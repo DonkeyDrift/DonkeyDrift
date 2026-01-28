@@ -27,20 +27,24 @@ except:
 
 
 import donkeycar as dk
-from donkeycar.parts.transform import TriggeredCallback, DelayedTrigger
-from donkeycar.parts.tub_v2 import TubWriter
-from donkeycar.parts.datastore import TubHandler
-from donkeycar.parts.controller import LocalWebController, WebFpv, JoystickController
-from donkeycar.parts.throttle_filter import ThrottleFilter
 from donkeycar.parts.behavior import BehaviorPart
-from donkeycar.parts.file_watcher import FileWatcher
-from donkeycar.parts.launch import AiLaunch
-from donkeycar.parts.kinematics import NormalizeSteeringAngle, UnnormalizeSteeringAngle, TwoWheelSteeringThrottle
-from donkeycar.parts.kinematics import Unicycle, InverseUnicycle, UnicycleUnnormalizeAngularVelocity
-from donkeycar.parts.kinematics import Bicycle, InverseBicycle, BicycleUnnormalizeAngularVelocity
+from donkeycar.parts.controller import (JoystickController, LocalWebController,
+                                        WebFpv)
+from donkeycar.parts.datastore import TubHandler
 from donkeycar.parts.explode import ExplodeDict
-from donkeycar.parts.transform import Lambda
+from donkeycar.parts.file_watcher import FileWatcher
+from donkeycar.parts.kinematics import (Bicycle,
+                                        BicycleUnnormalizeAngularVelocity,
+                                        InverseBicycle, InverseUnicycle,
+                                        NormalizeSteeringAngle,
+                                        TwoWheelSteeringThrottle, Unicycle,
+                                        UnicycleUnnormalizeAngularVelocity,
+                                        UnnormalizeSteeringAngle)
+from donkeycar.parts.launch import AiLaunch
 from donkeycar.parts.pipe import Pipe
+from donkeycar.parts.throttle_filter import ThrottleFilter
+from donkeycar.parts.transform import DelayedTrigger, Lambda, TriggeredCallback
+from donkeycar.parts.tub_v2 import TubWriter
 from donkeycar.utils import *
 
 logger = logging.getLogger(__name__)
@@ -402,7 +406,9 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         # so they get applied at inference time in autopilot mode.
         #
         if hasattr(cfg, 'TRANSFORMATIONS') or hasattr(cfg, 'POST_TRANSFORMATIONS'):
-            from donkeycar.parts.image_transformations import ImageTransformations
+            from donkeycar.parts.image_transformations import \
+                ImageTransformations
+
             #
             # add the complete set of pre and post augmentation transformations
             #
@@ -418,8 +424,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     # stop at a stop sign
     #
     if cfg.STOP_SIGN_DETECTOR:
-        from donkeycar.parts.object_detector.stop_sign_detector \
-            import StopSignDetector
+        from donkeycar.parts.object_detector.stop_sign_detector import \
+            StopSignDetector
         V.add(StopSignDetector(cfg.STOP_SIGN_MIN_SCORE,
                                cfg.STOP_SIGN_SHOW_BOUNDING_BOX,
                                cfg.STOP_SIGN_MAX_REVERSE_COUNT,
@@ -499,10 +505,6 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         inputs += ['cam/depth_array']
         types += ['gray16_array']
 
-    if cfg.CAMERA_TYPE == "OAKD" and cfg.OAKD_DEPTH:
-        inputs += ['cam/depth_array']
-        types += ['gray16_array']
-
     if cfg.HAVE_IMU or (cfg.CAMERA_TYPE == "D435" and cfg.REALSENSE_D435_IMU):
         inputs += ['imu/acl_x', 'imu/acl_y', 'imu/acl_z',
             'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z']
@@ -554,8 +556,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         V.add(tel, inputs=telem_inputs, outputs=["tub/queue_size"], threaded=True)
 
     if cfg.PUB_CAMERA_IMAGES:
-        from donkeycar.parts.network import TCPServeValue
         from donkeycar.parts.image import ImgArrToJpg
+        from donkeycar.parts.network import TCPServeValue
         pub = TCPServeValue("camera")
         V.add(ImgArrToJpg(), inputs=['cam/image_array'], outputs=['jpg/bin'])
         V.add(pub, inputs=['jpg/bin'])
@@ -765,6 +767,7 @@ def add_simulator(V, cfg):
     # TODO: the simulation outputs conflict with imu, odometry, kinematics pose estimation and T265 outputs; make them work together.
     if cfg.DONKEY_GYM:
         from donkeycar.parts.dgym import DonkeyGymEnv
+
         # rbx
         gym = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF,
                            record_location=cfg.SIM_RECORD_LOCATION, record_gyroaccel=cfg.SIM_RECORD_GYROACCEL,
@@ -803,10 +806,10 @@ def get_camera(cfg):
                            vflip=cfg.CAMERA_VFLIP, hflip=cfg.CAMERA_HFLIP)
         elif cfg.CAMERA_TYPE == "WEBCAM":
             from donkeycar.parts.camera import Webcam
-            cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH)
+            cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, camera_index=cfg.CAMERA_INDEX)
         elif cfg.CAMERA_TYPE == "CVCAM":
             from donkeycar.parts.cv import CvCam
-            cam = CvCam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH)
+            cam = CvCam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, iCam=cfg.CAMERA_INDEX)
         elif cfg.CAMERA_TYPE == "CSIC":
             from donkeycar.parts.camera import CSICamera
             cam = CSICamera(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH,
@@ -877,17 +880,6 @@ def add_camera(V, cfg, camera_type):
                        'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
                        'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z'],
               threaded=True)
-        
-    elif cfg.CAMERA_TYPE == "OAKD":
-        from donkeycar.parts.oak_d import OakD
-        cam = OakD(
-            enable_rgb=cfg.OAKD_RGB,
-            enable_depth=cfg.OAKD_DEPTH,
-            device_id=cfg.OAKD_ID)
-        V.add(cam, inputs=[],
-              outputs=['cam/image_array', 'cam/depth_array'],
-              threaded=True)
-
     else:
         inputs = []
         outputs = ['cam/image_array']
@@ -961,7 +953,8 @@ def add_drivetrain(V, cfg):
             # using a PwmPin for steering (servo)
             # and as second PwmPin for throttle (ESC)
             #
-            from donkeycar.parts.actuator import PWMSteering, PWMThrottle, PulseController
+            from donkeycar.parts.actuator import (PulseController, PWMSteering,
+                                                  PWMThrottle)
 
             dt = cfg.PWM_STEERING_THROTTLE
             steering_controller = PulseController(
@@ -988,7 +981,8 @@ def add_drivetrain(V, cfg):
             # This driver is DEPRECATED in favor of 'DRIVE_TRAIN_TYPE == "PWM_STEERING_THROTTLE"'
             # This driver will be removed in a future release
             #
-            from donkeycar.parts.actuator import PCA9685, PWMSteering, PWMThrottle
+            from donkeycar.parts.actuator import (PCA9685, PWMSteering,
+                                                  PWMThrottle)
 
             steering_controller = PCA9685(cfg.STEERING_CHANNEL, cfg.PCA9685_I2C_ADDR, busnum=cfg.PCA9685_I2C_BUSNUM)
             steering = PWMSteering(controller=steering_controller,
@@ -1046,7 +1040,8 @@ def add_drivetrain(V, cfg):
             #
             # Servo for steering and HBridge motor driver in 2pin mode for motor
             #
-            from donkeycar.parts.actuator import PWMSteering, PWMThrottle, PulseController
+            from donkeycar.parts.actuator import (PulseController, PWMSteering,
+                                                  PWMThrottle)
 
             dt = cfg.SERVO_HBRIDGE_2PIN
             steering_controller = PulseController(
@@ -1068,7 +1063,8 @@ def add_drivetrain(V, cfg):
             #
             # Servo for steering and HBridge motor driver in 3pin mode for motor
             #
-            from donkeycar.parts.actuator import PWMSteering, PWMThrottle, PulseController
+            from donkeycar.parts.actuator import (PulseController, PWMSteering,
+                                                  PWMThrottle)
 
             dt = cfg.SERVO_HBRIDGE_3PIN
             steering_controller = PulseController(
@@ -1092,7 +1088,7 @@ def add_drivetrain(V, cfg):
             # This driver is DEPRECATED in favor of 'DRIVE_TRAIN_TYPE == "SERVO_HBRIDGE_2PIN"'
             # This driver will be removed in a future release
             #
-            from donkeycar.parts.actuator import ServoBlaster, PWMSteering
+            from donkeycar.parts.actuator import PWMSteering, ServoBlaster
             steering_controller = ServoBlaster(cfg.STEERING_CHANNEL) #really pin
             # PWM pulse values should be in the range of 100 to 200
             assert(cfg.STEERING_LEFT_PWM <= 200)
@@ -1116,7 +1112,8 @@ def add_drivetrain(V, cfg):
             # This driver is DEPRECATED in favor of 'DRIVE_TRAIN_TYPE == "PWM_STEERING_THROTTLE"'
             # This driver will be removed in a future release
             #
-            from donkeycar.parts.actuator import PWMSteering, PWMThrottle, PiGPIO_PWM
+            from donkeycar.parts.actuator import (PiGPIO_PWM, PWMSteering,
+                                                  PWMThrottle)
             steering_controller = PiGPIO_PWM(cfg.STEERING_PWM_PIN, freq=cfg.STEERING_PWM_FREQ,
                                              inverted=cfg.STEERING_PWM_INVERTED)
             steering = PWMSteering(controller=steering_controller,
@@ -1145,6 +1142,28 @@ def add_drivetrain(V, cfg):
                           cfg.VESC_STEERING_OFFSET
                         )
             V.add(vesc, inputs=['steering', 'throttle'])
+            
+        elif cfg.DRIVE_TRAIN_TYPE == "ARDUINO_CONTROLLER":
+            # This driver is DEPRECATED in favor of 'DRIVE_TRAIN_TYPE == "ARDUINO_CONTROLLER"'
+            # This driver will controll Arduino directly via pymata and firmata
+            from donkeycar.parts.actuator import (ArdPWMSteering,
+                                                  ArdPWMThrottle, Arduino)
+            arduino_controller = Arduino(cfg)
+            steering = ArdPWMSteering(controller=arduino_controller,
+                    left_val=cfg.STEERING_LEFT_PWM,
+                    right_val=cfg.STEERING_RIGHT_PWM,
+                    channel=cfg.STEERING_PWM_CHANNEL)
+
+            throttle = ArdPWMThrottle(controller=arduino_controller,
+                    max_pulse=cfg.THROTTLE_FORWARD_PWM,
+                    zero_pulse=cfg.THROTTLE_STOPPED_PWM,
+                    min_pulse=cfg.THROTTLE_REVERSE_PWM,
+                    channel=cfg.THROTTLE_PWM_CHANNEL)
+            #V.add(steering, inputs=['angle'])
+            # V.add(steering, inputs=['angle'], outputs=['user/angle'])
+            V.add(steering, inputs=['user/mode','steering'], outputs=['user/mode','user/angle','user/throttle'], threaded=True)
+            V.add(throttle, inputs=['user/mode','throttle','user/throttle'], outputs=['user/throttle'])
+            #V.add(throttle, inputs=['throttle'], threaded=True)
 
 
 if __name__ == '__main__':
