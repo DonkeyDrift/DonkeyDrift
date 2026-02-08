@@ -8,8 +8,12 @@ import os
 import json
 import subprocess
 import time
+import threading
+import queue
+import shutil
+import getpass
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 from pathlib import Path
 
 from rich.console import Console
@@ -20,6 +24,7 @@ from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.align import Align
 from rich import box
 from rich.markdown import Markdown
+from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 # 初始化 Console
 console = Console()
@@ -69,12 +74,92 @@ class HistoryManager:
             self.history["log"] = self.history["log"][-50:]
         self.save()
 
+    def add_action_log(self, action: str, result: str, detail: Optional[Dict[str, Any]] = None):
+        if "actions" not in self.history:
+            self.history["actions"] = []
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "action": action,
+            "user": getpass.getuser(),
+            "result": result
+        }
+        if detail:
+            entry["detail"] = detail
+        self.history["actions"].append(entry)
+        if len(self.history["actions"]) > 50:
+            self.history["actions"] = self.history["actions"][-50:]
+        self.save()
+
 # -----------------------------------------------------------------------------
 # 辅助函数
 # -----------------------------------------------------------------------------
 def is_valid_mycar_folder():
     """检查当前目录是否为有效的 mycar 项目"""
     return os.path.exists("manage.py") and os.path.exists("myconfig.py")
+
+def _human_readable_size(size_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    size = float(size_bytes)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+
+def _scan_directory(path: Path) -> Tuple[int, int]:
+    file_count = 0
+    total_size = 0
+    if not path.exists():
+        return file_count, total_size
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total_size += (Path(root) / name).stat().st_size
+            except OSError:
+                pass
+            file_count += 1
+    return file_count, total_size
+
+def _move_items_to_trash(data_dir: Path, trash_dir: Path) -> Tuple[List[Path], List[str]]:
+    moved = []
+    errors = []
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    for item in data_dir.iterdir():
+        target = trash_dir / item.name
+        try:
+            shutil.move(str(item), str(target))
+            moved.append(target)
+        except Exception as e:
+            errors.append(f"{item}: {e}")
+    return moved, errors
+
+def _restore_from_trash(trash_dir: Path, data_dir: Path) -> List[str]:
+    errors = []
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for item in trash_dir.iterdir():
+        target = data_dir / item.name
+        try:
+            shutil.move(str(item), str(target))
+        except Exception as e:
+            errors.append(f"{item}: {e}")
+    return errors
+
+def _delete_directory_contents(trash_dir: Path, progress_callback: Callable[[int], None]) -> List[str]:
+    errors = []
+    for root, dirs, files in os.walk(trash_dir, topdown=False):
+        for name in files:
+            path = Path(root) / name
+            try:
+                path.unlink()
+                progress_callback(1)
+            except Exception as e:
+                errors.append(f"{path}: {e}")
+        for name in dirs:
+            path = Path(root) / name
+            try:
+                path.rmdir()
+            except Exception as e:
+                errors.append(f"{path}: {e}")
+    return errors
 
 # -----------------------------------------------------------------------------
 # 命令定义基类
