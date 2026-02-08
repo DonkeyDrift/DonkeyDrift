@@ -211,9 +211,9 @@ class DonkeyCommand:
 
 class CreateCarCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("createcar", "创建新的 DonkeyCar 项目目录", "管理", is_favorite=True, requires_mycar_folder=False)
+        super().__init__("createcar", "创建新的 DonkeyCar 项目", "管理", is_favorite=True, requires_mycar_folder=False)
         self.options = [
-            CommandOption("folder", "项目目录名称", default="mycar", help_text="将在 ~/projects/ 下创建此目录"),
+            CommandOption("folder", "项目名称", default="mycar", help_text="将在 ~/projects/ 下创建此目录"),
             CommandOption("template", "模板名称", default=None, required=False, help_text="可选模板: basic, square 等 (留空使用默认)"),
             CommandOption("overwrite", "是否覆盖", default="n", validator=lambda x: x.lower() in ['y', 'n'], help_text="如果目录存在是否覆盖 (y/n)")
         ]
@@ -379,7 +379,7 @@ class TrainLocalCommand(DonkeyCommand):
 
 class TrainOnlineCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("train_online", "云端训练", "训练", is_favorite=True)
+        super().__init__("train_online", "云端训练（train_online.conf）", "训练", is_favorite=True)
         self.options = [] # Configuration is via file, not CLI args for simplicity as per requirements
 
     def execute(self):
