@@ -40,12 +40,12 @@ var driveHandler = new function() {
             'accelRate': 1.0,     // 每秒加速率（油门单位/秒）
             'brakeRate': 1.2      // 每秒减速/刹车率
         },
-        // 方向键状态
+        // IKJL 按键状态（替代方向键，避免浏览器默认行为）
         'keyInput': {
-            'left': false,
-            'right': false,
-            'up': false,
-            'down': false,
+            'left': false,   // J
+            'right': false,  // L
+            'up': false,     // I
+            'down': false,   // K
         }
     }
 
@@ -85,7 +85,7 @@ var driveHandler = new function() {
       }
     }
 
-    // ---------- 键盘方向控制循环 ----------
+    // ---------- IKJL 增量控制循环（替代方向键）----------
     var lastArrowLoopTs = Date.now();
 
     var arrowControlActive = false;
@@ -100,14 +100,14 @@ var driveHandler = new function() {
 
         if(anyKey) { 
           arrowControlActive = true;
-          console.log('Arrow keys active:', state.keyInput);
+          console.log('IKJL keys active:', state.keyInput);
         }
         if(!arrowControlActive) {
           arrowControlLoop();
           return;
         }
 
-        // 目标角速度积分（左右键）
+        // J/L 控制转向：按住时角度持续增加/减少
         if(state.keyInput.left && !state.keyInput.right) {
           state.tele.user.angle = Math.max(state.tele.user.angle - state.params.steerRate * dt, -1);
           changed = true;
@@ -115,7 +115,7 @@ var driveHandler = new function() {
           state.tele.user.angle = Math.min(state.tele.user.angle + state.params.steerRate * dt, 1);
           changed = true;
         } else {
-          // 回中
+          // 松开 J/L 时自动回中
           if(Math.abs(state.tele.user.angle) > 0.001) {
             const sign = Math.sign(state.tele.user.angle);
             const delta = state.params.recenterRate * dt;
@@ -140,7 +140,7 @@ var driveHandler = new function() {
           changed = true;
         }
 
-        // 油门增量与松手回零
+        // I/K 控制油门：按住时增量变化
         if(state.keyInput.up && !state.keyInput.down) {
           state.tele.user.throttle = limitedThrottle(state.tele.user.throttle + state.params.accelRate * dt);
           changed = true;
@@ -148,7 +148,7 @@ var driveHandler = new function() {
           state.tele.user.throttle = limitedThrottle(state.tele.user.throttle - state.params.brakeRate * dt);
           changed = true;
         } else {
-          // 松手自动减速
+          // 松开 I/K 时自动减速至 0
           if(Math.abs(state.tele.user.throttle) > 0.001) {
             const signT = Math.sign(state.tele.user.throttle);
             const decel = state.params.accelRate * dt;
@@ -158,18 +158,18 @@ var driveHandler = new function() {
           }
         }
 
-        // 若角度与油门均回到零且无按键，停止箭控干预
+        // 若角度与油门均回到零且无按键，停止控制干预
         if(!anyKey && Math.abs(state.tele.user.angle) < 0.001 && Math.abs(state.tele.user.throttle) < 0.001) {
           arrowControlActive = false;
           pidState.output = 0;
           pidState.error = 0;
           pidState.prevError = 0;
           pidState.integral = 0;
-          console.log('Arrow control deactivated');
+          console.log('IKJL control deactivated');
         }
 
         if(changed) {
-          console.log('Sending control:', {angle: state.tele.user.angle.toFixed(3), throttle: state.tele.user.throttle.toFixed(3)});
+          console.log('IKJL sending:', {angle: state.tele.user.angle.toFixed(3), throttle: state.tele.user.throttle.toFixed(3)});
           postDrive(['angle','throttle']);
         }
 
@@ -268,52 +268,28 @@ var driveHandler = new function() {
         }
       };
 
-      // 使用原生事件捕获阶段拦截方向键，优先级最高
-      window.addEventListener('keydown', function(e) {
-          const arrowKeys = [37, 38, 39, 40]; // left, up, right, down
-          if(arrowKeys.includes(e.keyCode || e.which)) {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Arrow key down:', e.keyCode || e.which);
-            
-            switch(e.keyCode || e.which) {
-              case 37: state.keyInput.left = true; break;   // left
-              case 38: state.keyInput.up = true; break;     // up
-              case 39: state.keyInput.right = true; break;  // right
-              case 40: state.keyInput.down = true; break;   // down
-            }
-            return false;
-          }
-      }, true); // 使用捕获阶段
-
-      window.addEventListener('keyup', function(e) {
-          const arrowKeys = [37, 38, 39, 40];
-          if(arrowKeys.includes(e.keyCode || e.which)) {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Arrow key up:', e.keyCode || e.which);
-            
-            switch(e.keyCode || e.which) {
-              case 37: state.keyInput.left = false; break;
-              case 38: state.keyInput.up = false; break;
-              case 39: state.keyInput.right = false; break;
-              case 40: state.keyInput.down = false; break;
-            }
-            return false;
-          }
-      }, true); // 使用捕获阶段
-
       $(document).keydown(function(e) {
           if(e.which == 32) { e.preventDefault(); toggleBrake() }  // 'space'  brake
           if(e.which == 82) { toggleRecording() }  // 'r'  toggle recording
-          if(e.which == 73) { throttleUp() }  // 'i'  throttle up
-          if(e.which == 75) { throttleDown() } // 'k'  slow down
-          if(e.which == 74) { angleLeft() } // 'j' turn left
-          if(e.which == 76) { angleRight() } // 'l' turn right
+          
+          // IKJL 增量控制（替代方向键，带 PID + 回中 + 自动减速）
+          if(e.which == 73) { state.keyInput.up = true; }      // 'I' 油门增加
+          if(e.which == 75) { state.keyInput.down = true; }    // 'K' 刹车/倒车
+          if(e.which == 74) { state.keyInput.left = true; }    // 'J' 左转
+          if(e.which == 76) { state.keyInput.right = true; }   // 'L' 右转
+          
           if(e.which == 65) { updateDriveMode('local') } // 'a' turn on local mode (full _A_uto)
           if(e.which == 85) { updateDriveMode('user') } // 'u' turn on manual mode (_U_user)
           if(e.which == 83) { updateDriveMode('local_angle') } // 's' turn on local mode (auto _S_teering)
           if(e.which == 77) { toggleDriveMode() } // 'm' toggle drive mode (_M_ode)
+      });
+
+      $(document).keyup(function(e) {
+          // IKJL 松开时自动回中/减速
+          if(e.which == 73) { state.keyInput.up = false; }
+          if(e.which == 75) { state.keyInput.down = false; }
+          if(e.which == 74) { state.keyInput.left = false; }
+          if(e.which == 76) { state.keyInput.right = false; }
       });
 
       $('#mode_select').on('change', function () {
