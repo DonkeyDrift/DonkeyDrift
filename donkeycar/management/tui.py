@@ -73,7 +73,7 @@ class HistoryManager:
 # 辅助函数
 # -----------------------------------------------------------------------------
 def is_valid_mycar_folder():
-    """检查当前目录是否为有效的 mycar 项目目录"""
+    """检查当前目录是否为有效的 mycar 项目"""
     return os.path.exists("manage.py") and os.path.exists("myconfig.py")
 
 # -----------------------------------------------------------------------------
@@ -412,7 +412,7 @@ class TrainOnlineCommand(DonkeyCommand):
 
 class DriveCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("drive", "启动驾驶/仿真模式", "仿真", is_favorite=True)
+        super().__init__("drive", "启动驾驶模式", "驾驶", is_favorite=True)
         self.options = [
             CommandOption("model", "模型名称", default=None, required=False, help_text="请选择要加载的模型 (默认0:不加载)"),
             CommandOption("type", "模型类型", default="tflite_linear", required=False, help_text="模型类型 (默认: tflite_linear)")
@@ -652,7 +652,7 @@ class MenuSystem:
     def __init__(self):
         self.commands: Dict[str, List[DonkeyCommand]] = {
             "管理": [CreateCarCommand(), OpenProjectCommand()],
-            "仿真": [DriveCommand()],
+            "驾驶": [DriveCommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
         self.flat_commands = [cmd for sublist in self.commands.values() for cmd in sublist]
