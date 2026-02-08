@@ -1232,6 +1232,14 @@ class DriveCommand(DonkeyCommand):
             cmd.extend(["--type", params["type"]])
         return cmd
 
+class DonkeyUICommand(DonkeyCommand):
+    def __init__(self):
+        super().__init__("donkey_ui", "启动数据筛选工具", "筛选", is_favorite=True, requires_mycar_folder=True)
+        self.options = []
+
+    def get_command_line(self, params):
+        return ["donkey", "ui"]
+
 # -----------------------------------------------------------------------------
 # 菜单系统
 # -----------------------------------------------------------------------------
@@ -1241,6 +1249,7 @@ class MenuSystem:
             "管理": [CreateCarCommand(), OpenProjectCommand()],
             "数据": [ClearDataCommand(), BackupDataCommand(), RestoreDataCommand()],
             "驾驶": [DriveCommand()],
+            "筛选": [DonkeyUICommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
         self.flat_commands = [cmd for sublist in self.commands.values() for cmd in sublist]

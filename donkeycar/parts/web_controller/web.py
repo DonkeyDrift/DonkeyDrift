@@ -13,6 +13,7 @@ import json
 import logging
 import time
 import asyncio
+from pathlib import Path
 
 import requests
 from tornado.ioloop import IOLoop
@@ -123,6 +124,10 @@ class LocalWebController(tornado.web.Application):
         self.num_records = 0
         self.wsclients = []
         self.loop = None
+        
+        # 初始化参数管理器
+        self.params_manager = ParamsManager()
+        logger.info(f"Parameters manager initialized. Config file: {self.params_manager.config_file}")
 
 
         handlers = [
@@ -133,6 +138,8 @@ class LocalWebController(tornado.web.Application):
             (r"/calibrate", CalibrateHandler),
             (r"/video", VideoAPI),
             (r"/wsTest", WsTest),
+            (r"/api/get_params", GetParamsHandler),
+            (r"/api/save_params", SaveParamsHandler),
 
             (r"/static/(.*)", StaticFileHandler,
              {"path": self.static_file_path}),
@@ -258,6 +265,161 @@ class WsTest(RequestHandler):
         self.render("templates/wsTest.html", **data)
 
 
+class ParamsManager:
+    """
+    参数持久化管理器 - 负责保存和加载驾驶控制参数
+    """
+    def __init__(self, config_dir=None):
+        """
+        初始化参数管理器
+        :param config_dir: 配置文件目录，默认为 ~/mycar/
+        """
+        if config_dir is None:
+            config_dir = os.path.expanduser("~/mycar/")
+        
+        self.config_dir = Path(config_dir)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.config_file = self.config_dir / "drive_params.json"
+        
+        # 默认参数
+        self.default_params = {
+            'version': '2.0',
+            'params': {
+                'pid': {'kp': 0.8, 'ki': 0.0, 'kd': 0.05},
+                'recenterRate': 0.35,
+                'steerRate': 1.2,
+                'accelRate': 1.0,
+                'brakeRate': 1.2
+            }
+        }
+    
+    def validate_params(self, params):
+        """验证参数格式和数值范围"""
+        if not isinstance(params, dict):
+            return False
+        
+        pid = params.get('pid', {})
+        if not all(isinstance(pid.get(k), (int, float)) for k in ['kp', 'ki', 'kd']):
+            return False
+        
+        if not (0 <= pid.get('kp', -1) <= 3):
+            return False
+        if not (0 <= pid.get('ki', -1) <= 1):
+            return False
+        if not (0 <= pid.get('kd', -1) <= 0.1):
+            return False
+        
+        for key in ['recenterRate', 'steerRate', 'accelRate', 'brakeRate']:
+            val = params.get(key, -1)
+            if not isinstance(val, (int, float)) or val < 0 or val > 3:
+                return False
+        
+        return True
+    
+    def load(self):
+        """从文件加载参数"""
+        try:
+            if not self.config_file.exists():
+                logger.info("No saved parameters found, using defaults")
+                return self.default_params['params']
+            
+            with open(self.config_file, 'r') as f:
+                data = json.load(f)
+            
+            if not self.validate_params(data.get('params', {})):
+                logger.error("Loaded parameters validation failed, using defaults")
+                return self.default_params['params']
+            
+            logger.info(f"Parameters loaded from {self.config_file}")
+            return data['params']
+        
+        except Exception as e:
+            logger.error(f"Failed to load parameters: {e}")
+            return self.default_params['params']
+    
+    def save(self, params):
+        """保存参数到文件"""
+        try:
+            if not self.validate_params(params):
+                raise ValueError("Parameters validation failed")
+            
+            data = {
+                'version': '2.0',
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'params': params
+            }
+            
+            # 写入临时文件，然后原子性重命名（防止写入过程中崩溃）
+            temp_file = self.config_file.with_suffix('.json.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            temp_file.replace(self.config_file)
+            logger.info(f"Parameters saved to {self.config_file}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Failed to save parameters: {e}")
+            return False
+
+
+class GetParamsHandler(RequestHandler):
+    """获取驾驶参数的 HTTP API"""
+    async def get(self):
+        try:
+            params_manager = self.application.params_manager
+            params = params_manager.load()
+            self.set_header('Content-Type', 'application/json')
+            self.write({
+                'success': True,
+                'params': params,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        except Exception as e:
+            logger.error(f"Error in GetParamsHandler: {e}")
+            self.set_status(500)
+            self.write({
+                'success': False,
+                'error': str(e)
+            })
+
+
+class SaveParamsHandler(RequestHandler):
+    """保存驾驶参数的 HTTP API"""
+    async def post(self):
+        try:
+            data = json.loads(self.request.body)
+            params = data.get('params')
+            
+            if not params:
+                raise ValueError("Missing 'params' field")
+            
+            params_manager = self.application.params_manager
+            success = params_manager.save(params)
+            
+            self.set_header('Content-Type', 'application/json')
+            if success:
+                self.write({
+                    'success': True,
+                    'message': 'Parameters saved successfully',
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+            else:
+                self.set_status(500)
+                self.write({
+                    'success': False,
+                    'error': 'Failed to save parameters'
+                })
+        
+        except Exception as e:
+            logger.error(f"Error in SaveParamsHandler: {e}")
+            self.set_status(500)
+            self.write({
+                'success': False,
+                'error': str(e)
+            })
+
+
 class CalibrateHandler(RequestHandler):
     """ Serves the calibration web page"""
     async def get(self):
@@ -292,6 +454,20 @@ class WebSocketDriveAPI(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         data = json.loads(message)
+        
+        # 处理参数保存请求
+        if data.get('msg_type') == 'save_params':
+            try:
+                params = data.get('params')
+                if params:
+                    params_manager = self.application.params_manager
+                    success = params_manager.save(params)
+                    logger.info(f"Parameters saved via WebSocket: {success}")
+            except Exception as e:
+                logger.error(f"Failed to save parameters via WebSocket: {e}")
+            return
+        
+        # 正常的驾驶控制消息
         self.application.angle = data.get('angle', self.application.angle)
         self.application.throttle = data.get('throttle', self.application.throttle)
         if data.get('drive_mode') is not None:
