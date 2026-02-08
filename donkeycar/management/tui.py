@@ -216,28 +216,29 @@ class TrainCommand(DonkeyCommand):
     def _get_next_model_name(self, base_name="pilot"):
         """
         生成下一个自动递增的模型名称。
-        默认名称: ./models/pilot_1.h5
-        如果存在，则递增为 pilot_2.h5, pilot_3.h5 ...
+        默认名称: ./models/pilot_1
+        如果存在，则递增为 pilot_2, pilot_3 ...
         """
         models_dir = Path("./models")
         if not models_dir.exists():
-            return f"./models/{base_name}_1.h5"
+            return f"./models/{base_name}_1"
 
         import re
         
-        # 匹配 pilot_x.h5 的正则
-        pattern = re.compile(rf"^{base_name}_(\d+)\.h5$")
+        # 匹配 pilot_x 或 pilot_x.h5 的正则
+        pattern = re.compile(rf"^{base_name}_(\d+)(?:\.h5)?$")
         
         max_idx = 0
-        for f in models_dir.glob("*.h5"):
-            match = pattern.match(f.name)
-            if match:
-                idx = int(match.group(1))
-                if idx > max_idx:
-                    max_idx = idx
+        for f in models_dir.glob("*"):
+            if f.is_file() and not f.name.startswith('.'):
+                match = pattern.match(f.name)
+                if match:
+                    idx = int(match.group(1))
+                    if idx > max_idx:
+                        max_idx = idx
         
         next_idx = max_idx + 1
-        return f"./models/{base_name}_{next_idx}.h5"
+        return f"./models/{base_name}_{next_idx}"
 
     def execute(self):
         # 每次进入 execute 时重新计算默认模型名
