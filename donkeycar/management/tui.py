@@ -243,6 +243,69 @@ class CreateCarCommand(DonkeyCommand):
             cmd.append("--overwrite")
         return cmd
 
+class OpenProjectCommand(DonkeyCommand):
+    def __init__(self):
+        super().__init__("open", "打开已有 DonkeyCar 项目", "管理", is_favorite=True, requires_mycar_folder=False)
+        self.options = [] # No options needed, we'll ask interactively
+
+    def execute(self):
+        console.clear()
+        console.print(Panel(f"[bold blue]{self.description}[/bold blue]", title=f"配置 {self.name}"))
+        
+        base_dir = Path(os.path.expanduser("~/projects"))
+        if not base_dir.exists():
+             console.print(f"[red]项目根目录 {base_dir} 不存在！[/red]")
+             Prompt.ask("按回车键返回...")
+             return
+
+        console.print(f"[dim]正在扫描 {base_dir} 下的项目...[/dim]")
+        
+        valid_projects = []
+        try:
+            for item in base_dir.iterdir():
+                if item.is_dir():
+                    if (item / "manage.py").exists() and (item / "myconfig.py").exists():
+                        valid_projects.append(item)
+        except Exception as e:
+             console.print(f"[red]扫描出错: {e}[/red]")
+             Prompt.ask("按回车键返回...")
+             return
+
+        if not valid_projects:
+            console.print(f"[yellow]在 {base_dir} 下未找到有效的 DonkeyCar 项目。[/yellow]")
+            Prompt.ask("按回车键返回...")
+            return
+            
+        valid_projects.sort()
+
+        console.print("[bold]发现以下有效项目:[/bold]")
+        for idx, project_path in enumerate(valid_projects, 1):
+            console.print(f"{idx}. {project_path.name}")
+        
+        console.print("\n[dim]提示: 输入编号选择项目，输入 '0' 取消[/dim]")
+        
+        while True:
+            choice = Prompt.ask("请输入编号", default="0")
+            if choice == "0":
+                return
+            elif choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(valid_projects):
+                    selected_project = valid_projects[idx-1]
+                    try:
+                        os.chdir(selected_project)
+                        console.print(Panel(f"[bold green]✓ 已切换工作目录至: {selected_project}[/bold green]\n"
+                                            f"[dim]现在您可以直接运行 train 或 drive 命令了[/dim]",
+                                            title="项目切换成功"))
+                    except Exception as e:
+                        console.print(f"[red]切换目录失败: {e}[/red]")
+                    Prompt.ask("按回车键返回菜单...")
+                    return
+            console.print("[red]无效的选择，请重新输入[/red]")
+
+    def get_command_line(self, params):
+        return [] # Not used since we override execute
+
 class TrainCommand(DonkeyCommand):
     def __init__(self):
         super().__init__("train", "训练自动驾驶模型", "训练", is_favorite=True)
@@ -537,7 +600,7 @@ class DriveCommand(DonkeyCommand):
 class MenuSystem:
     def __init__(self):
         self.commands: Dict[str, List[DonkeyCommand]] = {
-            "管理": [CreateCarCommand()],
+            "管理": [CreateCarCommand(), OpenProjectCommand()],
             "仿真": [DriveCommand()],
             "训练": [TrainCommand()],
         }
