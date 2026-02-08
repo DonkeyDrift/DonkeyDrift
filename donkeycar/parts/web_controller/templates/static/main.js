@@ -351,7 +351,7 @@ var driveHandler = new function() {
     var paramInputMap = [
       { id: 'pid_kp', path: ['pid','kp'], min: 0, max: 3, step: 0.05 },
       { id: 'pid_ki', path: ['pid','ki'], min: 0, max: 1, step: 0.01 },
-      { id: 'pid_kd', path: ['pid','kd'], min: 0, max: 2, step: 0.05 },
+      { id: 'pid_kd', path: ['pid','kd'], min: 0, max: 0.1, step: 0.001 },
       { id: 'recenter_rate', path: ['recenterRate'], min: 0, max: 2, step: 0.05 },
       { id: 'steer_rate', path: ['steerRate'], min: 0, max: 3, step: 0.05 },
       { id: 'accel_rate', path: ['accelRate'], min: 0, max: 3, step: 0.05 },
