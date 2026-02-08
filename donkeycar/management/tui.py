@@ -1234,7 +1234,7 @@ class DriveCommand(DonkeyCommand):
 
 class DonkeyUICommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("donkey_ui", "启动数据筛选工具", "筛选", is_favorite=True, requires_mycar_folder=True)
+        super().__init__("donkey_ui", "启动数据筛选工具", "筛选", is_favorite=True, requires_mycar_folder=False)
         self.options = []
 
     def get_command_line(self, params):
