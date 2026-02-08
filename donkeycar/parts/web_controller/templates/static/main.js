@@ -98,7 +98,10 @@ var driveHandler = new function() {
         let changed = false;
         const anyKey = state.keyInput.left || state.keyInput.right || state.keyInput.up || state.keyInput.down;
 
-        if(anyKey) { arrowControlActive = true; }
+        if(anyKey) { 
+          arrowControlActive = true;
+          console.log('Arrow keys active:', state.keyInput);
+        }
         if(!arrowControlActive) {
           arrowControlLoop();
           return;
@@ -162,9 +165,11 @@ var driveHandler = new function() {
           pidState.error = 0;
           pidState.prevError = 0;
           pidState.integral = 0;
+          console.log('Arrow control deactivated');
         }
 
         if(changed) {
+          console.log('Sending control:', {angle: state.tele.user.angle.toFixed(3), throttle: state.tele.user.throttle.toFixed(3)});
           postDrive(['angle','throttle']);
         }
 
@@ -263,11 +268,43 @@ var driveHandler = new function() {
         }
       };
 
-      $(document).keydown(function(e) {
-          // 阻止方向键滚动页面
-          if([37,38,39,40].includes(e.which)) { e.preventDefault(); }
+      // 使用原生事件捕获阶段拦截方向键，优先级最高
+      window.addEventListener('keydown', function(e) {
+          const arrowKeys = [37, 38, 39, 40]; // left, up, right, down
+          if(arrowKeys.includes(e.keyCode || e.which)) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Arrow key down:', e.keyCode || e.which);
+            
+            switch(e.keyCode || e.which) {
+              case 37: state.keyInput.left = true; break;   // left
+              case 38: state.keyInput.up = true; break;     // up
+              case 39: state.keyInput.right = true; break;  // right
+              case 40: state.keyInput.down = true; break;   // down
+            }
+            return false;
+          }
+      }, true); // 使用捕获阶段
 
-          if(e.which == 32) { toggleBrake() }  // 'space'  brake
+      window.addEventListener('keyup', function(e) {
+          const arrowKeys = [37, 38, 39, 40];
+          if(arrowKeys.includes(e.keyCode || e.which)) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Arrow key up:', e.keyCode || e.which);
+            
+            switch(e.keyCode || e.which) {
+              case 37: state.keyInput.left = false; break;
+              case 38: state.keyInput.up = false; break;
+              case 39: state.keyInput.right = false; break;
+              case 40: state.keyInput.down = false; break;
+            }
+            return false;
+          }
+      }, true); // 使用捕获阶段
+
+      $(document).keydown(function(e) {
+          if(e.which == 32) { e.preventDefault(); toggleBrake() }  // 'space'  brake
           if(e.which == 82) { toggleRecording() }  // 'r'  toggle recording
           if(e.which == 73) { throttleUp() }  // 'i'  throttle up
           if(e.which == 75) { throttleDown() } // 'k'  slow down
@@ -277,20 +314,6 @@ var driveHandler = new function() {
           if(e.which == 85) { updateDriveMode('user') } // 'u' turn on manual mode (_U_user)
           if(e.which == 83) { updateDriveMode('local_angle') } // 's' turn on local mode (auto _S_teering)
           if(e.which == 77) { toggleDriveMode() } // 'm' toggle drive mode (_M_ode)
-
-          // 方向键状态（增量控制 + PID）
-          if(e.which == 37) { state.keyInput.left = true; }   // left
-          if(e.which == 39) { state.keyInput.right = true; }  // right
-          if(e.which == 38) { state.keyInput.up = true; }     // up
-          if(e.which == 40) { state.keyInput.down = true; }   // down
-      });
-
-      $(document).keyup(function(e) {
-          if([37,38,39,40].includes(e.which)) { e.preventDefault(); }
-          if(e.which == 37) { state.keyInput.left = false; }
-          if(e.which == 39) { state.keyInput.right = false; }
-          if(e.which == 38) { state.keyInput.up = false; }
-          if(e.which == 40) { state.keyInput.down = false; }
       });
 
       $('#mode_select').on('change', function () {
@@ -556,9 +579,13 @@ var driveHandler = new function() {
         });
         if(data) {
             let json_data = JSON.stringify(data);
-            console.log(`Posting ${json_data}`);
-            socket.send(json_data)
-            updateUI()
+            if(socket && socket.readyState === WebSocket.OPEN) {
+              console.log(`Posting ${json_data}`);
+              socket.send(json_data)
+              updateUI()
+            } else {
+              console.warn('WS not open, drop send', socket && socket.readyState);
+            }
         }
     };
 
