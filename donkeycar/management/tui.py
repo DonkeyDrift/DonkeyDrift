@@ -391,6 +391,155 @@ class OpenProjectCommand(DonkeyCommand):
     def get_command_line(self, params):
         return [] # Not used since we override execute
 
+class ClearDataCommand(DonkeyCommand):
+    def __init__(self):
+        super().__init__("clear_data", "清空当前项目 data 目录", "管理", is_favorite=False, requires_mycar_folder=True)
+        self.options = []
+
+    def execute(self):
+        console.clear()
+        console.print(Panel(f"[bold blue]{self.description}[/bold blue]", title=f"配置 {self.name}"))
+
+        if self.requires_mycar_folder and not is_valid_mycar_folder():
+            console.print(Panel(
+                "[bold red]错误：当前目录不是有效的 mycar 项目文件夹！[/bold red]\n\n"
+                "缺少关键文件：manage.py 或 myconfig.py\n"
+                "请先执行 [bold yellow]createcar[/bold yellow] 命令创建新的车辆项目。",
+                title="环境检查失败",
+                border_style="red"
+            ))
+            Prompt.ask("按回车键返回菜单...")
+            return
+
+        data_dir = Path("./data")
+        if not data_dir.exists():
+            console.print(Panel("[yellow]未找到 data 目录，无需清空。[/yellow]", title="状态提示"))
+            self.history_mgr.add_action_log("clear_data", "skipped", {"reason": "data_dir_missing"})
+            Prompt.ask("按回车键返回菜单...")
+            return
+
+        file_count, total_size = _scan_directory(data_dir)
+        top_level_items = [p for p in data_dir.iterdir()]
+        if not top_level_items:
+            console.print(Panel("[green]data 目录已为空，无需操作。[/green]", title="状态提示"))
+            self.history_mgr.add_action_log("clear_data", "skipped", {"reason": "data_dir_empty"})
+            Prompt.ask("按回车键返回菜单...")
+            return
+
+        console.print(Panel(
+            f"[bold]即将清空目录:[/bold] {data_dir.resolve()}\n"
+            f"[bold]文件数量:[/bold] {file_count}\n"
+            f"[bold]总大小:[/bold] {_human_readable_size(total_size)}",
+            title="操作确认",
+            border_style="yellow"
+        ))
+
+        if not Confirm.ask("确认开始?", default=False):
+            self.history_mgr.add_action_log("clear_data", "cancelled")
+            return
+
+        backup_path = None
+        if Confirm.ask("是否创建备份（推荐）?", default=False):
+            backup_dir = Path("./data_backups")
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archive_base = backup_dir / f"data_backup_{timestamp}"
+            try:
+                console.print("[dim]正在创建备份...[/dim]")
+                backup_path = shutil.make_archive(str(archive_base), "zip", root_dir=data_dir)
+                console.print(f"[green]备份已创建: {backup_path}[/green]")
+            except Exception as e:
+                console.print(f"[red]备份失败: {e}[/red]")
+                backup_path = None
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        trash_dir = data_dir.parent / f".data_trash_{timestamp}"
+        moved, move_errors = _move_items_to_trash(data_dir, trash_dir)
+
+        if move_errors:
+            _restore_from_trash(trash_dir, data_dir)
+            console.print(Panel(
+                "[red]移动数据到临时区失败，已尝试回滚。[/red]\n"
+                + "\n".join(move_errors[:10]),
+                title="操作失败",
+                border_style="red"
+            ))
+            self.history_mgr.add_action_log("clear_data", "failed", {
+                "stage": "move_to_trash",
+                "errors": move_errors[:20]
+            })
+            Prompt.ask("按回车键返回菜单...")
+            return
+
+        total_files = file_count
+        progress_queue: queue.Queue = queue.Queue()
+
+        def worker():
+            errors = _delete_directory_contents(trash_dir, lambda n: progress_queue.put(("progress", n)))
+            progress_queue.put(("done", errors))
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        errors: List[str] = []
+        with Progress(
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn()
+        ) as progress:
+            total = max(1, total_files)
+            task_id = progress.add_task("正在清空 data...", total=total)
+            while thread.is_alive() or not progress_queue.empty():
+                try:
+                    msg = progress_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if msg[0] == "progress":
+                    progress.advance(task_id, msg[1])
+                elif msg[0] == "done":
+                    errors = msg[1]
+            if total_files == 0:
+                progress.advance(task_id, 1)
+
+        if not errors:
+            try:
+                shutil.rmtree(trash_dir, ignore_errors=False)
+            except Exception as e:
+                errors.append(f"{trash_dir}: {e}")
+
+        if errors:
+            restore_errors = _restore_from_trash(trash_dir, data_dir)
+            detail = {
+                "errors": errors[:20],
+                "restore_errors": restore_errors[:20],
+                "backup_path": backup_path
+            }
+            console.print(Panel(
+                "[red]清空过程中出现错误，已尝试回滚未删除的数据。[/red]\n"
+                "建议:\n"
+                "- 关闭占用文件的进程后重试\n"
+                "- 检查目录权限\n"
+                + (f"\n- 如需完整恢复，请使用备份: {backup_path}" if backup_path else ""),
+                title="部分失败",
+                border_style="red"
+            ))
+            self.history_mgr.add_action_log("clear_data", "partial_failed", detail)
+        else:
+            console.print(Panel(
+                "[bold green]✓ data 目录已清空[/bold green]",
+                title="操作完成",
+                border_style="green"
+            ))
+            self.history_mgr.add_action_log("clear_data", "success", {
+                "files": file_count,
+                "size": total_size,
+                "backup_path": backup_path
+            })
+
+        Prompt.ask("按回车键返回菜单...")
+
 from donkeycar.management.train_online import OnlineTrainer
 from donkeycar.management.train_local import run_local_train
 
@@ -736,7 +885,7 @@ class DriveCommand(DonkeyCommand):
 class MenuSystem:
     def __init__(self):
         self.commands: Dict[str, List[DonkeyCommand]] = {
-            "管理": [CreateCarCommand(), OpenProjectCommand()],
+            "管理": [CreateCarCommand(), OpenProjectCommand(), ClearDataCommand()],
             "驾驶": [DriveCommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
