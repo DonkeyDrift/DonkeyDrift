@@ -9,6 +9,7 @@ import time
 import re
 import select
 import random
+import secrets
 import string
 from datetime import datetime
 from pathlib import Path
@@ -45,7 +46,7 @@ class OnlineTrainer:
         
         if no_interactive:
             # 非交互模式，直接使用配置值并添加后缀
-            final_model_name = self._get_auto_increment_model_name(current_model_name)
+            final_model_name = self._generate_unique_model_name(current_model_name)
             console.print(f"[dim]非交互模式，使用模型名称: {final_model_name}[/dim]")
             return final_model_name
         
@@ -73,58 +74,55 @@ class OnlineTrainer:
                 raise RuntimeError(f"配置文件写入失败: {e}")
         
         # 生成最终带后缀的模型名称
-        final_model_name = self._get_auto_increment_model_name(user_input)
+        final_model_name = self._generate_unique_model_name(user_input)
         console.print(f"最终模型名称: [bold]{final_model_name}[/bold]")
         
         return final_model_name
 
-    def _get_auto_increment_model_name(self, base_name=None):
+    def _generate_unique_model_name(self, base_name):
         """
-        生成自动递增的模型名称，格式：{base_name}-YYMMDD-XXX
+        生成全局唯一的模型名称，格式：folder-model-YYMMDD-ABCD
+        
+        Args:
+            base_name: 用户输入的原始模型名称
+            
+        Returns:
+            str: 生成的唯一模型名称
         """
-        if base_name is None:
-            base_name = self.get_config_value("model_name")
+        # 1. Folder name (current working directory name)
+        folder_name = os.path.basename(os.getcwd())
         
-        today = datetime.now()
-        today_str = today.strftime("%y%m%d")
+        # 2. Clean model name (keep only letters, numbers, underscore)
+        clean_model = re.sub(r'[^a-zA-Z0-9_]', '', base_name)
+        if not clean_model:
+            clean_model = "model"
+            
+        # 3. Date
+        date_str = datetime.now().strftime("%y%m%d")
         
-        # 检查模型目录是否存在
+        # 4. Generate unique name with retries
         models_dir = "./models"
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
-        
-        # 查找今天已有的模型文件
-        max_seq = 0
-        pattern = re.compile(rf"^{re.escape(base_name)}-{re.escape(today_str)}-(\d{{3}})\.tflite$")
-        
-        for filename in os.listdir(models_dir):
-            match = pattern.match(filename)
-            if match:
-                seq = int(match.group(1))
-                max_seq = max(max_seq, seq)
-        
-        # 如果序号超过999，递增日期
-        if max_seq >= 999:
-            # 寻找下一个可用日期
-            next_day = today
-            while True:
-                next_day = next_day.replace(day=next_day.day + 1)
-                next_day_str = next_day.strftime("%y%m%d")
-                
-                # 检查新日期是否有文件
-                new_pattern = re.compile(rf"^{re.escape(base_name)}-{re.escape(next_day_str)}-(\d{{3}})\.tflite$")
-                has_files = any(new_pattern.match(f) for f in os.listdir(models_dir))
-                
-                if not has_files:
-                    today_str = next_day_str
-                    max_seq = 0
-                    break
-        
-        next_seq = max_seq + 1
-        final_model_name = f"{base_name}-{today_str}-{next_seq:03d}"
-        
-        self._log(f"Generated model name: {final_model_name}")
-        return final_model_name
+            
+        while True:
+            # Cryptographically secure random string (4 chars: 0-9, A-Z)
+            chars = string.ascii_uppercase + string.digits
+            rand_suffix = ''.join(secrets.choice(chars) for _ in range(4))
+            
+            final_name = f"{folder_name}-{clean_model}-{date_str}-{rand_suffix}"
+            filename = f"{final_name}.tflite"
+            
+            # Check if exists locally to avoid collision before even sending to remote
+            # Note: Remote collision is also possible but highly unlikely with 36^4 combinations per day per user/folder.
+            # We primarily check local 'models' dir to ensure download won't fail/overwrite unexpectedly.
+            if not os.path.exists(os.path.join(models_dir, filename)):
+                self._log(f"Generated unique model name: {final_name}")
+                return final_name
+            else:
+                self._log(f"Model name collision locally: {final_name}, retrying...", success=False)
+
+    # _get_auto_increment_model_name 已废弃，直接移除或保留作为兼容（这里选择移除以保持清洁）
 
     def _load_config(self):
         config = configparser.ConfigParser()
