@@ -33,7 +33,7 @@ def configure_gpu_memory():
                 try:
                     tf.config.set_logical_device_configuration(
                         gpu,
-                        [tf.config.LogicalDeviceConfiguration(memory_limit=2048)])
+                        [tf.config.LogicalDeviceConfiguration(memory_limit=7168)])
                 except RuntimeError as e:
                     print(f"ERROR: Failed to set memory limit: {e}")
                     print("Hint: This usually means TensorFlow was already initialized.")

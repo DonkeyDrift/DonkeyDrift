@@ -117,7 +117,7 @@ if _should_limit_gpu_memory():
             for gpu in gpus:
                 tf.config.set_logical_device_configuration(
                     gpu,
-                    [tf.config.LogicalDeviceConfiguration(memory_limit=2048)],
+                    [tf.config.LogicalDeviceConfiguration(memory_limit=7168)],
                 )
     except Exception:
         pass
