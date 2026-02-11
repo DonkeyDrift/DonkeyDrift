@@ -164,7 +164,22 @@ def _delete_directory_contents(trash_dir: Path, progress_callback: Callable[[int
     return errors
 
 def _get_data_cache_dir() -> Path:
-    return Path("/home/dkc/projects/mycar/data_cache")
+    """获取数据备份缓存目录 (当前工作目录下的 data_cache)"""
+    return Path.cwd() / "data_cache"
+
+def _is_valid_archive(path: Path) -> bool:
+    """检查是否为有效的 tar.gz 文件"""
+    if not path.exists() or not path.is_file():
+        return False
+    try:
+        if not tarfile.is_tarfile(path):
+            return False
+        # 尝试打开并读取第一个成员以确认完整性
+        with tarfile.open(path, "r:gz") as tar:
+            tar.next()
+        return True
+    except Exception:
+        return False
 
 def _get_next_backup_path(cache_dir: Path, date_str: str) -> Path:
     pattern = re.compile(rf"^data-{date_str}-(\d{{3}})\.tar\.gz$")
@@ -178,28 +193,41 @@ def _get_next_backup_path(cache_dir: Path, date_str: str) -> Path:
     return cache_dir / f"data-{date_str}-{next_idx:03d}.tar.gz"
 
 def _list_backup_archives(cache_dir: Path) -> List[Dict[str, Any]]:
-    pattern = re.compile(r"^data-(\d{6})-(\d{3})\.tar\.gz$")
     items = []
     if not cache_dir.exists():
         return items
-    for item in cache_dir.iterdir():
+    
+    # 查找所有 .tar.gz 文件
+    for item in cache_dir.glob("*.tar.gz"):
         if not item.is_file():
             continue
-        match = pattern.match(item.name)
-        if not match:
-            continue
-        date_str, seq = match.groups()
+            
+        # 尝试匹配标准格式
+        match = re.match(r"^data-(\d{6})-(\d{3})\.tar\.gz$", item.name)
+        if match:
+            date_str, seq = match.groups()
+        else:
+            # 非标准命名，尝试从文件修改时间获取日期
+            try:
+                mtime = datetime.fromtimestamp(item.stat().st_mtime)
+                date_str = mtime.strftime("%y%m%d")
+            except Exception:
+                date_str = "Unknown"
+            seq = "N/A"
+            
         size = 0
         try:
             size = item.stat().st_size
         except OSError:
             size = 0
+            
         items.append({
             "path": item,
             "date": date_str,
             "seq": seq,
             "size": size
         })
+        
     items.sort(key=lambda x: x["path"].name)
     return items
 
@@ -726,9 +754,9 @@ class RestoreDataCommand(DonkeyCommand):
             return
 
         cache_dir = _get_data_cache_dir()
-        if not cache_dir.exists():
-            console.print(Panel(f"[yellow]备份目录不存在: {cache_dir}[/yellow]", title="状态提示"))
-            self.history_mgr.add_action_log("restore_data", "failed", {"reason": "cache_dir_missing"})
+        if not cache_dir.exists() or not cache_dir.is_dir():
+            console.print(Panel(f"[yellow]备份目录不存在或无效: {cache_dir}[/yellow]", title="状态提示"))
+            self.history_mgr.add_action_log("restore_data", "failed", {"reason": "cache_dir_missing_or_invalid"})
             Prompt.ask("按回车键返回菜单...")
             return
 
@@ -761,6 +789,18 @@ class RestoreDataCommand(DonkeyCommand):
                     selected = backups[idx - 1]["path"]
                     break
             console.print("[red]无效的选择，请重新输入[/red]")
+
+        # 验证文件格式和完整性
+        if not _is_valid_archive(selected):
+            console.print(Panel(
+                f"[red]文件校验失败: {selected.name}[/red]\n"
+                "该文件不是有效的 gzip 压缩 tar 归档，或已损坏。",
+                title="错误",
+                border_style="red"
+            ))
+            self.history_mgr.add_action_log("restore_data", "failed", {"reason": "invalid_archive", "file": selected.name})
+            Prompt.ask("按回车键返回菜单...")
+            return
 
         if not Confirm.ask(f"确认从 {selected.name} 恢复?", default=False):
             self.history_mgr.add_action_log("restore_data", "cancelled")
