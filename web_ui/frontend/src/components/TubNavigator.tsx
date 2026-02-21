@@ -24,7 +24,7 @@ export const TubNavigator: React.FC = () => {
   
   // Find image key
   const imageKey = currentRecord ? Object.keys(currentRecord).find(k => k.endsWith('image_array')) : null;
-  const imagePath = imageKey ? currentRecord[imageKey] : null;
+  const imagePath = imageKey && typeof currentRecord?.[imageKey] === 'string' ? currentRecord[imageKey] : null;
 
   // Animation Loop
   const animate = useCallback((time: number) => {
@@ -99,9 +99,22 @@ export const TubNavigator: React.FC = () => {
     );
   }
 
+  const formatValue = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value.toFixed(2);
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed.toFixed(2);
+      }
+    }
+    return 'N/A';
+  };
+
   const getRecordValue = (key: string, altKey?: string) => {
     const val = currentRecord?.[key] ?? (altKey ? currentRecord?.[altKey] : undefined);
-    return typeof val === 'number' ? val.toFixed(2) : 'N/A';
+    return formatValue(val);
   };
 
   return (
@@ -189,7 +202,7 @@ export const TubNavigator: React.FC = () => {
             
             <Button 
               className={`w-full flex items-center justify-center gap-2 transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700 text-white' : ''}`}
-              variant={isPlaying ? "default" : "primary"}
+              variant={isPlaying ? "danger" : "primary"}
               onClick={() => setIsPlaying(!isPlaying)}
             >
               {isPlaying ? <><Pause className="w-4 h-4" /> Stop</> : <><Play className="w-4 h-4" /> Play</>}

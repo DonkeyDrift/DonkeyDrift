@@ -20,7 +20,7 @@ interface AppState {
   setConfig: (config: any, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[]) => void;
   setRecords: (records: TubRecord[]) => void;
-  setCurrentIndex: (index: number) => void;
+  setCurrentIndex: (index: number | ((prev: number) => number)) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
 }
@@ -39,7 +39,10 @@ export const useStore = create<AppState>((set) => ({
   setConfig: (config, path) => set({ config, configPath: path }),
   setTub: (path, records, fields) => set({ tubPath: path, records, totalRecords: records.length, fields, currentIndex: 0 }),
   setRecords: (records) => set({ records }),
-  setCurrentIndex: (index) => set({ currentIndex: index }),
+  setCurrentIndex: (index) =>
+    set((state) => ({
+      currentIndex: typeof index === 'function' ? index(state.currentIndex) : index,
+    })),
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
 }));
