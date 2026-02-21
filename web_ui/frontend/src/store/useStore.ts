@@ -3,11 +3,11 @@ import { create } from 'zustand';
 interface TubRecord {
   _index: number;
   _timestamp_ms: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface AppState {
-  config: any | null;
+  config: Record<string, unknown> | null;
   configPath: string;
   tubPath: string;
   records: TubRecord[];
@@ -17,7 +17,7 @@ interface AppState {
   isLoading: boolean;
   error: string | null;
 
-  setConfig: (config: any, path: string) => void;
+  setConfig: (config: Record<string, unknown>, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[]) => void;
   setRecords: (records: TubRecord[]) => void;
   setCurrentIndex: (index: number | ((prev: number) => number)) => void;

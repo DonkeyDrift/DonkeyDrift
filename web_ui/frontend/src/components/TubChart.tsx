@@ -25,7 +25,7 @@ ChartJS.register(
 );
 
 export const TubChart: React.FC = () => {
-  const { records, currentIndex } = useStore();
+  const { records } = useStore();
 
   const data = useMemo(() => {
     if (!records.length) return { labels: [], datasets: [] };
@@ -88,27 +88,6 @@ export const TubChart: React.FC = () => {
     },
     animation: {
         duration: 0 // Disable animation for performance
-    }
-  };
-
-  // Create a plugin to draw a vertical line at current index
-  const verticalLinePlugin = {
-    id: 'verticalLine',
-    afterDraw: (chart: any) => {
-        if (chart.tooltip?._active?.length) return;
-        
-        const ctx = chart.ctx;
-        const xAxis = chart.scales.x;
-        const yAxis = chart.scales.y;
-        
-        // Find x position for current index
-        // Since we sampled, we need to find the closest x
-        // For simplicity, let's just use the ratio if linear, or search
-        // If x-axis is category (index), we find the index in labels
-        // But we sampled labels. 
-        // It's tricky to sync perfectly with sampled data. 
-        // Let's skip drawing line on chart for now to avoid complexity, 
-        // or just accept it might not be visible if sampled out.
     }
   };
 

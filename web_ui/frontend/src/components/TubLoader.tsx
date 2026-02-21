@@ -1,10 +1,20 @@
 import React, { useState } from 'react';
+import type { AxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
 import { loadTub } from '../services/api';
 import { Database } from 'lucide-react';
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as AxiosError<{ detail?: string }>).response;
+    const detail = response?.data?.detail;
+    if (detail) return detail;
+  }
+  return fallback;
+};
 
 export const TubLoader: React.FC = () => {
   const { tubPath, setTub, setError, setLoading, config } = useStore();
@@ -15,8 +25,8 @@ export const TubLoader: React.FC = () => {
     try {
       const data = await loadTub(path);
       setTub(data.path, data.records || [], data.fields || []);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load tub');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to load tub'));
     } finally {
       setLoading(false);
     }
