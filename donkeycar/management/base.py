@@ -5,6 +5,9 @@ import socket
 import stat
 import sys
 import logging
+import subprocess
+import time
+import signal
 
 from progress.bar import IncrementalBar
 import donkeycar as dk
@@ -616,6 +619,174 @@ class Tui(BaseCommand):
         main()
 
 
+class Web(BaseCommand):
+    def parse_args(self, args):
+        parser = argparse.ArgumentParser(prog='web', usage='%(prog)s [options]')
+        parser.add_argument('--path', default='/home/dkc/projects/donkeycar/web_ui',
+                            help='web_ui 根目录路径 (默认: /home/dkc/projects/donkeycar/web_ui)')
+        parser.add_argument('--frontend-port', type=int, default=5188,
+                            help='前端端口 (默认: 5188)')
+        parser.add_argument('--backend-port', type=int, default=8000,
+                            help='后端端口 (默认: 8000)')
+        parser.add_argument('--backend-host', default='0.0.0.0',
+                            help='后端监听地址 (默认: 0.0.0.0)')
+        return parser.parse_args(args)
+
+    def run(self, args):
+        args = self.parse_args(args)
+        web_ui_path = self._resolve_web_ui_path(args.path)
+        frontend_path = os.path.join(web_ui_path, 'frontend')
+        backend_path = os.path.join(web_ui_path, 'backend')
+
+        if not os.path.isdir(frontend_path):
+            raise SystemExit(f'未找到前端目录: {frontend_path}')
+        if not os.path.isdir(backend_path):
+            raise SystemExit(f'未找到后端目录: {backend_path}')
+
+        frontend_bind_host = '0.0.0.0'
+        frontend_port = self._choose_available_port(frontend_bind_host, args.frontend_port)
+        backend_port = self._choose_available_port(args.backend_host, args.backend_port)
+
+        if frontend_port != args.frontend_port:
+            print(f'前端端口 {args.frontend_port} 已被占用，已切换到 {frontend_port}')
+        if backend_port != args.backend_port:
+            print(f'后端端口 {args.backend_port} 已被占用，已切换到 {backend_port}')
+
+        frontend_cmd = ['npm', 'run', 'dev', '--', '--host', '--port', str(frontend_port)]
+        backend_cmd = [
+            sys.executable, '-m', 'uvicorn', 'main:app',
+            '--host', str(args.backend_host),
+            '--port', str(backend_port),
+            '--reload',
+        ]
+
+        print(f'Web UI 路径: {web_ui_path}')
+        print(f'前端: http://localhost:{frontend_port}/')
+        print(f'后端: http://localhost:{backend_port}/')
+        print(f'后端文档: http://localhost:{backend_port}/docs')
+        print('按 Ctrl+C 停止前后端')
+
+        frontend_proc = None
+        backend_proc = None
+        stop_requested = {'value': False}
+
+        def _handle_stop_signal(_signum, _frame):
+            stop_requested['value'] = True
+
+        prev_sigint = signal.getsignal(signal.SIGINT)
+        prev_sigterm = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGINT, _handle_stop_signal)
+        signal.signal(signal.SIGTERM, _handle_stop_signal)
+
+        try:
+            backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, start_new_session=True)
+            frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, start_new_session=True)
+            while True:
+                if stop_requested['value']:
+                    raise SystemExit(0)
+                frontend_rc = frontend_proc.poll()
+                backend_rc = backend_proc.poll()
+                if frontend_rc is not None:
+                    self._terminate_process(backend_proc)
+                    raise SystemExit(f'前端进程已退出，返回码: {frontend_rc}')
+                if backend_rc is not None:
+                    self._terminate_process(frontend_proc)
+                    raise SystemExit(f'后端进程已退出，返回码: {backend_rc}')
+                time.sleep(0.25)
+        finally:
+            signal.signal(signal.SIGINT, prev_sigint)
+            signal.signal(signal.SIGTERM, prev_sigterm)
+            self._terminate_process(frontend_proc)
+            self._terminate_process(backend_proc)
+
+    def _choose_available_port(self, host, preferred_port, max_tries=50):
+        port = int(preferred_port)
+        for _ in range(max_tries):
+            if self._is_port_available(host, port):
+                return port
+            port += 1
+        raise SystemExit(f'无法找到可用端口 (host={host}, 起始端口={preferred_port})')
+
+    def _is_port_available(self, host, port):
+        try:
+            addr_infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except Exception:
+            addr_infos = [(socket.AF_INET, socket.SOCK_STREAM, 0, '', (host, port))]
+
+        for family, socktype, proto, _, sockaddr in addr_infos:
+            sock = None
+            try:
+                sock = socket.socket(family, socktype, proto)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(sockaddr)
+                return True
+            except OSError:
+                continue
+            finally:
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+
+        return False
+
+    def _resolve_web_ui_path(self, path):
+        normalized = os.path.expanduser(str(path)).replace('\\', os.sep)
+        normalized = os.path.normpath(normalized)
+        if self._is_web_ui_dir(normalized):
+            return normalized
+
+        cwd = os.getcwd()
+        candidate = cwd
+        while True:
+            direct = os.path.join(candidate, 'web_ui')
+            if self._is_web_ui_dir(direct):
+                return direct
+            if self._is_web_ui_dir(candidate):
+                return candidate
+            parent = os.path.dirname(candidate)
+            if parent == candidate:
+                break
+            candidate = parent
+
+        raise SystemExit(
+            f'未找到 web_ui 目录。请使用 --path 指定，例如: donkey web --path "{normalized}"'
+        )
+
+    def _is_web_ui_dir(self, path):
+        return (
+            os.path.isdir(path)
+            and os.path.isdir(os.path.join(path, 'frontend'))
+            and os.path.isdir(os.path.join(path, 'backend'))
+        )
+
+    def _terminate_process(self, proc):
+        if proc is None:
+            return
+        if proc.poll() is not None:
+            return
+        if os.name == 'posix':
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except Exception:
+                proc.terminate()
+        else:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            if os.name == 'posix':
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    proc.kill()
+            else:
+                proc.kill()
+            proc.wait(timeout=5)
+
+
+
 def execute_from_command_line():
     """
     This is the function linked to the "donkey" terminal command.
@@ -634,6 +805,7 @@ def execute_from_command_line():
         'models': ModelDatabase,
         'ui': Gui,
         'tui': Tui,
+        'web': Web,
     }
 
     args = sys.argv[:]

@@ -199,22 +199,16 @@ def _list_backup_archives(cache_dir: Path) -> List[Dict[str, Any]]:
         return items
     
     # 查找所有 .tar.gz 文件
-    for item in cache_dir.glob("*.tar.gz"):
+    pattern = re.compile(r"^data-(\d{6})-(\d{3})\.tar\.gz$")
+    for item in cache_dir.glob("data-*.tar.gz"):
         if not item.is_file():
             continue
             
-        # 尝试匹配标准格式
-        match = re.match(r"^data-(\d{6})-(\d{3})\.tar\.gz$", item.name)
-        if match:
-            date_str, seq = match.groups()
-        else:
-            # 非标准命名，尝试从文件修改时间获取日期
-            try:
-                mtime = datetime.fromtimestamp(item.stat().st_mtime)
-                date_str = mtime.strftime("%y%m%d")
-            except Exception:
-                date_str = "Unknown"
-            seq = "N/A"
+        match = pattern.match(item.name)
+        if not match:
+            continue
+
+        date_str, seq = match.groups()
             
         size = 0
         try:
@@ -1306,11 +1300,19 @@ class DriveCommand(DonkeyCommand):
 
 class DonkeyUICommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("donkey_ui", "启动数据筛选工具", "筛选", is_favorite=True, requires_mycar_folder=False)
+        super().__init__("donkey_ui", "启动数据筛选工具（Windows下需要WSL来运行）", "筛选", is_favorite=False, requires_mycar_folder=False)
         self.options = []
 
     def get_command_line(self, params):
         return ["donkey", "ui"]
+
+class WebUICommand(DonkeyCommand):
+    def __init__(self):
+        super().__init__("web", "启动 Web UI（前后端）", "筛选", is_favorite=True, requires_mycar_folder=False)
+        self.options = []
+
+    def get_command_line(self, params):
+        return ["donkey", "web"]
 
 # -----------------------------------------------------------------------------
 # 菜单系统
@@ -1321,7 +1323,7 @@ class MenuSystem:
             "管理": [CreateCarCommand(), OpenProjectCommand()],
             "数据": [ClearDataCommand(), BackupDataCommand(), RestoreDataCommand()],
             "驾驶": [DriveCommand()],
-            "筛选": [DonkeyUICommand()],
+            "筛选": [WebUICommand(), DonkeyUICommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
         self.flat_commands = [cmd for sublist in self.commands.values() for cmd in sublist]
