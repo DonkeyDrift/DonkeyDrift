@@ -27,3 +27,4 @@ htmlcov/
 # PyTorch
 lightning_logs
 tb_logs
+.donkey_history
