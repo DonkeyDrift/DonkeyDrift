@@ -62,7 +62,6 @@ export const TubEditor: React.FC = () => {
   const chartNeedsRenderRef = useRef(false);
   const selectionAnimationUntilRef = useRef(0);
   const playbackActivityUntilRef = useRef(0);
-  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number; dataIndex: number } | null>(null);
   const [tooltipData, setTooltipData] = useState<{ x: number; y: number; steering: number; throttle: number; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectionDraft, setSelectionDraft] = useState<{
@@ -74,6 +73,8 @@ export const TubEditor: React.FC = () => {
   const selectionDraftRef = useRef(selectionDraft);
   const hydrateSelectionRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const hoverPositionRef = useRef<{ x: number; y: number; dataIndex: number } | null>(null);
+  const tooltipDataRef = useRef(tooltipData);
 
   const [rangeInputDraft, setRangeInputDraft] = useState<{ start: string; end: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -215,6 +216,10 @@ export const TubEditor: React.FC = () => {
   useEffect(() => {
     selectionDraftRef.current = selectionDraft;
   }, [selectionDraft]);
+
+  useEffect(() => {
+    tooltipDataRef.current = tooltipData;
+  }, [tooltipData]);
 
   useEffect(() => {
     requestChartRender({ animateSelection: selectionStartIndex != null && selectionEndIndex != null });
@@ -480,6 +485,18 @@ export const TubEditor: React.FC = () => {
     setScrollProgress(Math.max(0, Math.min(1, nextProgress)));
   }, []);
 
+  const updateTooltipPosition = useCallback((x: number, y: number) => {
+    if (!tooltipRef.current || !containerRef.current) {
+      return;
+    }
+
+    const isRightHalf = x > containerRef.current.clientWidth / 2;
+    const isBottomHalf = y > containerRef.current.clientHeight / 2;
+    tooltipRef.current.style.left = `${x}px`;
+    tooltipRef.current.style.top = `${y}px`;
+    tooltipRef.current.style.transform = `translate(${isRightHalf ? 'calc(-100% - 15px)' : '15px'}, ${isBottomHalf ? 'calc(-100% - 15px)' : '15px'})`;
+  }, []);
+
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!chartRef.current || !containerRef.current || !records.length) return;
@@ -492,8 +509,12 @@ export const TubEditor: React.FC = () => {
       const chartArea = chart.chartArea;
 
       if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) {
-        setHoverPosition(null);
-        setTooltipData(null);
+        if (hoverPositionRef.current || tooltipDataRef.current) {
+          hoverPositionRef.current = null;
+          tooltipDataRef.current = null;
+          setTooltipData(null);
+          requestChartRender();
+        }
         return;
       }
 
@@ -504,22 +525,33 @@ export const TubEditor: React.FC = () => {
       const steering = (record['user/angle'] as number) ?? 0;
       const throttle = (record['user/throttle'] as number) ?? 0;
 
-      setHoverPosition({ x: clampedX, y, dataIndex: clampedIndex });
-      setTooltipData({
+      hoverPositionRef.current = { x: clampedX, y, dataIndex: clampedIndex };
+      requestChartRender();
+
+      const nextTooltipData = {
         x: clampedX,
         y,
         steering,
         throttle,
         index: clampedIndex,
-      });
+      };
+      const previousTooltipData = tooltipDataRef.current;
 
-      // Update tooltip position via ref for maximum performance
-      if (tooltipRef.current && containerRef.current) {
-        const isRightHalf = clampedX > containerRef.current.clientWidth / 2;
-        const isBottomHalf = y > containerRef.current.clientHeight / 2;
-        tooltipRef.current.style.left = `${clampedX}px`;
-        tooltipRef.current.style.top = `${y}px`;
-        tooltipRef.current.style.transform = `translate(${isRightHalf ? 'calc(-100% - 15px)' : '15px'}, ${isBottomHalf ? 'calc(-100% - 15px)' : '15px'})`;
+      if (
+        !previousTooltipData ||
+        previousTooltipData.index !== clampedIndex ||
+        previousTooltipData.steering !== steering ||
+        previousTooltipData.throttle !== throttle
+      ) {
+        tooltipDataRef.current = nextTooltipData;
+        setTooltipData(nextTooltipData);
+      } else {
+        updateTooltipPosition(clampedX, y);
+        tooltipDataRef.current = {
+          ...previousTooltipData,
+          x: clampedX,
+          y,
+        };
       }
 
       if (selectionDraft) {
@@ -534,13 +566,19 @@ export const TubEditor: React.FC = () => {
         );
       }
     },
-    [getIndexFromPointerX, records, selectionDraft]
+    [getIndexFromPointerX, records, requestChartRender, selectionDraft, updateTooltipPosition]
   );
 
   const handleMouseLeave = useCallback(() => {
-    setHoverPosition(null);
+    if (!hoverPositionRef.current && !tooltipDataRef.current) {
+      return;
+    }
+
+    hoverPositionRef.current = null;
+    tooltipDataRef.current = null;
     setTooltipData(null);
-  }, []);
+    requestChartRender();
+  }, [requestChartRender]);
 
   const handleInteraction = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!chartRef.current || !containerRef.current || !records.length) return;
@@ -911,13 +949,6 @@ export const TubEditor: React.FC = () => {
     }
   };
 
-  const hoverPositionRef = useRef(hoverPosition);
-
-  useEffect(() => {
-    hoverPositionRef.current = hoverPosition;
-    requestChartRender();
-  }, [hoverPosition, requestChartRender]);
-
   const verticalLinePlugin = useMemo<Plugin<'line'>>(() => ({
     id: 'verticalLine',
     afterDraw: (chart: ChartInstance<'line'>) => {
@@ -1232,27 +1263,38 @@ export const TubEditor: React.FC = () => {
       const steering = (record['user/angle'] as number) ?? 0;
       const throttle = (record['user/throttle'] as number) ?? 0;
 
-      setHoverPosition({ x: clampedX, y, dataIndex: clampedIndex });
-      setTooltipData({
+      hoverPositionRef.current = { x: clampedX, y, dataIndex: clampedIndex };
+      requestChartRender();
+
+      const nextTooltipData = {
         x: clampedX,
         y,
         steering,
         throttle,
         index: clampedIndex,
-      });
+      };
+      const previousTooltipData = tooltipDataRef.current;
 
-      // Update tooltip position via ref for maximum performance
-      if (tooltipRef.current && containerRef.current) {
-        const isRightHalf = clampedX > containerRef.current.clientWidth / 2;
-        const isBottomHalf = y > containerRef.current.clientHeight / 2;
-        tooltipRef.current.style.left = `${clampedX}px`;
-        tooltipRef.current.style.top = `${y}px`;
-        tooltipRef.current.style.transform = `translate(${isRightHalf ? 'calc(-100% - 15px)' : '15px'}, ${isBottomHalf ? 'calc(-100% - 15px)' : '15px'})`;
+      if (
+        !previousTooltipData ||
+        previousTooltipData.index !== clampedIndex ||
+        previousTooltipData.steering !== steering ||
+        previousTooltipData.throttle !== throttle
+      ) {
+        tooltipDataRef.current = nextTooltipData;
+        setTooltipData(nextTooltipData);
+      } else {
+        updateTooltipPosition(clampedX, y);
+        tooltipDataRef.current = {
+          ...previousTooltipData,
+          x: clampedX,
+          y,
+        };
       }
 
       event.preventDefault();
     },
-    [getIndexFromPointerX, records, selectionDraft]
+    [getIndexFromPointerX, records, requestChartRender, selectionDraft, updateTooltipPosition]
   );
 
   const handleTouchEnd = useCallback(

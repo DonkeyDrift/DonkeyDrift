@@ -112,10 +112,26 @@ export const TubNavigator: React.FC = () => {
   useEffect(() => {
     const unsubscribe = useStore.subscribe((state) => {
       currentIndexRef.current = state.currentIndex;
+      
+      const prevStart = selectionRangeRef.current.start;
+      const prevEnd = selectionRangeRef.current.end;
+
       selectionRangeRef.current = {
         start: state.selectionStartIndex,
         end: state.selectionEndIndex,
       };
+
+      // Stop playback if selection becomes exactly 1 frame
+      if (
+        state.selectionStartIndex !== null &&
+        state.selectionEndIndex !== null &&
+        state.selectionEndIndex - state.selectionStartIndex === 1
+      ) {
+        if (state.selectionStartIndex !== prevStart || state.selectionEndIndex !== prevEnd) {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+        }
+      }
 
       if (!isPlayingRef.current && !isDragging) {
         setLocalIndex((prev) => {
