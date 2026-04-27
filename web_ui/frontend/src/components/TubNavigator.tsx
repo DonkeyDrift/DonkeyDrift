@@ -5,6 +5,64 @@ import { useStore } from '../store/useStore';
 import { getImageUrl } from '../services/api';
 import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine } from 'lucide-react';
 
+interface RecordStatsProps {
+  steering: string;
+  throttle: string;
+  targetFps: number;
+  actualFps: number;
+}
+
+const RecordStats = React.memo(({ steering, throttle, targetFps, actualFps }: RecordStatsProps) => (
+  <div className="grid grid-cols-3 gap-4">
+    <div className="bg-zinc-800 p-3 rounded-md">
+      <div className="text-xs text-zinc-400 uppercase">STEERING</div>
+      <div className="text-lg font-mono text-cyan-400">{steering}</div>
+    </div>
+    <div className="bg-zinc-800 p-3 rounded-md">
+      <div className="text-xs text-zinc-400 uppercase">Throttle</div>
+      <div className="text-lg font-mono text-cyan-400">{throttle}</div>
+    </div>
+    <div className="bg-zinc-800 p-3 rounded-md">
+      <div className="text-xs text-zinc-400 uppercase">FPS</div>
+      <div className="text-lg font-mono text-cyan-400">
+        {targetFps} / {actualFps}
+      </div>
+    </div>
+  </div>
+));
+
+interface TimelineSliderProps {
+  max: number;
+  value: number;
+  isDragging: boolean;
+  onInput: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onMouseDown: () => void;
+  onMouseUp: () => void;
+}
+
+const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, onMouseDown, onMouseUp }: TimelineSliderProps) => (
+  <div className="flex flex-col gap-2">
+    <label className="text-xs text-zinc-400 flex items-center gap-2">
+      Timeline
+      {isDragging && <span className="text-cyan-400 text-xs">(Dragging...)</span>}
+    </label>
+    <input 
+      type="range" 
+      min="0" 
+      max={max} 
+      value={value} 
+      onInput={onInput}
+      onChange={onChange}
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+      onTouchStart={onMouseDown}
+      onTouchEnd={onMouseUp}
+      className={`w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer ${isDragging ? 'accent-cyan-400' : 'accent-cyan-500'}`}
+    />
+  </div>
+));
+
 export const TubNavigator: React.FC = () => {
   const { records, currentIndex, setCurrentIndex, totalRecords, config, isDragging, setIsDragging } = useStore();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -22,6 +80,9 @@ export const TubNavigator: React.FC = () => {
   const fpsStartRef = useRef<number>(0);
   const fpsFramesRef = useRef<number>(0);
   const lastIndexRef = useRef(currentIndex);
+  const displayIndexRef = useRef(currentIndex);
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Sync ref with state
   useEffect(() => {
@@ -37,7 +98,30 @@ export const TubNavigator: React.FC = () => {
     lastIndexRef.current = currentIndex;
   }, [currentIndex]);
 
-  const currentRecord = records[currentIndex];
+  // Use a local state for the index to avoid triggering global store re-renders 60 times/sec
+  const [localIndex, setLocalIndex] = useState(currentIndex);
+
+  // Sync localIndex with global currentIndex when global changes (e.g. from other components)
+  useEffect(() => {
+    if (!isPlayingRef.current && !isDragging) {
+      setLocalIndex(currentIndex);
+      displayIndexRef.current = currentIndex;
+    }
+  }, [currentIndex, isDragging]);
+
+  // Throttled sync from localIndex to global store
+  useEffect(() => {
+    if (isPlaying) {
+      const interval = setInterval(() => {
+        setCurrentIndex(displayIndexRef.current);
+      }, 100); // Sync global state 10 times per second
+      return () => clearInterval(interval);
+    } else {
+      setCurrentIndex(localIndex);
+    }
+  }, [isPlaying, localIndex, setCurrentIndex]);
+
+  const currentRecord = records[localIndex];
   
   // Find image key
   const imageKey = currentRecord ? Object.keys(currentRecord).find(k => k.endsWith('image_array')) : null;
@@ -67,7 +151,7 @@ export const TubNavigator: React.FC = () => {
 
     if (deltaTime >= playbackSpeed) {
       const steps = Math.floor(deltaTime / playbackSpeed);
-      let nextIndex = lastIndexRef.current + steps;
+      let nextIndex = displayIndexRef.current + steps;
       
       if (nextIndex >= totalRecords - 1) {
         if (isLoopingRef.current) {
@@ -78,15 +162,14 @@ export const TubNavigator: React.FC = () => {
         }
       }
       
-      // 直接更新索引，避免函数调用开销
-      lastIndexRef.current = nextIndex;
-      setCurrentIndex(nextIndex);
+      displayIndexRef.current = nextIndex;
+      setLocalIndex(nextIndex);
       
       lastTimeRef.current = time - (deltaTime % playbackSpeed);
     }
     
     requestRef.current = requestAnimationFrame(animate);
-  }, [playbackSpeed, totalRecords, setCurrentIndex]);
+  }, [playbackSpeed, totalRecords]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -110,7 +193,7 @@ export const TubNavigator: React.FC = () => {
   // Reset error when index changes
   useEffect(() => {
     setImageError(false);
-  }, [currentIndex]);
+  }, [localIndex]);
 
   // Handle spacebar shortcut for play/pause
   useEffect(() => {
@@ -145,56 +228,115 @@ export const TubNavigator: React.FC = () => {
     };
   }, []);
 
-  const preloadImage = useCallback((path: string | null) => {
-    if (!path) return;
-    if (imageCacheRef.current.has(path)) return;
-    const img = new Image();
-    img.src = getImageUrl(path);
-    imageCacheRef.current.set(path, img);
-  }, []);
+  useEffect(() => {
+    if (!imageUrl) {
+      setImageError(true);
+      return;
+    }
+
+    let isCurrent = true;
+    let img = imageCacheRef.current.get(imageUrl);
+
+    const drawImage = (imageToDraw: HTMLImageElement) => {
+      if (!isCurrent) return;
+      setImageError(false);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Adjust canvas resolution to match image
+      if (canvas.width !== imageToDraw.width || canvas.height !== imageToDraw.height) {
+        canvas.width = imageToDraw.width;
+        canvas.height = imageToDraw.height;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(imageToDraw, 0, 0);
+    };
+
+    if (!img) {
+      img = new Image();
+      img.src = imageUrl;
+      imageCacheRef.current.set(imageUrl, img);
+    }
+
+    if (img.complete) {
+      if (img.naturalWidth === 0) {
+        if (isCurrent) handleImageError();
+      } else {
+        drawImage(img);
+      }
+    } else {
+      const handleLoad = () => drawImage(img!);
+      const handleError = () => {
+        if (isCurrent) handleImageError();
+      };
+      
+      img.addEventListener('load', handleLoad);
+      img.addEventListener('error', handleError);
+      
+      return () => {
+        isCurrent = false;
+        img?.removeEventListener('load', handleLoad);
+        img?.removeEventListener('error', handleError);
+      };
+    }
+
+    return () => {
+      isCurrent = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageUrl, imagePath]);
 
   useEffect(() => {
     if (!records.length) return;
-    for (let offset = 1; offset <= 3; offset += 1) {
-      const nextRecord = records[currentIndex + offset];
+    for (let offset = 1; offset <= 10; offset += 1) { // Preload 10 frames instead of 3
+      const nextRecord = records[localIndex + offset];
       if (!nextRecord) continue;
       const nextKey = Object.keys(nextRecord).find((k) => k.endsWith('image_array'));
       const nextPath = nextKey && typeof nextRecord?.[nextKey] === 'string' ? nextRecord[nextKey] : null;
-      preloadImage(nextPath);
+      if (!nextPath) continue;
+      const url = getImageUrl(nextPath);
+      if (imageCacheRef.current.has(url)) continue;
+      const img = new Image();
+      img.src = url;
+      imageCacheRef.current.set(url, img);
     }
-  }, [currentIndex, records, preloadImage]);
+  }, [localIndex, records]);
 
-  const handleSliderInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSliderInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newIndex = parseInt(e.target.value);
     setIsPlaying(false); // Stop playing when user scrubs
-    lastIndexRef.current = newIndex;
-    setCurrentIndex(newIndex);
-  };
+    displayIndexRef.current = newIndex;
+    setLocalIndex(newIndex);
+  }, []);
 
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newIndex = parseInt(e.target.value);
     setIsPlaying(false); // Stop playing when user scrubs
     setIsDragging(false); // End dragging
-    lastIndexRef.current = newIndex;
+    displayIndexRef.current = newIndex;
+    setLocalIndex(newIndex);
     setCurrentIndex(newIndex);
-  };
+  }, [setCurrentIndex, setIsDragging]);
 
-  const handleSliderMouseDown = () => {
+  const handleSliderMouseDown = useCallback(() => {
     setIsDragging(true);
     setIsPlaying(false);
-  };
+  }, [setIsDragging]);
 
-  const handleSliderMouseUp = () => {
+  const handleSliderMouseUp = useCallback(() => {
     setIsDragging(false);
-  };
+  }, [setIsDragging]);
 
-  const handleImageError = () => {
-    // Ignore errors during playback as they might be due to rapid switching/cancellation
-    if (isPlayingRef.current) return;
-    
-    console.error(`Failed to load image for record ${currentIndex}: ${imagePath}`);
+  const handleImageError = useCallback(() => {
+    console.error(`Failed to load image for record ${localIndex}: ${imagePath}`);
     setImageError(true);
-  };
+    if (isPlayingRef.current) {
+      setIsPlaying(false);
+    }
+  }, [localIndex, imagePath]);
 
   if (!records.length) {
     return (
@@ -246,12 +388,11 @@ export const TubNavigator: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="aspect-[4/3] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
             {imagePath && !imageError ? (
-              <img 
-                src={imageUrl ?? undefined} 
-                alt={`Record ${currentIndex}`} 
+              <canvas
+                ref={canvasRef}
                 className="w-full h-full object-contain"
-                onError={handleImageError}
-                loading="eager"
+                width={640}
+                height={480}
               />
             ) : (
               <div className="flex flex-col items-center justify-center text-zinc-600 gap-2">
@@ -266,59 +407,38 @@ export const TubNavigator: React.FC = () => {
               </div>
             )}
             <div className="absolute top-2 right-2 bg-black/70 px-2 py-1 rounded text-xs text-white">
-              Record {currentIndex} / {totalRecords - 1}
+              Record {localIndex} / {totalRecords - 1}
             </div>
           </div>
 
           <div className="space-y-6">
-            <div className="grid grid-cols-3 gap-4">
-               {/* Display key values */}
-               <div className="bg-zinc-800 p-3 rounded-md">
-                 <div className="text-xs text-zinc-400 uppercase">STEERING</div>
-                 <div className="text-lg font-mono text-cyan-400">
-                   {getRecordValue('user/angle', 'pilot/angle')}
-                 </div>
-               </div>
-               <div className="bg-zinc-800 p-3 rounded-md">
-                 <div className="text-xs text-zinc-400 uppercase">Throttle</div>
-                 <div className="text-lg font-mono text-cyan-400">
-                   {getRecordValue('user/throttle', 'pilot/throttle')}
-                 </div>
-               </div>
-               <div className="bg-zinc-800 p-3 rounded-md">
-                 <div className="text-xs text-zinc-400 uppercase">FPS</div>
-                 <div className="text-lg font-mono text-cyan-400">
-                   {playbackFps} / {actualFps}
-                 </div>
-               </div>
-            </div>
+            <RecordStats 
+              steering={getRecordValue('user/angle', 'pilot/angle')}
+              throttle={getRecordValue('user/throttle', 'pilot/throttle')}
+              targetFps={playbackFps}
+              actualFps={actualFps}
+            />
 
-            <div className="flex flex-col gap-2">
-               <label className="text-xs text-zinc-400 flex items-center gap-2">
-                 Timeline
-                 {isDragging && <span className="text-cyan-400 text-xs">(Dragging...)</span>}
-               </label>
-               <input 
-                 type="range" 
-                 min="0" 
-                 max={totalRecords - 1} 
-                 value={currentIndex} 
-                 onInput={handleSliderInput}
-                 onChange={handleSliderChange}
-                 onMouseDown={handleSliderMouseDown}
-                 onMouseUp={handleSliderMouseUp}
-                 onTouchStart={handleSliderMouseDown}
-                 onTouchEnd={handleSliderMouseUp}
-                 className={`w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer ${isDragging ? 'accent-cyan-400' : 'accent-cyan-500'}`}
-               />
-            </div>
+            <TimelineSlider 
+              max={totalRecords - 1}
+              value={localIndex}
+              isDragging={isDragging}
+              onInput={handleSliderInput}
+              onChange={handleSliderChange}
+              onMouseDown={handleSliderMouseDown}
+              onMouseUp={handleSliderMouseUp}
+            />
 
             <div className="grid grid-cols-4 gap-2">
               <Button
                 variant="secondary"
                 size="sm"
                 aria-label="First record"
-                onClick={() => setCurrentIndex(0)}
+                onClick={() => {
+                  setLocalIndex(0);
+                  displayIndexRef.current = 0;
+                  setCurrentIndex(0);
+                }}
               >
                 <ChevronsLeft className="w-4 h-4" />
                 <span className="ml-1 text-xs">First</span>
@@ -327,7 +447,12 @@ export const TubNavigator: React.FC = () => {
                 variant="secondary"
                 size="sm"
                 aria-label="Previous record"
-                onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
+                onClick={() => {
+                  const newIndex = Math.max(0, localIndex - 1);
+                  setLocalIndex(newIndex);
+                  displayIndexRef.current = newIndex;
+                  setCurrentIndex(newIndex);
+                }}
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span className="ml-1 text-xs">Prev</span>
@@ -336,7 +461,12 @@ export const TubNavigator: React.FC = () => {
                 variant="secondary"
                 size="sm"
                 aria-label="Next record"
-                onClick={() => setCurrentIndex(Math.min(totalRecords - 1, currentIndex + 1))}
+                onClick={() => {
+                  const newIndex = Math.min(totalRecords - 1, localIndex + 1);
+                  setLocalIndex(newIndex);
+                  displayIndexRef.current = newIndex;
+                  setCurrentIndex(newIndex);
+                }}
               >
                 <ChevronRight className="w-4 h-4" />
                 <span className="ml-1 text-xs">Next</span>
@@ -345,7 +475,12 @@ export const TubNavigator: React.FC = () => {
                 variant="secondary"
                 size="sm"
                 aria-label="Last record"
-                onClick={() => setCurrentIndex(Math.max(0, totalRecords - 1))}
+                onClick={() => {
+                  const newIndex = Math.max(0, totalRecords - 1);
+                  setLocalIndex(newIndex);
+                  displayIndexRef.current = newIndex;
+                  setCurrentIndex(newIndex);
+                }}
               >
                 <ChevronsRight className="w-4 h-4" />
                 <span className="ml-1 text-xs">Last</span>
