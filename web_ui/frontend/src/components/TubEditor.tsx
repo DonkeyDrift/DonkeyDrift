@@ -554,21 +554,36 @@ export const TubEditor: React.FC = () => {
         return;
       }
 
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        if (!isProcessing && hasValidRange) {
+          void handleAction('delete');
+        }
+        return;
+      }
+
+      if (event.key === '\\') {
+        event.preventDefault();
+        if (!isProcessing && hasValidRange) {
+          void handleAction('restore');
+        }
+        return;
+      }
+
       if (
         selectionStartIndex != null &&
         selectionEndIndex != null &&
-        event.shiftKey &&
-        (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+        (event.key === '[' || event.key === ']')
       ) {
         event.preventDefault();
-        const delta = event.key === 'ArrowLeft' ? -1 : 1;
+        const delta = event.key === '[' ? -1 : 1;
         const start = selectionStartIndex;
         const nextEnd = Math.max(start + 1, Math.min(selectionEndIndex + delta, records.length));
         setSelectionRange(start, nextEnd);
         return;
       }
 
-      const step = event.shiftKey ? 10 : 1;
+      const step = 1;
 
       switch (event.key) {
         case 'ArrowLeft':
@@ -597,6 +612,9 @@ export const TubEditor: React.FC = () => {
       handleUndoLastAction,
       redoHistory.length,
       handleRedoLastAction,
+      isProcessing,
+      hasValidRange,
+      handleAction,
       handleZoomIn,
       handleZoomOut,
       handleZoomReset,
@@ -874,21 +892,24 @@ export const TubEditor: React.FC = () => {
 
     if (selectionStartIndex != null && selectionEndIndex != null) {
         const total = records.length;
+        const nextStartIndex = Math.max(0, Math.min(selectionStartIndex, total - 1));
+        const nextEndIndex = Math.max(nextStartIndex + 1, Math.min(selectionEndIndex, total));
         let shouldUpdate = false;
         
         if (!visualSelectionRef.current) {
             shouldUpdate = true;
         } else {
             const vStartIdx = Math.round(visualSelectionRef.current.startIndex);
-            if (vStartIdx !== selectionStartIndex) {
+            const vEndIdx = Math.round(visualSelectionRef.current.endIndex);
+            if (vStartIdx !== nextStartIndex || vEndIdx !== nextEndIndex) {
                 shouldUpdate = true;
             }
         }
         
         if (shouldUpdate) {
             visualSelectionRef.current = {
-              startIndex: Math.max(0, Math.min(selectionStartIndex, total - 1)),
-              endIndex: Math.max(selectionStartIndex + 1, Math.min(selectionEndIndex, total)),
+              startIndex: nextStartIndex,
+              endIndex: nextEndIndex,
             };
         }
     } else {
@@ -1237,6 +1258,7 @@ export const TubEditor: React.FC = () => {
                 onClick={() => void handleAction('delete')}
                 disabled={isProcessing || !hasValidRange}
                 className="h-full text-xs"
+                title="删除选中范围 (Del / Backspace)"
               >
                 {isProcessing && processingMode === 'delete' ? 'Deleting...' : 'Delete'}
               </Button>
@@ -1246,6 +1268,7 @@ export const TubEditor: React.FC = () => {
                 onClick={() => void handleAction('restore')}
                 disabled={isProcessing || !hasValidRange}
                 className="h-full text-xs"
+                title="恢复选中范围 (\\)"
               >
                 {isProcessing && processingMode === 'restore' ? 'Restoring...' : 'Restore'}
               </Button>

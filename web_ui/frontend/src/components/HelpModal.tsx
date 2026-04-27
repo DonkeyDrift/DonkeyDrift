@@ -79,14 +79,6 @@ export const HelpModal: React.FC = () => {
                     </div>
                   </li>
                   <li className="flex items-center justify-between">
-                    <span>快进 / 快退 10 帧</span>
-                    <div className="flex gap-1">
-                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">Shift</kbd>
-                      <span>+</span>
-                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">← / →</kbd>
-                    </div>
-                  </li>
-                  <li className="flex items-center justify-between">
                     <span>跳转至首帧 / 尾帧</span>
                     <div className="flex gap-1">
                       <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">Home</kbd>
@@ -109,9 +101,8 @@ export const HelpModal: React.FC = () => {
                   <li className="flex items-center justify-between">
                     <span>扩大 / 缩小选区</span>
                     <div className="flex gap-1">
-                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">Shift</kbd>
-                      <span>+</span>
-                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">← / →</kbd>
+                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">[</kbd>
+                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">]</kbd>
                     </div>
                   </li>
                   <li className="flex items-center justify-between">
@@ -129,6 +120,17 @@ export const HelpModal: React.FC = () => {
                   <li className="flex items-center justify-between">
                     <span>放大图表</span>
                     <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">=</kbd>
+                  </li>
+                  <li className="flex items-center justify-between">
+                    <span>删除选中范围</span>
+                    <div className="flex gap-1">
+                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">Del</kbd>
+                      <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">Backspace</kbd>
+                    </div>
+                  </li>
+                  <li className="flex items-center justify-between">
+                    <span>恢复选中范围</span>
+                    <kbd className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-300">\</kbd>
                   </li>
                   <li className="flex items-center justify-between">
                     <span>撤销选区修改</span>
