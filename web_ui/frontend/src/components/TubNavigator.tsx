@@ -44,7 +44,7 @@ const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, 
           Timeline
           {isDragging && <span className="text-cyan-400 text-xs">(Dragging...)</span>}
         </label>
-        <span className="text-xs text-white bg-black/70 px-2 py-1 rounded">Index {recordIndex} / {totalRecords - 1}</span>
+        <span className="text-xs text-white bg-black/70 px-2 py-1 rounded">Index {recordIndex} / {totalRecords}</span>
       </div>
       <input 
         type="range" 
@@ -70,6 +70,7 @@ export const TubNavigator: React.FC = () => {
     currentIndex, 
     setCurrentIndex, 
     totalRecords, 
+    tubTotalRecords,
     config, 
     isDragging, 
     setIsDragging,
@@ -534,7 +535,7 @@ export const TubNavigator: React.FC = () => {
               onMouseDown={handleSliderMouseDown}
               onMouseUp={handleSliderMouseUp}
               recordIndex={localIndex}
-              totalRecords={totalRecords}
+              totalRecords={tubTotalRecords}
             />
 
             <div className="grid grid-cols-4 gap-2">

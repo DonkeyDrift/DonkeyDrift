@@ -14,6 +14,7 @@ interface AppState {
   originalRecords: TubRecord[];
   records: TubRecord[];
   totalRecords: number;
+  tubTotalRecords: number;
   currentIndex: number;
   fields: string[];
   isLoading: boolean;
@@ -53,6 +54,7 @@ export const useStore = create<AppState>()(
       originalRecords: [],
       records: [],
       totalRecords: 0,
+      tubTotalRecords: 0,
       currentIndex: 0,
       fields: [],
       isLoading: false,
@@ -72,6 +74,7 @@ export const useStore = create<AppState>()(
           records,
           originalRecords: records,
           totalRecords: records.length,
+          tubTotalRecords: records.length,
           fields,
           currentIndex: records.length > 0 ? 0 : 0, // Keep at 0 but ensure UI update
           error: null,

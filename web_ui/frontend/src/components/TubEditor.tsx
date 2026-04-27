@@ -1187,17 +1187,6 @@ export const TubEditor: React.FC = () => {
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => void handleUndoLastAction()}
-                disabled={isProcessing || actionHistory.length === 0}
-                className="h-full px-2"
-                aria-label="撤销最近一次删除或恢复，最多 10 步，快捷键 Ctrl+Z"
-                title={`撤销最近一次删除或恢复 (Ctrl+Z，最多 ${MAX_UNDO_HISTORY} 步)`}
-              >
-                <Undo2 className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
                 onClick={() => void handleAction('restore')}
                 disabled={isProcessing || !hasValidRange}
                 className="h-full text-xs"
@@ -1209,6 +1198,17 @@ export const TubEditor: React.FC = () => {
                   {actionError}
                 </span>
               )}
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void handleUndoLastAction()}
+                disabled={isProcessing || actionHistory.length === 0}
+                className="ml-auto h-full px-2"
+                aria-label="撤销最近一次删除或恢复，最多 10 步，快捷键 Ctrl+Z"
+                title={`撤销最近一次删除或恢复 (Ctrl+Z，最多 ${MAX_UNDO_HISTORY} 步)`}
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
             </div>
           </div>
           <div className="order-first flex min-h-[30px] items-center justify-start gap-2">
