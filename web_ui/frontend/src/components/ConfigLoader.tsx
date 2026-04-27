@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig } from '../services/api';
-import { FolderCog } from 'lucide-react';
+import { loadConfig, selectDirectory, loadTub } from '../services/api';
+import { FolderCog, FolderOpen } from 'lucide-react';
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (error && typeof error === 'object' && 'response' in error) {
@@ -17,26 +17,63 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export const ConfigLoader: React.FC = () => {
-  const { configPath, setConfig, setError, setLoading, config } = useStore();
+  const { configPath, setConfig, setError, setLoading, config, setTub } = useStore();
   const [path, setPath] = useState(configPath);
+
+  const autoLoadTub = async (carPath: string) => {
+    try {
+      // Normalize path and append /data
+      const tubPath = carPath.endsWith('/') || carPath.endsWith('\\') 
+        ? `${carPath}data` 
+        : `${carPath}/data`;
+      
+      const data = await loadTub(tubPath);
+      setTub(data.path, data.records || [], data.fields || []);
+    } catch (err: unknown) {
+      console.warn('Auto-loading tub from ./data failed, user might need to select manually.');
+    }
+  };
 
   const handleLoad = useCallback(async () => {
     setLoading(true);
     try {
+      // First open directory picker
+      const selectData = await selectDirectory();
+      
+      if (selectData.path) {
+        setPath(selectData.path);
+        // Then load config from selected path
+        const data = await loadConfig(selectData.path);
+        setConfig(data.config, selectData.path);
+        
+        // Auto load tub from ./data
+        await autoLoadTub(selectData.path);
+      }
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to select or load config'));
+    } finally {
+      setLoading(false);
+    }
+  }, [setConfig, setError, setLoading, setTub]);
+
+  const handleManualLoad = async () => {
+    setLoading(true);
+    try {
       const data = await loadConfig(path);
       setConfig(data.config, path);
+      await autoLoadTub(path);
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Failed to load config'));
     } finally {
       setLoading(false);
     }
-  }, [path, setConfig, setError, setLoading]);
+  };
 
   useEffect(() => {
-    if (!config) {
-      handleLoad();
+    if (!config && configPath) {
+      handleManualLoad();
     }
-  }, [config, handleLoad]);
+  }, [config, configPath]);
 
   return (
     <Card>
@@ -45,21 +82,26 @@ export const ConfigLoader: React.FC = () => {
           <FolderCog className="w-5 h-5" />
           Config Loader
         </CardTitle>
-        <p className="text-sm text-zinc-400">Load config from car directory, typically ~/mycar</p>
+        <p className="text-sm text-zinc-400">Select car directory, typically ~/mycar</p>
       </CardHeader>
       <CardContent>
-        <div className="flex gap-4 items-end">
-          <div className="flex-1 space-y-2">
-            <Input
-              aria-label="Config path input field"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="Config path, e.g. /home/dkc/projects/mycar"
-            />
+        <div className="flex flex-col gap-3">
+          <Input
+            placeholder="Config path, e.g. /home/dkc/projects/mycar"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            aria-label="Config path input field"
+          />
+          <div className="flex justify-end">
+            <Button 
+              onClick={handleLoad}
+              className="w-[30%] min-w-[100px]"
+              aria-label="Load configuration"
+            >
+              <FolderOpen className="w-4 h-4" />
+              Load
+            </Button>
           </div>
-          <Button aria-label="Load configuration" onClick={handleLoad}>
-            Load
-          </Button>
         </div>
         {config && (
           <p className="mt-3 text-xs text-emerald-400">

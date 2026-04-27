@@ -14,6 +14,11 @@ export const loadConfig = async (path: string) => {
   return response.data;
 };
 
+export const selectDirectory = async () => {
+  const response = await api.get('/config/select_directory');
+  return response.data;
+};
+
 export const loadTub = async (path: string) => {
   const response = await api.post('/tub/load', { path });
   return response.data;

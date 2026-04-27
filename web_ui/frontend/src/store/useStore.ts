@@ -18,6 +18,7 @@ interface AppState {
   isLoading: boolean;
   isDragging: boolean;
   error: string | null;
+  isSidePanelOpen: boolean;
   selectionStartIndex: number | null;
   selectionEndIndex: number | null;
   selectionHistory: { startIndex: number; endIndex: number }[];
@@ -31,6 +32,7 @@ interface AppState {
   setIsDragging: (isDragging: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setSidePanelOpen: (isOpen: boolean) => void;
   setSelectionRange: (startIndex: number, endIndex: number) => void;
   clearSelectionRange: () => void;
   undoSelectionRange: () => void;
@@ -53,13 +55,14 @@ export const useStore = create<AppState>((set) => ({
   isLoading: false,
   isDragging: false,
   error: null,
+  isSidePanelOpen: true, // Default open for first time use
   selectionStartIndex: null,
   selectionEndIndex: null,
   selectionHistory: [],
   selectionHistoryIndex: -1,
   onSelectionChange: undefined,
 
-  setConfig: (config, path) => set({ config, configPath: path }),
+  setConfig: (config, path) => set({ config, configPath: path, error: null, isSidePanelOpen: false }),
   setTub: (path, records, fields) =>
     set({
       tubPath: path,
@@ -68,6 +71,8 @@ export const useStore = create<AppState>((set) => ({
       totalRecords: records.length,
       fields,
       currentIndex: 0,
+      error: null,
+      isSidePanelOpen: false,
     }),
   setRecords: (records) => set({ records, totalRecords: records.length }),
   setAllRecords: (records) =>
@@ -87,7 +92,11 @@ export const useStore = create<AppState>((set) => ({
     })),
   setIsDragging: (isDragging) => set({ isDragging }),
   setLoading: (loading) => set({ isLoading: loading }),
-  setError: (error) => set({ error }),
+  setError: (error) => {
+    const shouldOpenPanel = error && (error.includes('not found') || error.includes('Failed'));
+    set({ error, isSidePanelOpen: !!shouldOpenPanel });
+  },
+  setSidePanelOpen: (isOpen) => set({ isSidePanelOpen: isOpen }),
   setSelectionRange: (startIndex, endIndex) =>
     set((state) => {
       const clampedStart = Math.max(0, Math.min(startIndex, state.totalRecords));

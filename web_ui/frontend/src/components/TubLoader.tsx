@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadTub } from '../services/api';
-import { Database } from 'lucide-react';
+import { loadTub, selectDirectory } from '../services/api';
+import { Database, FolderOpen } from 'lucide-react';
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (error && typeof error === 'object' && 'response' in error) {
@@ -23,10 +23,17 @@ export const TubLoader: React.FC = () => {
   const handleLoad = async () => {
     setLoading(true);
     try {
-      const data = await loadTub(path);
-      setTub(data.path, data.records || [], data.fields || []);
+      // First open directory picker
+      const selectData = await selectDirectory();
+      
+      if (selectData.path) {
+        setPath(selectData.path);
+        // Then load tub from selected path
+        const data = await loadTub(selectData.path);
+        setTub(data.path, data.records || [], data.fields || []);
+      }
     } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to load tub'));
+      setError(getErrorMessage(err, 'Failed to select or load tub'));
     } finally {
       setLoading(false);
     }
@@ -39,21 +46,27 @@ export const TubLoader: React.FC = () => {
           <Database className="w-5 h-5" />
           Tub Loader
         </CardTitle>
-        <p className="text-sm text-zinc-400">Load tub from within the car directory, typically ./data</p>
+        <p className="text-sm text-zinc-400">Select tub directory, typically ./data</p>
       </CardHeader>
       <CardContent>
-        <div className="flex gap-4 items-end">
-          <div className="flex-1 space-y-2">
-            <Input
-              aria-label="Tub path input field"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="Tub path, e.g. /home/dkc/projects/mycar/data"
-            />
+        <div className="flex flex-col gap-3">
+          <Input
+            placeholder="Tub path, e.g. /home/dkc/projects/mycar/data"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            aria-label="Tub path input field"
+          />
+          <div className="flex justify-end">
+            <Button 
+              onClick={handleLoad}
+              disabled={!config}
+              className="w-[30%] min-w-[100px]"
+              aria-label="Load tub"
+            >
+              <FolderOpen className="w-4 h-4" />
+              Load
+            </Button>
           </div>
-          <Button aria-label="Load tub" onClick={handleLoad} disabled={!config}>
-            Load tub
-          </Button>
         </div>
         {!config && (
           <p className="text-xs text-yellow-500 mt-2">

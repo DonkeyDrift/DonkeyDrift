@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { Layout } from './components/Layout';
-import { ConfigLoader } from './components/ConfigLoader';
-import { TubLoader } from './components/TubLoader';
+import { SidePanel } from './components/SidePanel';
 import { TubNavigator } from './components/TubNavigator';
 import { TubChart } from './components/TubChart';
 import { DataCleaner } from './components/DataCleaner';
@@ -45,6 +44,7 @@ function App() {
 
   return (
     <ErrorBoundary>
+      <SidePanel />
       <Layout>
         {error && (
           <div className="bg-red-900/50 border border-red-800 text-red-200 px-4 py-3 rounded-md mb-4">
@@ -60,11 +60,6 @@ function App() {
             </div>
           </div>
         )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ConfigLoader />
-          <TubLoader />
-        </div>
 
         <div className="space-y-6">
           <TubNavigator />

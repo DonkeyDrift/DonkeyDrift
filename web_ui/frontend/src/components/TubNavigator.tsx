@@ -309,7 +309,7 @@ export const TubNavigator: React.FC = () => {
             </div>
             
             <Button 
-              className={`w-full flex items-center justify-center gap-2 transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700 text-white' : ''}`}
+              className="w-full"
               variant={isPlaying ? "danger" : "primary"}
               aria-label={isPlaying ? 'Stop playback' : 'Start playback'}
               onClick={() => setIsPlaying(!isPlaying)}
