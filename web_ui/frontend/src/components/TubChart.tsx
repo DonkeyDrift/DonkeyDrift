@@ -29,6 +29,12 @@ ChartJS.register(
 const MIN_ZOOM_PERCENT = 100;
 const MAX_ZOOM_PERCENT = 1000;
 const ZOOM_STEP_PERCENT = 100;
+const MAX_UNDO_HISTORY = 10;
+
+type RecordAction = {
+  mode: 'delete' | 'restore';
+  indexes: number[];
+};
 
 export const TubChart: React.FC = () => {
   const {
@@ -66,7 +72,7 @@ export const TubChart: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMode, setProcessingMode] = useState<'delete' | 'restore' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [lastAction, setLastAction] = useState<{ mode: 'delete' | 'restore'; indexes: number[] } | null>(null);
+  const [actionHistory, setActionHistory] = useState<RecordAction[]>([]);
   const [zoomPercent, setZoomPercent] = useState(MIN_ZOOM_PERCENT);
   const [scrollProgress, setScrollProgress] = useState(0);
   const zoomMultiplier = zoomPercent / MIN_ZOOM_PERCENT;
@@ -125,35 +131,38 @@ export const TubChart: React.FC = () => {
       indexes: number[],
       rememberAction = true
     ) => {
-    if (indexes.length === 0) {
-      setActionError('No records in selected range');
-      return;
-    }
-
-    setIsProcessing(true);
-    setProcessingMode(mode);
-    try {
-      if (mode === 'delete') {
-        await deleteRecords(indexes);
-      } else {
-        await restoreRecords(indexes);
+      if (indexes.length === 0) {
+        setActionError('No records in selected range');
+        return false;
       }
 
-      const data = await getRecords(0, 100000);
-      const nextRecords = data.records || [];
-      setAllRecords(nextRecords);
-      setActionError(null);
-      if (rememberAction) {
-        setLastAction({ mode, indexes: [...indexes] });
-      } else {
-        setLastAction(null);
+      setIsProcessing(true);
+      setProcessingMode(mode);
+      try {
+        if (mode === 'delete') {
+          await deleteRecords(indexes);
+        } else {
+          await restoreRecords(indexes);
+        }
+
+        const data = await getRecords(0, 100000);
+        const nextRecords = data.records || [];
+        setAllRecords(nextRecords);
+        setActionError(null);
+        if (rememberAction) {
+          setActionHistory((prev) => {
+            const nextHistory = [...prev, { mode, indexes: [...indexes] }];
+            return nextHistory.slice(-MAX_UNDO_HISTORY);
+          });
+        }
+        return true;
+      } catch {
+        setActionError(mode === 'delete' ? 'Delete failed' : 'Restore failed');
+        return false;
+      } finally {
+        setIsProcessing(false);
+        setProcessingMode(null);
       }
-    } catch {
-      setActionError(mode === 'delete' ? 'Delete failed' : 'Restore failed');
-    } finally {
-      setIsProcessing(false);
-      setProcessingMode(null);
-    }
     },
     [setAllRecords]
   );
@@ -176,13 +185,17 @@ export const TubChart: React.FC = () => {
   }, [parseRange, runRecordAction, setSelectionRange]);
 
   const handleUndoLastAction = useCallback(async () => {
+    const lastAction = actionHistory[actionHistory.length - 1];
     if (!lastAction) {
       return;
     }
 
     const inverseMode = lastAction.mode === 'delete' ? 'restore' : 'delete';
-    await runRecordAction(inverseMode, lastAction.indexes, false);
-  }, [lastAction, runRecordAction]);
+    const succeeded = await runRecordAction(inverseMode, lastAction.indexes, false);
+    if (succeeded) {
+      setActionHistory((prev) => prev.slice(0, -1));
+    }
+  }, [actionHistory, runRecordAction]);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -406,7 +419,7 @@ export const TubChart: React.FC = () => {
 
       if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        if (!event.shiftKey && lastAction) {
+        if (!event.shiftKey && actionHistory.length > 0) {
           void handleUndoLastAction();
         } else if (event.shiftKey) {
           redoSelectionRange();
@@ -459,8 +472,8 @@ export const TubChart: React.FC = () => {
       records.length,
       setCurrentIndex,
       clearSelectionRange,
+      actionHistory.length,
       handleUndoLastAction,
-      lastAction,
       selectionStartIndex,
       selectionEndIndex,
       setSelectionRange,
@@ -1060,10 +1073,10 @@ export const TubChart: React.FC = () => {
               size="sm"
               variant="secondary"
               onClick={() => void handleUndoLastAction()}
-              disabled={isProcessing || !lastAction}
+              disabled={isProcessing || actionHistory.length === 0}
               className="h-full px-2"
-              aria-label="撤销最近一次删除或恢复，快捷键 Ctrl+Z"
-              title="撤销最近一次删除或恢复 (Ctrl+Z)"
+              aria-label="撤销最近一次删除或恢复，最多 10 步，快捷键 Ctrl+Z"
+              title={`撤销最近一次删除或恢复 (Ctrl+Z，最多 ${MAX_UNDO_HISTORY} 步)`}
             >
               <Undo2 className="h-4 w-4" />
             </Button>
