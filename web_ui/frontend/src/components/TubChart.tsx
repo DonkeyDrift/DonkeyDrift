@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { Button } from './ui/Button';
+import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
+import { deleteRecords, getRecords, restoreRecords } from '../services/api';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -35,6 +38,7 @@ export const TubChart: React.FC = () => {
     clearSelectionRange,
     undoSelectionRange,
     redoSelectionRange,
+    setAllRecords,
   } = useStore();
   const chartRef = useRef<ChartInstance<'line'> | null>(null);
   const [isChartReady, setIsChartReady] = useState(false);
@@ -53,6 +57,102 @@ export const TubChart: React.FC = () => {
   } | null>(null);
   const hydrateSelectionRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+
+  const [startIndex, setStartIndex] = useState('');
+  const [endIndex, setEndIndex] = useState('');
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [actionMode, setActionMode] = useState<'delete' | 'restore'>('delete');
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectionStartIndex != null) {
+      setStartIndex(String(selectionStartIndex));
+    }
+    if (selectionEndIndex != null) {
+      setEndIndex(String(selectionEndIndex - 1));
+    }
+    if (selectionStartIndex == null && selectionEndIndex == null) {
+      setStartIndex('');
+      setEndIndex('');
+    }
+  }, [selectionStartIndex, selectionEndIndex]);
+
+  const parseRange = useCallback(() => {
+    const start = Number(startIndex);
+    const end = Number(endIndex);
+
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) {
+      return null;
+    }
+
+    return { start, end };
+  }, [startIndex, endIndex]);
+
+  const handleOpenConfirm = useCallback(
+    (mode: 'delete' | 'restore') => {
+      const range = parseRange();
+      if (!range) {
+        setActionError('Invalid index range');
+        return;
+      }
+      setActionError(null);
+      setActionMode(mode);
+      setIsConfirmOpen(true);
+    },
+    [parseRange]
+  );
+
+  const handleOpenDeleteConfirm = useCallback(() => {
+    handleOpenConfirm('delete');
+  }, [handleOpenConfirm]);
+
+  const handleOpenRestoreConfirm = useCallback(() => {
+    handleOpenConfirm('restore');
+  }, [handleOpenConfirm]);
+
+  const handleCancelConfirm = useCallback(() => {
+    setIsConfirmOpen(false);
+  }, []);
+
+  const handleConfirmAction = useCallback(async () => {
+    const range = parseRange();
+    if (!range) {
+      setActionError('Invalid index range');
+      return;
+    }
+
+    setSelectionRange(range.start, range.end + 1);
+
+    const indexes: number[] = [];
+    for (let i = range.start; i <= range.end; i += 1) {
+      indexes.push(i);
+    }
+
+    if (indexes.length === 0) {
+      setActionError('No records in selected range');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      if (actionMode === 'delete') {
+        await deleteRecords(indexes);
+      } else {
+        await restoreRecords(indexes);
+      }
+
+      const data = await getRecords(0, 100000);
+      const nextRecords = data.records || [];
+      setAllRecords(nextRecords);
+      setIsConfirmOpen(false);
+      setActionError(null);
+    } catch {
+      setActionError(actionMode === 'delete' ? 'Delete failed' : 'Restore failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [actionMode, parseRange, setAllRecords, setSelectionRange]);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -880,19 +980,47 @@ export const TubChart: React.FC = () => {
    const containerCursorClass = selectionDraft ? 'cursor-ew-resize' : 'cursor-crosshair';
 
   return (
-      <Card>
-        <CardHeader className="relative">
-          <CardTitle className="flex items-center gap-2">
-            <LineChart className="w-5 h-5" />
-            Tub Chart
+    <Card className="h-[400px] flex flex-col relative">
+      <CardHeader className="relative flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="flex items-center gap-2">
+          <LineChart className="w-5 h-5" />
+          Tub Chart
           {isDragging && (
             <span className="ml-2 px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full animate-pulse">
               Live Update
             </span>
           )}
         </CardTitle>
+        <div className="flex gap-2 items-center">
+          <Input
+            aria-label="Start index"
+            placeholder="Start"
+            value={startIndex}
+            onChange={(e) => setStartIndex(e.target.value)}
+            className="w-24"
+          />
+          <span className="text-xs text-zinc-400">to</span>
+          <Input
+            aria-label="End index"
+            placeholder="End"
+            value={endIndex}
+            onChange={(e) => setEndIndex(e.target.value)}
+            className="w-24"
+          />
+          <Button variant="danger" onClick={handleOpenDeleteConfirm}>
+            Delete
+          </Button>
+          <Button variant="secondary" onClick={handleOpenRestoreConfirm}>
+            Restore
+          </Button>
+          {actionError && (
+            <span className="text-xs text-red-400 ml-2">
+              {actionError}
+            </span>
+          )}
+        </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 min-h-0 relative">
         <div 
           ref={containerRef}
           className={`h-[150px] w-full relative ${containerCursorClass} touch-none`}
@@ -939,6 +1067,33 @@ export const TubChart: React.FC = () => {
             </div>
           )}
         </div>
+        {isConfirmOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60">
+            <div className="rounded-lg bg-zinc-900 border border-zinc-700 p-6 w-full max-w-sm space-y-4">
+              <div className="text-sm font-semibold">
+                {actionMode === 'delete' ? 'Confirm deletion' : 'Confirm restore'}
+              </div>
+              <div className="text-xs text-zinc-300">
+                {actionMode === 'delete'
+                  ? 'This will delete records in the selected index range. This action cannot be undone. Continue?'
+                  : 'This will restore records in the selected index range back into the active dataset. Continue?'}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={handleCancelConfirm} disabled={isProcessing}>
+                  Cancel
+                </Button>
+                <Button variant="danger" onClick={handleConfirmAction} disabled={isProcessing}>
+                  {isProcessing ? (actionMode === 'delete' ? 'Deleting...' : 'Restoring...') : 'Confirm'}
+                </Button>
+              </div>
+              <div className="text-[11px] text-emerald-400">
+                {actionMode === 'delete'
+                  ? 'Success: Records in range will be removed from the tub and chart after confirmation.'
+                  : 'Success: Records in range will be restored into the tub and chart after confirmation.'}
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
