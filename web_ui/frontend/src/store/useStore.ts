@@ -73,7 +73,7 @@ export const useStore = create<AppState>()(
           originalRecords: records,
           totalRecords: records.length,
           fields,
-          currentIndex: 0,
+          currentIndex: records.length > 0 ? 0 : 0, // Keep at 0 but ensure UI update
           error: null,
           isSidePanelOpen: false,
         }),
@@ -83,7 +83,7 @@ export const useStore = create<AppState>()(
           records,
           originalRecords: records,
           totalRecords: records.length,
-          currentIndex: 0,
+          currentIndex: records.length > 0 ? 0 : 0, // Reset to first frame
           selectionStartIndex: null,
           selectionEndIndex: null,
           selectionHistory: [],

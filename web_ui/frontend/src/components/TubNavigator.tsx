@@ -134,6 +134,15 @@ export const TubNavigator: React.FC = () => {
     }
   }, [currentIndex, isDragging]);
 
+  // Ensure initial frame is drawn when records are loaded
+  useEffect(() => {
+    if (records.length > 0 && localIndex === 0) {
+      // Force an image update when records first arrive
+      setLocalIndex(-1);
+      setTimeout(() => setLocalIndex(0), 0);
+    }
+  }, [records.length]);
+
   // Removed the throttled setInterval effect as we'll sync directly in the animation loop
   // for better responsiveness and to avoid interval/animation-frame conflicts.
 
@@ -299,6 +308,25 @@ export const TubNavigator: React.FC = () => {
   useEffect(() => {
     if (!imageUrl) {
       setImageError(true);
+      
+      // Attempt to clear canvas when no image
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          // Draw a placeholder or just leave it blank, but ensure we don't hold old data
+          ctx.fillStyle = '#18181b'; // zinc-900 to match background roughly
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw some text to indicate no image
+          ctx.fillStyle = '#52525b'; // zinc-500
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('No Image Available', canvas.width / 2, canvas.height / 2);
+        }
+      }
       return;
     }
 
@@ -319,12 +347,15 @@ export const TubNavigator: React.FC = () => {
         canvas.height = imageToDraw.height;
       }
 
+      // Ensure clear before draw to prevent ghosting
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(imageToDraw, 0, 0);
     };
 
     if (!img) {
       img = new Image();
+      // Removing crossOrigin as it may cause CORS failures on local servers
+      // if the backend doesn't explicitly send Access-Control-Allow-Origin headers.
       img.src = imageUrl;
       imageCacheRef.current.set(imageUrl, img);
     }
@@ -333,10 +364,15 @@ export const TubNavigator: React.FC = () => {
       if (img.naturalWidth === 0) {
         if (isCurrent) handleImageError();
       } else {
-        drawImage(img);
+        // Use requestAnimationFrame to ensure the browser has time to paint
+        requestAnimationFrame(() => drawImage(img as HTMLImageElement));
       }
     } else {
-      const handleLoad = () => drawImage(img!);
+      const handleLoad = () => {
+        if (isCurrent) {
+          requestAnimationFrame(() => drawImage(img as HTMLImageElement));
+        }
+      };
       const handleError = () => {
         if (isCurrent) handleImageError();
       };
@@ -354,8 +390,9 @@ export const TubNavigator: React.FC = () => {
     return () => {
       isCurrent = false;
     };
+    // Removed imagePath from dependencies to avoid redundant triggers, imageUrl is sufficient
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl, imagePath]);
+  }, [imageUrl]);
 
   useEffect(() => {
     if (!records.length) return;
