@@ -226,7 +226,7 @@ export const TubNavigator: React.FC = () => {
             <div className="grid grid-cols-3 gap-4">
                {/* Display key values */}
                <div className="bg-zinc-800 p-3 rounded-md">
-                 <div className="text-xs text-zinc-400 uppercase">Angle</div>
+                 <div className="text-xs text-zinc-400 uppercase">STEERING</div>
                  <div className="text-lg font-mono text-cyan-400">
                    {getRecordValue('user/angle', 'pilot/angle')}
                  </div>

@@ -59,7 +59,7 @@ export const DataCleaner: React.FC = () => {
       setStartIndex(String(selectionStartIndex));
     }
     if (selectionEndIndex != null) {
-      setEndIndex(String(selectionEndIndex));
+      setEndIndex(String(selectionEndIndex - 1));
     }
     if (selectionStartIndex == null && selectionEndIndex == null) {
       setStartIndex('');
@@ -160,10 +160,10 @@ export const DataCleaner: React.FC = () => {
       return;
     }
 
-    setSelectionRange(range.start, range.end);
+    setSelectionRange(range.start, range.end + 1);
 
     const indexes: number[] = [];
-    for (let i = range.start; i < range.end; i += 1) {
+    for (let i = range.start; i <= range.end; i += 1) {
       indexes.push(i);
     }
 

@@ -201,8 +201,16 @@ export const TubChart: React.FC = () => {
         if (pixelDelta < 3) {
            // Snap to grid if it's a click
            const startIndex = Math.min(selectionDraft.startIndex, selectionDraft.currentIndex);
-           const pStart = startIndex / (records.length - 1);
-           const pEnd = (startIndex + 1) / (records.length - 1);
+           const total = records.length;
+           let pStart = startIndex / (total - 1);
+           let pEnd = (startIndex + 1) / (total - 1);
+           
+           // If last frame, show the segment before it to make it visible
+           if (startIndex === total - 1 && total > 1) {
+              pStart = (total - 2) / (total - 1);
+              pEnd = 1.0;
+           }
+           
            visualSelectionRef.current = { startProgress: pStart, endProgress: pEnd };
         } else {
            // Use exact drag position
@@ -515,8 +523,17 @@ export const TubChart: React.FC = () => {
             drawSelectionBox(visualSelectionRef.current.startProgress, visualSelectionRef.current.endProgress, false);
         } else if (selectionStartIndex != null && selectionEndIndex != null && totalRecords > 1) {
              // Fallback
-             const startP = Math.max(0, Math.min(selectionStartIndex, totalRecords - 1)) / (totalRecords - 1);
-             const endP = Math.max(0, Math.min(selectionEndIndex, totalRecords)) / (totalRecords - 1); // Allow > 1 for last segment
+             let startP = Math.max(0, Math.min(selectionStartIndex, totalRecords - 1)) / (totalRecords - 1);
+             let endP = Math.max(0, Math.min(selectionEndIndex, totalRecords)) / (totalRecords - 1);
+             
+             // Ensure the last frame selection is visible
+             if (selectionEndIndex === totalRecords) {
+                 endP = 1.0;
+                 if (selectionStartIndex === totalRecords - 1) {
+                     startP = (totalRecords - 2) / (totalRecords - 1);
+                 }
+             }
+             
              drawSelectionBox(startP, endP, false);
         }
 
@@ -568,8 +585,17 @@ export const TubChart: React.FC = () => {
         }
         
         if (shouldUpdate) {
-            const startP = Math.max(0, Math.min(selectionStartIndex, total - 1)) / (total - 1);
-            const endP = Math.max(0, Math.min(selectionEndIndex, total)) / (total - 1);
+            let startP = Math.max(0, Math.min(selectionStartIndex, total - 1)) / (total - 1);
+            let endP = Math.max(0, Math.min(selectionEndIndex, total)) / (total - 1);
+            
+            // Ensure the last frame selection is visible
+            if (selectionEndIndex === total) {
+                endP = 1.0;
+                if (selectionStartIndex === total - 1 && total > 1) {
+                    startP = (total - 2) / (total - 1);
+                }
+            }
+            
             visualSelectionRef.current = { startProgress: startP, endProgress: endP };
         }
     } else {
@@ -603,6 +629,9 @@ export const TubChart: React.FC = () => {
       return null;
     }
 
+    const baseTimestamp =
+      records[0] && typeof records[0]._timestamp_ms === 'number' ? records[0]._timestamp_ms : 0;
+
     if (selectionDraft) {
       const start = Math.min(selectionDraft.startIndex, selectionDraft.currentIndex);
       const endInclusive = Math.max(selectionDraft.startIndex, selectionDraft.currentIndex);
@@ -610,11 +639,11 @@ export const TubChart: React.FC = () => {
       const endRecord = records[endInclusive];
       const startTimeMs =
         startRecord && typeof startRecord._timestamp_ms === 'number'
-          ? startRecord._timestamp_ms
+          ? startRecord._timestamp_ms - baseTimestamp
           : null;
       const endTimeMs =
         endRecord && typeof endRecord._timestamp_ms === 'number'
-          ? endRecord._timestamp_ms
+          ? endRecord._timestamp_ms - baseTimestamp
           : null;
       const durationMs =
         startTimeMs != null && endTimeMs != null ? Math.max(0, endTimeMs - startTimeMs) : null;
@@ -639,11 +668,11 @@ export const TubChart: React.FC = () => {
       const endRecord = records[endInclusive];
       const startTimeMs =
         startRecord && typeof startRecord._timestamp_ms === 'number'
-          ? startRecord._timestamp_ms
+          ? startRecord._timestamp_ms - baseTimestamp
           : null;
       const endTimeMs =
         endRecord && typeof endRecord._timestamp_ms === 'number'
-          ? endRecord._timestamp_ms
+          ? endRecord._timestamp_ms - baseTimestamp
           : null;
       const durationMs =
         startTimeMs != null && endTimeMs != null ? Math.max(0, endTimeMs - startTimeMs) : null;
@@ -771,8 +800,16 @@ export const TubChart: React.FC = () => {
         
         if (pixelDelta < 3) {
            const startIndex = Math.min(selectionDraft.startIndex, selectionDraft.currentIndex);
-           const pStart = startIndex / (records.length - 1);
-           const pEnd = (startIndex + 1) / (records.length - 1);
+           const total = records.length;
+           let pStart = startIndex / (total - 1);
+           let pEnd = (startIndex + 1) / (total - 1);
+           
+           // If last frame, show the segment before it to make it visible
+           if (startIndex === total - 1 && total > 1) {
+              pStart = (total - 2) / (total - 1);
+              pEnd = 1.0;
+           }
+           
            visualSelectionRef.current = { startProgress: pStart, endProgress: pEnd };
         } else {
            const pStart = Math.max(0, (sX - chartArea.left) / chartWidth);
