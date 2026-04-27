@@ -28,7 +28,7 @@ ChartJS.register(
 
 const MIN_ZOOM_PERCENT = 100;
 const MAX_ZOOM_PERCENT = 1000;
-const ZOOM_STEP_PERCENT = 50;
+const ZOOM_STEP_PERCENT = 100;
 
 export const TubChart: React.FC = () => {
   const {
@@ -70,6 +70,7 @@ export const TubChart: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [zoomPercent, setZoomPercent] = useState(MIN_ZOOM_PERCENT);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const zoomMultiplier = zoomPercent / MIN_ZOOM_PERCENT;
 
   const clampZoomPercent = useCallback((value: number) => {
     return Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, value));
@@ -1038,9 +1039,10 @@ export const TubChart: React.FC = () => {
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
-            <span className="inline-flex h-[30px] items-center rounded-md border border-zinc-700 bg-zinc-800 px-3 text-xs text-zinc-200">
-              Zoom {zoomPercent}%
-            </span>
+            <div className="flex h-[18px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0">
+              <div className="h-4 box-content text-xs text-zinc-400 uppercase">ZOOM</div>
+              <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
+            </div>
           </div>
         </div>
       </CardHeader>
