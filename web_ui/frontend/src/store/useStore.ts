@@ -22,6 +22,7 @@ interface AppState {
   isLoading: boolean;
   isDragging: boolean;
   isPlaying: boolean;
+  isLooping: boolean;
   error: string | null;
   isSidePanelOpen: boolean;
   selectionStartIndex: number | null;
@@ -36,6 +37,7 @@ interface AppState {
   setCurrentIndex: (index: number | ((prev: number) => number)) => void;
   setIsDragging: (isDragging: boolean) => void;
   setIsPlaying: (isPlaying: boolean) => void;
+  setIsLooping: (isLooping: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSidePanelOpen: (isOpen: boolean) => void;
@@ -64,6 +66,7 @@ export const useStore = create<AppState>()(
       isLoading: false,
       isDragging: false,
       isPlaying: false,
+      isLooping: false,
       error: null,
       isSidePanelOpen: true, // Default open for first time use
       selectionStartIndex: null,
@@ -105,6 +108,7 @@ export const useStore = create<AppState>()(
         })),
       setIsDragging: (isDragging) => set({ isDragging }),
       setIsPlaying: (isPlaying) => set({ isPlaying }),
+      setIsLooping: (isLooping) => set({ isLooping }),
       setLoading: (loading) => set({ isLoading: loading }),
       setError: (error) => {
         const shouldOpenPanel = error && (error.includes('not found') || error.includes('Failed'));
@@ -189,6 +193,7 @@ export const useStore = create<AppState>()(
       partialize: (state) => ({
         configPath: state.configPath,
         tubPath: state.tubPath,
+        isLooping: state.isLooping,
       }),
     }
   )

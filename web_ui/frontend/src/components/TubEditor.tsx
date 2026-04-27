@@ -73,7 +73,6 @@ export const TubEditor: React.FC = () => {
     currentIndex: number;
   } | null>(null);
   const selectionDraftRef = useRef(selectionDraft);
-  const hydrateSelectionRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const hoverPositionRef = useRef<{ x: number; y: number; dataIndex: number } | null>(null);
   const tooltipDataRef = useRef(tooltipData);
@@ -877,32 +876,6 @@ export const TubEditor: React.FC = () => {
   }, [handleKeyDown]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!records.length) return;
-
-    const timeoutId = window.setTimeout(() => {
-      if (selectionStartIndex != null && selectionEndIndex != null) {
-        try {
-          window.localStorage.setItem(
-            'tubSelectionRange',
-            JSON.stringify({ start: selectionStartIndex, end: selectionEndIndex })
-          );
-        } catch {
-          // ignore
-        }
-      } else {
-        try {
-          window.localStorage.removeItem('tubSelectionRange');
-        } catch {
-          // ignore
-        }
-      }
-    }, 120);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [selectionStartIndex, selectionEndIndex, records.length]);
-
-  useEffect(() => {
     return () => {
       if (selectionRangeFrameRef.current != null) {
         window.cancelAnimationFrame(selectionRangeFrameRef.current);
@@ -912,35 +885,6 @@ export const TubEditor: React.FC = () => {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (hydrateSelectionRef.current) return;
-    if (!records.length) return;
-
-    try {
-      const raw = window.localStorage.getItem('tubSelectionRange');
-      if (!raw) {
-        hydrateSelectionRef.current = true;
-        return;
-      }
-      const parsed = JSON.parse(raw) as { start: number; end: number };
-      if (
-        typeof parsed.start === 'number' &&
-        typeof parsed.end === 'number' &&
-        parsed.start >= 0 &&
-        parsed.end > parsed.start
-      ) {
-        const clampedStart = Math.max(0, Math.min(parsed.start, records.length - 1));
-        const clampedEnd = Math.max(clampedStart + 1, Math.min(parsed.end, records.length));
-        setSelectionRange(clampedStart, clampedEnd);
-      }
-    } catch {
-      // ignore
-    } finally {
-      hydrateSelectionRef.current = true;
-    }
-  }, [records.length, setSelectionRange]);
 
   const { data, sampledIndices } = useMemo(() => {
     if (!records.length) return { data: { datasets: [] }, sampledIndices: [] as number[] };
