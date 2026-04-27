@@ -151,15 +151,6 @@ export const TubNavigator: React.FC = () => {
   // Use a local state for the index to avoid triggering global store re-renders 60 times/sec
   const [localIndex, setLocalIndex] = useState(currentIndexRef.current);
 
-  // Ensure initial frame is drawn when records are loaded
-  useEffect(() => {
-    if (records.length > 0 && localIndex === 0) {
-      // Force an image update when records first arrive
-      setLocalIndex(-1);
-      setTimeout(() => setLocalIndex(0), 0);
-    }
-  }, [records.length]);
-
   // Removed the throttled setInterval effect as we'll sync directly in the animation loop
   // for better responsiveness and to avoid interval/animation-frame conflicts.
 
@@ -328,7 +319,7 @@ export const TubNavigator: React.FC = () => {
 
   useEffect(() => {
     if (!imageUrl) {
-      setImageError(true);
+      setImageError(false);
       
       // Attempt to clear canvas when no image
       const canvas = canvasRef.current;
