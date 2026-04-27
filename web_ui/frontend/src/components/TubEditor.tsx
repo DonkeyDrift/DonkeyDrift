@@ -1081,9 +1081,14 @@ export const TubEditor: React.FC = () => {
     return (
       <Card className={chartCardClassName}>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LineChart className="w-5 h-5" />
-            Tub Editor
+          <CardTitle className="group flex w-fit items-center cursor-default">
+            <div className="flex items-center gap-2">
+              <LineChart className="w-5 h-5" />
+              <span>Tub Editor</span>
+            </div>
+            <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-normal text-zinc-400 opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[320px] group-hover:opacity-100">
+              Edit Tub with functions
+            </span>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -1104,14 +1109,19 @@ export const TubEditor: React.FC = () => {
   return (
     <Card className={chartCardClassName}>
       <CardHeader className="relative flex flex-col items-start justify-between gap-4 space-y-0">
-        <CardTitle className="flex items-center gap-2">
-          <LineChart className="w-5 h-5" />
-          Tub Editor
-          {isDragging && (
-            <span className="ml-2 px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full animate-pulse">
-              Live Update
-            </span>
-          )}
+        <CardTitle className="group flex w-fit items-center cursor-default">
+          <div className="flex items-center gap-2">
+            <LineChart className="w-5 h-5" />
+            <span>Tub Editor</span>
+            {isDragging && (
+              <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-400 animate-pulse">
+                Live Update
+              </span>
+            )}
+          </div>
+          <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-normal text-zinc-400 opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[320px] group-hover:opacity-100">
+            Edit Tub with functions
+          </span>
         </CardTitle>
         <div className="flex w-full max-w-full items-start justify-between gap-2">
           <div className="ml-auto flex flex-col items-end gap-1">
