@@ -494,7 +494,7 @@ export const TubNavigator: React.FC = () => {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="aspect-[4/3] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
+          <div className="w-full md:max-w-[40vw] aspect-[4/3] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
             {imagePath && !imageError ? (
               <canvas
                 ref={canvasRef}
