@@ -8,11 +8,10 @@ import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, Chevr
 interface RecordStatsProps {
   steering: string;
   throttle: string;
-  targetFps: number;
   actualFps: number;
 }
 
-const RecordStats = React.memo(({ steering, throttle, targetFps, actualFps }: RecordStatsProps) => (
+const RecordStats = React.memo(({ steering, throttle, actualFps }: RecordStatsProps) => (
   <div className="grid grid-cols-3 gap-4">
     <div className="bg-zinc-800 p-3 rounded-md">
       <div className="text-xs text-zinc-400 uppercase">STEERING</div>
@@ -25,7 +24,7 @@ const RecordStats = React.memo(({ steering, throttle, targetFps, actualFps }: Re
     <div className="bg-zinc-800 p-3 rounded-md">
       <div className="text-xs text-zinc-400 uppercase">FPS</div>
       <div className="text-lg font-mono text-cyan-400">
-        {targetFps} / {actualFps}
+        {actualFps}
       </div>
     </div>
   </div>
@@ -68,7 +67,6 @@ export const TubNavigator: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
   const playbackSpeed = 1000 / Math.max(1, Number(config?.DRIVE_LOOP_HZ) || 60);
-  const playbackFps = Math.round(1000 / playbackSpeed);
   const [actualFps, setActualFps] = useState(0);
   const [imageError, setImageError] = useState(false);
 
@@ -415,7 +413,6 @@ export const TubNavigator: React.FC = () => {
             <RecordStats 
               steering={getRecordValue('user/angle', 'pilot/angle')}
               throttle={getRecordValue('user/throttle', 'pilot/throttle')}
-              targetFps={playbackFps}
               actualFps={actualFps}
             />
 
