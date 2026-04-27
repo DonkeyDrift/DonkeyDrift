@@ -955,9 +955,11 @@ export const TubChart: React.FC = () => {
     [selectionDraft, setSelectionRange, records.length]
   );
 
+  const chartCardClassName = 'relative flex flex-col h-[clamp(12rem,30vh,22rem)]';
+
   if (!records.length) {
     return (
-      <Card>
+      <Card className={chartCardClassName}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <LineChart className="w-5 h-5" />
@@ -980,7 +982,7 @@ export const TubChart: React.FC = () => {
    const containerCursorClass = selectionDraft ? 'cursor-ew-resize' : 'cursor-crosshair';
 
   return (
-    <Card className="h-[400px] flex flex-col relative">
+    <Card className={chartCardClassName}>
       <CardHeader className="relative flex flex-row items-center justify-between space-y-0">
         <CardTitle className="flex items-center gap-2">
           <LineChart className="w-5 h-5" />
@@ -1020,10 +1022,10 @@ export const TubChart: React.FC = () => {
           )}
         </div>
       </CardHeader>
-      <CardContent className="flex-1 min-h-0 relative">
+      <CardContent className="flex-1 min-h-0 relative overflow-hidden">
         <div 
           ref={containerRef}
-          className={`h-[150px] w-full relative ${containerCursorClass} touch-none`}
+          className={`relative h-full min-h-0 w-full ${containerCursorClass} touch-none`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           onMouseDown={handleMouseDown}
