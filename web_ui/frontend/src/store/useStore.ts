@@ -91,17 +91,16 @@ export const useStore = create<AppState>()(
         }),
       setRecords: (records) => set({ records, totalRecords: records.length }),
       setAllRecords: (records) =>
-        set({
+        set((state) => ({
           records,
           originalRecords: records,
           totalRecords: records.length,
-          currentIndex: records.length > 0 ? 0 : 0, // Reset to first frame
-          selectionStartIndex: null,
-          selectionEndIndex: null,
-          selectionHistory: [],
-          selectionHistoryIndex: -1,
+          currentIndex:
+            records.length > 0
+              ? Math.max(0, Math.min(state.currentIndex, records.length - 1))
+              : 0,
           isPlaying: false,
-        }),
+        })),
       setCurrentIndex: (index) =>
         set((state) => ({
           currentIndex: typeof index === 'function' ? index(state.currentIndex) : index,

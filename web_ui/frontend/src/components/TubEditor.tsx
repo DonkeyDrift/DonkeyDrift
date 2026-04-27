@@ -64,6 +64,7 @@ export const TubEditor: React.FC = () => {
   const chartNeedsRenderRef = useRef(false);
   const selectionAnimationUntilRef = useRef(0);
   const playbackActivityUntilRef = useRef(0);
+  const preserveViewportOnRecordsChangeRef = useRef(false);
   const [tooltipData, setTooltipData] = useState<{ x: number; y: number; steering: number; throttle: number; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectionDraft, setSelectionDraft] = useState<{
@@ -344,6 +345,7 @@ export const TubEditor: React.FC = () => {
 
         const data = await getRecords(0, 100000);
         const nextRecords = data.records || [];
+        preserveViewportOnRecordsChangeRef.current = true;
         setAllRecords(nextRecords);
         setActionError(null);
         if (rememberAction) {
@@ -447,7 +449,14 @@ export const TubEditor: React.FC = () => {
     const maxStartIndex = Math.max(0, totalRecords - visibleCount);
 
     if (maxStartIndex <= 0) {
+      preserveViewportOnRecordsChangeRef.current = false;
       setScrollProgress(0);
+      return;
+    }
+
+    if (preserveViewportOnRecordsChangeRef.current) {
+      preserveViewportOnRecordsChangeRef.current = false;
+      setScrollProgress((previousProgress) => Math.max(0, Math.min(1, previousProgress)));
       return;
     }
 
