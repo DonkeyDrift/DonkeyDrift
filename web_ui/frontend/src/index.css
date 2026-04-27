@@ -18,3 +18,73 @@ body,
 #root {
   min-width: 520px;
 }
+
+.tub-chart-scroll-slider {
+  display: block;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.tub-chart-scroll-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  background: transparent;
+}
+
+.tub-chart-scroll-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -4px;
+  border-radius: 9999px;
+  border: 2px solid rgb(8 145 178);
+  background: rgb(34 211 238 / 0.55);
+  box-shadow: 0 0 0 1px rgb(24 24 27 / 0.7);
+  transition: background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.tub-chart-scroll-slider:hover::-webkit-slider-thumb {
+  background: rgb(34 211 238 / 0.8);
+  box-shadow: 0 0 0 1px rgb(24 24 27 / 0.7), 0 0 0 4px rgb(34 211 238 / 0.18), 0 0 12px rgb(34 211 238 / 0.35);
+}
+
+.tub-chart-scroll-slider:active::-webkit-slider-thumb {
+  background: rgb(34 211 238 / 1);
+  transform: scale(1.05);
+  box-shadow: 0 0 0 1px rgb(24 24 27 / 0.7), 0 0 0 5px rgb(34 211 238 / 0.24), 0 0 16px rgb(34 211 238 / 0.45);
+}
+
+.tub-chart-scroll-slider:disabled::-webkit-slider-thumb {
+  background: rgb(34 211 238 / 0.3);
+}
+
+.tub-chart-scroll-slider::-moz-range-track {
+  height: 8px;
+  background: transparent;
+}
+
+.tub-chart-scroll-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid rgb(8 145 178);
+  background: rgb(34 211 238 / 0.55);
+  box-shadow: 0 0 0 1px rgb(24 24 27 / 0.7);
+  transition: background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.tub-chart-scroll-slider:hover::-moz-range-thumb {
+  background: rgb(34 211 238 / 0.8);
+  box-shadow: 0 0 0 1px rgb(24 24 27 / 0.7), 0 0 0 4px rgb(34 211 238 / 0.18), 0 0 12px rgb(34 211 238 / 0.35);
+}
+
+.tub-chart-scroll-slider:active::-moz-range-thumb {
+  background: rgb(34 211 238 / 1);
+  transform: scale(1.05);
+  box-shadow: 0 0 0 1px rgb(24 24 27 / 0.7), 0 0 0 5px rgb(34 211 238 / 0.24), 0 0 16px rgb(34 211 238 / 0.45);
+}
+
+.tub-chart-scroll-slider:disabled::-moz-range-thumb {
+  background: rgb(34 211 238 / 0.3);
+}

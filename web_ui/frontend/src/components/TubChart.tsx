@@ -1132,7 +1132,7 @@ export const TubChart: React.FC = () => {
             </div>
           )}
         </div>
-        <div className="relative mt-3 shrink-0">
+        <div className="relative mt-3 h-4 shrink-0">
           <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-lg bg-zinc-700" />
           {sliderSelectionStyle && (
             <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2">
@@ -1151,7 +1151,7 @@ export const TubChart: React.FC = () => {
             onChange={handleScrollSliderChange}
             disabled={zoomPercent === MIN_ZOOM_PERCENT || records.length <= visibleRange.visibleCount}
             aria-label="图表横向滚动"
-            className="relative z-20 h-2 w-full appearance-none cursor-pointer bg-transparent accent-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+            className="tub-chart-scroll-slider relative z-20 h-4 w-full appearance-none cursor-pointer bg-transparent accent-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
           />
         </div>
         {isConfirmOpen && (
