@@ -76,6 +76,12 @@ export const TubEditor: React.FC = () => {
   const selectionDraftRef = useRef(selectionDraft);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const hoverPositionRef = useRef<{ x: number; y: number; dataIndex: number } | null>(null);
+  const recordsRef = useRef(records);
+  const sampledIndicesRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    recordsRef.current = records;
+  }, [records]);
   const tooltipDataRef = useRef(tooltipData);
 
   const [rangeInputDraft, setRangeInputDraft] = useState<{ start: string; end: string } | null>(null);
@@ -1009,6 +1015,10 @@ export const TubEditor: React.FC = () => {
     };
   }, [records, zoomPercent]);
 
+  useEffect(() => {
+    sampledIndicesRef.current = sampledIndices;
+  }, [sampledIndices]);
+
   const options = {
     responsive: true,
     maintainAspectRatio: false,
@@ -1052,6 +1062,9 @@ export const TubEditor: React.FC = () => {
   const verticalLinePlugin = useMemo<Plugin<'line'>>(() => ({
     id: 'verticalLine',
     afterDraw: (chart: ChartInstance<'line'>) => {
+      const records = recordsRef.current;
+      const sampledIndices = sampledIndicesRef.current;
+      
       if (!sampledIndices.length || !records.length) {
         return;
       }
@@ -1206,7 +1219,7 @@ export const TubEditor: React.FC = () => {
         console.error('Vertical line plugin error:', error);
       }
     }
-  }), [sampledIndices, records]);
+  }), []);
 
   // Sync Visual Selection Ref
   useEffect(() => {
