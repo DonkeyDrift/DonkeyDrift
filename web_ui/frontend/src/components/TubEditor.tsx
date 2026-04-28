@@ -379,10 +379,21 @@ export const TubEditor: React.FC = () => {
     const endIdx = range.end;
 
     // The user input (range.start and range.end) represents the physical _index shown on the chart X-axis.
-    // We must filter records to find all existing _index values within this selected physical range.
-    const indexes = records
-      .filter((record) => record._index >= startIdx && record._index <= endIdx)
-      .map((record) => record._index);
+    let indexes: number[] = [];
+    if (mode === 'delete') {
+      // For delete, we must filter records to find all existing _index values within this selected physical range.
+      indexes = records
+        .filter((record) => record._index >= startIdx && record._index <= endIdx)
+        .map((record) => record._index);
+    } else {
+      // For restore, the deleted records are not in the current array.
+      // We generate all physical indexes in the range to tell the backend to restore them.
+      const maxRestoreCount = 1000000; // Prevent out-of-memory if user inputs a huge range
+      const actualEnd = Math.min(endIdx, startIdx + maxRestoreCount);
+      for (let i = startIdx; i <= actualEnd; i++) {
+        indexes.push(i);
+      }
+    }
 
     if (indexes.length === 0) {
       setActionError('No valid records in selected range');
