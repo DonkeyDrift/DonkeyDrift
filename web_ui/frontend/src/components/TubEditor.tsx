@@ -688,12 +688,17 @@ export const TubEditor: React.FC = () => {
 
     const rect = containerRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
 
     const chart = chartRef.current;
     const chartArea = chart.chartArea;
 
     if (x < chartArea.left || x > chartArea.right) return;
     const clampedIndex = getIndexFromPointerX(x, chart);
+
+    // Update hover position so the red line can follow the mouse exactly
+    hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
+    requestChartRender();
 
     setCurrentIndex(clampedIndex);
 
@@ -706,7 +711,7 @@ export const TubEditor: React.FC = () => {
       selectionDraftRef.current = nextDraft;
       setSelectionDraft(nextDraft);
     }
-  }, [getIndexFromPointerX, records, setCurrentIndex]);
+  }, [getIndexFromPointerX, records, setCurrentIndex, requestChartRender]);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -715,6 +720,7 @@ export const TubEditor: React.FC = () => {
 
       const rect = containerRef.current.getBoundingClientRect();
       const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
 
       const chart = chartRef.current;
       const chartArea = chart.chartArea;
@@ -733,9 +739,13 @@ export const TubEditor: React.FC = () => {
       selectionDraftRef.current = draft;
       setSelectionDraft(draft);
 
+      // Update hover position so the red line can follow the mouse exactly
+      hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
+      requestChartRender();
+
       setCurrentIndex(clampedIndex);
     },
-    [getIndexFromPointerX, records.length, setCurrentIndex]
+    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender]
   );
 
   const handleClick = useCallback(
@@ -1059,8 +1069,24 @@ export const TubEditor: React.FC = () => {
         const totalRecords = records.length;
         const currentRecord = records[latestIndex];
         const currentXValue = currentRecord ? currentRecord._index : latestIndex;
-        const currentX = xAxis.getPixelForValue(currentXValue);
         
+        // When drawing the red line, we should use the actual pixel coordinate
+        // of the current playback position. If dragging the selection, the playback
+        // line should stick to the data point, but let's check if the user is 
+        // interacting and we want it to follow the mouse.
+        // Actually, currentIndex is already set by handleInteraction using getIndexFromPointerX,
+        // which maps the pixel to the nearest index. The issue is that there's a gap in _index,
+        // and the pixel for currentXValue (which is an _index) snaps to the physical index position,
+        // leaving a large gap to the mouse pointer if the mouse is over a deleted area.
+        // To make the red line follow the mouse over empty gaps, we should use the hover position if available.
+        let currentX = xAxis.getPixelForValue(currentXValue);
+        
+        const hoverPos = hoverPositionRef.current;
+        if (hoverPos && hoverPos.x >= chart.chartArea.left && hoverPos.x <= chart.chartArea.right) {
+            // When hovering, make the red line follow the mouse exactly
+            currentX = hoverPos.x;
+        }
+
         if (!isNaN(currentX) && currentX >= chart.chartArea.left && currentX <= chart.chartArea.right) {
           ctx.save();
           ctx.strokeStyle = 'rgb(239, 68, 68)';
@@ -1153,8 +1179,8 @@ export const TubEditor: React.FC = () => {
              drawSelectionBox(selectionRangeRef.current.startIndex, selectionRangeRef.current.endIndex, false);
         }
 
-        const hoverPos = hoverPositionRef.current;
-        if (hoverPos && hoverPos.x >= chartArea.left && hoverPos.x <= chartArea.right) {
+        const hoverPosData = hoverPositionRef.current;
+        if (hoverPosData && hoverPosData.x >= chartArea.left && hoverPosData.x <= chartArea.right) {
           ctx.save();
           ctx.strokeStyle = 'rgb(34, 197, 94)';
           ctx.lineWidth = 2;
@@ -1162,16 +1188,16 @@ export const TubEditor: React.FC = () => {
           ctx.setLineDash([]);
           
           ctx.beginPath();
-          ctx.moveTo(hoverPos.x, yAxis.top);
-          ctx.lineTo(hoverPos.x, yAxis.bottom);
+          ctx.moveTo(hoverPosData.x, yAxis.top);
+          ctx.lineTo(hoverPosData.x, yAxis.bottom);
           ctx.stroke();
           
           ctx.fillStyle = 'rgb(34, 197, 94)';
           ctx.beginPath();
-          ctx.arc(hoverPos.x, yAxis.top, 2, 0, 2 * Math.PI);
+          ctx.arc(hoverPosData.x, yAxis.top, 2, 0, 2 * Math.PI);
           ctx.fill();
           ctx.beginPath();
-          ctx.arc(hoverPos.x, yAxis.bottom, 2, 0, 2 * Math.PI);
+          ctx.arc(hoverPosData.x, yAxis.bottom, 2, 0, 2 * Math.PI);
           ctx.fill();
           
           ctx.restore();
@@ -1329,6 +1355,7 @@ export const TubEditor: React.FC = () => {
       const touch = event.touches[0];
       const rect = containerRef.current.getBoundingClientRect();
       const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
 
       const chart = chartRef.current;
       const chartArea = chart.chartArea;
@@ -1347,11 +1374,15 @@ export const TubEditor: React.FC = () => {
       selectionDraftRef.current = draft;
       setSelectionDraft(draft);
 
+      // Update hover position so the red line can follow the mouse exactly
+      hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
+      requestChartRender();
+
       setCurrentIndex(clampedIndex);
 
       event.preventDefault();
     },
-    [getIndexFromPointerX, records.length, setCurrentIndex]
+    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender]
   );
 
   const handleTouchMove = useCallback(
