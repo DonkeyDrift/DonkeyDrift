@@ -378,14 +378,11 @@ export const TubEditor: React.FC = () => {
     const startIdx = range.start;
     const endIdx = range.end;
 
-    // Convert range input to actual record _index values
-    // records array may be filtered, so we need to map position to actual _index
-    const indexes: number[] = [];
-    for (let i = startIdx; i <= endIdx; i += 1) {
-      if (i >= 0 && i < records.length) {
-        indexes.push(records[i]._index);
-      }
-    }
+    // The user input (range.start and range.end) represents the physical _index shown on the chart X-axis.
+    // We must filter records to find all existing _index values within this selected physical range.
+    const indexes = records
+      .filter((record) => record._index >= startIdx && record._index <= endIdx)
+      .map((record) => record._index);
 
     if (indexes.length === 0) {
       setActionError('No valid records in selected range');
