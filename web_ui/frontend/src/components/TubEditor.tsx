@@ -611,7 +611,7 @@ export const TubEditor: React.FC = () => {
 
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (!chartRef.current || !containerRef.current || !records.length) return;
+      if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
 
       const rect = containerRef.current.getBoundingClientRect();
       const x = event.clientX - rect.left;
@@ -1402,7 +1402,7 @@ export const TubEditor: React.FC = () => {
 
   const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
-      if (!chartRef.current || !containerRef.current || !records.length) return;
+      if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
       if (!selectionDraftRef.current) return;
       if (event.touches.length === 0) return;
 
