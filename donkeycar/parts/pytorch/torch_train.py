@@ -30,10 +30,10 @@ def train(cfg, tub_paths, model_output_path, model_type, checkpoint_path=None):
     model = get_model_by_type(model_type, cfg, checkpoint_path=checkpoint_path)
     if torch.cuda.is_available():
         print('Using CUDA')
-        gpus = -1
+        accelerator = 'gpu'
     else:
         print('Not using CUDA')
-        gpus = 0
+        accelerator = 'cpu'
 
     logger = None
     if cfg.VERBOSE_TRAIN:
@@ -46,7 +46,7 @@ def train(cfg, tub_paths, model_output_path, model_type, checkpoint_path=None):
 
     if cfg.PRINT_MODEL_SUMMARY:
         summarize(model)
-    trainer = pl.Trainer(accelerator='cpu', logger=logger,
+    trainer = pl.Trainer(accelerator=accelerator, logger=logger,
                          max_epochs=cfg.MAX_EPOCHS, default_root_dir=output_dir)
 
     data_module = TorchTubDataModule(cfg, tub_paths)

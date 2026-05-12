@@ -17,6 +17,23 @@ from fastapi import HTTPException
 from web_online_trainer import WebOnlineTrainer
 
 
+# Regex to strip ANSI escape codes (colour, cursor movement, etc.)
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _clean_training_line(raw: str) -> str:
+    """Remove ANSI escape codes and handle \\r carriage returns.
+
+    Keras verbose=1 progress bars emit \\r to overwrite the same line.
+    When captured by readline() the line may contain multiple \\r-separated
+    segments; only the final segment is the visible text.
+    """
+    cleaned = _ANSI_RE.sub('', raw)
+    if '\r' in cleaned:
+        cleaned = cleaned.split('\r')[-1]
+    return cleaned.strip()
+
+
 @dataclass
 class TrainingProgress:
     current_epoch: int = 0
@@ -117,17 +134,20 @@ class TrainingJobManager:
                         break
                     text = line.decode('utf-8', errors='ignore').rstrip()
                     if text:
+                        cleaned = _clean_training_line(text)
+                        if not cleaned:
+                            continue
                         payload = {
                             "type": "log",
-                            "line": text,
+                            "line": cleaned,
                             "is_stderr": is_stderr,
                             "timestamp": datetime.now().isoformat()
                         }
                         await job.log_queue.put(payload)
-                        job.logs.append(text)
+                        job.logs.append(cleaned)
                         # Try to parse progress from stdout
                         if not is_stderr:
-                            self._parse_line(job, text)
+                            self._parse_line(job, cleaned)
 
             await asyncio.gather(
                 read_stream(job.process.stdout),
@@ -221,6 +241,10 @@ class TrainingJobManager:
     def _parse_line(self, job: TrainingJob, line: str):
         """Parse Keras-style training output for local jobs."""
         try:
+            line = _clean_training_line(line)
+            if not line:
+                return
+
             epoch_match = re.search(r"Epoch (\d+)/(\d+)", line)
             if epoch_match:
                 job.progress.current_epoch = int(epoch_match.group(1))
@@ -232,7 +256,11 @@ class TrainingJobManager:
                 job.progress.current_step = int(step_match.group(1))
                 job.progress.total_steps = int(step_match.group(2))
 
-            loss_match = re.search(r"loss: (\d+\.\d+)", line)
+            # Progress bars may contain multiple "loss:" keys;
+            # the last one is the current value.
+            loss_match = None
+            for m in re.finditer(r"loss: ([\d.]+(?:e[+-]?\d+)?)", line):
+                loss_match = m
             if loss_match:
                 job.progress.loss = float(loss_match.group(1))
 

@@ -11,6 +11,15 @@ from typing import Optional
 from donkeycar.management.train_online import OnlineTrainer
 
 
+# Regex to strip ANSI escape codes (colour, cursor movement, etc.)
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _clean_line(raw: str) -> str:
+    """Remove ANSI escape codes and surrounding whitespace."""
+    return _ANSI_RE.sub('', raw).strip()
+
+
 class WebOnlineTrainer(OnlineTrainer):
     """OnlineTrainer subclass that streams output to a queue instead of Rich console."""
 
@@ -203,7 +212,7 @@ class WebOnlineTrainer(OnlineTrainer):
                     if match:
                         line = stdout_buffer[:match.start()]
                         stdout_buffer = stdout_buffer[match.end():]
-                        clean_line = line.strip()
+                        clean_line = _clean_line(line)
                         if not clean_line:
                             continue
 
@@ -226,7 +235,7 @@ class WebOnlineTrainer(OnlineTrainer):
                 stderr_buffer += chunk
                 while '\n' in stderr_buffer:
                     line, stderr_buffer = stderr_buffer.split('\n', 1)
-                    clean_line = line.strip()
+                    clean_line = _clean_line(line)
                     if clean_line:
                         is_progress_bar = "ETA:" in clean_line or ("[" in clean_line and "]" in clean_line and "=" in clean_line)
                         is_tf_noise = any(kw in clean_line for kw in tf_noise_keywords)
@@ -236,12 +245,14 @@ class WebOnlineTrainer(OnlineTrainer):
             time.sleep(0.1)
 
         # Check remaining buffer
-        if stdout_buffer.strip():
-            self._emit(stdout_buffer.strip())
-            if "Finished training" in stdout_buffer:
+        remaining_stdout = _clean_line(stdout_buffer)
+        if remaining_stdout:
+            self._emit(remaining_stdout)
+            if "Finished training" in remaining_stdout:
                 training_finished = True
-        if stderr_buffer.strip():
-            self._emit(stderr_buffer.strip(), level="error")
+        remaining_stderr = _clean_line(stderr_buffer)
+        if remaining_stderr:
+            self._emit(remaining_stderr, level="error")
 
         end_time = time.time()
         duration = end_time - start_time
@@ -256,6 +267,10 @@ class WebOnlineTrainer(OnlineTrainer):
     def _parse_training_output_web(self, line):
         """Parse Keras output and emit progress events."""
         try:
+            line = _clean_line(line)
+            if not line:
+                return
+
             epoch_match = re.search(r"Epoch (\d+)/(\d+)", line)
             if epoch_match:
                 self.current_epoch = int(epoch_match.group(1))
@@ -270,10 +285,11 @@ class WebOnlineTrainer(OnlineTrainer):
                 current_step = int(step_match.group(1))
                 total_steps = int(step_match.group(2))
 
+            # Progress bars may contain multiple "loss:" keys;
+            # the last one is the current value.
             loss = None
-            loss_match = re.search(r"loss: (\d+\.\d+)", line)
-            if loss_match:
-                loss = float(loss_match.group(1))
+            for m in re.finditer(r"loss: ([\d.]+(?:e[+-]?\d+)?)", line):
+                loss = float(m.group(1))
 
             if self.total_epochs > 0 and current_step is not None and total_steps is not None:
                 completed_epochs_progress = (self.current_epoch - 1) / self.total_epochs
