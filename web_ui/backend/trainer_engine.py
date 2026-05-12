@@ -147,7 +147,35 @@ class TrainingJobManager:
                         job.logs.append(cleaned)
                         # Try to parse progress from stdout
                         if not is_stderr:
+                            old_progress = (
+                                job.progress.current_epoch,
+                                job.progress.total_epochs,
+                                job.progress.current_step,
+                                job.progress.total_steps,
+                                job.progress.loss,
+                                job.progress.global_percent,
+                            )
                             self._parse_line(job, cleaned)
+                            new_progress = (
+                                job.progress.current_epoch,
+                                job.progress.total_epochs,
+                                job.progress.current_step,
+                                job.progress.total_steps,
+                                job.progress.loss,
+                                job.progress.global_percent,
+                            )
+                            if new_progress != old_progress:
+                                await job.log_queue.put({
+                                    "type": "progress",
+                                    "data": {
+                                        "currentEpoch": job.progress.current_epoch,
+                                        "totalEpochs": job.progress.total_epochs,
+                                        "currentStep": job.progress.current_step,
+                                        "totalSteps": job.progress.total_steps,
+                                        "loss": job.progress.loss,
+                                        "globalPercent": job.progress.global_percent,
+                                    }
+                                })
 
             await asyncio.gather(
                 read_stream(job.process.stdout),
