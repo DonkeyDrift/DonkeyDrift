@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from trainer_engine import job_manager
@@ -100,24 +100,87 @@ async def set_trainer_config(cfg: TrainerConfig, config_file: str = "train_onlin
 # ------------------------------------------------------------------
 # Model / Backup listing
 # ------------------------------------------------------------------
+def _get_dir_size(path: str) -> int:
+    """Recursively calculate total size of a directory."""
+    total = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if os.path.isfile(fp):
+                total += os.path.getsize(fp)
+    return total
+
+
 @router.get("/models")
 async def list_models(working_dir: Optional[str] = None):
-    """List local models in ./models directory."""
+    """List local models in ./models directory.
+
+    Includes files (e.g. .h5, .tflite, .trt, .ckpt) and
+    directories (e.g. TensorFlow SavedModel folders).
+    Training loss charts (.png) are hidden from the list but linked to
+    their corresponding model via previewPath.
+    """
     cwd = working_dir or os.getcwd()
     models_dir = os.path.join(cwd, "models")
     items: List[dict] = []
-    if os.path.isdir(models_dir):
-        for name in sorted(os.listdir(models_dir)):
-            full = os.path.join(models_dir, name)
-            if os.path.isfile(full):
-                stat = os.stat(full)
-                items.append({
-                    "name": name,
-                    "size": stat.st_size,
-                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "path": os.path.abspath(full),
-                })
+    if not os.path.isdir(models_dir):
+        return {"models": items}
+
+    # Build a set of existing .png files for quick lookup
+    png_files = {
+        n for n in os.listdir(models_dir)
+        if n.endswith(".png") and os.path.isfile(os.path.join(models_dir, n))
+    }
+
+    for name in sorted(os.listdir(models_dir)):
+        full = os.path.join(models_dir, name)
+        # Skip metadata and preview images
+        if name == "database.json" or name.endswith(".png"):
+            continue
+
+        # Derive the expected preview image name
+        if os.path.isfile(full):
+            stem = os.path.splitext(name)[0]
+        else:
+            stem = name
+        preview_name = f"{stem}.png"
+        preview_path = (
+            os.path.abspath(os.path.join(models_dir, preview_name))
+            if preview_name in png_files
+            else None
+        )
+
+        if os.path.isfile(full):
+            stat = os.stat(full)
+            items.append({
+                "name": name,
+                "type": "file",
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "path": os.path.abspath(full),
+                "previewPath": preview_path,
+            })
+        elif os.path.isdir(full):
+            stat = os.stat(full)
+            items.append({
+                "name": name,
+                "type": "directory",
+                "size": _get_dir_size(full),
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "path": os.path.abspath(full),
+                "previewPath": preview_path,
+            })
     return {"models": items}
+
+
+@router.get("/models/preview")
+async def get_model_preview(path: str = Query(..., description="Absolute path to the .png preview image")):
+    """Serve a model training loss chart (.png) for preview in the UI."""
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Preview file not found")
+    if not path.lower().endswith(".png"):
+        raise HTTPException(status_code=400, detail="Only .png previews are supported")
+    return FileResponse(path, media_type="image/png")
 
 
 @router.get("/backups")
