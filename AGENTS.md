@@ -6,7 +6,7 @@ This file provides the essential context an AI coding agent needs to work effect
 
 Donkeycar is a minimalist and modular self-driving library for Python, aimed at hobbyists and students. It provides a pipeline-based vehicle architecture, deep-learning autopilots (TensorFlow and PyTorch), computer vision autopilots, GPS path following, hardware abstraction for cameras/actuators/sensors, and both terminal and web-based user interfaces.
 
-- **Version**: 5.2.0
+- **Version**: 5.2.0 (defined in `donkeycar/__init__.py`)
 - **Python Requirement**: >=3.11.0, <3.12 (enforced at import time in `donkeycar/__init__.py`)
 - **License**: MIT
 - **Repository**: https://github.com/autorope/donkeycar
@@ -19,7 +19,7 @@ Donkeycar is a minimalist and modular self-driving library for Python, aimed at 
 - **Telemetry**: paho-mqtt
 - **Terminal UI**: Kivy + rich
 - **Web UI Backend**: FastAPI, Uvicorn, python-multipart
-- **Web UI Frontend**: React 18, TypeScript 5.8, Vite 6, Tailwind CSS 3, Zustand, Chart.js, Axios, react-router-dom
+- **Web UI Frontend**: React 18.3, TypeScript 5.8, Vite 6, Tailwind CSS 3.4, Zustand 5, Chart.js 4.5, Axios 1.13, react-router-dom 7.13, lucide-react, clsx, tailwind-merge
 - **Testing**: pytest, pytest-cov, responses, mypy
 - **Build**: setuptools with `setup.cfg` and `pyproject.toml`
 
@@ -79,14 +79,19 @@ web_ui/
       trainer.py       # /api/trainer — training config, start/stop, job status, SSE logs
     requirements.txt   # fastapi, uvicorn, python-multipart, pandas, numpy, pillow
   frontend/            # React + Vite SPA
-    package.json       # React 18, TypeScript 5.8, Vite 6, Tailwind CSS 3, Zustand, Chart.js
+    package.json       # Dependencies and scripts
     src/App.tsx        # Router (/ , /trainer)
     src/components/    # TubEditor, TubNavigator, ConfigLoader, TrainerPage components
     src/pages/         # Home, TrainerPage
     src/store/         # Zustand store, Axios API client
+    src/services/      # API client functions
+    src/hooks/         # Custom React hooks
 tests/                 # Top-level integration tests
 scripts/               # Standalone utilities (tflite conversion, profiling, migration, etc.)
 arduino/               # Arduino firmware for encoders
+docs/                  # Architecture and design documentation
+  arch/                # Architecture notes (web controller, params persistence, etc.)
+  plan/                # Design plans (trainer-design, etc.)
 ```
 
 ## Build, Install, and Test Commands
@@ -220,6 +225,13 @@ A modern web interface is provided under `web_ui/`:
 - The CLI command spawns both `uvicorn` (backend) and `npm run dev` (frontend) as subprocesses.
 - Supports both **local training** (subprocess `donkey train`) and **online/cloud training** (SSH to remote server, upload data, run training, download model).
 
+### Legacy Web Controller
+
+The Tornado-based web controller lives in `donkeycar/parts/web_controller/`:
+- Provides remote driving, calibration, and MJPEG video streaming.
+- Default port `8887` for the full controller; `8890` for FPV-only mode.
+- Static assets are served from `donkeycar/parts/web_controller/templates/static/`.
+
 ## Entry Points and CLI
 
 The `donkey` console command is defined in `setup.cfg`:
@@ -244,6 +256,11 @@ Available subcommands (from `management/base.py`):
 - Place unit tests in `donkeycar/tests/`.
 - Place integration tests in `tests/` at the project root.
 - Use fixtures from `donkeycar/tests/setup.py` for sample tubs, cars, and records.
+  - `tub_path`, `tub`, `tubs` — pytest fixtures for temporary tub directories.
+  - `create_sample_tub(path, records=128)` — programmatically populate a tub.
+  - `default_template(car_dir)`, `custom_template(car_dir, template)` — scaffold a car directory.
+  - `create_sample_record()` — generate a single mocked record.
+  - `on_pi()` — platform detection for Raspberry Pi guards.
 - Mock hardware when possible; many tests use `SquareBoxCamera` and `MovingSquareTelemetry` from `donkeycar.parts.simulation`.
 - Platform-specific tests should guard with `on_pi()` or similar checks (e.g., `@pytest.mark.skipif(on_pi() == False, reason='Not on RPi')`).
 - Both **pytest** and **unittest** patterns exist in the codebase; prefer pytest for new tests.
@@ -265,3 +282,4 @@ Available subcommands (from `management/base.py`):
 - **Config values are uppercase** by convention. Custom config should be added to `cfg_complete.py` and documented.
 - **Avoid breaking Tub v2 format changes** — it is the primary data interchange format.
 - When editing the web UI, remember both the FastAPI backend (`web_ui/backend/`) and the React frontend (`web_ui/frontend/`).
+- The `docs/` directory contains architecture notes (`docs/arch/`) and design plans (`docs/plan/`) that may provide useful context for complex features.
