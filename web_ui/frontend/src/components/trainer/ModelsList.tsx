@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { listModels } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy } from 'lucide-react';
+import { FileText, Copy, TrendingDown } from 'lucide-react';
 import { API_URL } from '../../services/api';
 
 interface ModelItem {
@@ -138,39 +138,47 @@ export const ModelsList: React.FC = () => {
         {models.map((m) => (
           <div
             key={m.name}
-            className="flex items-center justify-between bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50 cursor-default"
+            className="bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50 cursor-default"
             onMouseEnter={(e) => m.previewPath && showPreview(m, e.currentTarget.getBoundingClientRect())}
             onMouseLeave={() => hidePreview()}
             onClick={(e) => m.previewPath && togglePreview(m, e.currentTarget.getBoundingClientRect())}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <FileText className="w-4 h-4 text-zinc-500 shrink-0" />
-              <div className="min-w-0">
-                <div className="text-sm text-zinc-300 truncate" title={m.name}>{m.name}</div>
-                <div className="text-xs text-zinc-600">
-                  {formatSize(m.size)} · {new Date(m.modified).toLocaleString()}
-                  {typeof m.finalLoss === 'number' && (
-                    <span className="ml-2 text-emerald-500">
-                      loss: {m.finalLoss.toFixed(4)}
-                      {typeof m.bestLoss === 'number' && m.bestLoss !== m.finalLoss && (
-                        <span className="text-zinc-500 ml-1">(best: {m.bestLoss.toFixed(4)})</span>
-                      )}
-                    </span>
-                  )}
-                </div>
+            {/* Row 1: model name + loss badge */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-4 h-4 text-zinc-500 shrink-0" />
+                <span className="text-sm text-zinc-300 truncate" title={m.name}>{m.name}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {typeof m.finalLoss === 'number' && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded">
+                    <TrendingDown className="w-3 h-3" />
+                    {m.finalLoss.toFixed(4)}
+                  </span>
+                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(m.path);
+                  }}
+                  title="Copy path"
+                  className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard.writeText(m.path);
-                }}
-                title="Copy path"
-                className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"
-              >
-                <Copy className="w-3.5 h-3.5" />
-              </button>
+
+            {/* Row 2: metadata */}
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-xs text-zinc-600">
+                {formatSize(m.size)} · {new Date(m.modified).toLocaleString()}
+                {typeof m.bestLoss === 'number' && typeof m.finalLoss === 'number' && m.bestLoss !== m.finalLoss && (
+                  <span className="ml-2 text-zinc-500">
+                    best: {m.bestLoss.toFixed(4)}
+                  </span>
+                )}
+              </span>
             </div>
           </div>
         ))}

@@ -157,8 +157,8 @@ export const TrainerPage: React.FC = () => {
         <ModeTabs mode={mode} onChange={setMode} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="space-y-6">
           {mode === 'local' ? (
             <LocalConfigForm
               config={trainerLocalConfig}
@@ -184,7 +184,7 @@ export const TrainerPage: React.FC = () => {
           <LogPanel job={job} />
         </div>
 
-        <div className="lg:col-span-1 space-y-6">
+        <div className="space-y-6">
           <ProgressPanel job={job} />
 
           <button

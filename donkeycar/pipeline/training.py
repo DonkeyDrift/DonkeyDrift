@@ -189,8 +189,9 @@ def train(cfg: Config, tub_paths: str, model: str = None,
                 'val_loss_history': val_loss_hist,
                 'epochs': len(loss_hist),
             }, f, indent=2)
-    except Exception:
-        pass
+        logger.info(f'Saved loss metadata to {meta_path}')
+    except Exception as e:
+        logger.error(f'Failed to save loss metadata: {e}')
 
     # We are doing the tflite/trt conversion here on a previously saved model
     # and not on the kl.interpreter.model object directly. The reason is that
