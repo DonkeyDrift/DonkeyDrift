@@ -2,13 +2,17 @@
 Drive API Router - 实车驾驶控制、摄像头回传、参数管理
 """
 import os
+import io
+import asyncio
 import time
 import json
 import logging
 from pathlib import Path
 from typing import Optional, List, Dict
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -32,10 +36,43 @@ class DriveState:
         # 车端状态（车端 -> 客户端）
         self.num_records: int = 0
         self.last_frame_timestamp: float = 0.0
+        self.last_frame: Optional[bytes] = None  # JPEG 二进制帧缓存
+
+        # 心跳
+        self.car_last_seen: Optional[datetime] = None
 
         # 连接管理
         self.car_ws: Optional[WebSocket] = None
         self.client_ws: List[WebSocket] = []
+
+    async def broadcast_to_clients(self, data: dict):
+        """向所有已连接的客户端广播消息"""
+        payload = json.dumps(data)
+        dead: List[WebSocket] = []
+        for ws in self.client_ws:
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.client_ws.remove(ws)
+
+    async def send_to_car(self, data: dict):
+        """向车端发送控制指令"""
+        if self.car_ws is None:
+            return False
+        try:
+            await self.car_ws.send_text(json.dumps(data))
+            return True
+        except Exception:
+            self.car_ws = None
+            return False
+
+    def car_online(self) -> bool:
+        """车端是否在线（心跳超时 5 秒视为离线）"""
+        if self.car_last_seen is None:
+            return False
+        return datetime.now() - self.car_last_seen < timedelta(seconds=5)
 
 
 drive_state = DriveState()
@@ -111,23 +148,172 @@ async def save_params(request: SaveParamsRequest):
 
 
 # ------------------------------------------------------------------
-# WebSocket 主通道（M2 实现，预留位置）
+# WebSocket 主通道
 # ------------------------------------------------------------------
 @router.websocket("/ws")
 async def drive_ws(websocket: WebSocket, role: str = Query("client", description="连接角色: car 或 client")):
     await websocket.accept()
-    # M2: 完整实现连接管理、消息广播、心跳检测
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
+
+    if role == "car":
+        # 车端连接
+        if drive_state.car_ws is not None:
+            try:
+                await drive_state.car_ws.close()
+            except Exception:
+                pass
+        drive_state.car_ws = websocket
+        drive_state.car_last_seen = datetime.now()
+        logger.info("车端连接建立")
+
+        # 立即推送给所有客户端车端上线状态
+        await drive_state.broadcast_to_clients({
+            "type": "car_connection",
+            "online": True,
+        })
+
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                drive_state.car_last_seen = datetime.now()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+
+                # 处理车端心跳
+                if msg.get("type") == "heartbeat":
+                    continue
+
+                # 处理车端发来的图像帧 (base64)
+                if msg.get("type") == "frame" and msg.get("data"):
+                    import base64
+                    try:
+                        frame_bytes = base64.b64decode(msg["data"])
+                        drive_state.last_frame = frame_bytes
+                        drive_state.last_frame_timestamp = time.time()
+                    except Exception as e:
+                        logger.warning(f"解码帧失败: {e}")
+                    continue
+
+                # 处理车端状态更新（录制条数、模式等）
+                if "num_records" in msg:
+                    drive_state.num_records = int(msg["num_records"])
+                if "drive_mode" in msg:
+                    drive_state.drive_mode = msg["drive_mode"]
+                if "recording" in msg:
+                    drive_state.recording = bool(msg["recording"])
+
+                # 车端状态变更广播给所有客户端
+                await drive_state.broadcast_to_clients({
+                    "type": "car_state",
+                    "drive_mode": drive_state.drive_mode,
+                    "recording": drive_state.recording,
+                    "num_records": drive_state.num_records,
+                })
+        except WebSocketDisconnect:
+            logger.info("车端连接断开")
+            drive_state.car_ws = None
+            await drive_state.broadcast_to_clients({
+                "type": "car_connection",
+                "online": False,
+            })
+
+    else:
+        # 客户端连接（浏览器）
+        drive_state.client_ws.append(websocket)
+        logger.info(f"新客户端连接，当前在线: {len(drive_state.client_ws)}")
+
+        # 推送初始状态
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "car_connection",
+                "online": drive_state.car_online(),
+            }))
+            await websocket.send_text(json.dumps({
+                "type": "car_state",
+                "drive_mode": drive_state.drive_mode,
+                "recording": drive_state.recording,
+                "num_records": drive_state.num_records,
+            }))
+        except Exception:
+            pass
+
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+
+                # 心跳回执
+                if msg.get("type") == "heartbeat":
+                    continue
+
+                # 客户端发来的控制指令，转发给车端
+                control_fields = ["angle", "throttle", "drive_mode", "recording", "buttons"]
+                if any(k in msg for k in control_fields):
+                    if "angle" in msg:
+                        drive_state.angle = float(msg["angle"])
+                    if "throttle" in msg:
+                        drive_state.throttle = float(msg["throttle"])
+                    if "drive_mode" in msg:
+                        drive_state.drive_mode = msg["drive_mode"]
+                    if "recording" in msg:
+                        drive_state.recording = bool(msg["recording"])
+                    if "buttons" in msg:
+                        drive_state.buttons.update(msg["buttons"])
+
+                    # 转发给车端
+                    await drive_state.send_to_car(msg)
+
+                    # 同步给其他所有客户端（多端状态一致）
+                    await drive_state.broadcast_to_clients({
+                        "type": "car_state",
+                        "drive_mode": drive_state.drive_mode,
+                        "recording": drive_state.recording,
+                        "num_records": drive_state.num_records,
+                    })
+        except WebSocketDisconnect:
+            if websocket in drive_state.client_ws:
+                drive_state.client_ws.remove(websocket)
+            logger.info(f"客户端断开，当前在线: {len(drive_state.client_ws)}")
 
 
 # ------------------------------------------------------------------
-# MJPEG 视频流（M2 实现，预留位置）
+# MJPEG 视频流
 # ------------------------------------------------------------------
+async def _frame_generator():
+    """帧生成器，逐帧输出 multipart 分片"""
+    boundary = b"--donkeyframe"
+    last_sent_ts = 0.0
+    min_interval = 1.0 / 25.0  # 最高 25fps 发送
+
+    while True:
+        if drive_state.last_frame is None or not drive_state.car_online():
+            # 无帧时输出占位符（后续替换为默认占位图）
+            await asyncio.sleep(0.1)
+            continue
+
+        now = time.time()
+        if now - last_sent_ts < min_interval:
+            await asyncio.sleep(min_interval / 2)
+            continue
+
+        frame = drive_state.last_frame
+        last_sent_ts = now
+        yield (
+            boundary + b"\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
+            + frame + b"\r\n"
+        )
+
+
 @router.get("/video")
 async def video_stream():
-    # M2: 实现 multipart MJPEG 输出
-    raise HTTPException(status_code=501, detail="Video stream not implemented yet")
+    """MJPEG 流媒体接口，浏览器 <img src> 直接渲染"""
+    return StreamingResponse(
+        _frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=--donkeyframe",
+    )
