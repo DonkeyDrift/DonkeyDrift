@@ -73,6 +73,9 @@ const TRANSFORMATION_OPTIONS = [
   'SCALE',
 ];
 
+const ARENA_IMAGE_PRELOAD_AHEAD = 6;
+const ARENA_IMAGE_CACHE_LIMIT = 90;
+
 const formatValue = (value: number | undefined) =>
   value === undefined || Number.isNaN(value) ? '--' : value.toFixed(3);
 
@@ -218,20 +221,6 @@ export const PilotArenaPage: React.FC = () => {
   }, [maxIndex]);
 
   useEffect(() => {
-    if (!hasRecords) return;
-    for (let offset = 0; offset <= 20; offset += 1) {
-      const recordIndex = currentIndex + offset;
-      const imagePath = getRecordImagePath(records[recordIndex]);
-      if (!imagePath) continue;
-      const imageUrl = getImageUrl(imagePath);
-      if (imageCacheRef.current.has(imageUrl)) continue;
-      const image = new Image();
-      image.src = imageUrl;
-      imageCacheRef.current.set(imageUrl, image);
-    }
-  }, [currentIndex, hasRecords, records]);
-
-  useEffect(() => {
     listArenaModelTypes()
       .then((data) => {
         if (Array.isArray(data.model_types) && data.model_types.length > 0) {
@@ -261,6 +250,41 @@ export const PilotArenaPage: React.FC = () => {
       framesRef.current[localId] = 0;
     }
   }, [updateViewer]);
+
+  const cacheImage = useCallback((imageUrl: string) => {
+    const cachedImage = imageCacheRef.current.get(imageUrl);
+    if (cachedImage) {
+      imageCacheRef.current.delete(imageUrl);
+      imageCacheRef.current.set(imageUrl, cachedImage);
+      return cachedImage;
+    }
+
+    const image = new Image();
+    image.src = imageUrl;
+    imageCacheRef.current.set(imageUrl, image);
+    while (imageCacheRef.current.size > ARENA_IMAGE_CACHE_LIMIT) {
+      const oldestUrl = imageCacheRef.current.keys().next().value;
+      if (!oldestUrl) break;
+      const oldestImage = imageCacheRef.current.get(oldestUrl);
+      if (oldestImage) {
+        oldestImage.onload = null;
+        oldestImage.onerror = null;
+        oldestImage.src = '';
+      }
+      imageCacheRef.current.delete(oldestUrl);
+    }
+    return image;
+  }, []);
+
+  useEffect(() => {
+    if (!hasRecords) return;
+    for (let offset = 0; offset <= ARENA_IMAGE_PRELOAD_AHEAD; offset += 1) {
+      const recordIndex = currentIndex + offset;
+      const imagePath = getRecordImagePath(records[recordIndex]);
+      if (!imagePath) continue;
+      cacheImage(getImageUrl(imagePath));
+    }
+  }, [cacheImage, currentIndex, hasRecords, records]);
 
   const cachePilotPrediction = useCallback((localId: string, recordIndex: number, pilot: { angle: number; throttle: number }) => {
     predictionCacheRef.current[localId] = {
@@ -292,7 +316,7 @@ export const PilotArenaPage: React.FC = () => {
     const imagePath = getRecordImagePath(record);
     if (!canvas || !imagePath) return;
     const imageUrl = getImageUrl(imagePath);
-    let image = imageCacheRef.current.get(imageUrl);
+    const image = cacheImage(imageUrl);
     const draw = (imageToDraw: HTMLImageElement) => {
       if (imageToDraw.naturalWidth === 0) return;
       const ctx = canvas.getContext('2d');
@@ -308,17 +332,16 @@ export const PilotArenaPage: React.FC = () => {
       drawControlLine(ctx, userControl?.angle, userControl?.throttle, '#22c55e');
       drawControlLine(ctx, cachedPrediction?.pilot.angle ?? viewer.prediction?.angle, cachedPrediction?.pilot.throttle ?? viewer.prediction?.throttle, '#3b82f6');
     };
-    if (!image) {
-      image = new Image();
-      image.src = imageUrl;
-      imageCacheRef.current.set(imageUrl, image);
-    }
     if (image.complete) {
       draw(image);
     } else {
-      image.onload = () => draw(image as HTMLImageElement);
+      image.onload = () => {
+        if (imageCacheRef.current.get(imageUrl) === image) {
+          draw(image);
+        }
+      };
     }
-  }, [records]);
+  }, [cacheImage, records]);
 
   useEffect(() => {
     if (!isPlaying || !hasRecords) return;
