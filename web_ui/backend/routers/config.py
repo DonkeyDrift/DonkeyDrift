@@ -62,13 +62,9 @@ async def load_config_route(request: ConfigLoadRequest):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Directory not found")
     
-    config_path = os.path.join(path, 'myconfig.py')
+    config_path = os.path.join(path, 'config.py')
     if not os.path.exists(config_path):
-        alt_config_path = os.path.join(path, 'config.py')
-        if os.path.exists(alt_config_path):
-            config_path = alt_config_path
-        else:
-            raise HTTPException(status_code=404, detail="config.py not found in directory")
+        raise HTTPException(status_code=404, detail="config.py not found in directory")
 
     try:
         cfg = load_config(config_path)
