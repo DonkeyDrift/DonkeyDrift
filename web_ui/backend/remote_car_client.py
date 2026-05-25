@@ -104,6 +104,15 @@ def build_push_pilots_command(
     return ["rsync", "-rv", "--progress", "--partial", *filters, source, destination]
 
 
+def validate_bridge_url(url: str) -> str:
+    value = url.strip()
+    if not value.startswith(("ws://", "wss://")):
+        raise ValueError("DriveApiBridge 回连地址必须以 ws:// 或 wss:// 开头")
+    if _DANGEROUS_PATH_RE.search(value):
+        raise ValueError("DriveApiBridge 回连地址包含不安全字符")
+    return value
+
+
 def build_remote_drive_start_command(
     config: ConnectorConfig,
     model_type: Optional[str] = None,
@@ -113,7 +122,7 @@ def build_remote_drive_start_command(
     car_dir = validate_remote_path(config.car_dir)
     parts = []
     if bridge_server_url:
-        parts.append(f"DRIVE_API_SERVER_URL={shlex.quote(bridge_server_url)}")
+        parts.append(f"DRIVE_API_SERVER_URL={shlex.quote(validate_bridge_url(bridge_server_url))}")
     parts.extend(["python", "manage.py", "drive"])
     if pilot:
         model_name = validate_remote_name(pilot)

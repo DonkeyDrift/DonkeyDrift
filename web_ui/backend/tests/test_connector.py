@@ -93,6 +93,17 @@ def test_build_push_pilots_command_filters_selected_formats():
     assert command[-1] == "pi@car.local:~/mycar/models"
 
 
+def test_build_remote_drive_start_command_rejects_invalid_bridge_url():
+    from remote_car_client import ConnectorConfig, build_remote_drive_start_command
+
+    config = ConnectorConfig(host="car.local", user="pi", car_dir="~/mycar")
+
+    with pytest.raises(ValueError):
+        build_remote_drive_start_command(config=config, bridge_server_url="http://127.0.0.1:8000/api/drive/ws")
+    with pytest.raises(ValueError):
+        build_remote_drive_start_command(config=config, bridge_server_url="ws://host/api/drive/ws;rm -rf ~")
+
+
 def test_build_remote_drive_start_command_injects_bridge_url_safely():
     from remote_car_client import ConnectorConfig, build_remote_drive_start_command
 

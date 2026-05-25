@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+﻿import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -12,10 +12,12 @@ import {
   pushConnectorPilots,
   startConnectorDrive,
   stopConnectorDrive,
+  getConnectorDriveStatus,
   getConnectorJobStatus,
   stopConnectorJob,
   createConnectorJobStream,
   getApiErrorMessage,
+  getDriveCarWebSocketUrl,
   type ConnectorConfig as ConnectorConfigType,
   type ConnectorJobState,
   type ConnectorJobStatus,
@@ -75,6 +77,8 @@ export const CarConnectorPage: React.FC = () => {
   const [createNewDir, setCreateNewDir] = useState(false);
   const [selectedPilot, setSelectedPilot] = useState('');
   const [modelType, setModelType] = useState('tflite_linear');
+  const [bridgeServerUrl, setBridgeServerUrl] = useState(() => getDriveCarWebSocketUrl());
+  const [drivePid, setDrivePid] = useState<number | null>(null);
   const [selectedFormats, setSelectedFormats] = useState<Set<FormatOption>>(new Set(['tflite']));
 
   // 任务状态
@@ -239,9 +243,10 @@ export const CarConnectorPage: React.FC = () => {
       startConnectorDrive({
         model_type: selectedPilot ? modelType : undefined,
         pilot: selectedPilot || undefined,
+        bridge_server_url: bridgeServerUrl.trim() || undefined,
       }),
     );
-  }, [selectedPilot, modelType, startJobAndSubscribe]);
+  }, [selectedPilot, modelType, bridgeServerUrl, startJobAndSubscribe]);
 
   // 远程停止驾驶
   const handleDriveStop = useCallback(() => {
@@ -449,6 +454,17 @@ export const CarConnectorPage: React.FC = () => {
                   </select>
                 </div>
               </div>
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">DriveApiBridge 回连地址</label>
+                <Input
+                  value={bridgeServerUrl}
+                  onChange={(e) => setBridgeServerUrl(e.target.value)}
+                  placeholder="ws://你的电脑IP:8000/api/drive/ws"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  车端会使用这个地址连接 Web UI 后端；如果车端在另一台机器，请把 localhost 改成电脑局域网 IP。
+                </p>
+              </div>
               <div className="flex items-center gap-3">
                 <Button
                   onClick={handleDriveStart}
@@ -520,3 +536,4 @@ export const CarConnectorPage: React.FC = () => {
     </div>
   );
 };
+

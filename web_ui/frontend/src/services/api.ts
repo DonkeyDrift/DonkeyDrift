@@ -11,6 +11,18 @@ export const api = axios.create({
   },
 });
 
+export const getDriveCarWebSocketUrl = () => {
+  const apiBase = API_URL.replace(/\/$/, '');
+  if (apiBase.startsWith('http://') || apiBase.startsWith('https://')) {
+    return `${apiBase.replace(/^http/, 'ws')}/drive/ws`;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname;
+  const backendPort = window.location.port === '5188' ? '8000' : window.location.port;
+  const port = backendPort ? `:${backendPort}` : '';
+  return `${protocol}//${host}${port}${apiBase}/drive/ws`;
+};
+
 export const getApiErrorMessage = (error: unknown, fallback = '未知错误') => {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
@@ -235,6 +247,11 @@ export const startConnectorDrive = async (payload: {
 export const stopConnectorDrive = async (payload: { pid?: number; car_dir?: string } = {}) => {
   const response = await api.post('/connector/drive/stop', payload);
   return response.data as { job_id: string; status: ConnectorJobState };
+};
+
+export const getConnectorDriveStatus = async () => {
+  const response = await api.get('/connector/drive/status');
+  return response.data as { pid: number | null };
 };
 
 export const getConnectorJobStatus = async (jobId: string) => {
