@@ -64,12 +64,15 @@ def _load_payload() -> ConnectorConfigPayload:
     path = _get_config_path()
     if not path.exists():
         return _default_config()
-    with open(path, "r", encoding="utf-8") as file:
-        return ConnectorConfigPayload(**json.load(file))
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return ConnectorConfigPayload(**json.load(file))
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Connector 配置文件无效: {exc}") from exc
 
 
 def _payload_data(payload: ConnectorConfigPayload) -> dict:
-    return payload.model_dump() if hasattr(payload, "model_dump") else _payload_data(payload)
+    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
 
 def _save_payload(payload: ConnectorConfigPayload) -> None:
