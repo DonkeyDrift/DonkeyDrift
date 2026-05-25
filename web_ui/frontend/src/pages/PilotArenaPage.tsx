@@ -73,8 +73,8 @@ const TRANSFORMATION_OPTIONS = [
   'SCALE',
 ];
 
-const ARENA_IMAGE_PRELOAD_AHEAD = 6;
-const ARENA_IMAGE_CACHE_LIMIT = 90;
+const ARENA_IMAGE_CACHE_LIMIT = 40;
+const ARENA_IMAGE_MAX_IN_FLIGHT = 4;
 
 const formatValue = (value: number | undefined) =>
   value === undefined || Number.isNaN(value) ? '--' : value.toFixed(3);
@@ -147,6 +147,8 @@ export const PilotArenaPage: React.FC = () => {
   const predictionCacheRef = useRef<Record<string, Record<number, { pilot: { angle: number; throttle: number } }>>>({});
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const imageInFlightRef = useRef<Set<string>>(new Set());
+  const lastImageRequestAtRef = useRef(0);
   const playbackFpsStartRef = useRef<Record<string, number>>({});
   const playbackFpsFramesRef = useRef<Record<string, number>>({});
   const inferenceFpsStartRef = useRef<Record<string, number>>({});
@@ -258,8 +260,21 @@ export const PilotArenaPage: React.FC = () => {
       imageCacheRef.current.set(imageUrl, cachedImage);
       return cachedImage;
     }
+    const now = window.performance.now();
+    if (imageInFlightRef.current.size >= ARENA_IMAGE_MAX_IN_FLIGHT || now - lastImageRequestAtRef.current < 50) {
+      return undefined;
+    }
+    lastImageRequestAtRef.current = now;
 
     const image = new Image();
+    imageInFlightRef.current.add(imageUrl);
+    image.onload = () => {
+      imageInFlightRef.current.delete(imageUrl);
+    };
+    image.onerror = () => {
+      imageInFlightRef.current.delete(imageUrl);
+      imageCacheRef.current.delete(imageUrl);
+    };
     image.src = imageUrl;
     imageCacheRef.current.set(imageUrl, image);
     while (imageCacheRef.current.size > ARENA_IMAGE_CACHE_LIMIT) {
@@ -271,20 +286,11 @@ export const PilotArenaPage: React.FC = () => {
         oldestImage.onerror = null;
         oldestImage.src = '';
       }
+      imageInFlightRef.current.delete(oldestUrl);
       imageCacheRef.current.delete(oldestUrl);
     }
     return image;
   }, []);
-
-  useEffect(() => {
-    if (!hasRecords) return;
-    for (let offset = 0; offset <= ARENA_IMAGE_PRELOAD_AHEAD; offset += 1) {
-      const recordIndex = currentIndex + offset;
-      const imagePath = getRecordImagePath(records[recordIndex]);
-      if (!imagePath) continue;
-      cacheImage(getImageUrl(imagePath));
-    }
-  }, [cacheImage, currentIndex, hasRecords, records]);
 
   const cachePilotPrediction = useCallback((localId: string, recordIndex: number, pilot: { angle: number; throttle: number }) => {
     predictionCacheRef.current[localId] = {
@@ -317,6 +323,7 @@ export const PilotArenaPage: React.FC = () => {
     if (!canvas || !imagePath) return;
     const imageUrl = getImageUrl(imagePath);
     const image = cacheImage(imageUrl);
+    if (!image) return;
     const draw = (imageToDraw: HTMLImageElement) => {
       if (imageToDraw.naturalWidth === 0) return;
       const ctx = canvas.getContext('2d');
@@ -334,12 +341,6 @@ export const PilotArenaPage: React.FC = () => {
     };
     if (image.complete) {
       draw(image);
-    } else {
-      image.onload = () => {
-        if (imageCacheRef.current.get(imageUrl) === image) {
-          draw(image);
-        }
-      };
     }
   }, [cacheImage, records]);
 
