@@ -5,6 +5,7 @@ import { SidePanel } from './components/SidePanel';
 import { TubNavigator } from './components/TubNavigator';
 import { TubEditor } from './components/TubEditor';
 import { TrainerPage } from './pages/TrainerPage';
+import { DrivePage } from './pages/DrivePage';
 import { useStore } from './store/useStore';
 
 type ErrorBoundaryProps = {
@@ -76,6 +77,7 @@ function App() {
           <Routes>
             <Route path="/" element={<TubManagerPage />} />
             <Route path="/trainer" element={<TrainerPage />} />
+            <Route path="/drive" element={<DrivePage />} />
           </Routes>
         </Layout>
       </ErrorBoundary>

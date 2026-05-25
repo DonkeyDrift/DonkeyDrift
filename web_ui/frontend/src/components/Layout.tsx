@@ -18,11 +18,17 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             >
               Tub Manager
             </Link>
-            <Link 
-              to="/trainer" 
+            <Link
+              to="/trainer"
               className={`transition-colors hover:text-cyan-400 ${isActive('/trainer') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
               Trainer
+            </Link>
+            <Link
+              to="/drive"
+              className={`transition-colors hover:text-cyan-400 ${isActive('/drive') ? 'text-cyan-500' : 'text-zinc-400'}`}
+            >
+              Drive
             </Link>
             <div className="relative h-full flex items-center group">
               <span className="transition-colors hover:text-cyan-400 text-zinc-400 cursor-not-allowed">Pilot Arena</span>
