@@ -8,7 +8,10 @@ import { useKeyboardDrive } from '../hooks/useKeyboardDrive';
 import { useDriveHotkeys } from '../hooks/useDriveHotkeys';
 import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
 import { ParameterPanel } from '../components/drive/ParameterPanel';
+import { InputSourceSelector, InputSource } from '../components/drive/InputSourceSelector';
 import { useDriveStore } from '../store/useDriveStore';
+import { useGamepadDrive } from '../hooks/useGamepadDrive';
+import { useGyroDrive } from '../hooks/useGyroDrive';
 import { Circle, CirclePlay, Wifi, WifiOff } from 'lucide-react';
 
 export const DrivePage: React.FC = () => {
@@ -26,6 +29,9 @@ export const DrivePage: React.FC = () => {
   const [recordStartTime, setRecordStartTime] = useState<number | null>(null);
   const [recordDuration, setRecordDuration] = useState(0);
   const [currentModel, setCurrentModel] = useState<string>('未加载');
+  const [inputSource, setInputSource] = useState<InputSource>('joystick');
+  const gamepadRef = useRef({ angle: 0, throttle: 0 });
+  const gyroRef = useRef({ angle: 0, throttle: 0 });
 
   const { params, loadFromServer } = useDriveStore();
 
@@ -35,7 +41,7 @@ export const DrivePage: React.FC = () => {
   }, [loadFromServer]);
 
   useKeyboardDrive({
-    enabled: true,
+    enabled: inputSource === 'keyboard',
     params,
     onChange: (a, t) => {
       keyboardRef.current = { angle: a, throttle: t };
@@ -43,13 +49,52 @@ export const DrivePage: React.FC = () => {
     },
   });
 
+  const { connected: gamepadConnected } = useGamepadDrive({
+    enabled: inputSource === 'gamepad',
+    onChange: (a, t) => {
+      gamepadRef.current = { angle: a, throttle: t };
+      lastInputType.current = 'gamepad';
+    },
+  });
+
+  const { permissionState, requestPermission } = useGyroDrive({
+    enabled: inputSource === 'gyro',
+    onChange: (a, t) => {
+      gyroRef.current = { angle: a, throttle: t };
+      lastInputType.current = 'gyro';
+    },
+  });
+
+  // 切换到陀螺仪时自动请求权限
+  useEffect(() => {
+    if (inputSource === 'gyro' && permissionState === 'prompt') {
+      requestPermission();
+    }
+  }, [inputSource, permissionState, requestPermission]);
+
   // 控制节流：50Hz 发送
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     sendTimerRef.current = setInterval(() => {
-      const { angle: a, throttle: t } = lastInputType.current === 'joystick'
-        ? joystickRef.current
-        : keyboardRef.current;
+      let a = 0, t = 0;
+      switch (lastInputType.current) {
+        case 'joystick':
+          a = joystickRef.current.angle;
+          t = joystickRef.current.throttle;
+          break;
+        case 'keyboard':
+          a = keyboardRef.current.angle;
+          t = keyboardRef.current.throttle;
+          break;
+        case 'gamepad':
+          a = gamepadRef.current.angle;
+          t = gamepadRef.current.throttle;
+          break;
+        case 'gyro':
+          a = gyroRef.current.angle;
+          t = gyroRef.current.throttle;
+          break;
+      }
       setAngle(a);
       setThrottle(t);
 
@@ -132,6 +177,12 @@ export const DrivePage: React.FC = () => {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-zinc-200">驾驶控制台</h2>
         <div className="flex items-center gap-3">
+          <InputSourceSelector
+            value={inputSource}
+            onChange={setInputSource}
+            gamepadConnected={gamepadConnected}
+            gyroAvailable={permissionState !== 'unsupported'}
+          />
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
           <button
             onClick={toggleRecording}
