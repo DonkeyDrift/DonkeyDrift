@@ -14,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 class FakePilot:
     last_image = None
+    run_count = 0
 
     def __init__(self):
         self.loaded_path = None
@@ -23,12 +24,15 @@ class FakePilot:
 
     def run(self, image):
         FakePilot.last_image = image
+        FakePilot.run_count += 1
         return 0.25, 0.5
 
 
 def make_client(monkeypatch):
     arena = importlib.import_module("routers.arena")
     arena = importlib.reload(arena)
+    FakePilot.last_image = None
+    FakePilot.run_count = 0
 
     monkeypatch.setattr(arena, "get_model_by_type", lambda model_type, cfg: FakePilot())
     monkeypatch.setattr(arena, "load_car_config", lambda config_path=None: SimpleNamespace())
@@ -203,6 +207,7 @@ def test_preview_returns_image_response(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content.startswith(b"\x89PNG")
+    assert FakePilot.run_count == 1
 
 
 def test_predictions_returns_limited_points(monkeypatch, tmp_path):

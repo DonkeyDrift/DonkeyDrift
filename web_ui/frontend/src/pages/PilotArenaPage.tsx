@@ -96,6 +96,7 @@ export const PilotArenaPage: React.FC = () => {
   const [plotError, setPlotError] = useState<string | null>(null);
   const [plotLoading, setPlotLoading] = useState(false);
   const viewersRef = useRef(viewers);
+  const predictionRequestRef = useRef<Record<string, number>>({});
 
   const currentRecord = records[currentIndex];
   const hasRecords = records.length > 0;
@@ -153,6 +154,8 @@ export const PilotArenaPage: React.FC = () => {
 
   const refreshPrediction = useCallback(async (viewer: ViewerState, recordIndex: number) => {
     if (!viewer.pilot || !hasRecords) return;
+    const requestId = (predictionRequestRef.current[viewer.localId] ?? 0) + 1;
+    predictionRequestRef.current[viewer.localId] = requestId;
     updateViewer(viewer.localId, { loading: true, error: undefined });
     try {
       const data = await predictArenaPilot(viewer.pilot.id, {
@@ -164,6 +167,7 @@ export const PilotArenaPage: React.FC = () => {
         brightness: predictionOptions.brightness,
         blur: predictionOptions.blur,
       });
+      if (predictionRequestRef.current[viewer.localId] !== requestId) return;
       updateViewer(viewer.localId, {
         user: data.user,
         prediction: data.pilot,
@@ -171,6 +175,7 @@ export const PilotArenaPage: React.FC = () => {
         loading: false,
       });
     } catch (error) {
+      if (predictionRequestRef.current[viewer.localId] !== requestId) return;
       updateViewer(viewer.localId, { loading: false, error: getApiErrorMessage(error) });
     }
   }, [configPath, hasRecords, predictionOptions, updateViewer]);
@@ -204,15 +209,19 @@ export const PilotArenaPage: React.FC = () => {
         // 后端可能已重启，前端仍应允许移除本地状态。
       }
     }
+    delete predictionRequestRef.current[viewer.localId];
     setViewers((items) => items.filter((item) => item.localId !== viewer.localId));
   }, []);
 
   useEffect(() => {
-    viewersRef.current.forEach((viewer) => {
-      if (viewer.pilot) {
-        refreshPrediction(viewer, currentIndex);
-      }
-    });
+    const timer = window.setTimeout(() => {
+      viewersRef.current.forEach((viewer) => {
+        if (viewer.pilot) {
+          refreshPrediction(viewer, currentIndex);
+        }
+      });
+    }, 120);
+    return () => window.clearTimeout(timer);
   }, [currentIndex, refreshPrediction]);
 
   const toggleTransformation = (name: string, target: 'pre' | 'post') => {
