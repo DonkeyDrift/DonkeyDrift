@@ -74,7 +74,10 @@ const TRANSFORMATION_OPTIONS = [
 ];
 
 const ARENA_IMAGE_CACHE_LIMIT = 40;
-const ARENA_IMAGE_MAX_IN_FLIGHT = 4;
+const ARENA_IMAGE_MAX_IN_FLIGHT = 1;
+const ARENA_IMAGE_MIN_INTERVAL_MS = 120;
+const ARENA_PREDICTION_MIN_INTERVAL_MS = 250;
+const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
 
 const formatValue = (value: number | undefined) =>
   value === undefined || Number.isNaN(value) ? '--' : value.toFixed(3);
@@ -142,6 +145,8 @@ export const PilotArenaPage: React.FC = () => {
   const predictionInFlightRef = useRef<Record<string, boolean>>({});
   const predictionInFlightCountRef = useRef<Record<string, number>>({});
   const predictionBatchInFlightRef = useRef<Record<string, boolean>>({});
+  const predictionLastRequestAtRef = useRef<Record<string, number>>({});
+  const predictionBatchLastRequestAtRef = useRef<Record<string, number>>({});
   const pendingViewerIndexRef = useRef<Record<string, number>>({});
   const pendingBatchStartRef = useRef<Record<string, number>>({});
   const predictionCacheRef = useRef<Record<string, Record<number, { pilot: { angle: number; throttle: number } }>>>({});
@@ -167,9 +172,9 @@ export const PilotArenaPage: React.FC = () => {
   const hasRecords = records.length > 0;
   const maxIndex = Math.max(0, records.length - 1);
   const playbackSpeed = 1000 / Math.max(1, Number(config?.DRIVE_LOOP_HZ) || 60);
-  const evaluationIntervalMs = playbackSpeed;
-  const maxInferenceConcurrency = Math.max(2, Math.min(4, Number(config?.ARENA_INFERENCE_CONCURRENCY) || 2));
-  const prefetchFrameCount = Math.max(1, Math.min(60, Number(config?.ARENA_PREFETCH_FRAMES) || 12));
+  const evaluationIntervalMs = Math.max(playbackSpeed, ARENA_PREDICTION_MIN_INTERVAL_MS);
+  const maxInferenceConcurrency = Math.max(1, Math.min(2, Number(config?.ARENA_INFERENCE_CONCURRENCY) || 1));
+  const prefetchFrameCount = Math.max(0, Math.min(8, Number(config?.ARENA_PREFETCH_FRAMES) || 0));
   const predictionOptions = useMemo(() => ({
     preTransformations,
     augmentations: [
@@ -261,7 +266,7 @@ export const PilotArenaPage: React.FC = () => {
       return cachedImage;
     }
     const now = window.performance.now();
-    if (imageInFlightRef.current.size >= ARENA_IMAGE_MAX_IN_FLIGHT || now - lastImageRequestAtRef.current < 50) {
+    if (imageInFlightRef.current.size >= ARENA_IMAGE_MAX_IN_FLIGHT || now - lastImageRequestAtRef.current < ARENA_IMAGE_MIN_INTERVAL_MS) {
       return undefined;
     }
     lastImageRequestAtRef.current = now;
@@ -298,7 +303,7 @@ export const PilotArenaPage: React.FC = () => {
       [recordIndex]: { pilot },
     };
     const cachedIndexes = Object.keys(predictionCacheRef.current[localId]).map(Number).sort((a, b) => a - b);
-    while (cachedIndexes.length > 1000) {
+    while (cachedIndexes.length > 300) {
       const indexToDelete = cachedIndexes.shift();
       if (indexToDelete !== undefined) {
         delete predictionCacheRef.current[localId][indexToDelete];
@@ -311,6 +316,8 @@ export const PilotArenaPage: React.FC = () => {
     delete predictionInFlightRef.current[localId];
     delete predictionInFlightCountRef.current[localId];
     delete predictionBatchInFlightRef.current[localId];
+    delete predictionLastRequestAtRef.current[localId];
+    delete predictionBatchLastRequestAtRef.current[localId];
     delete pendingViewerIndexRef.current[localId];
     delete pendingBatchStartRef.current[localId];
     delete predictionCacheRef.current[localId];
@@ -419,9 +426,13 @@ export const PilotArenaPage: React.FC = () => {
   ) => {
     if (!viewer.pilot || !hasRecords) return;
     const inFlightCount = predictionInFlightCountRef.current[viewer.localId] ?? 0;
-    if (options.playback && !options.force && inFlightCount >= maxInferenceConcurrency) {
-      pendingViewerIndexRef.current[viewer.localId] = recordIndex;
-      return;
+    const now = window.performance.now();
+    if (options.playback) {
+      if (inFlightCount >= maxInferenceConcurrency || now - (predictionLastRequestAtRef.current[viewer.localId] ?? 0) < ARENA_PREDICTION_MIN_INTERVAL_MS) {
+        pendingViewerIndexRef.current[viewer.localId] = recordIndex;
+        return;
+      }
+      predictionLastRequestAtRef.current[viewer.localId] = now;
     }
 
     predictionInFlightRef.current[viewer.localId] = true;
@@ -468,11 +479,16 @@ export const PilotArenaPage: React.FC = () => {
 
   const prefetchPredictions = useCallback(async (viewer: ViewerState, start: number, limit: number) => {
     if (!viewer.pilot || !hasRecords || limit <= 0) return;
-    if (predictionBatchInFlightRef.current[viewer.localId]) {
+    const now = window.performance.now();
+    if (
+      predictionBatchInFlightRef.current[viewer.localId]
+      || now - (predictionBatchLastRequestAtRef.current[viewer.localId] ?? 0) < ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS
+    ) {
       pendingBatchStartRef.current[viewer.localId] = start;
       return;
     }
 
+    predictionBatchLastRequestAtRef.current[viewer.localId] = now;
     predictionBatchInFlightRef.current[viewer.localId] = true;
     try {
       const data = await getArenaPredictions(viewer.pilot.id, {
@@ -562,7 +578,7 @@ export const PilotArenaPage: React.FC = () => {
         if (pendingIndex === targetIndex) {
           delete pendingViewerIndexRef.current[viewer.localId];
         }
-        refreshPrediction(viewer, targetIndex, { playback, force: playback });
+        refreshPrediction(viewer, targetIndex, { playback });
       }
 
       if (playback) {
