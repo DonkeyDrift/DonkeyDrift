@@ -91,13 +91,15 @@ async def get_records(offset: int = 0, limit: int = 100):
     }
 
 @router.get("/image")
-async def get_image(path: str):
+async def get_image(path: str, tubPath: Optional[str] = None):
     # path is relative to the tub images directory usually, or we assume it's the full path if we constructing it
     # In Tub v2, record contains "cam/image_array": "0_cam_image_array_.jpg"
     # And images are in tub_path/images/
     
     global current_tub_path
-    if not current_tub_path:
+    target_tub_path = tubPath if tubPath else current_tub_path
+    
+    if not target_tub_path:
         raise HTTPException(status_code=400, detail="No tub loaded")
         
     # Security check: ensure path doesn't go outside
@@ -107,11 +109,11 @@ async def get_image(path: str):
     # But sometimes it might include 'images/' prefix if coming from different sources
     clean_path = path.replace('images/', '').replace('images\\', '')
     
-    image_full_path = os.path.join(current_tub_path, 'images', clean_path)
+    image_full_path = os.path.join(target_tub_path, 'images', clean_path)
     
     if not os.path.exists(image_full_path):
          # Try without 'images' subdir just in case structure is different
-         image_full_path_alt = os.path.join(current_tub_path, clean_path)
+         image_full_path_alt = os.path.join(target_tub_path, clean_path)
          if os.path.exists(image_full_path_alt):
              return FileResponse(image_full_path_alt)
              

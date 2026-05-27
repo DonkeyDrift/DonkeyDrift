@@ -69,6 +69,7 @@ export const TubNavigator: React.FC = () => {
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
   const totalRecords = useStore((state) => state.totalRecords);
   const config = useStore((state) => state.config);
+  const tubPath = useStore((state) => state.tubPath);
   const isDragging = useStore((state) => state.isDragging);
   const setIsDragging = useStore((state) => state.setIsDragging);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -109,6 +110,11 @@ export const TubNavigator: React.FC = () => {
   useEffect(() => {
     isLoopingRef.current = isLooping;
   }, [isLooping]);
+
+  useEffect(() => {
+    // Clear image cache when tub changes to free memory
+    imageCacheRef.current.clear();
+  }, [tubPath]);
 
   useEffect(() => {
     const unsubscribe = useStore.subscribe((state) => {
@@ -159,7 +165,7 @@ export const TubNavigator: React.FC = () => {
   // Find image key
   const imageKey = currentRecord ? Object.keys(currentRecord).find(k => k.endsWith('image_array')) : null;
   const imagePath = imageKey && typeof currentRecord?.[imageKey] === 'string' ? currentRecord[imageKey] : null;
-  const imageUrl = useMemo(() => (imagePath ? getImageUrl(imagePath) : null), [imagePath]);
+  const imageUrl = useMemo(() => (imagePath ? getImageUrl(imagePath, tubPath) : null), [imagePath, tubPath]);
 
   // Animation Loop - 优化同步性能
   const animate = useCallback((time: number) => {
@@ -414,13 +420,13 @@ export const TubNavigator: React.FC = () => {
       const nextKey = Object.keys(nextRecord).find((k) => k.endsWith('image_array'));
       const nextPath = nextKey && typeof nextRecord?.[nextKey] === 'string' ? nextRecord[nextKey] : null;
       if (!nextPath) continue;
-      const url = getImageUrl(nextPath);
+      const url = getImageUrl(nextPath, tubPath);
       if (imageCacheRef.current.has(url)) continue;
       const img = new Image();
       img.src = url;
       imageCacheRef.current.set(url, img);
     }
-  }, [localIndex, records]);
+  }, [localIndex, records, tubPath]);
 
   const handleSliderInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newIndex = parseInt(e.target.value);

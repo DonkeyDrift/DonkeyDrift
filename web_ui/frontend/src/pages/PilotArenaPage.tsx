@@ -221,6 +221,10 @@ export const PilotArenaPage: React.FC = () => {
   }, [isLooping]);
 
   useEffect(() => {
+    imageCacheRef.current.clear();
+  }, [tubPath]);
+
+  useEffect(() => {
     if (!hasRecords && isPlaying) {
       setIsPlaying(false);
     }
@@ -344,7 +348,7 @@ export const PilotArenaPage: React.FC = () => {
     const record = records[recordIndex];
     const imagePath = getRecordImagePath(record);
     if (!canvas || !imagePath) return;
-    const imageUrl = getImageUrl(imagePath);
+    const imageUrl = getImageUrl(imagePath, tubPath);
     const draw = (imageToDraw: HTMLImageElement) => {
       if (imageToDraw.naturalWidth === 0) return;
       const ctx = canvas.getContext('2d');
@@ -368,7 +372,7 @@ export const PilotArenaPage: React.FC = () => {
     if (image?.complete) {
       draw(image);
     }
-  }, [cacheImage, records]);
+  }, [cacheImage, records, tubPath]);
 
   useEffect(() => {
     if (!isPlaying || !hasRecords) return;

@@ -83,8 +83,12 @@ export const restoreRecords = async (indexes: number[]) => {
   return response.data;
 };
 
-export const getImageUrl = (path: string) => {
-  return `${API_URL}/tub/image?path=${encodeURIComponent(path)}`;
+export const getImageUrl = (path: string, tubPath?: string) => {
+  let url = `${API_URL}/tub/image?path=${encodeURIComponent(path)}`;
+  if (tubPath) {
+    url += `&tubPath=${encodeURIComponent(tubPath)}`;
+  }
+  return url;
 };
 
 // ------------------------------------------------------------------
