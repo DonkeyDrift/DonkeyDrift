@@ -58,6 +58,11 @@ export const selectDirectory = async () => {
   return response.data;
 };
 
+export const browseDirectory = async (path?: string) => {
+  const response = await api.get('/config/browser', { params: { path } });
+  return response.data;
+};
+
 export const loadTub = async (path: string) => {
   const response = await api.post('/tub/load', { path });
   return response.data;

@@ -56,6 +56,40 @@ async def select_directory():
         logger.error(f"Failed to select directory: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/browser")
+async def list_directories(path: str = None):
+    """
+    List directories in the given path for web-based file browser.
+    If path is None, return directories in the user home.
+    """
+    if not path:
+        path = os.path.expanduser("~")
+    
+    path = os.path.abspath(path)
+    if not os.path.exists(path) or not os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+        
+    try:
+        dirs = []
+        for d in os.listdir(path):
+            try:
+                d_path = os.path.join(path, d)
+                if os.path.isdir(d_path) and not d.startswith('.'):
+                    dirs.append(d)
+            except PermissionError:
+                continue
+        dirs.sort()
+        parent = os.path.dirname(path)
+        return {
+            "current": path,
+            "parent": parent if parent != path else None,
+            "directories": dirs
+        }
+    except Exception as e:
+        logger.error(f"Failed to list directories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/load")
 async def load_config_route(request: ConfigLoadRequest):
     path = request.path

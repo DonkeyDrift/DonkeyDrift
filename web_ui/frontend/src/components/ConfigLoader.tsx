@@ -3,12 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, selectDirectory, loadTub, getApiErrorMessage } from '../services/api';
-import { FolderCog, FolderOpen } from 'lucide-react';
+import { loadConfig, loadTub, getApiErrorMessage } from '../services/api';
+import { FolderCog, FolderOpen, Search } from 'lucide-react';
+import { FileBrowserModal } from './FileBrowserModal';
 
 export const ConfigLoader: React.FC = () => {
   const { configPath, setConfig, setError, setLoading, config, setTub } = useStore();
   const [path, setPath] = useState(configPath);
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
   // Sync local path state with store configPath
   useEffect(() => {
@@ -28,28 +30,6 @@ export const ConfigLoader: React.FC = () => {
       console.warn('Auto-loading tub from ./data failed, user might need to select manually.');
     }
   }, [setTub]);
-
-  const handleLoad = useCallback(async () => {
-    setLoading(true);
-    try {
-      // First open directory picker
-      const selectData = await selectDirectory();
-      
-      if (selectData.path) {
-        setPath(selectData.path);
-        // Then load config from selected path
-        const data = await loadConfig(selectData.path);
-        setConfig(data.config, selectData.path);
-        
-        // Auto load tub from ./data
-        await autoLoadTub(selectData.path);
-      }
-    } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Failed to select or load config'));
-    } finally {
-      setLoading(false);
-    }
-  }, [setConfig, setError, setLoading, autoLoadTub]);
 
   const handleManualLoad = useCallback(async () => {
     if (!path.trim()) return;
@@ -80,6 +60,23 @@ export const ConfigLoader: React.FC = () => {
     }
   }, [path, autoLoadTub, setConfig, setError, setLoading, setTub]);
 
+  const handleBrowserSelect = async (selectedPath: string) => {
+    setPath(selectedPath);
+    setIsBrowserOpen(false);
+    
+    // Auto trigger load
+    setLoading(true);
+    try {
+      const data = await loadConfig(selectedPath);
+      setConfig(data.config, selectedPath);
+      await autoLoadTub(selectedPath);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to load config from selected directory'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!config && configPath) {
       handleManualLoad();
@@ -103,10 +100,19 @@ export const ConfigLoader: React.FC = () => {
             onChange={(e) => setPath(e.target.value)}
             aria-label="Config path input field"
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <Button 
-              onClick={handleLoad}
-              className="w-[30%] min-w-[100px]"
+              variant="secondary"
+              onClick={() => setIsBrowserOpen(true)}
+              className="min-w-[100px]"
+              aria-label="Browse configuration directory"
+            >
+              <Search className="w-4 h-4" />
+              Browse
+            </Button>
+            <Button 
+              onClick={handleManualLoad}
+              className="min-w-[100px]"
               aria-label="Load configuration"
             >
               <FolderOpen className="w-4 h-4" />
@@ -125,6 +131,14 @@ export const ConfigLoader: React.FC = () => {
           </p>
         )}
       </CardContent>
+      
+      <FileBrowserModal 
+        isOpen={isBrowserOpen}
+        onClose={() => setIsBrowserOpen(false)}
+        onSelect={handleBrowserSelect}
+        initialPath={path || undefined}
+        title="Select Car Directory"
+      />
     </Card>
   );
 };
