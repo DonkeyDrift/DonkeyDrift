@@ -49,6 +49,8 @@ export const TubEditor: React.FC = () => {
   const clearSelectionRange = useStore((state) => state.clearSelectionRange);
   const redoSelectionRange = useStore((state) => state.redoSelectionRange);
   const setAllRecords = useStore((state) => state.setAllRecords);
+  const deletedIndexes = useStore((state) => state.deletedIndexes);
+  const totalPhysicalRecords = useStore((state) => state.totalPhysicalRecords);
   const chartRef = useRef<ChartInstance<'line'> | null>(null);
   const lineDashOffsetRef = useRef(0);
   const visualSelectionRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
@@ -343,16 +345,19 @@ export const TubEditor: React.FC = () => {
       setIsProcessing(true);
       setProcessingMode(mode);
       try {
-        if (mode === 'delete') {
-          await deleteRecords(indexes);
-        } else {
-          await restoreRecords(indexes);
-        }
+        const actionResponse =
+          mode === 'delete'
+            ? await deleteRecords(indexes)
+            : await restoreRecords(indexes);
 
         const data = await getRecords(0, 100000);
         const nextRecords = data.records || [];
         preserveViewportOnRecordsChangeRef.current = true;
-        setAllRecords(nextRecords);
+        setAllRecords(
+          nextRecords,
+          actionResponse.total_physical_records,
+          actionResponse.deleted_indexes
+        );
         setActionError(null);
         if (rememberAction) {
           setActionHistory((prev) => {
@@ -384,19 +389,30 @@ export const TubEditor: React.FC = () => {
     const startIdx = range.start;
     const endIdx = range.end;
 
-    // The user input (range.start and range.end) represents the physical _index shown on the chart X-axis.
+    // The user input (range.start and range.end) are array indices (as shown
+    // in the index inputs), not physical _index values. We must map them to
+    // the actual _index values before sending to the backend.
     let indexes: number[] = [];
+    const start = Math.max(0, Math.min(startIdx, records.length - 1));
+    const end = Math.max(start, Math.min(endIdx, records.length - 1));
+
     if (mode === 'delete') {
-      // For delete, we must filter records to find all existing _index values within this selected physical range.
-      indexes = records
-        .filter((record) => record._index >= startIdx && record._index <= endIdx)
-        .map((record) => record._index);
+      // For delete, collect the _index values of the visible records in the
+      // selected array-index range.
+      indexes = records.slice(start, end + 1).map((record) => record._index);
     } else {
       // For restore, the deleted records are not in the current array.
-      // We generate all physical indexes in the range to tell the backend to restore them.
+      // We generate all physical indexes from the _index of the first selected
+      // record to the _index of the last selected record.
+      if (records.length === 0) {
+        setActionError('No records available');
+        return;
+      }
+      const startXValue = records[start]._index;
+      const endXValue = records[end]._index;
       const maxRestoreCount = 1000000; // Prevent out-of-memory if user inputs a huge range
-      const actualEnd = Math.min(endIdx, startIdx + maxRestoreCount);
-      for (let i = startIdx; i <= actualEnd; i++) {
+      const actualEnd = Math.min(endXValue, startXValue + maxRestoreCount);
+      for (let i = startXValue; i <= actualEnd; i++) {
         indexes.push(i);
       }
     }
@@ -597,6 +613,42 @@ export const TubEditor: React.FC = () => {
     setScrollProgress(Math.max(0, Math.min(1, nextProgress)));
   }, []);
 
+  const handleWheel = useCallback((event: React.WheelEvent) => {
+    if (!records.length) return;
+
+    // Ctrl/Meta + vertical wheel = zoom
+    if ((event.ctrlKey || event.metaKey) && event.deltaY !== 0) {
+      event.preventDefault();
+      if (event.deltaY < 0) {
+        handleZoomIn();
+      } else {
+        handleZoomOut();
+      }
+      return;
+    }
+
+    // Horizontal pan (trackpad two-finger swipe left/right)
+    // Require dominant horizontal delta to avoid interfering with vertical scrolling
+    if (Math.abs(event.deltaX) > Math.abs(event.deltaY) && Math.abs(event.deltaX) > 0) {
+      event.preventDefault();
+
+      const totalRecords = records.length;
+      const visibleCount = Math.max(
+        2,
+        Math.min(totalRecords, Math.ceil((totalRecords * MIN_ZOOM_PERCENT) / zoomPercent))
+      );
+      const maxStartIndex = Math.max(0, totalRecords - visibleCount);
+
+      if (maxStartIndex <= 0) return;
+
+      const containerWidth = containerRef.current?.clientWidth || 1;
+      const sensitivity = 1.5;
+      const deltaProgress = (event.deltaX / containerWidth) * sensitivity;
+      const newProgress = Math.max(0, Math.min(1, scrollProgress + deltaProgress));
+      setScrollProgress(newProgress);
+    }
+  }, [records.length, zoomPercent, scrollProgress, handleZoomIn, handleZoomOut]);
+
   const updateTooltipPosition = useCallback((x: number, y: number) => {
     if (!tooltipRef.current || !containerRef.current) {
       return;
@@ -611,7 +663,7 @@ export const TubEditor: React.FC = () => {
 
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (!chartRef.current || !containerRef.current || !records.length) return;
+      if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
 
       const rect = containerRef.current.getBoundingClientRect();
       const x = event.clientX - rect.left;
@@ -928,9 +980,6 @@ export const TubEditor: React.FC = () => {
       handleZoomIn,
       handleZoomOut,
       handleZoomReset,
-      selectionStartIndex,
-      selectionEndIndex,
-      setSelectionRange,
       redoSelectionRange,
     ]
   );
@@ -1085,22 +1134,7 @@ export const TubEditor: React.FC = () => {
         const currentRecord = records[latestIndex];
         const currentXValue = currentRecord ? currentRecord._index : latestIndex;
         
-        // When drawing the red line, we should use the actual pixel coordinate
-        // of the current playback position. If dragging the selection, the playback
-        // line should stick to the data point, but let's check if the user is 
-        // interacting and we want it to follow the mouse.
-        // Actually, currentIndex is already set by handleInteraction using getIndexFromPointerX,
-        // which maps the pixel to the nearest index. The issue is that there's a gap in _index,
-        // and the pixel for currentXValue (which is an _index) snaps to the physical index position,
-        // leaving a large gap to the mouse pointer if the mouse is over a deleted area.
-        // To make the red line follow the mouse over empty gaps, we should use the hover position if available.
-        let currentX = xAxis.getPixelForValue(currentXValue);
-        
-        const hoverPos = hoverPositionRef.current;
-        if (hoverPos && hoverPos.x >= chart.chartArea.left && hoverPos.x <= chart.chartArea.right) {
-            // When hovering, make the red line follow the mouse exactly
-            currentX = hoverPos.x;
-        }
+        const currentX = xAxis.getPixelForValue(currentXValue);
 
         if (!isNaN(currentX) && currentX >= chart.chartArea.left && currentX <= chart.chartArea.right) {
           ctx.save();
@@ -1195,7 +1229,7 @@ export const TubEditor: React.FC = () => {
         }
 
         const hoverPosData = hoverPositionRef.current;
-        if (hoverPosData && hoverPosData.x >= chartArea.left && hoverPosData.x <= chartArea.right) {
+        if (hoverPosData && hoverPosData.x >= chartArea.left && hoverPosData.x <= chartArea.right && !selectionDraftRef.current) {
           ctx.save();
           ctx.strokeStyle = 'rgb(34, 197, 94)';
           ctx.lineWidth = 2;
@@ -1259,72 +1293,6 @@ export const TubEditor: React.FC = () => {
     requestChartRender({ animateSelection: Boolean(selectionDraft) });
   }, [requestChartRender, selectionDraft]);
 
-  const selectionInfo = useMemo(() => {
-    if (!records.length) {
-      return null;
-    }
-
-    const baseTimestamp =
-      records[0] && typeof records[0]._timestamp_ms === 'number' ? records[0]._timestamp_ms : 0;
-
-    if (selectionDraft) {
-      const start = Math.min(selectionDraft.startIndex, selectionDraft.currentIndex);
-      const endInclusive = Math.max(selectionDraft.startIndex, selectionDraft.currentIndex);
-      const startRecord = records[start];
-      const endRecord = records[endInclusive];
-      const startTimeMs =
-        startRecord && typeof startRecord._timestamp_ms === 'number'
-          ? startRecord._timestamp_ms - baseTimestamp
-          : null;
-      const endTimeMs =
-        endRecord && typeof endRecord._timestamp_ms === 'number'
-          ? endRecord._timestamp_ms - baseTimestamp
-          : null;
-      const durationMs =
-        startTimeMs != null && endTimeMs != null ? Math.max(0, endTimeMs - startTimeMs) : null;
-
-      return {
-        startIndex: start,
-        endIndex: endInclusive,
-        startTimeMs,
-        endTimeMs,
-        durationMs,
-        isDraft: true,
-      };
-    }
-
-    if (selectionStartIndex != null && selectionEndIndex != null) {
-      const start = Math.min(selectionStartIndex, Math.max(0, records.length - 1));
-      const endInclusive = Math.min(
-        Math.max(selectionEndIndex - 1, start),
-        Math.max(0, records.length - 1)
-      );
-      const startRecord = records[start];
-      const endRecord = records[endInclusive];
-      const startTimeMs =
-        startRecord && typeof startRecord._timestamp_ms === 'number'
-          ? startRecord._timestamp_ms - baseTimestamp
-          : null;
-      const endTimeMs =
-        endRecord && typeof endRecord._timestamp_ms === 'number'
-          ? endRecord._timestamp_ms - baseTimestamp
-          : null;
-      const durationMs =
-        startTimeMs != null && endTimeMs != null ? Math.max(0, endTimeMs - startTimeMs) : null;
-
-      return {
-        startIndex: start,
-        endIndex: endInclusive,
-        startTimeMs,
-        endTimeMs,
-        durationMs,
-        isDraft: false,
-      };
-    }
-
-    return null;
-  }, [selectionDraft, selectionStartIndex, selectionEndIndex, records]);
-
   const sliderSelectionRange = useMemo(() => {
     if (!records.length) {
       return null;
@@ -1347,20 +1315,53 @@ export const TubEditor: React.FC = () => {
   }, [records.length, selectionDraft, selectionStartIndex, selectionEndIndex]);
 
   const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
-    if (!sliderSelectionRange || !records.length) {
+    if (!sliderSelectionRange || !records.length || !totalPhysicalRecords) {
       return null;
     }
 
-    const total = records.length;
-    const leftPercent = (sliderSelectionRange.startIndex / total) * 100;
-    const widthPercent =
-      ((sliderSelectionRange.endIndex - sliderSelectionRange.startIndex) / total) * 100;
+    // Map array indices to physical _index values so the green bar aligns
+    // with the red deleted bars (which are plotted in the physical coordinate space).
+    const startRecord = records[Math.max(0, Math.min(sliderSelectionRange.startIndex, records.length - 1))];
+    const endRecord = records[Math.max(0, Math.min(sliderSelectionRange.endIndex - 1, records.length - 1))];
+
+    const startXValue = startRecord ? startRecord._index : 0;
+    const endXValue = endRecord ? endRecord._index + 1 : startXValue + 1;
+
+    const leftPercent = (startXValue / totalPhysicalRecords) * 100;
+    const widthPercent = ((endXValue - startXValue) / totalPhysicalRecords) * 100;
 
     return {
       left: `${leftPercent}%`,
       width: `max(${widthPercent}%, 2px)`,
     };
-  }, [records.length, sliderSelectionRange]);
+  }, [records, totalPhysicalRecords, sliderSelectionRange]);
+
+  const sliderDeletedStyles = useMemo<{ left: string; width: string }[]>(() => {
+    if (!deletedIndexes.length || !totalPhysicalRecords) {
+      return [];
+    }
+
+    // Group deleted indexes into contiguous ranges
+    const ranges: { start: number; end: number }[] = [];
+    let start = deletedIndexes[0];
+    let end = deletedIndexes[0];
+
+    for (let i = 1; i < deletedIndexes.length; i++) {
+      if (deletedIndexes[i] === end + 1) {
+        end = deletedIndexes[i];
+      } else {
+        ranges.push({ start, end });
+        start = deletedIndexes[i];
+        end = deletedIndexes[i];
+      }
+    }
+    ranges.push({ start, end });
+
+    return ranges.map(({ start, end }) => ({
+      left: `${(start / totalPhysicalRecords) * 100}%`,
+      width: `max(${((end - start + 1) / totalPhysicalRecords) * 100}%, 2px)`,
+    }));
+  }, [deletedIndexes, totalPhysicalRecords]);
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
@@ -1402,7 +1403,7 @@ export const TubEditor: React.FC = () => {
 
   const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
-      if (!chartRef.current || !containerRef.current || !records.length) return;
+      if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
       if (!selectionDraftRef.current) return;
       if (event.touches.length === 0) return;
 
@@ -1700,6 +1701,7 @@ export const TubEditor: React.FC = () => {
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onWheel={handleWheel}
         >
           <div className="pointer-events-none absolute inset-0 h-full min-h-0 w-full">
             <Line 
@@ -1744,6 +1746,17 @@ export const TubEditor: React.FC = () => {
               />
             </div>
           )}
+          {sliderDeletedStyles.map((style, i) => (
+            <div
+              key={i}
+              className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2"
+            >
+              <div
+                className="absolute h-full rounded-sm border border-red-400/60 bg-red-500/40"
+                style={style}
+              />
+            </div>
+          ))}
           <input
             type="range"
             min="0"

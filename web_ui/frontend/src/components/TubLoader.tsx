@@ -4,8 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadTub, selectDirectory } from '../services/api';
-import { Database, FolderOpen } from 'lucide-react';
+import { loadTub } from '../services/api';
+import { Database, FolderOpen, Search } from 'lucide-react';
+import { FileBrowserModal } from './FileBrowserModal';
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (error && typeof error === 'object' && 'response' in error) {
@@ -19,26 +20,36 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 export const TubLoader: React.FC = () => {
   const { tubPath, setTub, setError, setLoading, config, totalRecords, fields } = useStore();
   const [path, setPath] = useState(tubPath);
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
   // Sync local path state with store tubPath (e.g. when auto-loaded by ConfigLoader)
   React.useEffect(() => {
     setPath(tubPath);
   }, [tubPath]);
 
-  const handleLoad = async () => {
+  const handleManualLoad = async () => {
+    if (!path.trim()) return;
     setLoading(true);
     try {
-      // First open directory picker
-      const selectData = await selectDirectory();
-      
-      if (selectData.path) {
-        setPath(selectData.path);
-        // Then load tub from selected path
-        const data = await loadTub(selectData.path);
-        setTub(data.path, data.records || [], data.fields || []);
-      }
+      const data = await loadTub(path);
+      setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to select or load tub'));
+      setError(getErrorMessage(err, 'Failed to load tub'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBrowserSelect = async (selectedPath: string) => {
+    setPath(selectedPath);
+    setIsBrowserOpen(false);
+    
+    setLoading(true);
+    try {
+      const data = await loadTub(selectedPath);
+      setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to load tub from selected directory'));
     } finally {
       setLoading(false);
     }
@@ -61,11 +72,21 @@ export const TubLoader: React.FC = () => {
             onChange={(e) => setPath(e.target.value)}
             aria-label="Tub path input field"
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <Button 
-              onClick={handleLoad}
+              variant="secondary"
+              onClick={() => setIsBrowserOpen(true)}
               disabled={!config}
-              className="w-[30%] min-w-[100px]"
+              className="min-w-[100px]"
+              aria-label="Browse tub directory"
+            >
+              <Search className="w-4 h-4" />
+              Browse
+            </Button>
+            <Button 
+              onClick={handleManualLoad}
+              disabled={!config}
+              className="min-w-[100px]"
               aria-label="Load tub"
             >
               <FolderOpen className="w-4 h-4" />
@@ -89,6 +110,14 @@ export const TubLoader: React.FC = () => {
           </p>
         )}
       </CardContent>
+      
+      <FileBrowserModal 
+        isOpen={isBrowserOpen}
+        onClose={() => setIsBrowserOpen(false)}
+        onSelect={handleBrowserSelect}
+        initialPath={path || undefined}
+        title="Select Tub Directory"
+      />
     </Card>
   );
 };

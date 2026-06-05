@@ -1,24 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { AxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, selectDirectory, loadTub } from '../services/api';
-import { FolderCog, FolderOpen } from 'lucide-react';
-
-const getErrorMessage = (error: unknown, fallback: string) => {
-  if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as AxiosError<{ detail?: string }>).response;
-    const detail = response?.data?.detail;
-    if (detail) return detail;
-  }
-  return fallback;
-};
+import { loadConfig, loadTub, getApiErrorMessage } from '../services/api';
+import { FolderCog, FolderOpen, Search } from 'lucide-react';
+import { FileBrowserModal } from './FileBrowserModal';
 
 export const ConfigLoader: React.FC = () => {
   const { configPath, setConfig, setError, setLoading, config, setTub } = useStore();
   const [path, setPath] = useState(configPath);
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
   // Sync local path state with store configPath
   useEffect(() => {
@@ -33,35 +25,14 @@ export const ConfigLoader: React.FC = () => {
         : `${carPath}/data`;
       
       const data = await loadTub(tubPath);
-      setTub(data.path, data.records || [], data.fields || []);
+      setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
     } catch {
       console.warn('Auto-loading tub from ./data failed, user might need to select manually.');
     }
   }, [setTub]);
 
-  const handleLoad = useCallback(async () => {
-    setLoading(true);
-    try {
-      // First open directory picker
-      const selectData = await selectDirectory();
-      
-      if (selectData.path) {
-        setPath(selectData.path);
-        // Then load config from selected path
-        const data = await loadConfig(selectData.path);
-        setConfig(data.config, selectData.path);
-        
-        // Auto load tub from ./data
-        await autoLoadTub(selectData.path);
-      }
-    } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to select or load config'));
-    } finally {
-      setLoading(false);
-    }
-  }, [setConfig, setError, setLoading, autoLoadTub]);
-
   const handleManualLoad = useCallback(async () => {
+    if (!path.trim()) return;
     setLoading(true);
     try {
       const data = await loadConfig(path);
@@ -71,7 +42,7 @@ export const ConfigLoader: React.FC = () => {
       if (currentTubPath && currentTubPath !== '/home/dkc/projects/mycar/data') {
         try {
           const tubData = await loadTub(currentTubPath);
-          setTub(tubData.path, tubData.records || [], tubData.fields || []);
+          setTub(tubData.path, tubData.records || [], tubData.fields || [], tubData.total_physical_records, tubData.deleted_indexes);
         } catch (err) {
           console.warn('Failed to load persisted tub path, falling back to auto-load', err);
           await autoLoadTub(path);
@@ -80,11 +51,31 @@ export const ConfigLoader: React.FC = () => {
         await autoLoadTub(path);
       }
     } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to load config'));
+      const message = getApiErrorMessage(err, 'Failed to load config');
+      if (message !== 'Directory not found' && message !== 'config.py not found in directory') {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
   }, [path, autoLoadTub, setConfig, setError, setLoading, setTub]);
+
+  const handleBrowserSelect = async (selectedPath: string) => {
+    setPath(selectedPath);
+    setIsBrowserOpen(false);
+    
+    // Auto trigger load
+    setLoading(true);
+    try {
+      const data = await loadConfig(selectedPath);
+      setConfig(data.config, selectedPath);
+      await autoLoadTub(selectedPath);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to load config from selected directory'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!config && configPath) {
@@ -104,15 +95,24 @@ export const ConfigLoader: React.FC = () => {
       <CardContent>
         <div className="flex flex-col gap-3">
           <Input
-            placeholder="Config path, e.g. /home/dkc/projects/mycar"
+            placeholder="Config path, e.g. ~/mycar or /home/dkc/projects/mycar"
             value={path}
             onChange={(e) => setPath(e.target.value)}
             aria-label="Config path input field"
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <Button 
-              onClick={handleLoad}
-              className="w-[30%] min-w-[100px]"
+              variant="secondary"
+              onClick={() => setIsBrowserOpen(true)}
+              className="min-w-[100px]"
+              aria-label="Browse configuration directory"
+            >
+              <Search className="w-4 h-4" />
+              Browse
+            </Button>
+            <Button 
+              onClick={handleManualLoad}
+              className="min-w-[100px]"
               aria-label="Load configuration"
             >
               <FolderOpen className="w-4 h-4" />
@@ -131,6 +131,14 @@ export const ConfigLoader: React.FC = () => {
           </p>
         )}
       </CardContent>
+      
+      <FileBrowserModal 
+        isOpen={isBrowserOpen}
+        onClose={() => setIsBrowserOpen(false)}
+        onSelect={handleBrowserSelect}
+        initialPath={path || undefined}
+        title="Select Car Directory"
+      />
     </Card>
   );
 };

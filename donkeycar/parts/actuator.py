@@ -1202,7 +1202,7 @@ class Arduino:
             self.throttleCmd = val
             
         # print("Steering: %d, Throttle: %d" % (self.PWM_steering, self.PWM_throttle))
-        # print("Mode: %s, Steering: %d, Throttle: %d" % (self.mode, self.steeringCmd, self.throttleCmd))
+        # print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (self.mode, self.steeringCmd, self.throttleCmd))
         # with Arduino.ard_lock:
         #     Arduino.ard_device.write(("%d:%d\n" % (self.PWM_steering, self.PWM_throttle)).encode('ascii'))
         # return
@@ -1241,9 +1241,13 @@ class Arduino:
                         raw_throttle = int(match.group(1))
                         raw_steering = int(match.group(2))
                         
-                        self.throttle = clamp(raw_throttle, -30, 30)
-                        self.steering = clamp(raw_steering, -100, 100)
-                        
+                        clamped_throttle = clamp(raw_throttle, -100, 100)
+                        clamped_steering = clamp(raw_steering, -100, 100)
+                        self.throttle = utils.map_range_float(
+                            clamped_throttle, -100, 100, -1.0, 1.0)
+                        self.steering = utils.map_range_float(
+                            clamped_steering, -100, 100, -1.0, 1.0)
+
                         logger.debug(f"解析结果: throttle={self.throttle}(原始:{raw_throttle}) steering={self.steering}(原始:{raw_steering})")
                         return {
                             'throttle': self.throttle,
@@ -1298,7 +1302,7 @@ class ArdPWMSteering:
                 else:
                     if(self.Input_Temp):
                         self.controller.Input_RC = self.Input_Temp
-                        print("Mode: %s, Steering: %d, Throttle: %d" % (
+                        print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (
                             self.mode, 
                             self.controller.Input_RC['steering'], 
                             self.controller.Input_RC['throttle']
@@ -1326,7 +1330,7 @@ class ArdPWMSteering:
             self.controller.set_cmd(self.mode, self.channel, self.angle_val)
         else:
             if(self.controller.Input_RC):
-                                print("Mode: %s, Steering: %d, Throttle: %d" % (
+                                print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (
                                     self.mode, 
                                     self.controller.Input_RC['steering'], 
                                     self.controller.Input_RC['throttle']
@@ -1380,7 +1384,7 @@ class ArdPWMThrottle:
                 else:
                     if(self.Input_Temp):
                         self.controller.Input_RC = self.Input_Temp
-                        print("Mode: %s, Steering: %d, Throttle: %d" % (
+                        print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (
                             self.mode, 
                             self.controller.Input_RC['steering'], 
                             self.controller.Input_RC['throttle']

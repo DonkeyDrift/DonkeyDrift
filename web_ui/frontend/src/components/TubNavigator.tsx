@@ -68,8 +68,8 @@ export const TubNavigator: React.FC = () => {
   const records = useStore((state) => state.records);
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
   const totalRecords = useStore((state) => state.totalRecords);
-  const tubTotalRecords = useStore((state) => state.tubTotalRecords);
   const config = useStore((state) => state.config);
+  const tubPath = useStore((state) => state.tubPath);
   const isDragging = useStore((state) => state.isDragging);
   const setIsDragging = useStore((state) => state.setIsDragging);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -112,6 +112,11 @@ export const TubNavigator: React.FC = () => {
   }, [isLooping]);
 
   useEffect(() => {
+    // Clear image cache when tub changes to free memory
+    imageCacheRef.current.clear();
+  }, [tubPath]);
+
+  useEffect(() => {
     const unsubscribe = useStore.subscribe((state) => {
       currentIndexRef.current = state.currentIndex;
       
@@ -147,7 +152,7 @@ export const TubNavigator: React.FC = () => {
     });
 
     return unsubscribe;
-  }, [isDragging]);
+  }, [isDragging, setIsPlaying]);
 
   // Use a local state for the index to avoid triggering global store re-renders 60 times/sec
   const [localIndex, setLocalIndex] = useState(currentIndexRef.current);
@@ -160,7 +165,7 @@ export const TubNavigator: React.FC = () => {
   // Find image key
   const imageKey = currentRecord ? Object.keys(currentRecord).find(k => k.endsWith('image_array')) : null;
   const imagePath = imageKey && typeof currentRecord?.[imageKey] === 'string' ? currentRecord[imageKey] : null;
-  const imageUrl = useMemo(() => (imagePath ? getImageUrl(imagePath) : null), [imagePath]);
+  const imageUrl = useMemo(() => (imagePath ? getImageUrl(imagePath, tubPath) : null), [imagePath, tubPath]);
 
   // Animation Loop - 优化同步性能
   const animate = useCallback((time: number) => {
@@ -236,7 +241,7 @@ export const TubNavigator: React.FC = () => {
     }
     
     requestRef.current = requestAnimationFrame(animate);
-  }, [playbackSpeed, totalRecords, setCurrentIndex]);
+  }, [playbackSpeed, totalRecords, setCurrentIndex, setIsPlaying]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -316,7 +321,7 @@ export const TubNavigator: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [setIsLooping, setIsPlaying]);
 
   useEffect(() => {
     if (!imageUrl) {
@@ -415,20 +420,20 @@ export const TubNavigator: React.FC = () => {
       const nextKey = Object.keys(nextRecord).find((k) => k.endsWith('image_array'));
       const nextPath = nextKey && typeof nextRecord?.[nextKey] === 'string' ? nextRecord[nextKey] : null;
       if (!nextPath) continue;
-      const url = getImageUrl(nextPath);
+      const url = getImageUrl(nextPath, tubPath);
       if (imageCacheRef.current.has(url)) continue;
       const img = new Image();
       img.src = url;
       imageCacheRef.current.set(url, img);
     }
-  }, [localIndex, records]);
+  }, [localIndex, records, tubPath]);
 
   const handleSliderInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newIndex = parseInt(e.target.value);
     setIsPlaying(false); // Stop playing when user scrubs
     displayIndexRef.current = newIndex;
     setLocalIndex(newIndex);
-  }, []);
+  }, [setIsPlaying]);
 
   const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newIndex = parseInt(e.target.value);
@@ -437,12 +442,12 @@ export const TubNavigator: React.FC = () => {
     displayIndexRef.current = newIndex;
     setLocalIndex(newIndex);
     setCurrentIndex(newIndex);
-  }, [setCurrentIndex, setIsDragging]);
+  }, [setCurrentIndex, setIsDragging, setIsPlaying]);
 
   const handleSliderMouseDown = useCallback(() => {
     setIsDragging(true);
     setIsPlaying(false);
-  }, [setIsDragging]);
+  }, [setIsDragging, setIsPlaying]);
 
   const handleSliderMouseUp = useCallback(() => {
     setIsDragging(false);
@@ -454,7 +459,7 @@ export const TubNavigator: React.FC = () => {
     if (isPlayingRef.current) {
       setIsPlaying(false);
     }
-  }, [localIndex, imagePath]);
+  }, [localIndex, imagePath, setIsPlaying]);
 
   if (!records.length) {
     return (
@@ -545,7 +550,7 @@ export const TubNavigator: React.FC = () => {
               onMouseDown={handleSliderMouseDown}
               onMouseUp={handleSliderMouseUp}
               recordIndex={localIndex}
-              totalRecords={tubTotalRecords}
+              totalRecords={totalRecords}
             />
 
             <div className="grid grid-cols-4 gap-2">
