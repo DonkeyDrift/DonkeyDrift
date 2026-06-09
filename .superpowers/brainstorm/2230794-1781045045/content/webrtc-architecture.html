@@ -1,0 +1,53 @@
+<h2>Drive 60FPS WebRTC 架构草图</h2>
+<p class="subtitle">目标：320×240、端到端真实 60FPS；后端只做信令，视频点对点传输。</p>
+
+<div class="mockup">
+  <div class="mockup-header">推荐架构：aiortc 内嵌 WebRTC Track</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:stretch;">
+      <div style="border:1px solid rgba(34,211,238,.35);border-radius:12px;padding:14px;background:rgba(8,47,73,.25);">
+        <div class="label">车端 / 模拟车端</div>
+        <h3>DriveApiBridge</h3>
+        <p>从 <code>cam/image_array</code> 获取 320×240 帧</p>
+        <p>将最新帧送入 <code>aiortc.VideoStreamTrack</code></p>
+        <p>控制与状态继续走现有 WebSocket</p>
+      </div>
+      <div style="border:1px solid rgba(250,204,21,.35);border-radius:12px;padding:14px;background:rgba(113,63,18,.18);">
+        <div class="label">Web UI 后端</div>
+        <h3>FastAPI 信令</h3>
+        <p>新增 WebRTC offer / answer / ICE 信令</p>
+        <p>不转发媒体流，不承担视频编码压力</p>
+        <p>保留旧 MJPEG 作为兼容降级</p>
+      </div>
+      <div style="border:1px solid rgba(52,211,153,.35);border-radius:12px;padding:14px;background:rgba(6,78,59,.2);">
+        <div class="label">浏览器 Drive 页面</div>
+        <h3>RTCPeerConnection</h3>
+        <p>接收点对点视频轨道并绑定到 <code>&lt;video&gt;</code></p>
+        <p>用 requestVideoFrameCallback 统计真实展示 FPS</p>
+        <p>失败时自动重建连接或降级 MJPEG</p>
+      </div>
+    </div>
+    <div style="margin-top:18px;text-align:center;color:#94a3b8;">
+      <strong>视频流：</strong>车端 ⇄ 浏览器 WebRTC P2P　　<strong>信令：</strong>车端/浏览器 ⇄ FastAPI　　<strong>控制：</strong>沿用 /api/drive/ws
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>设计重点</h4>
+    <ul>
+      <li>把视频链路从 JSON/base64/MJPEG 中解耦</li>
+      <li>后端只负责协调，不成为 60FPS 瓶颈</li>
+      <li>保留现有控制通道，避免控制被视频阻塞</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>关键前提</h4>
+    <ul>
+      <li>Vehicle 主循环必须能提供接近 60Hz 的新帧</li>
+      <li>PC 模拟车端先验收，真实车端另行验证性能</li>
+      <li>需要新增 WebRTC 依赖与信令测试</li>
+    </ul>
+  </div>
+</div>
