@@ -1163,8 +1163,7 @@ class DriveCommand(DonkeyCommand):
     def execute(self):
         console.clear()
         console.print(Panel(f"[bold orange1]{self.description}[/bold orange1]", title=f"配置 {self.name}"))
-        
-        # 检查是否需要有效的 mycar 目录
+
         if self.requires_mycar_folder and not is_valid_mycar_folder():
             console.print(Panel(
                 "[bold red]错误：当前目录不是有效的 mycar 项目文件夹！[/bold red]\n\n"
@@ -1177,20 +1176,19 @@ class DriveCommand(DonkeyCommand):
             return
 
         current_params = {}
-        console.print("[dim]将打开 DonkeyDrifter Web UI 的 Drive 标签页: http://localhost:5188/#/drive[/dim]")
+        car_path = Path.cwd()
+        web_cmd = self.get_command_line(current_params)
+        car_cmd = self.get_car_command_line()
+        cmd_str = self.get_preview_command(web_cmd, car_cmd)
 
-        # Generate preview
-        cmd_list = self.get_command_line(current_params)
-        cmd_str = " ".join(cmd_list)
-        
+        console.print("[dim]将启动 DonkeyDrifter Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
         console.print("\n[bold yellow]命令预览:[/bold yellow]")
-        console.print(Panel(f"[green]{cmd_str}[/green]", title="Shell Command"))
+        console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
 
-        # Confirm execution
         console.print("([green]y[/green]:执行 [red]n[/red]:取消 [orange1]c[/orange1]:复制命令)")
         action = Prompt.ask(
-            "请选择操作", 
-            choices=["y", "n", "c", "copy"], 
+            "请选择操作",
+            choices=["y", "n", "c", "copy"],
             default="y",
             show_choices=False
         )
@@ -1210,117 +1208,37 @@ class DriveCommand(DonkeyCommand):
             time.sleep(1)
             return
 
-        # Execute and log
         self.history_mgr.update_last_params(self.name, current_params)
         self.history_mgr.add_command_log(cmd_str)
-        
+
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")
-        
+
+        processes = []
         try:
-            # 针对 Windows 和其他系统的处理
-            creation_flags = 0
-            if sys.platform == "win32":
-                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
-            
-            process = subprocess.Popen(
-                cmd_list,
+            creation_flags = self.get_creation_flags()
+            web_process = subprocess.Popen(web_cmd, creationflags=creation_flags)
+            processes.append(web_process)
+
+            car_env = os.environ.copy()
+            car_env["DRIVE_API_SERVER_URL"] = self.get_drive_api_server_url()
+            car_process = subprocess.Popen(
+                car_cmd,
+                cwd=car_path,
+                env=car_env,
                 creationflags=creation_flags
             )
-            
-            # 键盘监听循环
-            import signal
-            import select
-            
-            # Windows 键盘监听
-            def is_esc_pressed_win():
-                try:
-                    import msvcrt
-                    if msvcrt.kbhit():
-                        if ord(msvcrt.getch()) == 27: # ESC
-                            return True
-                except ImportError:
-                    pass
-                return False
+            processes.append(car_process)
 
-            # Linux/Mac 键盘监听
-            def is_esc_pressed_unix():
-                try:
-                    import sys
-                    import termios
-                    import tty
-                    
-                    # 检查 stdin 是否有数据
-                    if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
-                        c = sys.stdin.read(1)
-                        if c == '\x1b': # ESC
-                            return True
-                except ImportError:
-                    pass
-                return False
-
-            # 保存终端设置 (仅限 Unix)
-            old_settings = None
-            if sys.platform != "win32":
-                try:
-                    import termios
-                    import tty
-                    old_settings = termios.tcgetattr(sys.stdin)
-                    tty.setcbreak(sys.stdin.fileno())
-                except Exception:
-                    pass
-
-            try:
-                while process.poll() is None:
-                    esc_pressed = False
-                    if sys.platform == "win32":
-                        esc_pressed = is_esc_pressed_win()
-                    else:
-                        esc_pressed = is_esc_pressed_unix()
-
-                    if esc_pressed:
-                        console.print("\n[yellow]检测到 ESC 键，正在停止...[/yellow]")
-                        if sys.platform == "win32":
-                            os.kill(process.pid, signal.CTRL_C_EVENT)
-                        else:
-                            process.send_signal(signal.SIGINT)
-                        
-                        try:
-                            process.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                        break
-                    
-                    # 避免 CPU 占用过高
-                    time.sleep(0.1)
-            finally:
-                # 恢复终端设置 (仅限 Unix)
-                if old_settings:
-                    import termios
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-
-            if process.poll() is None:
-                # 如果还没有结束（非 ESC 退出，或者 Linux 环境），继续等待
-                process.wait()
-            
-            if process.returncode == 0 or process.returncode == 3221225786: # 3221225786 is CTRL+C on Windows
-                console.print(f"\n[bold green]✓ 执行结束[/bold green]")
-            else:
-                console.print(f"\n[bold red]✗ 执行失败 (Exit Code: {process.returncode})[/bold red]")
-                console.print(f"[dim]请检查上方错误日志[/dim]")
-
+            self.monitor_processes(web_process, car_process)
+            console.print(f"\n[bold green]✓ 执行结束[/bold green]")
         except KeyboardInterrupt:
-            # 捕获父进程的 Ctrl+C，尝试优雅关闭子进程
             console.print("\n[yellow]收到中断信号，正在停止...[/yellow]")
-            if process and process.poll() is None:
-                if sys.platform == "win32":
-                    os.kill(process.pid, signal.CTRL_C_EVENT)
-                else:
-                    process.send_signal(signal.SIGINT)
-                process.wait()
+            self.stop_processes(processes)
         except Exception as e:
             console.print(f"\n[bold red]✗ 发生异常: {e}[/bold red]")
-        
+            self.stop_processes(processes)
+
         Prompt.ask("\n按回车键返回菜单...")
 
     def get_command_line(self, params):
@@ -1330,6 +1248,87 @@ class DriveCommand(DonkeyCommand):
             cmd.extend(["--path", str(web_ui_path)])
         cmd.extend(["--open", "--route", "/drive"])
         return cmd
+
+    def get_car_command_line(self):
+        return [sys.executable, "manage.py", "drive"]
+
+    def get_drive_api_server_url(self):
+        return "ws://localhost:8000/api/drive/ws"
+
+    def get_preview_command(self, web_cmd, car_cmd):
+        car_prefix = f"DRIVE_API_SERVER_URL={self.get_drive_api_server_url()}"
+        return "\n\n".join([
+            "Web Console:\n" + " ".join(web_cmd),
+            "车辆进程:\n" + " ".join([car_prefix] + car_cmd),
+        ])
+
+    def get_creation_flags(self):
+        if sys.platform == "win32":
+            return subprocess.CREATE_NEW_PROCESS_GROUP
+        return 0
+
+    def stop_processes(self, processes):
+        import signal
+
+        for process in reversed(processes):
+            if process and process.poll() is None:
+                if sys.platform == "win32":
+                    os.kill(process.pid, signal.CTRL_C_EVENT)
+                else:
+                    process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+    def monitor_processes(self, web_process, car_process):
+        import select
+
+        def is_esc_pressed_win():
+            try:
+                import msvcrt
+                if msvcrt.kbhit():
+                    return ord(msvcrt.getch()) == 27
+            except ImportError:
+                pass
+            return False
+
+        def is_esc_pressed_unix():
+            try:
+                if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+                    return sys.stdin.read(1) == '\x1b'
+            except Exception:
+                pass
+            return False
+
+        old_settings = None
+        if sys.platform != "win32":
+            try:
+                import termios
+                import tty
+                old_settings = termios.tcgetattr(sys.stdin)
+                tty.setcbreak(sys.stdin.fileno())
+            except Exception:
+                pass
+
+        car_exit_reported = False
+        try:
+            while web_process.poll() is None:
+                esc_pressed = is_esc_pressed_win() if sys.platform == "win32" else is_esc_pressed_unix()
+                if esc_pressed:
+                    console.print("\n[yellow]检测到 ESC 键，正在停止...[/yellow]")
+                    self.stop_processes([web_process, car_process])
+                    return
+
+                if not car_exit_reported and car_process.poll() is not None:
+                    console.print("\n[yellow]车辆进程已退出，Web Console 继续运行。[/yellow]")
+                    car_exit_reported = True
+
+                time.sleep(0.1)
+        finally:
+            if old_settings:
+                import termios
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 class DonkeyUICommand(DonkeyCommand):
     def __init__(self):
