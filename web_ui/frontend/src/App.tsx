@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { SidePanel } from './components/SidePanel';
 import { TubNavigator } from './components/TubNavigator';
@@ -65,6 +65,29 @@ function TubManagerPage() {
   );
 }
 
+function AppShell() {
+  const { pathname } = useLocation();
+  const shouldShowLoaders = pathname !== '/drive';
+
+  return (
+    <ErrorBoundary>
+      {shouldShowLoaders && <SidePanel />}
+      <Layout>
+        <React.Suspense fallback={<div className="text-sm text-zinc-400">Loading</div>}>
+          <Routes>
+            <Route path="/" element={<TubManagerPage />} />
+            <Route path="/trainer" element={<TrainerPage />} />
+            <Route path="/drive" element={<DrivePage />} />
+            <Route path="/calibrate" element={<CalibratePage />} />
+            <Route path="/pilot" element={<PilotArenaPage />} />
+            <Route path="/connector" element={<CarConnectorPage />} />
+          </Routes>
+        </React.Suspense>
+      </Layout>
+    </ErrorBoundary>
+  );
+}
+
 function App() {
   useEffect(() => {
     const root = document.getElementById('root');
@@ -75,21 +98,7 @@ function App() {
 
   return (
     <HashRouter>
-      <ErrorBoundary>
-        <SidePanel />
-        <Layout>
-          <React.Suspense fallback={<div className="text-sm text-zinc-400">Loading</div>}>
-            <Routes>
-              <Route path="/" element={<TubManagerPage />} />
-              <Route path="/trainer" element={<TrainerPage />} />
-              <Route path="/drive" element={<DrivePage />} />
-              <Route path="/calibrate" element={<CalibratePage />} />
-              <Route path="/pilot" element={<PilotArenaPage />} />
-              <Route path="/connector" element={<CarConnectorPage />} />
-            </Routes>
-          </React.Suspense>
-        </Layout>
-      </ErrorBoundary>
+      <AppShell />
     </HashRouter>
   );
 }

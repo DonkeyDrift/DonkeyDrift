@@ -41,15 +41,14 @@ AI_THROTTLE_MULT = 1.1  # 自动驾驶时，油门的缩放因子（默认：1.1
 
 #--------------------------For DonkeySim 驴车模拟器相关配置
 # DonkeySim 驴车模拟器相关配置
-DONKEY_GYM = False           # 是否使用DonkeySim模拟器（默认：False）
+DONKEY_GYM = True           # 是否使用DonkeySim模拟器（默认：False）
 DONKEY_SIM_PATH = "remote"  # DonkeySim模拟器的安装路基（默认："remote"，需要先运行DonkeySim模拟器）
 GYM_CONF = { 
-    "body_style" : "donkey",        # 车子模型（"donkey" | "bare" | "car01" | "f1" | "cybertruck")
-    "body_rgb" : (128, 128, 128),   # 车子颜色(红, 绿, 蓝)，数值范围（0-255）
+    "body_style" : "car01",        # 车子模型（"donkey" | "bare" | "car01" | "f1" | "cybertruck")
+    "body_rgb" : (128, 12, 12),   # 车子颜色(红, 绿, 蓝)，数值范围（0-255）
     "car_name" : "DKC",             # 小车名称
     "font_size" : 50                # 车名字体大小
     } 
-
 
 def get_wsl_host_ip():
     # 尝试 1: 使用 ip route 获取默认网关 (WSL2 中 Windows 主机 IP 就是默认网关)
@@ -91,7 +90,8 @@ def get_wsl_host_ip():
     
     return "127.0.0.1"
 
-SIM_HOST = get_wsl_host_ip()
+# SIM_HOST = get_wsl_host_ip()
+SIM_HOST = "192.168.3.96"
 #SIM_HOST = "127.0.0.1"  # 模拟器主机IP地址（默认：127.0.0.1-代表本机，若不在同一系统，则需指定模拟器主机IP地址）
 WEB_CONTROL_PORT = 8887  # 控制网页的端口号（默认：8887）
 USE_JOYSTICK_AS_DEFAULT = False  # 是否将摇杆作为默认输入设备（默认：否）
