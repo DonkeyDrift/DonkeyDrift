@@ -462,14 +462,8 @@ class DonkeyCommand:
         
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         try:
-            # 使用 subprocess.run 实时显示输出有点麻烦，这里直接让子进程接管 stdio
-            # 或者使用 Popen 读取 pipe
-            process = subprocess.Popen(
-                cmd_list, 
-                stdout=sys.stdout, 
-                stderr=sys.stderr,
-                text=True
-            )
+            # 让子进程继承真实终端 stdio，避免 Rich/TUI 的包装流缺少 fileno。
+            process = subprocess.Popen(cmd_list)
             process.wait()
             
             if process.returncode == 0:
