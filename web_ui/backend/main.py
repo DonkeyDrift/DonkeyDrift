@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 
 from routers import config, tub, trainer, drive, arena, connector
 
-app = FastAPI(title="Donkey Car Web UI API")
+app = FastAPI(title="DonkeyDrifter Web API")
 
 # Configure CORS
 app.add_middleware(
@@ -29,7 +29,7 @@ app.include_router(connector.router, prefix="/api/connector", tags=["connector"]
 
 @app.get("/")
 async def root():
-    return {"message": "Donkey Car Web UI API is running"}
+    return {"message": "DonkeyDrifter Web API is running"}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

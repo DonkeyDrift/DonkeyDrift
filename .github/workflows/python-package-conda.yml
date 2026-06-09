@@ -1,4 +1,4 @@
-name: Python package and test
+name: Python package and test DonkeyDrifter
 
 on:
   push:
@@ -31,9 +31,16 @@ jobs:
         run: |
           conda info
           conda list
-      - name: Install donkey
-        run: | 
+      - name: Install DonkeyDrifter
+        run: |
           pip install -e .[pc,dev]
+          pip install build
           pip list
+      - name: Verify DonkeyDrifter imports
+        run: |
+          python -c "import donkeydrifter; from donkeydrifter import Vehicle"
+          python -c "import donkeycar; from donkeycar import Vehicle"
+      - name: Build package
+        run: python -m build --sdist --wheel
       - name: Run tests
         run: pytest

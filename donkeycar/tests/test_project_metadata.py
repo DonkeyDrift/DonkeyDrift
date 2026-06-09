@@ -109,3 +109,28 @@ def test_agent_docs_describe_donkeydrifter_migration_contract():
         assert "donkey" in text
         assert "Apache" in text
         assert "MIT" in text
+
+
+def test_makefile_package_uses_modern_build_backend():
+    makefile = read_text(PROJECT_ROOT / "Makefile")
+
+    assert "python -m build --sdist --wheel" in makefile
+    assert "python setup.py sdist" not in makefile
+
+
+def test_python_ci_checks_donkeydrifter_import_and_build():
+    workflow = read_text(
+        PROJECT_ROOT / ".github" / "workflows" / "python-package-conda.yml"
+    )
+
+    assert "Python package and test DonkeyDrifter" in workflow
+    assert "Install DonkeyDrifter" in workflow
+    assert "import donkeydrifter; from donkeydrifter import Vehicle" in workflow
+    assert "import donkeycar; from donkeycar import Vehicle" in workflow
+    assert "python -m build --sdist --wheel" in workflow
+
+
+def test_super_linter_workflow_uses_donkeydrifter_name():
+    workflow = read_text(PROJECT_ROOT / ".github" / "workflows" / "superlinter.yml")
+
+    assert "Lint DonkeyDrifter" in workflow
