@@ -57,8 +57,9 @@ def test_setup_metadata_uses_donkeydrifter_identity():
     metadata = read_setup_metadata()
 
     assert metadata["name"] == "donkeydrifter"
-    assert metadata["author"] == "DonkeyDrifter contributors"
-    assert metadata["url"] == "https://gitee.com/ffedu/donkeydrifter"
+    assert metadata["author"] == "Haobot"
+    assert metadata["author_email"] == "haobot2018@gmail.com"
+    assert metadata["url"] == "https://github.com/DonkeyDrift/DonkeyDrifter"
     assert metadata["license"] == "Apache-2.0"
     assert "DonkeyDrifter" in metadata["description"]
     assert "donkeydrifter" in metadata["keywords"]
@@ -143,3 +144,18 @@ def test_torch_extra_pins_fastai_below_incompatible_2_8_series():
     torch_extra = parser["options.extras_require"]["torch"]
     assert "torch==2.1.*" in torch_extra
     assert "fastai<2.8" in torch_extra
+
+
+def test_pypi_trusted_publishing_workflow_is_configured():
+    workflow_path = PROJECT_ROOT / ".github" / "workflows" / "publish-pypi.yml"
+
+    assert workflow_path.exists()
+    workflow = read_text(workflow_path)
+    assert "Publish DonkeyDrifter to PyPI" in workflow
+    assert "tags:" in workflow
+    assert '"v*"' in workflow
+    assert "id-token: write" in workflow
+    assert "environment: pypi" in workflow
+    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+    assert "python -m build --sdist --wheel" in workflow
+    assert "python -m twine check dist/*" in workflow
