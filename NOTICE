@@ -1,0 +1,21 @@
+DonkeyDrifter
+
+DonkeyDrifter is an independent project derived from Donkeycar.
+It is not affiliated with, sponsored by, or endorsed by the Donkeycar
+maintainers.
+
+Portions of this project originate from Donkeycar and remain licensed under
+the MIT License. The original Donkeycar copyright notice is preserved below:
+
+  Copyright (c) 2017 Will Roscoe
+
+New contributions and modifications made for DonkeyDrifter are licensed under
+the Apache License 2.0 unless otherwise noted.
+
+The upstream Donkeycar MIT License is preserved in:
+
+  LICENSES/MIT-donkeycar.txt
+
+The original Donkeycar project is available at:
+
+  https://github.com/autorope/donkeycar
