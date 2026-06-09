@@ -132,6 +132,39 @@ export const loadModelToCar = async (modelPath: string, workingDir?: string) => 
   return response.data;
 };
 
+export interface DriveWebRtcStats {
+  active: boolean;
+  session_id: string | null;
+  webrtc_available: boolean;
+  source_fps: number;
+  sent_fps: number;
+  browser_fps: number;
+  browser_p95_frame_interval_ms: number;
+  disconnect_count: number;
+  transport: 'webrtc' | 'mjpeg';
+  degraded: boolean;
+}
+
+export const createDriveWebRtcSession = async () => {
+  const response = await api.post('/drive/webrtc/session', { client_id: crypto.randomUUID() });
+  return response.data as { success: boolean; session_id: string; single_client: boolean };
+};
+
+export const sendDriveWebRtcOffer = async (sessionId: string, sdp: string) => {
+  const response = await api.post('/drive/webrtc/offer', { session_id: sessionId, sdp, type: 'offer' });
+  return response.data as { success: boolean };
+};
+
+export const sendDriveWebRtcIce = async (sessionId: string, candidate: RTCIceCandidateInit) => {
+  const response = await api.post('/drive/webrtc/ice', { session_id: sessionId, source: 'client', candidate });
+  return response.data as { success: boolean };
+};
+
+export const getDriveWebRtcStats = async () => {
+  const response = await api.get('/drive/webrtc/stats');
+  return response.data as DriveWebRtcStats;
+};
+
 export const sendCalibrate = async (params: Record<string, number | boolean>) => {
   const response = await api.post('/drive/calibrate', params);
   return response.data;

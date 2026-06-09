@@ -3,7 +3,8 @@ import { VideoStream } from '../components/drive/VideoStream';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { DriveModeSelector, DriveMode } from '../components/drive/DriveModeSelector';
-import { useDriveWebsocket } from '../hooks/useDriveWebsocket';
+import { useDriveWebsocket, type WebRtcSignal } from '../hooks/useDriveWebsocket';
+import { useDriveControlLoop } from '../hooks/useDriveControlLoop';
 import { useKeyboardDrive } from '../hooks/useKeyboardDrive';
 import { useDriveHotkeys } from '../hooks/useDriveHotkeys';
 import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
@@ -15,7 +16,8 @@ import { useGyroDrive } from '../hooks/useGyroDrive';
 import { Circle, CirclePlay, Wifi, WifiOff } from 'lucide-react';
 
 export const DrivePage: React.FC = () => {
-  const { connected, carState, send } = useDriveWebsocket();
+  const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
+  const { connected, carState, send } = useDriveWebsocket({ onWebRtcSignal: setWebRtcSignal });
 
   // 输入合并：摇杆 + 键盘，后发生效
   const joystickRef = useRef({ angle: 0, throttle: 0 });
@@ -72,40 +74,45 @@ export const DrivePage: React.FC = () => {
     }
   }, [inputSource, permissionState, requestPermission]);
 
-  // 控制节流：50Hz 发送
-  const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    sendTimerRef.current = setInterval(() => {
-      let a = 0, t = 0;
-      switch (lastInputType.current) {
-        case 'joystick':
-          a = joystickRef.current.angle;
-          t = joystickRef.current.throttle;
-          break;
-        case 'keyboard':
-          a = keyboardRef.current.angle;
-          t = keyboardRef.current.throttle;
-          break;
-        case 'gamepad':
-          a = gamepadRef.current.angle;
-          t = gamepadRef.current.throttle;
-          break;
-        case 'gyro':
-          a = gyroRef.current.angle;
-          t = gyroRef.current.throttle;
-          break;
-      }
-      setAngle(a);
-      setThrottle(t);
+  const getCurrentControl = useCallback(() => {
+    let a = 0, t = 0;
+    switch (lastInputType.current) {
+      case 'joystick':
+        a = joystickRef.current.angle;
+        t = joystickRef.current.throttle;
+        break;
+      case 'keyboard':
+        a = keyboardRef.current.angle;
+        t = keyboardRef.current.throttle;
+        break;
+      case 'gamepad':
+        a = gamepadRef.current.angle;
+        t = gamepadRef.current.throttle;
+        break;
+      case 'gyro':
+        a = gyroRef.current.angle;
+        t = gyroRef.current.throttle;
+        break;
+    }
+    return { angle: a, throttle: t, drive_mode: mode, recording };
+  }, [mode, recording]);
 
-      if (connected && (Math.abs(a) > 0.01 || Math.abs(t) > 0.01)) {
-        send({ angle: a, throttle: t });
-      }
-    }, 20);
-    return () => {
-      if (sendTimerRef.current) clearInterval(sendTimerRef.current);
-    };
-  }, [connected, send]);
+  // 控制循环：60Hz 持续发送完整控制状态，避免视频链路影响控制输出。
+  useDriveControlLoop({
+    connected,
+    send,
+    getControl: getCurrentControl,
+  });
+
+  // UI 显示无需驱动控制发送，按较低频率同步即可。
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const control = getCurrentControl();
+      setAngle(control.angle);
+      setThrottle(control.throttle);
+    }, 50);
+    return () => clearInterval(timer);
+  }, [getCurrentControl]);
 
   // 录制时长计时器
   useEffect(() => {
@@ -211,7 +218,7 @@ export const DrivePage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
-          <VideoStream className="min-h-[360px]" />
+          <VideoStream className="min-h-[360px]" incomingSignal={webRtcSignal} />
         </div>
 
         {/* 控制区 */}
