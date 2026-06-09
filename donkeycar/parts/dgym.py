@@ -1,7 +1,7 @@
 import os
 import time
-import gym
-import gym_donkeycar
+import gymnasium as gym
+import gym_donkeycar  # noqa: F401  -- registers donkey envs with gymnasium
 
 
 def is_exe(fpath):
@@ -26,7 +26,7 @@ class DonkeyGymEnv(object):
         conf["guid"] = 0
         conf["frame_skip"] = 1
         self.env = gym.make(env_name, conf=conf)
-        self.frame = self.env.reset()
+        self.frame, _ = self.env.reset()
         self.action = [0.0, 0.0, 0.0]
         self.running = True
         self.info = {'pos': (0., 0., 0.),
@@ -64,10 +64,12 @@ class DonkeyGymEnv(object):
     def update(self):
         while self.running:
             if self.delay > 0.0:
-                current_frame, _, _, current_info = self.env.step(self.action)
+                step_result = self.env.step(self.action)
+                current_frame, _, _, _, current_info = step_result
                 self.delay_buffer(current_frame, current_info)
             else:
-                self.frame, _, _, self.info = self.env.step(self.action)
+                step_result = self.env.step(self.action)
+                self.frame, _, _, _, self.info = step_result
 
     def run_threaded(self, steering, throttle, brake=None):
         if steering is None or throttle is None:

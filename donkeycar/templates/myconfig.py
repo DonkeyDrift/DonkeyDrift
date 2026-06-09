@@ -41,7 +41,7 @@ AI_THROTTLE_MULT = 1.1  # 自动驾驶时，油门的缩放因子（默认：1.1
 
 #--------------------------For DonkeySim 驴车模拟器相关配置
 # DonkeySim 驴车模拟器相关配置
-DONKEY_GYM = True           # 是否使用DonkeySim模拟器（默认：True）
+DONKEY_GYM = False           # 是否使用DonkeySim模拟器（默认：False）
 DONKEY_SIM_PATH = "remote"  # DonkeySim模拟器的安装路基（默认："remote"，需要先运行DonkeySim模拟器）
 GYM_CONF = { 
     "body_style" : "donkey",        # 车子模型（"donkey" | "bare" | "car01" | "f1" | "cybertruck")

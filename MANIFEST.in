@@ -1,3 +1,12 @@
 include donkeycar/templates/*
 include scripts
 recursive-include donkeycar/parts/web_controller/templates/ *
+include web_ui/backend/requirements.txt
+include web_ui/frontend/package.json
+include web_ui/frontend/package-lock.json
+include web_ui/frontend/vite.config.ts
+include web_ui/frontend/tsconfig.json
+include web_ui/frontend/tailwind.config.js
+include web_ui/frontend/postcss.config.js
+include web_ui/frontend/eslint.config.js
+include web_ui/frontend/index.html

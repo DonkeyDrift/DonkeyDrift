@@ -1,4 +1,3 @@
-<!-- From: /home/dkc/projects/donkeycar/AGENTS.md -->
 # Donkeycar Agent Guide
 
 This file provides the essential context an AI coding agent needs to work effectively in the Donkeycar repository.
@@ -19,8 +18,9 @@ Donkeycar is a minimalist and modular self-driving library for Python, aimed at 
 - **Data**: pandas, custom "Tub" v2 format for training records
 - **Telemetry**: paho-mqtt
 - **Terminal UI**: rich (`donkeycar.management.tui`), Kivy (`donkeycar.management.ui/`)
-- **Web UI Backend**: FastAPI, Uvicorn, python-multipart
+- **Web UI Backend**: FastAPI, Uvicorn, python-multipart, Pydantic
   - Requirements: `fastapi`, `uvicorn`, `python-multipart`, `pandas`, `numpy`, `pillow` (see `web_ui/backend/requirements.txt`)
+  - Routers mounted in `web_ui/backend/main.py`: `/api/config`, `/api/tub`, `/api/trainer`, `/api/drive`, `/api/arena`, `/api/connector`
 - **Web UI Frontend**: React 18.3, TypeScript ~5.8, Vite ^6.3, Tailwind CSS 3.4, Zustand 5, Chart.js 4.5, Axios 1.13, react-router-dom 7.13, lucide-react, clsx, tailwind-merge
   - Linting: ESLint 9 with flat config (`eslint.config.js`), typescript-eslint, react-hooks and react-refresh plugins
   - Testing: Playwright (`@playwright/test`) is installed as a dev dependency, but no active automated test suite exists in the repo
@@ -28,6 +28,8 @@ Donkeycar is a minimalist and modular self-driving library for Python, aimed at 
   - Vite dev server binds to `0.0.0.0:5188` and proxies `/api` to `http://localhost:8000`
 - **Testing**: pytest, pytest-cov, pytest-rerunfailures, responses, mypy
 - **Build**: setuptools with `setup.cfg` and `pyproject.toml`
+  - `pyproject.toml` declares the build-system: `requires = ["setuptools", "wheel"]`, `build-backend = "setuptools.build_meta"`
+  - `setup.cfg` defines core dependencies, extras (`pc`, `macos`, `pi`, `nano`, `dev`, `torch`, `fastapi-backend`), and the `donkey` console entry point
 
 ## Project Structure
 
@@ -39,10 +41,10 @@ donkeycar/
   config.py            # Config loader (config.py + optional myconfig.py overlay)
   utils.py             # Image/array helpers, model type resolution, FPSTimer
   geom.py, la.py       # Geometry and linear algebra utilities
-  parts/               # Hardware drivers, controllers, neural nets, CV, data stores (~58 .py files)
+  parts/               # Hardware drivers, controllers, neural nets, CV, data stores (~65 .py files)
     camera.py          # PiCamera (picamera2), Webcam, CSICamera, V4LCamera, MockCamera, ImageListCamera
     actuator.py        # PWM steering/throttle, H-Bridge, VESC, PCA9685, MockController
-    controller.py      # Joystick, Web, RC, Mock controllers (1,750+ lines)
+    controller.py      # Joystick, Web, RC, Mock controllers
     keras.py           # KerasPilot base class and model architectures (linear, categorical, imu, behavior, localizer, rnn, 3d, memory, inferred)
     pytorch/           # PyTorch Lightning models and training
       ResNet18.py      # Pretrained ResNet18 classifier for angle + throttle
@@ -60,6 +62,7 @@ donkeycar/
     object_detector/   # Object detection parts
     voice_control/     # Voice control parts
     behavior.py, coral.py, dgym.py, fastai.py, interpreter.py, launch.py, ...
+    drive_api_bridge.py # WebSocket bridge Part that connects a real car to the FastAPI Web UI backend
   pipeline/            # Training pipeline
     training.py        # TensorFlow training entry point (BatchSequence, train())
     sequence.py        # TubSeqIterator, TfmIterator, TubSequence
@@ -67,7 +70,7 @@ donkeycar/
     types.py           # TubRecord, TubDataset, Collator, CachePolicy
     database.py        # PilotDatabase for tracking trained models
   management/          # CLI tooling and UIs
-    base.py            # donkey CLI command dispatcher (createcar, train, calibrate, web, ...)
+    base.py            # donkey CLI command dispatcher (createcar, train, calibrate, web, installweb, ...)
     train_local.py     # Local training orchestration
     train_online.py    # Online/remote training orchestration (SSH-based)
     tui.py             # Terminal UI (rich-based)
@@ -88,7 +91,7 @@ donkeycar/
     basic.py, simulator.py, path_follow.py, cv_control.py, arduino_drive.py, square.py, just_drive.py
     train.py, calibrate.py, myconfig.py
     calibration_odometry.json
-  tests/               # Unit tests (pytest; 28 Python test files)
+  tests/               # Unit tests (pytest; 28+ Python test files)
     setup.py           # Shared fixtures (tub_path, tub, tubs, create_sample_tub, default_template, on_pi)
     test_train.py      # Model convergence and pipeline consistency tests
     test_tub_v2.py     # Tub operations and Collator tests (unittest)
@@ -104,13 +107,18 @@ donkeycar/
     robohat/           # Robo HAT MM1 driver
 web_ui/
   backend/             # FastAPI app
-    main.py            # FastAPI app with CORS (allow_origins=["*"])
+    main.py            # FastAPI app with CORS (allow_origins=["*"]); mounts 6 routers
     trainer_engine.py  # TrainingJobManager for local/online jobs and SSE streaming
+    connector_engine.py# ConnectorJobManager for SSH/rsync remote car sync and drive control
+    remote_car_client.py# SSH helpers for the connector (rsync, remote command building)
     web_online_trainer.py  # OnlineTrainer subclass for web log/progress streaming via Queue
     routers/
-      config.py        # /api/config — directory picker, config loader
+      config.py        # /api/config — directory picker, config loader/saver
       tub.py           # /api/tub — load tub, get records, serve images, delete/restore
       trainer.py       # /api/trainer — training config, start/stop, job status, SSE logs, model listing
+      drive.py         # /api/drive — WebSocket car/client bridge, MJPEG video stream, params, calibration, model load
+      arena.py         # /api/arena — model listing/loading, pilot prediction, preview images, batch predictions
+      connector.py     # /api/connector — SSH car connector config, pull tub, push pilots, start/stop remote drive
     requirements.txt   # fastapi, uvicorn, python-multipart, pandas, numpy, pillow
     tests/             # Exists but contains only __pycache__ (no source test files present)
   frontend/            # React + Vite SPA
@@ -120,13 +128,13 @@ web_ui/
     tailwind.config.js # Tailwind CSS config (darkMode: "class")
     tsconfig.json      # TypeScript config (strict: false)
     src/
-      App.tsx          # HashRouter (/ , /trainer)
+      App.tsx          # HashRouter (/ , /trainer, /drive, /calibrate, /pilot, /connector)
       main.tsx         # React 18 createRoot entry point
-      components/      # ConfigLoader, TubEditor, TubNavigator, Layout, SidePanel, StatusBar, HelpModal, Empty
-      pages/           # Home (TubManagerPage), TrainerPage
-      store/           # Zustand store (useStore.ts)
+      components/      # ConfigLoader, TubEditor, TubNavigator, Layout, SidePanel, StatusBar, HelpModal, Empty, drive/*, trainer/*, ui/*
+      pages/           # Home (TubManagerPage), TrainerPage, DrivePage, CalibratePage, PilotArenaPage, CarConnectorPage
+      store/           # Zustand stores (useStore.ts, useDriveStore.ts)
       services/        # Axios API client wrappers (api.ts)
-      hooks/           # useTheme, useTrainingJob
+      hooks/           # useTheme, useTrainingJob, useDriveWebsocket, useGamepadDrive, useKeyboardDrive, useGyroDrive, useDriveHotkeys, useConnectorJob
       lib/             # utils.ts
     testsprite_tests/  # Manual UI test plan JSON and generated test scripts (not automated)
 tests/                 # Top-level integration tests (4 unittest files)
@@ -138,12 +146,16 @@ scripts/               # Standalone utilities (17 files)
   convert_to_tflite.py, freeze_model.py, migrate_model_names.py, multi_train.py,
   preview_augumentations.py, profile.py, hsv_picker.py, remote_cam_view.py,
   tflite_convert.py, tflite_profile.py, pigpio_donkey.py, ...
+parts/                 # Top-level part wrappers
+  drive_api_bridge.py  # WebSocket bridge Part between a real car and the Web UI backend
 arduino/               # Arduino firmware for encoders
   mono_encoder/mono_encoder.ino
   quadrature_encoder/quadrature_encoder.ino
 docs/                  # Architecture and design documentation
   arch/                # Architecture notes (web controller, params persistence, arrow key fixes, IKJL guide)
-  plan/                # Design plans (trainer-design.md — written in Chinese)
+  guide/               # User-facing guides (some in Chinese)
+  plan/                # Design plans (some recent files are in Chinese, e.g., trainer-design.md)
+  valid/               # Validation notes
 ```
 
 ## Build, Install, and Test Commands
@@ -156,8 +168,13 @@ The project uses `setuptools` with `setup.cfg` and `pyproject.toml`.
 # Base install (core dependencies only)
 pip install -e .
 
-# PC development (includes TensorFlow, matplotlib, Kivy, albumentations)
+# PC development (includes TensorFlow, matplotlib, Kivy, albumentations,
+# AND the Web UI backend FastAPI stack via the [pc] extra)
 pip install -e .[pc,dev]
+
+# Frontend Node deps are installed separately (pip cannot run npm):
+donkey installweb --path ./web_ui
+# equivalent to: make installweb
 
 # Raspberry Pi
 pip install -e .[pi,dev]
@@ -170,6 +187,9 @@ pip install -e .[macos,dev]
 
 # PyTorch support
 pip install -e .[torch]
+
+# FastAPI backend only (used by installweb fallback)
+pip install -e .[fastapi-backend]
 ```
 
 Core dependencies (from `setup.cfg`): `numpy`, `pillow`, `docopt`, `tornado`, `requests`, `PrettyTable`, `paho-mqtt`, `simple_pid`, `progress`, `pyfiglet`, `psutil`, `pynmea2`, `pyserial`, `utm`, `pandas`, `pyyaml`, `rich`, `paramiko`.
@@ -225,7 +245,7 @@ python setup.py sdist
 - The project targets Raspberry Pi OS, Jetson Nano, Linux, macOS, and WSL on Windows.
 - New features should have **unit tests** and be broadly useful to the community.
 - Config values are **UPPERCASE** by convention.
-- The core project uses English for all code, comments, and documentation. Note that some recent Web UI additions (e.g., `docs/plan/trainer-design.md`, user-facing strings in the `donkey web` command) contain Chinese text.
+- The core project uses English for all code, comments, and documentation. Some recent Web UI additions (e.g., `docs/plan/trainer-design.md`, user-facing strings in the `donkey web` and `donkey installweb` commands, and several drive/connector modules) contain Chinese text.
 
 ## Key Architectural Patterns
 
@@ -283,13 +303,29 @@ Low-level primitives are in `donkeycar.parts.datastore_v2` (`Seekable`, `Catalog
 ### Web UI
 
 A modern web interface is provided under `web_ui/`:
-- **Backend**: FastAPI with CORS enabled (`allow_origins=["*"]`). Routers: `/api/config`, `/api/tub`, `/api/trainer`.
-  - `trainer_engine.py` manages local training via subprocess and online training via SSH, streaming logs/progress through an async Queue and SSE.
-  - `web_online_trainer.py` subclasses `OnlineTrainer` to replace console output with queue-based streaming.
-- **Frontend**: React SPA served by Vite. Communicates with backend via REST and SSE for training log streaming.
+- **Backend**: FastAPI with CORS enabled (`allow_origins=["*"]`). Routers:
+  - `/api/config` — directory dialogs, car config loader, myconfig editor
+  - `/api/tub` — load tub, paginated records, image serving, delete/restore
+  - `/api/trainer` — training config, local and online training jobs, SSE logs, model/backup listing
+  - `/api/drive` — WebSocket bridge between the car (`role=car`) and browsers (`role=client`), MJPEG video stream, driving-parameter persistence, calibration, and model-load commands
+  - `/api/arena` — model discovery, pilot load/unload, single-record and batch predictions, preview images with overlaid control lines
+  - `/api/connector` — SSH/rsync-based remote car connector: config persistence in `~/.donkeycar_web_connector.json`, pull tubs, push pilots, start/stop remote `manage.py drive` jobs, with SSE job streaming
+- `trainer_engine.py` manages local training via subprocess and online training via SSH, streaming logs/progress through an async Queue and SSE.
+- `connector_engine.py` manages remote file sync and drive control over SSH/rsync with progress/logging streamed through SSE.
+- `web_online_trainer.py` subclasses `OnlineTrainer` to replace console output with queue-based streaming.
+- **Frontend**: React SPA served by Vite. Communicates with backend via REST and SSE for training/connector log streaming, and WebSocket for drive control.
 - Launch via: `donkey web --path <web_ui_dir> --frontend-port 5188 --backend-port 8000`
 - The CLI command spawns both `uvicorn` (backend) and `npm run dev` (frontend) as subprocesses.
+- Use `donkey web --install-deps` (or `donkey installweb --path ./web_ui`) to install missing backend Python packages and frontend `node_modules`.
 - Supports both **local training** (subprocess `donkey train`) and **online/cloud training** (SSH to remote server, upload data, run training, download model).
+
+### Drive API Bridge
+
+`parts/drive_api_bridge.py` provides a `DriveApiBridge` Part that replaces the legacy Tornado-based `LocalWebController` for the new Web UI. It runs in a background thread, connects to `ws://<backend>/api/drive/ws?role=car`, and handles:
+- Upstream: JPEG/base64 camera frames, `num_records`, `drive_mode`, `recording`
+- Downstream: `angle`, `throttle`, `drive_mode`, `recording`, `buttons`
+
+It is intended to be added to a car's `manage.py` pipeline when using the Web UI for real-car driving.
 
 ### Legacy Web Controller
 
@@ -316,6 +352,7 @@ Available subcommands (from `management/base.py`):
 - `models` — show model database
 - `ui` / `tui` — graphical (Kivy) / terminal (rich) UIs
 - `web` — launch the new web UI
+- `installweb` — install/repair Web UI backend and frontend dependencies
 - `findcar` — find car IP on local network (scans /24 subnet for RPi MAC prefixes)
 - `createjs` — create joystick config
 - `cnnactivations` — visualize CNN activations
@@ -324,7 +361,7 @@ When invoked without arguments, `donkey` defaults to the TUI (`donkeycar.managem
 
 ## Testing Instructions
 
-- Place unit tests in `donkeycar/tests/` (28 pytest files).
+- Place unit tests in `donkeycar/tests/` (28+ pytest files).
 - Place integration tests in `tests/` at the project root (4 unittest files).
 - Use fixtures from `donkeycar/tests/setup.py` for sample tubs, cars, and records.
   - `tub_path`, `tub`, `tubs` — pytest fixtures for temporary tub directories.
@@ -347,7 +384,7 @@ When invoked without arguments, `donkey` defaults to the TUI (`donkeycar.managem
 - This project controls physical hardware (motors, servos). Test changes in `MOCK` drivetrain mode or simulator (`DONKEY_GYM`) before deploying to a real vehicle.
 - The web controller and Web UI bind to `0.0.0.0` by default; ensure network exposure is intentional.
 - The FastAPI backend in `web_ui/backend` uses `allow_origins=["*"]` for development.
-- Be cautious with subprocess calls in `management/base.py` (port scanning, npm, uvicorn).
+- Be cautious with subprocess calls in `management/base.py` (port scanning, npm, uvicorn) and in the connector engine (SSH/rsync to remote hosts).
 - The `Dockerfile` at the project root is outdated (references Python 3.6 and a `[tf]` extra that no longer exists). Do not rely on it for current builds without updates.
 
 ## Notes for AI Agents
@@ -357,6 +394,7 @@ When invoked without arguments, `donkey` defaults to the TUI (`donkeycar.managem
 - **Config values are uppercase** by convention. Custom config should be added to `cfg_complete.py` and documented.
 - **Avoid breaking Tub v2 format changes** — it is the primary data interchange format.
 - When editing the web UI, remember both the FastAPI backend (`web_ui/backend/`) and the React frontend (`web_ui/frontend/`).
-- The `docs/` directory contains architecture notes (`docs/arch/`) and design plans (`docs/plan/`) that may provide useful context for complex features.
-- Some recently added Web UI code and documentation (e.g., `docs/plan/trainer-design.md`, user-facing strings in the `donkey web` command) are written in Chinese. The rest of the codebase is English.
+- The `docs/` directory contains architecture notes (`docs/arch/`) and design plans (`docs/plan/`) that may provide useful context for complex features; some recent plan docs are written in Chinese.
+- Some recently added Web UI code and documentation (e.g., `docs/plan/trainer-design.md`, user-facing strings in the `donkey web` and `donkey installweb` commands, and drive/connector routers) are written in Chinese. The rest of the codebase is English.
 - The frontend Vite config includes `vite-plugin-trae-solo-badge`, a build-time plugin specific to the Trae IDE. Removing or modifying it will not affect application logic.
+- When changing Web UI routes, update both the FastAPI router and the React `App.tsx` routes, and ensure the Vite proxy and any API service calls stay aligned.
