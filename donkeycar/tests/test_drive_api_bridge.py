@@ -22,6 +22,13 @@ def test_drive_api_bridge_appends_car_role_to_url():
     assert bridge_with_query.server_url == "ws://host/ws?token=x&role=car"
 
 
+def test_drive_api_bridge_has_threaded_part_update_method():
+    bridge = DriveApiBridge(auto_start=False)
+
+    assert hasattr(bridge, "update")
+    assert bridge.update() is None
+
+
 def test_drive_api_bridge_handles_control_message():
     bridge = DriveApiBridge(auto_start=False)
 

@@ -124,6 +124,9 @@ class DriveApiBridge:
             "recording": recording if recording is not None else self.recording,
         })
 
+    def update(self):
+        return None
+
     def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None):
         now = time.time()
         if self.connected and img_arr is not None and now - self.last_frame > 0.05:
