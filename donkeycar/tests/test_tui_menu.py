@@ -20,3 +20,10 @@ def test_main_menu_exit_confirmation_defaults_to_yes(monkeypatch):
         tui.MenuSystem().show_main_menu()
 
     assert defaults == [True]
+
+
+def test_main_menu_sixth_item_is_drive_page():
+    command = tui.MenuSystem().flat_commands[5]
+
+    assert command.name == "drive"
+    assert "Web Console" in command.description

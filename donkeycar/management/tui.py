@@ -1163,11 +1163,8 @@ class TrainOnlineCommand(DonkeyCommand):
 
 class DriveCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("drive", "启动驾驶模式", "驾驶", is_favorite=True)
-        self.options = [
-            CommandOption("model", "模型名称", default=None, required=False, help_text="请选择要加载的模型 (默认0:不加载)"),
-            CommandOption("type", "模型类型", default="tflite_linear", required=False, help_text="模型类型 (默认: tflite_linear)")
-        ]
+        super().__init__("drive", "打开 Web Console 驾驶控制台", "驾驶", is_favorite=True)
+        self.options = []
 
     def execute(self):
         console.clear()
@@ -1185,56 +1182,8 @@ class DriveCommand(DonkeyCommand):
             Prompt.ask("按回车键返回菜单...")
             return
 
-        last_params = self.history_mgr.get_last_params(self.name)
         current_params = {}
-
-        # Custom logic for model selection
-        models_dir = Path("./models")
-        model_files = []
-        if models_dir.exists():
-            model_files = [f.name for f in models_dir.glob("*") if f.is_file() and not f.name.startswith('.')]
-            model_files.sort()
-        
-        # Model selection
-        console.print("[bold]选择模型:[/bold]")
-        console.print("0. 不加载模型 (默认)")
-        for idx, filename in enumerate(model_files, 1):
-            console.print(f"{idx}. {filename}")
-        
-        while True:
-            choice = Prompt.ask("请输入编号", default="0")
-            if choice == "0":
-                current_params["model"] = None
-                break
-            elif choice.isdigit():
-                idx = int(choice)
-                if 1 <= idx <= len(model_files):
-                    current_params["model"] = model_files[idx-1]
-                    break
-            console.print("[red]无效的选择，请重新输入[/red]")
-
-        if current_params.get("model") is None:
-            current_params["type"] = None
-        else:
-            for opt in self.options[1:]:
-                default_val = last_params.get(opt.name, opt.default)
-                prompt_text = f"{opt.prompt_text}"
-                if opt.help_text:
-                    console.print(f"[dim]{opt.help_text}[/dim]")
-                
-                while True:
-                    val = Prompt.ask(prompt_text, default=str(default_val) if default_val is not None else None)
-                    if not val and opt.required and default_val is None:
-                        console.print("[red]此项为必填项[/red]")
-                        continue
-                    
-                    if opt.validator and val:
-                        if not opt.validator(val):
-                            console.print(f"[red]输入无效，请重新输入[/red]")
-                            continue
-                    
-                    current_params[opt.name] = val
-                    break
+        console.print("[dim]将打开 DonkeyDrifter Web UI 的 Drive 标签页: http://localhost:5188/#/drive[/dim]")
 
         # Generate preview
         cmd_list = self.get_command_line(current_params)
@@ -1381,17 +1330,11 @@ class DriveCommand(DonkeyCommand):
         Prompt.ask("\n按回车键返回菜单...")
 
     def get_command_line(self, params):
-        # 优先使用当前目录的 manage.py
-        if os.path.exists("manage.py"):
-            cmd = [sys.executable, "manage.py", "drive"]
-        else:
-            cmd = ["donkey", "ui"] # Fallback
-
-        if params.get("model"):
-            full_model_path = os.path.join("./models", params["model"])
-            cmd.extend(["--model", full_model_path])
-            model_type = params.get("type") or "tflite_linear"
-            cmd.extend(["--type", model_type])
+        web_ui_path = _get_bundled_web_ui_path()
+        cmd = ["donkey", "web"]
+        if web_ui_path is not None:
+            cmd.extend(["--path", str(web_ui_path)])
+        cmd.extend(["--open", "--route", "/drive"])
         return cmd
 
 class DonkeyUICommand(DonkeyCommand):

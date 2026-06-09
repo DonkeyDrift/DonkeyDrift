@@ -8,6 +8,7 @@ import logging
 import subprocess
 import time
 import signal
+import webbrowser
 
 from progress.bar import IncrementalBar
 import donkeycar as dk
@@ -646,6 +647,10 @@ class Web(BaseCommand):
                             help='后端监听地址 (默认: 0.0.0.0)')
         parser.add_argument('--install-deps', action='store_true',
                             help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
+        parser.add_argument('--open', action='store_true',
+                            help='启动后自动打开浏览器')
+        parser.add_argument('--route', default='/',
+                            help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')
         return parser.parse_args(args)
 
     def run(self, args):
@@ -693,9 +698,13 @@ class Web(BaseCommand):
         ]
 
         print(f'Web UI 路径: {web_ui_path}')
+        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+
         print(f'前端: http://localhost:{frontend_port}/')
         print(f'后端: http://localhost:{backend_port}/')
         print(f'后端文档: http://localhost:{backend_port}/docs')
+        if args.open:
+            print(f'将打开: {frontend_url}')
         print('按 Ctrl+C 停止前后端')
 
         frontend_proc = None
@@ -721,6 +730,8 @@ class Web(BaseCommand):
 
             backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, **popen_kwargs)
             frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, **popen_kwargs)
+            if args.open:
+                webbrowser.open(frontend_url)
             while True:
                 if stop_requested['value']:
                     raise SystemExit(0)
@@ -738,6 +749,12 @@ class Web(BaseCommand):
             signal.signal(signal.SIGTERM, prev_sigterm)
             self._terminate_process(frontend_proc)
             self._terminate_process(backend_proc)
+
+    def _build_frontend_url(self, frontend_port, route=None):
+        if not route or route == '/':
+            return f'http://localhost:{frontend_port}/'
+        normalized_route = route if str(route).startswith('/') else f'/{route}'
+        return f'http://localhost:{frontend_port}/#{normalized_route}'
 
     def _choose_available_port(self, host, preferred_port, max_tries=50):
         port = int(preferred_port)
