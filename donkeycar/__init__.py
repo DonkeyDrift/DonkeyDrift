@@ -1,17 +1,10 @@
 import os
 import sys
-from pyfiglet import Figlet
 import logging
 
-__version__ = '5.2.0'
+from ._version import __version__
 
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
-
-f = Figlet(font='speed')
-
-
-print(f.renderText('Donkey Car'))
-print(f'using donkey v{__version__} ...')
 
 if sys.version_info.major < 3 or sys.version_info.minor < 11:
     msg = f'Donkey Requires Python 3.11 or greater. You are using {sys.version}'
