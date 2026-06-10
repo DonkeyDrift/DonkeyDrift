@@ -53,8 +53,9 @@ const HookProbe: React.FC<{
   onState: (value: ReturnType<typeof useDriveWebRtcVideo>) => void;
   factory?: () => RTCPeerConnection;
   negotiationTimeoutMs?: number;
-}> = ({ signal, onState, factory, negotiationTimeoutMs }) => {
-  const state = useDriveWebRtcVideo({ incomingSignal: signal, peerConnectionFactory: factory, negotiationTimeoutMs });
+  retryIntervalMs?: number;
+}> = ({ signal, onState, factory, negotiationTimeoutMs, retryIntervalMs }) => {
+  const state = useDriveWebRtcVideo({ incomingSignal: signal, peerConnectionFactory: factory, negotiationTimeoutMs, retryIntervalMs });
   onState(state);
   return <video ref={state.videoRef} />;
 };
@@ -105,6 +106,23 @@ describe('useDriveWebRtcVideo', () => {
     await waitFor(() => {
       expect(lastCallValue(onState).state).toBe('degraded');
     });
+  });
+
+  it('降级后会自动重试 WebRTC session', async () => {
+    vi.useFakeTimers();
+    const api = await import('../services/api');
+    const pc = new FakePeerConnection();
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} factory={factory} negotiationTimeoutMs={10} retryIntervalMs={50} />);
+    await vi.advanceTimersByTimeAsync(10);
+    await waitFor(() => expect(lastCallValue(onState).state).toBe('degraded'));
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    await waitFor(() => expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(2));
+    vi.useRealTimers();
   });
 
   it('处理 answer 和 ICE 信令', async () => {

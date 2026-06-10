@@ -14,6 +14,7 @@ interface UseDriveWebRtcVideoOptions {
   incomingSignal?: WebRtcSignal | null;
   peerConnectionFactory?: () => RTCPeerConnection;
   negotiationTimeoutMs?: number;
+  retryIntervalMs?: number;
 }
 
 export interface DriveVideoMetrics {
@@ -49,7 +50,7 @@ export const calculateVideoMetrics = (timestamps: number[]): DriveVideoMetrics =
 };
 
 export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) => {
-  const { incomingSignal, peerConnectionFactory, negotiationTimeoutMs = 3000 } = options;
+  const { incomingSignal, peerConnectionFactory, negotiationTimeoutMs = 3000, retryIntervalMs = 5000 } = options;
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -57,6 +58,9 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const frameCallbackRef = useRef<number | null>(null);
   const trackReceivedRef = useRef(false);
   const negotiationTimerRef = useRef<number | null>(null);
+  const retryTimerRef = useRef<number | null>(null);
+
+  const startRef = useRef<() => void>(() => undefined);
 
   const [state, setState] = useState<DriveVideoState>('idle');
   const [stats, setStats] = useState<DriveWebRtcStats>(EMPTY_STATS);
@@ -83,6 +87,16 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     peerRef.current = null;
   }, []);
 
+  const scheduleRetry = useCallback(() => {
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+    }
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      startRef.current();
+    }, retryIntervalMs);
+  }, [retryIntervalMs]);
+
   const scheduleFrameStats = useCallback(() => {
     const video = videoRef.current;
     if (!video?.requestVideoFrameCallback) {
@@ -103,6 +117,10 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       return;
     }
 
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
     setState('connecting');
     trackReceivedRef.current = false;
     try {
@@ -138,6 +156,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
           setState('degraded');
           setStats((current) => ({ ...current, degraded: true }));
           closePeer();
+          scheduleRetry();
         }
       }, negotiationTimeoutMs);
       setStats((current) => ({ ...current, active: true, session_id: session.session_id, webrtc_available: true }));
@@ -146,12 +165,23 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       setState('degraded');
       setStats((current) => ({ ...current, degraded: true }));
       closePeer();
+      scheduleRetry();
     }
-  }, [closePeer, createPeer, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats]);
+  }, [closePeer, createPeer, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats, scheduleRetry]);
+
+  useEffect(() => {
+    startRef.current = start;
+  }, [start]);
 
   useEffect(() => {
     start();
-    return () => closePeer();
+    return () => {
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      closePeer();
+    };
   }, [closePeer, start]);
 
   useEffect(() => {

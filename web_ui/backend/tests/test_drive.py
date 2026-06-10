@@ -274,3 +274,33 @@ def test_car_webrtc_stats_ignores_stale_session():
     data = response.json()
     assert data["source_fps"] == 0.0
     assert data["sent_fps"] == 0.0
+
+
+def test_webrtc_session_resets_diagnostics():
+    client, drive = make_online_client()
+    drive.drive_state.webrtc_stats.update({
+        "source_fps": 60.0,
+        "sent_fps": 59.0,
+        "peer_connection_state": "connected",
+        "ice_connection_state": "completed",
+        "ice_gathering_state": "complete",
+        "last_offer_at": 1.0,
+        "last_answer_at": 2.0,
+        "last_client_ice_at": 3.0,
+        "last_car_ice_at": 4.0,
+        "degraded": True,
+    })
+
+    client.post("/api/drive/webrtc/session", json={"client_id": "browser-2"})
+
+    data = client.get("/api/drive/webrtc/stats").json()
+    assert data["source_fps"] == 0.0
+    assert data["sent_fps"] == 0.0
+    assert data["peer_connection_state"] is None
+    assert data["ice_connection_state"] is None
+    assert data["ice_gathering_state"] is None
+    assert data["last_offer_at"] is None
+    assert data["last_answer_at"] is None
+    assert data["last_client_ice_at"] is None
+    assert data["last_car_ice_at"] is None
+    assert data["degraded"] is False
