@@ -728,8 +728,11 @@ class Web(BaseCommand):
             else:
                 popen_kwargs['start_new_session'] = True
 
+            frontend_env = os.environ.copy()
+            frontend_env["VITE_API_BASE_URL"] = f"http://localhost:{backend_port}/api"
+
             backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, **popen_kwargs)
-            frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, **popen_kwargs)
+            frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
             if args.open:
                 webbrowser.open(frontend_url)
             while True:
