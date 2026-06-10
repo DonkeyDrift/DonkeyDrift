@@ -4,6 +4,13 @@ const DEFAULT_API_BASE = '/api';
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL?.trim();
 export const API_URL = RAW_API_BASE && RAW_API_BASE.length > 0 ? RAW_API_BASE.replace(/\/$/, '') : DEFAULT_API_BASE;
 
+export type DriveVideoTransport = 'auto' | 'webrtc' | 'mjpeg';
+
+export const getDriveVideoTransport = (): DriveVideoTransport => {
+  const value = import.meta.env.VITE_DRIVE_VIDEO_TRANSPORT?.trim().toLowerCase();
+  return value === 'webrtc' || value === 'mjpeg' ? value : 'auto';
+};
+
 export const api = axios.create({
   baseURL: API_URL,
   headers: {

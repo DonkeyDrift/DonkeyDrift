@@ -44,6 +44,15 @@ describe('VideoStream', () => {
     expect(screen.getByLabelText('WebRTC camera feed')).toBeInTheDocument();
   });
 
+  it('mjpeg 模式直接显示 MJPEG 降级且不渲染 WebRTC video', () => {
+    render(<VideoStream transport="mjpeg" />);
+
+    expect(screen.getByText('MJPEG')).toBeInTheDocument();
+    expect(screen.getByText('非 60FPS 验收路径')).toBeInTheDocument();
+    expect(screen.queryByLabelText('WebRTC camera feed')).not.toBeInTheDocument();
+    expect(screen.getByAltText('Camera feed')).toBeInTheDocument();
+  });
+
   it('车端离线时显示 DriveApiBridge 连接诊断', async () => {
     mockWebRtc.mockReturnValue({
       videoRef: { current: null },
