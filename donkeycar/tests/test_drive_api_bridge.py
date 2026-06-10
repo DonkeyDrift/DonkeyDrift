@@ -9,6 +9,7 @@ from donkeycar.parts.drive_api_bridge import (
     DriveVideoFrameBuffer,
     DriveWebRtcVideoTrack,
     DriveAiortcVideoTrack,
+    parse_webrtc_ice_servers,
 )
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge as DrifterDriveApiBridge
 
@@ -16,6 +17,27 @@ from donkeydrifter.parts.drive_api_bridge import DriveApiBridge as DrifterDriveA
 class FakeEncodedFrame:
     def tobytes(self):
         return b"jpeg-bytes"
+
+
+def test_parse_webrtc_ice_servers_accepts_empty_and_list():
+    servers = [{"urls": ["turn:192.168.3.96:3478?transport=udp"], "username": "donkey", "credential": "secret"}]
+
+    assert parse_webrtc_ice_servers(None) == []
+    assert parse_webrtc_ice_servers("") == []
+    assert parse_webrtc_ice_servers(servers) == servers
+
+
+def test_parse_webrtc_ice_servers_accepts_json_string():
+    raw = '[{"urls":["turn:192.168.3.96:3478?transport=udp"],"username":"donkey","credential":"secret"}]'
+
+    assert parse_webrtc_ice_servers(raw) == [
+        {"urls": ["turn:192.168.3.96:3478?transport=udp"], "username": "donkey", "credential": "secret"}
+    ]
+
+
+def test_parse_webrtc_ice_servers_rejects_invalid_json_and_non_array():
+    assert parse_webrtc_ice_servers("not-json") == []
+    assert parse_webrtc_ice_servers('{"urls":"turn:host"}') == []
 
 
 def test_drive_api_bridge_is_available_from_donkeydrifter_alias():
@@ -35,6 +57,22 @@ def test_drive_api_bridge_has_threaded_part_update_method():
 
     assert hasattr(bridge, "update")
     assert bridge.update() is None
+
+
+def test_drive_api_bridge_accepts_webrtc_ice_servers_config():
+    servers = [{"urls": ["turn:192.168.3.96:3478?transport=udp"], "username": "donkey", "credential": "secret"}]
+
+    bridge = DriveApiBridge(auto_start=False, webrtc_ice_servers=servers)
+
+    assert bridge.webrtc_ice_servers == servers
+
+
+def test_drive_api_bridge_env_ice_servers_override_constructor(monkeypatch):
+    monkeypatch.setenv("DRIVE_WEBRTC_ICE_SERVERS", '[{"urls":["turn:env:3478"],"username":"env","credential":"secret"}]')
+
+    bridge = DriveApiBridge(auto_start=False, webrtc_ice_servers=[{"urls": ["turn:cfg:3478"]}])
+
+    assert bridge.webrtc_ice_servers == [{"urls": ["turn:env:3478"], "username": "env", "credential": "secret"}]
 
 
 def test_drive_api_bridge_handles_control_message():
@@ -285,6 +323,16 @@ class FakeIceCandidate:
         self.kwargs = kwargs
 
 
+class FakeIceServer:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeConfiguration:
+    def __init__(self, iceServers):
+        self.iceServers = iceServers
+
+
 def test_drive_api_bridge_creates_aiortc_peer_from_offer(monkeypatch):
     created = []
     answers = []
@@ -313,6 +361,39 @@ def test_drive_api_bridge_creates_aiortc_peer_from_offer(monkeypatch):
     assert len(created[0].tracks) == 1
     assert created[0].remote.sdp == "offer-sdp"
     assert answers == [("session-1", "local-answer-sdp")]
+
+
+def test_drive_api_bridge_passes_ice_servers_to_aiortc_peer(monkeypatch):
+    created = []
+    servers = [{"urls": ["turn:192.168.3.96:3478?transport=udp"], "username": "donkey", "credential": "secret", "unknown": "ignored"}]
+
+    class RecordingPeerConnection(FakePeerConnection):
+        def __init__(self, configuration=None):
+            super().__init__()
+            self.configuration = configuration
+            created.append(self)
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCPeerConnection", RecordingPeerConnection)
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCSessionDescription", FakeSessionDescription)
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCConfiguration", FakeConfiguration)
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCIceServer", FakeIceServer)
+
+    bridge = DriveApiBridge(auto_start=False, webrtc_ice_servers=servers)
+    monkeypatch.setattr(bridge, "_post_webrtc_answer", lambda _session_id, _sdp: None)
+
+    bridge._handle_webrtc_signal({
+        "type": "webrtc_signal",
+        "signal_type": "offer",
+        "session_id": "session-1",
+        "sdp": "offer-sdp",
+        "description_type": "offer",
+    })
+
+    assert created[0].configuration.iceServers[0].kwargs == {
+        "urls": ["turn:192.168.3.96:3478?transport=udp"],
+        "username": "donkey",
+        "credential": "secret",
+    }
 
 
 def test_drive_api_bridge_posts_answer_before_set_local_description(monkeypatch):

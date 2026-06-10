@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -33,7 +34,7 @@ except Exception:  # pragma: no cover - 运行环境缺少 av 时只影响 WebRT
     av = None
 
 try:
-    from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+    from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription, RTCIceServer, VideoStreamTrack
     try:
         from aiortc import RTCIceCandidate
     except ImportError:  # aiortc 部分版本不公开该类，回退为原始 dict
@@ -43,8 +44,10 @@ try:
     except ImportError:
         candidate_from_sdp = None
 except Exception:  # pragma: no cover - 运行环境缺少 aiortc 时只影响 WebRTC 媒体轨道
+    RTCConfiguration = None
     RTCPeerConnection = None
     RTCSessionDescription = None
+    RTCIceServer = None
     RTCIceCandidate = None
     candidate_from_sdp = None
     class VideoStreamTrack:  # type: ignore[no-redef]
@@ -54,6 +57,22 @@ except Exception:  # pragma: no cover - 运行环境缺少 aiortc 时只影响 W
             pass
 
 logger = logging.getLogger(__name__)
+
+
+def parse_webrtc_ice_servers(value):
+    """解析前后端共用的 ICE servers JSON 配置。"""
+    if not value:
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            logger.warning(f"解析 DRIVE_WEBRTC_ICE_SERVERS 失败: {exc}")
+            return []
+    if not isinstance(value, list):
+        logger.warning("DRIVE_WEBRTC_ICE_SERVERS 必须是 JSON 数组")
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 @dataclass(frozen=True)
@@ -206,13 +225,15 @@ class DriveApiBridge:
                  role: str = "car", reconnect_interval: float = 3.0,
                  auto_start: bool = True, video_transport: str = "webrtc",
                  video_width: int = 320, video_height: int = 240,
-                 video_fps: int = 60, webrtc_enabled: bool = True):
+                 video_fps: int = 60, webrtc_enabled: bool = True,
+                 webrtc_ice_servers=None):
         self.server_url = self._with_role(server_url, role)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
         self.video_transport = video_transport
         self.video_fps = video_fps
         self.webrtc_enabled = webrtc_enabled
+        self.webrtc_ice_servers = parse_webrtc_ice_servers(os.environ.get("DRIVE_WEBRTC_ICE_SERVERS") or webrtc_ice_servers)
         self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height)
 
         self.angle = 0.0
@@ -322,6 +343,23 @@ class DriveApiBridge:
             return asyncio.run_coroutine_threadsafe(coro, self.loop)
         return asyncio.run(coro)
 
+    def _build_webrtc_configuration(self):
+        if not self.webrtc_ice_servers or RTCConfiguration is None or RTCIceServer is None:
+            return None
+        ice_servers = []
+        allowed_keys = {"urls", "username", "credential", "credentialType"}
+        for server in self.webrtc_ice_servers:
+            kwargs = {key: value for key, value in server.items() if key in allowed_keys}
+            if "urls" not in kwargs:
+                continue
+            try:
+                ice_servers.append(RTCIceServer(**kwargs))
+            except Exception as exc:
+                logger.warning(f"忽略无效 WebRTC ICE server 配置: {exc}")
+        if not ice_servers:
+            return None
+        return RTCConfiguration(iceServers=ice_servers)
+
     async def _accept_webrtc_offer(self, msg: dict):
         if RTCPeerConnection is None or RTCSessionDescription is None:
             logger.warning("缺少 aiortc 依赖，无法建立 WebRTC PeerConnection")
@@ -334,7 +372,8 @@ class DriveApiBridge:
                 if asyncio.iscoroutine(result):
                     await result
 
-        peer = RTCPeerConnection()
+        configuration = self._build_webrtc_configuration()
+        peer = RTCPeerConnection(configuration=configuration) if configuration is not None else RTCPeerConnection()
         self.webrtc_peer = peer
         if hasattr(peer, "on"):
             @peer.on("icecandidate")

@@ -718,6 +718,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
             video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
             video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
             webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
+            webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
         )
     else:
         ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)

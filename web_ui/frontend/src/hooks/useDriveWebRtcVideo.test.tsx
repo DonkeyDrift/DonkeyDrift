@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useDriveWebRtcVideo } from './useDriveWebRtcVideo';
+import { getDriveWebRtcIceServers, useDriveWebRtcVideo } from './useDriveWebRtcVideo';
 import type { WebRtcSignal } from './useDriveWebsocket';
 
 vi.mock('../services/api', () => ({
@@ -68,6 +68,34 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('getDriveWebRtcIceServers', () => {
+  it('未配置时返回空数组', () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_ICE_SERVERS', '');
+
+    expect(getDriveWebRtcIceServers()).toEqual([]);
+  });
+
+  it('解析有效 TURN JSON 配置', () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_ICE_SERVERS', '[{"urls":["turn:192.168.3.96:3478?transport=udp"],"username":"donkey","credential":"secret"}]');
+
+    expect(getDriveWebRtcIceServers()).toEqual([
+      { urls: ['turn:192.168.3.96:3478?transport=udp'], username: 'donkey', credential: 'secret' },
+    ]);
+  });
+
+  it('非法 JSON 返回空数组', () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_ICE_SERVERS', 'not-json');
+
+    expect(getDriveWebRtcIceServers()).toEqual([]);
+  });
+
+  it('顶层非数组返回空数组', () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_ICE_SERVERS', '{"urls":"turn:host"}');
+
+    expect(getDriveWebRtcIceServers()).toEqual([]);
+  });
+});
+
 describe('useDriveWebRtcVideo', () => {
   it('浏览器不支持 RTCPeerConnection 时降级', async () => {
     vi.stubGlobal('RTCPeerConnection', undefined);
@@ -93,6 +121,25 @@ describe('useDriveWebRtcVideo', () => {
       expect(api.sendDriveWebRtcOffer).toHaveBeenCalledWith('session-1', 'offer-sdp');
       expect(pc.localDescription?.sdp).toBe('offer-sdp');
     });
+  });
+
+  it('默认 RTCPeerConnection 注入 ICE servers 配置', async () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_ICE_SERVERS', '[{"urls":["turn:192.168.3.96:3478?transport=udp"],"username":"donkey","credential":"secret"}]');
+    const configs: RTCConfiguration[] = [];
+    class RecordingPeerConnection extends FakePeerConnection {
+      constructor(config?: RTCConfiguration) {
+        super();
+        configs.push(config ?? {});
+      }
+    }
+    vi.stubGlobal('RTCPeerConnection', RecordingPeerConnection);
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} />);
+
+    await waitFor(() => expect(configs[0]).toEqual({
+      iceServers: [{ urls: ['turn:192.168.3.96:3478?transport=udp'], username: 'donkey', credential: 'secret' }],
+    }));
   });
 
   it('offer 发出后未收到视频 track 时降级', async () => {

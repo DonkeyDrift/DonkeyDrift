@@ -45,6 +45,7 @@ DRIVE_VIDEO_FPS = 60             # 视频流目标帧率
 DRIVE_WEBRTC_ENABLED = True      # 是否启用 WebRTC
 DRIVE_WEBRTC_SINGLE_CLIENT = True  # 是否只允许单个客户端
 DRIVE_WEBRTC_RECONNECT_TIMEOUT_SEC = 3.0  # WebRTC 连接超时恢复时间（秒）
+DRIVE_WEBRTC_ICE_SERVERS = []  # 示例: [{"urls": ["turn:192.168.3.96:3478?transport=udp"], "username": "donkey", "credential": "donkey-turn-secret"}]
 
 #--------------------------For DonkeySim 驴车模拟器相关配置
 # DonkeySim 驴车模拟器相关配置

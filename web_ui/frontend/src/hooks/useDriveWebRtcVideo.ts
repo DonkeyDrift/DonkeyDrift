@@ -23,6 +23,24 @@ export interface DriveVideoMetrics {
   p95FrameIntervalMs: number;
 }
 
+export const getDriveWebRtcIceServers = (): RTCIceServer[] => {
+  const raw = import.meta.env.VITE_DRIVE_WEBRTC_ICE_SERVERS?.trim();
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      console.warn('VITE_DRIVE_WEBRTC_ICE_SERVERS 必须是 JSON 数组');
+      return [];
+    }
+    return parsed.filter((item) => item && typeof item === 'object') as RTCIceServer[];
+  } catch (exc) {
+    console.warn('解析 VITE_DRIVE_WEBRTC_ICE_SERVERS 失败', exc);
+    return [];
+  }
+};
+
 const EMPTY_STATS: DriveWebRtcStats = {
   active: false,
   session_id: null,
@@ -72,7 +90,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     if (peerConnectionFactory) {
       return peerConnectionFactory();
     }
-    return new RTCPeerConnection();
+    return new RTCPeerConnection({ iceServers: getDriveWebRtcIceServers() });
   }, [peerConnectionFactory]);
 
   const closePeer = useCallback(() => {
