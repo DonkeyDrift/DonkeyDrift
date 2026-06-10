@@ -154,6 +154,10 @@ export interface DriveWebRtcStats {
   ice_gathering_state?: string | null;
   local_description_error?: string | null;
   local_description_elapsed_ms?: number | null;
+  inbound_fps?: number;
+  frames_dropped?: number;
+  jitter_ms?: number;
+  jitter_buffer_delay_ms?: number;
   transport: 'webrtc' | 'mjpeg';
   degraded: boolean;
 }
@@ -175,7 +179,14 @@ export const sendDriveWebRtcIce = async (sessionId: string, candidate: RTCIceCan
 
 export const sendDriveWebRtcBrowserStats = async (
   sessionId: string,
-  metrics: { browser_fps: number; browser_p95_frame_interval_ms: number }
+  metrics: {
+    browser_fps: number;
+    browser_p95_frame_interval_ms: number;
+    inbound_fps?: number;
+    frames_dropped?: number;
+    jitter_ms?: number;
+    jitter_buffer_delay_ms?: number;
+  }
 ) => {
   const response = await api.post('/drive/webrtc/browser-stats', { session_id: sessionId, ...metrics });
   return response.data as { success: boolean };

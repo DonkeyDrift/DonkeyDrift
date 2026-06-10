@@ -25,6 +25,7 @@ class FakePeerConnection {
   closed = false;
   ontrack: ((event: RTCTrackEvent) => void) | null = null;
   onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
+  statsReports: unknown[] = [];
 
   addTransceiver = vi.fn();
 
@@ -42,6 +43,10 @@ class FakePeerConnection {
 
   async addIceCandidate(candidate: RTCIceCandidateInit) {
     this.candidates.push(candidate);
+  }
+
+  async getStats() {
+    return new Map(this.statsReports.map((report, index) => [String(index), report]));
   }
 
   close() {
@@ -183,14 +188,24 @@ describe('useDriveWebRtcVideo', () => {
       value: vi.fn(),
     });
     const pc = new FakePeerConnection();
+    pc.statsReports = [{
+      type: 'inbound-rtp',
+      kind: 'video',
+      framesPerSecond: 58,
+      framesDropped: 3,
+      jitter: 0.0042,
+      jitterBufferDelay: 0.25,
+      jitterBufferEmittedCount: 20,
+    }];
     const factory = () => pc as unknown as RTCPeerConnection;
     const onState = vi.fn();
+    const receiver = { playoutDelayHint: undefined } as RTCRtpReceiver & { playoutDelayHint?: number };
 
     render(<HookProbe onState={onState} factory={factory} />);
 
     await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
     await act(async () => {
-      pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack } as unknown as RTCTrackEvent);
+      pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver } as unknown as RTCTrackEvent);
     });
     await act(async () => {
       callbacks.shift()?.(0, { presentationTime: 0 } as VideoFrameCallbackMetadata);
@@ -200,7 +215,12 @@ describe('useDriveWebRtcVideo', () => {
     await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalledWith('session-1', {
       browser_fps: 1,
       browser_p95_frame_interval_ms: 1000,
+      inbound_fps: 58,
+      frames_dropped: 3,
+      jitter_ms: 4.2,
+      jitter_buffer_delay_ms: 12.5,
     }));
+    expect(receiver.playoutDelayHint).toBe(0);
   });
 
   it('处理 answer 和 ICE 信令', async () => {

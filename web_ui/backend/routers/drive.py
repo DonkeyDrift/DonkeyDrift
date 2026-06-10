@@ -51,6 +51,10 @@ class DriveState:
             "sent_fps": 0.0,
             "browser_fps": 0.0,
             "browser_p95_frame_interval_ms": 0.0,
+            "inbound_fps": 0.0,
+            "frames_dropped": 0,
+            "jitter_ms": 0.0,
+            "jitter_buffer_delay_ms": 0.0,
             "disconnect_count": 0,
             "stale_frames": 0,
             "peer_connection_state": None,
@@ -164,6 +168,10 @@ class WebRtcBrowserStatsRequest(BaseModel):
     session_id: str
     browser_fps: float
     browser_p95_frame_interval_ms: float
+    inbound_fps: Optional[float] = None
+    frames_dropped: Optional[int] = None
+    jitter_ms: Optional[float] = None
+    jitter_buffer_delay_ms: Optional[float] = None
 
 
 # ------------------------------------------------------------------
@@ -364,6 +372,10 @@ async def update_webrtc_browser_stats(request: WebRtcBrowserStatsRequest):
     _require_webrtc_session(request.session_id)
     drive_state.webrtc_stats["browser_fps"] = request.browser_fps
     drive_state.webrtc_stats["browser_p95_frame_interval_ms"] = request.browser_p95_frame_interval_ms
+    for key in ("inbound_fps", "frames_dropped", "jitter_ms", "jitter_buffer_delay_ms"):
+        value = getattr(request, key)
+        if value is not None:
+            drive_state.webrtc_stats[key] = value
     return {"success": True}
 
 
@@ -379,6 +391,10 @@ async def webrtc_stats():
         "sent_fps": drive_state.webrtc_stats["sent_fps"],
         "browser_fps": drive_state.webrtc_stats["browser_fps"],
         "browser_p95_frame_interval_ms": drive_state.webrtc_stats["browser_p95_frame_interval_ms"],
+        "inbound_fps": drive_state.webrtc_stats["inbound_fps"],
+        "frames_dropped": drive_state.webrtc_stats["frames_dropped"],
+        "jitter_ms": drive_state.webrtc_stats["jitter_ms"],
+        "jitter_buffer_delay_ms": drive_state.webrtc_stats["jitter_buffer_delay_ms"],
         "disconnect_count": drive_state.webrtc_stats["disconnect_count"],
         "stale_frames": drive_state.webrtc_stats["stale_frames"],
         "peer_connection_state": drive_state.webrtc_stats["peer_connection_state"],

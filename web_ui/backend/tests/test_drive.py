@@ -245,12 +245,20 @@ def test_browser_webrtc_stats_update_backend_stats():
         "session_id": session["session_id"],
         "browser_fps": 58.4,
         "browser_p95_frame_interval_ms": 23.7,
+        "inbound_fps": 58.0,
+        "frames_dropped": 3,
+        "jitter_ms": 4.2,
+        "jitter_buffer_delay_ms": 12.5,
     })
 
     assert response.status_code == 200
     data = client.get("/api/drive/webrtc/stats").json()
     assert data["browser_fps"] == 58.4
     assert data["browser_p95_frame_interval_ms"] == 23.7
+    assert data["inbound_fps"] == 58.0
+    assert data["frames_dropped"] == 3
+    assert data["jitter_ms"] == 4.2
+    assert data["jitter_buffer_delay_ms"] == 12.5
 
 
 def test_browser_webrtc_stats_reject_stale_session():
@@ -267,6 +275,8 @@ def test_browser_webrtc_stats_reject_stale_session():
     data = client.get("/api/drive/webrtc/stats").json()
     assert data["browser_fps"] == 0.0
     assert data["browser_p95_frame_interval_ms"] == 0.0
+    assert data["inbound_fps"] == 0.0
+    assert data["frames_dropped"] == 0
 
 
 def test_webrtc_stats_exposes_signaling_timestamps():

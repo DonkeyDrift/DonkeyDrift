@@ -59,9 +59,20 @@ const EMPTY_STATS: DriveWebRtcStats = {
   ice_gathering_state: null,
   local_description_error: null,
   local_description_elapsed_ms: null,
+  inbound_fps: 0,
+  frames_dropped: 0,
+  jitter_ms: 0,
+  jitter_buffer_delay_ms: 0,
   transport: 'webrtc',
   degraded: false,
 };
+
+interface BrowserInboundStats {
+  inbound_fps?: number;
+  frames_dropped?: number;
+  jitter_ms?: number;
+  jitter_buffer_delay_ms?: number;
+}
 
 export const calculateVideoMetrics = (timestamps: number[]): DriveVideoMetrics => {
   if (timestamps.length < 2) {
@@ -75,6 +86,35 @@ export const calculateVideoMetrics = (timestamps: number[]): DriveVideoMetrics =
     browserFps: elapsed <= 0 ? 0 : ((timestamps.length - 1) * 1000) / elapsed,
     p95FrameIntervalMs: sorted[p95Index] ?? 0,
   };
+};
+
+const collectBrowserInboundStats = async (peer: RTCPeerConnection | null): Promise<BrowserInboundStats> => {
+  if (!peer?.getStats) {
+    return {};
+  }
+  const reports = await peer.getStats();
+  for (const report of reports.values()) {
+    const value = report as RTCInboundRtpStreamStats & {
+      kind?: string;
+      framesPerSecond?: number;
+      framesDropped?: number;
+      jitterBufferDelay?: number;
+      jitterBufferEmittedCount?: number;
+    };
+    if (value.type !== 'inbound-rtp' || value.kind !== 'video') {
+      continue;
+    }
+    const jitterBufferDelayMs = value.jitterBufferDelay !== undefined && value.jitterBufferEmittedCount
+      ? (value.jitterBufferDelay / value.jitterBufferEmittedCount) * 1000
+      : undefined;
+    return {
+      inbound_fps: value.framesPerSecond,
+      frames_dropped: value.framesDropped,
+      jitter_ms: value.jitter !== undefined ? value.jitter * 1000 : undefined,
+      jitter_buffer_delay_ms: jitterBufferDelayMs,
+    };
+  }
+  return {};
 };
 
 export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) => {
@@ -138,10 +178,13 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       const sessionId = sessionIdRef.current;
       if (sessionId && nextMetrics.browserFps > 0 && metadata.presentationTime - lastBrowserStatsSentAtRef.current >= 1000) {
         lastBrowserStatsSentAtRef.current = metadata.presentationTime;
-        sendDriveWebRtcBrowserStats(sessionId, {
-          browser_fps: nextMetrics.browserFps,
-          browser_p95_frame_interval_ms: nextMetrics.p95FrameIntervalMs,
-        }).catch(() => undefined);
+        collectBrowserInboundStats(peerRef.current)
+          .then((inboundStats) => sendDriveWebRtcBrowserStats(sessionId, {
+            browser_fps: nextMetrics.browserFps,
+            browser_p95_frame_interval_ms: nextMetrics.p95FrameIntervalMs,
+            ...inboundStats,
+          }))
+          .catch(() => undefined);
       }
       frameCallbackRef.current = video.requestVideoFrameCallback(onFrame);
     };
@@ -179,6 +222,10 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
         }
       };
       peer.ontrack = (event) => {
+        const receiver = event.receiver as RTCRtpReceiver & { playoutDelayHint?: number };
+        if ('playoutDelayHint' in receiver) {
+          receiver.playoutDelayHint = 0;
+        }
         trackReceivedRef.current = true;
         if (negotiationTimerRef.current !== null) {
           window.clearTimeout(negotiationTimerRef.current);
