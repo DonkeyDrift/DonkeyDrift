@@ -4,7 +4,12 @@ import json
 
 import numpy as np
 
-from donkeycar.parts.drive_api_bridge import DriveApiBridge, DriveVideoFrameBuffer, DriveWebRtcVideoTrack
+from donkeycar.parts.drive_api_bridge import (
+    DriveApiBridge,
+    DriveVideoFrameBuffer,
+    DriveWebRtcVideoTrack,
+    DriveAiortcVideoTrack,
+)
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge as DrifterDriveApiBridge
 
 
@@ -212,3 +217,83 @@ def test_drive_api_bridge_posts_answer_and_ice(monkeypatch):
         ("/webrtc/answer", {"session_id": "session-1", "sdp": "answer-sdp", "type": "answer"}),
         ("/webrtc/ice", {"session_id": "session-1", "source": "car", "candidate": {"candidate": "candidate:1"}}),
     ]
+
+
+class FakeVideoFrame:
+    def __init__(self, image, format):
+        self.image = image
+        self.format = format
+        self.pts = None
+        self.time_base = None
+
+
+class FakeAvModule:
+    class VideoFrame:
+        @staticmethod
+        def from_ndarray(image, format):
+            return FakeVideoFrame(image, format)
+
+
+def test_aiortc_video_track_converts_latest_frame(monkeypatch):
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+    buffer = DriveVideoFrameBuffer(width=320, height=240)
+    track = DriveAiortcVideoTrack(buffer, fps=60)
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+    buffer.update(frame)
+    output = asyncio.run(track.recv())
+
+    assert isinstance(output, FakeVideoFrame)
+    assert output.image is frame
+    assert output.format == "rgb24"
+    assert output.pts == 1
+    assert output.time_base is not None
+
+
+def test_drive_api_bridge_creates_aiortc_peer_from_offer(monkeypatch):
+    created = []
+    answers = []
+
+    class FakePeerConnection:
+        def __init__(self):
+            self.tracks = []
+            self.remote = None
+            self.localDescription = type("Description", (), {"sdp": "answer-sdp"})()
+            created.append(self)
+
+        def addTrack(self, track):
+            self.tracks.append(track)
+
+        async def setRemoteDescription(self, description):
+            self.remote = description
+
+        async def createAnswer(self):
+            return "answer"
+
+        async def setLocalDescription(self, answer):
+            self.answer = answer
+
+    class FakeSessionDescription:
+        def __init__(self, sdp, type):
+            self.sdp = sdp
+            self.type = type
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCPeerConnection", FakePeerConnection)
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCSessionDescription", FakeSessionDescription)
+
+    bridge = DriveApiBridge(auto_start=False)
+    monkeypatch.setattr(bridge, "_post_webrtc_answer", lambda session_id, sdp: answers.append((session_id, sdp)))
+
+    bridge._handle_webrtc_signal({
+        "type": "webrtc_signal",
+        "signal_type": "offer",
+        "session_id": "session-1",
+        "sdp": "offer-sdp",
+        "description_type": "offer",
+    })
+
+    assert bridge.active_webrtc_session_id == "session-1"
+    assert len(created) == 1
+    assert len(created[0].tracks) == 1
+    assert created[0].remote.sdp == "offer-sdp"
+    assert answers == [("session-1", "answer-sdp")]

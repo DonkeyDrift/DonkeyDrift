@@ -4,3 +4,6 @@ python-multipart
 pandas
 numpy
 pillow
+websockets
+aiortc
+av

@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass
 from threading import Thread
 from typing import Callable, Dict, Optional
+from fractions import Fraction
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
@@ -25,6 +26,22 @@ try:
     import websockets
 except Exception:  # pragma: no cover - 运行环境缺少 websockets 时由连接线程记录错误
     websockets = None
+
+try:
+    import av
+except Exception:  # pragma: no cover - 运行环境缺少 av 时只影响 WebRTC 媒体轨道
+    av = None
+
+try:
+    from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+except Exception:  # pragma: no cover - 运行环境缺少 aiortc 时只影响 WebRTC 媒体轨道
+    RTCPeerConnection = None
+    RTCSessionDescription = None
+    class VideoStreamTrack:  # type: ignore[no-redef]
+        kind = "video"
+
+        def __init__(self):
+            pass
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +142,33 @@ class DriveWebRtcVideoTrack:
         }
 
 
+class DriveAiortcVideoTrack(VideoStreamTrack):
+    """aiortc 使用的视频轨道，输出最新真实帧。"""
+
+    def __init__(self, frame_buffer: DriveVideoFrameBuffer, fps: int = 60):
+        super().__init__()
+        self.frame_buffer = frame_buffer
+        self.fps = fps
+        self.last_frame_id = 0
+        self.pts = 0
+        self.time_base = Fraction(1, fps)
+
+    async def recv(self):
+        if av is None:
+            raise RuntimeError("缺少 av 依赖，无法创建 WebRTC 视频帧")
+
+        while True:
+            latest = self.frame_buffer.get_latest()
+            if latest is not None and latest.frame_id != self.last_frame_id:
+                self.last_frame_id = latest.frame_id
+                self.pts += 1
+                frame = av.VideoFrame.from_ndarray(latest.frame, format="rgb24")
+                frame.pts = self.pts
+                frame.time_base = self.time_base
+                return frame
+            await asyncio.sleep(1.0 / self.fps)
+
+
 class DriveApiBridge:
     """车端 WebSocket 桥接 Part。"""
 
@@ -156,6 +200,7 @@ class DriveApiBridge:
         self.last_frame = 0.0
         self.thread = None
         self.active_webrtc_session_id = None
+        self.webrtc_peer = None
         self.webrtc_track = DriveWebRtcVideoTrack(self.frame_buffer, fps=video_fps)
 
         if auto_start:
@@ -232,9 +277,35 @@ class DriveApiBridge:
         asyncio.run_coroutine_threadsafe(self.ws.send(json.dumps(payload)), self.loop)
 
     def _handle_webrtc_signal(self, msg: dict):
-        """处理 WebRTC 信令；完整 PeerConnection 在后续步骤接入。"""
+        """处理 WebRTC 信令。"""
         if msg.get("signal_type") == "offer" and msg.get("session_id"):
             self.active_webrtc_session_id = msg["session_id"]
+            self._run_async(self._accept_webrtc_offer(msg))
+
+    def _run_async(self, coro):
+        if self.loop and self.loop.is_running():
+            return asyncio.run_coroutine_threadsafe(coro, self.loop)
+        return asyncio.run(coro)
+
+    async def _accept_webrtc_offer(self, msg: dict):
+        if RTCPeerConnection is None or RTCSessionDescription is None:
+            logger.warning("缺少 aiortc 依赖，无法建立 WebRTC PeerConnection")
+            return
+
+        if self.webrtc_peer is not None:
+            close = getattr(self.webrtc_peer, "close", None)
+            if close:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
+
+        peer = RTCPeerConnection()
+        self.webrtc_peer = peer
+        peer.addTrack(DriveAiortcVideoTrack(self.frame_buffer, fps=self.video_fps))
+        await peer.setRemoteDescription(RTCSessionDescription(sdp=msg.get("sdp", ""), type="offer"))
+        answer = await peer.createAnswer()
+        await peer.setLocalDescription(answer)
+        self._post_webrtc_answer(msg["session_id"], peer.localDescription.sdp)
 
     def _post_json(self, path: str, payload: dict):
         url = f"{self.http_api_base}{path}"

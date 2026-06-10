@@ -13,7 +13,7 @@ Web 驾驶控制台是 Donkeycar 新一代统一 Web UI 的核心模块，将原
 ```bash
 # 后端
 cd web_ui/backend
-pip install -r requirements.txt   # 首次运行
+pip install -r requirements.txt   # 首次运行，包含 WebRTC 所需 aiortc / av
 python main.py                    # 默认监听 0.0.0.0:8000
 
 # 前端（新终端）
