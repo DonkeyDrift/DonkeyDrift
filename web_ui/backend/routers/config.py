@@ -80,6 +80,8 @@ async def list_directories(path: str = None):
     """
     if not path:
         path = os.path.expanduser("~")
+    else:
+        path = os.path.expanduser(path)
     
     path = os.path.abspath(path)
     if not os.path.exists(path) or not os.path.isdir(path):
@@ -108,7 +110,7 @@ async def list_directories(path: str = None):
 
 @router.post("/load")
 async def load_config_route(request: ConfigLoadRequest):
-    path = request.path
+    path = os.path.expanduser(request.path)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Directory not found")
     
@@ -138,7 +140,7 @@ async def load_config_route(request: ConfigLoadRequest):
 @router.post("/load_myconfig")
 async def load_myconfig_route(request: ConfigLoadRequest):
     """Load only myconfig.py (without merging config.py defaults)."""
-    path = request.path
+    path = os.path.expanduser(request.path)
     myconfig_path = os.path.join(path, 'myconfig.py')
 
     if not os.path.exists(myconfig_path):
@@ -169,7 +171,7 @@ async def load_myconfig_route(request: ConfigLoadRequest):
 @router.post("/save_training")
 async def save_training_config(request: TrainingConfigSaveRequest):
     """Save or remove training-related config keys in myconfig.py."""
-    path = request.path
+    path = os.path.expanduser(request.path)
     myconfig_path = os.path.join(path, 'myconfig.py')
 
     lines = []
@@ -240,7 +242,7 @@ async def discover_simulator(request: SimulatorDiscoverRequest):
 @router.post("/save_simulator")
 async def save_simulator_config(request: SimulatorSaveRequest):
     """Save simulator-related config keys in myconfig.py."""
-    path = request.path
+    path = os.path.expanduser(request.path)
     myconfig_path = os.path.join(path, 'myconfig.py')
 
     lines = []
