@@ -17,16 +17,28 @@ import {
   WifiOff,
   Loader2,
   CheckCircle2,
+  X,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 
+type ToastType = 'success' | 'error' | 'info';
+
+interface ToastItem {
+  id: number;
+  message: string;
+  type: ToastType;
+}
+
 export const SimulatorConfig: React.FC = () => {
-  const { config, configPath, setError, setLoading, isLoading } = useStore();
+  const { config, configPath, setLoading, isLoading } = useStore();
 
   const [simHost, setSimHost] = useState('');
   const [donkeyGym, setDonkeyGym] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [foundHosts, setFoundHosts] = useState<SimulatorHost[]>([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   // Sync with loaded config
   useEffect(() => {
@@ -42,32 +54,52 @@ export const SimulatorConfig: React.FC = () => {
     }
   }, [config]);
 
+  const pushToast = useCallback((message: string, type: ToastType = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }, []);
+
   const handleDiscover = useCallback(async () => {
     setIsDiscovering(true);
     setFoundHosts([]);
     setSaveSuccess(false);
+    pushToast('正在扫描局域网中的 DonkeySim...', 'info');
     try {
       const data = await discoverSimulator(configPath || undefined);
       if (data.found && data.found.length > 0) {
         setFoundHosts(data.found);
+        const best = data.found[0];
+        setSimHost(best.ip);
+        pushToast(
+          `发现 ${data.found.length} 个可用模拟器（扫描了 ${data.scanned} 个地址），已自动填入最佳 IP：${best.ip}`,
+          'success'
+        );
       } else {
-        setError('未在局域网中发现 DonkeySim 实例，请确认模拟器已启动');
+        pushToast(
+          `${data.message}`,
+          'error'
+        );
       }
     } catch (err: unknown) {
-      setError(getApiErrorMessage(err, '发现模拟器失败'));
+      const msg = getApiErrorMessage(err, '发现模拟器失败');
+      pushToast(msg, 'error');
     } finally {
       setIsDiscovering(false);
     }
-  }, [configPath, setError]);
+  }, [configPath, pushToast]);
 
   const handleSelectHost = (host: SimulatorHost) => {
     setSimHost(host.ip);
     setSaveSuccess(false);
+    pushToast(`已选择模拟器 IP：${host.ip}`, 'info');
   };
 
   const handleSave = useCallback(async () => {
     if (!configPath) {
-      setError('请先加载车辆配置目录');
+      pushToast('请先加载车辆配置目录', 'error');
       return;
     }
     setLoading(true);
@@ -81,18 +113,41 @@ export const SimulatorConfig: React.FC = () => {
         },
       });
       setSaveSuccess(true);
-      // Update local config state so other components see the change
+      pushToast('配置已保存到 myconfig.py，车辆进程将自动重连', 'success');
       if (config) {
         useStore.setState({
           config: { ...config, SIM_HOST: simHost, DONKEY_GYM: donkeyGym },
         });
       }
     } catch (err: unknown) {
-      setError(getApiErrorMessage(err, '保存模拟器配置失败'));
+      const msg = getApiErrorMessage(err, '保存模拟器配置失败');
+      pushToast(msg, 'error');
     } finally {
       setLoading(false);
     }
-  }, [configPath, simHost, donkeyGym, config, setError, setLoading]);
+  }, [configPath, simHost, donkeyGym, config, pushToast, setLoading]);
+
+  const toastIcon = (type: ToastType) => {
+    switch (type) {
+      case 'success':
+        return <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />;
+      case 'error':
+        return <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />;
+      default:
+        return <Info className="w-4 h-4 text-cyan-400 shrink-0" />;
+    }
+  };
+
+  const toastBg = (type: ToastType) => {
+    switch (type) {
+      case 'success':
+        return 'bg-emerald-950/90 border-emerald-700/50';
+      case 'error':
+        return 'bg-red-950/90 border-red-700/50';
+      default:
+        return 'bg-zinc-900/90 border-zinc-700/50';
+    }
+  };
 
   return (
     <Card>
@@ -210,6 +265,25 @@ export const SimulatorConfig: React.FC = () => {
           </Button>
         </div>
       </CardContent>
+
+      {/* Toast overlay */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm text-sm text-zinc-100 max-w-sm animate-in fade-in slide-in-from-right-4 duration-300 ${toastBg(t.type)}`}
+          >
+            {toastIcon(t.type)}
+            <span className="flex-1 leading-relaxed">{t.message}</span>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+              className="shrink-0 text-zinc-400 hover:text-white transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
     </Card>
   );
 };

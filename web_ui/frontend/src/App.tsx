@@ -94,12 +94,9 @@ function TubManagerPage() {
 }
 
 function AppShell() {
-  const { pathname } = useLocation();
-  const shouldShowLoaders = pathname !== '/drive';
-
   return (
     <ErrorBoundary>
-      {shouldShowLoaders && <SidePanel />}
+      <SidePanel />
       <Layout>
         <React.Suspense fallback={<div className="text-sm text-zinc-400">Loading</div>}>
           <Routes>

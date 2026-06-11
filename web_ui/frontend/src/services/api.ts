@@ -494,7 +494,7 @@ export interface SimulatorHost {
 
 export const discoverSimulator = async (carPath?: string) => {
   const response = await api.post('/config/discover_simulator', { car_path: carPath });
-  return response.data as { status: boolean; found: SimulatorHost[]; count: number };
+  return response.data as { status: boolean; found: SimulatorHost[]; count: number; scanned: number; message: string };
 };
 
 export const saveSimulatorConfig = async (payload: {
