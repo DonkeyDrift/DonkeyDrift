@@ -39,27 +39,43 @@ def get_default_gateway():
     return None
 
 
-def get_local_subnet():
-    """Return the LAN subnet prefix of the primary interface, if any."""
+def _extract_subnet(ip: str) -> str | None:
+    """从 IPv4 地址提取 /24 子网前缀，仅对 RFC1918 地址返回。"""
+    if ip.startswith("127.") or ip.startswith("169.254."):
+        return None
+    if ip.startswith("192.168.") or ip.startswith("10."):
+        parts = ip.split(".")
+        return f"{parts[0]}.{parts[1]}.{parts[2]}"
+    if ip.startswith("172."):
+        second = int(ip.split(".")[1])
+        if 16 <= second <= 31:
+            parts = ip.split(".")
+            return f"{parts[0]}.{parts[1]}.{parts[2]}"
+    return None
+
+
+def get_local_subnets() -> list[str]:
+    """Return all LAN subnet prefixes of non-loopback RFC1918 interfaces."""
+    subnets = set()
+
+    # 1. Try psutil
     try:
         import psutil
 
         addrs = psutil.net_if_addrs()
         for iface, addr_list in addrs.items():
+            # 跳过回环接口
+            if iface.lower() in ("lo", "loopback"):
+                continue
             for addr in addr_list:
                 if addr.family == socket.AF_INET:
-                    ip = addr.address
-                    if ip.startswith("192.168.") or ip.startswith("10."):
-                        parts = ip.split(".")
-                        return f"{parts[0]}.{parts[1]}.{parts[2]}"
-                    if ip.startswith("172."):
-                        second = int(ip.split(".")[1])
-                        if 16 <= second <= 31:
-                            parts = ip.split(".")
-                            return f"{parts[0]}.{parts[1]}.{parts[2]}"
+                    subnet = _extract_subnet(addr.address)
+                    if subnet:
+                        subnets.add(subnet)
     except Exception:
         pass
 
+    # 2. Fallback: parse 'ip route' for RFC1918 source addresses
     try:
         result = subprocess.run(
             ["ip", "route", "show"], capture_output=True, text=True
@@ -67,18 +83,13 @@ def get_local_subnet():
         for line in result.stdout.splitlines():
             match = re.search(r"src\s+(\d+\.\d+\.\d+\.\d+)", line)
             if match:
-                ip = match.group(1)
-                if ip.startswith("192.168.") or ip.startswith("10."):
-                    parts = ip.split(".")
-                    return f"{parts[0]}.{parts[1]}.{parts[2]}"
-                if ip.startswith("172."):
-                    second = int(ip.split(".")[1])
-                    if 16 <= second <= 31:
-                        parts = ip.split(".")
-                        return f"{parts[0]}.{parts[1]}.{parts[2]}"
+                subnet = _extract_subnet(match.group(1))
+                if subnet:
+                    subnets.add(subnet)
     except Exception:
         pass
 
+    # 3. WSL fallback: use ipconfig.exe
     try:
         result = subprocess.run(["ipconfig.exe"], capture_output=True)
         if result.returncode == 0:
@@ -91,19 +102,19 @@ def get_local_subnet():
                 if "IPv4" in line or "IP Address" in line:
                     match = re.search(r"(\d+\.\d+\.\d+\.\d+)", line)
                     if match:
-                        ip = match.group(1)
-                        if ip.startswith("192.168.") or ip.startswith("10."):
-                            parts = ip.split(".")
-                            return f"{parts[0]}.{parts[1]}.{parts[2]}"
-                        if ip.startswith("172."):
-                            second = int(ip.split(".")[1])
-                            if 16 <= second <= 31:
-                                parts = ip.split(".")
-                                return f"{parts[0]}.{parts[1]}.{parts[2]}"
+                        subnet = _extract_subnet(match.group(1))
+                        if subnet:
+                            subnets.add(subnet)
     except Exception:
         pass
 
-    return None
+    return sorted(subnets)
+
+
+def get_local_subnet() -> str | None:
+    """Return the first LAN subnet prefix (backwards compatibility)."""
+    subnets = get_local_subnets()
+    return subnets[0] if subnets else None
 
 
 def get_wsl_host_ip():
@@ -176,16 +187,16 @@ async def discover_hosts(
     if wsl_host and wsl_host not in candidates:
         candidates.append(wsl_host)
 
-    # 4. If we have a LAN subnet, scan it
-    subnet = get_local_subnet()
-    if subnet:
+    # 4. Scan all local subnets
+    subnets = get_local_subnets()
+    for subnet in subnets:
         for i in range(1, 255):
             ip = f"{subnet}.{i}"
             if ip not in candidates:
                 candidates.append(ip)
 
     # 5. Fallback: scan common home router subnets
-    if not subnet:
+    if not subnets:
         common_subnets = [
             "192.168.0",
             "192.168.1",

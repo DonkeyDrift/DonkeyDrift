@@ -46,4 +46,5 @@ async def root():
     return {"message": "DonkeyDrifter Web API is running"}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("DRIVE_WEB_PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
