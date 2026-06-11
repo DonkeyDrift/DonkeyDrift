@@ -92,44 +92,33 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative rounded-full bg-zinc-950 border-2 border-zinc-700 touch-none select-none ${dragging ? 'border-cyan-500/60 shadow-lg shadow-cyan-500/10' : ''} ${className}`}
-      style={{ width: size, height: size }}
+      className={`relative bg-zinc-950 border-2 border-zinc-700 touch-none select-none ${dragging ? 'border-cyan-500/60 shadow-lg shadow-cyan-500/10' : ''} ${className}`}
+      style={{ width: size, height: size, borderRadius: '50%' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* 参考圆环 */}
+      {/* 参考圆环 - 使用 transform 严格居中，确保同心 */}
       <div
-        className="absolute rounded-full border border-zinc-800"
-        style={{
-          width: maxRadius * 2,
-          height: maxRadius * 2,
-          left: size / 2 - maxRadius,
-          top: size / 2 - maxRadius,
-        }}
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-zinc-800 pointer-events-none"
+        style={{ width: maxRadius * 2, height: maxRadius * 2 }}
       />
       <div
-        className="absolute rounded-full border border-dashed border-zinc-800/60"
-        style={{
-          width: maxRadius,
-          height: maxRadius,
-          left: size / 2 - maxRadius / 2,
-          top: size / 2 - maxRadius / 2,
-        }}
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-zinc-800/60 pointer-events-none"
+        style={{ width: maxRadius, height: maxRadius }}
       />
-      {/* 十字线 */}
-      <div className="absolute w-px h-1/2 bg-zinc-800 left-1/2 top-0" />
-      <div className="absolute w-1/2 h-px bg-zinc-800 top-1/2 left-0" />
+      {/* 十字线（直径） */}
+      <div className="absolute w-px h-full bg-zinc-800 left-1/2 top-0 -translate-x-1/2 pointer-events-none" />
+      <div className="absolute w-full h-px bg-zinc-800 top-1/2 left-0 -translate-y-1/2 pointer-events-none" />
 
-      {/* 摇杆头 */}
+      {/* 摇杆头 - 使用 transform 居中 + 偏移，避免手动 left/top 计算误差 */}
       <div
-        className={`absolute rounded-full transition-colors ${dragging ? 'bg-cyan-500/80' : 'bg-zinc-600'} shadow-lg`}
+        className={`absolute top-1/2 left-1/2 rounded-full transition-colors pointer-events-none ${dragging ? 'bg-cyan-500/50' : 'bg-zinc-500'} shadow-lg`}
         style={{
           width: knobSize,
           height: knobSize,
-          left: size / 2 - knobSize / 2 + offset.x,
-          top: size / 2 - knobSize / 2 + offset.y,
+          transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))`,
         }}
       />
     </div>

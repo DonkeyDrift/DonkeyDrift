@@ -17,6 +17,9 @@ html,
 body,
 #root {
   min-width: 520px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .tub-editor-scroll-slider {

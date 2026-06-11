@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
+import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
 import { DriveModeSelector, DriveMode } from '../components/drive/DriveModeSelector';
 import { useDriveWebsocket, type WebRtcSignal } from '../hooks/useDriveWebsocket';
 import { useDriveControlLoop } from '../hooks/useDriveControlLoop';
@@ -220,7 +221,7 @@ export const DrivePage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
-          <VideoStream className="min-h-[360px]" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
         </div>
 
         {/* 控制区 */}
@@ -230,14 +231,19 @@ export const DrivePage: React.FC = () => {
             <span className="text-[10px] text-zinc-500">支持鼠标 / 触屏</span>
           </div>
           <div className="flex-1 flex flex-col items-center gap-4">
-            <VirtualJoystick
-              onChange={(a, t) => {
-                joystickRef.current = { angle: a, throttle: t };
-                lastInputType.current = 'joystick';
-              }}
-              size={220}
-            />
-            <ControlBars angle={angle} throttle={throttle} className="w-full max-w-[240px]" />
+            <div className="grid grid-cols-[auto_220px] gap-6">
+              <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+              <div className="flex flex-col items-center gap-2 w-[220px]">
+                <VirtualJoystick
+                  onChange={(a, t) => {
+                    joystickRef.current = { angle: a, throttle: t };
+                    lastInputType.current = 'joystick';
+                  }}
+                  size={220}
+                />
+                <ControlBars angle={angle} className="w-full" />
+              </div>
+            </div>
             <ProgrammableButtons
               className="w-full max-w-[240px]"
               onClick={(id) => send({ buttons: { [id]: true } })}

@@ -19,6 +19,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const [mjpegFps, setMjpegFps] = useState(0);
   const [carOnline, setCarOnline] = useState<boolean | null>(null);
   const [mjpegFallbackAllowed, setMjpegFallbackAllowed] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<string>('16/9');
   const imgRef = useRef<HTMLImageElement>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,6 +85,46 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   }, [forceMjpeg, webRtcConnected]);
 
   useEffect(() => resetFallbackTimer, []);
+
+  // 动态根据实际 WebRTC 视频画面调整容器宽高比
+  useEffect(() => {
+    if (!webRtcVisible) return;
+    const video = videoRef.current;
+    if (!video) return;
+    const updateRatio = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setAspectRatio(`${video.videoWidth}/${video.videoHeight}`);
+      }
+    };
+    if (video.readyState >= 1) {
+      updateRatio();
+    } else {
+      video.addEventListener('loadedmetadata', updateRatio, { once: true });
+    }
+  }, [webRtcVisible]);
+
+  useEffect(() => {
+    const wasVisible = prevWebRtcVisibleRef.current;
+    if (webRtcVisible && !wasVisible) {
+      // WebRTC 刚连上：等它完全渐入（500ms）后再淡出 MJPEG，避免中间 Gap 闪烁
+      mjpegFadeTimerRef.current = setTimeout(() => {
+        setMjpegVisible(false);
+      }, 500);
+    } else if (!webRtcVisible) {
+      if (mjpegFadeTimerRef.current) {
+        clearTimeout(mjpegFadeTimerRef.current);
+        mjpegFadeTimerRef.current = null;
+      }
+      setMjpegVisible(true);
+    }
+    prevWebRtcVisibleRef.current = webRtcVisible;
+    return () => {
+      if (mjpegFadeTimerRef.current) {
+        clearTimeout(mjpegFadeTimerRef.current);
+        mjpegFadeTimerRef.current = null;
+      }
+    };
+  }, [webRtcVisible]);
 
   useEffect(() => {
     const wasVisible = prevWebRtcVisibleRef.current;
@@ -188,7 +229,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   })();
 
   return (
-    <div className={`relative bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden min-h-[360px] ${className}`}>
+    <div className={`relative bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden ${className}`} style={{ aspectRatio }}>
       <div className="absolute top-2 left-2 z-30 flex items-center gap-2">
         {statusBadge}
         {degraded && (
@@ -214,7 +255,12 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         ref={imgRef}
         src={streamUrl}
         alt="Camera feed"
-        onLoad={() => setStatus('connected')}
+        onLoad={() => {
+          setStatus('connected');
+          if (imgRef.current && imgRef.current.naturalWidth > 0 && imgRef.current.naturalHeight > 0) {
+            setAspectRatio(`${imgRef.current.naturalWidth}/${imgRef.current.naturalHeight}`);
+          }
+        }}
         onError={() => {
           setStatus('error');
           scheduleRetry();
