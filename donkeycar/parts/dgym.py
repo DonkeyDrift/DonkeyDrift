@@ -205,13 +205,6 @@ class DonkeyGymEnv(object):
                 time.sleep(1.0)
                 continue
 
-            # 健康检查：如果底层连接已断开，主动关闭环境等待重连
-            if not self._is_env_connected():
-                print("[DonkeyGymEnv] 检测到模拟器连接已断开，准备重连")
-                self._close_env()
-                time.sleep(1.0)
-                continue
-
             try:
                 if self.delay > 0.0:
                     step_result = self.env.step(self.action)

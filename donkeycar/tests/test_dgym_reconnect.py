@@ -129,8 +129,6 @@ def test_update_sets_env_none_on_step_failure(mock_gym_make):
     # 清理
     gym_env.shutdown()
     thread.join(timeout=2.0)
-
-
 class FakeClient:
     def __init__(self, connected=True):
         self._connected = connected
