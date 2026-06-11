@@ -1,7 +1,7 @@
 <!-- AGENTS.md for DonkeyDrifter -->
 # DonkeyDrifter 智能体指南
 
-本文件为 AI 编程智能体提供在 DonkeyDrifter 仓库中高效工作所需的必要上下文。该项目是一个源自 Donkeycar 的独立 Python 自动驾驶/漂移机器人平台。以下所有事实均取自工作树中的实际文件（当前版本 `0.1.1`，分支 `v1.6.0-UX`）。
+本文件为 AI 编程智能体提供在 DonkeyDrifter 仓库中高效工作所需的必要上下文。该项目是一个源自 Donkeycar 的独立 Python 自动驾驶/漂移机器人平台。以下所有事实均取自工作树中的实际文件。
 
 ## 项目概览
 
@@ -64,6 +64,7 @@ docs/                # 架构、计划、指南、验证、工作流规范
 | `web_ui/frontend/tsconfig.json` | TypeScript 配置：`module: ESNext`、`moduleResolution: bundler`、`jsx: react-jsx`、`strict: false`，路径别名 `@/* -> ./src/*` |
 | `web_ui/frontend/tailwind.config.js` | Tailwind 配置：`darkMode: "class"`，内容路径 `./index.html` 和 `./src/**/*` |
 | `web_ui/frontend/eslint.config.js` | ESLint 配置：`typescript-eslint` recommended + `react-hooks` recommended + `react-refresh/only-export-components` warn |
+| `web_ui/frontend/vite.config.ts` | Vite 配置：开发服务器端口 `5188`，`/api` 代理到 `http://localhost:8000`，测试环境 `jsdom`，生产构建含 manualChunks 拆包 |
 | `web_ui/backend/requirements.txt` | 后端独立运行时依赖：`fastapi`、`uvicorn`、`python-multipart`、`pandas`、`numpy`、`pillow`、`websockets`、`aiortc`、`av` |
 | `Dockerfile` | **已过时**。基于 `python:3.6`，引用不存在的 `setup.py` 和 `[tf]` extra，面向 Jupyter 而非 FastAPI/React Web UI。不要直接使用，除非明确更新。 |
 
@@ -78,6 +79,38 @@ docs/                # 架构、计划、指南、验证、工作流规范
 - **Web UI 前端**：React 18、TypeScript ~5.8、Vite 6、Tailwind CSS 3、Zustand、Chart.js、axios、react-router-dom 7、lucide-react、clsx、tailwind-merge。
 - **测试**：pytest、pytest-cov、responses、mypy；前端 vitest + jsdom + @testing-library/react + Playwright。
 - **构建/打包**：setuptools 通过 `setup.cfg` + `pyproject.toml`；`python -m build` 用于 wheels/sdists。
+
+## 代码组织与运行时架构
+
+### Vehicle / Memory / Part 架构
+
+- `Vehicle`（`donkeycar/vehicle.py`）是主循环容器。
+- 部件通过 `Vehicle.add(part, inputs=[], outputs=[], threaded=False, run_condition=None)` 注册。
+- 每个循环节拍从 `Memory` 读取命名的 `inputs`，调用 `part.run()`（或对于 `threaded=True` 在后台线程中调用 `part.update()`），并将命名的 `outputs` 写回。
+- `Memory`（`donkeycar/memory.py`）是一个简单的键/值总线。部件通过字符串键通信，而非直接引用。
+- 部件使用鸭子类型：实现 `run()`；线程部件还实现 `update()`；清理放在 `shutdown()` 中。避免多个部件并发写入相同的 Memory 键。
+
+### Python 包与 CLI
+
+- `setup.cfg` 定义包名、依赖、extras 和 `donkey` console script。
+- `donkeycar/management/base.py` 承载 `createcar`、`web`、`installweb` 等 CLI 子命令入口。
+- 车辆应用由 `donkey createcar` 从 `donkeycar/templates/` 复制 `manage.py`、`config.py`、`myconfig.py`、`train.py`、`calibrate.py` 等文件生成。
+- 配置通过 `dk.load_config()` 加载用户车目录中的 `config.py` 和 `myconfig.py`。
+
+### Web UI 架构
+
+- 后端入口是 `web_ui/backend/main.py`，通过 `include_router` 挂载 `/api/config`、`/api/tub`、`/api/trainer`、`/api/drive`、`/api/arena`、`/api/connector`。
+- 后端业务辅助模块包括 `trainer_engine.py`、`connector_engine.py`、`remote_car_client.py` 和 `web_online_trainer.py`。
+- 前端入口是 `web_ui/frontend/src/main.tsx` 和 `App.tsx`，页面位于 `src/pages/`，复用组件位于 `src/components/`。
+- 前端 API 客户端集中在 `web_ui/frontend/src/services/api.ts` 中；URL 拼接、WebSocket 地址和错误消息应复用这里的工具。`VITE_API_BASE_URL` 可以覆盖基础 URL，`VITE_DRIVE_VIDEO_TRANSPORT` 可以强制指定视频传输方式（`webrtc|mjpeg`）。
+- 驾驶相关状态与输入逻辑分布在 `src/store/useDriveStore.ts`、`src/hooks/useDriveWebsocket.ts`、`src/hooks/useKeyboardDrive.ts`、`src/hooks/useGamepadDrive.ts`、`src/hooks/useGyroDrive.ts`。
+- 视频传输可以通过 `VITE_DRIVE_VIDEO_TRANSPORT=webrtc|mjpeg` 强制指定；默认是自动。
+- 生产构建是使用 HashRouter 的静态 SPA（`/#/drive`、`/#/trainer` 等）。
+
+### 车端 Web UI 桥
+
+- `donkeycar/parts/drive_api_bridge.py`（模板通过 `donkeydrifter.parts.drive_api_bridge` 导入）是一个线程部件，取代了传统的 Tornado `LocalWebController`。
+- 它通过 WebSocket 将状态/视频推送到 FastAPI 后端，同时支持 WebRTC 视频轨道和 MJPEG 降级回退。
 
 ## 构建、安装和运行命令
 
@@ -169,79 +202,20 @@ make tests   # 运行 pytest
 - `installweb` – 安装 Web UI 后端/前端依赖。
 - `createjs` – 摇杆创建器。
 
-## 代码组织与运行时架构
-
-### Vehicle / Memory / Part 架构
-
-- `Vehicle`（`donkeycar/vehicle.py`）是主循环容器。
-- 部件通过 `Vehicle.add(part, inputs=[], outputs=[], threaded=False, run_condition=None)` 注册。
-- 每个循环节拍从 `Memory` 读取命名的 `inputs`，调用 `part.run()`（或对于 `threaded=True` 在后台线程中调用 `part.update()`），并将命名的 `outputs` 写回。
-- `Memory`（`donkeycar/memory.py`）是一个简单的键/值总线。部件通过字符串键通信，而非直接引用。
-- 部件使用鸭子类型：实现 `run()`；线程部件还实现 `update()`；清理放在 `shutdown()` 中。避免多个部件并发写入相同的 Memory 键。
-
-### Python 包与 CLI
-
-- `setup.cfg` 定义包名、依赖、extras 和 `donkey` console script。
-- `donkeycar/management/base.py` 承载 `createcar`、`web`、`installweb` 等 CLI 子命令入口。
-- 车辆应用由 `donkey createcar` 从 `donkeycar/templates/` 复制 `manage.py`、`config.py`、`myconfig.py`、`train.py`、`calibrate.py` 等文件生成。
-- 配置通过 `dk.load_config()` 加载用户车目录中的 `config.py` 和 `myconfig.py`。
-
-### Web UI 架构
-
-- 后端入口是 `web_ui/backend/main.py`，通过 `include_router` 挂载 `/api/config`、`/api/tub`、`/api/trainer`、`/api/drive`、`/api/arena`、`/api/connector`。
-- 后端业务辅助模块包括 `trainer_engine.py`、`connector_engine.py`、`remote_car_client.py` 和 `web_online_trainer.py`。
-- 前端入口是 `web_ui/frontend/src/main.tsx` 和 `App.tsx`，页面位于 `src/pages/`，复用组件位于 `src/components/`。
-- 前端 API 客户端集中在 `web_ui/frontend/src/services/api.ts` 中；URL 拼接、WebSocket 地址和错误消息应复用这里的工具。`VITE_API_BASE_URL` 可以覆盖基础 URL，`VITE_DRIVE_VIDEO_TRANSPORT` 可以强制指定视频传输方式（`webrtc|mjpeg`）。
-- 驾驶相关状态与输入逻辑分布在 `src/store/useDriveStore.ts`、`src/hooks/useDriveWebsocket.ts`、`src/hooks/useKeyboardDrive.ts`、`src/hooks/useGamepadDrive.ts`、`src/hooks/useGyroDrive.ts`。
-- 视频传输可以通过 `VITE_DRIVE_VIDEO_TRANSPORT=webrtc|mjpeg` 强制指定；默认是自动。
-- 生产构建是使用 HashRouter 的静态 SPA（`/#/drive`、`/#/trainer` 等）。
-
-### 车端 Web UI 桥
-
-- `donkeycar/parts/drive_api_bridge.py`（模板通过 `donkeydrifter.parts.drive_api_bridge` 导入）是一个线程部件，取代了传统的 Tornado `LocalWebController`。
-- 它通过 WebSocket 将状态/视频推送到 FastAPI 后端，同时支持 WebRTC 视频轨道和 MJPEG 降级回退。
-
-## 开发约定
-
-### 导入兼容性契约
-
-- 新代码和模板应优先使用 `import donkeydrifter as dk`。
-- 现有的 `import donkeycar` 必须保持兼容；不要破坏 `donkeydrifter/__init__.py` 中的别名层。
-- CLI 命令必须保持为 `donkey`。
-- 现有的 `DONKEY_*` 配置键在第一阶段迁移中不更名。
-- 现有的 Web UI `/api/*` 路由和驱动 WebSocket 协议在第一阶段迁移中不更名。
-- 不要盲目替换每个 Donkeycar 引用；上游归属、兼容性文档和许可文本必须在适当的地方保留 Donkeycar 名称。
-
-### 代码风格
+## 代码风格
 
 - **Python**：`CONTRIBUTING.md` 引用 PEP-8。Black 配置存在于 `.github/linters/.python-black`（`line-length = 80`、`target-version = ['py37']`、`skip-string-normalization = true`），主要由 GitHub Super-Linter 使用；注意项目实际运行时为 Python 3.11。
 - **TypeScript**：`tsconfig.json` 使用 `module: ESNext`、`moduleResolution: bundler`、`jsx: react-jsx`、`strict: false`，路径别名 `@/* -> ./src/*`。
 - **ESLint**：`eslint.config.js` 使用 `typescript-eslint` recommended、`react-hooks` recommended，以及 `react-refresh/only-export-components` 作为警告。
 - **Tailwind**：`tailwind.config.js` 使用 `darkMode: "class"` 和内容路径 `./index.html` 和 `./src/**/*`。
 
-### Web UI 约定
-
-- 后端入口点：`web_ui/backend/main.py`（默认端口 `8000`）。
-- 前端开发服务器：`web_ui/frontend`（默认端口 `5188`，Vite 将 `/api` 代理到 `http://localhost:8000`）。
-- 前端 API 客户端集中在 `web_ui/frontend/src/services/api.ts` 中；不要在其他地方硬编码 API 基础 URL。`VITE_API_BASE_URL` 可以覆盖基础 URL。
-- 视频传输可以通过 `VITE_DRIVE_VIDEO_TRANSPORT=webrtc|mjpeg` 强制指定；默认是自动。
-- 生产构建是使用 HashRouter 的静态 SPA（`/#/drive`、`/#/trainer` 等）。
-
-## 测试说明
+## 测试策略
 
 - **核心 Python 测试**：`pytest`（收集 `donkeycar/tests/` 和 `tests/`）。`donkeycar/tests/pytest.ini` 抑制弃用警告，启用 INFO 级别的 CLI 日志，并设置 `reruns = 3`。
 - **覆盖率**：`.coveragerc` 启用分支覆盖率并忽略 `donkeycar/tests/*`。
 - **根级集成测试**：`pytest tests/ -q` 覆盖迁移品牌、恢复逻辑、模型命名重构、在线训练器工作区、Tub 管理器刷新、驾驶页面布局。
 - **Web UI 后端测试**：`cd web_ui/backend && python -m pytest tests -q` 覆盖驱动（WebRTC/MJPEG/统计）、连接器、竞技场、配置和品牌。
 - **Web UI 前端测试**：`cd web_ui/frontend && npm run test` 在 jsdom 中运行 vitest。Playwright 风格的测试计划也存在于 `web_ui/frontend/testsprite_tests/` 下。
-
-## 安全注意事项
-
-- `web_ui/backend/main.py` 中的 FastAPI 后端为本地开发配置了 CORS，`allow_origins=["*"]`、`allow_credentials=True`、`allow_methods=["*"]`、`allow_headers=["*"]`。这是针对 LAN 原型设计的有意宽松设置；在未添加身份验证或限制来源的情况下，不要直接将 Web UI 暴露给不受信任的网络。
-- Web UI 或 WebSocket 控制通道上没有内置的身份验证层。任何具有车辆/后端网络访问权限的人都可以发送驱动命令、查看视频流以及启动/停止训练。
-- WebRTC 信令和 MJPEG 回退视频是局域网功能。在公共或共享 Wi-Fi 上运行之前，请考虑网络分段。
-- 车辆端模板和 `myconfig.py` 可能包含硬件凭证或引脚。如果生成的车辆目录包含 SSH/MQTT 或云密钥，请将其视为敏感信息。
-- 不要提交密钥、`node_modules` 或构建产物。仓库已通过 `.gitignore` 排除它们。
 
 ## 部署和 CI/CD
 
@@ -250,6 +224,14 @@ make tests   # 运行 pytest
 - **CI / 测试**：`.github/workflows/python-package-conda.yml` 在 push/PR 时跨 `macos-latest` 和 `ubuntu-latest` 运行，创建 Python 3.11 conda 环境，安装 `.[pc,dev]`，验证 `donkeydrifter` 和 `donkeycar` 导入，构建包，并运行 `pytest`。
 - **Super-Linter**：`.github/workflows/superlinter.yml` 以非阻塞模式运行 GitHub Super-Linter（`continue-on-error: true`、`DISABLE_ERRORS: true`）。
 - **Docker**：顶层 `Dockerfile` 存在但目前已过时。它使用 `python:3.6`，引用不存在的 `setup.py` 和 `[tf]` extra，并面向 Jupyter 而非 FastAPI/React Web UI。除非明确更新，否则将其视为遗留文件。
+
+## 安全注意事项
+
+- `web_ui/backend/main.py` 中的 FastAPI 后端为本地开发配置了 CORS，`allow_origins=["*"]`、`allow_credentials=True`、`allow_methods=["*"]`、`allow_headers=["*"]`。这是针对 LAN 原型设计的有意宽松设置；在未添加身份验证或限制来源的情况下，不要直接将 Web UI 暴露给不受信任的网络。
+- Web UI 或 WebSocket 控制通道上没有内置的身份验证层。任何具有车辆/后端网络访问权限的人都可以发送驱动命令、查看视频流以及启动/停止训练。
+- WebRTC 信令和 MJPEG 回退视频是局域网功能。在公共或共享 Wi-Fi 上运行之前，请考虑网络分段。
+- 车辆端模板和 `myconfig.py` 可能包含硬件凭证或引脚。如果生成的车辆目录包含 SSH/MQTT 或云密钥，请将其视为敏感信息。
+- 不要提交密钥、`node_modules` 或构建产物。仓库已通过 `.gitignore` 排除它们。
 
 ## 迁移契约
 
