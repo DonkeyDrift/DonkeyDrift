@@ -61,14 +61,24 @@ beforeEach(() => {
 });
 
 describe('VideoStream', () => {
-  it('默认渲染 WebRTC video 与 60FPS 指标', () => {
+  it('默认渲染 WebRTC video 与 FPS 指标', () => {
     render(<VideoStream />);
 
     expect(screen.getByText('WebRTC')).toBeInTheDocument();
-    expect(screen.getByText('P95 24ms')).toBeInTheDocument();
-    expect(screen.getByText('源 60')).toBeInTheDocument();
+    expect(screen.getByText('58')).toBeInTheDocument();
+    expect(screen.getByText('24ms')).toBeInTheDocument();
+    expect(screen.queryByText('P95 24ms')).not.toBeInTheDocument();
+    expect(screen.queryByText('源 60')).not.toBeInTheDocument();
+    expect(screen.queryByText('发 59')).not.toBeInTheDocument();
     expect(screen.getByLabelText('WebRTC camera feed')).toHaveClass('opacity-100');
     expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-0');
+  });
+
+  it('WebRTC 连接时通过 onLatencyChange 回传 P95 延迟', () => {
+    const onLatencyChange = vi.fn();
+    render(<VideoStream onLatencyChange={onLatencyChange} />);
+
+    expect(onLatencyChange).toHaveBeenCalledWith(24);
   });
 
   it('WebRTC 降级后在 fallback 延迟前 video 透明、MJPEG 可见', () => {

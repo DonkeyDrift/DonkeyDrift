@@ -35,6 +35,7 @@ export const DrivePage: React.FC = () => {
   const [recordDuration, setRecordDuration] = useState(0);
   const [currentModel] = useState<string>('未加载');
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
+  const [videoLatencyMs, setVideoLatencyMs] = useState(0);
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
 
@@ -221,7 +222,7 @@ export const DrivePage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
-          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} onLatencyChange={setVideoLatencyMs} />
         </div>
 
         {/* 控制区 */}
@@ -261,9 +262,14 @@ export const DrivePage: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
           <div className="text-xs text-zinc-500 mb-1">车端连接</div>
-          <div className={`text-sm font-medium flex items-center gap-1 ${carState.online ? 'text-emerald-400' : 'text-red-400'}`}>
-            {carState.online ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-            {carState.online ? '在线' : '离线'}
+          <div className="flex items-center gap-2">
+            <div className={`text-sm font-medium flex items-center gap-1 ${carState.online ? 'text-emerald-400' : 'text-red-400'}`}>
+              {carState.online ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+              {carState.online ? '在线' : '离线'}
+            </div>
+            {carState.online && videoLatencyMs > 0 && (
+              <span className="text-xs text-zinc-500">{videoLatencyMs}ms</span>
+            )}
           </div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
@@ -288,12 +294,6 @@ export const DrivePage: React.FC = () => {
           <div className="text-xs text-zinc-500 mb-1">当前模型</div>
           <div className="text-sm text-zinc-300 font-medium truncate" title={currentModel}>
             {currentModel}
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <div className="text-xs text-zinc-500 mb-1">连接延迟</div>
-          <div className="text-sm text-zinc-300 font-medium">
-            {connected ? '~20ms' : '-'}
           </div>
         </div>
       </div>
