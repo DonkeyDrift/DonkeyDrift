@@ -1,19 +1,20 @@
+<!-- From: /home/dkc/projects/DonkeyDrifter/AGENTS.md -->
 # DonkeyDrifter 智能体指南
 
-本文件为 AI 编程智能体提供在 DonkeyDrifter 仓库中高效工作所需的必要上下文。该项目是一个源自 Donkeycar 的独立 Python 自动驾驶/漂移机器人平台。以下所有事实均取自工作树中的实际文件（当前分支 `WebRTC-v1.4`，版本 `0.1.1`）。
+本文件为 AI 编程智能体提供在 DonkeyDrifter 仓库中高效工作所需的必要上下文。该项目是一个源自 Donkeycar 的独立 Python 自动驾驶/漂移机器人平台。以下所有事实均取自工作树中的实际文件（当前分支 `v1.6.0-UX`，版本 `0.1.1`）。
 
 ## 项目概览
 
 - **版本**：`0.1.1`，定义于 `donkeycar/_version.py`。
-- **Python 要求**：`>=3.11.0,<3.12`。
+- **Python 要求**：`>=3.11.0,<3.12`。`donkeycar/__init__.py` 在导入阶段强制校验该版本。
 - **主要分发包**：`donkeydrifter`（setuptools 元数据位于 `setup.cfg`）。
 - **实现包**：`donkeycar/`（遗留兼容性命名空间）。
 - **推荐导入**：`import donkeydrifter as dk`。
-- **兼容导入**：`import donkeycar as dk` 仍可通过 `donkeydrifter/__init__.py` 中的 `sys.meta_path` 别名工作。
+- **兼容导入**：`import donkeycar as dk` 仍可通过 `donkeydrifter/__init__.py` 中的 `sys.meta_path` 别名层工作。
 - **CLI 入口点**：`donkey = donkeycar.management.base:execute_from_command_line`。
+- **项目主页**：`https://github.com/DonkeyDrift/DonkeyDrifter`（来自 `setup.cfg` 的 `url`）。
+- **上游源码**：`https://github.com/autorope/donkeycar`。
 - **许可证**：DonkeyDrifter 的更改采用 Apache License 2.0；上游 Donkeycar 部分保留 MIT。参见 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `LICENSES/MIT-donkeycar.txt`。
-- **仓库**：https://gitee.com/ffedu/donkeydrifter
-- **上游源码**：https://github.com/autorope/donkeycar
 
 DonkeyDrifter 不隶属于 Donkeycar 维护者，也不受其赞助或认可。
 
@@ -31,7 +32,7 @@ donkeycar/           # 当前实现包 + 遗留兼容性命名空间
   pipeline/          # 训练流水线、数据增强、序列处理、数据库
   management/        # CLI 工具和 UI（base.py、tui.py、train_local.py、train_online.py、ui/、tub_web/）
   templates/         # `donkey createcar` 使用的车辆应用模板（basic、complete、cv_control、path_follow、simulator、arduino_drive 等）
-  tests/             # 核心单元/集成测试（44 个测试文件）
+  tests/             # 核心单元/集成测试（40+ 测试文件）
   utilities/         # 辅助工具和 TrackSpeedPlanner
   contrib/、gym/     # 社区和模拟器集成
 web_ui/              # 统一的 FastAPI 后端 + React/Vite 前端
@@ -39,7 +40,7 @@ web_ui/              # 统一的 FastAPI 后端 + React/Vite 前端
   backend/routers/   # FastAPI 路由模块（config.py、tub.py、trainer.py、drive.py、arena.py、connector.py）
   backend/tests/     # FastAPI 契约测试（test_arena.py、test_branding.py、test_config.py、test_connector.py、test_drive.py）
   frontend/src/      # React/TypeScript/Vite SPA（pages/、components/、services/、store/、hooks/）
-parts/               # 额外的顶层部件（drive_api_bridge.py）
+parts/               # 额外的顶层部件目录（保留旧版 drive_api_bridge.py，但模板实际导入的是 donkeycar/parts/drive_api_bridge.py）
 tests/               # 根级迁移/集成测试（6 个文件）
 scripts/             # 独立工具（convert、freeze、profile、migrate_model_names、multi_train 等）
 arduino/             # mono_encoder 和 quadrature_encoder 草图
@@ -48,8 +49,8 @@ docs/                # 架构、计划、指南、验证、超能力规范
 
 ## 技术栈
 
-- **核心运行时**：Python 3.11、NumPy、Pillow、OpenCV、Tornado、pandas、PyYAML、requests、rich、paramiko、pygame、gymnasium。
-- **机器学习**：TensorFlow `2.15.*`、Keras；PyTorch `2.1.*`、pytorch-lightning、torchvision、fastai `<2.8`。
+- **核心运行时**：Python 3.11、NumPy、Pillow、Tornado、pandas、PyYAML、requests、rich、paramiko、pygame、gymnasium、paho-mqtt、simple_pid、progress、pyfiglet、psutil、pynmea2、pyserial、utm、websockets、aiortc、av。
+- **机器学习**：TensorFlow `2.15.*`、Keras；PyTorch `2.1.*`、pytorch-lightning、torchvision、fastai `<2.8`。OpenCV 在 `pi` 平台 extra 中显式列出，PC 开发环境通常也需要安装。
 - **数据格式**：Tub v2（清单 + 目录 + 图片）；逻辑位于 `donkeycar/parts/tub_v2.py` 和 `donkeycar/parts/datastore_v2.py`。
 - **遥测**：paho-mqtt。
 - **终端 UI**：rich、Kivy（`.kv` 文件作为包数据包含）。
@@ -132,7 +133,7 @@ make package
 make tests   # 运行 pytest
 ```
 
-### `donkey` 提供的 CLI 命令
+## `donkey` 提供的 CLI 命令
 
 注册于 `donkeycar/management/base.py`：
 
@@ -143,7 +144,7 @@ make tests   # 运行 pytest
 - `train` – 训练入口点。
 - `tubplot`、`tubhist`、`makemovie`、`cnnactivations` – 数据可视化。
 - `models` – 模型数据库。
-- `ui`、`tui` – GUI；裸 `donkey` 默认为 TUI。
+- `ui`、`tui` – GUI/TUI；裸 `donkey` 默认为 TUI。
 - `web` – 启动统一的 FastAPI + React Web UI。
 - `installweb` – 安装 Web UI 后端/前端依赖。
 - `createjs` – 摇杆创建器。
@@ -169,7 +170,7 @@ make tests   # 运行 pytest
 
 ### 代码风格
 
-- **Python**：`CONTRIBUTING.md` 引用 PEP-8。Black 配置存在于 `.github/linters/.python-black`（`line-length = 80`、`target-version = ['py37']`、`skip-string-normalization = true`），主要由 GitHub Super-Linter 使用。
+- **Python**：`CONTRIBUTING.md` 引用 PEP-8。Black 配置存在于 `.github/linters/.python-black`（`line-length = 80`、`target-version = ['py37']`、`skip-string-normalization = true`），主要由 GitHub Super-Linter 使用；注意项目实际运行时为 Python 3.11。
 - **TypeScript**：`tsconfig.json` 使用 `module: ESNext`、`moduleResolution: bundler`、`jsx: react-jsx`、`strict: false`，路径别名 `@/* -> ./src/*`。
 - **ESLint**：`eslint.config.js` 使用 `typescript-eslint` recommended、`react-hooks` recommended，以及 `react-refresh/only-export-components` 作为警告。
 - **Tailwind**：`tailwind.config.js` 使用 `darkMode: "class"` 和内容路径 `./index.html` 和 `./src/**/*`。
@@ -209,22 +210,23 @@ make tests   # 运行 pytest
 
 在 DonkeyDrifter 迁移期间：
 
-- 新代码和模板应优先使用 `donkeydrifter` 导入。
-- 现有的 `donkeycar` 导入必须保持兼容。
-- CLI 命令保持为 `donkey`。
-- 现有的 `DONKEY_*` 配置键在第一阶段迁移中不更名。
-- 现有的 Web UI `/api/*` 路由和驱动 WebSocket 协议在第一阶段迁移中不更名。
-- 上游 Donkeycar 归属和 MIT 许可证文本不得删除。
+- 新代码和新模板应优先使用 `donkeydrifter` 导入。
+- 旧代码中的 `donkeycar` import 必须继续兼容。
+- `donkeydrifter/__init__.py` 通过 `sys.meta_path` 把 `donkeydrifter.<submodule>` 映射到 `donkeycar.<submodule>`；迁移时不要破坏这个别名层。
+- CLI 命令继续沿用 `donkey`。
+- 第一阶段不重命名旧 `DONKEY_*` 配置键。
+- 第一阶段不重命名 Web UI 的 `/api/*` 路径和驾驶 WebSocket 协议。
+- 不要盲目全局替换 Donkeycar 字样；上游来源、兼容说明和许可证文本中的 Donkeycar 名称应保留。
 
 ## 重要的智能体注意事项
 
 - 编辑模板时，新生成的车辆应用应使用 `import donkeydrifter as dk`。
 - 编辑 Web UI 路由时，保持 `/api` 契约稳定，除非有单独的迁移计划更改它们。
 - 更改许可证或归属文件时，保持 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `LICENSES/MIT-donkeycar.txt` 一致。
-- TensorFlow 固定为 `2.15.*`，PyTorch 固定为 `2.1.*`；主要版本升级会影响模型兼容性。
+- TensorFlow 固定在 `2.15.*`，PyTorch 固定在 `2.1.*`；主要版本升级会影响模型兼容性。
 - Tub v2 是规范的数据格式；录制逻辑集中在 `donkeycar/parts/tub_v2.py`。
-- CLI 模板文件既是用户生成的应用源，也是配置契约；模板的更改通常需要在 `cfg_*.py` 文件和测试中进行匹配更新。
-- 车辆端 Web UI 桥是 `parts/drive_api_bridge.py`（`DriveApiBridge`），一个线程部件，取代了传统的 Tornado `LocalWebController`，并通过 WebSocket 将状态/视频推送到 FastAPI 后端。
+- CLI 模板文件既是用户生成的应用源，也是配置契约的一部分；模板的更改通常需要在 `cfg_*.py` 文件和测试中进行匹配更新。
+- 车辆端 Web UI 桥是 `donkeycar/parts/drive_api_bridge.py`（模板通过 `donkeydrifter.parts.drive_api_bridge` 导入），一个线程部件，取代了传统的 Tornado `LocalWebController`，并通过 WebSocket 将状态/视频推送到 FastAPI 后端；同时支持 WebRTC 视频轨道和 MJPEG 降级回退。
 
 ## 有用的参考
 
