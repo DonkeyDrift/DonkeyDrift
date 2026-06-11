@@ -651,6 +651,8 @@ class Web(BaseCommand):
                             help='启动后自动打开浏览器')
         parser.add_argument('--route', default='/',
                             help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')
+        parser.add_argument('--debug', action='store_true',
+                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
         return parser.parse_args(args)
 
     def run(self, args):
@@ -695,6 +697,7 @@ class Web(BaseCommand):
             '--host', str(args.backend_host),
             '--port', str(backend_port),
             '--reload',
+            '--log-level', 'debug' if args.debug else 'warning',
         ]
 
         print(f'Web UI 路径: {web_ui_path}')
@@ -731,7 +734,11 @@ class Web(BaseCommand):
             frontend_env = os.environ.copy()
             frontend_env["VITE_API_BASE_URL"] = f"http://localhost:{backend_port}/api"
 
-            backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, **popen_kwargs)
+            backend_env = os.environ.copy()
+            if args.debug:
+                backend_env["DRIVE_WEB_DEBUG"] = "1"
+
+            backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
             frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
             if args.open:
                 webbrowser.open(frontend_url)
