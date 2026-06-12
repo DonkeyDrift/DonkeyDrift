@@ -478,3 +478,35 @@ async def test_activate_sim_recovery_starts_worker(monkeypatch):
         time.sleep(0.1)
 
     assert len(started) == 1
+
+
+def test_client_connect_requests_car_state_when_online(monkeypatch):
+    client, drive = make_online_client()
+    sent_to_car = []
+
+    async def fake_send_to_car(payload):
+        sent_to_car.append(payload)
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
+
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        pass
+
+    assert {"type": "request_car_state"} in sent_to_car
+
+
+def test_client_connect_does_not_request_car_state_when_offline(monkeypatch):
+    client, drive = make_client()  # offline by default
+    sent_to_car = []
+
+    async def fake_send_to_car(payload):
+        sent_to_car.append(payload)
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
+
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        pass
+
+    assert {"type": "request_car_state"} not in sent_to_car

@@ -598,6 +598,11 @@ async def drive_ws(
                 "recording": drive_state.recording,
                 "num_records": drive_state.num_records,
             }))
+            if drive_state.car_online():
+                try:
+                    await drive_state.send_to_car({"type": "request_car_state"})
+                except Exception:
+                    logger.debug("请求车端状态失败")
         except Exception:
             drive_state.client_ws.pop(client_id, None)
             logger.info(f"客户端初始状态推送失败，已清理，当前在线: {len(drive_state.client_ws)}")
