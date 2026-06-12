@@ -168,6 +168,20 @@ class DonkeyGymEnv(object):
         # clear the buffer
         del self.buffer[:num_to_remove]
 
+    def _is_env_connected(self):
+        """检查底层模拟器 TCP 连接是否仍然有效。"""
+        if self.env is None:
+            return False
+        try:
+            client = getattr(self.env, "viewer", None)
+            if client is not None:
+                client = getattr(client, "client", None)
+            if client is not None and hasattr(client, "is_connected"):
+                return client.is_connected()
+        except Exception:
+            pass
+        return True
+
     def update(self):
         while self.running:
             # 如果未连接，检查配置是否有更新并尝试重连
@@ -177,6 +191,13 @@ class DonkeyGymEnv(object):
                 if self.env is None:
                     time.sleep(1.0)
                     continue
+
+            # 健康检查：如果底层连接已断开，主动关闭环境等待重连
+            if not self._is_env_connected():
+                print("[DonkeyGymEnv] 检测到模拟器连接已断开，准备重连")
+                self._close_env()
+                time.sleep(1.0)
+                continue
 
             try:
                 if self.delay > 0.0:

@@ -300,6 +300,7 @@ class DriveApiBridge:
         self.recording = False
         self.recording_latch = None
         self.buttons: Dict[str, bool] = {}
+        self.reconnect_simulator = False
 
         self.connected = False
         self.ws = None
@@ -402,6 +403,9 @@ class DriveApiBridge:
         """处理服务端发来的控制消息。"""
         if msg.get("type") == "webrtc_signal":
             self._handle_webrtc_signal(msg)
+            return
+        if msg.get("type") == "reconnect_simulator":
+            self.reconnect_simulator = True
             return
         if "angle" in msg:
             self.angle = float(msg["angle"])
@@ -716,7 +720,9 @@ class DriveApiBridge:
 
         buttons = self.buttons
         self.buttons = {}
-        return self.angle, self.throttle, self.mode, self.recording, buttons
+        reconnect = self.reconnect_simulator
+        self.reconnect_simulator = False
+        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect
 
     def run(self, img_arr=None, num_records=0, mode=None, recording=None):
         return self.run_threaded(img_arr, num_records, mode, recording)

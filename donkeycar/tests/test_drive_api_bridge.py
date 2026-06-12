@@ -817,3 +817,15 @@ def test_drive_api_bridge_stops_mjpeg_fallback_after_aiortc_track_sends(monkeypa
     bridge.run_threaded(img_arr=frame, num_records=3, mode="user", recording=False)
 
     assert sent_frames == []
+
+
+def test_drive_api_bridge_handles_reconnect_simulator():
+    bridge = DriveApiBridge(server_url="ws://localhost:8000/api/drive/ws", auto_start=False)
+    bridge._handle_message({"type": "reconnect_simulator"})
+
+    assert bridge.reconnect_simulator is True
+
+    outputs = bridge.run_threaded(img_arr=None, num_records=0, mode="user", recording=False)
+    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator
+    assert outputs[-1] is False
+    assert bridge.reconnect_simulator is False
