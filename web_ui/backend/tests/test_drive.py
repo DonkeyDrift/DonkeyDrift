@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -459,3 +460,21 @@ async def test_sim_recovery_starts_and_stops():
     # Give the event loop a chance to process cancellation
     await asyncio.sleep(0.1)
     assert drive.drive_state.sim_recovery_task is None or drive.drive_state.sim_recovery_task.done()
+
+
+@pytest.mark.anyio
+async def test_activate_sim_recovery_starts_worker(monkeypatch):
+    client, drive = make_client()
+    started = []
+
+    def fake_start():
+        started.append(True)
+
+    monkeypatch.setattr(drive.drive_state, "start_sim_recovery", fake_start)
+
+    # Simulate a client websocket that sends activate then disconnects
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        ws.send_json({"type": "activate_sim_recovery"})
+        time.sleep(0.1)
+
+    assert len(started) == 1

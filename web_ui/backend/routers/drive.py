@@ -611,6 +611,14 @@ async def drive_ws(
                 except json.JSONDecodeError:
                     continue
 
+                # 模拟器自动恢复控制
+                if msg.get("type") == "activate_sim_recovery":
+                    drive_state.start_sim_recovery()
+                    continue
+                if msg.get("type") == "deactivate_sim_recovery":
+                    drive_state.stop_sim_recovery()
+                    continue
+
                 # 心跳回执
                 if msg.get("type") == "heartbeat":
                     continue
@@ -643,6 +651,9 @@ async def drive_ws(
             if drive_state.client_ws.get(client_id) is websocket:
                 drive_state.client_ws.pop(client_id, None)
             logger.info(f"客户端断开，当前在线: {len(drive_state.client_ws)}")
+            # 没有前端在线时停止恢复任务
+            if not drive_state.client_ws:
+                drive_state.stop_sim_recovery()
 
 
 # ------------------------------------------------------------------
