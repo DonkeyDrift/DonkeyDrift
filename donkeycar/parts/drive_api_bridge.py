@@ -309,6 +309,7 @@ class DriveApiBridge:
         self.thread = None
         self.last_heartbeat = 0.0
         self.last_webrtc_stats = 0.0
+        self.last_car_state = 0.0
         self.active_webrtc_session_id = None
         self.webrtc_peer = None
         self.aiortc_track = None
@@ -643,6 +644,13 @@ class DriveApiBridge:
     def _send_heartbeat(self):
         self._send_json({"type": "heartbeat"})
 
+    def _send_car_state(self, num_records=0):
+        self._send_json({
+            "num_records": int(num_records or 0),
+            "drive_mode": self.mode,
+            "recording": bool(self.recording),
+        })
+
     def _send_frame(self, img_arr, num_records=0, mode=None, recording=None):
         if cv2 is None:
             return
@@ -654,7 +662,7 @@ class DriveApiBridge:
         self._send_json({
             "type": "frame",
             "data": frame_b64,
-            "num_records": num_records,
+            "num_records": int(num_records or 0),
             "drive_mode": mode or self.mode,
             "recording": recording if recording is not None else self.recording,
         })
@@ -672,6 +680,9 @@ class DriveApiBridge:
             if now - self.last_webrtc_stats >= 1.0:
                 self.last_webrtc_stats = now
                 self._send_webrtc_stats()
+            if now - self.last_car_state >= 1.0:
+                self.last_car_state = now
+                self._send_car_state(num_records)
             aiortc_sent_frames = getattr(self.aiortc_track, "sent_frames", 0)
             if (RTCPeerConnection is None or av is None or aiortc_sent_frames == 0) and self.connected and now - self.last_frame > 0.05:
                 self.last_frame = now
@@ -681,6 +692,9 @@ class DriveApiBridge:
                     logger.debug(f"发送降级帧失败: {e}")
         else:
             now = time.time()
+            if now - self.last_car_state >= 1.0:
+                self.last_car_state = now
+                self._send_car_state(num_records)
             if self.connected and img_arr is not None and now - self.last_frame > 0.05:
                 self.last_frame = now
                 try:

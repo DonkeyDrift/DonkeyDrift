@@ -9,10 +9,10 @@ interface DriveModeSelectorProps {
   className?: string;
 }
 
-const MODE_OPTIONS: { value: DriveMode; label: string; shortcut?: string }[] = [
-  { value: 'user', label: '人工' },
-  { value: 'local_angle', label: 'AI 转向', shortcut: 'S' },
-  { value: 'local', label: '全自动', shortcut: 'A' },
+const MODE_OPTIONS: { value: DriveMode; label: string }[] = [
+  { value: 'user', label: '手动' },
+  { value: 'local_angle', label: '半自动' },
+  { value: 'local', label: '全自动' },
 ];
 
 export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
@@ -39,9 +39,6 @@ export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
             `}
           >
             {mode.label}
-            {mode.shortcut && (
-              <span className="ml-1 text-[10px] opacity-60">({mode.shortcut})</span>
-            )}
           </button>
         );
       })}

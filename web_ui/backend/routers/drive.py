@@ -485,6 +485,24 @@ async def drive_ws(
                     drive_state.apply_car_webrtc_stats(msg)
                     continue
 
+                # 车端状态更新（录制条数、模式等）可能随任意消息携带，优先提取
+                state_changed = False
+                if msg.get("num_records") is not None:
+                    new_num_records = int(msg["num_records"])
+                    if new_num_records != drive_state.num_records:
+                        drive_state.num_records = new_num_records
+                        state_changed = True
+                if msg.get("drive_mode") is not None:
+                    new_drive_mode = msg["drive_mode"]
+                    if new_drive_mode != drive_state.drive_mode:
+                        drive_state.drive_mode = new_drive_mode
+                        state_changed = True
+                if msg.get("recording") is not None:
+                    new_recording = bool(msg["recording"])
+                    if new_recording != drive_state.recording:
+                        drive_state.recording = new_recording
+                        state_changed = True
+
                 # 处理车端发来的图像帧 (base64)
                 if msg.get("type") == "frame" and msg.get("data"):
                     import base64
@@ -495,23 +513,15 @@ async def drive_ws(
                         drive_state.frame_timestamps.append(drive_state.last_frame_timestamp)
                     except Exception as e:
                         logger.warning(f"解码帧失败: {e}")
-                    continue
-
-                # 处理车端状态更新（录制条数、模式等）
-                if "num_records" in msg:
-                    drive_state.num_records = int(msg["num_records"])
-                if "drive_mode" in msg:
-                    drive_state.drive_mode = msg["drive_mode"]
-                if "recording" in msg:
-                    drive_state.recording = bool(msg["recording"])
 
                 # 车端状态变更广播给所有客户端
-                await drive_state.broadcast_to_clients({
-                    "type": "car_state",
-                    "drive_mode": drive_state.drive_mode,
-                    "recording": drive_state.recording,
-                    "num_records": drive_state.num_records,
-                })
+                if state_changed:
+                    await drive_state.broadcast_to_clients({
+                        "type": "car_state",
+                        "drive_mode": drive_state.drive_mode,
+                        "recording": drive_state.recording,
+                        "num_records": drive_state.num_records,
+                    })
         except WebSocketDisconnect:
             logger.info("车端连接断开")
             drive_state.car_ws = None

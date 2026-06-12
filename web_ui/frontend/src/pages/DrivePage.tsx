@@ -11,11 +11,13 @@ import { useDriveHotkeys } from '../hooks/useDriveHotkeys';
 import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
 import { ParameterPanel } from '../components/drive/ParameterPanel';
 import { InputSourceSelector, InputSource } from '../components/drive/InputSourceSelector';
+import { ModelSelector } from '../components/drive/ModelSelector';
 import { useDriveStore } from '../store/useDriveStore';
-import { createDriveClientId } from '../services/api';
+import { useStore } from '../store/useStore';
+import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
-import { Circle, CirclePlay, Wifi, WifiOff } from 'lucide-react';
+import { Circle } from 'lucide-react';
 
 export const DrivePage: React.FC = () => {
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
@@ -35,18 +37,37 @@ export const DrivePage: React.FC = () => {
   const [recordDuration, setRecordDuration] = useState(0);
   const [recordingLock, setRecordingLock] = useState(false);
   const recordingLockRef = useRef(false);
-  const [currentModel] = useState<string>('未加载');
+  const [currentModel, setCurrentModel] = useState<string>('');
+  const [models, setModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
-  const [videoLatencyMs, setVideoLatencyMs] = useState(0);
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
 
   const { params, loadFromServer } = useDriveStore();
+  const { configPath } = useStore();
 
   // 页面加载时从服务端拉取参数
   useEffect(() => {
     loadFromServer();
   }, [loadFromServer]);
+
+  // 从 Trainer 加载已训练模型列表
+  useEffect(() => {
+    if (!configPath) return;
+    setModelsLoading(true);
+    listModels(configPath)
+      .then((data) => {
+        const items = (data.models || []) as { name: string }[];
+        setModels(items.map((m) => m.name));
+      })
+      .catch(() => {
+        setModels([]);
+      })
+      .finally(() => {
+        setModelsLoading(false);
+      });
+  }, [configPath]);
 
   useKeyboardDrive({
     enabled: inputSource === 'keyboard',
@@ -152,6 +173,16 @@ export const DrivePage: React.FC = () => {
     send({ drive_mode: newMode });
   }, [send]);
 
+  const handleModelChange = useCallback((modelName: string) => {
+    setCurrentModel(modelName);
+    if (modelName && configPath) {
+      const modelPath = `./models/${modelName}`;
+      loadModelToCar(modelPath, configPath).catch((err) => {
+        console.warn('加载模型到车端失败:', getApiErrorMessage(err));
+      });
+    }
+  }, [configPath]);
+
   const cycleMode = useCallback(() => {
     const modes: DriveMode[] = ['user', 'local_angle', 'local'];
     const idx = modes.indexOf(mode);
@@ -205,6 +236,12 @@ export const DrivePage: React.FC = () => {
             gyroAvailable={permissionState !== 'unsupported'}
           />
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
+          <ModelSelector
+            value={currentModel}
+            options={models}
+            onChange={handleModelChange}
+            disabled={!carState.online || modelsLoading}
+          />
           <button
             onClick={toggleRecording}
             disabled={!carState.online || recordingLock}
@@ -217,14 +254,14 @@ export const DrivePage: React.FC = () => {
             `}
           >
             {recording ? (
-              <CirclePlay className="w-3.5 h-3.5 fill-current animate-pulse" />
+              <Circle className="w-3.5 h-3.5 fill-current animate-pulse text-red-400" />
             ) : (
               <Circle className="w-3.5 h-3.5" />
             )}
             {recording ? `录制中 ${formatDuration(recordDuration)}` : '录制'}
           </button>
-          <span className="text-xs text-zinc-500">
-            {connected ? 'WebSocket 已连接' : 'WebSocket 连接中...'}
+          <span className="text-xs text-zinc-500 whitespace-nowrap">
+            已录制条数 {carState.numRecords}
           </span>
         </div>
       </div>
@@ -232,7 +269,7 @@ export const DrivePage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
-          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} onLatencyChange={setVideoLatencyMs} />
+          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
         </div>
 
         {/* 控制区 */}
@@ -255,10 +292,7 @@ export const DrivePage: React.FC = () => {
                 <ControlBars angle={angle} className="w-full" />
               </div>
             </div>
-            <ProgrammableButtons
-              className="w-full max-w-[240px]"
-              onClick={(id) => send({ buttons: { [id]: true } })}
-            />
+            <ProgrammableButtons className="w-full max-w-[240px]" />
             <ParameterPanel className="w-full max-w-[240px]" />
             <div className="text-[10px] text-zinc-500 text-center">
               键盘快捷键: I 前进 · K 倒车 · J 左转 · L 右转<br />
@@ -268,45 +302,6 @@ export const DrivePage: React.FC = () => {
         </div>
       </div>
 
-      {/* 状态卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <div className="text-xs text-zinc-500 mb-1">车端连接</div>
-          <div className="flex items-center gap-2">
-            <div className={`text-sm font-medium flex items-center gap-1 ${carState.online ? 'text-emerald-400' : 'text-red-400'}`}>
-              {carState.online ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-              {carState.online ? '在线' : '离线'}
-            </div>
-            {carState.online && videoLatencyMs > 0 && (
-              <span className="text-xs text-zinc-500">{videoLatencyMs}ms</span>
-            )}
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <div className="text-xs text-zinc-500 mb-1">驾驶模式</div>
-          <div className="text-sm text-zinc-300 font-medium capitalize">
-            {mode === 'user' ? '人工驾驶' : mode === 'local_angle' ? 'AI 转向' : '全自动'}
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <div className="text-xs text-zinc-500 mb-1">录制状态</div>
-          <div className={`text-sm font-medium ${recording ? 'text-red-400' : 'text-zinc-400'}`}>
-            {recording ? `录制中 (${formatDuration(recordDuration)})` : '关闭'}
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <div className="text-xs text-zinc-500 mb-1">已录制条数</div>
-          <div className="text-sm text-zinc-300 font-medium">
-            {carState.numRecords}
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <div className="text-xs text-zinc-500 mb-1">当前模型</div>
-          <div className="text-sm text-zinc-300 font-medium truncate" title={currentModel}>
-            {currentModel}
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

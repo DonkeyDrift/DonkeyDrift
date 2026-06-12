@@ -329,6 +329,81 @@ def test_car_webrtc_stats_ignores_stale_session():
     assert data["sent_fps"] == 0.0
 
 
+def test_car_frame_message_updates_num_records_and_broadcasts_state(monkeypatch):
+    client, drive = make_online_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=car") as car_ws:
+        car_ws.send_json({
+            "type": "frame",
+            "data": "aGVsbG8=",  # base64 'hello'
+            "num_records": 16460,
+            "drive_mode": "local_angle",
+            "recording": True,
+        })
+
+    assert drive.drive_state.num_records == 16460
+    assert drive.drive_state.drive_mode == "local_angle"
+    assert drive.drive_state.recording is True
+
+    car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
+    assert len(car_state_messages) == 1
+    assert car_state_messages[0]["num_records"] == 16460
+    assert car_state_messages[0]["drive_mode"] == "local_angle"
+    assert car_state_messages[0]["recording"] is True
+
+
+def test_car_frame_message_with_none_state_does_not_crash(monkeypatch):
+    client, drive = make_online_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=car") as car_ws:
+        car_ws.send_json({
+            "type": "frame",
+            "data": "aGVsbG8=",
+            "num_records": None,
+            "drive_mode": None,
+            "recording": None,
+        })
+
+    assert drive.drive_state.num_records == 0
+    assert drive.drive_state.drive_mode == "user"
+    assert drive.drive_state.recording is False
+
+
+def test_car_state_only_broadcasts_on_change(monkeypatch):
+    client, drive = make_online_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=car") as car_ws:
+        # first message establishes state
+        car_ws.send_json({"num_records": 100})
+        # same value should not broadcast again
+        car_ws.send_json({"num_records": 100})
+        # new value should broadcast
+        car_ws.send_json({"num_records": 110})
+
+    car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
+    assert len(car_state_messages) == 2
+    assert car_state_messages[0]["num_records"] == 100
+    assert car_state_messages[1]["num_records"] == 110
+
+
 def test_webrtc_session_resets_diagnostics():
     client, drive = make_online_client()
     drive.drive_state.webrtc_stats.update({

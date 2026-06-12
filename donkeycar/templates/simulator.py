@@ -99,8 +99,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
                 V.add(netwkJs, threaded=True)
                 ctr.js = netwkJs
         
-        V.add(ctr, 
-          inputs=['cam/image_array'],
+        V.add(ctr,
+          inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
           outputs=['user/angle', 'user/throttle', 'user/mode', 'recording'],
           threaded=True)
 

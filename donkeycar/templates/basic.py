@@ -132,9 +132,11 @@ def drive(cfg, model_path=None, model_type=None):
         # web controller sets user mode, its angle, throttle are not used.
         controller_outputs = ['webcontroller/angle', 'webcontroller/throttle',
                               'user/mode', 'recording']
+        controller_inputs = ['cam/image_array']
         if isinstance(ctr, DriveApiBridge):
             controller_outputs.append('web/buttons')
-        car.add(ctr, inputs=['cam/image_array'],
+            controller_inputs = ['cam/image_array', 'tub/num_records', 'user/mode', 'recording']
+        car.add(ctr, inputs=controller_inputs,
                 outputs=controller_outputs,
                 threaded=True)
 
@@ -150,10 +152,12 @@ def drive(cfg, model_path=None, model_type=None):
         else:
             ctr = make_web_controller(cfg)
         controller_outputs = ['user/angle', 'user/throttle', 'user/mode', 'recording']
+        controller_inputs = ['cam/image_array']
         if isinstance(ctr, DriveApiBridge):
             controller_outputs.append('web/buttons')
+            controller_inputs = ['cam/image_array', 'tub/num_records', 'user/mode', 'recording']
         car.add(ctr,
-                inputs=['cam/image_array'],
+                inputs=controller_inputs,
                 outputs=controller_outputs,
                 threaded=True)
 
