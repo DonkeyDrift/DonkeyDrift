@@ -204,7 +204,7 @@ def drive(cfg, use_joystick=False, camera_type='single', meta=[]):
     V.add(tub_writer, inputs=inputs, outputs=["tub/num_records"], run_condition='recording')
 
     if isinstance(ctr, DriveApiBridge):
-        print("Web Console Drive 已就绪，请打开浏览器访问 http://localhost:5188/")
+        print(f"Web Console Drive 已就绪，请打开浏览器访问 {ctr.web_console_url()}/#/drive")
     elif cfg.DONKEY_GYM:
         print("You can now go to http://localhost:%d to drive your car." % cfg.WEB_CONTROL_PORT)
     else:

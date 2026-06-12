@@ -573,7 +573,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
 
 
     if isinstance(ctr, DriveApiBridge):
-        print("Web Console Drive 已就绪，请打开浏览器访问 http://localhost:5188/")
+        print(f"Web Console Drive 已就绪，请打开浏览器访问 {ctr.web_console_url()}/#/drive")
     elif cfg.DONKEY_GYM:
         print("You can now go to http://localhost:%d to drive your car." % cfg.WEB_CONTROL_PORT)
     else:

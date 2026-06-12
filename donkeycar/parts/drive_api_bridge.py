@@ -338,6 +338,22 @@ class DriveApiBridge:
             path = path[:-3]
         return urlunsplit((scheme, parsed.netloc, path.rstrip("/"), "", ""))
 
+    def web_console_url(self) -> str:
+        """返回驾驶控制台 URL。
+
+        优先使用 DRIVE_WEB_FRONTEND_URL 环境变量；否则从 WebSocket
+        服务端地址推导后端 HTTP URL（可能不能直接打开前端页面，
+        但会显示当前实际端口）。
+        """
+        frontend_url = os.environ.get("DRIVE_WEB_FRONTEND_URL")
+        if frontend_url:
+            return frontend_url.rstrip("/")
+        parsed = urlsplit(self.server_url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+        return f"{scheme}://{host}:{port}"
+
     def start(self):
         self.running = True
         self.thread = Thread(target=self._run_loop, daemon=True)
