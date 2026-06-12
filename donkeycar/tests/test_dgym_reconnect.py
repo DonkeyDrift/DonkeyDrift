@@ -214,3 +214,32 @@ def test_update_detects_disconnect_and_reconnects(mock_gym_make):
     gym_env.shutdown()
     thread.join(timeout=2.0)
     assert not thread.is_alive(), "shutdown 后线程应该退出"
+
+
+def test_run_threaded_reconnect_closes_env(mock_gym_make):
+    """验证 run_threaded 收到 reconnect=True 时会关闭当前 env。"""
+    fake_env = FakeEnv(fail_after=9999)
+    mock_gym_make.return_value = fake_env
+
+    gym_env = DonkeyGymEnv(
+        sim_path="remote",
+        host="127.0.0.1",
+        port=9091,
+        env_name="donkey-generated-track-v0",
+        conf={"img_h": 120, "img_w": 160},
+    )
+
+    # 通过 run_threaded 请求重连
+    gym_env.run_threaded(0.0, 0.0, 0.0, reconnect=True)
+
+    # update 线程会在下一次循环中关闭 env 并重连
+    thread = threading.Thread(target=gym_env.update, daemon=True)
+    thread.start()
+
+    time.sleep(0.3)
+
+    assert fake_env.closed, "收到重连请求后 env 应该被关闭"
+    assert gym_env.env is None, "env 应该被设为 None"
+
+    gym_env.shutdown()
+    thread.join(timeout=2.0)

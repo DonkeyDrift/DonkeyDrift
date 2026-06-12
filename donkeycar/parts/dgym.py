@@ -182,6 +182,12 @@ class DonkeyGymEnv(object):
             pass
         return True
 
+    def _request_reconnect(self):
+        """标记需要在下一次 update 循环中强制重建模拟器连接。"""
+        if self.env is not None:
+            print("[DonkeyGymEnv] 收到强制重连请求，准备重建模拟器连接")
+            self._close_env()
+
     def update(self):
         while self.running:
             # 如果未连接，检查配置是否有更新并尝试重连
@@ -212,7 +218,10 @@ class DonkeyGymEnv(object):
                 self._close_env()
                 time.sleep(1.0)
 
-    def run_threaded(self, steering, throttle, brake=None):
+    def run_threaded(self, steering, throttle, brake=None, reconnect=False):
+        if reconnect:
+            self._request_reconnect()
+
         if steering is None or throttle is None:
             steering = 0.0
             throttle = 0.0
