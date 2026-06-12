@@ -67,11 +67,28 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF, delay=cfg.SIM_ARTIFICIAL_LATENCY)
     threaded = True
-    inputs = ['angle', 'throttle', 'brake']
+    inputs = ['angle', 'throttle', 'brake', 'reconnect_simulator']
 
     V.add(cam, inputs=inputs, outputs=['cam/image_array'], threaded=threaded)
 
-    if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
+    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None)
+    if server_url:
+        # 优先使用 Web Console Drive 桥接
+        ctr = DriveApiBridge(
+            server_url=server_url,
+            video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
+            video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
+            video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
+            video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
+            webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
+            webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+        )
+        V.add(ctr,
+              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
+              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'reconnect_simulator_requested'],
+              threaded=True)
+
+    elif use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
         #modify max_throttle closer to 1.0 to have more power
         #modify steering_scale lower than 1.0 to have less responsive steering
         if cfg.CONTROLLER_TYPE == "MM1":
