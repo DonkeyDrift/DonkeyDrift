@@ -64,6 +64,12 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
       ws.onopen = () => {
         if (wsRef.current !== ws || !mountedRef.current) return;
         setConnected(true);
+        // 页面刷新后激活后端的模拟器自动恢复任务
+        try {
+          ws.send(JSON.stringify({ type: 'activate_sim_recovery' }));
+        } catch {
+          // ignore
+        }
         // 心跳 5s 一次，更快感知断线与车端上线
         heartbeatTimerRef.current = setInterval(() => {
           if (wsRef.current === ws && ws.readyState === WebSocket.OPEN) {
@@ -138,6 +144,13 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
       closingRef.current = true;
       clearTimers();
       const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'deactivate_sim_recovery' }));
+        } catch {
+          // ignore
+        }
+      }
       wsRef.current = null;
       if (ws) {
         ws.close();
