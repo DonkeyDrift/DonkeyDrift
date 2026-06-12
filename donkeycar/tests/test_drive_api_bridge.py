@@ -830,5 +830,6 @@ def test_drive_api_bridge_handles_reconnect_simulator():
 
     outputs = bridge.run_threaded(img_arr=None, num_records=0, mode="user", recording=False)
     # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator
-    assert outputs[-1] is False
+    assert len(outputs) == 6, f"expected 6 outputs, got {len(outputs)}: {outputs}"
+    assert outputs[-1] is True
     assert bridge.reconnect_simulator is False
