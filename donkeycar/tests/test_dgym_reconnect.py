@@ -129,3 +129,88 @@ def test_update_sets_env_none_on_step_failure(mock_gym_make):
     # 清理
     gym_env.shutdown()
     thread.join(timeout=2.0)
+
+
+class FakeClient:
+    def __init__(self, connected=True):
+        self._connected = connected
+
+    def is_connected(self):
+        return self._connected
+
+
+class FakeViewer:
+    def __init__(self, connected=True):
+        self.client = FakeClient(connected)
+
+
+class FakeEnvWithDisconnectedClient(FakeEnv):
+    """模拟底层 TCP 已断开但 step() 尚未抛出的 env。"""
+
+    def __init__(self):
+        super().__init__(fail_after=9999)
+        self.connected = True
+        self.viewer = FakeViewer(connected=True)
+
+    def step(self, action):
+        # 不抛出异常，但报告连接已断开
+        self.step_count += 1
+        if not self.connected:
+            # 模拟卡住：不再返回新帧
+            time.sleep(0.05)
+        # 保持 viewer.client.is_connected() 与 self.connected 一致
+        self.viewer.client._connected = self.connected
+        obs = np.zeros((120, 160, 3), dtype=np.uint8)
+        return obs, 0.0, False, False, {}
+
+
+def test_update_detects_disconnect_and_reconnects(mock_gym_make):
+    """
+    验证当底层 client.is_connected() 返回 False 时，
+    DonkeyGymEnv 能主动关闭 env 并重连。
+    """
+    fake_env_1 = FakeEnvWithDisconnectedClient()
+    fake_env_2 = FakeEnv(fail_after=9999)
+
+    call_count = [0]
+
+    def side_effect(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return fake_env_1
+        return fake_env_2
+
+    mock_gym_make.side_effect = side_effect
+
+    gym_env = DonkeyGymEnv(
+        sim_path="remote",
+        host="127.0.0.1",
+        port=9091,
+        env_name="donkey-generated-track-v0",
+        conf={"img_h": 120, "img_w": 160},
+    )
+
+    # 模拟底层连接在若干步后断开
+    def toggle_connection():
+        time.sleep(0.15)
+        fake_env_1.connected = False
+
+    toggle_thread = threading.Thread(target=toggle_connection, daemon=True)
+    toggle_thread.start()
+
+    thread = threading.Thread(target=gym_env.update, daemon=True)
+    thread.start()
+
+    # 等待健康检查检测到断开并重连
+    time.sleep(2.0)
+
+    # 第一个 env 应该被关闭
+    assert fake_env_1.closed, "底层连接断开后 FakeEnv 应该被 close()"
+    # 应该至少重连一次
+    assert call_count[0] >= 2, f"期望至少重连一次，实际调用次数: {call_count[0]}"
+    # update 线程仍然存活
+    assert thread.is_alive(), "update() 线程应该在健康检查后仍然存活"
+
+    gym_env.shutdown()
+    thread.join(timeout=2.0)
+    assert not thread.is_alive(), "shutdown 后线程应该退出"
