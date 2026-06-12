@@ -77,7 +77,7 @@ class DriveState:
         self.client_ws: Dict[str, WebSocket] = {}
 
     async def broadcast_to_clients(self, data: dict):
-        """向所有已连接的客户端广播消息。"""
+        """向所有已连接的客户端广播消息，失败时关闭并清理失效连接。"""
         payload = json.dumps(data)
         dead: List[str] = []
         for client_id, ws in list(self.client_ws.items()):
@@ -85,6 +85,10 @@ class DriveState:
                 await ws.send_text(payload)
             except Exception:
                 dead.append(client_id)
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
         for client_id in dead:
             self.client_ws.pop(client_id, None)
 
@@ -522,7 +526,7 @@ async def drive_ws(
                         "recording": drive_state.recording,
                         "num_records": drive_state.num_records,
                     })
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             logger.info("车端连接断开")
             drive_state.car_ws = None
             await drive_state.broadcast_to_clients({
@@ -542,7 +546,7 @@ async def drive_ws(
         drive_state.client_ws[client_id] = websocket
         logger.info(f"新客户端连接，当前在线: {len(drive_state.client_ws)}")
 
-        # 推送初始状态
+        # 推送初始状态；如果发送失败说明连接已不可用，直接清理返回
         try:
             await websocket.send_text(json.dumps({
                 "type": "car_connection",
@@ -555,7 +559,9 @@ async def drive_ws(
                 "num_records": drive_state.num_records,
             }))
         except Exception:
-            pass
+            drive_state.client_ws.pop(client_id, None)
+            logger.info(f"客户端初始状态推送失败，已清理，当前在线: {len(drive_state.client_ws)}")
+            return
 
         try:
             while True:
@@ -593,7 +599,7 @@ async def drive_ws(
                         "recording": drive_state.recording,
                         "num_records": drive_state.num_records,
                     })
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             if drive_state.client_ws.get(client_id) is websocket:
                 drive_state.client_ws.pop(client_id, None)
             logger.info(f"客户端断开，当前在线: {len(drive_state.client_ws)}")
