@@ -113,7 +113,7 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
 
     outputs = bridge.run_threaded(img_arr="rgb-image", num_records=7, mode="user", recording=False)
 
-    assert outputs == (0.0, 0.0, "user", False, {})
+    assert outputs == (0.0, 0.0, "user", False, {}, False)
     assert encoded_images == ["converted-rgb-image-4"]
     assert sent_payloads == [{
         "type": "frame",
