@@ -184,12 +184,32 @@ git add <resolved-file>
 git commit
 ```
 
-### 步骤 3：删除 Worktree
+### 步骤 3：清理或复用 Worktree（可选）
 
-合并完成后，清理临时工作区：
+合并完成后，你可以选择**删除**临时工作区，也可以**保留**以便复用。
+
+#### 何时保留 Worktree
+
+对于环境配置较复杂的项目（例如需要安装大量 Python/Node 依赖、编译原生扩展、下载模型权重、配置硬件驱动等），重新搭建开发环境可能耗时较长。此时建议保留 Worktree，待下一次开发同类型任务时直接复用，避免重复配置。
+
+保留时只需保持工作区目录和对应分支即可，后续可直接 `cd` 进入继续开发。
+
+#### 何时删除 Worktree
+
+如果出现以下情况，再考虑删除：
+
+- 该任务已彻底结束，且后续很长一段时间不会再修改相关模块；
+- 工作区占用磁盘空间过大，且环境可以方便地重新搭建；
+- 需要清理历史分支，保持 `git worktree list` 简洁。
+
+#### 删除前请确认
+
+删除 Worktree 会同时移除工作区内的未提交修改（即使这些修改尚未被 git 追踪）。**执行删除前，请与相关会话/开发者确认该工作区内没有需要保留的改动或环境配置。**
+
+确认无误后，再执行删除：
 
 ```bash
-# 删除工作区目录并解除 git 追踪
+# 删除工作区目录并解除 git 追踪（请谨慎操作）
 git worktree remove .worktrees/feature-a
 git worktree remove .worktrees/feature-b
 
@@ -197,6 +217,8 @@ git worktree remove .worktrees/feature-b
 git branch -d feature/a-module
 git branch -d feature/b-module
 ```
+
+> 如果不确定是否要删除，建议先保留 Worktree，仅删除已合并的分支即可。
 
 ---
 
@@ -207,6 +229,7 @@ git branch -d feature/b-module
 3. **及时提交**：在每个工作区频繁小步提交，降低合并冲突的概率。
 4. **不要在工作区内创建嵌套 Worktree**：`git worktree list` 可以帮你检测是否已处于 worktree 中。
 5. **CI/测试独立**：每个工作区可以独立运行测试，互不干扰构建缓存。
+6. **谨慎删除，优先复用**：对于环境配置复杂的项目，合并完成后不必立即删除 Worktree。保留工作区可让后续同模块迭代直接复用已配置的环境，节省重建成本。删除前务必确认工作区内没有未提交的改动或需要保留的环境配置。
 
 ---
 
