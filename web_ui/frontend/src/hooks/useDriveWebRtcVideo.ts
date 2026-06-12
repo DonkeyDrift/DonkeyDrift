@@ -124,17 +124,7 @@ const collectBrowserInboundStats = async (peer: RTCPeerConnection | null): Promi
 };
 
 export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) => {
-  const {
-    incomingSignal,
-    peerConnectionFactory,
-    negotiationTimeoutMs = DRIVE_WEBRTC_NEGOTIATION_TIMEOUT_MS,
-    // retryIntervalMs is part of the public API but not yet wired internally
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    retryIntervalMs = 5000,
-    disabled = false,
-    clientId,
-    carOnline,
-  } = options;
+  const { incomingSignal, peerConnectionFactory, negotiationTimeoutMs = DRIVE_WEBRTC_NEGOTIATION_TIMEOUT_MS, disabled = false, clientId, carOnline } = options;
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const sessionIdRef = useRef<string | null>(null);

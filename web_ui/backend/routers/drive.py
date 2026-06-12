@@ -547,24 +547,6 @@ async def drive_ws(
                         drive_state.recording = new_recording
                         state_changed = True
 
-                # 车端状态更新（录制条数、模式等）可能随任意消息携带，优先提取
-                state_changed = False
-                if msg.get("num_records") is not None:
-                    new_num_records = int(msg["num_records"])
-                    if new_num_records != drive_state.num_records:
-                        drive_state.num_records = new_num_records
-                        state_changed = True
-                if msg.get("drive_mode") is not None:
-                    new_drive_mode = msg["drive_mode"]
-                    if new_drive_mode != drive_state.drive_mode:
-                        drive_state.drive_mode = new_drive_mode
-                        state_changed = True
-                if msg.get("recording") is not None:
-                    new_recording = bool(msg["recording"])
-                    if new_recording != drive_state.recording:
-                        drive_state.recording = new_recording
-                        state_changed = True
-
                 # 处理车端发来的图像帧 (base64)
                 if msg.get("type") == "frame" and msg.get("data"):
                     import base64
