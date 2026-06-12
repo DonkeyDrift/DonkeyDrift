@@ -584,7 +584,7 @@ async def drive_ws(
                         "recording": drive_state.recording,
                         "num_records": drive_state.num_records,
                     })
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             logger.info("车端连接断开")
             drive_state.car_ws = None
             await drive_state.broadcast_to_clients({
