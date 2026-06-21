@@ -13,17 +13,18 @@ def read_text(path):
 def test_frontend_package_uses_donkeydrifter_name():
     package_json = json.loads(read_text(FRONTEND_DIR / "package.json"))
 
+    # npm 包名 donkeydrifter-web-ui 保留不动（避免破坏 lockfile / 已有引用）。
     assert package_json["name"] == "donkeydrifter-web-ui"
 
 
 def test_frontend_html_title_uses_donkeydrifter_brand():
     html = read_text(FRONTEND_DIR / "index.html")
 
-    assert "<title>DonkeyDrifter</title>" in html
+    assert "<title>DonkeyDrift Web UI</title>" in html
 
 
 def test_layout_visible_brand_uses_donkeydrifter():
     layout = read_text(FRONTEND_DIR / "src" / "components" / "Layout.tsx")
 
-    assert "DonkeyDrifter" in layout
+    assert "DonkeyDrift" in layout
     assert "Donkey Car" not in layout

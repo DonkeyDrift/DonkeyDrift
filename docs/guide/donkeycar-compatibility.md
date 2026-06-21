@@ -1,6 +1,6 @@
 # Donkeycar Compatibility
 
-DonkeyDrifter is derived from Donkeycar and keeps compatibility with existing Donkeycar-based vehicle projects during the migration period.
+DonkeyDrift is derived from Donkeycar and keeps compatibility with existing Donkeycar-based vehicle projects during the migration period.
 
 ## PyPI package names and the `donkey` command
 
@@ -56,7 +56,7 @@ DonkeyDrifter.
 
 ## Recommended new import
 
-Use `donkeydrifter` for new DonkeyDrifter code:
+Use `donkeydrifter` for new DonkeyDrift code:
 
 ```python
 import donkeydrifter as dk

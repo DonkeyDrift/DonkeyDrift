@@ -4,31 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-DonkeyDrifter 是一个基于 Donkeycar 派生的模块化 Python 自驾与漂移机器人平台，面向真实硬件、模拟器和教学实验场景。核心运行模型仍是把摄像头、控制器、执行器、训练/推理、数据记录等能力拆成可组合的 Part，并由 Vehicle 主循环串联。
+DonkeyDrift 是一个基于 Donkeycar 派生的模块化 Python 自驾与漂移机器人平台，面向真实硬件、模拟器和教学实验场景。核心运行模型仍是把摄像头、控制器、执行器、训练/推理、数据记录等能力拆成可组合的 Part，并由 Vehicle 主循环串联。
 
 - 当前版本：`0.1.1`，定义在 `donkeycar/_version.py`
 - Python 版本：`>=3.11.0,<3.12`
-- 主发行包：`donkeydrifter`，包元数据在 `setup.cfg`
-- 推荐导入：`import donkeydrifter as dk`
+- GitHub 仓库：`https://github.com/DonkeyDrift/DonkeyDrift`
+- 产品 / 品牌名：`DonkeyDrift`（README、UI 文案、CLI banner、CI workflow 等用户可见处）
+- PyPI 主发行包：`donkeydrifter`（保留不改，避免破坏 `pip install donkeydrifter`），元数据在 `setup.cfg`
+- 推荐导入：`import donkeydrifter as dk`（包名保留）
 - 兼容导入：`import donkeycar as dk`
 - Python 实现包：当前仍在 `donkeycar/`，`donkeydrifter/` 提供公开兼容入口和子模块别名
 - CLI 入口：`donkey = donkeycar.management.base:execute_from_command_line`
 - 旧版车辆模板：`donkeycar/templates/`，新模板应优先使用 `donkeydrifter` 导入
 - 统一 Web UI：`web_ui/`，后端 FastAPI，前端 React/Vite
-- 许可证：DonkeyDrifter 新增/修改部分采用 Apache License 2.0；源自上游 Donkeycar 的部分继续保留 MIT License，详见 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 与 `LICENSES/MIT-donkeycar.txt`
+- 许可证：DonkeyDrift 新增/修改部分采用 Apache License 2.0；源自上游 Donkeycar 的部分继续保留 MIT License，详见 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 与 `LICENSES/MIT-donkeycar.txt`
 - 上游来源：https://github.com/autorope/donkeycar
 
-DonkeyDrifter 是独立派生项目，不代表 Donkeycar 官方维护团队，也不构成官方背书。
+DonkeyDrift 是独立派生项目，不代表 Donkeycar 官方维护团队，也不构成官方背书。
 
 ## 迁移兼容约定
 
-1. 新代码和新模板优先使用 `donkeydrifter`。
+1. 新代码和新模板优先使用 `donkeydrifter`（PyPI 包名 / import 别名保留不动）。
 2. 旧代码中的 `donkeycar` import 必须继续兼容。
 3. `donkeydrifter/__init__.py` 通过 `sys.meta_path` 把 `donkeydrifter.<submodule>` 映射到 `donkeycar.<submodule>`；迁移时不要破坏这个别名层。
 4. CLI 命令继续沿用 `donkey`。
 5. 第一阶段不重命名旧 `DONKEY_*` 配置键。
 6. 第一阶段不重命名 Web UI 的 `/api/*` 路径和驾驶 WebSocket 协议。
 7. 不要盲目全局替换 Donkeycar 字样；上游来源、兼容说明和许可证文本中的 Donkeycar 名称应保留。
+8. **仓库改名约定**：仓库 / 产品名为 `DonkeyDrift`，但 PyPI 包名 `donkeydrifter`、`import donkeydrifter`、`donkeydrifter/` 目录、npm 包 `donkeydrifter-web-ui`、localStorage 键 `donkeydrifter_drive_client_id` 一律**保留不改**。区分原则：大写品牌字 `DonkeyDrifter` → `DonkeyDrift`；小写包标识符 `donkeydrifter` 一律不动。历史快照文档（`docs/superpowers/specs/`、`docs/plan/` 下的发布说明等）保留迁移当时的字面值。
 
 ## 常用命令
 
@@ -106,7 +109,7 @@ donkey web --path ./web_ui
 donkey web --path ./web_ui --install-deps --open
 ```
 
-`donkey` 是 DonkeyDrifter 继续沿用的 CLI 命令，用于兼容 Donkeycar 生态和已有脚本。
+`donkey` 是 DonkeyDrift 继续沿用的 CLI 命令，用于兼容 Donkeycar 生态和已有脚本。
 
 ### 运行时 CLI
 
@@ -168,7 +171,7 @@ Part 不需要继承基类；通常只要实现 `run()`，线程型 Part 还会�
 
 ### 主要目录职责
 
-- `donkeydrifter/`：DonkeyDrifter 推荐 import 入口，转发到当前实现包。
+- `donkeydrifter/`：DonkeyDrift 的推荐 import 入口（包名保留为 `donkeydrifter`），转发到当前实现包。
 - `donkeycar/`：当前实现包和旧 import 兼容命名空间。
 - `donkeycar/parts/`：可插拔硬件和算法组件。
 - `donkeycar/templates/`：`donkey createcar` 使用的车辆应用模板和默认配置。

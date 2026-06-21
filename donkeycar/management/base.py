@@ -1605,7 +1605,7 @@ def execute_from_command_line():
         c = Tui()
         c.run([])
     else:
-        dk.utils.eprint('DonkeyDrifter CLI')
+        dk.utils.eprint('DonkeyDrift CLI')
         dk.utils.eprint('Usage: The available commands are:')
         dk.utils.eprint(list(commands.keys()))
 

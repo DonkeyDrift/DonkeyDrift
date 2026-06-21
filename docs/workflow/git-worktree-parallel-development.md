@@ -248,9 +248,9 @@ git branch -d feature/b-module
 
 ---
 
-## 示例：DonkeyDrifter 项目
+## 示例：DonkeyDrift 项目
 
-以下是在 DonkeyDrifter 仓库中的实际应用：
+以下是在 DonkeyDrift 仓库中的实际应用：
 
 ```bash
 # 创建两个工作区

@@ -1,8 +1,8 @@
-# DonkeyDrifter
+# DonkeyDrift
 
-DonkeyDrifter is an open-source Python platform for small-scale autonomous driving and drifting RC cars. Derived from Donkeycar, it keeps the modular Vehicle + Part architecture, the Tub data workflow, neural-network pilot training, and simulator support, while adding a unified Web UI, a launcher service, and first-class integration with the MUS4 ESP32 firmware.
+DonkeyDrift is a Python autonomous driving and drifting robotics platform derived from Donkeycar. It keeps the modular Vehicle + Part architecture, Tub data workflow, training tools, simulator support, and Web UI workflows while establishing an independent DonkeyDrift identity.
 
-> Independent fork notice: DonkeyDrifter is derived from Donkeycar and is not affiliated with, sponsored by, or endorsed by the Donkeycar maintainers.
+> Independent fork notice: DonkeyDrift is derived from Donkeycar and is not affiliated with, sponsored by, or endorsed by the Donkeycar maintainers.
 
 ## Features
 
@@ -29,10 +29,10 @@ The CLI command remains `donkey` for compatibility with the Donkeycar ecosystem 
 Requires Python 3.11.
 
 > **Important: install `donkeydrifter`, never `donkeycar`.**
-> The PyPI package `donkeycar` is the upstream Donkeycar project, not DonkeyDrifter.
+> The PyPI package `donkeycar` is the upstream Donkeycar project, not DonkeyDrift.
 > Installing it (for example `pip install donkeycar[pc]`) overwrites the `donkeycar`
-> compatibility package shipped by DonkeyDrifter and takes over the `donkey` command,
-> so DonkeyDrifter commands such as `tui`, `web`, `drive`, and `installweb` disappear.
+> compatibility package shipped by DonkeyDrift and takes over the `donkey` command,
+> so DonkeyDrift commands such as `tui`, `web`, `drive`, and `installweb` disappear.
 > If this happens, restore with:
 >
 > ```bash
@@ -68,7 +68,7 @@ pytest
 
 ## Python Imports
 
-Recommended for new DonkeyDrifter code:
+Recommended for new DonkeyDrift code:
 
 ```python
 import donkeydrifter as dk
@@ -84,7 +84,7 @@ Submodule imports are also compatible. New templates prefer `donkeydrifter`, whi
 
 ## Web UI
 
-DonkeyDrifter includes a unified Web UI under `web_ui/`:
+DonkeyDrift includes a unified Web UI under `web_ui/`:
 
 - Backend: FastAPI, default port `8000` (override with `DRIVE_WEB_PORT`).
 - Frontend: React/Vite, default port `5188`.
@@ -173,7 +173,7 @@ npm run build
 
 ## Compatibility with Donkeycar
 
-DonkeyDrifter is intentionally compatible with existing Donkeycar-based projects during the migration period:
+DonkeyDrift is intentionally compatible with existing Donkeycar-based projects during the migration period:
 
 - `pip install donkeydrifter` is the new package target.
 - `import donkeydrifter as dk` is the recommended import path for new code.
@@ -201,9 +201,9 @@ See the [Donkeycar compatibility guide](docs/guide/donkeycar-compatibility.md) f
 
 ## License
 
-DonkeyDrifter uses the Apache License 2.0 as its primary project license.
+DonkeyDrift uses the Apache License 2.0 as its primary project license.
 
-DonkeyDrifter is derived from Donkeycar. Portions originating from Donkeycar remain licensed under the MIT License. See:
+DonkeyDrift is derived from Donkeycar. Portions originating from Donkeycar remain licensed under the MIT License. See:
 
 - [LICENSE](LICENSE)
 - [LICENSES/MIT-donkeycar.txt](LICENSES/MIT-donkeycar.txt)
@@ -212,10 +212,10 @@ DonkeyDrifter is derived from Donkeycar. Portions originating from Donkeycar rem
 
 ## Acknowledgements
 
-DonkeyDrifter is derived from the Donkeycar project:
+DonkeyDrift is derived from the Donkeycar project:
 
 https://github.com/autorope/donkeycar
 
 We thank the Donkeycar maintainers and contributors for their work.
 
-Some historical documentation links may still point to upstream Donkeycar resources. Such links are retained as attribution or compatibility references and may differ from DonkeyDrifter behavior.
+Some historical documentation links may still point to upstream Donkeycar resources. Such links are retained as attribution or compatibility references and may differ from DonkeyDrift behavior.

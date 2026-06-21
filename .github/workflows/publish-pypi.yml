@@ -1,4 +1,4 @@
-name: Publish DonkeyDrifter to PyPI
+name: Publish DonkeyDrift to PyPI
 
 on:
   push:

@@ -26,7 +26,7 @@ if not DEBUG:
     # 抑制后端业务路由日志（连接/断连统计等）
     logging.getLogger("routers.drive").setLevel(logging.WARNING)
 
-app = FastAPI(title="DonkeyDrifter")
+app = FastAPI(title="DonkeyDrift Web API")
 
 # Configure CORS
 app.add_middleware(
@@ -69,7 +69,6 @@ app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
 app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
 app.include_router(drift.router, prefix="/api/drift", tags=["drift"])
-
 
 @app.on_event("startup")
 async def _install_drift_hooks():
@@ -116,11 +115,11 @@ if os.path.isdir(FRONTEND_DIST):
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)
-        return {"message": "DonkeyDrifter is running"}
+        return {"message": "DonkeyDrift Web UI is running"}
 else:
     @app.get("/")
     async def root():
-        return {"message": "DonkeyDrifter is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
+        return {"message": "DonkeyDrift Web UI is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("DRIVE_WEB_PORT", 8000))
