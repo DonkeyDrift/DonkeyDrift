@@ -49,7 +49,7 @@ DRIVE_WEBRTC_ICE_SERVERS = []  # 示例: [{"urls": ["turn:192.168.3.96:3478?tran
 
 #--------------------------For DonkeySim 驴车模拟器相关配置
 # DonkeySim 驴车模拟器相关配置
-DONKEY_GYM = True           # 是否使用DonkeySim模拟器（默认：False）
+DONKEY_GYM = False           # 是否使用DonkeySim模拟器（默认：False）
 DONKEY_SIM_PATH = "remote"  # DonkeySim模拟器的安装路基（默认："remote"，需要先运行DonkeySim模拟器）
 GYM_CONF = { 
     "body_style" : "car01",        # 车子模型（"donkey" | "bare" | "car01" | "f1" | "cybertruck")
