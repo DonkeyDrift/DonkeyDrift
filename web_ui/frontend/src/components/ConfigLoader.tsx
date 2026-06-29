@@ -39,7 +39,9 @@ export const ConfigLoader: React.FC = () => {
       setConfig(data.config, path);
       
       const currentTubPath = useStore.getState().tubPath;
-      if (currentTubPath && currentTubPath !== '/home/dkc/projects/mycar/data') {
+      if (currentTubPath && currentTubPath !== '/home/dkc/projects/mycar/data'
+          && currentTubPath !== path + '/data'
+          && currentTubPath !== path.replace(/\/$/, '') + '/data') {
         try {
           const tubData = await loadTub(currentTubPath);
           setTub(tubData.path, tubData.records || [], tubData.fields || [], tubData.total_physical_records, tubData.deleted_indexes);
@@ -79,9 +81,13 @@ export const ConfigLoader: React.FC = () => {
 
   useEffect(() => {
     if (!config && configPath) {
-      handleManualLoad();
+      // 页面刚加载时服务器可能尚未就绪，先清除旧错误状态
+      setError(null);
+      // 延迟 500ms 再加载，给后端启动留出时间
+      const timer = setTimeout(() => handleManualLoad(), 500);
+      return () => clearTimeout(timer);
     }
-  }, [config, configPath, handleManualLoad]);
+  }, [config, configPath, handleManualLoad, setError]);
 
   return (
     <Card>
@@ -90,12 +96,13 @@ export const ConfigLoader: React.FC = () => {
           <FolderCog className="w-5 h-5" />
           Config Loader
         </CardTitle>
-        <p className="text-sm text-zinc-400">Select car directory, typically ~/mycar</p>
+        <p className="text-sm text-zinc-400">Select car directory (created via donkey createcar)</p>
+        <p className="text-xs text-zinc-600">API: {window.location.origin}/api</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-3">
           <Input
-            placeholder="Config path, e.g. ~/mycar or /home/dkc/projects/mycar"
+            placeholder="Config path, e.g. /home/dkc/projects/mycar"
             value={path}
             onChange={(e) => setPath(e.target.value)}
             aria-label="Config path input field"

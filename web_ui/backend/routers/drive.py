@@ -239,7 +239,16 @@ class WebRtcBrowserStatsRequest(BaseModel):
 # 参数持久化
 # ------------------------------------------------------------------
 def _get_params_path() -> Path:
-    config_dir = Path(os.path.expanduser("~/mycar/"))
+    # 优先使用环境变量 DONKEY_CAR_DIR，其次 ~/mycar（向后兼容），最后回退到 backend/data/
+    car_dir = os.environ.get("DONKEY_CAR_DIR", "").strip()
+    if car_dir:
+        config_dir = Path(os.path.expanduser(car_dir))
+    else:
+        legacy_dir = Path(os.path.expanduser("~/mycar/"))
+        if legacy_dir.exists():
+            config_dir = legacy_dir
+        else:
+            config_dir = Path(__file__).resolve().parent.parent / "data"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / "drive_params.json"
 

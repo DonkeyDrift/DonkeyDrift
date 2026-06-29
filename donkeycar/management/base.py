@@ -701,11 +701,11 @@ class Web(BaseCommand):
         ]
 
         print(f'Web UI 路径: {web_ui_path}')
-        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+        frontend_url = self._build_frontend_url(backend_port, args.route if args.open else None)
 
-        print(f'前端: http://localhost:{frontend_port}/')
-        print(f'后端: http://localhost:{backend_port}/')
-        print(f'后端文档: http://localhost:{backend_port}/docs')
+        print(f'Web UI:  http://localhost:{backend_port}/')
+        print(f'API 文档: http://localhost:{backend_port}/docs')
+        print(f'开发模式: http://localhost:{frontend_port}/ (Vite HMR 热更新)')
         if args.open:
             print(f'将打开: {frontend_url}')
         print('按 Ctrl+C 停止前后端')

@@ -33,7 +33,14 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
       setParentPath(data.parent);
       setDirectories(data.directories);
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Failed to load directories'));
+      const msg = getApiErrorMessage(err, 'Failed to load directories');
+      setError(msg);
+      // 网络错误时，如果是初始加载失败，尝试回退到用户主目录
+      if (msg.includes('无法连接后端') || msg === 'Network Error') {
+        setCurrentPath('/');
+        setParentPath(null);
+        setDirectories([]);
+      }
     } finally {
       setLoading(false);
     }

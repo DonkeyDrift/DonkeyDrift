@@ -49,7 +49,12 @@ export const getDriveCarWebSocketUrl = (clientId?: string) => {
 export const getApiErrorMessage = (error: unknown, fallback = '未知错误') => {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
-    return typeof detail === 'string' ? detail : error.message || fallback;
+    if (typeof detail === 'string') return detail;
+    // 服务器不可达时给出明确提示
+    if (!error.response && error.message === 'Network Error') {
+      return '无法连接后端服务，请确认已执行 donkey web 并且端口 8000 可访问';
+    }
+    return error.message || fallback;
   }
   if (error instanceof Error) {
     return error.message;
