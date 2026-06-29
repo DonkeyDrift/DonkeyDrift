@@ -942,6 +942,10 @@ def add_odometry(V, cfg, threaded=True):
 def add_imu(V, cfg):
     imu = None
     if cfg.HAVE_IMU:
+        # ARDUINO_CONTROLLER 模式下，IMU 数据由 ArdImu Part 从 ESP32 串口读取
+        # （在 add_drivetrain() 中已添加），此处跳过本地 I2C IMU。
+        if cfg.DRIVE_TRAIN_TYPE == "ARDUINO_CONTROLLER":
+            return imu
         from donkeydrifter.parts.imu import IMU
 
         imu = IMU(sensor=cfg.IMU_SENSOR, addr=cfg.IMU_ADDRESS,
@@ -1187,6 +1191,15 @@ def add_drivetrain(V, cfg):
             V.add(steering, inputs=['user/mode','steering'], outputs=['user/mode','user/angle','user/throttle'], threaded=True)
             V.add(throttle, inputs=['user/mode','throttle','user/throttle'], outputs=['user/throttle'])
             #V.add(throttle, inputs=['throttle'], threaded=True)
+
+            # 当启用 IMU 时，从 ESP32 串口读取 IMU 数据（ArdImu 共享 arduino_controller 的串口连接）
+            if cfg.HAVE_IMU:
+                from donkeydrifter.parts.actuator import ArdImu
+                imu = ArdImu(controller=arduino_controller)
+                V.add(imu, outputs=[
+                    'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+                    'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z',
+                ], threaded=True)
 
 
 # -----------------------------------------------------------------------------

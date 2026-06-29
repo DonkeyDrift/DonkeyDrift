@@ -1193,6 +1193,7 @@ class Arduino:
         self.throttle = 0
         self.steeringCmd = 0
         self.throttleCmd = 0
+        self.imu_data = {}  # 存储最新 IMU 数据：{'seq', 'ts_ms', 'accel_x/y/z', 'gyro_x/y/z'}
 
     def set_cmd(self, mode, channel, val):
         self.mode = mode
@@ -1240,7 +1241,7 @@ class Arduino:
                     if match:
                         raw_throttle = int(match.group(1))
                         raw_steering = int(match.group(2))
-                        
+
                         clamped_throttle = clamp(raw_throttle, -100, 100)
                         clamped_steering = clamp(raw_steering, -100, 100)
                         self.throttle = utils.map_range_float(
@@ -1257,6 +1258,35 @@ class Arduino:
                         }
                 except Exception as e:
                     logger.error(f"解析串口数据失败: {ret}, 错误: {str(e)}")
+            elif ret.startswith('$IMU'):
+                try:
+                    # 解析 IMU 数据：$IMU,seq,ts_ms,ax,ay,az,gx,gy,gz
+                    # 加速度单位 m/s²，陀螺仪单位 rad/s
+                    parts = ret.split(',')
+                    if len(parts) == 9:  # $IMU + seq + ts_ms + ax + ay + az + gx + gy + gz
+                        imu_seq = int(parts[1])
+                        imu_ts_ms = int(parts[2])
+                        imu_ax = float(parts[3])
+                        imu_ay = float(parts[4])
+                        imu_az = float(parts[5])
+                        imu_gx = float(parts[6])
+                        imu_gy = float(parts[7])
+                        imu_gz = float(parts[8])
+                        # 存储 IMU 数据到实例属性，供 ArdImu Part 读取
+                        self.imu_data = {
+                            'seq': imu_seq,
+                            'ts_ms': imu_ts_ms,
+                            'accel_x': imu_ax,
+                            'accel_y': imu_ay,
+                            'accel_z': imu_az,
+                            'gyro_x': imu_gx,
+                            'gyro_y': imu_gy,
+                            'gyro_z': imu_gz,
+                        }
+                        # IMU 数据不干扰控制数据流，返回 None
+                        return None
+                except Exception as e:
+                    logger.error(f"解析 IMU 数据失败: {ret}, 错误: {str(e)}")
             else:
                 logger.warning(f"收到未识别数据格式: {ret}")
 
@@ -1427,4 +1457,78 @@ class ArdPWMThrottle:
     def shutdown(self):
         # stop vehicle
         # self.run(0)
+        self.running = False
+
+
+class ArdImu:
+    """
+    从 Arduino/ESP32 串口控制器读取 IMU 传感器数据。
+
+    ESP32 固件以 ~100Hz 通过 Serial1 上行 $IMU 帧：
+        $IMU,seq,ts_ms,ax,ay,az,gx,gy,gz
+
+    加速度单位 m/s²，陀螺仪单位 rad/s。
+    该 Part 从 Arduino 控制器实例中读取最新缓存的 IMU 数据，
+    并以标准 Donkey IMU 格式输出，供 Vehicle 循环和 TubWriter 记录。
+
+    使用方式（在 complete.py 模板中）：
+        if cfg.HAVE_IMU and cfg.DRIVE_TRAIN_TYPE == "ARDUINO_CONTROLLER":
+            from donkeydrifter.parts.actuator import ArdImu
+            imu = ArdImu(controller=arduino_controller)
+            V.add(imu, outputs=[
+                'imu/accel_x', 'imu/accel_y', 'imu/accel_z',
+                'imu/gyro_x', 'imu/gyro_y', 'imu/gyro_z',
+                'imu/temp'
+            ], threaded=True)
+    """
+
+    def __init__(self, controller=None):
+        """
+        :param controller: Arduino 控制器实例（共享同一个串口连接）
+        """
+        if controller is None:
+            raise ValueError("ArdImu 需要一个 Arduino 控制器实例")
+        self.controller = controller
+        self.accel_x = 0.0
+        self.accel_y = 0.0
+        self.accel_z = 0.0
+        self.gyro_x = 0.0
+        self.gyro_y = 0.0
+        self.gyro_z = 0.0
+        self.temp = 0.0   # ESP32 固件暂未上传温度
+        self.running = True
+        logger.info('ArdImu 已创建，从串口控制器读取 IMU 数据')
+
+    def poll(self):
+        """从 Arduino 控制器读取最新缓存的 IMU 数据"""
+        imu = self.controller.imu_data
+        if imu and 'accel_x' in imu:
+            self.accel_x = imu['accel_x']
+            self.accel_y = imu['accel_y']
+            self.accel_z = imu['accel_z']
+            self.gyro_x = imu['gyro_x']
+            self.gyro_y = imu['gyro_y']
+            self.gyro_z = imu['gyro_z']
+            # temp 当前固件未上传，保持 0
+
+    def update(self):
+        """线程化运行：持续轮询最新 IMU 数据"""
+        while self.running:
+            self.poll()
+            time.sleep(0.01)  # ~100Hz 匹配固件发送频率
+
+    def run_threaded(self):
+        """返回最新缓存的 IMU 数据，供 Vehicle 主循环写入 Memory"""
+        return (
+            self.accel_x, self.accel_y, self.accel_z,
+            self.gyro_x, self.gyro_y, self.gyro_z,
+            self.temp,
+        )
+
+    def run(self):
+        """非线程模式：立即轮询并返回"""
+        self.poll()
+        return self.run_threaded()
+
+    def shutdown(self):
         self.running = False
