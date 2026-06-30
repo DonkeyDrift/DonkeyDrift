@@ -732,7 +732,8 @@ class Web(BaseCommand):
                 popen_kwargs['start_new_session'] = True
 
             frontend_env = os.environ.copy()
-            frontend_env["VITE_API_BASE_URL"] = f"http://localhost:{backend_port}/api"
+            # 不再设置 VITE_API_BASE_URL，让前端使用相对路径 /api
+            # Vite 代理会自动将 /api 请求转发到后端，这样本地和远程访问都能正常工作
 
             backend_env = os.environ.copy()
             if args.debug:

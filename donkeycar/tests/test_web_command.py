@@ -63,7 +63,9 @@ def test_web_command_passes_backend_url_to_frontend_when_port_changes(monkeypatc
         Web().run(["--path", str(tmp_path / "web_ui"), "--backend-port", "8001"])
 
     _, frontend_kwargs = popen_calls[1]
-    assert frontend_kwargs["env"]["VITE_API_BASE_URL"] == "http://localhost:8001/api"
+    # 前端不再需要 VITE_API_BASE_URL，使用相对路径 /api 并依赖 Vite 代理转发
+    # 这样无论是本地访问还是局域网远程访问都能正常工作
+    assert "VITE_API_BASE_URL" not in frontend_kwargs["env"]
 
 
 def test_web_command_opens_requested_route(monkeypatch, tmp_path):
