@@ -20,16 +20,16 @@ THROTTLE_FORWARD_PWM = 100  # 最大前进油门配置（默认：100）
 THROTTLE_STOPPED_PWM = 0    # 停止油门配置（默认：0）
 THROTTLE_REVERSE_PWM = -100 # 最大倒车油门配置（默认：-100）
 
-# 底盘控制器串口配置
+# 底盘控制接口Serial1串口配置
 DRIVE_TRAIN_TYPE = "ARDUINO_CONTROLLER" # 底盘驱动器类型
-ARDUINO_SERIAL_PORT = "/dev/ttyS4"      # 默认串口端口（默认：/dev/ttyS4）
+ARDUINO_SERIAL_PORT = "/dev/ttyS4"      # 串口端口（默认：/dev/ttyS4）
 ARDUINO_BAUDRATE = 115200               # 串口通信波特率（默认：115200）
 ARDUINO_TIMEOUT = 1                     # 串口读取超时时间（秒），默认：1.0
 ARDUINO_WRITE_TIMEOUT = 1               # 串口写入超时时间（秒），默认：1.0
 
-# Serial2 扩展串口配置（GPIO18/19，双向联通验证）
-SERIAL2_PORT = "/dev/ttyS5"             # Serial2 对应的 Linux 串口设备（待确认）
-SERIAL2_BAUDRATE = 115200               # Serial2 波特率（与固件 BAUD_RATE_1 一致）
+# 底盘功能接口Serial2串口配置
+SERIAL2_PORT = "/dev/ttyS6"             # 串口端口（默认：/dev/ttyS6）
+SERIAL2_BAUDRATE = 115200               # 串口通信波特率（默认：115200）
 
 # 线程安全配置
 ARDUINO_LOCK_TIMEOUT = 1.0     # 最大等待锁的时间（秒），默认：1.0

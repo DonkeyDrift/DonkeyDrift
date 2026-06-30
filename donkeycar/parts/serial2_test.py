@@ -196,29 +196,101 @@ class Serial2Test:
             logger.info("Serial2 ECHO: %s", parsed["data"])
         # unknown 类型也仅更新时间戳
 
-    def _build_output(self) -> dict:
-        """构建当前状态输出 dict。
+    # ------------------------------------------------------------------
+    # 串口扫描工具
+    # ------------------------------------------------------------------
+    @staticmethod
+    def scan_ports(baudrate=115200, timeout=0.3, probe_retries=2):
+        """扫描所有可用串口，找到 ESP32 Serial2 所在的设备。
+
+        对每个候选串口依次发送 PING 帧，等待 PONG 响应。
+        找到第一个响应的端口即返回。
+
+        Args:
+            baudrate: 波特率，默认 115200
+            timeout: 单个端口读取超时，秒，默认 0.3
+            probe_retries: 每个端口探测次数，默认 2
 
         Returns:
-            {'status': 'connected'|'disconnected',
-             'rtt_ms': float,
-             'lost_packets': int}
+            (port_name, rtt_ms)  — 成功时
+            (None, None)         — 所有端口均无响应
         """
-        connected = (
-            self._last_data_time > 0
-            and (time.monotonic() - self._last_data_time) < self._disconnect_timeout
-        )
-        return {
-            "status": "connected" if connected else "disconnected",
-            "rtt_ms": round(self._rtt_ms, 2),
-            "lost_packets": self._lost_packets,
-        }
+        import glob
+
+        # 候选设备列表：优先 ttyS*（内置串口），其次 ttyUSB*/ttyACM*（USB 转串口）
+        candidates = []
+        for pattern in ["/dev/ttyS*", "/dev/ttyUSB*", "/dev/ttyACM*"]:
+            candidates.extend(sorted(glob.glob(pattern)))
+
+        if not candidates:
+            logger.warning("未找到任何候选串口设备")
+            return None, None
+
+        # 排除已被 Serial1 使用的设备（常见 /dev/ttyS4）
+        exclude = {"/dev/ttyS4"}
+        candidates = [c for c in candidates if c not in exclude]
+
+        logger.info("Serial2 扫描：候选设备 %d 个（排除 %s 及无法打开的端口）",
+                     len(candidates), ", ".join(sorted(exclude)))
+
+        scanned = 0
+        for device in candidates:
+            # 正在探测的端口打印为 INFO，方便调试
+            logger.info("Serial2 扫描：正在探测 %s ...", device)
+
+            try:
+                ser = serial.Serial(port=device, baudrate=baudrate,
+                                    timeout=timeout)
+            except (OSError, serial.SerialException) as exc:
+                logger.warning("Serial2 扫描：跳过 %s（打开失败: %s）", device, exc)
+                continue
+
+            scanned += 1
+            try:
+                # 清空缓冲区
+                ser.reset_input_buffer()
+                ser.reset_output_buffer()
+
+                for attempt in range(probe_retries):
+                    # 发送探测帧
+                    ping_seq = (device.encode("utf-8", errors="ignore").__hash__()
+                                & 0xFFFF) + attempt
+                    ser.write(f"PING,{ping_seq}\n".encode("ascii"))
+                    ser.flush()
+                    logger.debug("Serial2 扫描：%s 发送 PING,%d (第 %d 次)",
+                                  device, ping_seq, attempt + 1)
+
+                    # 等待响应
+                    deadline = time.monotonic() + timeout
+                    while time.monotonic() < deadline:
+                        raw = ser.readline()
+                        if raw:
+                            line = raw.decode("utf-8", errors="ignore").strip()
+                            parsed = Serial2Test._parse_line(line)
+                            if parsed and parsed.get("type") == "pong":
+                                rtt = (time.monotonic()
+                                       - (deadline - timeout)) * 1000.0
+                                logger.info("Serial2 扫描：找到设备 %s（RTT %.1f ms）",
+                                             device, rtt)
+                                return device, rtt
+                ser.close()
+                logger.info("Serial2 扫描：%s 无响应", device)
+            except (OSError, serial.SerialException) as exc:
+                logger.warning("Serial2 扫描：%s 通信异常 (%s)", device, exc)
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+
+        logger.warning("Serial2 扫描：已探测 %d 个端口，均无响应", scanned)
+        return None, None
 
     # ------------------------------------------------------------------
     # 生命周期方法
     # ------------------------------------------------------------------
-    def setup(self):
-        """Part 加载时调用：打开串口。"""
+    def update(self):
+        """线程主循环：打开串口，周期性发送 PING，接收并解析响应。"""
+        # 在线程中打开串口（Donkeycar 框架不调用 setup()）
         try:
             self._ser = serial.Serial(
                 port=self._port,
@@ -230,9 +302,8 @@ class Serial2Test:
         except (OSError, serial.SerialException) as exc:
             logger.error("Serial2 串口打开失败: %s", exc)
             self._ser = None
+            return  # 无法打开串口，线程退出
 
-    def update(self):
-        """线程主循环：周期性发送 PING，接收并解析响应。"""
         self._running = True
         last_ping_time = 0.0
 
@@ -271,6 +342,49 @@ class Serial2Test:
     def run(self):
         """非线程模式：返回最新状态。"""
         return self._build_output()
+
+    def run_threaded(self):
+        """线程模式：由 Vehicle 主循环调用，返回最新状态。
+
+        Returns:
+            (status, rtt_ms, lost_packets) 元组，按顺序对应 outputs 列表
+        """
+        return self._build_output()
+
+    # ------------------------------------------------------------------
+    # 对外接口
+    # ------------------------------------------------------------------
+    def send(self, data: str):
+        """向 ESP32 Serial2 发送任意文本行。
+
+        Args:
+            data: 要发送的文本（自动追加 \\n，无需手动添加）
+        """
+        if self._ser is None:
+            logger.warning("Serial2 发送失败：串口未打开")
+            return
+        try:
+            text = data.rstrip("\n") + "\n"
+            self._ser.write(text.encode("ascii", errors="ignore"))
+            self._ser.flush()
+        except (OSError, serial.SerialException) as exc:
+            logger.error("Serial2 发送失败: %s", exc)
+
+    def _build_output(self):
+        """构建当前状态输出。
+
+        Returns:
+            (status, rtt_ms, lost_packets) 元组
+        """
+        connected = (
+            self._last_data_time > 0
+            and (time.monotonic() - self._last_data_time) < self._disconnect_timeout
+        )
+        return (
+            "connected" if connected else "disconnected",
+            round(self._rtt_ms, 2),
+            self._lost_packets,
+        )
 
     def shutdown(self):
         """程序退出时调用：关闭串口。"""

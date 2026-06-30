@@ -163,8 +163,8 @@ class TestDisconnectDetection:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5", disconnect_timeout=3.0)
-        status = part._build_output()
-        assert status["status"] == "disconnected"
+        status, rtt_ms, lost = part._build_output()
+        assert status == "disconnected"
 
     def test_stays_connected_within_timeout(self, monkeypatch):
         """在超时窗口内持续收到数据时 status=connected。"""
@@ -179,8 +179,8 @@ class TestDisconnectDetection:
 
         # 2.9 秒后仍应 connected
         monkeypatch.setattr(time, "monotonic", lambda: 1002.9)
-        status = part._build_output()
-        assert status["status"] == "connected"
+        status, rtt_ms, lost = part._build_output()
+        assert status == "connected"
 
     def test_disconnected_after_timeout(self, monkeypatch):
         """超过超时窗口无数据时 status=disconnected。"""
@@ -194,8 +194,8 @@ class TestDisconnectDetection:
 
         # 3.1 秒后应 disconnected
         monkeypatch.setattr(time, "monotonic", lambda: 1003.1)
-        status = part._build_output()
-        assert status["status"] == "disconnected"
+        status, rtt_ms, lost = part._build_output()
+        assert status == "disconnected"
 
 
 class TestRttCalculation:
@@ -215,8 +215,8 @@ class TestRttCalculation:
         monkeypatch.setattr(time, "monotonic", lambda: 5000.0032)
         part._handle_pong(seq=0, esp_ms=12345)
 
-        status = part._build_output()
-        assert status["rtt_ms"] == pytest.approx(3.2, abs=0.1)
+        status, rtt_ms, lost = part._build_output()
+        assert rtt_ms == pytest.approx(3.2, abs=0.1)
 
     def test_rtt_stale_pong_ignored(self, monkeypatch):
         """只保留最新的 RTT，旧 PONG 不覆盖。"""
@@ -240,8 +240,8 @@ class TestRttCalculation:
         monkeypatch.setattr(time, "monotonic", lambda: 2000.002)
         part._handle_pong(seq=1, esp_ms=2)
 
-        status = part._build_output()
-        assert status["rtt_ms"] == pytest.approx(2.0, abs=0.1)
+        status, rtt_ms, lost = part._build_output()
+        assert rtt_ms == pytest.approx(2.0, abs=0.1)
 
 
 class TestSeqOverflow:
@@ -270,8 +270,8 @@ class TestSeqOverflow:
         monkeypatch.setattr(time, "monotonic", lambda: 3000.004)
         part._handle_pong(seq=65535, esp_ms=999)
 
-        status = part._build_output()
-        assert status["rtt_ms"] == pytest.approx(4.0, abs=0.1)
+        status, rtt_ms, lost = part._build_output()
+        assert rtt_ms == pytest.approx(4.0, abs=0.1)
 
 
 class TestLostPacketCounting:
@@ -294,36 +294,35 @@ class TestLostPacketCounting:
         monkeypatch.setattr(time, "monotonic", lambda: 1003.001)
         part._handle_pong(seq=3, esp_ms=4)
 
-        status = part._build_output()
-        assert status["lost_packets"] == 2
+        status, rtt_ms, lost = part._build_output()
+        assert lost == 2
 
 
 class TestOutputFormat:
     """验证 run() 输出格式。"""
 
-    def test_output_keys(self):
-        """输出 dict 必须包含所有约定的键。"""
+    def test_output_tuple_format(self):
+        """输出应为 (status, rtt_ms, lost_packets) 三元组。"""
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
         output = part._build_output()
-        assert "status" in output
-        assert "rtt_ms" in output
-        assert "lost_packets" in output
-        assert output["status"] in ("connected", "disconnected")
+        assert len(output) == 3
+        status, rtt_ms, lost = output
+        assert status in ("connected", "disconnected")
 
     def test_output_types(self):
         """验证输出值类型正确。"""
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
-        output = part._build_output()
-        assert isinstance(output["status"], str)
-        assert isinstance(output["rtt_ms"], (int, float))
-        assert isinstance(output["lost_packets"], int)
+        status, rtt_ms, lost = part._build_output()
+        assert isinstance(status, str)
+        assert isinstance(rtt_ms, (int, float))
+        assert isinstance(lost, int)
 
-    def test_run_returns_latest_output(self, monkeypatch):
-        """run() 返回最新状态（非线程模式）。"""
+    def test_run_returns_tuple(self, monkeypatch):
+        """run() 返回 (status, rtt_ms, lost) 元组。"""
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
@@ -331,8 +330,55 @@ class TestOutputFormat:
         monkeypatch.setattr(time, "monotonic", lambda: 500.0)
         part._last_data_time = 500.0
 
-        output = part.run()
-        assert output["status"] == "connected"
+        status, rtt_ms, lost = part.run()
+        assert status == "connected"
+
+    def test_run_threaded_returns_tuple(self, monkeypatch):
+        """run_threaded() 返回 (status, rtt_ms, lost) 元组。"""
+        from donkeycar.parts.serial2_test import Serial2Test
+
+        part = Serial2Test(port="/dev/ttyS5")
+        monkeypatch.setattr(time, "monotonic", lambda: 500.0)
+        part._last_data_time = 500.0
+
+        status, rtt_ms, lost = part.run_threaded()
+        assert status == "connected"
+
+class TestSendMethod:
+    """验证 send() 对外接口。"""
+
+    def test_send_writes_to_serial(self):
+        """send() 将文本写入串口并 flush。"""
+        from donkeycar.parts.serial2_test import Serial2Test
+
+        mock_ser = MagicMock()
+        part = Serial2Test(port="/dev/ttyS5")
+        part._ser = mock_ser
+
+        part.send("test message")
+        mock_ser.write.assert_called_once_with(b"test message\n")
+        mock_ser.flush.assert_called_once()
+
+    def test_send_safe_when_serial_closed(self):
+        """串口未打开时 send() 打印警告但不抛异常。"""
+        from donkeycar.parts.serial2_test import Serial2Test
+
+        part = Serial2Test(port="/dev/ttyS5")
+        part._ser = None
+        # 不应抛异常
+        part.send("should not crash")
+
+    def test_send_non_ascii_ignored(self):
+        """非 ASCII 字符被静默丢弃。"""
+        from donkeycar.parts.serial2_test import Serial2Test
+
+        mock_ser = MagicMock()
+        part = Serial2Test(port="/dev/ttyS5")
+        part._ser = mock_ser
+
+        part.send("hello 中文 🌍")
+        # 中文字符和 emoji 被 ignore 处理
+        mock_ser.write.assert_called_once_with(b"hello  \n")
 
 
 class TestShutdown:
