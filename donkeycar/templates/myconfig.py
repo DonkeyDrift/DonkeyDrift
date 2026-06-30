@@ -27,6 +27,10 @@ ARDUINO_BAUDRATE = 115200               # 串口通信波特率（默认：11520
 ARDUINO_TIMEOUT = 1                     # 串口读取超时时间（秒），默认：1.0
 ARDUINO_WRITE_TIMEOUT = 1               # 串口写入超时时间（秒），默认：1.0
 
+# Serial2 扩展串口配置（GPIO18/19，双向联通验证）
+SERIAL2_PORT = "/dev/ttyS5"             # Serial2 对应的 Linux 串口设备（待确认）
+SERIAL2_BAUDRATE = 115200               # Serial2 波特率（与固件 BAUD_RATE_1 一致）
+
 # 线程安全配置
 ARDUINO_LOCK_TIMEOUT = 1.0     # 最大等待锁的时间（秒），默认：1.0
 ARDUINO_MAX_RETRIES = 3        # 最大重试次数（默认：3）
