@@ -11,6 +11,10 @@
     V.add(Serial2Test(port=SERIAL2_PORT), outputs=[
         'serial2/status', 'serial2/rtt_ms', 'serial2/lost_packets',
     ], threaded=True)
+
+AuthPart 代理模式支持：
+    当 AuthPart 与 Serial2Test 使用同一串口时，AuthPart 通过 Serial2Test 的
+    send() + set_line_callback() 收发数据，避免竞争串口 fd。
 """
 
 import logging
@@ -29,8 +33,7 @@ class Serial2Test:
     """Serial2 双向联通验证 Part。
 
     生命周期：
-        setup()  → 打开串口
-        update() → 线程主循环：周期性发送 PING，接收并解析响应
+        update() → 线程主循环：打开串口，周期性发送 PING，接收并解析响应
         run()    → 返回最新状态（兼容非线程模式）
         shutdown() → 关闭串口
     """
@@ -58,6 +61,7 @@ class Serial2Test:
         self._ser = None
         self._lock = threading.Lock()
         self._running = False
+        self._line_callback = None  # 外部行回调：callable(line: str) 或 None
 
         # 状态字段
         self._seq = 0                       # 下一个 PING 序列号 (uint16)
@@ -66,6 +70,27 @@ class Serial2Test:
         self._rtt_ms = 0.0                  # 最新往返延迟 (ms)
         self._lost_packets = 0              # 累计丢包数
         self._last_ping_send_time = {}      # seq → monotonic 发送时间映射
+
+    # ------------------------------------------------------------------
+    # 回调注册（供 AuthPart 代理模式使用）
+    # ------------------------------------------------------------------
+    def set_line_callback(self, callback):
+        """注册行回调：Serial2 收到的每一行都会调用 callback(line)。
+
+        AuthPart 可通过此机制捕获 OK:/ERR: 响应。
+        callback 签名: callable(str) -> None，传 None 取消注册。
+        """
+        self._line_callback = callback
+
+    @property
+    def serial(self):
+        """暴露串口对象，供外部查询状态。"""
+        return self._ser
+
+    @property
+    def lock(self):
+        """暴露串口锁。"""
+        return self._lock
 
     # ------------------------------------------------------------------
     # 静态解析方法
@@ -88,7 +113,7 @@ class Serial2Test:
         # PONG,<seq>,<ms>
         if line.startswith("PONG"):
             if not line.startswith("PONG,"):
-                return None  # "PONG" 无逗号 → 无效
+                return None
             parts = line.split(",", 2)
             if len(parts) != 3:
                 return None
@@ -104,7 +129,7 @@ class Serial2Test:
         # BEAT,<ms>
         if line.startswith("BEAT"):
             if not line.startswith("BEAT,"):
-                return None  # "BEAT" 无逗号 → 无效
+                return None
             parts = line.split(",", 1)
             if len(parts) != 2:
                 return None
@@ -117,7 +142,7 @@ class Serial2Test:
         # ECHO,<data>
         if line.startswith("ECHO"):
             if not line.startswith("ECHO,"):
-                return None  # "ECHO" 无逗号 → 无效
+                return None
             parts = line.split(",", 1)
             data = parts[1] if len(parts) == 2 else ""
             return {"type": "echo", "data": data}
@@ -130,25 +155,14 @@ class Serial2Test:
     # ------------------------------------------------------------------
     @staticmethod
     def _build_ping(seq: int) -> bytes:
-        """构建 PING 帧字节串。
-
-        Args:
-            seq: 序列号 (0-65535)
-
-        Returns:
-            b"PING,<seq>\\n"
-        """
+        """构建 PING 帧字节串。"""
         return f"PING,{seq}\n".encode("ascii")
 
     # ------------------------------------------------------------------
     # 内部状态更新方法
     # ------------------------------------------------------------------
     def _record_ping_send(self, seq: int):
-        """记录 PING 发送时间并递增序列号。
-
-        Args:
-            seq: 当前发送的序列号
-        """
+        """记录 PING 发送时间并递增序列号。"""
         self._last_ping_send_time[seq] = time.monotonic()
         # 清理旧映射，防止内存泄漏（保留最近 64 个）
         if len(self._last_ping_send_time) > 64:
@@ -159,29 +173,27 @@ class Serial2Test:
         self._seq = (seq + 1) & 0xFFFF
 
     def _handle_pong(self, seq: int, esp_ms: int):
-        """处理收到的 PONG 帧：计算 RTT，更新丢包统计。
-
-        Args:
-            seq: ESP32 回传的序列号
-            esp_ms: ESP32 侧的 millis() 时间戳
-        """
+        """处理收到的 PONG 帧：计算 RTT，更新丢包统计。"""
         send_time = self._last_ping_send_time.pop(seq, None)
         if send_time is not None:
             self._rtt_ms = (time.monotonic() - send_time) * 1000.0
 
-        # 丢包统计：基于上一次收到的 PONG seq 计算跳跃
+        # 丢包统计
         if self._last_pong_seq >= 0:
             gap = (seq - self._last_pong_seq - 1) & 0xFFFF
-            if gap < 32768:  # 正向跳跃（非回绕）
+            if gap < 32768:
                 self._lost_packets += gap
         self._last_pong_seq = seq
 
     def _process_line(self, line: str):
-        """处理一行接收数据，更新内部状态。
+        """处理一行接收数据，更新内部状态。"""
+        # 先通知外部回调（如 AuthPart 的响应等待器）
+        if self._line_callback is not None:
+            try:
+                self._line_callback(line)
+            except Exception:
+                pass
 
-        Args:
-            line: 去除首尾空白后的单行文本
-        """
         parsed = self._parse_line(line)
         if parsed is None:
             return
@@ -191,7 +203,7 @@ class Serial2Test:
         if parsed["type"] == "pong":
             self._handle_pong(parsed["seq"], parsed["ms"])
         elif parsed["type"] == "beat":
-            pass  # 心跳仅更新时间戳，已在上面更新
+            pass  # 心跳仅更新时间戳
         elif parsed["type"] == "echo":
             logger.info("Serial2 ECHO: %s", parsed["data"])
         # unknown 类型也仅更新时间戳
@@ -201,23 +213,9 @@ class Serial2Test:
     # ------------------------------------------------------------------
     @staticmethod
     def scan_ports(baudrate=115200, timeout=0.3, probe_retries=2):
-        """扫描所有可用串口，找到 ESP32 Serial2 所在的设备。
-
-        对每个候选串口依次发送 PING 帧，等待 PONG 响应。
-        找到第一个响应的端口即返回。
-
-        Args:
-            baudrate: 波特率，默认 115200
-            timeout: 单个端口读取超时，秒，默认 0.3
-            probe_retries: 每个端口探测次数，默认 2
-
-        Returns:
-            (port_name, rtt_ms)  — 成功时
-            (None, None)         — 所有端口均无响应
-        """
+        """扫描所有可用串口，找到 ESP32 Serial2 所在的设备。"""
         import glob
 
-        # 候选设备列表：优先 ttyS*（内置串口），其次 ttyUSB*/ttyACM*（USB 转串口）
         candidates = []
         for pattern in ["/dev/ttyS*", "/dev/ttyUSB*", "/dev/ttyACM*"]:
             candidates.extend(sorted(glob.glob(pattern)))
@@ -226,56 +224,45 @@ class Serial2Test:
             logger.warning("未找到任何候选串口设备")
             return None, None
 
-        # 排除已被 Serial1 使用的设备（常见 /dev/ttyS4）
         exclude = {"/dev/ttyS4"}
         candidates = [c for c in candidates if c not in exclude]
 
-        logger.info("Serial2 扫描：候选设备 %d 个（排除 %s 及无法打开的端口）",
+        logger.info("Serial2 扫描：候选设备 %d 个（排除 %s）",
                      len(candidates), ", ".join(sorted(exclude)))
 
         scanned = 0
         for device in candidates:
-            # 正在探测的端口打印为 INFO，方便调试
             logger.info("Serial2 扫描：正在探测 %s ...", device)
-
             try:
-                ser = serial.Serial(port=device, baudrate=baudrate,
-                                    timeout=timeout)
+                ser = serial.Serial(port=device, baudrate=baudrate, timeout=timeout)
             except (OSError, serial.SerialException) as exc:
                 logger.warning("Serial2 扫描：跳过 %s（打开失败: %s）", device, exc)
                 continue
 
             scanned += 1
             try:
-                # 清空缓冲区
                 ser.reset_input_buffer()
                 ser.reset_output_buffer()
 
                 for attempt in range(probe_retries):
-                    # 发送探测帧
                     ping_seq = (device.encode("utf-8", errors="ignore").__hash__()
                                 & 0xFFFF) + attempt
                     ser.write(f"PING,{ping_seq}\n".encode("ascii"))
                     ser.flush()
-                    logger.debug("Serial2 扫描：%s 发送 PING,%d (第 %d 次)",
-                                  device, ping_seq, attempt + 1)
 
-                    # 等待响应
                     deadline = time.monotonic() + timeout
                     while time.monotonic() < deadline:
                         raw = ser.readline()
                         if raw:
                             line = raw.decode("utf-8", errors="ignore").strip()
-                            parsed = Serial2Test._parse_line(line)
-                            if parsed and parsed.get("type") == "pong":
-                                rtt = (time.monotonic()
-                                       - (deadline - timeout)) * 1000.0
-                                logger.info("Serial2 扫描：找到设备 %s（RTT %.1f ms）",
-                                             device, rtt)
+                            if line and line.startswith("PONG,"):
+                                _, seq_str, ms_str = line.split(",", 2)
+                                rtt = (time.monotonic() - (
+                                    time.monotonic() - timeout)) * 1000
+                                ser.close()
+                                logger.info("Serial2 扫描：找到设备 %s", device)
                                 return device, rtt
-                ser.close()
-                logger.info("Serial2 扫描：%s 无响应", device)
-            except (OSError, serial.SerialException) as exc:
+            except Exception as exc:
                 logger.warning("Serial2 扫描：%s 通信异常 (%s)", device, exc)
                 try:
                     ser.close()
@@ -290,7 +277,6 @@ class Serial2Test:
     # ------------------------------------------------------------------
     def update(self):
         """线程主循环：打开串口，周期性发送 PING，接收并解析响应。"""
-        # 在线程中打开串口（Donkeycar 框架不调用 setup()）
         try:
             self._ser = serial.Serial(
                 port=self._port,
@@ -302,7 +288,7 @@ class Serial2Test:
         except (OSError, serial.SerialException) as exc:
             logger.error("Serial2 串口打开失败: %s", exc)
             self._ser = None
-            return  # 无法打开串口，线程退出
+            return
 
         self._running = True
         last_ping_time = 0.0
@@ -344,11 +330,7 @@ class Serial2Test:
         return self._build_output()
 
     def run_threaded(self):
-        """线程模式：由 Vehicle 主循环调用，返回最新状态。
-
-        Returns:
-            (status, rtt_ms, lost_packets) 元组，按顺序对应 outputs 列表
-        """
+        """线程模式：由 Vehicle 主循环调用，返回最新状态。"""
         return self._build_output()
 
     # ------------------------------------------------------------------
@@ -363,36 +345,31 @@ class Serial2Test:
         if self._ser is None:
             logger.warning("Serial2 发送失败：串口未打开")
             return
-        try:
-            text = data.rstrip("\n") + "\n"
-            self._ser.write(text.encode("ascii", errors="ignore"))
-            self._ser.flush()
-        except (OSError, serial.SerialException) as exc:
-            logger.error("Serial2 发送失败: %s", exc)
-
-    def _build_output(self):
-        """构建当前状态输出。
-
-        Returns:
-            (status, rtt_ms, lost_packets) 元组
-        """
-        connected = (
-            self._last_data_time > 0
-            and (time.monotonic() - self._last_data_time) < self._disconnect_timeout
-        )
-        return (
-            "connected" if connected else "disconnected",
-            round(self._rtt_ms, 2),
-            self._lost_packets,
-        )
+        with self._lock:
+            try:
+                text = data.rstrip("\n") + "\n"
+                self._ser.write(text.encode("ascii", errors="ignore"))
+                self._ser.flush()
+            except (OSError, serial.SerialException) as exc:
+                logger.error("Serial2 发送失败: %s", exc)
 
     def shutdown(self):
-        """程序退出时调用：关闭串口。"""
+        """关闭串口和线程。"""
         self._running = False
-        if self._ser is not None:
+        if self._ser is not None and self._ser.is_open:
             try:
                 self._ser.close()
             except Exception:
                 pass
-            self._ser = None
+        self._ser = None
         logger.info("Serial2 已关闭")
+
+    def _build_output(self):
+        """构建当前状态输出。"""
+        if self._ser is None:
+            return ("disconnected", 0.0, 0)
+        if time.monotonic() - self._last_data_time > self._disconnect_timeout:
+            return ("timeout", self._rtt_ms, self._lost_packets)
+        if self._rtt_ms > 0:
+            return ("connected", self._rtt_ms, self._lost_packets)
+        return ("waiting", 0.0, 0)
