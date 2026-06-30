@@ -571,6 +571,22 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         V.add(ImgArrToJpg(), inputs=['cam/image_array'], outputs=['jpg/bin'])
         V.add(pub, inputs=['jpg/bin'])
 
+    # 配网 Part（需 ESP32 配网固件配合，默认关闭）
+    # 使用独立 Serial2（/dev/ttyS6），不与控制/遥测 Serial1 竞争
+    if cfg.PROVISIONING_ENABLED:
+        from donkeycar.parts.provisioning import ProvisioningPart
+        prov = ProvisioningPart(
+            serial_port=cfg.PROVISIONING_SERIAL_PORT,
+            baudrate=cfg.PROVISIONING_BAUDRATE,
+            wifi_interface=cfg.PROVISIONING_WIFI_INTERFACE,
+            timeout=cfg.PROVISIONING_SERIAL_TIMEOUT,
+        )
+        V.add(prov,
+              inputs=['provisioning/trigger'],
+              outputs=['provisioning/status', 'provisioning/ssid',
+                       'provisioning/ip', 'provisioning/error'],
+              threaded=True)
+
 
     if isinstance(ctr, DriveApiBridge):
         print(f"Web Console Drive 已就绪，请打开浏览器访问 {ctr.web_console_url()}/#/drive")

@@ -630,6 +630,14 @@ MM1_SHOW_STEERING_VALUE = False
 #  eg.'/dev/tty.usbmodemXXXXXX' and replace the port accordingly
 MM1_SERIAL_PORT = '/dev/ttyS0'  # Serial Port for reading and sending MM1 data.
 
+#PROVISIONING（ESP32 WiFi 配网系统，需配合 ESP32 配网固件使用）
+# 启用后自动监听 ESP32 串口，接收 WiFi 凭据并通过 nmcli 连接目标网络
+PROVISIONING_ENABLED = False            # 是否启用配网 Part
+PROVISIONING_SERIAL_PORT = "/dev/ttyS6" # ESP32 配网串口设备路径（Serial2: RX19/TX18）
+PROVISIONING_BAUDRATE = 115200          # 串口波特率
+PROVISIONING_WIFI_INTERFACE = "wlp1s0"  # Linux 端 WiFi 网卡名（nmcli device 名称）
+PROVISIONING_SERIAL_TIMEOUT = 1.0       # 串口读取超时（秒）
+
 #LOGGING
 HAVE_CONSOLE_LOGGING = True
 LOGGING_LEVEL = 'INFO'          # (Python logging level) 'NOTSET' / 'DEBUG' / 'INFO' / 'WARNING' / 'ERROR' / 'FATAL' / 'CRITICAL'

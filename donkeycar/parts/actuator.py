@@ -1193,6 +1193,7 @@ class Arduino:
         self.throttle = 0
         self.steeringCmd = 0
         self.throttleCmd = 0
+        self._rx_buf = bytearray()  # 接收字节缓冲区，用于拆行
         self.imu_data = {}  # 存储最新 IMU 数据：{'seq', 'ts_ms', 'accel_x/y/z', 'gyro_x/y/z'}
 
     def set_cmd(self, mode, channel, val):
@@ -1208,94 +1209,126 @@ class Arduino:
         #     Arduino.ard_device.write(("%d:%d\n" % (self.PWM_steering, self.PWM_throttle)).encode('ascii'))
         # return
     
+    def _read_serial_bytes(self):
+        """将串口可读字节全部读入 _rx_buf（持有 ard_lock）。"""
+        with Arduino.ard_lock:
+            try:
+                waiting = Arduino.ard_device.in_waiting
+            except Exception:
+                return
+            if waiting > 0:
+                try:
+                    chunk = Arduino.ard_device.read(waiting)
+                    if chunk:
+                        self._rx_buf.extend(chunk)
+                except Exception:
+                    pass
+
+    def _pop_line_from_buf(self):
+        """从 _rx_buf 中提取一个 \\n 终止的完整行。返回解码后的 str 或 None。"""
+        while True:
+            nl_idx = self._rx_buf.find(b'\n')
+            if nl_idx < 0:
+                # 防止缓冲区无限增长（无换行的噪声数据）
+                if len(self._rx_buf) > 4096:
+                    logger.warning("串口缓冲区溢出（%d 字节无换行），已清空", len(self._rx_buf))
+                    self._rx_buf = bytearray()
+                return None
+            line_bytes = self._rx_buf[:nl_idx]
+            self._rx_buf = self._rx_buf[nl_idx + 1:]
+            if line_bytes.endswith(b'\r'):
+                line_bytes = line_bytes[:-1]
+            if not line_bytes:
+                continue
+            try:
+                return line_bytes.decode('utf-8', errors='ignore').strip()
+            except Exception:
+                continue
+
     def Arduino_readline(self):
-        ret = None
-        # with Arduino.ard_lock: // 去除后系统不卡顿
-        if Arduino.ard_device.inWaiting() > 0:
-            ret = Arduino.ard_device.readline().decode('utf-8').strip()
-            # print("Received: %s" % ret)
-            # 解析下位机数据格式：M{mode}:P{park} 或 T{throttle}S{steering}
-            if ret.startswith('M') and 'P' in ret:
-                try:
-                    # 解析模式(M)和手刹状态(P)
-                    import re
-                    match = re.match(r'M(\d+):P(\d+)', ret)
-                    if match:
-                        mode = int(match.group(1))
-                        park = int(match.group(2))
-                        
-                        # 返回模式、手刹状态和默认控制值
-                        return {
-                            'mode': mode,
-                            'park': park,
-                            'throttle': 0,
-                            'steering': 0
-                        }
-                except Exception as e:
-                    logger.error(f"解析串口数据失败: {ret}, 错误: {str(e)}")
-            elif ret.startswith('T') and 'S' in ret:
-                try:
-                    # 解析油门(T)和转向(S)
-                    import re
-                    match = re.match(r'T:?(-?\d+):?S:?(-?\d+)', ret)
-                    if match:
-                        raw_throttle = int(match.group(1))
-                        raw_steering = int(match.group(2))
+        """线程安全地从串口读取一行并解析。
 
-                        clamped_throttle = clamp(raw_throttle, -100, 100)
-                        clamped_steering = clamp(raw_steering, -100, 100)
-                        self.throttle = utils.map_range_float(
-                            clamped_throttle, -100, 100, -1.0, 1.0)
-                        self.steering = utils.map_range_float(
-                            clamped_steering, -100, 100, -1.0, 1.0)
+        使用字节缓冲区自行拆行（而非 pyserial readline()），
+        即使 ESP32 端 TX 缓冲区溢出导致帧拼接/字符丢失，
+        也能尽可能恢复可解析的行，避免 readline() timeout
+        返回残缺行后被误认为未识别数据。
+        """
+        self._read_serial_bytes()
+        ret = self._pop_line_from_buf()
+        if not ret:
+            return None
 
-                        logger.debug(f"解析结果: throttle={self.throttle}(原始:{raw_throttle}) steering={self.steering}(原始:{raw_steering})")
-                        return {
-                            'throttle': self.throttle,
-                            'steering': self.steering,
-                            'mode': 0,
-                            'park': 0
-                        }
-                except Exception as e:
-                    logger.error(f"解析串口数据失败: {ret}, 错误: {str(e)}")
-            elif ret.startswith('$IMU'):
-                try:
-                    # 解析 IMU 数据：$IMU,seq,ts_ms,ax,ay,az,gx,gy,gz
-                    # 加速度单位 m/s²，陀螺仪单位 rad/s
-                    parts = ret.split(',')
-                    if len(parts) == 9:  # $IMU + seq + ts_ms + ax + ay + az + gx + gy + gz
-                        imu_seq = int(parts[1])
-                        imu_ts_ms = int(parts[2])
-                        imu_ax = float(parts[3])
-                        imu_ay = float(parts[4])
-                        imu_az = float(parts[5])
-                        imu_gx = float(parts[6])
-                        imu_gy = float(parts[7])
-                        imu_gz = float(parts[8])
-                        # 存储 IMU 数据到实例属性，供 ArdImu Part 读取
-                        self.imu_data = {
-                            'seq': imu_seq,
-                            'ts_ms': imu_ts_ms,
-                            'accel_x': imu_ax,
-                            'accel_y': imu_ay,
-                            'accel_z': imu_az,
-                            'gyro_x': imu_gx,
-                            'gyro_y': imu_gy,
-                            'gyro_z': imu_gz,
-                        }
-                        # IMU 数据不干扰控制数据流，返回 None
-                        return None
-                except Exception as e:
-                    logger.error(f"解析 IMU 数据失败: {ret}, 错误: {str(e)}")
-            else:
-                logger.warning(f"收到未识别数据格式: {ret}")
+        # 解析下位机数据格式：M{mode}:P{park} 或 T{throttle}S{steering}
+        if ret.startswith('M') and 'P' in ret:
+            try:
+                # 解析模式(M)和手刹状态(P)
+                import re
+                match = re.match(r'M(\d+):P(\d+)', ret)
+                if match:
+                    mode = int(match.group(1))
+                    park = int(match.group(2))
+                    return {
+                        'mode': mode,
+                        'park': park,
+                        'throttle': 0,
+                        'steering': 0
+                    }
+            except Exception as e:
+                logger.error(f"解析串口数据失败: {ret}, 错误: {str(e)}")
+        elif ret.startswith('T') and 'S' in ret:
+            try:
+                # 解析油门(T)和转向(S)
+                import re
+                match = re.match(r'T:?(-?\d+):?S:?(-?\d+)', ret)
+                if match:
+                    raw_throttle = int(match.group(1))
+                    raw_steering = int(match.group(2))
+                    clamped_throttle = clamp(raw_throttle, -100, 100)
+                    clamped_steering = clamp(raw_steering, -100, 100)
+                    self.throttle = utils.map_range_float(
+                        clamped_throttle, -100, 100, -1.0, 1.0)
+                    self.steering = utils.map_range_float(
+                        clamped_steering, -100, 100, -1.0, 1.0)
+                    logger.debug(f"解析结果: throttle={self.throttle}(原始:{raw_throttle}) steering={self.steering}(原始:{raw_steering})")
+                    return {
+                        'throttle': self.throttle,
+                        'steering': self.steering,
+                        'mode': 0,
+                        'park': 0
+                    }
+            except Exception as e:
+                logger.error(f"解析串口数据失败: {ret}, 错误: {str(e)}")
+        elif ret.startswith('$IMU'):
+            try:
+                # 解析 IMU 数据：$IMU,seq,ts_ms,ax,ay,az,gx,gy,gz
+                # 加速度单位 m/s²，陀螺仪单位 rad/s
+                parts = ret.split(',')
+                if len(parts) == 9:  # $IMU + seq + ts_ms + ax + ay + az + gx + gy + gz
+                    imu_seq = int(parts[1])
+                    imu_ts_ms = int(parts[2])
+                    imu_ax = float(parts[3])
+                    imu_ay = float(parts[4])
+                    imu_az = float(parts[5])
+                    imu_gx = float(parts[6])
+                    imu_gy = float(parts[7])
+                    imu_gz = float(parts[8])
+                    self.imu_data = {
+                        'seq': imu_seq,
+                        'ts_ms': imu_ts_ms,
+                        'accel_x': imu_ax,
+                        'accel_y': imu_ay,
+                        'accel_z': imu_az,
+                        'gyro_x': imu_gx,
+                        'gyro_y': imu_gy,
+                        'gyro_z': imu_gz,
+                    }
+                    return None  # IMU 不干扰控制数据流
+            except Exception as e:
+                logger.error(f"解析 IMU 数据失败: {ret}, 错误: {str(e)}")
+        else:
+            logger.warning(f"收到未识别数据格式: {ret}")
 
-        # return {
-        #     'throttle': 0,
-        #     'steering': 0,
-        #     'mode': 0,
-        #     'park': 0
-        # }
+        return None
 
 
 class ArdPWMSteering:
@@ -1436,8 +1469,12 @@ class ArdPWMThrottle:
                 self.controller.throttleCmd = self.throttle_val
                 # Arduino.ard_device.write(("%d:%d\n" % (self.throttle_val, self.throttle_val)).encode('ascii'))
                 # if(self.controller.throttleCmd):
-                Arduino.ard_device.write(("%d:%d\n" % (self.controller.throttleCmd, self.controller.steeringCmd)).encode('ascii'))
-                print(("Thr:%d Str:%d\n" % (self.controller.throttleCmd, self.controller.steeringCmd)))
+                with Arduino.ard_lock:
+                    Arduino.ard_device.write(("%d:%d\n" % (self.controller.throttleCmd, self.controller.steeringCmd)).encode('ascii'))
+                # 仅在值变化时打印，避免每帧刷屏（~60Hz 日志噪音）
+                if not hasattr(self, '_last_logged_cmd') or self._last_logged_cmd != (self.controller.throttleCmd, self.controller.steeringCmd):
+                    self._last_logged_cmd = (self.controller.throttleCmd, self.controller.steeringCmd)
+                    logger.debug("Thr:%d Str:%d", self.controller.throttleCmd, self.controller.steeringCmd)
                 return self.controller.throttleCmd
             
             except (TypeError, ValueError) as e:
