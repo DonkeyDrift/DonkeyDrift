@@ -6,81 +6,56 @@ Web 驾驶控制台是 Donkeycar 新一代统一 Web UI 的核心模块，将原
 
 ## 快速开始
 
-### 1. 启动服务端
+### 1. 一键启动（本机场景，推荐）
 
-在电脑上启动 FastAPI 后端和前端开发服务器：
+`donkey drive` 一条命令同时拉起 Web UI 前后端与本机 `manage.py drive`，并自动注入 `DRIVE_API_SERVER_URL`，车端 `DriveApiBridge` 以 `role=car` 连回 `ws://127.0.0.1:8000/api/drive/ws`：
 
 ```bash
-# 后端
-cd web_ui/backend
-pip install -r requirements.txt   # 首次运行，包含 WebRTC 所需 aiortc / av
-python main.py                    # 默认监听 0.0.0.0:8000
-
-# 前端（新终端）
-cd web_ui/frontend
-npm install                       # 首次运行
-npm run dev                       # 默认监听 localhost:5173
+donkey createcar --path ~/mycar --template complete    # 首次创建车目录
+cd ~/mycar
+donkey drive --path /home/dkc/projects/DonkeyDrift/web_ui --car ~/mycar
 ```
 
-### 2. 车端接入（方式 A：推荐）
+可选参数：`--model ./models/mypilot.h5`（指定推理模型）、`--type linear`、`--js`（物理摇杆）、`--open`（自动打开浏览器）、`--backend-port`/`--frontend-port`（端口）。
 
-修改 `manage.py`，将 `LocalWebController` 替换为 `DriveApiBridge`：
+启动后浏览器访问 `http://localhost:5188/#/drive`（dev 模式由 Vite 在 5188 提供 SPA；Ctrl+C 同时停止前端、后端与车辆进程）。
 
-```python
-# 原来的导入
-# from donkeycar.parts.controller import (JoystickController, LocalWebController, WebFpv)
+### 2. 单独启动 Web UI 与车端
 
-# 替换为
-from donkeycar.parts.controller import (JoystickController, WebFpv)
-from donkeycar.parts.drive_api_bridge import DriveApiBridge
+若需分开运行（例如调试）：
+
+```bash
+# 终端 1：Web UI（后端 8000 + 前端 5188）
+donkey web --path /home/dkc/projects/DonkeyDrift/web_ui
+
+# 终端 2：车端（自动连本机 8000）
+cd ~/mycar
+python manage.py drive
 ```
 
-```python
-# 原来的实例化
-# ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
+模板默认 `DRIVE_API_SERVER_URL` 为 `ws://127.0.0.1:8000/api/drive/ws`，无需手动配置。
 
-# 替换为
-ctr = DriveApiBridge(
-    server_url=cfg.DRIVE_API_SERVER_URL,
-    video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
-    video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
-    video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
-    video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
-    webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
-)
-V.add(ctr,
-      inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
-      outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'buttons'],
-      threaded=True)
-```
+### 3. 远程场景（车与 Web UI 不同机）
 
-在 `myconfig.py` 中添加配置：
+车端在 `myconfig.py` 中显式指向 Web UI 主机：
 
 ```python
-# 电脑 IP 地址，车端通过此地址连接
 DRIVE_API_SERVER_URL = "ws://192.168.1.100:8000/api/drive/ws"
+```
 
-# Drive 页面视频配置。60FPS 验收路径使用 WebRTC，MJPEG 仅作为降级。
+或通过环境变量 `DRIVE_API_SERVER_URL=... python manage.py drive` 注入。Web UI 后端需监听 `0.0.0.0`（默认）并放行 8000 端口。
+
+### 视频配置（可选）
+
+Drive 页面视频配置在 `myconfig.py` 中调整。60FPS 验收路径使用 WebRTC，MJPEG 仅作为降级：
+
+```python
 DRIVE_VIDEO_TRANSPORT = "webrtc"
 DRIVE_VIDEO_WIDTH = 320
 DRIVE_VIDEO_HEIGHT = 240
 DRIVE_VIDEO_FPS = 60
 DRIVE_WEBRTC_ENABLED = True
-DRIVE_WEBRTC_SINGLE_CLIENT = True
-DRIVE_WEBRTC_RECONNECT_TIMEOUT_SEC = 3.0
 ```
-
-然后正常启动车端：
-
-```bash
-python manage.py drive
-```
-
-> 详细的迁移步骤和兼容性说明见 [车端接入指南](drive-api-bridge-migration.md)
-
-### 3. 打开驾驶控制台
-
-浏览器访问 `http://localhost:5173/#/drive`，看到驾驶控制台页面。
 
 ---
 
@@ -348,13 +323,13 @@ Drive 页面在 WebSocket 已连接时会以 60Hz 持续发送完整控制状态
 ## 常见问题
 
 ### Q: 页面显示「车端离线」？
-1. 确认 `web_ui/backend/main.py` 正在运行
-2. 确认车端 `manage.py` 中 `DRIVE_API_SERVER_URL` 配置正确（IP 和端口）
-3. 确认车端和电脑在同一局域网，防火墙未屏蔽 8000 端口
+1. 确认 Web UI 后端正在运行（`donkey web` 或 `donkey drive`）
+2. 确认车端 `DRIVE_API_SERVER_URL` 指向正确的 Web UI 主机和端口（本机默认 `ws://127.0.0.1:8000/api/drive/ws`）
+3. 远程场景确认车端和电脑在同一局域网，防火墙未屏蔽 8000 端口
 
 ### Q: 摄像头画面不显示？
 1. 确认车端 Part 正确传入 `cam/image_array`
-2. 确认 `DriveApiBridge` 已替换原有的 `LocalWebController`
+2. 确认车端 `DriveApiBridge` 已以 `role=car` 连上后端 WebSocket
 3. 检查浏览器控制台是否有 WebSocket 连接错误
 4. 若 WebRTC 无法建立，页面会降级到 MJPEG；此时不应作为 60FPS 验收结果
 
@@ -370,7 +345,7 @@ Drive 页面在 WebSocket 已连接时会以 60Hz 持续发送完整控制状态
 3. 键盘控制只在页面获得焦点时生效，点击页面任意位置获取焦点
 
 ### Q: 如何回退到原有 Tornado 控制台？
-把 `manage.py` 中的 `DriveApiBridge` 改回 `LocalWebController`，恢复原来的导入即可，无任何破坏性。
+旧版 `LocalWebController`（Tornado，端口 8887）已移除，不再支持回退。驾驶控制统一走新 Web UI。如需独立标定单针 PWM，使用 `donkey calibrate --channel <通道>` CLI。
 
 ---
 
