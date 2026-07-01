@@ -17,7 +17,7 @@ import os
 import donkeydrifter as dk
 from donkeydrifter.parts.tub_v2 import TubWriter, TubWiper
 from donkeydrifter.parts.datastore import TubHandler
-from donkeydrifter.parts.controller import LocalWebController, RCReceiver
+from donkeydrifter.parts.controller import RCReceiver
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
 from donkeydrifter.parts.actuator import PCA9685, PWMSteering, PWMThrottle
 from donkeydrifter.pipeline.augmentations import ImageAugmentation
@@ -27,18 +27,16 @@ logging.basicConfig(level=logging.INFO)
 
 
 def make_web_controller(cfg):
-    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None)
-    if server_url:
-        return DriveApiBridge(
-            server_url=server_url,
-            video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
-            video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
-            video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
-            video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
-            webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
-            webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
-        )
-    return LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
+    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
+    return DriveApiBridge(
+        server_url=server_url,
+        video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
+        video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
+        video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
+        video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
+        webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
+        webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+    )
 
 
 class DriveMode:

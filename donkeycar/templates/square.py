@@ -21,7 +21,7 @@ import donkeydrifter as dk
 from donkeydrifter.parts.datastore import TubGroup, TubHandler
 from donkeydrifter.parts.transform import Lambda
 from donkeydrifter.parts.simulation import SquareBoxCamera, MovingSquareTelemetry
-from donkeydrifter.parts.controller import LocalWebController
+from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
 from donkeydrifter.parts.keras import KerasCategorical
 
 
@@ -36,12 +36,21 @@ def drive(cfg, model_path=None):
           inputs=['square/angle', 'square/throttle'],
           outputs=['cam/image_array'])
     
-    #display the image and read user values from a local web controller
-    ctr = LocalWebController()
-    V.add(ctr, 
+    #display the image and read user values from the Web UI drive bridge
+    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
+    ctr = DriveApiBridge(
+        server_url=server_url,
+        video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
+        video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
+        video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
+        video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
+        webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
+        webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+    )
+    V.add(ctr,
           inputs=['cam/image_array'],
-          outputs=['user/angle', 'user/throttle', 
-                   'user/mode', 'recording'],
+          outputs=['user/angle', 'user/throttle',
+                   'user/mode', 'recording', 'web/buttons'],
           threaded=True)
     
     #See if we should even run the pilot module. 

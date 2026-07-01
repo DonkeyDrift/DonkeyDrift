@@ -105,12 +105,10 @@ class CreateCar(BaseCommand):
         config_template_path = os.path.join(TEMPLATES_PATH, 'cfg_' + template + '.py')
         myconfig_template_path = os.path.join(TEMPLATES_PATH, 'myconfig.py')
         train_template_path = os.path.join(TEMPLATES_PATH, 'train.py')
-        calibrate_template_path = os.path.join(TEMPLATES_PATH, 'calibrate.py')
         car_app_path = os.path.join(path, 'manage.py')
         car_config_path = os.path.join(path, 'config.py')
         mycar_config_path = os.path.join(path, 'myconfig.py')
         train_app_path = os.path.join(path, 'train.py')
-        calibrate_app_path = os.path.join(path, 'calibrate.py')
 
         if os.path.exists(car_app_path) and not overwrite:
             print('Car app already exists. Delete it and rerun createcar to replace.')
@@ -131,13 +129,6 @@ class CreateCar(BaseCommand):
             print("Copying train script. Adjust these before starting your car.")
             shutil.copyfile(train_template_path, train_app_path)
             os.chmod(train_app_path, stat.S_IRWXU)
-
-        if os.path.exists(calibrate_app_path) and not overwrite:
-            print('Calibrate already exists. Delete it and rerun createcar to replace.')
-        else:
-            print("Copying calibrate script. Adjust these before starting your car.")
-            shutil.copyfile(calibrate_template_path, calibrate_app_path)
-            os.chmod(calibrate_app_path, stat.S_IRWXU)
 
         if not os.path.exists(mycar_config_path):
             print("Copying my car config overrides")
@@ -657,6 +648,39 @@ class Web(BaseCommand):
 
     def run(self, args):
         args = self.parse_args(args)
+        frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
+            self._launch_web_ui(args)
+
+        if args.open:
+            webbrowser.open(frontend_url)
+
+        stop_requested = {'value': False}
+
+        def _handle_stop_signal(_signum, _frame):
+            stop_requested['value'] = True
+
+        prev_sigint = signal.getsignal(signal.SIGINT)
+        prev_sigterm = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGINT, _handle_stop_signal)
+        signal.signal(signal.SIGTERM, _handle_stop_signal)
+
+        try:
+            self._supervise_processes(
+                [('前端', frontend_proc), ('后端', backend_proc)],
+                stop_requested,
+            )
+        finally:
+            signal.signal(signal.SIGINT, prev_sigint)
+            signal.signal(signal.SIGTERM, prev_sigterm)
+            self._terminate_process(frontend_proc)
+            self._terminate_process(backend_proc)
+
+    def _launch_web_ui(self, args):
+        """解析 web_ui 路径、检查依赖、选择端口，并拉起前端+后端子进程。
+
+        供 `donkey web` 与 `donkey drive` 共用。返回
+        (frontend_proc, backend_proc, frontend_port, backend_port, frontend_url)。
+        """
         web_ui_path = self._resolve_web_ui_path(args.path)
         frontend_path = os.path.join(web_ui_path, 'frontend')
         backend_path = os.path.join(web_ui_path, 'backend')
@@ -701,7 +725,9 @@ class Web(BaseCommand):
         ]
 
         print(f'Web UI 路径: {web_ui_path}')
-        frontend_url = self._build_frontend_url(backend_port, args.route if args.open else None)
+        # 开发模式下前端 SPA 由 Vite 提供（frontend_port），8000 仅在 npm run build 后才托管 dist。
+        # 因此自动打开的 URL 用 frontend_port，确保用户能直接看到页面。
+        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
 
         print(f'Web UI:  http://localhost:{backend_port}/')
         print(f'API 文档: http://localhost:{backend_port}/docs')
@@ -710,56 +736,42 @@ class Web(BaseCommand):
             print(f'将打开: {frontend_url}')
         print('按 Ctrl+C 停止前后端')
 
-        frontend_proc = None
-        backend_proc = None
-        stop_requested = {'value': False}
+        popen_kwargs = {}
+        if os.name == 'nt':
+            # On Windows, use shell=True to handle .cmd files and avoid FileNotFoundError
+            # and creationflags to manage process groups if needed.
+            popen_kwargs['shell'] = True
+        else:
+            popen_kwargs['start_new_session'] = True
 
-        def _handle_stop_signal(_signum, _frame):
-            stop_requested['value'] = True
+        frontend_env = os.environ.copy()
+        # 不再设置 VITE_API_BASE_URL，让前端使用相对路径 /api
+        # Vite 代理会自动将 /api 请求转发到后端，这样本地和远程访问都能正常工作
 
-        prev_sigint = signal.getsignal(signal.SIGINT)
-        prev_sigterm = signal.getsignal(signal.SIGTERM)
-        signal.signal(signal.SIGINT, _handle_stop_signal)
-        signal.signal(signal.SIGTERM, _handle_stop_signal)
+        backend_env = os.environ.copy()
+        if args.debug:
+            backend_env["DRIVE_WEB_DEBUG"] = "1"
 
-        try:
-            popen_kwargs = {}
-            if os.name == 'nt':
-                # On Windows, use shell=True to handle .cmd files and avoid FileNotFoundError
-                # and creationflags to manage process groups if needed.
-                popen_kwargs['shell'] = True
-            else:
-                popen_kwargs['start_new_session'] = True
+        backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
+        frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
 
-            frontend_env = os.environ.copy()
-            # 不再设置 VITE_API_BASE_URL，让前端使用相对路径 /api
-            # Vite 代理会自动将 /api 请求转发到后端，这样本地和远程访问都能正常工作
+        return frontend_proc, backend_proc, frontend_port, backend_port, frontend_url
 
-            backend_env = os.environ.copy()
-            if args.debug:
-                backend_env["DRIVE_WEB_DEBUG"] = "1"
+    def _supervise_processes(self, named_procs, stop_requested):
+        """监督子进程：收到停止信号或任一进程退出时，终止全部并以 SystemExit 退出。
 
-            backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
-            frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
-            if args.open:
-                webbrowser.open(frontend_url)
-            while True:
-                if stop_requested['value']:
-                    raise SystemExit(0)
-                frontend_rc = frontend_proc.poll()
-                backend_rc = backend_proc.poll()
-                if frontend_rc is not None:
-                    self._terminate_process(backend_proc)
-                    raise SystemExit(f'前端进程已退出，返回码: {frontend_rc}')
-                if backend_rc is not None:
-                    self._terminate_process(frontend_proc)
-                    raise SystemExit(f'后端进程已退出，返回码: {backend_rc}')
-                time.sleep(0.25)
-        finally:
-            signal.signal(signal.SIGINT, prev_sigint)
-            signal.signal(signal.SIGTERM, prev_sigterm)
-            self._terminate_process(frontend_proc)
-            self._terminate_process(backend_proc)
+        named_procs: [(名称, proc), ...]，按顺序轮询。
+        """
+        while True:
+            if stop_requested['value']:
+                raise SystemExit(0)
+            for name, proc in named_procs:
+                rc = proc.poll()
+                if rc is not None:
+                    for _, other in named_procs:
+                        self._terminate_process(other)
+                    raise SystemExit(f'{name}进程已退出，返回码: {rc}')
+            time.sleep(0.25)
 
     def _build_frontend_url(self, frontend_port, route=None):
         if not route or route == '/':
@@ -879,6 +891,139 @@ class Web(BaseCommand):
             else:
                 proc.kill()
             proc.wait(timeout=5)
+
+
+class Drive(Web):
+    """`donkey drive` — 一键拉起 Web UI 前后端 + 本机 manage.py drive。
+
+    在 `donkey web` 的基础上额外启动本机 Vehicle（manage.py drive），并自动注入
+    DRIVE_API_SERVER_URL，使车端以 role=car 连回 Web UI 后端的 /api/drive/ws。
+    浏览器访问 http://localhost:<backend-port>/#/drive 即可控制真实小车。
+    """
+
+    def parse_args(self, args):
+        parser = argparse.ArgumentParser(prog='drive', usage='%(prog)s [options]')
+        parser.add_argument('--path', default='/home/dkc/projects/donkeycar/web_ui',
+                            help='web_ui 根目录路径 (默认: /home/dkc/projects/donkeycar/web_ui)')
+        parser.add_argument('--car', default=None,
+                            help='车目录路径（须含 manage.py，默认: 当前目录）')
+        parser.add_argument('--model', default=None,
+                            help='推理模型路径，透传给 manage.py drive --model')
+        parser.add_argument('--type', default=None,
+                            help='模型类型 (linear|categorical)，透传给 manage.py drive --type')
+        parser.add_argument('--js', action='store_true',
+                            help='使用物理摇杆，透传给 manage.py drive --js')
+        parser.add_argument('--frontend-port', type=int, default=5188,
+                            help='前端端口 (默认: 5188)')
+        parser.add_argument('--backend-port', type=int, default=8000,
+                            help='后端端口 (默认: 8000)')
+        parser.add_argument('--backend-host', default='0.0.0.0',
+                            help='后端监听地址 (默认: 0.0.0.0)')
+        parser.add_argument('--install-deps', action='store_true',
+                            help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
+        parser.add_argument('--open', action='store_true',
+                            help='启动后自动打开浏览器')
+        parser.add_argument('--route', default='/drive',
+                            help='自动打开的前端路由 (默认: /drive)')
+        parser.add_argument('--debug', action='store_true',
+                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
+        return parser.parse_args(args)
+
+    def run(self, args):
+        args = self.parse_args(args)
+        car_path = self._resolve_car_path(args.car)
+
+        frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
+            self._launch_web_ui(args)
+
+        # 等待后端就绪后再启动车辆，避免车端 WS 先于后端启动导致连接失败重连风暴
+        if not self._wait_for_backend_ready(backend_port):
+            self._terminate_process(frontend_proc)
+            self._terminate_process(backend_proc)
+            raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
+
+        car_cmd = self._build_car_command(args)
+        car_env = self._build_car_env(backend_port)
+
+        popen_kwargs = {}
+        if os.name == 'nt':
+            popen_kwargs['shell'] = True
+        else:
+            popen_kwargs['start_new_session'] = True
+
+        print(f'车辆目录: {car_path}')
+        print(f'车辆进程: {" ".join(car_cmd)}')
+        car_proc = subprocess.Popen(
+            car_cmd, cwd=car_path, env=car_env,
+            stdin=subprocess.DEVNULL, **popen_kwargs,
+        )
+
+        if args.open:
+            webbrowser.open(frontend_url)
+        print('按 Ctrl+C 停止前端、后端与车辆进程')
+
+        stop_requested = {'value': False}
+
+        def _handle_stop_signal(_signum, _frame):
+            stop_requested['value'] = True
+
+        prev_sigint = signal.getsignal(signal.SIGINT)
+        prev_sigterm = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGINT, _handle_stop_signal)
+        signal.signal(signal.SIGTERM, _handle_stop_signal)
+
+        try:
+            self._supervise_processes(
+                [('前端', frontend_proc), ('后端', backend_proc), ('车辆', car_proc)],
+                stop_requested,
+            )
+        finally:
+            signal.signal(signal.SIGINT, prev_sigint)
+            signal.signal(signal.SIGTERM, prev_sigterm)
+            self._terminate_process(frontend_proc)
+            self._terminate_process(backend_proc)
+            self._terminate_process(car_proc)
+
+    # ------------------------------------------------------------------
+    # 车辆子进程构造（纯逻辑，便于单测）
+    # ------------------------------------------------------------------
+
+    def _resolve_car_path(self, car_arg):
+        car_path = os.path.abspath(os.path.expanduser(car_arg)) if car_arg else os.getcwd()
+        if not os.path.isfile(os.path.join(car_path, 'manage.py')):
+            raise SystemExit(
+                f'车目录未找到 manage.py: {car_path}\n'
+                '请通过 --car 指定包含 manage.py 的车目录，或在车目录中运行 donkey drive。'
+            )
+        return car_path
+
+    def _build_car_command(self, args):
+        """构造 manage.py drive 命令行，透传 --model/--type/--js。"""
+        cmd = [sys.executable, 'manage.py', 'drive']
+        if args.model:
+            cmd.extend(['--model', args.model])
+        if args.type:
+            cmd.extend(['--type', args.type])
+        if args.js:
+            cmd.append('--js')
+        return cmd
+
+    def _build_car_env(self, backend_port):
+        """构造车端子进程环境，注入 DRIVE_API_SERVER_URL 指向本机后端。"""
+        env = os.environ.copy()
+        env['DRIVE_API_SERVER_URL'] = f'ws://127.0.0.1:{backend_port}/api/drive/ws'
+        return env
+
+    def _wait_for_backend_ready(self, backend_port, timeout=30.0):
+        """轮询后端端口直至可连或超时。返回是否就绪。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(('127.0.0.1', backend_port), timeout=0.5):
+                    return True
+            except OSError:
+                time.sleep(0.2)
+        return False
 
 
 class InstallWebUI(BaseCommand):
@@ -1051,6 +1196,7 @@ def execute_from_command_line():
         'ui': Gui,
         'tui': Tui,
         'web': Web,
+        'drive': Drive,
         'installweb': InstallWebUI,
     }
 

@@ -36,8 +36,7 @@ import tornado.ioloop
 import tornado.web
 import donkeydrifter as dk
 from donkeydrifter.parts.behavior import BehaviorPart
-from donkeydrifter.parts.controller import (JoystickController, LocalWebController,
-                                        WebFpv)
+from donkeydrifter.parts.controller import JoystickController
 from donkeydrifter.parts.datastore import TubHandler
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
 from donkeydrifter.parts.explode import ExplodeDict
@@ -283,9 +282,6 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
 
 
     # Use the FPV preview, which will show the cropped image output, or the full frame.
-    if cfg.USE_FPV:
-        V.add(WebFpv(), inputs=['cam/image_array'], threaded=True)
-
     def load_model(kl, model_path):
         start = time.time()
         print('loading model', model_path)
@@ -574,7 +570,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     # 配网 Part（需 ESP32 配网固件配合，默认关闭）
     # 使用独立 Serial2（/dev/ttyS6），不与控制/遥测 Serial1 竞争
     if cfg.PROVISIONING_ENABLED:
-        from donkeycar.parts.provisioning import ProvisioningPart
+        from donkeydrifter.parts.provisioning import ProvisioningPart
         prov = ProvisioningPart(
             serial_port=cfg.PROVISIONING_SERIAL_PORT,
             baudrate=cfg.PROVISIONING_BAUDRATE,
@@ -590,10 +586,6 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
 
     if isinstance(ctr, DriveApiBridge):
         print(f"Web Console Drive 已就绪，请打开浏览器访问 {ctr.web_console_url()}/#/drive")
-    elif cfg.DONKEY_GYM:
-        print("You can now go to http://localhost:%d to drive your car." % cfg.WEB_CONTROL_PORT)
-    else:
-        print("You can now go to <your hostname.local>:%d to drive your car." % cfg.WEB_CONTROL_PORT)
     if has_input_controller:
         print("You can now move your controller to drive your car.")
         if isinstance(ctr, JoystickController):
@@ -727,19 +719,16 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
     # This web controller will create a web server that is capable
     # of managing steering, throttle, and modes, and more.
     #
-    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None)
-    if server_url:
-        ctr = DriveApiBridge(
-            server_url=server_url,
-            video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
-            video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
-            video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
-            video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
-            webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
-            webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
-        )
-    else:
-        ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
+    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
+    ctr = DriveApiBridge(
+        server_url=server_url,
+        video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
+        video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
+        video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
+        video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
+        webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
+        webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+    )
     V.add(ctr,
           inputs=[input_image, 'tub/num_records', 'user/mode', 'recording'],
           outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons'],
@@ -1355,7 +1344,8 @@ class ActionHandler(tornado.web.RequestHandler):
             cmd = [sys.executable, "manage.py", "drive"]
             subprocess.Popen(cmd, cwd=cwd)
             response["message"] = "驾驶模式已在后台启动，即将打开控制页..."
-            response["url"] = f"http://{self.request.host_name}:{self.cfg.WEB_CONTROL_PORT}" 
+            # 新 Web UI 后端端口（donkey web / donkey drive 默认 8000）
+            response["url"] = f"http://{self.request.host_name}:8000/#/drive"
             
         elif action == "data":
             # Start tubplot

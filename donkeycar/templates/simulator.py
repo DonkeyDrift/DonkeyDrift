@@ -25,7 +25,7 @@ import donkeydrifter as dk
 from donkeydrifter.parts.transform import TriggeredCallback, DelayedTrigger
 from donkeydrifter.parts.tub_v2 import TubWriter
 from donkeydrifter.parts.datastore import TubHandler
-from donkeydrifter.parts.controller import LocalWebController, JoystickController, WebFpv
+from donkeydrifter.parts.controller import JoystickController
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
 from donkeydrifter.parts.throttle_filter import ThrottleFilter
 from donkeydrifter.parts.behavior import BehaviorPart
@@ -71,28 +71,12 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     V.add(cam, inputs=inputs, outputs=['cam/image_array'], threaded=threaded)
 
-    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None)
-    if server_url:
-        # 优先使用 Web Console Drive 桥接
-        ctr = DriveApiBridge(
-            server_url=server_url,
-            video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
-            video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
-            video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
-            video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
-            webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
-            webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
-        )
-        V.add(ctr,
-              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
-              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'reconnect_simulator_requested'],
-              threaded=True)
-
-    elif use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
+    server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
+    if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
         #modify max_throttle closer to 1.0 to have more power
         #modify steering_scale lower than 1.0 to have less responsive steering
         if cfg.CONTROLLER_TYPE == "MM1":
-            from donkeydrifter.parts.robohat import RoboHATController            
+            from donkeydrifter.parts.robohat import RoboHATController
             ctr = RoboHATController(cfg)
         elif "custom" == cfg.CONTROLLER_TYPE:
             #
@@ -115,21 +99,27 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
                 netwkJs = JoyStickSub(cfg.NETWORK_JS_SERVER_IP)
                 V.add(netwkJs, threaded=True)
                 ctr.js = netwkJs
-        
+
         V.add(ctr,
           inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
           outputs=['user/angle', 'user/throttle', 'user/mode', 'recording'],
           threaded=True)
 
     else:
-        #This web controller will create a web server that is capable
-        #of managing steering, throttle, and modes, and more.
-        ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
-        
+        # 默认使用 Web Console Drive 桥接（需配合 donkey web / donkey drive 运行 Web UI 后端）
+        ctr = DriveApiBridge(
+            server_url=server_url,
+            video_transport=getattr(cfg, "DRIVE_VIDEO_TRANSPORT", "webrtc"),
+            video_width=getattr(cfg, "DRIVE_VIDEO_WIDTH", 320),
+            video_height=getattr(cfg, "DRIVE_VIDEO_HEIGHT", 240),
+            video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
+            webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
+            webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+        )
         V.add(ctr,
-          inputs=['cam/image_array', 'tub/num_records'],
-          outputs=['user/angle', 'user/throttle', 'user/mode', 'recording'],
-          threaded=True)
+              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
+              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'reconnect_simulator_requested'],
+              threaded=True)
 
     #this throttle filter will allow one tap back for esc reverse
     th_filter = ThrottleFilter()
@@ -240,9 +230,6 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
         ctr.set_button_down_trigger('circle', show_record_acount_status)
 
     # Use the FPV preview, which will show the cropped image output, or the full frame.
-    if cfg.USE_FPV:
-        V.add(WebFpv(), inputs=['cam/image_array'], threaded=True)
-
     #Behavioral state
     if cfg.TRAIN_BEHAVIORS:
         bh = BehaviorPart(cfg.BEHAVIOR_LIST)
@@ -427,12 +414,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
         V.add(ImgArrToJpg(), inputs=['cam/image_array'], outputs=['jpg/bin'])
         V.add(pub, inputs=['jpg/bin'])
 
-    if type(ctr) is LocalWebController:
-        if cfg.DONKEY_GYM:
-            print("You can now go to http://localhost:%d to drive your car." % cfg.WEB_CONTROL_PORT)
-        else:
-            print("You can now go to <your hostname.local>:%d to drive your car." % cfg.WEB_CONTROL_PORT)
-    elif isinstance(ctr, DriveApiBridge):
+    if isinstance(ctr, DriveApiBridge):
         print(f"Web Console Drive 已就绪，请打开浏览器访问 {ctr.web_console_url()}/#/drive")
     elif isinstance(ctr, JoystickController):
         print("You can now move your joystick to drive your car.")

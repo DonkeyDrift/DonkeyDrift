@@ -106,7 +106,7 @@ def get_wsl_host_ip():
 
 SIM_HOST = get_wsl_host_ip()
 #SIM_HOST = "127.0.0.1"  # 模拟器主机IP地址（默认：127.0.0.1-代表本机，若不在同一系统，则需指定模拟器主机IP地址）
-WEB_CONTROL_PORT = 8887  # 控制网页的端口号（默认：8887）
+#DRIVE_API_SERVER_URL = None  # 新 Web UI 驾驶后端回连地址；donkey drive 自动注入，留空连本机 ws://127.0.0.1:8000/api/drive/ws
 USE_JOYSTICK_AS_DEFAULT = False  # 是否将摇杆作为默认输入设备（默认：否）
 
 

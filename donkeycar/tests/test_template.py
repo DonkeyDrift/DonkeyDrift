@@ -42,7 +42,6 @@ def test_custom_templates():
 _MAIN_VEHICLE_TEMPLATES = [
     "arduino_drive.py",
     "basic.py",
-    "calibrate.py",
     "complete.py",
     "cv_control.py",
     "just_drive.py",

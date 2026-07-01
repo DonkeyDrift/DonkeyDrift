@@ -29,8 +29,8 @@ class Header(BoxLayout):
 class StartScreen(AppScreen):
     img_path = os.path.realpath(os.path.join(
         os.path.dirname(__file__),
-        '../../parts/web_controller/templates/'
-        'static/donkeycar-logo-sideways.png'))
+        'static',
+        'donkeycar-logo-sideways.png'))
     pass
 
 

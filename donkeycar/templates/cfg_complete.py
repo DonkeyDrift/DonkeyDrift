@@ -567,9 +567,11 @@ SCALE_HEIGHT = None    # vertical scale factor or None to maintain aspect ratio
 FREEZE_LAYERS = False               #default False will allow all layers to be modified by training
 NUM_LAST_LAYERS_TO_TRAIN = 7        #when freezing layers, how many layers from the last should be allowed to train?
 
-#WEB CONTROL
-WEB_CONTROL_PORT = int(os.getenv("WEB_CONTROL_PORT", 8887))  # which port to listen on when making a web controller
-WEB_INIT_MODE = "user"              # which control mode to start in. one of user|local_angle|local. Setting local will start in ai mode.
+#DRIVE WEB UI
+#新 Web UI 驾驶后端的 WebSocket 回连地址（车端 DriveApiBridge 以 role=car 连接此地址）。
+#donkey drive / donkey web 运行时会自动注入；留空(默认)则连本机 ws://127.0.0.1:8000/api/drive/ws。
+#远程场景（车与 web_ui 不同机）显式设为 ws://<车端可见的 web_ui 主机>:<端口>/api/drive/ws。
+DRIVE_API_SERVER_URL = None
 
 #JOYSTICK
 USE_JOYSTICK_AS_DEFAULT = False    #when starting the manage.py, when True, will not require a --js option to use the joystick
@@ -581,7 +583,6 @@ USE_NETWORKED_JS = False            #should we listen for remote joystick contro
 NETWORK_JS_SERVER_IP = None         #when listening for network joystick control, which ip is serving this information
 JOYSTICK_DEADZONE = 0.01            # when non zero, this is the smallest throttle before recording triggered.
 JOYSTICK_THROTTLE_DIR = -1.0         # use -1.0 to flip forward/backward, use 1.0 to use joystick's natural forward/backward
-USE_FPV = False                     # send camera data to FPV webserver
 JOYSTICK_DEVICE_FILE = "/dev/input/js0" # this is the unix file use to access the joystick.
 
 #For the categorical model, this limits the upper bound of the learned throttle

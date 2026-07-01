@@ -159,12 +159,11 @@ USE_NETWORKED_JS = False            #should we listen for remote joystick contro
 NETWORK_JS_SERVER_IP = "192.168.0.1"#when listening for network joystick control, which ip is serving this information
 JOYSTICK_DEADZONE = 0.0             # when non zero, this is the smallest throttle before recording triggered.
 JOYSTICK_THROTTLE_DIR = -1.0        # use -1.0 to flip forward/backward, use 1.0 to use joystick's natural forward/backward
-USE_FPV = False                     # send camera data to FPV webserver
 JOYSTICK_DEVICE_FILE = "/dev/input/js0" # this is the unix file use to access the joystick.
 
-#WEB CONTROL
-WEB_CONTROL_PORT = int(os.getenv("WEB_CONTROL_PORT", 8887))  # which port to listen on when making a web controller
-WEB_INIT_MODE = "user"              # which control mode to start in. one of user|local_angle|local. Setting local will start in ai mode.
+#DRIVE WEB UI
+#新 Web UI 驾驶后端的 WebSocket 回连地址。donkey drive 自动注入；留空(默认)连本机 ws://127.0.0.1:8000/api/drive/ws。
+DRIVE_API_SERVER_URL = None
 
 #DRIVING
 AI_THROTTLE_MULT = 1.0              # this multiplier will scale every throttle value for all output from NN models

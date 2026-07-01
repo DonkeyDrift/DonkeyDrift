@@ -205,10 +205,6 @@ def drive(cfg, use_joystick=False, camera_type='single', meta=[]):
 
     if isinstance(ctr, DriveApiBridge):
         print(f"Web Console Drive 已就绪，请打开浏览器访问 {ctr.web_console_url()}/#/drive")
-    elif cfg.DONKEY_GYM:
-        print("You can now go to http://localhost:%d to drive your car." % cfg.WEB_CONTROL_PORT)
-    else:
-        print("You can now go to <your hostname.local>:%d to drive your car." % cfg.WEB_CONTROL_PORT)
     if has_input_controller:
         print("You can now move your controller to drive your car.")
         if isinstance(ctr, JoystickController):
