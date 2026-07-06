@@ -745,8 +745,10 @@ class Web(BaseCommand):
             popen_kwargs['start_new_session'] = True
 
         frontend_env = os.environ.copy()
-        # 不再设置 VITE_API_BASE_URL，让前端使用相对路径 /api
-        # Vite 代理会自动将 /api 请求转发到后端，这样本地和远程访问都能正常工作
+        # 前端使用相对路径 /api，由 Vite 代理转发到后端。
+        # 必须显式指向 --backend-port 选定的端口，否则 Vite 用默认的 8000，
+        # 当后端不在 8000 时浏览器 /api 请求会 ECONNREFUSED。
+        frontend_env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{backend_port}'
 
         backend_env = os.environ.copy()
         if args.debug:

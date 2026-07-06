@@ -114,3 +114,52 @@ def test_web_command_opens_requested_route(monkeypatch, tmp_path):
 
     assert opened_urls == ["http://localhost:5188/#/drive"]
     assert len(popen_calls) == 2
+
+
+def test_web_command_sets_vite_proxy_target_to_actual_backend_port(monkeypatch, tmp_path):
+    """--backend-port 选定端口后，必须把该端口作为 Vite 代理目标传给前端环境，
+    否则 Vite 会用默认的 8000；当后端不在 8000 时浏览器 /api 请求会 ECONNREFUSED。"""
+    frontend_path = tmp_path / "web_ui" / "frontend"
+    backend_path = tmp_path / "web_ui" / "backend"
+    frontend_path.mkdir(parents=True)
+    backend_path.mkdir(parents=True)
+    popen_calls = []
+
+    class FakeProcess:
+        def __init__(self, return_codes):
+            self.return_codes = iter(return_codes)
+            self.returncode = None
+
+        def poll(self):
+            try:
+                self.returncode = next(self.return_codes)
+            except StopIteration:
+                pass
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode or 0
+
+    processes = [FakeProcess([None, 0]), FakeProcess([None, None])]
+
+    def fake_popen(cmd, **kwargs):
+        popen_calls.append((cmd, kwargs))
+        return processes.pop(0)
+
+    monkeypatch.setattr("donkeycar.management.base.shutil.which", lambda name: "npm")
+    monkeypatch.setattr(Web, "_choose_available_port", lambda self, host, preferred_port: preferred_port)
+    monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("donkeycar.management.base.webbrowser.open", lambda _url: None)
+    monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(SystemExit):
+        Web().run(["--path", str(tmp_path / "web_ui"), "--backend-port", "8100"])
+
+    _, frontend_kwargs = popen_calls[1]
+    assert frontend_kwargs["env"]["VITE_API_PROXY_TARGET"] == "http://127.0.0.1:8100"
