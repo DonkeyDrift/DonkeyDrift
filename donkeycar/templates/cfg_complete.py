@@ -247,6 +247,24 @@ VESC_STEERING_SCALE= 0.5 # VESC accepts steering inputs from 0 to 1. Joystick is
 VESC_STEERING_OFFSET = 0.5 # VESC accepts steering inputs from 0 to 1. Coupled with above change we move Joystick to 0 to 1
 
 #
+# 漂移操作回放（Drift Replay）
+# - 用人工录制的 Tub v2 转向/油门时间序列替代模型推理
+# - 用 scripts/build_drift_clip.py 从 Tub 生成 replay clip JSON
+# - 与 KerasPilot 互斥：仅在未加载 --model 且 DRIFT_REPLAY_ENABLED=True 时生效
+# - 安全：固件侧需 RC CH4 拨到 FULL_AUTO 才接受 pilot 数据；Park/mode 随时可接管
+# - 固件无 slew rate，max_delta_* 是上位机必须承担的变化率限制
+#
+DRIFT_REPLAY_ENABLED = False            # 默认关闭，不影响现有 Pilot 链路
+DRIFT_REPLAY_CLIP = "data/clips/drift_clip.json"  # replay clip 路径（车目录）
+DRIFT_REPLAY_SPEED = 1.0                # 回放速率倍率（>1 加速）
+DRIFT_REPLAY_LOOP = 1                   # 循环次数
+DRIFT_REPLAY_MAX_THROTTLE = 0.6         # 油门上限（-1~1 域，对应 -100~100 的 60）
+DRIFT_REPLAY_MAX_STEERING = 1.0         # 转向上限（漂移需大转向）
+DRIFT_REPLAY_MAX_DELTA_THROTTLE = 0.2   # 油门单帧最大变化（slew rate）
+DRIFT_REPLAY_MAX_DELTA_STEERING = 0.3   # 转向单帧最大变化
+DRIFT_REPLAY_WARMUP_FRAMES = 10         # 首部 (0,0) 预热帧数
+
+#
 # DC_STEER_THROTTLE with one motor as steering, one as drive
 # - uses L298N type motor controller in two pin wiring
 #   scheme utilizing two pwm pins per motor; one for 

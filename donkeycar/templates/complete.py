@@ -426,6 +426,30 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         V.add(kl, inputs=inputs, outputs=outputs, run_condition='run_pilot')
 
     #
+    # 漂移操作回放：用录制的转向/油门时间序列替代模型推理。
+    # 与 KerasPilot 互斥（仅在未加载模型且启用回放时注册）。
+    # DriftReplayPart 输出 pilot/angle、pilot/throttle（-1~1），
+    # 接口与 KerasPilot 同构，下游 DriveMode/ArdPWM 链路不变。
+    # 安全：run_condition='run_pilot'（user/mode != 'user' 才生效），
+    # 固件侧需 RC CH4 拨到 FULL_AUTO 才接受；Park/mode 随时可接管。
+    #
+    if getattr(cfg, 'DRIFT_REPLAY_ENABLED', False) and not model_path:
+        from donkeydrifter.parts.drift_replay import DriftReplayPart
+        replay_part = DriftReplayPart(
+            clip_path=cfg.DRIFT_REPLAY_CLIP,
+            speed=getattr(cfg, 'DRIFT_REPLAY_SPEED', 1.0),
+            loop=getattr(cfg, 'DRIFT_REPLAY_LOOP', 1),
+            max_throttle=getattr(cfg, 'DRIFT_REPLAY_MAX_THROTTLE', 0.6),
+            max_steering=getattr(cfg, 'DRIFT_REPLAY_MAX_STEERING', 1.0),
+            max_delta_throttle=getattr(cfg, 'DRIFT_REPLAY_MAX_DELTA_THROTTLE', 0.2),
+            max_delta_steering=getattr(cfg, 'DRIFT_REPLAY_MAX_DELTA_STEERING', 0.3),
+            warmup_frames=getattr(cfg, 'DRIFT_REPLAY_WARMUP_FRAMES', 10),
+        )
+        V.add(replay_part, outputs=['pilot/angle', 'pilot/throttle'],
+              run_condition='run_pilot')
+        logger.info("Drift replay part enabled (clip=%s)", cfg.DRIFT_REPLAY_CLIP)
+
+    #
     # stop at a stop sign
     #
     if cfg.STOP_SIGN_DETECTOR:
@@ -729,8 +753,17 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
         webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
         webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
     )
+    # inputs 顺序必须与 DriveApiBridge.run_threaded 签名严格一致（Vehicle 按位置解包）：
+    # (img_arr, num_records, mode, recording, imu_gz, imu_gx, imu_gy,
+    #  imu_ax, imu_ay, imu_az, steering, throttle, pilot_angle, pilot_throttle)
+    # 非 HAVE_IMU 或 ARDUINO_CONTROLLER 模式下 imu/* key 可能不存在，Memory.get 返回 None，
+    # run_threaded 收到 None 后不写入遥测消息（见 RFC 降级说明），无需条件分支。
+    ctr_inputs = [input_image, 'tub/num_records', 'user/mode', 'recording',
+                  'imu/gyr_z', 'imu/gyr_x', 'imu/gyr_y',
+                  'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+                  'steering', 'throttle', 'pilot/angle', 'pilot/throttle']
     V.add(ctr,
-          inputs=[input_image, 'tub/num_records', 'user/mode', 'recording'],
+          inputs=ctr_inputs,
           outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons'],
           threaded=True)
 
