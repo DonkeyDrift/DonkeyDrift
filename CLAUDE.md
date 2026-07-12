@@ -48,6 +48,8 @@ pip install -e ".[pc,dev]"
 pip install -e ".[torch]"
 pip install -e ".[pi]"
 pip install -e ".[nano]"
+pip install -e ".[macos]"            # macOS（含 tensorflow-metal）
+pip install -e ".[fastapi-backend]" # 仅 Web UI 后端依赖，不装 ML 栈
 
 pytest
 make tests
@@ -68,7 +70,7 @@ make package
 - `donkeycar/tests/`：核心包单元测试。
 - `tests/`：仓库根目录的迁移、恢复逻辑、模型命名和在线训练工作区测试。
 - `web_ui/backend/tests/`：FastAPI 后端路由/服务契约测试。
-- 前端目前主要依赖类型检查、ESLint、构建和手工运行页面验证。
+- 前端用 vitest 跑 hooks/components 单测（`*.test.tsx`，见 `src/hooks/`、`src/components/drive/`），命令 `npm run test`；另有 `npm run check`（tsc 类型检查）、`npm run lint`。端到端验收测试为 `web_ui/frontend/testsprite_tests/` 下的 Playwright 风格脚本（`TC0xx_*.py`，按测试用例编号组织）。
 
 ### Web UI 后端
 
@@ -81,7 +83,7 @@ python -m pytest tests/test_connector.py -q
 python -m pytest tests/test_arena.py::test_predict_returns_user_and_pilot_values -q
 ```
 
-FastAPI 应用定义在 `web_ui/backend/main.py`，默认端口为 `8000`。
+FastAPI 应用定义在 `web_ui/backend/main.py`，默认端口 `8000`，可用 `DRIVE_WEB_PORT` 环境变量覆盖。`donkey web`/`donkey drive` 的 `--backend-port` 在 8000 被占用时会自动切换到可用端口，并联动设置 Vite 代理目标（`VITE_API_PROXY_TARGET`）。
 
 ### Web UI 前端
 
@@ -93,9 +95,10 @@ npm run build
 npm run lint
 npm run check
 npm run preview
+npm run test     # vitest 单元测试
 ```
 
-前端开发服务器默认端口为 `5188`。开发时 `/api` 由 Vite 代理到后端；也可通过 `VITE_API_BASE_URL` 覆盖 API base URL。
+前端开发服务器默认端口 `5188`。开发时 `/api` 由 Vite 代理到后端（代理目标 `VITE_API_PROXY_TARGET`，默认 `http://localhost:8000`）；运行时 API base URL 可通过 `VITE_API_BASE_URL` 覆盖，视频传输方式通过 `VITE_DRIVE_VIDEO_TRANSPORT` 选择。
 
 ### 一键安装前后端依赖
 
@@ -241,14 +244,15 @@ Part 不需要继承基类；通常只要实现 `run()`，线程型 Part 还会�
 ### Web UI 架构
 
 - 后端入口是 `web_ui/backend/main.py`，通过 `include_router` 挂载 `/api/config`、`/api/tub`、`/api/trainer`、`/api/drive`、`/api/arena`、`/api/connector`、`/api/provisioning`。
-- 后端业务辅助模块包括 `trainer_engine.py`、`connector_engine.py`、`remote_car_client.py` 和 `web_online_trainer.py`。
+- 后端业务辅助模块包括 `trainer_engine.py`、`connector_engine.py`、`remote_car_client.py`、`web_online_trainer.py` 和 `network_utils.py`。
 - `/api/drive/ws` 是核心 WebSocket 端点（`role=car|client` 查询参数区分角色），用于车辆端上报状态+视频帧、客户端下发控制指令。`DriveState` 单例管理所有共享状态。
 - `/api/drive` 还提供 MJPEG 视频（`/video`）、WebRTC 信令（`/webrtc/session`、`/webrtc/offer`、`/webrtc/answer`、`/webrtc/ice`）、参数持久化（`/params`）、模型加载（`/load_model`）、校准（`/calibrate`）。
 - `/api/trainer` 和 `/api/connector` 均通过 SSE（Server-Sent Events）推送任务日志流（`/train/{job_id}/logs` 模式）。
 - `/api/arena` 管理多 Pilot 并行加载/预测，使用 LRU 缓存淘汰预测结果。`/api/connector` 通过 SSH（paramiko）管理远程车辆。
 - 前端入口是 `web_ui/frontend/src/main.tsx` 和 `App.tsx`，页面位于 `src/pages/`，复用组件位于 `src/components/`。
 - 前端 API 客户端集中在 `web_ui/frontend/src/services/api.ts`；URL 拼接、WebSocket 地址和错误消息应复用这里的工具。
-- 驾驶相关状态与输入逻辑分布在 `src/store/useDriveStore.ts`、`src/hooks/useDriveWebsocket.ts`、`src/hooks/useKeyboardDrive.ts`、`src/hooks/useGamepadDrive.ts`、`src/hooks/useGyroDrive.ts`、`src/hooks/useDriveWebRtcVideo.ts`、`src/hooks/useDriveControlLoop.ts`。
+- 前端用 `HashRouter`（路由带 `#` 前缀，如 `http://host/#/drive`），主要路由：`/`（Tub 管理）、`/trainer`、`/drive`、`/calibrate`、`/pilot`（Pilot Arena）、`/connector`（远程车辆连接）。
+- 驾驶相关状态与输入逻辑分布在 `src/store/useDriveStore.ts`、`src/hooks/useDriveWebsocket.ts`、`src/hooks/useKeyboardDrive.ts`、`src/hooks/useGamepadDrive.ts`、`src/hooks/useGyroDrive.ts`、`src/hooks/useDriveWebRtcVideo.ts`、`src/hooks/useDriveControlLoop.ts`、`src/hooks/useDriveHotkeys.ts`（键盘快捷键）。
 
 ### 主要目录职责
 
@@ -259,7 +263,11 @@ Part 不需要继承基类；通常只要实现 `run()`，线程型 Part 还会�
 - `donkeycar/management/`：CLI 子命令入口和管理逻辑。
 - `donkeycar/pipeline/`：训练管道、图像增强、序列数据处理和 Tub 数据集管理。
 - `web_ui/`：新版统一管理界面。
-- `docs/`：项目内设计、计划、验证和用户指南。
+- `docs/`：项目内文档，按子目录组织：`arch/`（架构决策与修复记录）、`guide/`（用户与兼容指南）、`plan/`（设计与迁移计划，如 `web-drive-console-migration.md`、`drive-api-bridge-migration.md`）、`Rfc/`（技术方案 RFC，注意项目用 `docs/Rfc/` 路径）、`valid/`（手动验证记录）、`workflow/`（如 git worktree 并行开发）、`superpowers/`（plans/specs）。
+- `scripts/`：独立工具脚本（`convert_to_tflite.py`、`migrate_model_names.py`、`multi_train.py`、`freeze_model.py`、`profile*.py`、可视化监听等），非 Vehicle 运行时依赖。
+- `arduino/`：Arduino 编码器草图（`mono_encoder`、`quadrature_encoder`），与 `DRIVE_TRAIN_TYPE = "ARDUINO_CONTROLLER"` 的控制串口配合。
+- `parts/`（仓库根）：历史遗留的旧版 `drive_api_bridge.py` 副本，**不被模板或测试引用**；实际使用的是 `donkeycar/parts/drive_api_bridge.py`，修改请改后者。
+- `donkeycar/utilities/`：辅助工具与 `TrackSpeedPlanner`；`donkeycar/contrib/`：社区集成；`donkeycar/gym/`：Gym 风格模拟器集成。
 
 ## 重要约定
 
@@ -270,3 +278,9 @@ Part 不需要继承基类；通常只要实现 `run()`，线程型 Part 还会�
 5. Web UI 前后端 API 前缀约定为 `/api`；不要绕过 `services/api.ts` 手写重复的 API base URL 逻辑。
 6. 涉及硬件、路径、进程或网络行为时要避免只适配当前开发机。
 7. 新功能或已有功能变更通常需要同步用户文档。
+
+## 安全与部署注意事项
+
+- Web UI 后端 **无身份认证层**，CORS 设为 `allow_origins=["*"]`，仅适用于可信局域网，不要直接暴露到公网。
+- WebRTC/MJPEG 视频流面向局域网场景；涉及硬件凭据、串口路径、SSH 连接信息时避免提交到仓库。
+- 仓库根 `Dockerfile` 已过时（基于 `python:3.6`、引用不存在的 `setup.py` 与 `[tf]` extra、面向 Jupyter），与当前 Web UI 架构不符，不要据此构建镜像。

@@ -5,7 +5,7 @@
 
 ## 项目概览
 
-- **版本**：`0.1.1`，定义于 `donkeycar/_version.py`。
+- **版本**：`0.1.2`，定义于 `donkeycar/_version.py`。
 - **Python 要求**：`>=3.11.0,<3.12`。`donkeycar/__init__.py` 在导入阶段强制校验该版本。
 - **主要分发包**：`donkeydrifter`（setuptools 元数据位于 `setup.cfg`）。
 - **实现包**：`donkeycar/`（遗留兼容性命名空间）。
@@ -25,7 +25,7 @@ donkeydrifter/       # 公共别名包，通过 sys.meta_path 将导入转发到
   __init__.py        # 导入别名层，暴露 donkeycar 的所有公开符号
 donkeycar/           # 当前实现包 + 遗留兼容性命名空间
   __init__.py        # 强制要求 Python >=3.11，暴露 Vehicle、Memory、load_config
-  _version.py        # __version__ = '0.1.1'
+  _version.py        # __version__ = '0.1.2'
   vehicle.py         # 车辆驱动循环和 PartProfiler
   memory.py          # 部件间通信的键/值总线
   config.py          # 配置加载器
@@ -33,19 +33,19 @@ donkeycar/           # 当前实现包 + 遗留兼容性命名空间
   pipeline/          # 训练流水线、数据增强、序列处理、数据库、类型定义
   management/        # CLI 工具和 UI（base.py、tui.py、train_local.py、train_online.py、ui/、tub_web/）
   templates/         # `donkey createcar` 使用的车辆应用模板和默认配置（basic、complete、cv_control、path_follow、simulator、arduino_drive 等）
-  tests/             # 核心单元/集成测试（50+ 测试文件）
+  tests/             # 核心单元/集成测试（约 49 个测试文件）
   utilities/         # 辅助工具和 TrackSpeedPlanner
   contrib/、gym/     # 社区和模拟器集成
 web_ui/              # 统一的 FastAPI 后端 + React/Vite 前端
-  backend/main.py    # FastAPI 应用，挂载 /api/{config,tub,trainer,drive,arena,connector}
-  backend/routers/   # FastAPI 路由模块（config.py、tub.py、trainer.py、drive.py、arena.py、connector.py）
-  backend/tests/     # FastAPI 契约测试（test_arena.py、test_branding.py、test_config.py、test_connector.py、test_drive.py、test_drive_ws_disconnect.py）
+  backend/main.py    # FastAPI 应用，挂载 /api/{config,tub,trainer,drive,arena,connector,provisioning}
+  backend/routers/   # FastAPI 路由模块（config.py、tub.py、trainer.py、drive.py、arena.py、connector.py、provisioning.py）
+  backend/tests/     # FastAPI 契约测试（test_arena.py、test_branding.py、test_config.py、test_connector.py、test_drive.py、test_drive_ws_disconnect.py、test_provisioning.py）
   backend/requirements.txt  # 后端运行时依赖清单
   frontend/package.json     # 前端 npm 依赖与脚本
   frontend/src/      # React/TypeScript/Vite SPA（pages/、components/、services/、store/、hooks/）
   frontend/testsprite_tests/ # Playwright 风格的前端验收测试用例脚本
 parts/               # 额外的顶层部件目录（保留旧版 drive_api_bridge.py，但模板实际导入的是 donkeycar/parts/drive_api_bridge.py）
-tests/               # 根级迁移/集成测试（6 个文件）
+tests/               # 根级迁移/集成测试（7 个文件）
 scripts/             # 独立工具（convert、freeze、profile、migrate_model_names、multi_train 等）
 arduino/             # mono_encoder 和 quadrature_encoder 草图
 docs/                # 架构、计划、指南、验证、工作流规范
@@ -95,12 +95,12 @@ docs/                # 架构、计划、指南、验证、工作流规范
 
 - `setup.cfg` 定义包名、依赖、extras 和 `donkey` console script。
 - `donkeycar/management/base.py` 承载 `createcar`、`web`、`installweb` 等 CLI 子命令入口。
-- 车辆应用由 `donkey createcar` 从 `donkeycar/templates/` 复制 `manage.py`、`config.py`、`myconfig.py`、`train.py`、`calibrate.py` 等文件生成。
+- 车辆应用由 `donkey createcar` 从 `donkeycar/templates/` 复制 `manage.py`、`config.py`、`myconfig.py`、`train.py` 等文件生成（`calibrate.py` 模板已随 `LocalWebController` 一并移除，标定改用 `donkey calibrate --channel` CLI 或 Web UI 标定页）。
 - 配置通过 `dk.load_config()` 加载用户车目录中的 `config.py` 和 `myconfig.py`。
 
 ### Web UI 架构
 
-- 后端入口是 `web_ui/backend/main.py`，通过 `include_router` 挂载 `/api/config`、`/api/tub`、`/api/trainer`、`/api/drive`、`/api/arena`、`/api/connector`。
+- 后端入口是 `web_ui/backend/main.py`，通过 `include_router` 挂载 `/api/config`、`/api/tub`、`/api/trainer`、`/api/drive`、`/api/arena`、`/api/connector`、`/api/provisioning`。
 - 后端业务辅助模块包括 `trainer_engine.py`、`connector_engine.py`、`remote_car_client.py`、`web_online_trainer.py` 和 `network_utils.py`。
 - 前端入口是 `web_ui/frontend/src/main.tsx` 和 `App.tsx`；页面位于 `src/pages/`，复用组件位于 `src/components/`。
 - 生产构建使用 `HashRouter`，路由包括 `/`（Tub 管理）、`/trainer`、`/drive`、`/calibrate`、`/pilot`、`/connector`。`Home.tsx` 当前为空，根路由对应的 `TubManagerPage` 在 `App.tsx` 中内联定义。
@@ -191,7 +191,7 @@ make tests   # 运行 pytest
 
 注册于 `donkeycar/management/base.py`：
 
-- `createcar` – 从模板生成车辆目录（复制 `manage.py`、`config.py`、`myconfig.py`、`train.py`、`calibrate.py` 等）。
+- `createcar` – 从模板生成车辆目录（复制 `manage.py`、`config.py`、`myconfig.py`、`train.py` 等；`calibrate.py` 模板已移除）。
 - `update` – 刷新当前目录中的车辆文件。
 - `findcar` – 在本地网络上发现车辆 IP。
 - `calibrate` – PWM/舵机校准。
@@ -200,6 +200,7 @@ make tests   # 运行 pytest
 - `models` – 模型数据库（PilotDatabase）。
 - `ui`、`tui` – GUI/TUI；裸 `donkey` 默认为 TUI。
 - `web` – 启动统一的 FastAPI + React Web UI（前后端子进程）。
+- `drive` – 一键拉起 Web UI 前后端 + 本机 Vehicle（`manage.py drive`），自动注入 `DRIVE_API_SERVER_URL` 使车端以 `role=car` 连回 `/api/drive/ws`；浏览器访问 `http://localhost:<backend-port>/#/drive` 控制真实小车。
 - `installweb` – 安装 Web UI 后端/前端依赖。
 - `createjs` – 摇杆创建器。
 
