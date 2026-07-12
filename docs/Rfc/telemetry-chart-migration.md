@@ -67,7 +67,7 @@
 
 | 来源 | 字段 | 车端通道 |
 |---|---|---|
-| 固件串口 $IMU | ax, ay, az, gx, gy, gz, seq, ts_ms | `imu/acl_x..z`、`imu/gyr_x..z`（Arduino Part，`actuator.py:1315-1324`） |
+| 固件串口 $IMU | ax, ay, az, gx, gy, gz, seq, ts_ms | `imu/acl_x..z`、`imu/gyr_x..z`（`ArdImu` Part，`actuator.py:1500-1575`；源数据由 `Arduino.Arduino_readline` 解析 `$IMU` 并缓存于 `self.imu_data`，`actuator.py:1248-1327`） |
 | 车端 donkey 自算 | steering, throttle（最终执行值） | `steering`、`throttle`（DriveMode，`manage.py:464`） |
 | 车端 donkey 自算 | pilot/angle, pilot/throttle | `pilot/angle`、`pilot/throttle` |
 | 车端 donkey 自算 | user/angle, user/throttle | `user/angle`、`user/throttle` |
@@ -98,13 +98,14 @@
                   steering=None, throttle=None,
                   pilot_angle=None, pilot_throttle=None):
   ```
-- 新增 `_send_telemetry(...)`，按节流频率（建议 50Hz / 20ms）发送：
+- 新增 `_send_telemetry(...)`，按节流频率（**100Hz / 10ms**，与固件 `$IMU` 100Hz 上行对齐）发送：
   ```python
   {"type":"telemetry","t":<epoch_ms>,"gz":..,"gx":..,"gy":..,"ax":..,"ay":..,"az":..,
    "steering":..,"throttle":..,"pilot_angle":..,"pilot_throttle":..}
   ```
-- run_threaded 内调用：`if now - self.last_telemetry >= 0.02: self._send_telemetry(...)`
+- run_threaded 内调用：`if now - self.last_telemetry >= 0.01: self._send_telemetry(...)`
 - **向后兼容**：新参数均默认 None，旧模板（basic.py/complete.py 等）不传亦不报错；None 字段不写入消息
+- **流量**：单帧 ~190 字节 JSON，100Hz 单客户端 ~18.6 KB/s，3 客户端 ~55.7 KB/s（可接受）
 
 ### 4.2 改动 2 — 车端接线（注入遥测通道）
 
@@ -122,6 +123,10 @@ V.add(ctr,
 
 > **降级**：非 `ARDUINO_CONTROLLER` 模式（`manage.py:952`）下 `imu/*` 通道可能不存在。需在接线前判断 `cfg.HAVE_IMU`，缺失通道不接入参，曲线图组件对缺失字段自动隐藏对应曲线。
 
+> **接线时序**：模板中 `ctr`（`complete.py:732`）在 `ArdImu`（`complete.py:1205`）之前注册。Vehicle 主循环按注册顺序每轮从 Memory 读 inputs，故首轮循环 `ctr` 读到的 `imu/gyr_z` 等为 `None`（ArdImu 尚未写入），第二轮起正常。此为 Donkey 既定行为而非缺陷，由"None 字段不写入 telemetry 消息 + 组件隐藏缺失曲线"覆盖，无需特殊处理。
+
+> **docstring 勘误**：`ArdImu` 类 docstring（`actuator.py:1511-1521`）示例使用全称通道 `imu/accel_x`/`imu/gyro_x`，而模板实际接线使用短缩 `imu/acl_x`/`imu/gyr_x`（`complete.py:1205-1206`）。接线须以模板短缩为准；建议顺带修正 docstring 以免误导后续实施者。
+
 ### 4.3 改动 3 — 后端转发遥测
 
 文件：`DonkeyDrift/web_ui/backend/routers/drive.py`（car_ws 处理段，541-568 附近）
@@ -129,12 +134,12 @@ V.add(ctr,
 在 car_ws 消息循环中新增：
 ```python
 if msg.get("type") == "telemetry":
-    # 原样广播给所有客户端；后端不节流（车端已节流 50Hz）
+    # 原样广播给所有客户端；后端不节流（车端已节流 100Hz）
     await drive_state.broadcast_to_clients(msg)
     continue
 ```
 
-> 50Hz 广播对所有在线 client；多客户端时流量线性放大，但单帧仅 ~200 字节 JSON，可接受。如需进一步降负载，后端可做 30ms 合并。
+> 100Hz 广播对所有在线 client；多客户端时流量线性放大（单帧 ~190 字节，3 客户端 ~55.7 KB/s），可接受。如需进一步降负载，后端可做 10ms 合并或改 50Hz。
 
 ### 4.4 改动 4 — 前端接收与绘制
 
@@ -153,8 +158,8 @@ if (msg.type === 'telemetry') {
 文件：`web_ui/frontend/src/components/drive/TelemetryChart.tsx`
 
 - 用 `react-chartjs-2` 的 `Line` 组件
-- 自管 256 长度环形缓冲数组，`requestAnimationFrame` 节流重绘（避免 50Hz 全量 setState）
-- 默认 3 条曲线（对齐固件端）：Throttle(绿)、Steering(蓝)、GyroZ(红)，归一化 -1~1
+- 自管 256 长度环形缓冲数组，`requestAnimationFrame` 节流重绘（上限 60fps，避免 100Hz 全量 setState）
+- 默认 3 条曲线（对齐固件端）：Throttle(绿 `#39d98a`)、Steering(蓝 `#5cc8ff`)、GyroZ(红 `#ff6b6b`)，归一化 -1~1
 - 全量开关：ax/ay/az/gx/gy/pilot_angle/pilot_throttle 通过工具栏 checkbox 切换显隐
 - 工具栏：暂停、清空、全屏、曲线开关
 - 缺失字段（None）自动隐藏对应曲线
@@ -177,7 +182,7 @@ DrivePage 通过 `useDriveWebsocket({ onTelemetry })` 持有最新遥测 ref（�
 
 | 测试文件 | 覆盖断点 | 关键用例 |
 |---|---|---|
-| `donkeycar/tests/test_drive_api_bridge_telemetry.py` | 1 | 输入遥测 → 发出 telemetry 消息；None 输入不报错；50Hz 节流 |
+| `donkeycar/tests/test_drive_api_bridge_telemetry.py` | 1 | 输入遥测 → 发出 telemetry 消息；None 输入不报错；100Hz 节流 |
 | `web_ui/backend/tests/test_drive_telemetry_forward.py` | 3 | car 发 telemetry → 所有 client 收到原样消息 |
 | `web_ui/frontend/src/components/drive/TelemetryChart.test.tsx` | 4 | 收到 telemetry → 曲线数据更新；暂停停止更新；清空归零；缺失字段隐藏 |
 
@@ -189,8 +194,8 @@ DrivePage 通过 `useDriveWebsocket({ onTelemetry })` 持有最新遥测 ref（�
 |---|---|---|
 | DriveApiBridge 属 donkeycar 框架库，改动波及模板（basic/complete 等） | 中 | 新参数全默认 None，向后兼容；模板无需改 |
 | 非 ARDUINO_CONTROLLER 模式无 imu/* 通道 | 中 | 接线前判 `cfg.HAVE_IMU`；组件对缺失字段降级 |
-| 50Hz 广播多客户端放大流量 | 低 | 单帧~200B；必要时后端 30ms 合并 |
-| Chart.js 50Hz 重绘性能 | 中 | requestAnimationFrame 节流；256 点环形缓冲；非 setState 驱动 |
+| 50Hz 广播多客户端放大流量 | 低 | 单帧~190B；100Hz 单客户端 ~18.6 KB/s，3 客户端 ~55.7 KB/s；必要时后端 10ms 合并或降回 50Hz |
+| Chart.js 100Hz 重绘性能 | 中 | requestAnimationFrame 节流至上限 60fps；256 点环形缓冲；非 setState 驱动；低端设备可降回 50Hz |
 | 前端曲线归一化范围与固件端不一致 | 低 | 固件 gyroZ 除以 5、thr/str 除以 100；前端统一按字段实际范围配置 yAxis |
 
 ## 7. 可选扩展（默认不做，需用户确认）
@@ -212,8 +217,8 @@ DrivePage 通过 `useDriveWebsocket({ onTelemetry })` 持有最新遥测 ref（�
 | 4 前端组件 | useDriveWebsocket.ts + TelemetryChart.tsx + DrivePage.tsx + 测试 | 中 |
 | 集成验证 | 启动 manage.py + 软件端 | 小 |
 
-## 9. 待用户确认的决策点
+## 9. 决策点（已确认）
 
-1. **第 3.2 节字段（电压/电流/RC 等）是否本期纳入？** 默认不纳入（需改固件）。
-2. **曲线频率**：车端 50Hz / 前端 30fps 重绘，是否符合预期？
-3. **曲线默认显示**：固件原样 3 条（throttle/steering/gyroZ）+ 其余默认隐藏开关，是否同意？
+1. **第 3.2 节字段（电压/电流/RC 等）是否本期纳入？** → **不纳入**。仅用现有串口 $IMU + 车端自算通道（steering/throttle/pilot）。电压/电流/RC/PID/漂移补偿等需改固件 Serial1 协议，回归风险高且与曲线图核心解耦，留作后续按调试需求逐字段扩。
+2. **曲线频率**：→ **车端 100Hz 发送 / 前端 60fps 重绘**。与固件 `$IMU` 100Hz 上行对齐；requestAnimationFrame 节流至上限 60fps，256 点环形缓冲，ref 不进 state。窗口约 256/100≈2.6 秒。
+3. **曲线默认显示**：→ **固件原样 3 条**（Throttle 绿 `#39d98a`、Steering 蓝 `#5cc8ff`、GyroZ 红 `#ff6b6b`）+ 其余（ax/ay/az/gx/gy/pilot_angle/pilot_throttle）通过工具栏 checkbox 开关。
