@@ -30,13 +30,14 @@ class DriftReplayPart:
 
     :param clip_path: replay clip JSON 路径，None 表示未加载（输出 0,0）
     :param speed: 回放速率倍率（>1 加速）
-    :param loop: 循环次数（1=单次，>1 循环）
+    :param loop: 循环次数（1=单次，>1 有限循环，<=0 无限循环）
     :param max_throttle: 油门上限（0~1）
     :param max_steering: 转向上限（0~1）
-    :param max_delta_throttle: 油门单帧最大变化
-    :param max_delta_steering: 转向单帧最大变化
+    :param max_delta_throttle: 油门单帧最大变化；<=0 表示禁用
+    :param max_delta_steering: 转向单帧最大变化；<=0 表示禁用
     :param warmup_frames: 首部 (0,0) 预热帧数
     :param transition_ms: 循环重置时的静置时长 ms
+    :param interpolate: 是否对 angle/throttle 做线性插值（消除锯齿）
     """
 
     def __init__(
@@ -50,15 +51,17 @@ class DriftReplayPart:
         max_delta_steering: float = 0.3,
         warmup_frames: int = 10,
         transition_ms: int = 300,
+        interpolate: bool = True,
     ):
         self.speed = speed
-        self.loop = max(1, int(loop))
+        self.loop = int(loop)
         self.max_throttle = max_throttle
         self.max_steering = max_steering
         self.max_delta_throttle = max_delta_throttle
         self.max_delta_steering = max_delta_steering
         self.warmup_frames = warmup_frames
         self.transition_ms = transition_ms
+        self.interpolate = interpolate
 
         self._samples: list[dict] = []
         self._clip_duration_ms = 0.0
@@ -101,6 +104,35 @@ class DriftReplayPart:
                 break
         return chosen
 
+    def _interpolate_at(self, t_rel_ms: float) -> dict | None:
+        """对当前时戳做线性插值，返回 (angle, throttle) 字典。
+
+        若 t_rel_ms 早于首帧，返回首帧；若晚于末帧，返回末帧。
+        否则在相邻两帧之间按时间比例线性插值 angle 与 throttle。
+        """
+        if not self._samples:
+            return None
+        if t_rel_ms <= float(self._samples[0].get("t_rel", 0.0)):
+            return self._samples[0]
+        if t_rel_ms >= float(self._samples[-1].get("t_rel", 0.0)):
+            return self._samples[-1]
+
+        # 找到右边界
+        for i in range(1, len(self._samples)):
+            t1 = float(self._samples[i].get("t_rel", 0.0))
+            if t_rel_ms <= t1:
+                s0 = self._samples[i - 1]
+                s1 = self._samples[i]
+                t0 = float(s0.get("t_rel", 0.0))
+                if t1 == t0:
+                    return s0
+                ratio = (t_rel_ms - t0) / (t1 - t0)
+                return {
+                    "angle": float(s0.get("angle", 0.0)) + ratio * (float(s1.get("angle", 0.0)) - float(s0.get("angle", 0.0))),
+                    "throttle": float(s0.get("throttle", 0.0)) + ratio * (float(s1.get("throttle", 0.0)) - float(s0.get("throttle", 0.0))),
+                }
+        return self._samples[-1]
+
     def _clamp(self, value: float, limit: float) -> float:
         return max(-limit, min(limit, float(value)))
 
@@ -136,21 +168,22 @@ class DriftReplayPart:
             self._start_mono = time.monotonic()
 
         elapsed = self._elapsed_ms()
-        total_duration = self._clip_duration_ms + (self.transition_ms if self.loop > 1 else 0)
+        # 需要循环时（loop != 1）在末尾加入段间静置时长
+        total_duration = self._clip_duration_ms + (self.transition_ms if self.loop != 1 else 0)
 
-        # 循环结束判定
-        if self.loop > 1 and self._loop_count + 1 < self.loop and elapsed > total_duration:
+        # 循环重置：无限循环（loop <= 0）或有限循环未到次数
+        if self.loop != 1 and (self.loop <= 0 or self._loop_count + 1 < self.loop) and elapsed > total_duration:
             self._loop_count += 1
             self._start_mono = time.monotonic()
             elapsed = 0.0
 
-        # 超过总回放时长（含所有循环），输出末帧后归零
-        if elapsed > self._clip_duration_ms and self._loop_count + 1 >= self.loop:
+        # 超过总回放时长且非无限循环，输出末帧后归零
+        if self.loop > 0 and elapsed > self._clip_duration_ms and self._loop_count + 1 >= self.loop:
             self._last_angle = 0.0
             self._last_throttle = 0.0
             return 0.0, 0.0
 
-        sample = self._sample_at(elapsed)
+        sample = self._interpolate_at(elapsed) if self.interpolate else self._sample_at(elapsed)
         if sample is None:
             return self._last_angle, self._last_throttle
 

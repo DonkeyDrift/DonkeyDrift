@@ -36,14 +36,16 @@ export const api = axios.create({
 export const getDriveCarWebSocketUrl = (clientId?: string) => {
   const apiBase = API_URL.replace(/\/$/, '');
   const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
+  // 显式指定了 http(s) 后端地址（VITE_API_BASE_URL）：直接用，把 http 换成 ws
   if (apiBase.startsWith('http://') || apiBase.startsWith('https://')) {
     return `${apiBase.replace(/^http/, 'ws')}/drive/ws${query}`;
   }
+  // 未显式指定：用相对 /api 路径，走 Vite 代理（vite.config.ts 的 ws:true 转发到后端）。
+  // 这样浏览器 ws 连自身端口的 /api/drive/ws，由 Vite 代理转给 --backend-port 选定的后端，
+  // 不再硬编码 8000，与 donkey web --backend-port 联动一致。
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.hostname;
-  const backendPort = window.location.port === '5188' ? '8000' : window.location.port;
-  const port = backendPort ? `:${backendPort}` : '';
-  return `${protocol}//${host}${port}${apiBase}/drive/ws${query}`;
+  const host = window.location.host; // hostname:port（含 dev 服务器端口）
+  return `${protocol}//${host}${apiBase}/drive/ws${query}`;
 };
 
 export const getApiErrorMessage = (error: unknown, fallback = '未知错误') => {
@@ -52,7 +54,7 @@ export const getApiErrorMessage = (error: unknown, fallback = '未知错误') =>
     if (typeof detail === 'string') return detail;
     // 服务器不可达时给出明确提示
     if (!error.response && error.message === 'Network Error') {
-      return '无法连接后端服务，请确认已执行 donkey web 并且端口 8000 可访问';
+      return '无法连接后端服务，请确认已执行 donkey web 并且后端端口可访问';
     }
     return error.message || fallback;
   }

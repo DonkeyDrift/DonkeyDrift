@@ -1188,6 +1188,11 @@ class Arduino:
         if Arduino.ard_device == None:
             Arduino.ard_device = serial.Serial(cfg.ARDUINO_SERIAL_PORT,cfg.ARDUINO_BAUDRATE, timeout=cfg.ARDUINO_TIMEOUT)
             # Arduino.ard_device.setRTS(True)
+            # 清空串口启动时可能残留的 RX 数据，避免首帧边界错位
+            try:
+                Arduino.ard_device.reset_input_buffer()
+            except Exception:
+                pass
             
         self.steering = 0
         self.throttle = 0
@@ -1225,21 +1230,40 @@ class Arduino:
                     pass
 
     def _pop_line_from_buf(self):
-        """从 _rx_buf 中提取一个 \\n 终止的完整行。返回解码后的 str 或 None。"""
+        """从 _rx_buf 中提取一个 \\n 终止的完整帧。
+
+        采用保守策略：只接受以已知帧头（$IMU、T、M）开头的完整行。
+        如果一行不以帧头开头（例如上一帧尾部与下一帧头部被错误地
+        拼接成 "-0.0T3S0"），则丢弃整行，避免把 IMU 数据尾部误解析
+        为控制命令。下一行正常以帧头开头时即可恢复同步。
+        返回解码后的 str 或 None。
+        """
         while True:
+            if not self._rx_buf:
+                return None
+
             nl_idx = self._rx_buf.find(b'\n')
             if nl_idx < 0:
-                # 防止缓冲区无限增长（无换行的噪声数据）
+                # 没有完整行，保留等待更多数据；防止无限增长
                 if len(self._rx_buf) > 4096:
-                    logger.warning("串口缓冲区溢出（%d 字节无换行），已清空", len(self._rx_buf))
+                    logger.warning("串口帧超长（%d 字节无换行），已清空", len(self._rx_buf))
                     self._rx_buf = bytearray()
                 return None
+
             line_bytes = self._rx_buf[:nl_idx]
             self._rx_buf = self._rx_buf[nl_idx + 1:]
             if line_bytes.endswith(b'\r'):
                 line_bytes = line_bytes[:-1]
             if not line_bytes:
                 continue
+
+            # 保守策略：只接受以已知帧头开头的行
+            if not (line_bytes.startswith(b'$IMU') or
+                    line_bytes.startswith(b'T') or
+                    line_bytes.startswith(b'M')):
+                logger.debug("丢弃不以帧头开头的错位行: %r", line_bytes)
+                continue
+
             try:
                 return line_bytes.decode('utf-8', errors='ignore').strip()
             except Exception:
@@ -1303,28 +1327,43 @@ class Arduino:
                 # 解析 IMU 数据：$IMU,seq,ts_ms,ax,ay,az,gx,gy,gz
                 # 加速度单位 m/s²，陀螺仪单位 rad/s
                 parts = ret.split(',')
-                if len(parts) == 9:  # $IMU + seq + ts_ms + ax + ay + az + gx + gy + gz
-                    imu_seq = int(parts[1])
-                    imu_ts_ms = int(parts[2])
-                    imu_ax = float(parts[3])
-                    imu_ay = float(parts[4])
-                    imu_az = float(parts[5])
-                    imu_gx = float(parts[6])
-                    imu_gy = float(parts[7])
-                    imu_gz = float(parts[8])
-                    self.imu_data = {
-                        'seq': imu_seq,
-                        'ts_ms': imu_ts_ms,
-                        'accel_x': imu_ax,
-                        'accel_y': imu_ay,
-                        'accel_z': imu_az,
-                        'gyro_x': imu_gx,
-                        'gyro_y': imu_gy,
-                        'gyro_z': imu_gz,
-                    }
-                    return None  # IMU 不干扰控制数据流
+                if len(parts) != 9:  # $IMU + seq + ts_ms + ax + ay + az + gx + gy + gz
+                    return None
+
+                # 帧污染检测：如果 IMU 字段里混入了控制帧字符（T/S）
+                # 或多个数字被拼接（多余小数点），说明 ESP32 端串口输出
+                # 发生了交错或字符丢失，直接丢弃该帧。
+                import re
+                if any('T' in p or 'S' in p for p in parts):
+                    logger.debug("丢弃被 T/S 控制帧污染的 $IMU 帧: %s", ret)
+                    return None
+                if not all(re.fullmatch(r'-?\d+(\.\d+)?', p) for p in parts[1:]):
+                    logger.debug("丢弃字段格式非法的 $IMU 帧: %s", ret)
+                    return None
+
+                imu_seq = int(parts[1])
+                imu_ts_ms = int(parts[2])
+                imu_ax = float(parts[3])
+                imu_ay = float(parts[4])
+                imu_az = float(parts[5])
+                imu_gx = float(parts[6])
+                imu_gy = float(parts[7])
+                imu_gz = float(parts[8])
+                self.imu_data = {
+                    'seq': imu_seq,
+                    'ts_ms': imu_ts_ms,
+                    'accel_x': imu_ax,
+                    'accel_y': imu_ay,
+                    'accel_z': imu_az,
+                    'gyro_x': imu_gx,
+                    'gyro_y': imu_gy,
+                    'gyro_z': imu_gz,
+                }
+                return None  # IMU 不干扰控制数据流
             except Exception as e:
-                logger.error(f"解析 IMU 数据失败: {ret}, 错误: {str(e)}")
+                # 帧污染是 ESP32 端串口输出的已知问题，降级为 debug，
+                # 避免 error 日志刷屏。
+                logger.debug("解析 $IMU 帧失败，已丢弃: %s, 错误: %s", ret, e)
         else:
             logger.warning(f"收到未识别数据格式: {ret}")
 
@@ -1333,7 +1372,14 @@ class Arduino:
 
 class ArdPWMSteering:
     """
-    Wrapper over a Arduino Firmata controller to convert angles to PWM pulses.
+    Wrapper over a Arduino controller to convert angles to PWM pulses.
+
+    在 ARDUINO_CONTROLLER 链路中，本 Part 负责：
+    - user 模式：把上游控制器的 steering（donkeycar 标准 -1~1）透传给
+      user/angle，供 TubWriter 记录；不再用串口 RC 的 T0S0 怠速值覆盖，
+      避免录制数据间歇性跳到 0。
+    - 非 user 模式：将缩放后的 steering_ard 转成 PWM 命令写入串口，
+      同时把 steering_ard 还原为 -1~1 返回给 user/angle，保持记录语义一致。
     """
     LEFT_ANGLE = -100
     RIGHT_ANGLE = 100
@@ -1353,66 +1399,59 @@ class ArdPWMSteering:
         self.mode = mode
         self.running = True
         self.Input_Temp = None
-        self.Output_Steering = None
-        self.Output_Throttle = None
+        self.Output_Steering = 0.0
+        self.Output_Throttle = 0.0
         print('Arduino PWM Steering created')
+
     def update(self):
         while self.running:
             try:
                 self.Input_Temp = self.controller.Arduino_readline()
-                if(self.mode != 'user'):
+                if self.mode != 'user':
                     self.controller.set_cmd(self.mode, self.channel, self.angle_val)
                 else:
-                    if(self.Input_Temp):
+                    if self.Input_Temp:
                         self.controller.Input_RC = self.Input_Temp
-                        print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (
-                            self.mode, 
-                            self.controller.Input_RC['steering'], 
-                            self.controller.Input_RC['throttle']
-                        ))
-                        self.Output_Steering = self.controller.Input_RC['steering']
-                        self.Output_Throttle = self.controller.Input_RC['throttle']
+                        self.Output_Steering = float(self.controller.Input_RC.get('steering', 0.0))
+                        self.Output_Throttle = float(self.controller.Input_RC.get('throttle', 0.0))
             except Exception as e:
                 logger.error(f"Error in ArdPWMSteering update: {str(e)}")
-            time.sleep(0.001) # Need to test
-            
+            time.sleep(0.001)
+
+    def _scale_angle(self, angle):
+        """将 donkeycar 标准 -100~100（steering_ard）映射为 Arduino PWM 值。"""
+        return dk.utils.map_range(angle, self.LEFT_ANGLE, self.RIGHT_ANGLE,
+                                  self.left_val, self.right_val)
+
     def run_threaded(self, mode, angle):
-        self.mode = mode
-        if(self.mode != 'user'):
-            self.angle_val = dk.utils.map_range(angle, self.LEFT_ANGLE, self.RIGHT_ANGLE,
-                                                self.left_val, self.right_val)
-            if(self.controller.steeringCmd):
-                return self.mode, self.controller.steeringCmd, self.controller.throttleCmd
-        else:
-            if(self.Output_Steering):
-                # 需要增加手柄Mode的判断与保存
-                return self.mode, self.Output_Steering, self.Output_Throttle
-    def run(self, mode, angle):
-        self.run_threaded(mode, angle)
-        if(self.mode != 'user'):
+        self.mode = mode if mode is not None else 'user'
+        # angle 来自 ScaleToArdPwm，值域为 -100~100；还原为 -1~1 作为 user/angle
+        normalized_angle = angle / 100.0 if angle is not None else 0.0
+
+        if self.mode != 'user':
+            self.angle_val = self._scale_angle(angle)
             self.controller.set_cmd(self.mode, self.channel, self.angle_val)
-        else:
-            if(self.controller.Input_RC):
-                                print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (
-                                    self.mode, 
-                                    self.controller.Input_RC['steering'], 
-                                    self.controller.Input_RC['throttle']
-                                ))
+
+        # user 模式透传上游 angle；非 user 模式也把实际下发的角度返回给 user/angle
+        return self.mode, normalized_angle
+
+    def run(self, mode, angle):
+        return self.run_threaded(mode, angle)
 
     def shutdown(self):
-        # set steering straight
-        # self.angle_val = dk.utils.map_range(0, self.LEFT_ANGLE, self.RIGHT_ANGLE,
-        #                                 self.left_pulse, self.right_pulse)
         time.sleep(0.3)
         self.running = False
 
 
 class ArdPWMThrottle:
-
     """
-    Edit by: Henry 
-    Wrapper over Arduino Firmata controller to convert -1 to 1 throttle
-    values to PWM pulses.
+    Wrapper over Arduino controller to convert -1 to 1 throttle values to PWM pulses.
+
+    在 ARDUINO_CONTROLLER 链路中，本 Part 负责：
+    - user 模式：把上游控制器的 throttle（donkeycar 标准 -1~1）透传给
+      user/throttle 供 TubWriter 记录，不再用串口 RC 的 T0S0 怠速值覆盖。
+    - 非 user 模式：将缩放后的 throttle_ard 转成 PWM 并与 steeringCmd 一起
+      写入串口，同时把 throttle_ard 还原为 -1~1 返回给 user/throttle。
     """
     MIN_THROTTLE = -100
     MAX_THROTTLE = 100
@@ -1424,7 +1463,7 @@ class ArdPWMThrottle:
                  min_pulse=-100,
                  zero_pulse=0,
                  channel=1,
-                 mode = 'user'):
+                 mode='user'):
         self.controller = controller
         self.max_pulse = max_pulse
         self.min_pulse = min_pulse
@@ -1434,66 +1473,57 @@ class ArdPWMThrottle:
         self.mode = mode
         self.running = True
         self.Input_Temp = None
-        self.Output_Thorttle = None
+        self.Output_Thorttle = 0.0
         self.throttle_val = dk.utils.map_range(0, 0, self.MAX_THROTTLE, self.zero_pulse, self.max_pulse)
         print('Arduino PWM Throttle created')
 
     def update(self):
         while self.running:
             try:
-                # self.Input_Temp = 
-                if(self.mode != 'user'):
+                if self.mode != 'user':
                     self.controller.set_cmd(self.mode, self.channel, self.throttle_val)
-                else:
-                    if(self.Input_Temp):
-                        self.controller.Input_RC = self.Input_Temp
-                        print("Mode: %s, Steering: %.2f, Throttle: %.2f" % (
-                            self.mode, 
-                            self.controller.Input_RC['steering'], 
-                            self.controller.Input_RC['throttle']
-                        ))
-                        self.Output_Thorttle = self.controller.Input_RC['throttle']
             except Exception as e:
                 logger.error(f"Error in ArdPWMThrottle update: {str(e)}")
-            time.sleep(0.001) # Need to test
+            time.sleep(0.001)
+
+    def _scale_throttle(self, throttle):
+        """将 donkeycar 标准 -100~100（throttle_ard）映射为 Arduino PWM 值。"""
+        if throttle > 0:
+            return dk.utils.map_range(throttle, 0, self.MAX_THROTTLE,
+                                      self.zero_pulse, self.max_pulse)
+        return dk.utils.map_range(throttle, self.MIN_THROTTLE, 0,
+                                  self.min_pulse, self.zero_pulse)
+
     def run_threaded(self, mode, throttle, throttleUser):
-        self.mode = mode
-        if(self.mode != 'user'):
+        self.mode = mode if mode is not None else 'user'
+        # throttle 来自 ScaleToArdPwm，值域为 -100~100；还原为 -1~1 作为 user/throttle
+        normalized_throttle = throttle / 100.0 if throttle is not None else 0.0
+
+        if self.mode != 'user':
             try:
-                if throttle > 0:
-                    self.throttle_val = dk.utils.map_range(throttle, 0, self.MAX_THROTTLE,
-                                                    self.zero_pulse, self.max_pulse)
-                else:
-                    self.throttle_val = dk.utils.map_range(throttle, self.MIN_THROTTLE, 0,
-                                                self.min_pulse, self.zero_pulse)
+                self.throttle_val = self._scale_throttle(throttle)
                 self.controller.throttleCmd = self.throttle_val
-                # Arduino.ard_device.write(("%d:%d\n" % (self.throttle_val, self.throttle_val)).encode('ascii'))
-                # if(self.controller.throttleCmd):
                 with Arduino.ard_lock:
-                    Arduino.ard_device.write(("%d:%d\n" % (self.controller.throttleCmd, self.controller.steeringCmd)).encode('ascii'))
-                # 仅在值变化时打印，避免每帧刷屏（~60Hz 日志噪音）
-                if not hasattr(self, '_last_logged_cmd') or self._last_logged_cmd != (self.controller.throttleCmd, self.controller.steeringCmd):
+                    Arduino.ard_device.write(
+                        ("%d:%d\n" % (self.controller.throttleCmd, self.controller.steeringCmd)).encode('ascii')
+                    )
+                if not hasattr(self, '_last_logged_cmd') or \
+                        self._last_logged_cmd != (self.controller.throttleCmd, self.controller.steeringCmd):
                     self._last_logged_cmd = (self.controller.throttleCmd, self.controller.steeringCmd)
                     logger.debug("Thr:%d Str:%d", self.controller.throttleCmd, self.controller.steeringCmd)
-                return self.controller.throttleCmd
-            
             except (TypeError, ValueError) as e:
-                logger.error(f"Invalid steering angle type: {type(throttle)}, value: {throttle}")
-                raise ValueError("Steering angle must be a number") from e       
-        else:
-            self.Output_Thorttle = throttleUser
-            if(self.Output_Thorttle):
-                # 需要增加手柄Mode的判断与保存
-                return self.Output_Thorttle
+                logger.error(f"Invalid throttle type: {type(throttle)}, value: {throttle}")
+                raise ValueError("Throttle must be a number") from e
+
+        # user 模式透传上游 throttle；非 user 模式把实际下发的油门返回给 user/throttle
+        if self.mode == 'user':
+            return 0.0 if throttleUser is None else throttleUser
+        return normalized_throttle
+
     def run(self, mode, throttle, throttleUser):
-        self.run_threaded(mode, throttle, throttleUser)
-        # if(mode != 'user'):
-        #     self.controller.set_pwm_pulse(self.channel, self.pulse)
-        # self.controller.set_pwm_pulse(self.channel, self.pulse)
+        return self.run_threaded(mode, throttle, throttleUser)
 
     def shutdown(self):
-        # stop vehicle
-        # self.run(0)
         self.running = False
 
 

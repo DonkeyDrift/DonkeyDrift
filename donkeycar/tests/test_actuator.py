@@ -1,6 +1,9 @@
 from .setup import on_pi
 
-from donkeycar.parts.actuator import Arduino, ArdImu, PCA9685, PWMSteering, PWMThrottle
+from donkeycar.parts.actuator import (
+    Arduino, ArdImu, PCA9685, PWMSteering, PWMThrottle,
+    ArdPWMSteering, ArdPWMThrottle,
+)
 import pytest
 
 
@@ -17,12 +20,17 @@ def test_PWMSteering():
 class FakeArduinoSerial:
     def __init__(self, line):
         self.line = line
+        self.written = []
 
     def inWaiting(self):
         return 1
 
     def readline(self):
         return self.line
+
+    def write(self, data):
+        self.written.append(data)
+        return len(data)
 
 
 def _make_arduino_controller(line):
@@ -33,6 +41,7 @@ def _make_arduino_controller(line):
     controller.throttle = 0
     controller.steering = 0
     controller.imu_data = {}
+    controller._rx_buf = bytearray(line)
     return controller, original_device
 
 
@@ -132,6 +141,48 @@ def test_arduino_readline_imu_partial_fields():
     assert result is None
 
 
+def test_arduino_readline_imu_drops_t_frame_contamination():
+    """$IMU 帧末尾混入 T/S 控制帧时应丢弃，不抛异常"""
+    controller, original_device = _make_arduino_controller(
+        b"$IMU,59810,11448725,-0.1437,-0.3232,9.1530,-0.1122,0.0141,-0T2S-1\n"
+    )
+    try:
+        result = controller.Arduino_readline()
+    finally:
+        _restore_arduino_device(original_device)
+
+    assert result is None
+    assert controller.imu_data == {}  # 不更新被污染的 IMU 数据
+
+
+def test_arduino_readline_imu_drops_concatenated_numbers():
+    """$IMU 帧中数字被拼接（逗号丢失）时应丢弃"""
+    controller, original_device = _make_arduino_controller(
+        b"$IMU,59794,11448469,-0.15800.1293,-0.2993,9.1435,-0.1130,0.0163,-0.0176\n"
+    )
+    try:
+        result = controller.Arduino_readline()
+    finally:
+        _restore_arduino_device(original_device)
+
+    assert result is None
+    assert controller.imu_data == {}
+
+
+def test_arduino_readline_imu_drops_invalid_numeric_field():
+    """$IMU 帧中出现非法数字字段（如 '-'）时应丢弃"""
+    controller, original_device = _make_arduino_controller(
+        b"$IMU,60022,11452117,-,-0.2705,9.1506,-0.1122,0.0144,-0.0163\n"
+    )
+    try:
+        result = controller.Arduino_readline()
+    finally:
+        _restore_arduino_device(original_device)
+
+    assert result is None
+    assert controller.imu_data == {}
+
+
 # ======================== ArdImu Part 测试 ========================
 
 class FakeArduinoControllerForImu:
@@ -196,3 +247,149 @@ def test_ardimu_requires_controller():
     """ArdImu 必须传入控制器实例"""
     with pytest.raises(ValueError, match="ArdImu 需要一个 Arduino 控制器实例"):
         ArdImu(controller=None)
+
+
+# ======================== 帧边界同步恢复测试 ========================
+
+
+def test_arduino_readline_recovers_from_frame_slip():
+    """前一帧尾部与下一帧头部被拼接成乱码时，应丢弃整行并解析后续完整帧"""
+    # "-0.0T3S0\n" 模拟 $IMU 帧末尾的 -0.0 与 T3S0 控制帧被错误拼接；
+    # 保守策略下整行丢弃，下一正常帧 T50S-50 被正确解析。
+    controller, original_device = _make_arduino_controller(b"-0.0T3S0\nT50S-50\n")
+    try:
+        result = controller.Arduino_readline()
+    finally:
+        _restore_arduino_device(original_device)
+
+    assert result is not None
+    assert result["throttle"] == pytest.approx(0.5)
+    assert result["steering"] == pytest.approx(-0.5)
+
+
+def test_arduino_readline_recovers_from_imu_frame_slip():
+    """控制帧尾部与下一 $IMU 帧拼接时，应丢弃错位字节并解析 $IMU"""
+    imu_tail = b"9.2751,-0.1058,0.0173,-0.0176"
+    next_imu = b"$IMU,37474,662376,-0.0200,-0.1500,9.2800,-0.1000,0.0200,-0.0200"
+    controller, original_device = _make_arduino_controller(
+        imu_tail + b"\n" + next_imu + b"\n"
+    )
+    try:
+        result = controller.Arduino_readline()
+    finally:
+        _restore_arduino_device(original_device)
+
+    assert result is None
+    imu = controller.imu_data
+    assert imu['seq'] == 37474
+    assert imu['ts_ms'] == 662376
+    assert imu['accel_x'] == pytest.approx(-0.0200)
+
+
+def test_arduino_readline_drops_noise_without_header():
+    """缓冲区中全是噪声且没有有效帧头时，应安全清空并返回 None"""
+    controller, original_device = _make_arduino_controller(b"garbage,no,frame\n")
+    try:
+        result = controller.Arduino_readline()
+    finally:
+        _restore_arduino_device(original_device)
+
+    assert result is None
+    assert controller._rx_buf == b""
+
+
+# ======================== ArdPWM 透传/缩放测试 ========================
+
+class FakeControllerForArdPWM:
+    """为 ArdPWMSteering/ArdPWMThrottle 提供的最小控制器替身"""
+    def __init__(self):
+        self.steeringCmd = 0
+        self.throttleCmd = 0
+        self.Input_RC = None
+        self.imu_data = {}
+        self._rx_buf = bytearray()
+        self._cmds = []
+
+    def set_cmd(self, mode, channel, val):
+        self._cmds.append((mode, channel, val))
+        if channel == 0:
+            self.steeringCmd = val
+        elif channel == 1:
+            self.throttleCmd = val
+
+
+@pytest.fixture
+def fake_ard_pwm_controller():
+    return FakeControllerForArdPWM()
+
+
+def test_ardpwm_steering_user_mode_passthrough(fake_ard_pwm_controller):
+    """user 模式应透传上游 steering_ard 还原后的 user/angle，不因 RC 怠速返回 None"""
+    steering = ArdPWMSteering(controller=fake_ard_pwm_controller,
+                              left_val=-100, right_val=100)
+    # 模拟串口读到 T0S0，Output_Steering 会被设为 0.0
+    steering.Output_Steering = 0.0
+    steering.Output_Throttle = 0.0
+
+    mode, angle = steering.run_threaded('user', 50.0)
+    assert mode == 'user'
+    assert angle == pytest.approx(0.5)
+    # user 模式不应写入 set_cmd
+    assert fake_ard_pwm_controller._cmds == []
+
+
+def test_ardpwm_steering_user_mode_zero_angle_returns_zero(fake_ard_pwm_controller):
+    """user 模式真实输入 0 时应返回 0，而不是因 0 为 falsy 返回 None"""
+    steering = ArdPWMSteering(controller=fake_ard_pwm_controller,
+                              left_val=-100, right_val=100)
+    mode, angle = steering.run_threaded('user', 0.0)
+    assert mode == 'user'
+    assert angle == pytest.approx(0.0)
+
+
+def test_ardpwm_steering_auto_mode_writes_pwm(fake_ard_pwm_controller):
+    """非 user 模式应写入 PWM 命令并把 steering_ard 还原为 angle 返回"""
+    steering = ArdPWMSteering(controller=fake_ard_pwm_controller,
+                              left_val=-100, right_val=100)
+    mode, angle = steering.run_threaded('local', -75.0)
+    assert mode == 'local'
+    assert angle == pytest.approx(-0.75)
+    assert len(fake_ard_pwm_controller._cmds) == 1
+    assert fake_ard_pwm_controller._cmds[0][0] == 'local'
+    assert fake_ard_pwm_controller._cmds[0][1] == 0  # channel
+    # -75 映射到 left_val=-100, right_val=100 的中间偏左
+    assert fake_ard_pwm_controller.steeringCmd == -75
+
+
+def test_ardpwm_throttle_user_mode_passthrough(fake_ard_pwm_controller):
+    """user 模式应透传上游 throttleUser，不因 0 为 falsy 返回 None"""
+    throttle = ArdPWMThrottle(controller=fake_ard_pwm_controller,
+                              max_pulse=100, zero_pulse=0, min_pulse=-100)
+    result = throttle.run('user', 0.0, 0.3)
+    assert result == pytest.approx(0.3)
+    assert fake_ard_pwm_controller._cmds == []
+
+
+def test_ardpwm_throttle_user_mode_zero_returns_zero(fake_ard_pwm_controller):
+    """user 模式 throttleUser=0 时应返回 0，而不是 None"""
+    throttle = ArdPWMThrottle(controller=fake_ard_pwm_controller,
+                              max_pulse=100, zero_pulse=0, min_pulse=-100)
+    result = throttle.run('user', 0.0, 0.0)
+    assert result == pytest.approx(0.0)
+
+
+def test_ardpwm_throttle_auto_mode_writes_pwm(fake_ard_pwm_controller):
+    """非 user 模式应写入 PWM 并把 throttle_ard 还原为 throttle 返回"""
+    original_device = Arduino.ard_device
+    Arduino.ard_device = FakeArduinoSerial(b"")
+    try:
+        fake_ard_pwm_controller.steeringCmd = 30
+        throttle = ArdPWMThrottle(controller=fake_ard_pwm_controller,
+                                  max_pulse=100, zero_pulse=0, min_pulse=-100)
+        result = throttle.run('local', 60.0, 0.0)
+        assert result == pytest.approx(0.6)
+        assert fake_ard_pwm_controller.throttleCmd == 60
+        # run() 应返回 run_threaded 的结果，而不是 None
+        assert result is not None
+    finally:
+        Arduino.ard_device = original_device

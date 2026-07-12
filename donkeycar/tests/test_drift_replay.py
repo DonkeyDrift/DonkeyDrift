@@ -118,14 +118,38 @@ def test_loop_restarts_clip(clip_file, clock):
     """循环：到末尾后重置继续。"""
     part = DriftReplayPart(clip_path=clip_file, warmup_frames=0, loop=2,
                            max_delta_steering=1.0, max_delta_throttle=1.0)
+    part.run()  # t=0，确立 _start_mono
     # 推进到末尾（400ms）
     clock.advance(0.4)
     a_end, _ = part.run()  # 末帧 angle=0.0
-    # 再推进，应回到开头
+    # 再推进，超过 clip 末尾但仍在 transition 期内，应仍输出末帧
     clock.advance(0.1)
     a_restart, _ = part.run()
-    # 500ms 在第二轮的第 1 帧（t_rel=0.0）附近
+    # 500ms 在第二轮开始前的 transition 期内，末帧 angle=0.0
     assert a_restart == pytest.approx(0.0)
+
+
+def test_infinite_loop_never_stops(clip_file, clock):
+    """loop<=0 时无限循环，不会回到 (0,0)。"""
+    part = DriftReplayPart(clip_path=clip_file, warmup_frames=0, loop=0,
+                           max_delta_steering=1.0, max_delta_throttle=1.0)
+    part.run()  # t=0，确立 _start_mono
+    # 推进到单次末尾（400ms）
+    clock.advance(0.4)
+    a_end, _ = part.run()  # 末帧 angle=0.0
+    assert a_end == pytest.approx(0.0)
+    # 再推进，超过 clip 末尾但仍在 transition 期内，输出末帧
+    clock.advance(0.1)
+    a_restart, _ = part.run()
+    assert a_restart == pytest.approx(0.0)  # transition 期内仍为 0.0
+    # 推进到 transition 结束并触发循环重置
+    clock.advance(0.25)
+    a_reset, _ = part.run()  # 重置瞬间 elapsed=0，输出首帧 angle=0.0
+    assert a_reset == pytest.approx(0.0)
+    # 再推进到第二轮第 2 帧（100ms 处）
+    clock.advance(0.1)
+    a_second, _ = part.run()
+    assert a_second == pytest.approx(0.5)
 
 
 def test_speed_scales_timeline(clip_file, clock):
@@ -136,6 +160,30 @@ def test_speed_scales_timeline(clip_file, clock):
     clock.advance(0.05)  # 50ms -> 原本 100ms 的位置（speed=2）
     a, t = part.run()
     assert a == pytest.approx(0.5)  # 第 2 帧
+
+
+def test_interpolation_between_samples(clip_file, clock):
+    """默认启用线性插值：两帧中间应取中间值。"""
+    part = DriftReplayPart(clip_path=clip_file, warmup_frames=0,
+                           max_delta_steering=1.0, max_delta_throttle=1.0,
+                           interpolate=True)
+    part.run()  # t=0, angle=0.0
+    clock.advance(0.05)  # 50ms，在第 1 帧（0ms）与第 2 帧（100ms）正中间
+    a, t = part.run()
+    assert a == pytest.approx(0.25)  # (0.0 + 0.5) / 2
+    assert t == pytest.approx(0.25)
+
+
+def test_interpolation_can_be_disabled(clip_file, clock):
+    """interpolate=False 时回到零阶保持（取不超前的最后一帧）。"""
+    part = DriftReplayPart(clip_path=clip_file, warmup_frames=0,
+                           max_delta_steering=1.0, max_delta_throttle=1.0,
+                           interpolate=False)
+    part.run()  # t=0
+    clock.advance(0.05)  # 50ms，零阶保持仍应输出第 1 帧
+    a, t = part.run()
+    assert a == pytest.approx(0.0)
+    assert t == pytest.approx(0.0)
 
 
 def test_shutdown_emits_zero(clip_file, clock):

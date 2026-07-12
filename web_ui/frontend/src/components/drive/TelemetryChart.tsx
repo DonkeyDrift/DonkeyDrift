@@ -1,0 +1,293 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Legend,
+  Tooltip,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+import { Pause, Play, Trash2, Maximize2, Minimize2 } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import type { Telemetry } from '../../hooks/useDriveWebsocket';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Legend,
+  Tooltip,
+);
+
+/** 环形缓冲长度，与固件 WebConsole 对齐（约 2.6 秒 @100Hz）。 */
+const BUFFER_SIZE = 256;
+
+/** 单条曲线的显示配置。 */
+interface CurveConfig {
+  /** 显示名。 */
+  label: string;
+  /** CSS 颜色。 */
+  color: string;
+  /** 从 Telemetry 取值的键。 */
+  key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle'>;
+  /** 是否默认显示。 */
+  defaultOn: boolean;
+}
+
+/** 默认 3 条曲线，对齐固件 MUS4_FW Drifter Console。 */
+const CURVES: CurveConfig[] = [
+  { label: 'Throttle', color: '#39d98a', key: 'throttle', defaultOn: true },
+  { label: 'Steering', color: '#5cc8ff', key: 'steering', defaultOn: true },
+  { label: 'GyroZ', color: '#ff6b6b', key: 'gz', defaultOn: true },
+  { label: 'GyroX', color: '#ffcc66', key: 'gx', defaultOn: false },
+  { label: 'GyroY', color: '#d96bff', key: 'gy', defaultOn: false },
+  { label: 'AccX', color: '#a3e635', key: 'ax', defaultOn: false },
+  { label: 'AccY', color: '#fb923c', key: 'ay', defaultOn: false },
+  { label: 'AccZ', color: '#f472b6', key: 'az', defaultOn: false },
+  { label: 'Pilot Angle', color: '#22d3ee', key: 'pilot_angle', defaultOn: false },
+  { label: 'Pilot Throttle', color: '#c084fc', key: 'pilot_throttle', defaultOn: false },
+];
+
+interface TelemetryChartProps {
+  /** 最新一帧遥测（由父组件通过 ref 持有，避免高频 setState）。 */
+  telemetry: Telemetry | null;
+  className?: string;
+}
+
+/**
+ * 实时遥测曲线图，移植自固件 Drifter Console。
+ * - 256 点环形缓冲，requestAnimationFrame 节流重绘（上限 60fps），避免 100Hz 全量 setState
+ * - 默认 3 条曲线（Throttle/Steering/GyroZ），其余通过工具栏开关
+ * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
+ */
+export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '' }) => {
+  // 各曲线的环形缓冲：number[] 长度恒为 BUFFER_SIZE，未填满处为 NaN
+  const buffersRef = useRef<Record<string, number[]>>({});
+  const writeIndexRef = useRef(0);
+  const filledRef = useRef(0);
+  const pausedRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
+  const latestTelemetryRef = useRef<Telemetry | null>(null);
+
+  const [paused, setPaused] = useState(false);
+  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(
+    () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
+  );
+  const [fullscreen, setFullscreen] = useState(false);
+  // 用于触发 Line 重绘的版本号
+  const [renderTick, setRenderTick] = useState(0);
+  const [hasData, setHasData] = useState(false);
+
+  // 初始化缓冲
+  if (Object.keys(buffersRef.current).length === 0) {
+    for (const c of CURVES) {
+      buffersRef.current[c.key as string] = new Array(BUFFER_SIZE).fill(NaN);
+    }
+  }
+
+  // 收到新遥测帧：写入环形缓冲（暂停时丢弃）
+  useEffect(() => {
+    if (!telemetry) return;
+    latestTelemetryRef.current = telemetry;
+    if (pausedRef.current) return;
+
+    const buffers = buffersRef.current;
+    const idx = writeIndexRef.current;
+    let wroteAny = false;
+    for (const c of CURVES) {
+      const val = telemetry[c.key];
+      const buf = buffers[c.key as string];
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        buf[idx] = val;
+        wroteAny = true;
+      } else {
+        // 缺失字段不写入，该位置保持 NaN（曲线在此处断开）
+        buf[idx] = NaN;
+      }
+    }
+    if (wroteAny) {
+      writeIndexRef.current = (idx + 1) % BUFFER_SIZE;
+      filledRef.current = Math.min(filledRef.current + 1, BUFFER_SIZE);
+      setHasData(true);
+    }
+  }, [telemetry]);
+
+  // requestAnimationFrame 节流重绘：合并 100Hz 写入到 60fps 重绘
+  useEffect(() => {
+    const tick = () => {
+      setRenderTick((t) => (t + 1) % 1_000_000);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
+  const handlePauseToggle = useCallback(() => {
+    pausedRef.current = !pausedRef.current;
+    setPaused(pausedRef.current);
+  }, []);
+
+  const handleClear = useCallback(() => {
+    const buffers = buffersRef.current;
+    for (const c of CURVES) {
+      const buf = buffers[c.key as string];
+      buf.fill(NaN);
+    }
+    writeIndexRef.current = 0;
+    filledRef.current = 0;
+    setHasData(false);
+    setRenderTick((t) => (t + 1) % 1_000_000);
+  }, []);
+
+  const toggleCurve = useCallback((key: string) => {
+    setVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    setFullscreen((f) => !f);
+  }, []);
+
+  // 构造 chart.js 数据：按写入顺序展开环形缓冲（最旧 -> 最新）
+  const chartData = useMemo(() => {
+    const buffers = buffersRef.current;
+    const writeIdx = writeIndexRef.current;
+    const filled = filledRef.current;
+    const activeCurves = CURVES.filter((c) => visibleKeys.has(c.key as string));
+
+    const datasets = activeCurves.map((c) => {
+      const buf = buffers[c.key as string];
+      let ordered: number[];
+      if (filled < BUFFER_SIZE) {
+        // 未填满：取 [0, filled)
+        ordered = buf.slice(0, filled);
+      } else {
+        // 已填满：从 writeIdx 开始环绕
+        ordered = buf.slice(writeIdx).concat(buf.slice(0, writeIdx));
+      }
+      return {
+        label: c.label,
+        data: ordered,
+        borderColor: c.color,
+        backgroundColor: c.color,
+        pointRadius: 0,
+        borderWidth: 1.5,
+        spanGaps: false, // NaN 处断开曲线
+        tension: 0,
+      };
+    });
+
+    const labels = datasets[0]?.data.map((_, i) => i) ?? [];
+    return { labels, datasets };
+    // renderTick 驱动重绘
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKeys, renderTick]);
+
+  const chartOptions = useMemo(
+    () => ({
+      animation: { duration: 0 } as const,
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+      },
+      scales: {
+        x: { display: false },
+        y: {
+          min: -1,
+          max: 1,
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#8fa1b5', font: { size: 10 } },
+        },
+      },
+    }),
+    [],
+  );
+
+  return (
+    <div
+      className={cn(
+        'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
+        fullscreen && 'fixed inset-0 z-50 rounded-none p-4 bg-slate-950',
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wider text-slate-400">遥测曲线</span>
+          {!hasData && <span className="text-xs text-slate-500">（等待数据）</span>}
+          {paused && <span className="text-xs text-amber-400">已暂停</span>}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handlePauseToggle}
+            className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
+            title={paused ? '继续' : '暂停'}
+            aria-label={paused ? '继续' : '暂停'}
+          >
+            {paused ? <Play size={14} /> : <Pause size={14} />}
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
+            title="清空"
+            aria-label="清空"
+          >
+            <Trash2 size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
+            title={fullscreen ? '退出全屏' : '全屏'}
+            aria-label={fullscreen ? '退出全屏' : '全屏'}
+          >
+            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+        </div>
+      </div>
+      <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : 'h-48')}>
+        <Line data={chartData} options={chartOptions} />
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+        {CURVES.map((c) => {
+          const on = visibleKeys.has(c.key as string);
+          return (
+            <label
+              key={c.key as string}
+              className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
+            >
+              <input
+                type="checkbox"
+                checked={on}
+                onChange={() => toggleCurve(c.key as string)}
+                className="accent-[var(--curve-color)]"
+                style={{ ['--curve-color' as string]: c.color }}
+              />
+              <span style={{ color: on ? c.color : undefined }}>{c.label}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+};

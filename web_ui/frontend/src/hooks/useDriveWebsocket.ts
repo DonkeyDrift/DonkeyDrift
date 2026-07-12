@@ -17,15 +17,35 @@ export interface WebRtcSignal {
   candidate?: RTCIceCandidateInit;
 }
 
+/**
+ * 车端上报的遥测数据（曲线图用）。字段均为可选——车端只发送非 None 字段。
+ * 对齐 RFC telemetry-chart-migration.md 改动1 的消息体。
+ */
+export interface Telemetry {
+  type: 'telemetry';
+  t?: number;
+  gz?: number;
+  gx?: number;
+  gy?: number;
+  ax?: number;
+  ay?: number;
+  az?: number;
+  steering?: number;
+  throttle?: number;
+  pilot_angle?: number;
+  pilot_throttle?: number;
+}
+
 interface UseDriveWebsocketOptions {
   autoReconnect?: boolean;
   reconnectInterval?: number;
   onWebRtcSignal?: (signal: WebRtcSignal) => void;
+  onTelemetry?: (t: Telemetry) => void;
   clientId?: string;
 }
 
 export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
-  const { autoReconnect = true, reconnectInterval = 3000, onWebRtcSignal, clientId } = options;
+  const { autoReconnect = true, reconnectInterval = 3000, onWebRtcSignal, onTelemetry, clientId } = options;
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -96,6 +116,9 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
           if (msg.type === 'webrtc_signal') {
             onWebRtcSignal?.(msg as WebRtcSignal);
           }
+          if (msg.type === 'telemetry') {
+            onTelemetry?.(msg as Telemetry);
+          }
         } catch {
           // 忽略格式错误的消息
         }
@@ -121,7 +144,7 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
         reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
       }
     }
-  }, [wsUrl, autoReconnect, reconnectInterval, onWebRtcSignal]);
+  }, [wsUrl, autoReconnect, reconnectInterval, onWebRtcSignal, onTelemetry]);
 
   const send = useCallback((data: Record<string, unknown>) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {

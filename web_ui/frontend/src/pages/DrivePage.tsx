@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
+import { TelemetryChart } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
 import { DriveModeSelector, DriveMode } from '../components/drive/DriveModeSelector';
-import { useDriveWebsocket, type WebRtcSignal } from '../hooks/useDriveWebsocket';
+import { useDriveWebsocket, type WebRtcSignal, type Telemetry } from '../hooks/useDriveWebsocket';
 import { useDriveControlLoop } from '../hooks/useDriveControlLoop';
 import { useKeyboardDrive } from '../hooks/useKeyboardDrive';
 import { useDriveHotkeys } from '../hooks/useDriveHotkeys';
@@ -21,8 +22,13 @@ import { Circle } from 'lucide-react';
 
 export const DrivePage: React.FC = () => {
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const clientIdRef = useRef(createDriveClientId());
-  const { connected, carState, send } = useDriveWebsocket({ onWebRtcSignal: setWebRtcSignal, clientId: clientIdRef.current });
+  const { connected, carState, send } = useDriveWebsocket({
+    onWebRtcSignal: setWebRtcSignal,
+    onTelemetry: setTelemetry,
+    clientId: clientIdRef.current,
+  });
 
   // 输入合并：摇杆 + 键盘，后发生效
   const joystickRef = useRef({ angle: 0, throttle: 0 });
@@ -270,6 +276,7 @@ export const DrivePage: React.FC = () => {
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
           <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          <TelemetryChart telemetry={telemetry} className="mt-4" />
         </div>
 
         {/* 控制区 */}

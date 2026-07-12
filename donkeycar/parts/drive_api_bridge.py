@@ -311,6 +311,8 @@ class DriveApiBridge:
         self.last_heartbeat = 0.0
         self.last_webrtc_stats = 0.0
         self.last_car_state = 0.0
+        self.last_telemetry = 0.0
+        self.telemetry_interval = 0.01  # 100Hz，与固件 $IMU 上行对齐
         self.last_num_records: int = 0
         self.active_webrtc_session_id = None
         self.webrtc_peer = None
@@ -684,10 +686,41 @@ class DriveApiBridge:
             "recording": recording if recording is not None else self.recording,
         })
 
+    def _maybe_send_telemetry(self, now, **fields):
+        """按 telemetry_interval 节流发送遥测；未连接或无字段时不发。
+
+        内部入参名（imu_gz 等）映射为消息字段名（gz 等），对齐固件 WebConsole。
+        """
+        if not self.connected:
+            return
+        if now - self.last_telemetry < self.telemetry_interval:
+            return
+        field_name_map = {
+            "imu_gz": "gz", "imu_gx": "gx", "imu_gy": "gy",
+            "imu_ax": "ax", "imu_ay": "ay", "imu_az": "az",
+            "steering": "steering", "throttle": "throttle",
+            "pilot_angle": "pilot_angle", "pilot_throttle": "pilot_throttle",
+        }
+        payload = {"type": "telemetry", "t": int(now * 1000)}
+        for arg_name, value in fields.items():
+            if value is None:
+                continue
+            msg_key = field_name_map.get(arg_name, arg_name)
+            payload[msg_key] = value
+        if len(payload) <= 2:
+            # 仅含 type/t，无任何遥测字段，不发
+            return
+        self.last_telemetry = now
+        self._send_json(payload)
+
     def update(self):
         return None
 
-    def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None):
+    def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None,
+                    imu_gz=None, imu_gx=None, imu_gy=None,
+                    imu_ax=None, imu_ay=None, imu_az=None,
+                    steering=None, throttle=None,
+                    pilot_angle=None, pilot_throttle=None):
         if img_arr is not None and self.video_transport == "webrtc":
             self.frame_buffer.update(img_arr)
             now = time.time()
@@ -723,6 +756,11 @@ class DriveApiBridge:
                 except Exception as e:
                     logger.debug(f"发送帧失败: {e}")
 
+        self._maybe_send_telemetry(now, imu_gz=imu_gz, imu_gx=imu_gx, imu_gy=imu_gy,
+                                   imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
+                                   steering=steering, throttle=throttle,
+                                   pilot_angle=pilot_angle, pilot_throttle=pilot_throttle)
+
         if mode is not None:
             self.mode = mode
         if self.mode_latch is not None:
@@ -741,8 +779,16 @@ class DriveApiBridge:
         self.reconnect_simulator = False
         return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect
 
-    def run(self, img_arr=None, num_records=0, mode=None, recording=None):
-        return self.run_threaded(img_arr, num_records, mode, recording)
+    def run(self, img_arr=None, num_records=0, mode=None, recording=None,
+            imu_gz=None, imu_gx=None, imu_gy=None,
+            imu_ax=None, imu_ay=None, imu_az=None,
+            steering=None, throttle=None,
+            pilot_angle=None, pilot_throttle=None):
+        return self.run_threaded(img_arr, num_records, mode, recording,
+                                 imu_gz=imu_gz, imu_gx=imu_gx, imu_gy=imu_gy,
+                                 imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
+                                 steering=steering, throttle=throttle,
+                                 pilot_angle=pilot_angle, pilot_throttle=pilot_throttle)
 
     def shutdown(self):
         self.running = False

@@ -538,6 +538,11 @@ async def drive_ws(
                     drive_state.apply_car_webrtc_stats(msg)
                     continue
 
+                # 车端遥测曲线数据，原样广播给所有客户端（车端已按 100Hz 节流）
+                if msg.get("type") == "telemetry":
+                    await drive_state.broadcast_to_clients(msg)
+                    continue
+
                 # 车端状态更新（录制条数、模式等）可能随任意消息携带，优先提取
                 state_changed = False
                 if msg.get("num_records") is not None:

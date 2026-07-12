@@ -707,6 +707,18 @@ class DriveMode:
                pilot_throttle * self.ai_throttle_mult if pilot_throttle else 0.0)
 
 
+class ScaleToArdPwm:
+    """将 donkeycar 标准值域 -1~1 的 steering/throttle 缩放到 ArdPWM 期望的 -100~100。
+
+    DriftReplayPart/KerasPilot 输出的是 donkeycar 标准 -1~1，而 ArdPWMSteering/
+    ArdPWMThrottle 的 LEFT_ANGLE/RIGHT_ANGLE/MAX_THROTTLE 为 -100~100，
+    因此需要在 DriveMode 之后、ArdPWM 之前补一层 ×100 缩放。
+    """
+
+    def run(self, steering: float, throttle: float) -> tuple[float, float]:
+        return steering * 100.0, throttle * 100.0
+
+
 class UserPilotCondition:
     def __init__(self, show_pilot_image:bool = False) -> None:
         """
@@ -1224,10 +1236,17 @@ def add_drivetrain(V, cfg):
                     zero_pulse=cfg.THROTTLE_STOPPED_PWM,
                     min_pulse=cfg.THROTTLE_REVERSE_PWM,
                     channel=cfg.THROTTLE_PWM_CHANNEL)
+
+            # donkeycar 标准值域为 -1~1，ArdPWM 期望 -100~100，补缩放层
+            V.add(ScaleToArdPwm(), inputs=['steering', 'throttle'],
+                  outputs=['steering_ard', 'throttle_ard'])
+
             #V.add(steering, inputs=['angle'])
             # V.add(steering, inputs=['angle'], outputs=['user/angle'])
-            V.add(steering, inputs=['user/mode','steering'], outputs=['user/mode','user/angle','user/throttle'], threaded=True)
-            V.add(throttle, inputs=['user/mode','throttle','user/throttle'], outputs=['user/throttle'])
+            # ArdPWMSteering 在 user 模式透传上游 steering_ard 还原后的 user/angle，
+            # 不再用串口 RC 怠速值覆盖，避免录制数据间歇性跳到 0。
+            V.add(steering, inputs=['user/mode','steering_ard'], outputs=['user/mode','user/angle'], threaded=True)
+            V.add(throttle, inputs=['user/mode','throttle_ard','user/throttle'], outputs=['user/throttle'])
             #V.add(throttle, inputs=['throttle'], threaded=True)
 
             # 当启用 IMU 时，从 ESP32 串口读取 IMU 数据（ArdImu 共享 arduino_controller 的串口连接）
