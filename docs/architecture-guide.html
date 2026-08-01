@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DonkeyDrift 代码架构科普 — 高中生也能看懂</title>
+<style>
+  :root {
+    --ink: #263238;
+    --muted: #607d8b;
+    --accent: #1565c0;
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --line: #e0e6ed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.8;
+  }
+  .page { max-width: 920px; margin: 0 auto; padding: 24px 20px 64px; }
+  header.site-header {
+    background: linear-gradient(135deg, #1565c0, #00838f);
+    color: #fff;
+    border-radius: 14px;
+    padding: 36px 32px;
+    margin-bottom: 24px;
+  }
+  header.site-header h1 { margin: 0 0 8px; font-size: 1.9rem; }
+  header.site-header p { margin: 0; opacity: .92; }
+  nav.toc {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 24px;
+    margin-bottom: 32px;
+  }
+  nav.toc strong { color: var(--accent); }
+  nav.toc ol { margin: 8px 0 0; padding-left: 22px; }
+  nav.toc a { color: var(--accent); text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+
+  .arch-section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-bottom: 32px;
+  }
+  .arch-section h2 {
+    margin-top: 0;
+    color: var(--accent);
+    border-bottom: 2px solid var(--line);
+    padding-bottom: 10px;
+  }
+  .arch-figure {
+    margin: 20px 0;
+    padding: 16px;
+    background: #fafcfe;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    text-align: center;
+  }
+  .arch-figure svg { max-width: 100%; height: auto; }
+  .arch-caption {
+    margin-top: 10px;
+    font-size: .88rem;
+    color: var(--muted);
+  }
+  .arch-note {
+    background: #fff8e1;
+    border-left: 4px solid #ffb300;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: .95rem;
+  }
+  .arch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+  }
+  .arch-card {
+    background: #f8fafd;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .arch-card h3, .arch-card h4 { margin-top: 0; }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: #eceff1;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: .88em;
+    color: #37474f;
+  }
+  footer.site-footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: .85rem;
+    margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+<header class="site-header">
+  <h1>DonkeyDrift 代码架构科普</h1>
+  <p>RC 漂移车的"大脑 + 驾校"是怎么组成的 —— 基于 donkeydrifter v0.1.2 源码，写给高中生的图解指南</p>
+</header>
+<nav class="toc">
+  <strong>目录</strong>
+  <ol>
+    <li><a href="#sec1">一页看懂 DonkeyDrift</a></li>
+    <li><a href="#sec2">Vehicle + Memory + Part：乐高式流水线</a></li>
+    <li><a href="#sec3">parts/ 部件大观园</a></li>
+    <li><a href="#sec4">从数据到 AI 司机：Tub v2 → pipeline → 模型</a></li>
+    <li><a href="#sec5">Web UI：浏览器里的驾驶舱</a></li>
+    <li><a href="#sec6">donkey CLI 与车辆模板</a></li>
+  </ol>
+</nav>
+<section id="sec1" class="arch-section">
+  <h2>第 1 章 · 一页看懂 DonkeyDrift</h2>
+
+  <p>
+    如果把一辆 RC 漂移车比作驾校里的学员，那么 DonkeyDrift 就是坐在副驾的<strong>教练 + 大脑</strong>：它是一段跑在车上（或连着车的电脑）的
+    Python 程序，负责<strong>看路</strong>（读相机画面）、<strong>记笔记</strong>（把每一次驾驶录成数据）、<strong>练本领</strong>（用数据训练
+    AI 模型）、<strong>下指令</strong>（算出转向和油门发给小车）。而真正握紧方向盘、踩下油门的"手"，是另一块叫 MUS4 的 ESP32 固件——它有自己
+    的配套科普页（<code>Firmware/MUS4_FW/docs/architecture-guide.html</code>）专门讲它。本章先用一张图看清整个系统谁管什么。
+  </p>
+
+  <figure class="arch-figure">
+    <svg viewBox="0 0 800 540" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DonkeyDrift 总体架构图">
+      <defs>
+        <marker id="arch-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 Z" fill="#546E7A"></path>
+        </marker>
+      </defs>
+
+      <!-- 标题 -->
+      <text x="400" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#37474F">一辆 RC 漂移车的「大脑 + 驾校」全貌</text>
+
+      <!-- 相机/传感器 -->
+      <rect x="20" y="180" width="130" height="90" rx="10" fill="#E3F2FD" stroke="#64B5F6" stroke-width="2"></rect>
+      <text x="85" y="215" text-anchor="middle" font-size="15" font-weight="bold" fill="#1565C0">相机 / 传感器</text>
+      <text x="85" y="240" text-anchor="middle" font-size="12" fill="#1565C0">眼睛：拍赛道画面</text>
+
+      <!-- 相机 → 上位机 -->
+      <line x1="150" y1="225" x2="186" y2="225" stroke="#546E7A" stroke-width="2" marker-end="url(#arch-arrow)"></line>
+      <text x="168" y="212" text-anchor="middle" font-size="12" fill="#546E7A">图像</text>
+
+      <!-- 上位机大框 -->
+      <rect x="190" y="80" width="260" height="300" rx="12" fill="#E8F5E9" stroke="#66BB6A" stroke-width="2.5"></rect>
+      <text x="320" y="110" text-anchor="middle" font-size="16" font-weight="bold" fill="#2E7D32">上位机 DonkeyDrift</text>
+      <text x="320" y="130" text-anchor="middle" font-size="12" fill="#2E7D32">Python 3.11 · 包名 donkeydrifter</text>
+
+      <!-- 三大职能 -->
+      <rect x="205" y="145" width="230" height="60" rx="8" fill="#FFF3E0" stroke="#FFB74D" stroke-width="1.5"></rect>
+      <text x="320" y="170" text-anchor="middle" font-size="14" font-weight="bold" fill="#E65100">① 数据录制（驾校记笔记）</text>
+      <text x="320" y="192" text-anchor="middle" font-size="12" fill="#E65100">画面 + 转向/油门 → Tub 数据集</text>
+
+      <rect x="205" y="218" width="230" height="60" rx="8" fill="#FFF3E0" stroke="#FFB74D" stroke-width="1.5"></rect>
+      <text x="320" y="243" text-anchor="middle" font-size="14" font-weight="bold" fill="#E65100">② AI 训练（课后刷题）</text>
+      <text x="320" y="265" text-anchor="middle" font-size="12" fill="#E65100">TensorFlow / PyTorch 学开车</text>
+
+      <rect x="205" y="291" width="230" height="60" rx="8" fill="#FFF3E0" stroke="#FFB74D" stroke-width="1.5"></rect>
+      <text x="320" y="316" text-anchor="middle" font-size="14" font-weight="bold" fill="#E65100">③ 驾驶控制（实时指挥）</text>
+      <text x="320" y="338" text-anchor="middle" font-size="12" fill="#E65100">主循环算出转向 / 油门</text>
+
+      <!-- 上位机 → 串口 → 固件 -->
+      <line x1="450" y1="225" x2="506" y2="225" stroke="#546E7A" stroke-width="2" marker-end="url(#arch-arrow)"></line>
+      <text x="478" y="200" text-anchor="middle" font-size="12" fill="#546E7A">串口</text>
+      <text x="478" y="248" text-anchor="middle" font-size="12" fill="#546E7A">下行:油门:转向</text>
+      <text x="478" y="266" text-anchor="middle" font-size="12" fill="#546E7A">上行:T/S·M:P·$IMU</text>
+
+      <!-- MUS4 固件 -->
+      <rect x="510" y="180" width="140" height="90" rx="10" fill="#F3E5F5" stroke="#BA68C8" stroke-width="2"></rect>
+      <text x="580" y="212" text-anchor="middle" font-size="15" font-weight="bold" fill="#6A1B9A">MUS4 固件</text>
+      <text x="580" y="234" text-anchor="middle" font-size="12" fill="#6A1B9A">ESP32 · 安全与实时</text>
+      <text x="580" y="252" text-anchor="middle" font-size="12" fill="#6A1B9A">Park / 限幅 / 300Hz PWM</text>
+
+      <!-- 固件 → 舵机电调 -->
+      <line x1="650" y1="225" x2="686" y2="225" stroke="#546E7A" stroke-width="2" marker-end="url(#arch-arrow)"></line>
+
+      <!-- 舵机/电调 -->
+      <rect x="690" y="180" width="95" height="90" rx="10" fill="#FFF8E1" stroke="#FFCA28" stroke-width="2"></rect>
+      <text x="737" y="215" text-anchor="middle" font-size="14" font-weight="bold" fill="#FF8F00">舵机 / 电调</text>
+      <text x="737" y="238" text-anchor="middle" font-size="12" fill="#FF8F00">车的「手」</text>
+
+      <!-- Web UI 侧路 -->
+      <rect x="90" y="445" width="150" height="60" rx="10" fill="#E1F5FE" stroke="#4FC3F7" stroke-width="2"></rect>
+      <text x="165" y="470" text-anchor="middle" font-size="14" font-weight="bold" fill="#0277BD">浏览器 Web UI</text>
+      <text x="165" y="492" text-anchor="middle" font-size="12" fill="#0277BD">驾驶 / 校准 / 训练面板</text>
+
+      <rect x="300" y="445" width="150" height="60" rx="10" fill="#E1F5FE" stroke="#4FC3F7" stroke-width="2"></rect>
+      <text x="375" y="470" text-anchor="middle" font-size="14" font-weight="bold" fill="#0277BD">FastAPI 后端</text>
+      <text x="375" y="492" text-anchor="middle" font-size="12" fill="#0277BD">/api/* 路由 · 端口 8000</text>
+
+      <!-- 浏览器 ↔ 后端 -->
+      <line x1="240" y1="475" x2="296" y2="475" stroke="#546E7A" stroke-width="2" marker-end="url(#arch-arrow)"></line>
+      <line x1="296" y1="485" x2="240" y2="485" stroke="#546E7A" stroke-width="2" marker-end="url(#arch-arrow)"></line>
+      <text x="270" y="466" text-anchor="middle" font-size="12" fill="#546E7A">HTTP / WebSocket</text>
+
+      <!-- 后端 ↔ 上位机 -->
+      <line x1="375" y1="445" x2="375" y2="386" stroke="#546E7A" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arch-arrow)"></line>
+      <text x="375" y="420" text-anchor="start" font-size="12" fill="#546E7A">指挥这一切</text>
+    </svg>
+    <figcaption class="arch-caption">
+      图 1-1：数据从相机流进上位机，驾驶指令经串口发给 MUS4 固件，浏览器则通过 FastAPI 后端总揽全局。
+    </figcaption>
+  </figure>
+
+  <p>
+    <strong>它为什么叫「大脑 + 驾校」？</strong>普通遥控车的大脑是你的手——遥控器直接连舵机。DonkeyDrift
+    在中间加了一层"会学习的教练"：你先手动开车，它把每一帧画面和你当时的转向、油门一起记进一个叫 <strong>Tub</strong>
+    的数据集（类似驾校的行车记录仪 + 教练笔记）；然后用这些数据训练一个 AI 模型，相当于让教练"刷题"总结你的开法；最后把模型装回车上，它就能自己看画面、自己打方向了。这条"录数据 → 训练 → 自动驾驶"的流水线，正是
+    DonkeyDrift 从 Donkeycar 继承来的看家本领（见 <code>README.md</code> 的 Quick Start）。
+  </p>
+
+  <p>
+    <strong>拆开大脑：传送带 + 共享白板。</strong>DonkeyDrift 的核心是一台叫 <code>Vehicle</code> 的"传送带"
+    （<code>donkeycar/vehicle.py:151</code> 的主循环，默认每秒转几十圈）。传送带上挂着一个个<strong>部件</strong>（Part）——相机部件、控制器部件、AI
+    推理部件、串口部件……每个部件像一块乐高积木，只管一件事：从一块"共享白板"上读出自己需要的输入，算完再把结果写回白板。这块白板叫
+    <code>Memory</code>（<code>donkeycar/memory.py:9</code>），就是一个键值字典，比如相机部件写入 <code>cam/image_array</code>，AI
+    部件读出它、写入 <code>pilot/angle</code>，驾驶模式部件再决定听人还是听 AI（<code>donkeycar/templates/complete.py:485</code> 的
+    <code>DriveMode</code>）。车辆模板 <code>donkeycar/templates/complete.py</code> 就是默认的"接线图"：从
+    <code>complete.py:88</code> 创建 Vehicle 开始，一路 <code>V.add(...)</code> 把几十块积木装好，最后
+    <code>complete.py:620</code> 启动主循环。
+  </p>
+
+  <p>
+    <strong>上位机与 MUS4 固件的分工：教练与手。</strong>为什么算出来的油门转向不直接发给电机？因为"聪明"和"快且可靠"很难兼得。于是系统把活儿劈成两半：
+  </p>
+
+  <div class="arch-grid">
+    <div class="arch-card">
+      <p><strong>上位机 DonkeyDrift：管「智能和体验」</strong></p>
+      <ul>
+        <li>看路：读相机、IMU 等传感器数据</li>
+        <li>学习：录制 Tub 数据、训练 TensorFlow / PyTorch 模型</li>
+        <li>决策：AI 推理出转向 / 油门（-100~100 的百分比值）</li>
+        <li>体验：提供浏览器驾驶界面、校准和训练面板</li>
+      </ul>
+    </div>
+    <div class="arch-card">
+      <p><strong>MUS4 固件（ESP32）：管「安全和实时」</strong></p>
+      <ul>
+        <li>执行：以 300Hz PWM 精确驱动舵机和电调</li>
+        <li>安全：Park 停车、PWM 限幅、失效保护，随时可接管</li>
+        <li>桥接：读取原车 RC 遥控器输入，人永远能抢回方向盘</li>
+        <li>上报：把车身状态持续回传给上位机</li>
+      </ul>
+    </div>
+  </div>
+
+  <p>
+    两半之间靠一根<strong>串口</strong>（USB/串口线）对话，说的"暗号"是几行短小文本帧：上位机下行的是 <code>油门:转向</code> 形式的 PWM
+    命令（<code>donkeycar/parts/actuator.py:1507</code> 写入串口）；固件上行的是遥测——<code>T&lt;t&gt;S&lt;s&gt;</code> 报告当前 RC
+    油门/转向、<code>M&lt;m&gt;:P&lt;p&gt;</code> 报告驾驶模式和 Park 状态、<code>$IMU,...</code> 报告惯性传感器读数
+    （解析逻辑见 <code>actuator.py:1285</code> 与 <code>actuator.py:1325</code>）。就算上位机的 Python 程序卡住了，固件也会立刻接管并把车停稳——这正是"安全交给固件"的意义。
+  </p>
+
+  <p>
+    <strong>浏览器是怎么进来的？</strong>你不用守着车敲命令。DonkeyDrift 自带一个 Web UI：后端是 FastAPI（默认端口 8000），把配置、Tub
+    数据、训练、驾驶等功能挂成 <code>/api/config</code>、<code>/api/tub</code>、<code>/api/trainer</code>、<code>/api/drive</code>
+    等路由（<code>web_ui/backend/main.py:40-46</code>）；前端是 React 页面。车上的主程序通过一个 <code>DriveApiBridge</code> 部件
+    （<code>complete.py:759</code>）连上后端的 WebSocket，于是你在浏览器里就能看车载画面、转方向盘、切 AI 模式、点"开始训练"——浏览器成了这套系统的遥控器加大屏幕。
+  </p>
+
+  <div class="arch-note">
+    <p>
+      <strong>一句话总结：</strong>MUS4 固件是忠实可靠的"手"，毫秒级执行、永远把安全放第一；DonkeyDrift 是会学习的"大脑"，管看路、记数据、练
+      AI；Web UI 则是你和大脑对话的窗口。后面的章节会分别深入这三块：先看清主循环和数据怎么流动，再看 AI 怎么训练出来，最后看固件如何守住安全底线。
+    </p>
+  </div>
+</section>
+<section id="sec2" class="arch-section">
+  <h2>第 2 章　Vehicle + Memory + Part：乐高式流水线</h2>
+
+  <p>
+    打开 DonkeyDrift 的上位机代码，你会发现整辆小车的"大脑"其实只有三个角色：<strong>Vehicle</strong> 是一条永不停歇的传送带，
+    每转一圈就依次请每个工人干一次活；<strong>Memory</strong> 是车间中央的一块共享白板，谁有了新数据就写上去，谁需要数据就去读；
+    <strong>Part</strong> 则是一块块乐高积木——相机、AI 飞行员、舵机驱动，各自只关心自己的一亩三分地。
+    神奇之处在于：积木之间从不直接说话，所有交流都通过白板上的"字符串键"完成，比如 <code>'cam/image_array'</code>（相机拍的最新一帧画面）、
+    <code>'user/steering'</code>（人打的方向）。这意味着你可以随时拔掉一块积木、换上另一块，只要它读写的键不变，整条流水线照常运转。
+  </p>
+
+  <figure class="arch-figure">
+    <svg viewBox="0 0 800 480" width="100%" role="img" aria-label="Vehicle 传送带、Memory 共享白板与五个 Part 积木的接线示意图">
+      <defs>
+        <marker id="sec2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#546E7A"/>
+        </marker>
+        <marker id="sec2-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#43A047"/>
+        </marker>
+      </defs>
+
+      <!-- 传送带 -->
+      <rect x="20" y="150" width="760" height="26" rx="13" fill="#E8F5E9" stroke="#66BB6A" stroke-width="2"/>
+      <circle cx="34" cy="163" r="9" fill="#C8E6C9" stroke="#66BB6A" stroke-width="2"/>
+      <circle cx="766" cy="163" r="9" fill="#C8E6C9" stroke="#66BB6A" stroke-width="2"/>
+      <line x1="60" y1="163" x2="735" y2="163" stroke="#43A047" stroke-width="2" stroke-dasharray="9 7" marker-end="url(#sec2-arrow-green)"/>
+      <text x="400" y="200" text-anchor="middle" font-size="13" fill="#2E7D32">Vehicle 主循环：每圈从左到右让每个 Part 干一次活（vehicle.py:151）</text>
+      <text x="400" y="220" text-anchor="middle" font-size="12" fill="#2E7D32">干完一圈若还有富余时间就睡到下一圈，节奏由 rate_hz 决定（vehicle.py:161）</text>
+
+      <!-- Part 积木 -->
+      <g font-size="13">
+        <rect x="25" y="60" width="130" height="80" rx="10" fill="#E3F2FD" stroke="#1E88E5" stroke-width="2"/>
+        <text x="90" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#0D47A1">相机</text>
+        <text x="90" y="108" text-anchor="middle" fill="#1565C0">PiCamera</text>
+        <text x="90" y="126" text-anchor="middle" font-size="12" fill="#1565C0">拍一帧画面</text>
+
+        <rect x="180" y="60" width="130" height="80" rx="10" fill="#E3F2FD" stroke="#1E88E5" stroke-width="2"/>
+        <text x="245" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#0D47A1">AI 飞行员</text>
+        <text x="245" y="108" text-anchor="middle" fill="#1565C0">KerasPilot</text>
+        <text x="245" y="126" text-anchor="middle" font-size="12" fill="#1565C0">看图算方向油门</text>
+
+        <rect x="335" y="60" width="130" height="80" rx="10" fill="#E3F2FD" stroke="#1E88E5" stroke-width="2"/>
+        <text x="400" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#0D47A1">模式切换</text>
+        <text x="400" y="108" text-anchor="middle" fill="#1565C0">DriveMode</text>
+        <text x="400" y="126" text-anchor="middle" font-size="12" fill="#1565C0">听人还是听 AI</text>
+
+        <rect x="490" y="60" width="130" height="80" rx="10" fill="#E3F2FD" stroke="#1E88E5" stroke-width="2"/>
+        <text x="555" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#0D47A1">执行器</text>
+        <text x="555" y="108" text-anchor="middle" fill="#1565C0">ArdPWM</text>
+        <text x="555" y="126" text-anchor="middle" font-size="12" fill="#1565C0">驱动舵机/电调</text>
+
+        <rect x="645" y="60" width="130" height="80" rx="10" fill="#E3F2FD" stroke="#1E88E5" stroke-width="2"/>
+        <text x="710" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#0D47A1">记录员</text>
+        <text x="710" y="108" text-anchor="middle" fill="#1565C0">TubWriter</text>
+        <text x="710" y="126" text-anchor="middle" font-size="12" fill="#1565C0">存训练数据</text>
+      </g>
+
+      <!-- 积木到白板的连线（双向） -->
+      <g stroke="#546E7A" stroke-width="1.8" marker-start="url(#sec2-arrow)" marker-end="url(#sec2-arrow)">
+        <line x1="90" y1="140" x2="90" y2="308"/>
+        <line x1="245" y1="140" x2="245" y2="308"/>
+        <line x1="400" y1="140" x2="400" y2="308"/>
+        <line x1="555" y1="140" x2="555" y2="308"/>
+        <line x1="710" y1="140" x2="710" y2="308"/>
+      </g>
+      <g font-size="12" fill="#37474F">
+        <text x="98" y="240">写 'cam/image_array'</text>
+        <text x="253" y="230">读画面</text>
+        <text x="253" y="248">写 'pilot/angle'</text>
+        <text x="408" y="230">读 user/pilot 两路</text>
+        <text x="408" y="248">写 'steering' 'throttle'</text>
+        <text x="563" y="240">读 'steering' 'throttle'</text>
+        <text x="672" y="230">读图像+操控</text>
+        <text x="672" y="248">写 'tub/num_records'</text>
+      </g>
+
+      <!-- Memory 共享白板 -->
+      <rect x="60" y="310" width="680" height="130" rx="12" fill="#FFF3E0" stroke="#FB8C00" stroke-width="2.5"/>
+      <text x="400" y="338" text-anchor="middle" font-size="16" font-weight="bold" fill="#E65100">Memory 共享白板（memory.py）</text>
+      <g font-size="13" fill="#4E342E">
+        <text x="100" y="366">'cam/image_array' ＝ 最新一帧画面</text>
+        <text x="100" y="390">'pilot/angle' 'pilot/throttle' ＝ AI 的决定</text>
+        <text x="430" y="366">'steering' 'throttle' ＝ 最终指令</text>
+        <text x="430" y="390">'user/mode' ＝ 现在谁开车</text>
+        <text x="100" y="418">'tub/num_records' ＝ 已录多少条数据</text>
+        <text x="430" y="418">… 键名都是普通字符串，随用随取</text>
+      </g>
+
+      <text x="400" y="466" text-anchor="middle" font-size="13" fill="#546E7A">积木互不相识，只认白板上的字符串键——就像乐高只靠凸点连接</text>
+    </svg>
+    <figcaption class="arch-caption">
+      图 2-1　一条传送带（Vehicle）串起五块真实的 Part 积木，所有数据都经过中间的 Memory 白板交换。
+    </figcaption>
+  </figure>
+
+  <div class="arch-grid">
+    <div class="arch-card">
+      <h3>Vehicle：传送带</h3>
+      <p>
+        <code>start(rate_hz=20)</code> 一调用，传送带就开动了：先唤醒所有"住"在独立线程里的部件
+        （<code>vehicle.py:141</code>），然后进入 <code>while self.on</code> 无限循环（<code>vehicle.py:151</code>）。
+        每一圈，<code>update_parts()</code>（<code>vehicle.py:186</code>）按添加顺序遍历所有积木：从白板读出它的 inputs、
+        调用它的 <code>run()</code>、把返回值写回白板（<code>vehicle.py:204</code> / <code>vehicle.py:213</code>）。
+        一圈干完还有剩时间就小睡一会儿，保证每秒刚好转 rate_hz 圈。
+      </p>
+    </div>
+    <div class="arch-card">
+      <h3>Memory：共享白板</h3>
+      <p>
+        Memory 朴素得令人意外——它就是对 Python 字典的一层薄包装（<code>memory.py:9</code>）。
+        <code>put(keys, values)</code> 把数据写上白板（<code>memory.py:35</code>），<code>get(keys)</code> 按键读回来
+        （<code>memory.py:49</code>），找不到就返回 <code>None</code>。没有锁、没有队列、没有消息协议，
+        因为每圈里同一时刻只有一个零件在读写，简单反而可靠。
+      </p>
+    </div>
+    <div class="arch-card">
+      <h3>Part：鸭子类型积木</h3>
+      <p>
+        想当一块积木不需要继承任何基类——"鸭子类型"的意思是：只要它走起来像鸭子，它就是鸭子。
+        实现 <code>run()</code> 就能上车；想常驻后台就实现 <code>update()</code> 并以
+        <code>threaded=True</code> 注册，Vehicle 会为它单独开线程（<code>vehicle.py:102</code>），
+        之后每圈改调 <code>run_threaded()</code>；停车时若实现了 <code>shutdown()</code> 还会被温柔地收尾
+        （<code>vehicle.py:221</code>）。<code>Vehicle.add(part, inputs=[...], outputs=[...])</code>
+        （<code>vehicle.py:72</code>）就是那把"接线枪"。
+      </p>
+    </div>
+  </div>
+
+  <p>
+    这套接线在真实车辆模板里长什么样？打开 <code>donkeycar/templates/complete.py</code>：相机被注册为线程部件，
+    每圈把最新画面写上 <code>'cam/image_array'</code>（<code>complete.py:962</code>）；AI 飞行员以图像为输入、
+    输出 <code>'pilot/angle'</code> 和 <code>'pilot/throttle'</code>，并且带着 <code>run_condition='run_pilot'</code> —
+    只有白板上这个开关为真时才干活（<code>complete.py:426</code>）；接着 DriveMode 像驾校教练一样在"人的指令"和
+    "AI 的指令"之间二选一，写下最终的 <code>'steering'</code> 和 <code>'throttle'</code>（<code>complete.py:485</code>）；
+    最后 TubWriter 把画面和操控记录存盘，供日后训练（<code>complete.py:578</code>）。整张"电路图"全是
+    <code>V.add(...)</code> 一行行声明出来的，没有一处部件之间直接调用。
+  </p>
+
+  <p>
+    为什么老司机们钟爱这种设计？因为<strong>改车就像换积木</strong>。想把真实相机换成模拟器？换一个输出同样叫
+    <code>'cam/image_array'</code> 的部件即可，下游的 AI 飞行员毫无察觉。想在 AI 和电机之间插一个"看到停车标志就刹车"
+    的零件？模板里现成的 StopSignDetector 读 <code>'pilot/throttle'</code>、改写后再写回同名键
+    （<code>complete.py:458</code>），像乐高一样插在中间就行。甚至打印一个按钮事件也是一块积木——Lambda 部件配上
+    <code>run_condition</code>，按钮按下那一圈才执行（<code>complete.py:161</code>）。
+  </p>
+
+  <div class="arch-note">
+    <strong>小思考：</strong>Memory 白板上后写的数据会覆盖先写的，这正好符合"开车只关心最新一帧"的直觉；
+    但也意味着两个部件不能同时往同一个键上写不同意思的数据——所以模板里才有 DriveMode 这样的"仲裁员"，
+    统一决定最终指令，而不是让人和 AI 抢方向盘。
+  </div>
+</section>
+<section id="sec3" class="arch-section">
+  <h2>第 3 章 · parts/ 部件大观园：一盒 60+ 块的乐高</h2>
+
+  <p>打开 <code>donkeycar/parts/</code> 目录，你会看到 60 多个 Python 文件——这就是 DonkeyDrift 的「零件盒」。上一章说过，整辆车由 <code>Vehicle</code> 传送带和 <code>Memory</code> 共享白板驱动；而零件盒里的每一块积木（叫「部件」，Part）都只干一件小事：摄像头只负责拍照，舵机只负责转角度，记事本只负责把数据写进硬盘。它们长得五花八门，但接口完全一致——声明「我要读白板上的哪几个格子」和「我会往哪几个格子写东西」，然后用 <code>V.add(部件, inputs=[...], outputs=[...])</code> 往传送带上一卡（<code>templates/complete.py:150</code>），就开始工作了。需要哪块拿哪块，不需要的就留在盒子里，这就是「按需取用、即插即用」的乐高哲学。</p>
+
+  <figure class="arch-figure">
+    <svg viewBox="0 0 800 560" width="100%" role="img" aria-label="parts 部件分类地图">
+      <defs>
+        <marker id="arch-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 Z" fill="#78909C"/>
+        </marker>
+      </defs>
+
+      <!-- 左列：数据生产者 -->
+      <rect x="20" y="30" rx="12" ry="12" width="220" height="140" fill="#E3F2FD" stroke="#64B5F6" stroke-width="1.5"/>
+      <text x="130" y="56" font-size="15" font-weight="bold" fill="#1565C0" text-anchor="middle">👁 眼睛 · 看世界</text>
+      <text x="36" y="84" font-size="12.5" fill="#37474F">camera.py（USB/CSI 相机）</text>
+      <text x="36" y="106" font-size="12.5" fill="#37474F">realsense2.py · oak_d.py</text>
+      <text x="36" y="128" font-size="12.5" fill="#37474F">lidar.py（激光雷达）</text>
+      <text x="36" y="150" font-size="12.5" fill="#90A4AE">→ 往白板写 cam/image</text>
+
+      <rect x="20" y="215" rx="12" ry="12" width="220" height="140" fill="#E0F7FA" stroke="#4DD0E1" stroke-width="1.5"/>
+      <text x="130" y="241" font-size="15" font-weight="bold" fill="#00838F" text-anchor="middle">🧭 仪表 · 感知自己</text>
+      <text x="36" y="269" font-size="12.5" fill="#37474F">imu.py（陀螺仪/加速度）</text>
+      <text x="36" y="291" font-size="12.5" fill="#37474F">encoder.py（轮子转速）</text>
+      <text x="36" y="313" font-size="12.5" fill="#37474F">gps.py · odometer.py</text>
+      <text x="36" y="335" font-size="12.5" fill="#90A4AE">→ 往白板写 imu/* 车速</text>
+
+      <rect x="20" y="400" rx="12" ry="12" width="220" height="140" fill="#FFFDE7" stroke="#FFD54F" stroke-width="1.5"/>
+      <text x="130" y="426" font-size="15" font-weight="bold" fill="#F9A825" text-anchor="middle">📡 对讲机 · 对外通信</text>
+      <text x="36" y="454" font-size="12.5" fill="#37474F">serial_port.py（串口）</text>
+      <text x="36" y="476" font-size="12.5" fill="#37474F">network.py（ZMQ/MQTT）</text>
+      <text x="36" y="498" font-size="12.5" fill="#37474F">telemetry.py · auth_part.py</text>
+      <text x="36" y="520" font-size="12.5" fill="#90A4AE">↔ 和白板双向交换数据</text>
+
+      <!-- 中央传送带 -->
+      <rect x="290" y="235" rx="14" ry="14" width="220" height="100" fill="#ECEFF1" stroke="#78909C" stroke-width="2"/>
+      <circle cx="315" cy="285" r="10" fill="#FFFFFF" stroke="#78909C" stroke-width="1.5"/>
+      <circle cx="355" cy="285" r="10" fill="#FFFFFF" stroke="#78909C" stroke-width="1.5"/>
+      <circle cx="395" cy="285" r="10" fill="#FFFFFF" stroke="#78909C" stroke-width="1.5"/>
+      <circle cx="435" cy="285" r="10" fill="#FFFFFF" stroke="#78909C" stroke-width="1.5"/>
+      <circle cx="475" cy="285" r="10" fill="#FFFFFF" stroke="#78909C" stroke-width="1.5"/>
+      <text x="400" y="262" font-size="15" font-weight="bold" fill="#455A64" text-anchor="middle">Vehicle 传送带</text>
+      <text x="400" y="322" font-size="12.5" fill="#546E7A" text-anchor="middle">Memory 共享白板：键值格</text>
+
+      <!-- 右列：数据消费者 -->
+      <rect x="560" y="30" rx="12" ry="12" width="220" height="140" fill="#E8F5E9" stroke="#81C784" stroke-width="1.5"/>
+      <text x="670" y="56" font-size="15" font-weight="bold" fill="#2E7D32" text-anchor="middle">🧠 大脑 · 做决策</text>
+      <text x="576" y="84" font-size="12.5" fill="#37474F">keras.py（KerasPilot 家族）</text>
+      <text x="576" y="106" font-size="12.5" fill="#37474F">pytorch/ · fastai.py</text>
+      <text x="576" y="128" font-size="12.5" fill="#37474F">interpreter.py（推理引擎）</text>
+      <text x="576" y="150" font-size="12.5" fill="#90A4AE">读图像 → 写转向/油门</text>
+
+      <rect x="560" y="215" rx="12" ry="12" width="220" height="140" fill="#F3E5F5" stroke="#BA68C8" stroke-width="1.5"/>
+      <text x="670" y="241" font-size="15" font-weight="bold" fill="#6A1B9A" text-anchor="middle">📼 记事本 · 录数据</text>
+      <text x="576" y="269" font-size="12.5" fill="#37474F">datastore.py（经典 Tub）</text>
+      <text x="576" y="291" font-size="12.5" fill="#37474F">datastore_v2.py（Manifest）</text>
+      <text x="576" y="313" font-size="12.5" fill="#37474F">tub_v2.py（Tub/TubWriter）</text>
+      <text x="576" y="335" font-size="12.5" fill="#90A4AE">读白板 → 落盘训练数据</text>
+
+      <rect x="560" y="400" rx="12" ry="12" width="220" height="140" fill="#FFF3E0" stroke="#FFB74D" stroke-width="1.5"/>
+      <text x="670" y="426" font-size="15" font-weight="bold" fill="#E65100" text-anchor="middle">🦾 手脚 · 执行动作</text>
+      <text x="576" y="454" font-size="12.5" fill="#37474F">actuator.py（舵机/电调）</text>
+      <text x="576" y="476" font-size="12.5" fill="#37474F">pins.py（GPIO/PWM 引脚）</text>
+      <text x="576" y="498" font-size="12.5" fill="#37474F">PWMSteering · PWMThrottle</text>
+      <text x="576" y="520" font-size="12.5" fill="#90A4AE">读白板 → 驱动真实电机</text>
+
+      <!-- 箭头：左列 → 传送带 -->
+      <line x1="240" y1="100" x2="300" y2="240" stroke="#78909C" stroke-width="1.5" marker-end="url(#arch-arrow)"/>
+      <line x1="240" y1="285" x2="285" y2="285" stroke="#78909C" stroke-width="1.5" marker-end="url(#arch-arrow)"/>
+      <line x1="240" y1="470" x2="300" y2="330" stroke="#78909C" stroke-width="1.5" marker-end="url(#arch-arrow)"/>
+      <!-- 箭头：传送带 → 右列 -->
+      <line x1="500" y1="240" x2="560" y2="100" stroke="#78909C" stroke-width="1.5" marker-end="url(#arch-arrow)"/>
+      <line x1="515" y1="285" x2="555" y2="285" stroke="#78909C" stroke-width="1.5" marker-end="url(#arch-arrow)"/>
+      <line x1="500" y1="330" x2="560" y2="470" stroke="#78909C" stroke-width="1.5" marker-end="url(#arch-arrow)"/>
+    </svg>
+    <figcaption class="arch-caption">部件分类地图：左边三类把数据「放上」白板，右边三类从白板「取走」数据干活，中间的 Vehicle 传送带负责循环搬运。</figcaption>
+  </figure>
+
+  <p>按职能可以把这盒积木分成六堆，每堆选一个代表认识一下：</p>
+  <ul>
+    <li><strong>眼睛</strong>：<code>camera.py</code> 里住着一排相机——树莓派相机的 <code>PiCamera</code>（<code>camera.py:23</code>）、普通 USB 摄像头的 <code>Webcam</code>（<code>camera.py:85</code>），甚至还有一块「假相机」<code>MockCamera</code>（<code>camera.py:333</code>），专门在没有真相机时生成测试图片。想要深度视觉或环视，还有 <code>realsense2.py</code>、<code>oak_d.py</code> 和激光雷达 <code>lidar.py</code> 可选。</li>
+    <li><strong>手脚</strong>：<code>actuator.py</code> 是执行机构大本营，<code>PWMSteering</code>（<code>actuator.py:284</code>）和 <code>PWMThrottle</code>（<code>actuator.py:333</code>）把白板上「转向 0.3、油门 0.2」这样的数字翻译成舵机和电调听得懂的 PWM 脉冲；更底层的引脚操作则抽象在 <code>pins.py</code>（如 <code>pins.py:563</code> 的 PCA9685 驱动）里。</li>
+    <li><strong>大脑</strong>：<code>keras.py</code> 里整个 <code>KerasPilot</code> 家族（<code>keras.py:45</code>）都是「驾校学成归来」的神经网络驾驶员，PyTorch 党去 <code>pytorch/</code>（如 <code>pytorch/ResNet18.py:29</code>），fastai 党用 <code>fastai.py</code> 的 <code>FastAiPilot</code>（<code>fastai.py:40</code>）。三派统一由 <code>interpreter.py</code> 的 <code>Interpreter</code>（<code>interpreter.py:76</code>）封装推理，还支持 TfLite（<code>interpreter.py:250</code>）和 TensorRT（<code>interpreter.py:299</code>）加速——换个框架，传送带上的接口纹丝不动。</li>
+    <li><strong>记事本</strong>：你开车时它默默把「看到什么 + 怎么打的方向」一对对记下来，这就是训练数据的来源。老版 <code>datastore.py</code> 的 <code>Tub</code>（<code>datastore.py:22</code>）已升级为 v2：<code>datastore_v2.py</code> 用 <code>Manifest</code>（<code>datastore_v2.py:220</code>）做可追加、可断点续写的数据清单，运行时实际挂上车的是 <code>tub_v2.py</code> 的 <code>TubWriter</code>（<code>tub_v2.py:119</code>）。</li>
+    <li><strong>对讲机</strong>：<code>serial_port.py</code> 的 <code>SerialPort</code>（<code>serial_port.py:13</code>）负责和 MUS4 固件那头的 ESP32 聊串口；<code>network.py</code> 提供 ZMQ（<code>network.py:6</code>）、UDP、TCP、MQTT（<code>network.py:305</code>）一整套网络收发；<code>telemetry.py</code> 的 <code>MqttTelemetry</code>（<code>telemetry.py:24</code>）把车辆状态广播出去；<code>auth_part.py</code> 的 <code>AuthPart</code>（<code>auth_part.py:41</code>）则是身份识别门卫，确认「你是我家固件」才放行。</li>
+    <li><strong>仪表</strong>：<code>imu.py</code> 的 <code>IMU</code>（<code>imu.py:9</code>）报姿态和加速度，<code>encoder.py</code> 的 <code>ArduinoEncoder</code>（<code>encoder.py:25</code>）数轮子转了几圈，<code>gps.py</code> 报经纬度，<code>odometer.py</code> 的 <code>Odometer</code>（<code>odometer.py:7</code>）算里程——漂移车要知道自己「跑多快、往哪倾」，全靠它们。</li>
+  </ul>
+
+  <p>为什么说像乐高？因为部件之间<strong>从不直接互相认识</strong>。相机不知道舵机的存在，神经网络也不关心图片是相机拍的还是 MockCamera 画的——它们只认白板上的格子名（比如 <code>cam/image</code>、<code>angle</code>、<code>throttle</code>）。这种「只认格子不认人」的设计（鸭子类型：会跑就行，不管你是谁）带来两个超能力：一是<strong>随便替换</strong>，把 PiCamera 拔了换 Webcam，下游部件毫无察觉；二是<strong>容易测试</strong>，用 Mock 部件就能在没有硬件的笔记本上把整辆车的数据流跑起来。</p>
+
+  <p>「按需取用」则体现在车辆模板里：启动脚本并不是把 60 个部件全挂上，而是按配置挑着装——<code>templates/complete.py</code> 里 <code>add_camera(V, cfg, camera_type)</code>（<code>templates/complete.py:116</code>）会根据你的 <code>cfg</code> 配置决定实例化哪一种相机（<code>templates/complete.py:877</code> 起的一串分支）。装激光雷达？改一行配置，模板就把 <code>lidar</code> 部件挂上传送带（<code>templates/complete.py:125</code>）。不装？它连内存都不占。零件盒满满当当，但真正上车的只有你需要的那几块。</p>
+
+  <div class="arch-note">
+    <strong>小思考：</strong>零件盒里还有 <code>fps.py</code>（帧率统计）、<code>led_status.py</code>（状态灯）、<code>voice_control/</code>（语音控制）这类「非必需但好用」的配件。下次看 <code>parts/</code> 目录时，不妨猜一猜每个文件属于上面哪一堆——猜对了，你就已经读懂这套架构了。
+  </div>
+</section>
+<section id="sec4" class="arch-section">
+  <h2>第 4 章 从数据到 AI 司机：Tub v2 → pipeline → 模型</h2>
+
+  <p>前面几章里，车会跑、会看、会听话，但它还不会"自己开"。这一章讲的就是 DonkeyDrift 怎么把一个人的驾驶技术"教"给 AI。整个过程和驾校学员跟教练学车一模一样：学员先坐在副驾驶<strong>看教练怎么开</strong>（录数据），然后自己<strong>反复练习</strong>（训练），最后<strong>考下驾照独立上路</strong>（模型上车推理）。更妙的是，AI 上路后还能继续录数据、继续练，越开越聪明——这就是本章的环形闭环。</p>
+
+  <figure class="arch-figure">
+    <svg viewBox="0 0 800 420" width="100%" role="img" aria-label="从数据到 AI 司机的闭环示意图">
+      <defs>
+        <marker id="sec4-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,5 L0,10 z" fill="#607D8B"/>
+        </marker>
+      </defs>
+
+      <!-- 环形箭头 -->
+      <path d="M463.4,74.1 A150,150 0 0 1 509.7,107.7" fill="none" stroke="#90A4AE" stroke-width="3" marker-end="url(#sec4-arrow)"/>
+      <path d="M548.9,228.3 A150,150 0 0 1 531.2,282.7" fill="none" stroke="#90A4AE" stroke-width="3" marker-end="url(#sec4-arrow)"/>
+      <path d="M428.6,357.3 A150,150 0 0 1 371.4,357.3" fill="none" stroke="#90A4AE" stroke-width="3" marker-end="url(#sec4-arrow)"/>
+      <path d="M268.8,282.7 A150,150 0 0 1 251.1,228.3" fill="none" stroke="#90A4AE" stroke-width="3" marker-end="url(#sec4-arrow)"/>
+      <path d="M290.3,107.7 A150,150 0 0 1 336.6,74.1" fill="none" stroke="#90A4AE" stroke-width="3" marker-end="url(#sec4-arrow)"/>
+
+      <!-- 中心文字 -->
+      <text x="400" y="205" text-anchor="middle" font-size="20" font-weight="bold" fill="#455A64">数据飞轮</text>
+      <text x="400" y="230" text-anchor="middle" font-size="13" fill="#78909C">开得越多，AI 越聪明</text>
+
+      <!-- 节点 1：人开车 -->
+      <rect x="325" y="30" width="150" height="60" rx="12" fill="#E3F2FD" stroke="#64B5F6" stroke-width="2"/>
+      <text x="400" y="55" text-anchor="middle" font-size="15" font-weight="bold" fill="#1565C0">① 人来开车</text>
+      <text x="400" y="76" text-anchor="middle" font-size="12" fill="#1E88E5">遥控器示范驾驶</text>
+
+      <!-- 节点 2：录数据 -->
+      <rect x="468" y="134" width="150" height="60" rx="12" fill="#E8F5E9" stroke="#81C784" stroke-width="2"/>
+      <text x="543" y="159" text-anchor="middle" font-size="15" font-weight="bold" fill="#2E7D32">② 录数据</text>
+      <text x="543" y="180" text-anchor="middle" font-size="12" fill="#43A047">tub_v2.py 写 Tub v2</text>
+
+      <!-- 节点 3：训练 -->
+      <rect x="413" y="301" width="150" height="60" rx="12" fill="#FFF3E0" stroke="#FFB74D" stroke-width="2"/>
+      <text x="488" y="326" text-anchor="middle" font-size="15" font-weight="bold" fill="#E65100">③ 训练</text>
+      <text x="488" y="347" text-anchor="middle" font-size="12" fill="#F57C00">pipeline/training.py</text>
+
+      <!-- 节点 4：模型 -->
+      <rect x="237" y="301" width="150" height="60" rx="12" fill="#F3E5F5" stroke="#BA68C8" stroke-width="2"/>
+      <text x="312" y="326" text-anchor="middle" font-size="15" font-weight="bold" fill="#6A1B9A">④ 模型文件</text>
+      <text x="312" y="347" text-anchor="middle" font-size="12" fill="#8E24AA">pilot_*.h5 / .tflite</text>
+
+      <!-- 节点 5：AI 开车 -->
+      <rect x="182" y="134" width="150" height="60" rx="12" fill="#FFFDE7" stroke="#FDD835" stroke-width="2"/>
+      <text x="257" y="159" text-anchor="middle" font-size="15" font-weight="bold" fill="#F57F17">⑤ AI 开车</text>
+      <text x="257" y="180" text-anchor="middle" font-size="12" fill="#F9A825">KerasPilot 实时推理</text>
+    </svg>
+    <figcaption class="arch-caption">图：数据飞轮闭环——人示范开车 → 录进 Tub v2 → pipeline 训练出模型 → 模型上车自己开 → 继续录数据</figcaption>
+  </figure>
+
+  <p><strong>第一步：看教练怎么开（录数据）。</strong>你拿着遥控器开车时，车上的 <code>TubWriter</code> 部件（<code>donkeycar/parts/tub_v2.py:119</code>）就像一台"行车记录仪 + 动作捕捉器"：主循环每转一圈，它就把当前相机画面和这一刻你打的方向、油门数值打包成一条记录（record），写进名叫 <strong>Tub v2</strong> 的数据集。图片存成 jpg 文件，数值和时间戳写进清单（manifest），见 <code>tub_v2.py:38-82</code> 的 <code>write_record()</code>。开上十几分钟，就攒下几千条"画面 → 操作"的对照样本——相当于学员脑子里记下的"看到这种弯道，教练是这样打方向的"。</p>
+
+  <p><strong>第二步：反复练习（训练）。</strong>录够了数据，在电脑上运行 <code>donkey train --tub ./data --model ./models/mypilot.h5</code> 命令（子命令定义在 <code>donkeycar/management/base.py:547</code>），它会把活儿交给 <code>donkeycar/pipeline/training.py</code> 的 <code>train()</code> 函数（<code>training.py:111</code>）。这个"总教练"做三件事：先用 <code>TubDataset</code> 把记录全读出来，按 <code>train_test_split</code> 分成"练习题"和"模拟考卷"两份（<code>training.py:134-138</code>）；再用 <code>BatchSequence</code> 把数据一条一条喂给神经网络（<code>training.py:33</code>）；喂之前还会经过 <code>ImageAugmentation</code> 做<strong>数据增强</strong>（<code>training.py:49</code>，实现在 <code>pipeline/augmentations.py:14</code>）——随机调亮度、加模糊，好比教练故意带你在阴天、黄昏练车，防止你只会在大晴天开。底层用的是 TensorFlow（Keras），也支持 PyTorch 框架（<code>base.py:581-588</code>）。</p>
+
+  <p><strong>第三步：拿到驾照（产出模型）。</strong>训练结束后会得到一个模型文件，比如 <code>pilot_25-01-01_0.h5</code>——这就是 AI 的"驾照"，里面存着它学到的全部驾驶经验。系统还会顺手把它转换成更轻量的 <code>.tflite</code> 格式，方便在小算力的车机上跑（<code>training.py:200-202</code>）。同时，<code>PilotDatabase</code>（<code>donkeycar/pipeline/database.py:17</code>）扮演"车管所档案管理员"，把这次训练用了哪些数据、最终误差（loss）多大、什么时间练的，都登记进 <code>database.json</code>，训练误差曲线还会单独存一份 <code>_meta.json</code> 给 Web UI 画图（<code>training.py:178-192</code>）。</p>
+
+  <p><strong>第四步：AI 上路（模型推理）。</strong>把模型文件交给车，车辆模板里的代码会用 <code>get_model_by_type</code> 造出一个 <code>KerasPilot</code> 部件并加载模型（<code>donkeycar/templates/complete.py:319</code>、<code>complete.py:288</code>）。所谓<strong>推理</strong>（inference），就是模型不再学习，只做"看图 → 给答案"：主循环每拍到一帧画面，它就输出一个转向值和一个油门值，像一位不知疲倦的司机。关键设计是：<code>TubWriter</code> 此刻仍在工作——AI 开车时你随时可以接管纠正，这些"纠错示范"又被录成新数据，喂回第二步继续训练。飞轮转起来，这就是闭环的精髓。</p>
+
+  <div class="arch-grid">
+    <div class="arch-card">
+      <h3>training.py：总教练</h3>
+      <p>编排整个训练流程：读数据、分考卷、启动训练、保存模型并登记档案（<code>pipeline/training.py:111</code>）。</p>
+    </div>
+    <div class="arch-card">
+      <h3>sequence.py：传送带</h3>
+      <p><code>TubSequence</code> / <code>TfmIterator</code> 把一条条记录变成"画面 x + 操作 y"的对子，源源不断地送上传送带（<code>pipeline/sequence.py:134</code>）。</p>
+    </div>
+    <div class="arch-card">
+      <h3>augmentations.py：化妆师</h3>
+      <p>给训练图片随机调亮度、加模糊，让 AI 见多识广，不挑天气（<code>pipeline/augmentations.py:29-40</code>）。</p>
+    </div>
+    <div class="arch-card">
+      <h3>database.py：档案管理员</h3>
+      <p>给每个模型编号起名（<code>pilot_日期_序号</code>），记录训练履历到 <code>database.json</code>（<code>pipeline/database.py:37-50</code>）。</p>
+    </div>
+  </div>
+
+  <div class="arch-note">
+    <p><strong>动手入口：</strong>除了 <code>donkey train</code> 命令，车辆目录里还有一份现成的训练脚本模板 <code>donkeycar/templates/train.py</code>（由 <code>donkey createcar</code> 复制生成，见 <code>management/base.py:107-131</code>）。它会在启动时先配置好 GPU 显存上限和混合精度加速（<code>templates/train.py:22-60</code>），用法同样是 <code>train.py --tubs data/ --model models/mypilot.h5</code>。另外还有个贴心部件 <code>TubWiper</code>（<code>tub_v2.py:144</code>）：录数据时如果刚开撞了，按一下就能删掉最后 N 条"翻车录像"，免得 AI 把错误示范也学进去。</p>
+  </div>
+</section>
+<section id="sec5" class="arch-section">
+  <h2>第 5 章　Web UI：浏览器里的驾驶舱</h2>
+
+  <p>前面的章节告诉我们：车会自己跑、数据会录下来、模型能训练出来。但总不能每次都敲命令行吧？DonkeyDrift 的答案是 <code>web_ui/</code>——把整个自动驾驶工作流搬进浏览器。你打开一个网页，就能看车载摄像头的实时画面、拖方向盘开车、删掉录得不好的数据、点一下按钮开始训练。它就像一个网页版驾驶舱：仪表盘、方向盘、监控屏，全在浏览器标签页里。</p>
+
+  <p>这套系统采用经典的<b>前后端分离</b>架构：浏览器里的<b>前端</b>负责"长得好看、点得顺手"，电脑上的<b>后端</b>负责"真的干活"——读数据文件、跑训练、连车。两者之间用 HTTP 请求（像寄信：一问一答）和 WebSocket（像打电话：接通后随时互说）两种通道通信。</p>
+
+  <figure class="arch-figure">
+    <svg viewBox="0 0 800 460" width="100%">
+      <defs>
+        <marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#607D8B"/>
+        </marker>
+      </defs>
+
+      <!-- 第一层：浏览器 / 前端 -->
+      <rect x="60" y="20" width="680" height="120" rx="12" fill="#E3F2FD" stroke="#64B5F6" stroke-width="2"/>
+      <text x="400" y="45" text-anchor="middle" font-size="16" font-weight="bold" fill="#1565C0">浏览器（前端：React 18 + TypeScript + Vite）</text>
+      <rect x="90" y="60" width="150" height="60" rx="8" fill="#FFFFFF" stroke="#90CAF9"/>
+      <text x="165" y="85" text-anchor="middle" font-size="13" fill="#1565C0">驾驶页 DrivePage</text>
+      <text x="165" y="105" text-anchor="middle" font-size="12" fill="#546E7A">方向盘+实时画面</text>
+      <rect x="260" y="60" width="150" height="60" rx="8" fill="#FFFFFF" stroke="#90CAF9"/>
+      <text x="335" y="85" text-anchor="middle" font-size="13" fill="#1565C0">校准 / 连车页</text>
+      <text x="335" y="105" text-anchor="middle" font-size="12" fill="#546E7A">Calibrate / Connector</text>
+      <rect x="430" y="60" width="150" height="60" rx="8" fill="#FFFFFF" stroke="#90CAF9"/>
+      <text x="505" y="85" text-anchor="middle" font-size="13" fill="#1565C0">Tub 管理页</text>
+      <text x="505" y="105" text-anchor="middle" font-size="12" fill="#546E7A">TubManager / Arena</text>
+      <rect x="600" y="60" width="120" height="60" rx="8" fill="#FFFFFF" stroke="#90CAF9"/>
+      <text x="660" y="85" text-anchor="middle" font-size="13" fill="#1565C0">训练器页</text>
+      <text x="660" y="105" text-anchor="middle" font-size="12" fill="#546E7A">TrainerPage</text>
+
+      <!-- 通道：HTTP / WebSocket -->
+      <line x1="300" y1="140" x2="300" y2="190" stroke="#607D8B" stroke-width="2" marker-start="url(#arr5)" marker-end="url(#arr5)"/>
+      <text x="250" y="170" text-anchor="end" font-size="13" fill="#455A64">HTTP 请求（一问一答）</text>
+      <line x1="500" y1="190" x2="500" y2="140" stroke="#607D8B" stroke-width="2" stroke-dasharray="6 4" marker-start="url(#arr5)" marker-end="url(#arr5)"/>
+      <text x="520" y="170" text-anchor="start" font-size="13" fill="#455A64">WebSocket / WebRTC（实时画面与操控）</text>
+
+      <!-- 第二层：FastAPI 后端 -->
+      <rect x="60" y="195" width="680" height="140" rx="12" fill="#E8F5E9" stroke="#81C784" stroke-width="2"/>
+      <text x="400" y="220" text-anchor="middle" font-size="16" font-weight="bold" fill="#2E7D32">FastAPI 后端（main.py 装配，路由挂在 /api/*）</text>
+      <rect x="80" y="235" width="200" height="80" rx="8" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="180" y="258" text-anchor="middle" font-size="13" fill="#2E7D32">七组路由 routers/</text>
+      <text x="180" y="278" text-anchor="middle" font-size="12" fill="#546E7A">/api/config · /api/tub</text>
+      <text x="180" y="296" text-anchor="middle" font-size="12" fill="#546E7A">/api/drive · /api/trainer …</text>
+      <rect x="300" y="235" width="200" height="80" rx="8" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="400" y="258" text-anchor="middle" font-size="13" fill="#2E7D32">trainer_engine.py</text>
+      <text x="400" y="278" text-anchor="middle" font-size="12" fill="#546E7A">训练任务调度</text>
+      <text x="400" y="296" text-anchor="middle" font-size="12" fill="#546E7A">SSE 实时推送训练日志</text>
+      <rect x="520" y="235" width="200" height="80" rx="8" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="620" y="258" text-anchor="middle" font-size="13" fill="#2E7D32">connector_engine.py</text>
+      <text x="620" y="278" text-anchor="middle" font-size="12" fill="#546E7A">连车任务（SSH/rsync）</text>
+      <text x="620" y="296" text-anchor="middle" font-size="12" fill="#546E7A">拉数据 · 推模型 · 远程驾驶</text>
+
+      <!-- 通道：串口 / 网络 -->
+      <line x1="300" y1="335" x2="300" y2="390" stroke="#607D8B" stroke-width="2" marker-start="url(#arr5)" marker-end="url(#arr5)"/>
+      <text x="250" y="368" text-anchor="end" font-size="13" fill="#455A64">串口（接底盘固件）</text>
+      <line x1="500" y1="390" x2="500" y2="335" stroke="#607D8B" stroke-width="2" stroke-dasharray="6 4" marker-start="url(#arr5)" marker-end="url(#arr5)"/>
+      <text x="520" y="368" text-anchor="start" font-size="13" fill="#455A64">网络（SSH / rsync 连远程小车）</text>
+
+      <!-- 第三层：车辆 -->
+      <rect x="200" y="395" width="400" height="50" rx="12" fill="#FFF3E0" stroke="#FFB74D" stroke-width="2"/>
+      <text x="400" y="425" text-anchor="middle" font-size="15" font-weight="bold" fill="#E65100">车辆：MUS4 固件 + 摄像头 + 舵机/电调</text>
+    </svg>
+    <figcaption class="arch-caption">三层结构：浏览器里的 React 页面 ⇄ HTTP/WebSocket 通道 ⇄ FastAPI 后端 ⇄ 真实的小车</figcaption>
+  </figure>
+
+  <p><b>前端：六个页面各司其职。</b><code>web_ui/frontend/src/App.tsx:102</code> 里注册了全部路由：首页 <code>/</code> 是 Tub 管理页（浏览、删除录坏的驾驶数据），<code>/drive</code> 是驾驶页（DrivePage），<code>/calibrate</code> 是校准页（调舵机/油门中位与限幅），<code>/trainer</code> 是训练器页，<code>/pilot</code> 是模型竞技场（PilotArenaPage，让训练好的"AI 车手"离线跑预测、比成绩），<code>/connector</code> 是连车页。技术上它是 React 18 + TypeScript，用 Vite 打包（想象成把散装的乐高积木压成一块整板），Tailwind 负责样式，Zustand 像一块"共享白板"，各个页面把全局状态（比如当前打开的数据目录）写在上面，谁都能读。</p>
+
+  <p><b>后端：一个装配间 + 七组窗口。</b><code>web_ui/backend/main.py:40</code> 起，把 <code>routers/</code> 目录下七个路由文件依次挂到 <code>/api/config</code>、<code>/api/tub</code>、<code>/api/trainer</code>、<code>/api/drive</code>、<code>/api/arena</code>、<code>/api/connector</code>、<code>/api/provisioning</code>——就像办事大厅开了七个窗口，前端想干什么就去对应窗口排队。比如驾驶页的实时操控走 <code>routers/drive.py:498</code> 的 WebSocket <code>/api/drive/ws</code>，摄像头画面则通过 WebRTC（一种浏览器原生的实时视频技术）在 <code>/api/drive/webrtc/*</code> 一组接口里协商建立。训练不归路由直接干，而是交给 <code>trainer_engine.py</code> 这个"工头"开后台任务，再用 SSE（服务器主动推消息的单向通道）把训练日志源源不断推回网页。连远程小车则由 <code>connector_engine.py</code> 和 <code>remote_car_client.py</code> 负责，通过 SSH/rsync 拉数据、推模型、远程启停驾驶。</p>
+
+  <div class="arch-grid">
+    <div class="arch-card">
+      <b>为什么要分前后端？</b>
+      <p>分工像餐厅：前端是服务员，负责点菜界面好看、上菜及时；后端是后厨，真正掌勺。浏览器碰不到你电脑里的数据文件和串口，必须靠后端这个"本地人"代劳；而 Python 又不擅长画漂亮的交互界面，于是各干各的，中间用约定好的 API（窗口叫号规则）对话。</p>
+    </div>
+    <div class="arch-card">
+      <b>一条请求的旅程</b>
+      <p>你在训练器页点"开始训练"→ 前端 <code>services/api.ts</code> 发出 POST 到 <code>/api/trainer/train/local</code> → 后端 <code>trainer_engine.py</code> 启动训练进程 → 日志经 SSE 推回 → 网页上的进度条开始爬。全程你没碰过命令行，但背后跑的还是那个训练流水线。</p>
+    </div>
+  </div>
+
+  <div class="arch-note">
+    ⚠️ <b>安全提醒：仅限局域网！</b>这个后端为了开发方便，把 CORS（浏览器的跨站访问门禁）设置成了"谁来都放行"（<code>main.py:31</code>，<code>allow_origins=["*"]</code>），而且没有任何登录认证——同一网络里任何人打开这个网址都能操控你的车。所以它只适合在家里或实验室的局域网用，千万别暴露到公网。
+  </div>
+</section>
+<section id="sec6" class="arch-section">
+  <h2>第 6 章：donkey CLI 与车辆模板 —— 一把瑞士军刀和一张预画好的乐高接线图</h2>
+
+  <p>
+    前面几章讲了零件（Part）、传送带（Vehicle 主循环）和共享白板（Memory）。可是一个新同学拿到项目后，
+    第一个问题往往是：「我该从哪条命令开始？」答案就是 <code>donkey</code> —— 它是整个项目的命令行入口，
+    像一把瑞士军刀：造车目录、校准舵机、开车、训练、画图，全都从这一个命令里弹出不同的「刀片」。
+    安装包时，<code>setup.cfg</code> 把 <code>donkey</code> 这个名字注册成
+    <code>donkeycar/management/base.py:1182</code> 的 <code>execute_from_command_line()</code> 函数；
+    你敲下 <code>donkey createcar ...</code>，它就在一张「命令字典」里查到对应的类，替你干活
+    （<code>base.py:1186</code>）。
+  </p>
+
+  <figure class="arch-figure">
+    <svg viewBox="0 0 800 400" width="100%">
+      <defs>
+        <marker id="arr6" markerWidth="10" markerHeight="10" refX="8" refY="5"
+                orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,5 L0,10 z" fill="#5C6BC0"/>
+        </marker>
+      </defs>
+
+      <!-- 阶段 1：createcar -->
+      <rect x="20" y="120" width="200" height="160" rx="12" fill="#E3F2FD" stroke="#64B5F6" stroke-width="2"/>
+      <text x="120" y="150" text-anchor="middle" font-size="16" fill="#1565C0">① donkey createcar</text>
+      <text x="120" y="175" text-anchor="middle" font-size="12" fill="#37474F">瑞士军刀弹出「造车」刀片</text>
+      <rect x="40" y="190" width="160" height="34" rx="6" fill="#FFFFFF" stroke="#90CAF9"/>
+      <text x="120" y="212" text-anchor="middle" font-size="12" fill="#37474F">模板：complete.py</text>
+      <rect x="40" y="232" width="160" height="34" rx="6" fill="#FFFFFF" stroke="#90CAF9"/>
+      <text x="120" y="254" text-anchor="middle" font-size="12" fill="#37474F">配套：cfg_complete.py</text>
+
+      <!-- 箭头 1 -->
+      <line x1="225" y1="200" x2="285" y2="200" stroke="#5C6BC0" stroke-width="2.5" marker-end="url(#arr6)"/>
+      <text x="255" y="188" text-anchor="middle" font-size="12" fill="#5C6BC0">复制生成</text>
+
+      <!-- 阶段 2：车辆目录 -->
+      <rect x="290" y="60" width="240" height="280" rx="12" fill="#E8F5E9" stroke="#81C784" stroke-width="2"/>
+      <text x="410" y="90" text-anchor="middle" font-size="16" fill="#2E7D32">② 车辆目录（默认 ~/mycar）</text>
+      <rect x="310" y="108" width="200" height="36" rx="6" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="410" y="131" text-anchor="middle" font-size="12" fill="#37474F">manage.py —— 乐高接线图</text>
+      <rect x="310" y="152" width="200" height="36" rx="6" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="410" y="175" text-anchor="middle" font-size="12" fill="#37474F">config.py —— 出厂默认配置</text>
+      <rect x="310" y="196" width="200" height="36" rx="6" fill="#FFF3E0" stroke="#FFB74D"/>
+      <text x="410" y="219" text-anchor="middle" font-size="12" fill="#37474F">myconfig.py —— 我的私人覆盖</text>
+      <rect x="310" y="240" width="200" height="36" rx="6" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="410" y="263" text-anchor="middle" font-size="12" fill="#37474F">train.py —— 训练入口脚本</text>
+      <rect x="310" y="284" width="200" height="36" rx="6" fill="#FFFFFF" stroke="#A5D6A7"/>
+      <text x="410" y="307" text-anchor="middle" font-size="12" fill="#37474F">data/ models/ logs/ 文件夹</text>
+
+      <!-- 箭头 2a：drive -->
+      <line x1="535" y1="140" x2="595" y2="140" stroke="#5C6BC0" stroke-width="2.5" marker-end="url(#arr6)"/>
+      <!-- 箭头 2b：train -->
+      <line x1="535" y1="270" x2="595" y2="270" stroke="#5C6BC0" stroke-width="2.5" marker-end="url(#arr6)"/>
+
+      <!-- 阶段 3a：drive -->
+      <rect x="600" y="95" width="180" height="90" rx="12" fill="#FFF3E0" stroke="#FFB74D" stroke-width="2"/>
+      <text x="690" y="125" text-anchor="middle" font-size="15" fill="#E65100">③a donkey drive</text>
+      <text x="690" y="148" text-anchor="middle" font-size="12" fill="#37474F">拉起 Web UI + 启动整车</text>
+      <text x="690" y="168" text-anchor="middle" font-size="12" fill="#37474F">浏览器里开车录数据</text>
+
+      <!-- 阶段 3b：train -->
+      <rect x="600" y="225" width="180" height="90" rx="12" fill="#F3E5F5" stroke="#BA68C8" stroke-width="2"/>
+      <text x="690" y="255" text-anchor="middle" font-size="15" fill="#6A1B9A">③b donkey train</text>
+      <text x="690" y="278" text-anchor="middle" font-size="12" fill="#37474F">拿 data/ 里的数据训练</text>
+      <text x="690" y="298" text-anchor="middle" font-size="12" fill="#37474F">模型存进 models/</text>
+
+      <!-- 底部说明 -->
+      <text x="400" y="375" text-anchor="middle" font-size="13" fill="#607D8B">同一份模板 + 不同配置 = 不同硬件的车：换相机、换执行器，只改配置不改接线图</text>
+    </svg>
+    <figcaption class="arch-caption">
+      图：donkey 命令行工作流 —— createcar 复制模板生成车辆目录，之后 drive 开车、train 训练。
+    </figcaption>
+  </figure>
+
+  <p>
+    <strong>瑞士军刀里到底有几把刀片？</strong>这不是文档抄来的，而是
+    <code>donkeycar/management/base.py:1186-1203</code> 的命令字典里真实注册的 16 个子命令：
+  </p>
+  <div class="arch-grid">
+    <div class="arch-card">
+      <strong>造车与找车</strong>
+      <ul>
+        <li><code>createcar</code>：用模板生成车辆目录（本章主角）</li>
+        <li><code>update</code>：在已有车目录里更新到最新模板（<code>base.py:152</code>）</li>
+        <li><code>findcar</code>：扫描局域网，找小车的 IP 地址（<code>base.py:169</code>）</li>
+        <li><code>calibrate</code>：交互式校准舵机/电调的 PWM 值（<code>base.py:189</code>）</li>
+      </ul>
+    </div>
+    <div class="arch-card">
+      <strong>开车与训练</strong>
+      <ul>
+        <li><code>drive</code>：一键拉起 Web UI 前后端 + 本车 <code>manage.py drive</code>（<code>base.py:898</code>）</li>
+        <li><code>train</code>：用 Tub 数据训练模型，可选 tensorflow / pytorch（<code>base.py:547</code>）</li>
+        <li><code>models</code>：查看模型数据库里的训练记录（<code>base.py:594</code>）</li>
+      </ul>
+    </div>
+    <div class="arch-card">
+      <strong>界面与数据工具</strong>
+      <ul>
+        <li><code>web</code> / <code>installweb</code>：启动 Web UI / 装它的依赖（<code>base.py:628</code>、<code>base.py:1031</code>）</li>
+        <li><code>ui</code> / <code>tui</code>：图形界面 / 终端界面（不带参数敲 <code>donkey</code> 默认进 TUI，<code>base.py:1213</code>）</li>
+        <li><code>tubplot</code> / <code>tubhist</code> / <code>makemovie</code> / <code>cnnactivations</code> / <code>createjs</code>：数据画图、做视频、看神经网络「注意力」、配摇杆</li>
+      </ul>
+    </div>
+  </div>
+
+  <p>
+    <strong>createcar 干了什么？</strong>看 <code>CreateCar.create_car()</code>（<code>base.py:84</code>）就一目了然：
+    先建好 <code>models</code>、<code>data</code>、<code>data_cache</code>、<code>logs</code> 四个文件夹，
+    然后从 <code>donkeycar/templates/</code> 目录里复制四样东西——模板代码（如 <code>complete.py</code>）改名成
+    <code>manage.py</code>，配套的 <code>cfg_complete.py</code> 改名成 <code>config.py</code>，
+    再加上 <code>myconfig.py</code> 和 <code>train.py</code>（<code>base.py:104-131</code>）。
+    默认模板叫 <code>complete</code>（<code>base.py:93</code>），但 <code>templates/</code> 里还有
+    <code>basic.py</code>、<code>arduino_drive.py</code>（用 Arduino 当底盘驱动）、<code>just_drive.py</code>、
+    <code>simulator.py</code> 等多种「车型」可选，用 <code>--template</code> 指定。
+    还有个小细节：生成的 <code>myconfig.py</code> 里会自动附上 config.py 全部内容、但每行都注释掉
+    （<code>base.py:138-147</code>），像一份「出厂说明书」，想改哪项就取消注释哪行。
+  </p>
+
+  <p>
+    <strong>模板 = 一张预画好的乐高接线图。</strong>打开生成的 <code>manage.py</code>（即模板的副本），
+    你会看到 <code>drive()</code> 函数先造一辆空车 <code>V = dk.vehicle.Vehicle()</code>
+    （<code>donkeycar/templates/complete.py:88</code>），然后就是一长串 <code>V.add(...)</code>：
+    加相机、加手柄、加 AI 飞行员、加数据记录器……每次 <code>V.add(部件, inputs=[...], outputs=[...])</code>
+    就像把一块乐高积木插到底板上，并用线把它的「输出插口」连到别人的「输入插口」。
+    比如 <code>complete.py:150</code> 把 <code>user/steering</code> 转接成 <code>user/angle</code>，
+    <code>complete.py:578</code> 把一堆数据接进 <code>TubWriter</code> 录像机。
+    新手不用从零画这张图——模板作者已经把一辆能跑的车画好了。
+  </p>
+
+  <p>
+    <strong>那配置负责什么？决定接线图上每块积木的「型号」。</strong>模板里的接线经常藏在
+    <code>if cfg.XXX</code> 后面：比如 <code>add_camera()</code>（<code>complete.py:908</code>）读
+    <code>cfg.CAMERA_TYPE</code> 来决定插 PICAM、WEBCAM 还是 D435 深度相机这块「积木」；
+    <code>cfg_complete.py</code> 里写着 <code>CAMERA_TYPE = "PICAM"</code>、<code>DRIVE_LOOP_HZ = 20</code>
+    这类出厂默认值。配置的读取机制在 <code>donkeycar/config.py</code>：<code>Config.from_pyfile()</code>
+    直接把你的 cfg 文件当 Python 代码执行（<code>config.py:16-26</code>），然后只收集全大写的变量
+    （<code>config.py:28-31</code>）。加载时先读 <code>config.py</code>，再找同目录的
+    <code>myconfig.py</code> 把同名变量覆盖掉（<code>config.py:80-86</code>）——就像学校发了一本标准实验手册，
+    你可以在自己的便利贴上写「我这台车的转向 PWM 通道是 0」，贴在手册上，运行时以便利贴为准，
+    而手册本身（模板文件）永远不被改脏。
+  </p>
+
+  <div class="arch-note">
+    <strong>记忆口诀：</strong><code>donkey</code> 是瑞士军刀，<code>createcar</code> 是复印机
+    （把 templates/ 里的图纸复印成你的车辆目录），<code>manage.py</code> 是乐高接线图，
+    <code>config.py</code> 是出厂手册，<code>myconfig.py</code> 是你的便利贴。
+    之后 <code>donkey drive</code> 让你当驾校教练开车收数据，<code>donkey train</code>
+    用这些数据教出 AI 学员 —— 整套流程不用写一行新代码。
+  </div>
+</section>
+<footer class="site-footer">
+  <p>本页内容依据 <code>DonkeyDrift</code> 仓库源码（donkeydrifter v0.1.2）整理，文中 <code>文件:行号</code> 可直接跳转查阅源码。</p>
+  <p>配套阅读：<code>Firmware/MUS4_FW/docs/architecture-guide.html</code>（MUS4 固件篇） · DonkeyDrift · 生成于 2026-07-26</p>
+</footer>
+</div>
+</body>
+</html>
