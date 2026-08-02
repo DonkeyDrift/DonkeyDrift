@@ -157,3 +157,66 @@ def test_auto_open_project_can_cancel_multiple_project_selection(monkeypatch, tm
 
     assert Path.cwd() == start_dir
     assert "last_project_path" not in rc_handler.data
+
+
+def _patch_projects_root(monkeypatch, projects_dir: Path):
+    """让 OpenProjectCommand 扫描临时目录而不是真实的 ~/projects。"""
+    monkeypatch.setattr(
+        tui.os.path,
+        "expanduser",
+        lambda p: str(projects_dir) if p == "~/projects" else p,
+    )
+
+
+def test_open_project_command_auto_opens_single_project(monkeypatch, tmp_path):
+    rc_handler = FakeRcHandler()
+    monkeypatch.setattr(tui, "rc_handler", rc_handler)
+    start_dir = tmp_path / "start"
+    projects_dir = tmp_path / "projects"
+    project = projects_dir / "mycar"
+    start_dir.mkdir()
+    _make_project(project)
+    monkeypatch.chdir(start_dir)
+    _patch_projects_root(monkeypatch, projects_dir)
+    prompts = []
+    monkeypatch.setattr(
+        tui.Prompt,
+        "ask",
+        lambda message, **kwargs: prompts.append(message) or "",
+    )
+
+    tui.OpenProjectCommand().execute()
+
+    assert Path.cwd() == project
+    assert rc_handler.data["last_project_path"] == str(project)
+    # 只出现“按回车键返回菜单”一次提示，未要求输入编号
+    assert len(prompts) == 1
+    assert "返回菜单" in prompts[0]
+
+
+def test_open_project_command_prompts_when_multiple_projects(monkeypatch, tmp_path):
+    rc_handler = FakeRcHandler()
+    monkeypatch.setattr(tui, "rc_handler", rc_handler)
+    start_dir = tmp_path / "start"
+    projects_dir = tmp_path / "projects"
+    first_project = projects_dir / "a_car"
+    second_project = projects_dir / "b_car"
+    start_dir.mkdir()
+    _make_project(first_project)
+    _make_project(second_project)
+    monkeypatch.chdir(start_dir)
+    _patch_projects_root(monkeypatch, projects_dir)
+    answers = iter(["2", ""])
+    prompts = []
+
+    def fake_ask(message, **kwargs):
+        prompts.append(message)
+        return next(answers)
+
+    monkeypatch.setattr(tui.Prompt, "ask", fake_ask)
+
+    tui.OpenProjectCommand().execute()
+
+    assert Path.cwd() == second_project
+    assert rc_handler.data["last_project_path"] == str(second_project)
+    assert prompts[0] == "请输入编号"

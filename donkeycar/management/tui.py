@@ -566,6 +566,12 @@ class OpenProjectCommand(DonkeyCommand):
             Prompt.ask("按回车键返回...")
             return
 
+        if len(valid_projects) == 1:
+            console.print(f"[dim]仅发现一个有效项目: {valid_projects[0].name}，自动打开。[/dim]")
+            _change_to_project(valid_projects[0], "自动打开项目")
+            Prompt.ask("按回车键返回菜单...")
+            return
+
         console.print("[bold]发现以下有效项目:[/bold]")
         for idx, project_path in enumerate(valid_projects, 1):
             console.print(f"{idx}. {project_path.name}")
