@@ -34,21 +34,28 @@ interface CurveConfig {
   /** CSS 颜色。 */
   color: string;
   /** 从 Telemetry 取值的键。 */
-  key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle'>;
+  key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle' | 'rc_steering' | 'rc_throttle'>;
   /** 是否默认显示。 */
   defaultOn: boolean;
+  /**
+   * 显示缩放系数（写入缓冲前乘上）。y 轴固定 [-1, 1]，
+   * gyro(rad/s) 与 accel(m/s²) 需要缩放到该量程内才可见。
+   */
+  scale?: number;
 }
 
-/** 默认 3 条曲线，对齐固件 MUS4_FW Drifter Console。 */
+/** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
 const CURVES: CurveConfig[] = [
   { label: 'Throttle', color: '#39d98a', key: 'throttle', defaultOn: true },
   { label: 'Steering', color: '#5cc8ff', key: 'steering', defaultOn: true },
-  { label: 'GyroZ', color: '#ff6b6b', key: 'gz', defaultOn: true },
-  { label: 'GyroX', color: '#ffcc66', key: 'gx', defaultOn: false },
-  { label: 'GyroY', color: '#d96bff', key: 'gy', defaultOn: false },
-  { label: 'AccX', color: '#a3e635', key: 'ax', defaultOn: false },
-  { label: 'AccY', color: '#fb923c', key: 'ay', defaultOn: false },
-  { label: 'AccZ', color: '#f472b6', key: 'az', defaultOn: false },
+  { label: 'GyroZ', color: '#ff6b6b', key: 'gz', defaultOn: true, scale: 0.2 },
+  { label: 'RC Steering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
+  { label: 'RC Throttle', color: '#15803d', key: 'rc_throttle', defaultOn: true },
+  { label: 'GyroX', color: '#ffcc66', key: 'gx', defaultOn: false, scale: 0.2 },
+  { label: 'GyroY', color: '#d96bff', key: 'gy', defaultOn: false, scale: 0.2 },
+  { label: 'AccX', color: '#a3e635', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
+  { label: 'AccY', color: '#fb923c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
+  { label: 'AccZ', color: '#f472b6', key: 'az', defaultOn: false, scale: 1 / 9.8 },
   { label: 'Pilot Angle', color: '#22d3ee', key: 'pilot_angle', defaultOn: false },
   { label: 'Pilot Throttle', color: '#c084fc', key: 'pilot_throttle', defaultOn: false },
 ];
@@ -62,7 +69,8 @@ interface TelemetryChartProps {
 /**
  * 实时遥测曲线图，移植自固件 Drifter Console。
  * - 256 点环形缓冲，requestAnimationFrame 节流重绘（上限 60fps），避免 100Hz 全量 setState
- * - 默认 3 条曲线（Throttle/Steering/GyroZ），其余通过工具栏开关
+ * - 默认 5 条曲线（Throttle/Steering/GyroZ/RC Steering/RC Throttle），其余通过工具栏开关
+ * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
  */
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '' }) => {
@@ -103,7 +111,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       const val = telemetry[c.key];
       const buf = buffers[c.key as string];
       if (typeof val === 'number' && Number.isFinite(val)) {
-        buf[idx] = val;
+        buf[idx] = val * (c.scale ?? 1);
         wroteAny = true;
       } else {
         // 缺失字段不写入，该位置保持 NaN（曲线在此处断开）

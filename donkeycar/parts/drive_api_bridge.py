@@ -700,6 +700,7 @@ class DriveApiBridge:
             "imu_ax": "ax", "imu_ay": "ay", "imu_az": "az",
             "steering": "steering", "throttle": "throttle",
             "pilot_angle": "pilot_angle", "pilot_throttle": "pilot_throttle",
+            "rc_steering": "rc_steering", "rc_throttle": "rc_throttle",
         }
         payload = {"type": "telemetry", "t": int(now * 1000)}
         for arg_name, value in fields.items():
@@ -720,7 +721,8 @@ class DriveApiBridge:
                     imu_gz=None, imu_gx=None, imu_gy=None,
                     imu_ax=None, imu_ay=None, imu_az=None,
                     steering=None, throttle=None,
-                    pilot_angle=None, pilot_throttle=None):
+                    pilot_angle=None, pilot_throttle=None,
+                    rc_steering=None, rc_throttle=None):
         if img_arr is not None and self.video_transport == "webrtc":
             self.frame_buffer.update(img_arr)
             now = time.time()
@@ -759,7 +761,8 @@ class DriveApiBridge:
         self._maybe_send_telemetry(now, imu_gz=imu_gz, imu_gx=imu_gx, imu_gy=imu_gy,
                                    imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
                                    steering=steering, throttle=throttle,
-                                   pilot_angle=pilot_angle, pilot_throttle=pilot_throttle)
+                                   pilot_angle=pilot_angle, pilot_throttle=pilot_throttle,
+                                   rc_steering=rc_steering, rc_throttle=rc_throttle)
 
         if mode is not None:
             self.mode = mode
@@ -783,12 +786,14 @@ class DriveApiBridge:
             imu_gz=None, imu_gx=None, imu_gy=None,
             imu_ax=None, imu_ay=None, imu_az=None,
             steering=None, throttle=None,
-            pilot_angle=None, pilot_throttle=None):
+            pilot_angle=None, pilot_throttle=None,
+            rc_steering=None, rc_throttle=None):
         return self.run_threaded(img_arr, num_records, mode, recording,
                                  imu_gz=imu_gz, imu_gx=imu_gx, imu_gy=imu_gy,
                                  imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
                                  steering=steering, throttle=throttle,
-                                 pilot_angle=pilot_angle, pilot_throttle=pilot_throttle)
+                                 pilot_angle=pilot_angle, pilot_throttle=pilot_throttle,
+                                 rc_steering=rc_steering, rc_throttle=rc_throttle)
 
     def shutdown(self):
         self.running = False

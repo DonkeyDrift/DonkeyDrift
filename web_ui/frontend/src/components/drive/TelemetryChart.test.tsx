@@ -9,7 +9,7 @@ vi.mock('react-chartjs-2', () => ({
     <div data-testid="mock-chart">
       {props.data.datasets.map((d) => (
         <div key={d.label} data-testid={`dataset-${d.label}`}>
-          {d.label}:{d.data.length}
+          {d.label}:{JSON.stringify(d.data)}
         </div>
       ))}
     </div>
@@ -44,6 +44,12 @@ function waitForDataset(label: string) {
   });
 }
 
+// 解析 mock 数据集渲染的 JSON 数据（NaN 序列化为 null）
+function datasetValues(label: string): (number | null)[] {
+  const text = screen.getByTestId(`dataset-${label}`).textContent ?? '';
+  return JSON.parse(text.slice(text.indexOf(':') + 1));
+}
+
 describe('TelemetryChart', () => {
   it('无数据时显示等待提示', () => {
     render(<TelemetryChart telemetry={null} />);
@@ -51,14 +57,51 @@ describe('TelemetryChart', () => {
     expect(screen.getByText('（等待数据）')).toBeInTheDocument();
   });
 
-  it('收到遥测后显示默认 3 条曲线', async () => {
+  it('收到遥测后显示默认 5 条曲线', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry()} />);
 
     await waitForDataset('Throttle');
     expect(screen.getByTestId('dataset-Steering')).toBeInTheDocument();
     expect(screen.getByTestId('dataset-GyroZ')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-RC Steering')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-RC Throttle')).toBeInTheDocument();
     // 默认不显示 GyroX
     expect(screen.queryByTestId('dataset-GyroX')).not.toBeInTheDocument();
+  });
+
+  it('RC 手柄输入写入 RC 曲线', async () => {
+    render(<TelemetryChart telemetry={sampleTelemetry({ rc_steering: -0.5, rc_throttle: 0.8 })} />);
+
+    await waitFor(() => {
+      expect(datasetValues('RC Steering')).toContain(-0.5);
+    });
+    expect(datasetValues('RC Throttle')).toContain(0.8);
+  });
+
+  it('gyro/accel 曲线按 scale 缩放后写入缓冲', async () => {
+    render(<TelemetryChart telemetry={sampleTelemetry({ gz: 0.5, ax: 4.9 })} />);
+
+    // gz scale=0.2 -> 0.5*0.2=0.1
+    await waitFor(() => {
+      const vals = datasetValues('GyroZ').filter((v): v is number => v !== null);
+      expect(vals.length).toBeGreaterThan(0);
+      expect(vals[0]).toBeCloseTo(0.1, 10);
+    });
+
+    // 勾选默认隐藏的 AccX 复选框
+    const checkboxes = screen.getAllByRole('checkbox');
+    const accXCheckbox = checkboxes.find((cb) => {
+      const label = cb.parentElement?.querySelector('span');
+      return label?.textContent === 'AccX';
+    }) as HTMLInputElement;
+    fireEvent.click(accXCheckbox);
+
+    // ax scale=1/9.8 -> 4.9/9.8≈0.5
+    await waitFor(() => {
+      const vals = datasetValues('AccX').filter((v): v is number => v !== null);
+      expect(vals.length).toBeGreaterThan(0);
+      expect(vals[0]).toBeCloseTo(0.5, 10);
+    });
   });
 
   it('暂停后切换为继续按钮', async () => {
