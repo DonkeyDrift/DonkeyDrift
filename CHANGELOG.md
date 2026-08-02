@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-02
+
+- feat(tui): TUI `open` 命令在仅有一个有效项目时自动打开（PR #5，已合并 main）
+  - `OpenProjectCommand.execute()`（`donkeycar/management/tui.py`）新增单项目分支：扫描 `~/projects` 后若恰好只有 1 个有效项目（含 `manage.py` + `myconfig.py`），打印提示并直接调用 `_change_to_project()` 切换进入，显示成功面板后按回车返回菜单，不再要求输入编号。
+  - 0 个项目时保留"未找到有效项目"提示；多个项目时保留原有编号手动选择流程，行为均不变。
+  - 启动前的 `_auto_open_project()` 原有单项目自动打开逻辑不变。
+- 同步更新 `donkeycar/tests/test_tui_project_selection.py`：新增 2 个用例（单项目自动打开且不要求输入编号、多项目仍手动选择编号），全文件 11 项测试全部通过。
+
 ## [0.1.2] — 2026-06-30
 
 ### 驾驶页面 (Drive UI)
