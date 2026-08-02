@@ -33,3 +33,9 @@ web_ui/frontend/node_modules/
 .ssh-tmp/
 .worktrees/
 start_test.sh
+
+# 本机 agent 说明文件与工作目录（用户私人文件，不入库）
+/AGENTS.md
+/CLAUDE.md
+.trae/
+.superpowers/
