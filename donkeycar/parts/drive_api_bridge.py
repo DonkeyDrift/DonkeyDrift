@@ -700,6 +700,7 @@ class DriveApiBridge:
             "imu_ax": "ax", "imu_ay": "ay", "imu_az": "az",
             "steering": "steering", "throttle": "throttle",
             "pilot_angle": "pilot_angle", "pilot_throttle": "pilot_throttle",
+            "rc_steering": "rc_steering", "rc_throttle": "rc_throttle",
             "drift_yaw_error": "dye",
             "drift_steering_correction": "dsc",
             "drift_throttle_mode": "dtm",
@@ -724,6 +725,7 @@ class DriveApiBridge:
                     imu_ax=None, imu_ay=None, imu_az=None,
                     steering=None, throttle=None,
                     pilot_angle=None, pilot_throttle=None,
+                    rc_steering=None, rc_throttle=None,
                     drift_yaw_error=None, drift_steering_correction=None,
                     drift_throttle_mode=None):
         if img_arr is not None and self.video_transport == "webrtc":
@@ -765,6 +767,7 @@ class DriveApiBridge:
                                    imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
                                    steering=steering, throttle=throttle,
                                    pilot_angle=pilot_angle, pilot_throttle=pilot_throttle,
+                                   rc_steering=rc_steering, rc_throttle=rc_throttle,
                                    drift_yaw_error=drift_yaw_error,
                                    drift_steering_correction=drift_steering_correction,
                                    drift_throttle_mode=drift_throttle_mode)
@@ -792,6 +795,7 @@ class DriveApiBridge:
             imu_ax=None, imu_ay=None, imu_az=None,
             steering=None, throttle=None,
             pilot_angle=None, pilot_throttle=None,
+            rc_steering=None, rc_throttle=None,
             drift_yaw_error=None, drift_steering_correction=None,
             drift_throttle_mode=None):
         return self.run_threaded(img_arr, num_records, mode, recording,
@@ -799,6 +803,7 @@ class DriveApiBridge:
                                  imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
                                  steering=steering, throttle=throttle,
                                  pilot_angle=pilot_angle, pilot_throttle=pilot_throttle,
+                                 rc_steering=rc_steering, rc_throttle=rc_throttle,
                                  drift_yaw_error=drift_yaw_error,
                                  drift_steering_correction=drift_steering_correction,
                                  drift_throttle_mode=drift_throttle_mode)

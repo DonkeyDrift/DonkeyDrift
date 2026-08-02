@@ -1599,3 +1599,46 @@ class ArdImu:
 
     def shutdown(self):
         self.running = False
+
+
+class ArdRc:
+    """
+    从 Arduino/ESP32 串口控制器读取 RC 接收机（手柄）输入。
+
+    ESP32 固件经 Serial1 上行 T<t>S<s> 帧，Arduino.Arduino_readline()
+    解析时无条件更新 controller.steering / controller.throttle（值域 -1..1）。
+    该 Part 把这两个缓存值发布到 Memory（如 'rc/steering'、'rc/throttle'），
+    供遥测桥上行到 web UI 遥测曲线。
+
+    注意：输出不要接 'user/angle' / 'user/throttle'——历史上用串口 RC
+    怠速值覆盖 user/angle 曾导致录制数据间歇跳 0（见 complete 模板注释）。
+
+    使用方式：
+        rc = ArdRc(controller=arduino_controller)
+        V.add(rc, outputs=['rc/steering', 'rc/throttle'])
+    """
+
+    def __init__(self, controller=None):
+        """
+        :param controller: Arduino 控制器实例（共享同一个串口连接）
+        """
+        if controller is None:
+            raise ValueError("ArdRc 需要一个 Arduino 控制器实例")
+        self.controller = controller
+        self.running = True
+        logger.info('ArdRc 已创建，从串口控制器读取 RC 输入')
+
+    def update(self):
+        """线程化注册时保持线程存活；缓存由串口读取线程刷新，无需轮询"""
+        while self.running:
+            time.sleep(0.1)
+
+    def run_threaded(self):
+        """返回最新缓存的 RC 输入 (steering, throttle)，值域 -1..1"""
+        return self.controller.steering, self.controller.throttle
+
+    def run(self):
+        return self.run_threaded()
+
+    def shutdown(self):
+        self.running = False

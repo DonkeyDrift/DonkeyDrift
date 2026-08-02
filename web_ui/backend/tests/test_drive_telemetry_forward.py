@@ -54,6 +54,8 @@ def test_car_telemetry_message_is_broadcast_verbatim(monkeypatch):
         "throttle": 0.35,
         "pilot_angle": 0.1,
         "pilot_throttle": 0.4,
+        "rc_steering": -0.3,
+        "rc_throttle": 0.6,
     }
 
     with client.websocket_connect("/api/drive/ws?role=car") as car_ws:
@@ -67,6 +69,8 @@ def test_car_telemetry_message_is_broadcast_verbatim(monkeypatch):
     assert msg["az"] == 9.8
     assert msg["steering"] == 0.0
     assert msg["throttle"] == 0.35
+    assert msg["rc_steering"] == -0.3
+    assert msg["rc_throttle"] == 0.6
     assert msg["t"] == 1752300000000
 
 

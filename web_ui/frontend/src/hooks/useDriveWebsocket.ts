@@ -34,6 +34,8 @@ export interface Telemetry {
   throttle?: number;
   pilot_angle?: number;
   pilot_throttle?: number;
+  rc_steering?: number;
+  rc_throttle?: number;
 }
 
 interface UseDriveWebsocketOptions {
