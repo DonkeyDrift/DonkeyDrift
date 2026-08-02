@@ -1191,16 +1191,22 @@ class DriveCommand(DonkeyCommand):
         console.clear()
         console.print(Panel(f"[bold orange1]{self.description}[/bold orange1]", title=f"配置 {self.name}"))
 
-        if self.requires_mycar_folder and not is_valid_mycar_folder():
-            console.print(Panel(
-                "[bold red]错误：当前目录不是有效的 mycar 项目文件夹！[/bold red]\n\n"
-                "缺少关键文件：manage.py 或 myconfig.py\n"
-                "请先执行 [bold yellow]createcar[/bold yellow] 命令创建新的车辆项目。",
-                title="环境检查失败",
-                border_style="red"
-            ))
-            Prompt.ask("按回车键返回菜单...")
-            return
+        if not is_valid_mycar_folder():
+            # 未进入项目时：仅有一个有效项目则自动进入；否则仍允许打开 Web Console
+            projects = _find_valid_projects()
+            if len(projects) == 1:
+                console.print(f"[dim]当前目录不是 mycar 项目，仅发现一个有效项目: {projects[0].name}，自动打开。[/dim]")
+                if not _change_to_project(projects[0], "自动打开项目"):
+                    Prompt.ask("按回车键返回菜单...")
+                    return
+            else:
+                console.print(Panel(
+                    "[yellow]当前目录不是有效的 mycar 项目文件夹。[/yellow]\n\n"
+                    "仍将打开 Web Console 驾驶控制台，但不会启动车辆进程（manage.py）。\n"
+                    "如需连接车辆，请先执行 [bold]open[/bold] 命令进入项目。",
+                    title="提示",
+                    border_style="yellow"
+                ))
 
         current_params = {}
         car_path = Path.cwd()

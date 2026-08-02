@@ -220,3 +220,71 @@ def test_open_project_command_prompts_when_multiple_projects(monkeypatch, tmp_pa
     assert Path.cwd() == second_project
     assert rc_handler.data["last_project_path"] == str(second_project)
     assert prompts[0] == "请输入编号"
+
+
+def _patch_no_sleep(monkeypatch):
+    monkeypatch.setattr(tui.time, "sleep", lambda *args, **kwargs: None)
+
+
+def test_drive_command_auto_enters_single_project(monkeypatch, tmp_path):
+    rc_handler = FakeRcHandler()
+    monkeypatch.setattr(tui, "rc_handler", rc_handler)
+    start_dir = tmp_path / "start"
+    projects_dir = tmp_path / "projects"
+    project = projects_dir / "mycar"
+    start_dir.mkdir()
+    _make_project(project)
+    monkeypatch.chdir(start_dir)
+    _patch_projects_root(monkeypatch, projects_dir)
+    _patch_no_sleep(monkeypatch)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: "n")
+
+    tui.DriveCommand().execute()
+
+    assert Path.cwd() == project
+    assert rc_handler.data["last_project_path"] == str(project)
+
+
+def test_drive_command_opens_without_any_project(monkeypatch, tmp_path):
+    rc_handler = FakeRcHandler()
+    monkeypatch.setattr(tui, "rc_handler", rc_handler)
+    start_dir = tmp_path / "start"
+    projects_dir = tmp_path / "projects"
+    start_dir.mkdir()
+    projects_dir.mkdir()
+    monkeypatch.chdir(start_dir)
+    _patch_projects_root(monkeypatch, projects_dir)
+    _patch_no_sleep(monkeypatch)
+    asks = []
+    monkeypatch.setattr(
+        tui.Prompt, "ask", lambda message, **kwargs: asks.append(message) or "n"
+    )
+
+    tui.DriveCommand().execute()
+
+    # 未被环境检查拦截：到达了执行确认提示，且目录未切换
+    assert asks == ["请选择操作"]
+    assert Path.cwd() == start_dir
+    assert "last_project_path" not in rc_handler.data
+
+
+def test_drive_command_does_not_auto_enter_when_multiple_projects(monkeypatch, tmp_path):
+    rc_handler = FakeRcHandler()
+    monkeypatch.setattr(tui, "rc_handler", rc_handler)
+    start_dir = tmp_path / "start"
+    projects_dir = tmp_path / "projects"
+    start_dir.mkdir()
+    _make_project(projects_dir / "a_car")
+    _make_project(projects_dir / "b_car")
+    monkeypatch.chdir(start_dir)
+    _patch_projects_root(monkeypatch, projects_dir)
+    _patch_no_sleep(monkeypatch)
+    asks = []
+    monkeypatch.setattr(
+        tui.Prompt, "ask", lambda message, **kwargs: asks.append(message) or "n"
+    )
+
+    tui.DriveCommand().execute()
+
+    assert asks == ["请选择操作"]
+    assert Path.cwd() == start_dir
