@@ -5,6 +5,9 @@ import platform
 from collections import namedtuple
 from donkeycar.config import Config
 
+pytest.importorskip("torch")
+pytest.importorskip("pytorch_lightning")
+
 Data = namedtuple('Data', ['type', 'name', 'convergence', 'pretrained'])
 
 

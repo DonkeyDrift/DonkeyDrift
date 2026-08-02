@@ -22,7 +22,6 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: 3.11
-          mamba-version: "*"
           activate-environment: donkey
           auto-activate-base: false
           channels: default, conda-forge, pytorch
@@ -44,3 +43,8 @@ jobs:
         run: python -m build --sdist --wheel
       - name: Run tests
         run: pytest
+      - name: Run backend contract tests
+        run: |
+          cd web_ui/backend
+          pip install -r requirements.txt
+          python -m pytest tests -q

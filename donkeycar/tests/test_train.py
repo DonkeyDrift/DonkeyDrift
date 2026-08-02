@@ -142,6 +142,10 @@ def test_train(config: Config, data: Data) -> None:
     :param data:            test case data
     :return:                None
     """
+    if data.type == 'fastai_linear':
+        # fastai is an optional dependency (torch extra), skip if missing
+        pytest.importorskip('fastai')
+
     def pilot_path(name):
         pilot_name = f'pilot_{name}.savedmodel'
         return os.path.join(config.MODELS_PATH, pilot_name)

@@ -167,12 +167,14 @@ class TestDisconnectDetection:
         assert status == "disconnected"
 
     def test_stays_connected_within_timeout(self, monkeypatch):
-        """在超时窗口内持续收到数据时 status=connected。"""
+        """串口已打开、已测得 RTT 且在超时窗口内有数据时 status=connected。"""
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5", disconnect_timeout=3.0)
 
-        # 模拟刚收到数据
+        # 模拟串口已打开、已测得 RTT、刚收到数据
+        part._ser = MagicMock()
+        part._rtt_ms = 5.0
         fake_now = 1000.0
         monkeypatch.setattr(time, "monotonic", lambda: fake_now)
         part._last_data_time = fake_now
@@ -182,20 +184,35 @@ class TestDisconnectDetection:
         status, rtt_ms, lost = part._build_output()
         assert status == "connected"
 
-    def test_disconnected_after_timeout(self, monkeypatch):
-        """超过超时窗口无数据时 status=disconnected。"""
+    def test_waiting_before_first_rtt(self, monkeypatch):
+        """串口已打开且超时窗口内有数据，但尚未测得 RTT 时 status=waiting。"""
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5", disconnect_timeout=3.0)
 
+        part._ser = MagicMock()
         fake_now = 1000.0
         monkeypatch.setattr(time, "monotonic", lambda: fake_now)
         part._last_data_time = fake_now
 
-        # 3.1 秒后应 disconnected
+        status, rtt_ms, lost = part._build_output()
+        assert status == "waiting"
+
+    def test_disconnected_after_timeout(self, monkeypatch):
+        """串口已打开但超过超时窗口无数据时 status=timeout。"""
+        from donkeycar.parts.serial2_test import Serial2Test
+
+        part = Serial2Test(port="/dev/ttyS5", disconnect_timeout=3.0)
+
+        part._ser = MagicMock()
+        fake_now = 1000.0
+        monkeypatch.setattr(time, "monotonic", lambda: fake_now)
+        part._last_data_time = fake_now
+
+        # 3.1 秒后应 timeout
         monkeypatch.setattr(time, "monotonic", lambda: 1003.1)
         status, rtt_ms, lost = part._build_output()
-        assert status == "disconnected"
+        assert status == "timeout"
 
 
 class TestRttCalculation:
@@ -206,6 +223,7 @@ class TestRttCalculation:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
+        part._ser = MagicMock()
 
         # 模拟发送 PING #0 的时间
         monkeypatch.setattr(time, "monotonic", lambda: 5000.0)
@@ -214,8 +232,10 @@ class TestRttCalculation:
         # 模拟 3.2ms 后收到 PONG
         monkeypatch.setattr(time, "monotonic", lambda: 5000.0032)
         part._handle_pong(seq=0, esp_ms=12345)
+        part._last_data_time = time.monotonic()
 
         status, rtt_ms, lost = part._build_output()
+        assert status == "connected"
         assert rtt_ms == pytest.approx(3.2, abs=0.1)
 
     def test_rtt_stale_pong_ignored(self, monkeypatch):
@@ -223,6 +243,7 @@ class TestRttCalculation:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
+        part._ser = MagicMock()
 
         # 发送 PING #0
         monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
@@ -239,6 +260,7 @@ class TestRttCalculation:
         # 收到 PONG #1, RTT=2ms
         monkeypatch.setattr(time, "monotonic", lambda: 2000.002)
         part._handle_pong(seq=1, esp_ms=2)
+        part._last_data_time = time.monotonic()
 
         status, rtt_ms, lost = part._build_output()
         assert rtt_ms == pytest.approx(2.0, abs=0.1)
@@ -262,6 +284,7 @@ class TestSeqOverflow:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
+        part._ser = MagicMock()
         part._seq = 65535
 
         monkeypatch.setattr(time, "monotonic", lambda: 3000.0)
@@ -269,6 +292,7 @@ class TestSeqOverflow:
 
         monkeypatch.setattr(time, "monotonic", lambda: 3000.004)
         part._handle_pong(seq=65535, esp_ms=999)
+        part._last_data_time = time.monotonic()
 
         status, rtt_ms, lost = part._build_output()
         assert rtt_ms == pytest.approx(4.0, abs=0.1)
@@ -282,6 +306,7 @@ class TestLostPacketCounting:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
+        part._ser = MagicMock()
 
         # 发送 PING 0,1,2,3
         for seq in range(4):
@@ -293,6 +318,7 @@ class TestLostPacketCounting:
         part._handle_pong(seq=0, esp_ms=1)
         monkeypatch.setattr(time, "monotonic", lambda: 1003.001)
         part._handle_pong(seq=3, esp_ms=4)
+        part._last_data_time = time.monotonic()
 
         status, rtt_ms, lost = part._build_output()
         assert lost == 2
@@ -326,7 +352,9 @@ class TestOutputFormat:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
-        # 模拟收到 BEAT
+        # 模拟串口已打开、刚收到数据且已测得 RTT
+        part._ser = MagicMock()
+        part._rtt_ms = 5.0
         monkeypatch.setattr(time, "monotonic", lambda: 500.0)
         part._last_data_time = 500.0
 
@@ -338,6 +366,9 @@ class TestOutputFormat:
         from donkeycar.parts.serial2_test import Serial2Test
 
         part = Serial2Test(port="/dev/ttyS5")
+        # 模拟串口已打开、刚收到数据且已测得 RTT
+        part._ser = MagicMock()
+        part._rtt_ms = 5.0
         monkeypatch.setattr(time, "monotonic", lambda: 500.0)
         part._last_data_time = 500.0
 
