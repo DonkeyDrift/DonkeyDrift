@@ -1,0 +1,509 @@
+/*
+ * MUS4 Web Console skin for the Donkey Web UI.
+ *
+ * Activated by toggling the `theme-mus4` class on <html>
+ * (state in src/store/useUiPrefsStore.ts, applied in src/components/Layout.tsx).
+ * Every rule is prefixed with `html.theme-mus4` so it beats the original
+ * Tailwind utilities on specificity alone.
+ *
+ * Visual-only skin: rules may only touch color, background-color,
+ * background-image (gradients), border-color, border-radius, box-shadow,
+ * outline/outline-offset (inset hairline frames), accent-color, font-family
+ * and the corresponding --tw-* color variables. Layout-affecting
+ * properties (display/position/flex/grid/order/width/height/margin/
+ * padding/top/right/bottom/left/float/...) are forbidden here.
+ *
+ * The panel/state frames mimic the ESP32 Drifter Console: its `.stateCard`
+ * draws a 1px frame plus a diagonal gradient, and state cards recolor the
+ * frame (green = normal/on, red = locked/off, yellow = transitional,
+ * cyan = info). Donkey blocks often carry no border class at all, so the
+ * frames here are drawn with `outline` + negative offset: they never shift
+ * layout and never clobber Tailwind's box-shadow based drop shadows.
+ */
+
+html.theme-mus4 {
+  color-scheme: dark;
+}
+
+/* ---------- Surfaces ---------- */
+/* page background / deepest wells */
+html.theme-mus4 .bg-zinc-950 {
+  background-color: #101318;
+}
+html.theme-mus4 .bg-zinc-950\/80 {
+  background-color: rgba(16, 19, 24, 0.8);
+}
+/* panels / cards */
+html.theme-mus4 .bg-zinc-900 {
+  background-color: #171c24;
+}
+html.theme-mus4 .bg-zinc-900\/35 {
+  background-color: rgba(23, 28, 36, 0.35);
+}
+html.theme-mus4 .bg-zinc-900\/50,
+html.theme-mus4 .supports-\[backdrop-filter\]\:bg-zinc-900\/50 {
+  background-color: rgba(23, 28, 36, 0.5);
+}
+html.theme-mus4 .bg-zinc-900\/70 {
+  background-color: rgba(23, 28, 36, 0.7);
+}
+html.theme-mus4 .bg-zinc-900\/90 {
+  background-color: rgba(23, 28, 36, 0.9);
+}
+html.theme-mus4 .bg-zinc-900\/95 {
+  background-color: rgba(23, 28, 36, 0.95);
+}
+/* inner cards / inputs */
+html.theme-mus4 .bg-zinc-800,
+html.theme-mus4 .disabled\:bg-zinc-800:disabled {
+  background-color: #111820;
+}
+html.theme-mus4 .bg-zinc-800\/50 {
+  background-color: rgba(17, 24, 32, 0.5);
+}
+html.theme-mus4 .bg-zinc-800\/80 {
+  background-color: rgba(17, 24, 32, 0.8);
+}
+/* raised controls (toggle off state, slider tracks) */
+html.theme-mus4 .bg-zinc-700 {
+  background-color: #232c3a;
+}
+html.theme-mus4 .bg-zinc-600 {
+  background-color: #2b3441;
+}
+html.theme-mus4 .bg-zinc-500 {
+  background-color: #3a4656;
+}
+html.theme-mus4 .hover\:bg-zinc-800:hover {
+  background-color: #202a37;
+}
+html.theme-mus4 .hover\:bg-zinc-800\/50:hover {
+  background-color: rgba(32, 42, 55, 0.5);
+}
+html.theme-mus4 .hover\:bg-zinc-700:hover {
+  background-color: #27313f;
+}
+html.theme-mus4 .active\:bg-zinc-900:active {
+  background-color: #141a22;
+}
+html.theme-mus4 .bg-white {
+  background-color: #e8edf2;
+}
+
+/* ---------- Accent (bright cyan) ---------- */
+html.theme-mus4 .bg-cyan-600,
+html.theme-mus4 .bg-cyan-500 {
+  background-color: #5cc8ff;
+}
+html.theme-mus4 .hover\:bg-cyan-700:hover {
+  background-color: #8bdcff;
+}
+/* dark text on bright accent buttons */
+html.theme-mus4 .bg-cyan-600.text-white,
+html.theme-mus4 .bg-cyan-500.text-white {
+  color: #0b1220;
+}
+html.theme-mus4 .bg-cyan-500\/50 {
+  background-color: rgba(92, 200, 255, 0.5);
+}
+html.theme-mus4 .bg-cyan-500\/20,
+html.theme-mus4 .bg-cyan-600\/20 {
+  background-color: rgba(92, 200, 255, 0.15);
+}
+html.theme-mus4 .hover\:bg-cyan-500\/30:hover {
+  background-color: rgba(92, 200, 255, 0.3);
+}
+html.theme-mus4 .bg-cyan-950 {
+  background-color: #12202c;
+}
+html.theme-mus4 .bg-cyan-950\/30 {
+  background-color: rgba(92, 200, 255, 0.08);
+}
+
+/* ---------- Semantic surfaces ---------- */
+html.theme-mus4 .bg-red-600,
+html.theme-mus4 .bg-red-500 {
+  background-color: #ef4444;
+}
+html.theme-mus4 .hover\:bg-red-700:hover {
+  background-color: #f06161;
+}
+html.theme-mus4 .bg-red-500\/40 {
+  background-color: rgba(239, 68, 68, 0.4);
+}
+html.theme-mus4 .bg-red-500\/20 {
+  background-color: rgba(239, 68, 68, 0.18);
+}
+html.theme-mus4 .hover\:bg-red-500\/30:hover {
+  background-color: rgba(239, 68, 68, 0.3);
+}
+html.theme-mus4 .bg-red-900\/50,
+html.theme-mus4 .bg-red-950\/90 {
+  background-color: rgba(239, 68, 68, 0.16);
+}
+html.theme-mus4 .bg-red-950\/60 {
+  background-color: rgba(239, 68, 68, 0.14);
+}
+html.theme-mus4 .bg-emerald-600,
+html.theme-mus4 .bg-emerald-500,
+html.theme-mus4 .bg-emerald-400 {
+  background-color: #39d98a;
+}
+html.theme-mus4 .bg-emerald-500\/25 {
+  background-color: rgba(57, 217, 138, 0.25);
+}
+html.theme-mus4 .bg-emerald-400\/10 {
+  background-color: rgba(57, 217, 138, 0.1);
+}
+html.theme-mus4 .bg-emerald-950\/90 {
+  background-color: rgba(57, 217, 138, 0.12);
+}
+html.theme-mus4 .bg-amber-950\/40 {
+  background-color: rgba(255, 204, 102, 0.14);
+}
+html.theme-mus4 .bg-amber-400\/10 {
+  background-color: rgba(255, 204, 102, 0.1);
+}
+
+/* ---------- Panel frames (ESP32 .stateCard look) ---------- */
+/* diagonal gradient face, same as the Drifter Console state cards */
+html.theme-mus4 .bg-zinc-900 {
+  background-image: linear-gradient(135deg, #1c2430, #121821);
+}
+/* every panel/card gets a visible hairline frame */
+html.theme-mus4 .bg-zinc-900 {
+  outline: 1px solid #344154;
+  outline-offset: -1px;
+}
+html.theme-mus4 .bg-zinc-900\/35,
+html.theme-mus4 .bg-zinc-900\/50,
+html.theme-mus4 .supports-\[backdrop-filter\]\:bg-zinc-900\/50,
+html.theme-mus4 .bg-zinc-900\/70,
+html.theme-mus4 .bg-zinc-900\/90,
+html.theme-mus4 .bg-zinc-900\/95 {
+  outline: 1px solid rgba(52, 65, 84, 0.85);
+  outline-offset: -1px;
+}
+html.theme-mus4 .bg-zinc-800,
+html.theme-mus4 .disabled\:bg-zinc-800:disabled {
+  outline: 1px solid #2b3441;
+  outline-offset: -1px;
+}
+html.theme-mus4 .bg-zinc-800\/50,
+html.theme-mus4 .bg-zinc-800\/80 {
+  outline: 1px solid rgba(43, 52, 65, 0.9);
+  outline-offset: -1px;
+}
+
+/* ---------- State frames (green=normal/on, red=off/error, cyan=info, amber=warn) ---------- */
+html.theme-mus4 .bg-emerald-600,
+html.theme-mus4 .bg-emerald-500,
+html.theme-mus4 .bg-emerald-400,
+html.theme-mus4 .bg-emerald-500\/25,
+html.theme-mus4 .bg-emerald-400\/10,
+html.theme-mus4 .bg-emerald-950\/90 {
+  outline: 1px solid rgba(57, 217, 138, 0.55);
+  outline-offset: -1px;
+}
+html.theme-mus4 .bg-red-600,
+html.theme-mus4 .bg-red-500,
+html.theme-mus4 .bg-red-500\/40,
+html.theme-mus4 .bg-red-500\/20,
+html.theme-mus4 .bg-red-900\/50,
+html.theme-mus4 .bg-red-950\/90,
+html.theme-mus4 .bg-red-950\/60 {
+  outline: 1px solid rgba(239, 68, 68, 0.55);
+  outline-offset: -1px;
+}
+html.theme-mus4 .bg-cyan-500\/20,
+html.theme-mus4 .bg-cyan-600\/20,
+html.theme-mus4 .bg-cyan-950,
+html.theme-mus4 .bg-cyan-950\/30 {
+  outline: 1px solid rgba(92, 200, 255, 0.45);
+  outline-offset: -1px;
+}
+html.theme-mus4 .bg-amber-950\/40,
+html.theme-mus4 .bg-amber-400\/10 {
+  outline: 1px solid rgba(255, 204, 102, 0.45);
+  outline-offset: -1px;
+}
+
+/* ---------- Text ---------- */
+html.theme-mus4 .text-zinc-100,
+html.theme-mus4 .text-zinc-200,
+html.theme-mus4 .hover\:text-zinc-100:hover,
+html.theme-mus4 .hover\:text-zinc-200:hover {
+  color: #e8edf2;
+}
+html.theme-mus4 .text-zinc-300,
+html.theme-mus4 .hover\:text-zinc-300:hover {
+  color: #b9c5d3;
+}
+html.theme-mus4 .text-zinc-400 {
+  color: #8fa1b5;
+}
+html.theme-mus4 .text-zinc-500,
+html.theme-mus4 .placeholder\:text-zinc-500::placeholder {
+  color: #6b7d90;
+}
+html.theme-mus4 .text-zinc-600,
+html.theme-mus4 .disabled\:text-zinc-600:disabled {
+  color: #55677a;
+}
+html.theme-mus4 .text-white {
+  color: #eef3f8;
+}
+html.theme-mus4 .hover\:text-white:hover {
+  color: #ffffff;
+}
+
+/* accent text */
+html.theme-mus4 .text-cyan-400,
+html.theme-mus4 .text-cyan-500,
+html.theme-mus4 .text-cyan-600 {
+  color: #5cc8ff;
+}
+html.theme-mus4 .text-cyan-200 {
+  color: #b7e5ff;
+}
+html.theme-mus4 .hover\:text-cyan-400:hover,
+html.theme-mus4 .group-hover\:text-cyan-400 {
+  color: #8bdcff;
+}
+
+/* semantic text */
+html.theme-mus4 .text-red-400,
+html.theme-mus4 .text-red-500 {
+  color: #ef4444;
+}
+html.theme-mus4 .text-red-300 {
+  color: #f2a0a0;
+}
+html.theme-mus4 .text-red-200 {
+  color: #f6c0c0;
+}
+html.theme-mus4 .text-red-100 {
+  color: #fad9d9;
+}
+html.theme-mus4 .placeholder\:text-red-300\/70::placeholder {
+  color: rgba(242, 160, 160, 0.7);
+}
+html.theme-mus4 .text-emerald-400,
+html.theme-mus4 .text-green-400 {
+  color: #39d98a;
+}
+html.theme-mus4 .hover\:text-emerald-400:hover {
+  color: #5fe8a8;
+}
+html.theme-mus4 .text-amber-400,
+html.theme-mus4 .text-yellow-400,
+html.theme-mus4 .text-yellow-500,
+html.theme-mus4 .text-orange-400 {
+  color: #ffcc66;
+}
+html.theme-mus4 .text-amber-300 {
+  color: #ffd88a;
+}
+html.theme-mus4 .text-amber-100 {
+  color: #ffedc4;
+}
+
+/* ---------- Borders ---------- */
+html.theme-mus4 .border-zinc-800 {
+  border-color: #2b3441;
+}
+html.theme-mus4 .border-zinc-700 {
+  border-color: #344154;
+}
+html.theme-mus4 .border-zinc-800\/50 {
+  border-color: rgba(43, 52, 65, 0.5);
+}
+html.theme-mus4 .border-zinc-700\/50 {
+  border-color: rgba(52, 65, 84, 0.55);
+}
+html.theme-mus4 .border-zinc-800\/60 {
+  border-color: rgba(43, 52, 65, 0.6);
+}
+html.theme-mus4 .border-zinc-600 {
+  border-color: #3a4656;
+}
+html.theme-mus4 .border-white\/10 {
+  border-color: rgba(52, 65, 84, 0.9);
+}
+html.theme-mus4 .border-cyan-500,
+html.theme-mus4 .focus\:border-cyan-600:focus {
+  border-color: #5cc8ff;
+}
+html.theme-mus4 .border-cyan-500\/50 {
+  border-color: rgba(92, 200, 255, 0.5);
+}
+html.theme-mus4 .border-cyan-500\/60 {
+  border-color: rgba(92, 200, 255, 0.6);
+}
+html.theme-mus4 .border-cyan-800\/60 {
+  border-color: rgba(92, 200, 255, 0.35);
+}
+html.theme-mus4 .border-red-500 {
+  border-color: #ef4444;
+}
+html.theme-mus4 .border-red-800 {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+html.theme-mus4 .border-red-700\/50 {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+html.theme-mus4 .border-red-700,
+html.theme-mus4 .border-red-400 {
+  border-color: rgba(239, 68, 68, 0.6);
+}
+html.theme-mus4 .border-red-500\/50 {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+html.theme-mus4 .border-red-500\/60,
+html.theme-mus4 .border-red-400\/60 {
+  border-color: rgba(239, 68, 68, 0.6);
+}
+html.theme-mus4 .border-emerald-500,
+html.theme-mus4 .border-emerald-400 {
+  border-color: rgba(57, 217, 138, 0.65);
+}
+html.theme-mus4 .border-emerald-400\/70 {
+  border-color: rgba(57, 217, 138, 0.7);
+}
+html.theme-mus4 .border-emerald-700,
+html.theme-mus4 .border-emerald-700\/50 {
+  border-color: rgba(57, 217, 138, 0.4);
+}
+html.theme-mus4 .border-amber-700 {
+  border-color: rgba(255, 204, 102, 0.55);
+}
+
+/* ---------- Focus rings & form accents ---------- */
+html.theme-mus4 .focus\:ring-cyan-500:focus,
+html.theme-mus4 .focus\:ring-cyan-600:focus {
+  --tw-ring-color: #5cc8ff;
+}
+html.theme-mus4 .focus\:ring-red-500:focus {
+  --tw-ring-color: #ef4444;
+}
+html.theme-mus4 .accent-cyan-500,
+html.theme-mus4 .accent-cyan-400 {
+  accent-color: #5cc8ff;
+}
+
+/* ---------- Radii (cards 8-12px, pill buttons) ---------- */
+html.theme-mus4 .rounded-sm {
+  border-radius: 6px;
+}
+html.theme-mus4 .rounded {
+  border-radius: 8px;
+}
+html.theme-mus4 .rounded-md {
+  border-radius: 10px;
+}
+html.theme-mus4 .rounded-lg {
+  border-radius: 12px;
+}
+html.theme-mus4 .rounded-xl {
+  border-radius: 16px;
+}
+html.theme-mus4 button.rounded,
+html.theme-mus4 button.rounded-md,
+html.theme-mus4 button.rounded-lg {
+  border-radius: 999px;
+}
+
+/* ---------- Typography ---------- */
+html.theme-mus4 .font-sans {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Shadows ---------- */
+html.theme-mus4 .shadow-sm {
+  --tw-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --tw-shadow-colored: 0 1px 2px 0 var(--tw-shadow-color);
+}
+html.theme-mus4 .shadow-lg {
+  --tw-shadow: 0 10px 24px -3px rgba(0, 0, 0, 0.45), 0 4px 8px -4px rgba(0, 0, 0, 0.4);
+  --tw-shadow-colored: 0 10px 24px -3px var(--tw-shadow-color), 0 4px 8px -4px var(--tw-shadow-color);
+}
+html.theme-mus4 .shadow-xl {
+  --tw-shadow: 0 20px 36px -5px rgba(0, 0, 0, 0.5), 0 8px 14px -6px rgba(0, 0, 0, 0.45);
+  --tw-shadow-colored: 0 20px 36px -5px var(--tw-shadow-color), 0 8px 14px -6px var(--tw-shadow-color);
+}
+html.theme-mus4 .shadow-2xl {
+  --tw-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  --tw-shadow-colored: 0 25px 50px -12px var(--tw-shadow-color);
+}
+
+/* ---------- Custom scroll slider (index.css, cyan hardcoded) ---------- */
+html.theme-mus4 .tub-editor-scroll-slider::-webkit-slider-thumb {
+  border-color: #3fa9e6;
+  background: rgba(92, 200, 255, 0.55);
+}
+html.theme-mus4 .tub-editor-scroll-slider:hover::-webkit-slider-thumb {
+  background: rgba(92, 200, 255, 0.8);
+  box-shadow: 0 0 0 4px rgba(92, 200, 255, 0.18), 0 0 12px rgba(92, 200, 255, 0.35);
+}
+html.theme-mus4 .tub-editor-scroll-slider:active::-webkit-slider-thumb {
+  background: rgba(92, 200, 255, 1);
+  box-shadow: 0 0 0 5px rgba(92, 200, 255, 0.24), 0 0 16px rgba(92, 200, 255, 0.45);
+}
+html.theme-mus4 .tub-editor-scroll-slider:disabled::-webkit-slider-thumb {
+  background: rgba(92, 200, 255, 0.3);
+}
+html.theme-mus4 .tub-editor-scroll-slider::-moz-range-thumb {
+  border-color: #3fa9e6;
+  background: rgba(92, 200, 255, 0.55);
+}
+html.theme-mus4 .tub-editor-scroll-slider:hover::-moz-range-thumb {
+  background: rgba(92, 200, 255, 0.8);
+  box-shadow: 0 0 0 4px rgba(92, 200, 255, 0.18), 0 0 12px rgba(92, 200, 255, 0.35);
+}
+html.theme-mus4 .tub-editor-scroll-slider:active::-moz-range-thumb {
+  background: rgba(92, 200, 255, 1);
+  box-shadow: 0 0 0 5px rgba(92, 200, 255, 0.24), 0 0 16px rgba(92, 200, 255, 0.45);
+}
+html.theme-mus4 .tub-editor-scroll-slider:disabled::-moz-range-thumb {
+  background: rgba(92, 200, 255, 0.3);
+}
+
+/* ---------- Skin switcher: active segment stays visibly darker than its pill ---------- */
+html.theme-mus4 button[aria-pressed="true"].bg-zinc-950 {
+  background-color: #05070a;
+  outline: 1px solid #5cc8ff;
+  outline-offset: -1px;
+}
+
+/* ---------- State frames addition: red badge surface (VideoStream degraded badge) ---------- */
+html.theme-mus4 .bg-red-400\/10 {
+  outline: 1px solid rgba(239, 68, 68, 0.55);
+  outline-offset: -1px;
+}
+
+/* ---------- Drive mode selector: ESP32 mode-card accents (手动=绿, 半自动=黄, 全自动=蓝) ---------- */
+/* mirrors the Drifter Console .mode0/.mode1/.mode2 state-card colors;
+   only the active segment (bg-cyan-500/20) is recolored, container is unique
+   to DriveModeSelector (inline-flex rounded-lg overflow-hidden) */
+html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button:nth-child(1).bg-cyan-500\/20 {
+  background-color: rgba(57, 217, 138, 0.18);
+  color: #39d98a;
+  outline: 1px solid rgba(57, 217, 138, 0.55);
+  outline-offset: -1px;
+}
+html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button:nth-child(2).bg-cyan-500\/20 {
+  background-color: rgba(255, 204, 102, 0.16);
+  color: #ffcc66;
+  outline: 1px solid rgba(255, 204, 102, 0.55);
+  outline-offset: -1px;
+}
+html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button:nth-child(3).bg-cyan-500\/20 {
+  outline: 1px solid rgba(92, 200, 255, 0.55);
+  outline-offset: -1px;
+}
+
+/* ---------- Record button: 录制键常驻红框（record = red，全局仅驾驶页录制键匹配该签名） ---------- */
+html.theme-mus4 button.inline-flex.rounded-lg.bg-zinc-800:not(.border) {
+  outline: 1px solid rgba(239, 68, 68, 0.5);
+  outline-offset: -1px;
+}
