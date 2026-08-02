@@ -1424,8 +1424,8 @@ class WebUICommand(DonkeyCommand):
     def get_command_line(self, params):
         web_ui_path = _get_bundled_web_ui_path()
         if web_ui_path is None:
-            return ["donkey", "web"]
-        return ["donkey", "web", "--path", str(web_ui_path)]
+            return ["donkey", "web", "--open"]
+        return ["donkey", "web", "--path", str(web_ui_path), "--open"]
 
 # -----------------------------------------------------------------------------
 # 菜单系统
