@@ -176,7 +176,14 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
       }
       wsRef.current = null;
       if (ws) {
-        ws.close();
+        // 连接尚未建立时直接 close() 会让 Chrome 报
+        // "WebSocket is closed before the connection is established"，
+        // 等 onopen 后再关即可避免（StrictMode 双挂载时常见）。
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => ws.close();
+        } else {
+          ws.close();
+        }
       }
     };
   }, [connect]);
