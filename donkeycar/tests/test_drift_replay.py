@@ -69,6 +69,18 @@ def test_run_returns_zero_before_clip_loaded(clock):
     assert throttle == 0.0
 
 
+def test_missing_clip_file_degrades_instead_of_raising(tmp_path, clock):
+    """clip 文件不存在时不抛异常，降级为未加载（输出 0,0）。
+
+    回归测试：数据目录被清空后 manage.py drive 不应在启动时崩溃。
+    """
+    missing = str(tmp_path / "no_such_clip.json")
+    part = DriftReplayPart(clip_path=missing)
+    angle, throttle = part.run()
+    assert angle == 0.0
+    assert throttle == 0.0
+
+
 def test_first_frames_after_load_are_warmup_zero(clip_file, clock):
     """加载后首部预热帧为 (0,0)。"""
     part = DriftReplayPart(clip_path=clip_file, warmup_frames=3)

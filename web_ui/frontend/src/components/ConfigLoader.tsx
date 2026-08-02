@@ -53,10 +53,9 @@ export const ConfigLoader: React.FC = () => {
         await autoLoadTub(path);
       }
     } catch (err: unknown) {
-      const message = getApiErrorMessage(err, 'Failed to load config');
-      if (message !== 'Directory not found' && message !== 'config.py not found in directory') {
-        setError(message);
-      }
+      // 任何加载失败（包括目录不存在、缺少 config.py）都要反馈给用户，
+      // 否则路径错误时界面毫无提示，只剩控制台里的 404。
+      setError(getApiErrorMessage(err, 'Failed to load config'));
     } finally {
       setLoading(false);
     }
