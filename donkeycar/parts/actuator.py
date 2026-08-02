@@ -1200,6 +1200,7 @@ class Arduino:
         self.throttleCmd = 0
         self._rx_buf = bytearray()  # 接收字节缓冲区，用于拆行
         self.imu_data = {}  # 存储最新 IMU 数据：{'seq', 'ts_ms', 'accel_x/y/z', 'gyro_x/y/z'}
+        self.mode_data = {}  # 存储最新 M 帧固件状态：{'mode', 'park'}
 
     def set_cmd(self, mode, channel, val):
         self.mode = mode
@@ -1291,6 +1292,8 @@ class Arduino:
                 if match:
                     mode = int(match.group(1))
                     park = int(match.group(2))
+                    # 无条件缓存最新固件模式/手刹状态，供 ArdRc 发布到 Memory
+                    self.mode_data = {'mode': mode, 'park': park}
                     return {
                         'mode': mode,
                         'park': park,
@@ -1606,16 +1609,17 @@ class ArdRc:
     从 Arduino/ESP32 串口控制器读取 RC 接收机（手柄）输入。
 
     ESP32 固件经 Serial1 上行 T<t>S<s> 帧，Arduino.Arduino_readline()
-    解析时无条件更新 controller.steering / controller.throttle（值域 -1..1）。
-    该 Part 把这两个缓存值发布到 Memory（如 'rc/steering'、'rc/throttle'），
-    供遥测桥上行到 web UI 遥测曲线。
+    解析时无条件更新 controller.steering / controller.throttle（值域 -1..1）；
+    1Hz 的 M<m>:P<p> 帧解析时无条件更新 controller.mode_data。
+    该 Part 把这些缓存值发布到 Memory（如 'rc/steering'、'rc/throttle'、
+    'rc/mode'、'rc/park'），供遥测桥上行到 web UI 遥测曲线与状态显示。
 
     注意：输出不要接 'user/angle' / 'user/throttle'——历史上用串口 RC
     怠速值覆盖 user/angle 曾导致录制数据间歇跳 0（见 complete 模板注释）。
 
     使用方式：
         rc = ArdRc(controller=arduino_controller)
-        V.add(rc, outputs=['rc/steering', 'rc/throttle'])
+        V.add(rc, outputs=['rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'])
     """
 
     def __init__(self, controller=None):
@@ -1634,8 +1638,15 @@ class ArdRc:
             time.sleep(0.1)
 
     def run_threaded(self):
-        """返回最新缓存的 RC 输入 (steering, throttle)，值域 -1..1"""
-        return self.controller.steering, self.controller.throttle
+        """返回最新缓存的 RC 输入与固件状态 (steering, throttle, mode, park)。
+
+        steering/throttle 值域 -1..1；mode/park 来自固件 1Hz 的 M<m>:P<p> 帧，
+        尚未收到 M 帧时为 None（遥测桥会跳过 None 字段，只注册两个
+        rc/steering、rc/throttle 输出键的旧调用方也不受影响）。
+        """
+        return (self.controller.steering, self.controller.throttle,
+                self.controller.mode_data.get('mode'),
+                self.controller.mode_data.get('park'))
 
     def run(self):
         return self.run_threaded()

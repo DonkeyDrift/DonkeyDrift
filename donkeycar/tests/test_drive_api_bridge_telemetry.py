@@ -40,6 +40,8 @@ def test_run_threaded_accepts_telemetry_kwargs_and_sends_message(monkeypatch):
         pilot_throttle=0.4,
         rc_steering=-0.3,
         rc_throttle=0.6,
+        rc_mode=0,
+        rc_park=1,
     )
 
     telemetry_msgs = [m for m in sent if m.get("type") == "telemetry"]
@@ -54,6 +56,8 @@ def test_run_threaded_accepts_telemetry_kwargs_and_sends_message(monkeypatch):
     assert msg["pilot_throttle"] == 0.4
     assert msg["rc_steering"] == -0.3
     assert msg["rc_throttle"] == 0.6
+    assert msg["rc_mode"] == 0
+    assert msg["rc_park"] == 1
     assert "t" in msg  # 必须带时间戳
 
 
@@ -113,6 +117,8 @@ def test_telemetry_omits_none_fields(monkeypatch):
     assert "pilot_angle" not in msg
     assert "rc_steering" not in msg
     assert "rc_throttle" not in msg
+    assert "rc_mode" not in msg
+    assert "rc_park" not in msg
 
 
 def test_telemetry_not_sent_when_disconnected(monkeypatch):

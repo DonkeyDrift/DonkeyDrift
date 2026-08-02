@@ -701,6 +701,7 @@ class DriveApiBridge:
             "steering": "steering", "throttle": "throttle",
             "pilot_angle": "pilot_angle", "pilot_throttle": "pilot_throttle",
             "rc_steering": "rc_steering", "rc_throttle": "rc_throttle",
+            "rc_mode": "rc_mode", "rc_park": "rc_park",
             "drift_yaw_error": "dye",
             "drift_steering_correction": "dsc",
             "drift_throttle_mode": "dtm",
@@ -726,6 +727,7 @@ class DriveApiBridge:
                     steering=None, throttle=None,
                     pilot_angle=None, pilot_throttle=None,
                     rc_steering=None, rc_throttle=None,
+                    rc_mode=None, rc_park=None,
                     drift_yaw_error=None, drift_steering_correction=None,
                     drift_throttle_mode=None):
         if img_arr is not None and self.video_transport == "webrtc":
@@ -768,6 +770,7 @@ class DriveApiBridge:
                                    steering=steering, throttle=throttle,
                                    pilot_angle=pilot_angle, pilot_throttle=pilot_throttle,
                                    rc_steering=rc_steering, rc_throttle=rc_throttle,
+                                   rc_mode=rc_mode, rc_park=rc_park,
                                    drift_yaw_error=drift_yaw_error,
                                    drift_steering_correction=drift_steering_correction,
                                    drift_throttle_mode=drift_throttle_mode)
@@ -796,6 +799,7 @@ class DriveApiBridge:
             steering=None, throttle=None,
             pilot_angle=None, pilot_throttle=None,
             rc_steering=None, rc_throttle=None,
+            rc_mode=None, rc_park=None,
             drift_yaw_error=None, drift_steering_correction=None,
             drift_throttle_mode=None):
         return self.run_threaded(img_arr, num_records, mode, recording,
@@ -804,6 +808,7 @@ class DriveApiBridge:
                                  steering=steering, throttle=throttle,
                                  pilot_angle=pilot_angle, pilot_throttle=pilot_throttle,
                                  rc_steering=rc_steering, rc_throttle=rc_throttle,
+                                 rc_mode=rc_mode, rc_park=rc_park,
                                  drift_yaw_error=drift_yaw_error,
                                  drift_steering_correction=drift_steering_correction,
                                  drift_throttle_mode=drift_throttle_mode)
