@@ -276,6 +276,21 @@ export const DrivePage: React.FC = () => {
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
           <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          {/* 固件模式 / Park 状态徽标（来自 ESP32 M<m>:P<p> 帧遥测） */}
+          {(telemetry?.rc_mode !== undefined || telemetry?.rc_park !== undefined) && (
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              {telemetry?.rc_mode !== undefined && (
+                <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                  固件模式：{['手动', '半自动', '全自动'][telemetry.rc_mode] ?? `未知(${telemetry.rc_mode})`}
+                </span>
+              )}
+              {telemetry?.rc_park === 1 && (
+                <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+                  Park 锁定 · 油门被钳 0
+                </span>
+              )}
+            </div>
+          )}
           <TelemetryChart telemetry={telemetry} className="mt-4" />
         </div>
 

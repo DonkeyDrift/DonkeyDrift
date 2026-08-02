@@ -36,6 +36,10 @@ export interface Telemetry {
   pilot_throttle?: number;
   rc_steering?: number;
   rc_throttle?: number;
+  /** 固件驾驶模式（0=手动/1=半自动/2=全自动），来自 M<m>:P<p> 帧 */
+  rc_mode?: number;
+  /** 固件 Park 手刹状态（1=锁定，油门被钳 0），来自 M<m>:P<p> 帧 */
+  rc_park?: number;
 }
 
 interface UseDriveWebsocketOptions {
