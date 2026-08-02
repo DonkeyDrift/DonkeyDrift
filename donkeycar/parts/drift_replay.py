@@ -18,8 +18,11 @@ DriftReplayPart 是一个"假 Pilot"：实现与 KerasPilot 同构的 Part 接�
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # 标准 clip schema，与 scripts/build_drift_clip.py 保持一致
 CLIP_SCHEMA = "mus4.drift_replay_clip.v1"
@@ -79,7 +82,16 @@ class DriftReplayPart:
         self._shutdown = False
 
     def _load_clip(self, clip_path: str | Path) -> None:
-        data = json.loads(Path(clip_path).read_text(encoding="utf-8"))
+        # clip 文件缺失属于运行环境问题（例如数据目录被清空），
+        # 降级为"未加载"（输出 0,0），不应让整个 drive 进程崩溃。
+        try:
+            raw = Path(clip_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.error(
+                "漂移回放 clip 不存在，回放已禁用（输出 0,0）: %s", clip_path
+            )
+            return
+        data = json.loads(raw)
         if data.get("schema") != CLIP_SCHEMA:
             raise ValueError(f"clip schema 不匹配：期望 {CLIP_SCHEMA}，实际 {data.get('schema')!r}")
         self._samples = list(data.get("samples", []))

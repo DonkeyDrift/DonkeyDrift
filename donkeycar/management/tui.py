@@ -1388,7 +1388,14 @@ class DriveCommand(DonkeyCommand):
                     return
 
                 if not car_exit_reported and car_process.poll() is not None:
-                    console.print("\n[yellow]车辆进程已退出，Web Console 继续运行。[/yellow]")
+                    car_exit_code = car_process.returncode
+                    if car_exit_code:
+                        console.print(
+                            f"\n[bold red]车辆进程已异常退出（退出码 {car_exit_code}），驾驶页面将显示「车端离线」。[/bold red]\n"
+                            "[red]请向上滚动查看 manage.py 的报错输出（常见原因：配置指向的文件缺失、硬件占用等）。[/red]"
+                        )
+                    else:
+                        console.print("\n[yellow]车辆进程已退出，Web Console 继续运行。[/yellow]")
                     car_exit_reported = True
 
                 time.sleep(0.1)
