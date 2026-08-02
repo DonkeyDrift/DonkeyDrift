@@ -47,26 +47,27 @@ class TestConnectEndpoint:
     """验证 POST /api/provisioning/connect 端点。"""
 
     def test_validates_ssid_required(self, client):
-        """缺少 ssid 返回 400。"""
+        """缺少 ssid 返回 422（pydantic 校验），空 ssid 返回 400。"""
         response = client.post("/api/provisioning/connect", json={"password": "123"})
-        assert response.status_code == 400
+        assert response.status_code == 422
         # 空字符串 ssid 也会被拒绝
         response2 = client.post("/api/provisioning/connect", json={"ssid": "", "password": "123"})
         assert response2.status_code == 400
 
     def test_accepts_valid_request(self, client, monkeypatch):
         """正确的请求返回 200 并更新状态为 connecting。"""
-        # Mock WifiManager 避免真实的 nmcli 调用
-        import routers.provisioning as prov_module
+        # Mock WifiManager 避免真实的 nmcli 调用。
+        # 路由在函数内延迟执行 from donkeycar.parts.provisioning import WifiManager，
+        # 因此 patch 目标必须是 donkeycar.parts.provisioning 模块属性。
+        import donkeycar.parts.provisioning as parts_prov
         from unittest.mock import MagicMock
 
         mock_wm = MagicMock()
         mock_wm.disconnect_ap.return_value = True
         mock_wm.connect.return_value = (True, "192.168.1.100")
 
-        # 在路由模块中替换 WifiManager 类
         monkeypatch.setattr(
-            prov_module, "WifiManager",
+            parts_prov, "WifiManager",
             lambda *args, **kwargs: mock_wm,
         )
 
@@ -84,7 +85,8 @@ class TestScanEndpoint:
 
     def test_returns_networks_list(self, client, monkeypatch):
         """扫描返回网络列表。"""
-        import routers.provisioning as prov_module
+        # 路由在函数内延迟导入 WifiManager，patch donkeycar.parts.provisioning
+        import donkeycar.parts.provisioning as parts_prov
         from unittest.mock import MagicMock
 
         mock_wm = MagicMock()
@@ -93,7 +95,7 @@ class TestScanEndpoint:
             {"ssid": "Guest", "signal": 45, "security": "OPEN"},
         ]
         monkeypatch.setattr(
-            prov_module, "WifiManager",
+            parts_prov, "WifiManager",
             lambda *args, **kwargs: mock_wm,
         )
 
@@ -107,13 +109,13 @@ class TestScanEndpoint:
 
     def test_scan_empty_on_failure(self, client, monkeypatch):
         """扫描失败时返回空列表。"""
-        import routers.provisioning as prov_module
+        import donkeycar.parts.provisioning as parts_prov
         from unittest.mock import MagicMock
 
         mock_wm = MagicMock()
         mock_wm.scan_networks.return_value = []
         monkeypatch.setattr(
-            prov_module, "WifiManager",
+            parts_prov, "WifiManager",
             lambda *args, **kwargs: mock_wm,
         )
 
@@ -127,10 +129,11 @@ class TestSerialScanEndpoint:
 
     def test_returns_scan_result_structure(self, client, monkeypatch):
         """返回 found/port/rtt_ms 结构。"""
-        import routers.provisioning as prov_module
+        # 路由在函数内延迟导入 ProvisioningPart，patch donkeycar.parts.provisioning
+        import donkeycar.parts.provisioning as parts_prov
 
         monkeypatch.setattr(
-            prov_module.ProvisioningPart, "scan_serial_ports",
+            parts_prov.ProvisioningPart, "scan_serial_ports",
             staticmethod(lambda **kw: (None, None)),
         )
 

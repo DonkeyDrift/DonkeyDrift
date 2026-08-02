@@ -1,4 +1,5 @@
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -13,7 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 def test_app_title_uses_donkeydrifter_brand():
     main = importlib.import_module("main")
 
-    assert main.app.title == "DonkeyDrifter Web API"
+    assert main.app.title == "DonkeyDrifter Web UI"
 
 
 def test_root_message_uses_donkeydrifter_brand():
@@ -23,4 +24,11 @@ def test_root_message_uses_donkeydrifter_brand():
     response = client.get("/")
 
     assert response.status_code == 200
-    assert response.json()["message"] == "DonkeyDrifter Web API is running"
+    if os.path.isdir(main.FRONTEND_DIST):
+        # 前端已构建：GET / 由 StaticFiles 挂载返回 SPA 的 index.html
+        assert "text/html" in response.headers["content-type"]
+    else:
+        # 前端未构建：返回 JSON 提示
+        assert response.json()["message"].startswith(
+            "DonkeyDrifter Web UI is running"
+        )

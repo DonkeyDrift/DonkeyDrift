@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
+pytest.importorskip("gym_donkeycar")
+
 from donkeycar.parts.dgym import DonkeyGymEnv
 
 

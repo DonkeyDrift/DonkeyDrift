@@ -123,21 +123,21 @@ def test_drive_command_uses_public_host_environment_override(monkeypatch):
     monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
     monkeypatch.setenv("DRIVE_API_PUBLIC_HOST", "192.168.3.96")
 
-    assert tui.DriveCommand().get_drive_api_server_url() == "ws://192.168.3.96:8000/api/drive/ws"
+    assert tui.DriveCommand().get_drive_api_server_url() == "ws://192.168.3.96:8100/api/drive/ws"
 
 
 def test_drive_command_does_not_use_sim_host_as_backend_host(monkeypatch):
     monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
     monkeypatch.delenv("DRIVE_API_PUBLIC_HOST", raising=False)
 
-    assert tui.DriveCommand().get_drive_api_server_url() == "ws://localhost:8000/api/drive/ws"
+    assert tui.DriveCommand().get_drive_api_server_url() == "ws://localhost:8100/api/drive/ws"
 
 
 def test_drive_command_defaults_to_localhost(monkeypatch):
     monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
     monkeypatch.delenv("DRIVE_API_PUBLIC_HOST", raising=False)
 
-    assert tui.DriveCommand().get_drive_api_server_url() == "ws://localhost:8000/api/drive/ws"
+    assert tui.DriveCommand().get_drive_api_server_url() == "ws://localhost:8100/api/drive/ws"
 
 
 def test_drive_command_inherits_stdio_without_requiring_fileno(monkeypatch, tmp_path):
