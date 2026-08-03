@@ -7,9 +7,12 @@ import numpy as np
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from conftest import collect_route_paths
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
 
 
 class FakePilot:
@@ -54,7 +57,7 @@ def make_client(monkeypatch):
 
 def test_main_registers_arena_router():
     main = importlib.import_module("main")
-    routes = {route.path for route in main.app.routes}
+    routes = collect_route_paths(main.app.routes)
     assert "/api/arena/model-types" in routes
 
 

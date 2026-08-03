@@ -2,6 +2,12 @@
 
 ## 2026-08-03
 
+- fix(ci): 修复后端契约测试在 FastAPI 0.141 下的两处失败（`test_main_registers_arena_router`、`test_main_registers_connector_router`，macOS + Ubuntu 双红）
+  - 根因：`web_ui/backend/requirements.txt` 未锁定版本，CI 当日拉到 fastapi 0.141.1；该版本 `include_router` 改为惰性挂载，`app.routes` 中存私有 `_IncludedRouter` 条目（无 `.path` 属性）而非展平后的路由，按 `{route.path for route in main.app.routes}` 遍历路由表的两处契约测试抛 `AttributeError`（2 failed / 68 passed）。本地环境仍为 fastapi 0.136.3 旧行为，故本地全绿、CI 独红。
+  - 修复：新增 `web_ui/backend/tests/conftest.py::collect_route_paths()`，鸭子类型兼容两代 FastAPI——路由条目有 `.path` 直接收集；无 `.path` 但有 `original_router`（0.141+ 惰性挂载）则携带 `include_context.prefix` 递归展开嵌套路由。两处测试改用该辅助函数，不断言 FastAPI 内部结构。
+  - 验证：venv 复现 CI 依赖（fastapi 0.141.1 + starlette 1.3.1）——未修复时两测试复现 CI 同款 `AttributeError`，修复后 70 passed；本地 fastapi 0.136.3 下亦 70 passed。
+
+
 - fix(ci): 修复 "Python package and test DonkeyDrifter" 两处测试失败（PR #14 合并后 CI 变红）
   - 删除 `test_project_metadata.py::test_agent_docs_describe_donkeydrifter_migration_contract`：该用例读取仓库根的 `AGENTS.md`/`CLAUDE.md`，而 agent 说明文件已按约定移出版本控制（本地保留、`.gitignore` 排除），CI 环境不存在这两文件必然 FileNotFoundError（macOS + Ubuntu 双红）；迁移契约已由 `test_docs_include_compatibility_and_attribution_guides`（`docs/guide/donkeycar-compatibility.md`）覆盖。
   - 修复 `test_tui_restore.py::test_get_data_cache_dir`（仅 macOS 红）：`/var` 是 `/private/var` 的符号链接，`Path.cwd()` 返回解析后物理路径，期望值比较前对 `mkdtemp()` 结果补 `os.path.realpath()`。
