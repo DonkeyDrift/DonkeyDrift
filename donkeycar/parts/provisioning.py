@@ -17,12 +17,14 @@
 协议：
     下行（ESP32 → Linux）: WIFI|<ssid>|<password>\\n
     上行（Linux → ESP32）: STATUS|CONNECTING\\n / OK|<ip>\\n / FAIL|<reason>\\n
+                          HOSTIP|<ipv4>\\n（周期上报本机局域网 IP）
 
 ESP32 固件保持不变，独立运行在 ESP32 上。
 """
 
 import logging
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -38,6 +40,38 @@ except ImportError:
     glob = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+
+def detect_lan_ip():
+    """探测本机在默认路由出口上的局域网 IPv4 地址。
+
+    用 UDP socket connect 外部地址做路由查询（UDP connect 不实际发包），
+    拿到默认出口接口的 IP；失败时回退到主机名解析。均失败返回 None。
+
+    Returns:
+        str  — 非 127.x 的 IPv4 地址
+        None — 无法确定（无网络等）
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        ip = sock.getsockname()[0]
+        if ip and not ip.startswith("127."):
+            return ip
+    except OSError:
+        pass
+    finally:
+        if sock is not None:
+            sock.close()
+
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except OSError:
+        pass
+    return None
 
 
 # ===========================================================================
@@ -183,6 +217,7 @@ class ProvisioningProtocol:
     协议格式：
         下行（ESP32 → Linux）: WIFI|<ssid>|<password>
         上行（Linux → ESP32）: STATUS|CONNECTING / OK|<ip> / FAIL|<reason>
+                              HOSTIP|<ipv4>（周期上报本机局域网 IP）
     """
 
     # ------------------------------------------------------------------
@@ -233,6 +268,15 @@ class ProvisioningProtocol:
             ip: DHCP 分配的 IPv4 地址
         """
         return f"OK|{ip}"
+
+    @staticmethod
+    def build_host_ip(ip: str) -> str:
+        """构建 HOSTIP|<ipv4> 帧（周期上报本机局域网 IP 给 ESP32 显示）。
+
+        Args:
+            ip: 本机局域网 IPv4 地址
+        """
+        return f"HOSTIP|{ip}"
 
     @staticmethod
     def build_fail(reason: str) -> str:
@@ -304,6 +348,8 @@ class ProvisioningPart:
         timeout: float = 1.0,
         auto_respond: bool = True,
         arduino_controller=None,
+        host_ip_report: bool = True,
+        host_ip_report_interval: float = 10.0,
     ):
         """初始化配网 Part。
 
@@ -315,6 +361,9 @@ class ProvisioningPart:
             auto_respond: True 时 update() 自动响应 WIFI| 帧
             arduino_controller: 可选的 Arduino 控制器实例。
                 当提供时，复用 Arduino 的共享串口设备，不独立打开串口。
+            host_ip_report: True 时周期向 ESP32 上报本机局域网 IP
+                （HOSTIP|<ipv4> 帧，ESP32 Web Console Network 卡片 HOST 分页显示）
+            host_ip_report_interval: 上报间隔（秒），默认 10 秒
         """
         self._serial_port = serial_port
         self._baudrate = baudrate
@@ -332,6 +381,11 @@ class ProvisioningPart:
 
         # WiFi 管理
         self._wifi_manager = WifiManager(interface=wifi_interface)
+
+        # 上位机 IP 周期上报
+        self._host_ip_report = host_ip_report
+        self._host_ip_report_interval = host_ip_report_interval
+        self._last_host_ip_report_ts = 0.0
 
         # 状态字段
         self._status = "idle"       # idle / connecting / connected / failed
@@ -471,6 +525,22 @@ class ProvisioningPart:
             logger.error("配网失败: %s", result)
             self._write_line(ProvisioningProtocol.build_fail(result))
 
+    def _maybe_report_host_ip(self):
+        """按间隔节流，向 ESP32 上报本机局域网 IP（HOSTIP|<ipv4> 帧）。
+
+        每次上报前重新探测 IP（UDP 路由查询，代价极低且不发包），
+        DHCP 换地址或 ESP32 重启丢失运行时状态后可在下一个周期自愈。
+        """
+        if not self._host_ip_report:
+            return
+        now = time.monotonic()
+        if now - self._last_host_ip_report_ts < self._host_ip_report_interval:
+            return
+        self._last_host_ip_report_ts = now
+        ip = detect_lan_ip()
+        if ip:
+            self._write_line(ProvisioningProtocol.build_host_ip(ip))
+
     def _write_line(self, data: str):
         """线程安全的串口写入。
 
@@ -549,6 +619,7 @@ class ProvisioningPart:
             logger.info("配网 Part 运行于 Arduino 共享串口模式")
 
             while self._running:
+                self._maybe_report_host_ip()
                 # 检查 Arduino 控制器是否有新的配网请求
                 wifi_req = self._arduino_controller.wifi_provisioning
                 if wifi_req and wifi_req.get('ssid'):
@@ -583,14 +654,25 @@ class ProvisioningPart:
 
         while self._running:
             self._read_and_process()
+            self._maybe_report_host_ip()
             time.sleep(0.1)  # ~10Hz 轮询，配网对实时性要求不高
 
-    def run_threaded(self):
+    def run_threaded(self, trigger=None):
         """Vehicle 主循环调用，返回最新配网状态。
+
+        Args:
+            trigger: 可选 dict{'ssid': str, 'password': str}，手动触发配网。
+                来自 inputs=['provisioning/trigger'] 通道，通常为 None。
 
         Returns:
             (status, ssid, ip, error) 四元组，对应 outputs 列表顺序
         """
+        if trigger and isinstance(trigger, dict):
+            ssid = trigger.get("ssid", "")
+            password = trigger.get("password", "")
+            if ssid:
+                self._handle_wifi_request(ssid, password)
+
         return self._build_output()
 
     def run(self, trigger=None):

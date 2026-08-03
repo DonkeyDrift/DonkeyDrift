@@ -553,6 +553,45 @@ class TestProvisioningPartRunThreaded:
         assert ssid == "TestNet"
 
 
+class TestProvisioningPartRunThreadedTrigger:
+    """run_threaded 必须接受 inputs 通道传入的 trigger 位置参数。
+
+    回归：Vehicle.update_parts() 以 p.run_threaded(*inputs) 调用，
+    注册 inputs=['provisioning/trigger'] 时旧签名 run_threaded(self)
+    会抛 TypeError 导致整车退出。
+    """
+
+    def test_run_threaded_accepts_none_trigger(self):
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        part = ProvisioningPart()
+        result = part.run_threaded(None)
+        assert result == ("idle", "", "", "")
+
+    def test_run_threaded_with_trigger_dict(self, monkeypatch):
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        part = ProvisioningPart()
+        calls = []
+        monkeypatch.setattr(
+            part,
+            "_handle_wifi_request",
+            lambda ssid, password: calls.append((ssid, password)),
+        )
+
+        result = part.run_threaded({"ssid": "TestAP", "password": "secret123"})
+
+        assert calls == [("TestAP", "secret123")]
+        assert result == ("idle", "", "", "")
+
+    def test_run_threaded_ignores_non_dict_trigger(self):
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        part = ProvisioningPart()
+        result = part.run_threaded("unexpected-string")
+        assert result == ("idle", "", "", "")
+
+
 class TestProvisioningPartManualTrigger:
     """验证 run(trigger=...) 手动触发路径。"""
 
@@ -732,3 +771,146 @@ class TestProvisioningPartScanSerialPorts:
         port, rtt = ProvisioningPart.scan_serial_ports()
         assert port is None
         assert rtt is None
+
+
+# ===========================================================================
+# detect_lan_ip / HOSTIP 上报测试（v1.7.39）
+# ===========================================================================
+class TestDetectLanIp:
+    """验证 detect_lan_ip() 默认出口 IP 探测与回退。"""
+
+    def test_udp_route_query_success(self, monkeypatch):
+        """UDP 路由查询拿到非 127.x 地址时直接返回。"""
+        from donkeycar.parts import provisioning
+
+        mock_sock = MagicMock()
+        mock_sock.getsockname.return_value = ("192.168.3.45", 0)
+        monkeypatch.setattr(
+            provisioning.socket, "socket", lambda *a, **kw: mock_sock
+        )
+
+        assert provisioning.detect_lan_ip() == "192.168.3.45"
+        mock_sock.close.assert_called_once()
+
+    def test_udp_failure_falls_back_to_hostname(self, monkeypatch):
+        """UDP connect 失败时回退主机名解析。"""
+        from donkeycar.parts import provisioning
+
+        mock_sock = MagicMock()
+        mock_sock.connect.side_effect = OSError("network unreachable")
+        monkeypatch.setattr(
+            provisioning.socket, "socket", lambda *a, **kw: mock_sock
+        )
+        monkeypatch.setattr(
+            provisioning.socket, "gethostbyname", lambda name: "10.0.0.8"
+        )
+
+        assert provisioning.detect_lan_ip() == "10.0.0.8"
+
+    def test_loopback_results_return_none(self, monkeypatch):
+        """两条路径都只拿到 127.x 时返回 None。"""
+        from donkeycar.parts import provisioning
+
+        mock_sock = MagicMock()
+        mock_sock.getsockname.return_value = ("127.0.0.1", 0)
+        monkeypatch.setattr(
+            provisioning.socket, "socket", lambda *a, **kw: mock_sock
+        )
+        monkeypatch.setattr(
+            provisioning.socket, "gethostbyname", lambda name: "127.0.1.1"
+        )
+
+        assert provisioning.detect_lan_ip() is None
+
+    def test_all_failures_return_none(self, monkeypatch):
+        """全部失败时返回 None 而不是抛异常。"""
+        from donkeycar.parts import provisioning
+
+        mock_sock = MagicMock()
+        mock_sock.connect.side_effect = OSError("no route")
+        monkeypatch.setattr(
+            provisioning.socket, "socket", lambda *a, **kw: mock_sock
+        )
+        monkeypatch.setattr(
+            provisioning.socket,
+            "gethostbyname",
+            MagicMock(side_effect=OSError("no dns")),
+        )
+
+        assert provisioning.detect_lan_ip() is None
+
+
+class TestProtocolBuildHostIp:
+    """验证 HOSTIP|<ipv4> 帧构建。"""
+
+    def test_build_host_ip(self):
+        from donkeycar.parts.provisioning import ProvisioningProtocol
+
+        assert ProvisioningProtocol.build_host_ip("192.168.3.45") == "HOSTIP|192.168.3.45"
+
+
+class TestProvisioningPartHostIpReport:
+    """验证 ProvisioningPart 周期上报上位机 IP。"""
+
+    def _make_part(self, **kwargs):
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        part = ProvisioningPart(**kwargs)
+        part._write_line = MagicMock()
+        return part
+
+    def test_first_call_reports_immediately(self, monkeypatch):
+        """首次调用立即上报（_last_host_ip_report_ts 初始为 0）。"""
+        from donkeycar.parts import provisioning
+
+        monkeypatch.setattr(provisioning, "detect_lan_ip", lambda: "192.168.3.45")
+        monkeypatch.setattr(provisioning.time, "monotonic", lambda: 100.0)
+        part = self._make_part()
+
+        part._maybe_report_host_ip()
+
+        part._write_line.assert_called_once_with("HOSTIP|192.168.3.45")
+
+    def test_throttled_within_interval(self, monkeypatch):
+        """间隔内重复调用被节流，只上报一次。"""
+        from donkeycar.parts import provisioning
+
+        monkeypatch.setattr(provisioning, "detect_lan_ip", lambda: "192.168.3.45")
+        clock = {"now": 100.0}
+        monkeypatch.setattr(
+            provisioning.time, "monotonic", lambda: clock["now"]
+        )
+        part = self._make_part(host_ip_report_interval=10.0)
+
+        part._maybe_report_host_ip()
+        clock["now"] = 105.0  # 间隔内
+        part._maybe_report_host_ip()
+        assert part._write_line.call_count == 1
+
+        clock["now"] = 111.0  # 超过间隔
+        part._maybe_report_host_ip()
+        assert part._write_line.call_count == 2
+
+    def test_disabled_no_report(self, monkeypatch):
+        """host_ip_report=False 时不上报。"""
+        from donkeycar.parts import provisioning
+
+        monkeypatch.setattr(provisioning, "detect_lan_ip", lambda: "192.168.3.45")
+        part = self._make_part(host_ip_report=False)
+
+        part._maybe_report_host_ip()
+
+        part._write_line.assert_not_called()
+
+    def test_no_ip_detected_no_write(self, monkeypatch):
+        """探测不到 IP 时不写串口，但节流计时照常推进。"""
+        from donkeycar.parts import provisioning
+
+        monkeypatch.setattr(provisioning, "detect_lan_ip", lambda: None)
+        monkeypatch.setattr(provisioning.time, "monotonic", lambda: 100.0)
+        part = self._make_part()
+
+        part._maybe_report_host_ip()
+
+        part._write_line.assert_not_called()
+        assert part._last_host_ip_report_ts == 100.0
