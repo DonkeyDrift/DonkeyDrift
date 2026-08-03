@@ -108,19 +108,6 @@ def test_docs_include_compatibility_and_attribution_guides():
     assert "not affiliated" in attribution_text.lower()
 
 
-def test_agent_docs_describe_donkeydrifter_migration_contract():
-    for relative_path in ("AGENTS.md", "CLAUDE.md"):
-        text = read_text(PROJECT_ROOT / relative_path)
-        assert "DonkeyDrifter" in text
-        assert "donkeydrifter" in text
-        assert "兼容" in text or "compatibility" in text.lower()
-        assert "donkeycar" in text
-        assert "CLI" in text
-        assert "donkey" in text
-        assert "Apache" in text
-        assert "MIT" in text
-
-
 def test_makefile_package_uses_modern_build_backend():
     makefile = read_text(PROJECT_ROOT / "Makefile")
 
