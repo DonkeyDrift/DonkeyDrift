@@ -1,17 +1,10 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { HelpModal } from './HelpModal';
-import { SkinSwitcher } from './SkinSwitcher';
-import { useUiPrefsStore } from '../store/useUiPrefsStore';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
-  const { skin } = useUiPrefsStore();
-
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('theme-mus4', skin === 'mus4');
-  }, [skin]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
@@ -56,9 +49,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               Car Connector
             </Link>
           </nav>
-          <div className="ml-auto">
-            <SkinSwitcher />
-          </div>
         </div>
       </header>
       <main className="container mx-auto px-4 py-6 space-y-6">

@@ -280,7 +280,7 @@ export const DrivePage: React.FC = () => {
           {(telemetry?.rc_mode !== undefined || telemetry?.rc_park !== undefined) && (
             <div className="mt-2 flex items-center gap-2 text-xs">
               {telemetry?.rc_mode !== undefined && (
-                <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400" data-rc-mode={telemetry.rc_mode}>
                   固件模式：{['手动', '半自动', '全自动'][telemetry.rc_mode] ?? `未知(${telemetry.rc_mode})`}
                 </span>
               )}

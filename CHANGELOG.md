@@ -2,12 +2,33 @@
 
 ## 2026-08-06
 
+- feat(web_ui): Calibrate 页面新增 RC Channels 实时面板，与 ESP32 Drifter Console 双向同步（后端 WiFi 直连 ESP32，不动固件、无需车端 manage.py 在跑）
+  - 链路：后端作为 WS 客户端直连 ESP32 遥测端口（`ws://<host>:81/`，~60Hz 二进制帧 'M4'/v2），解析出 RC Channels 字段（ch1..ch6 各通道脉宽、sd/ed 输出 duty、sm/mm 转向/油门中点、tl/tu 油门上下限、mode/park/vol）缓存并节流（200ms，对齐 ESP32 UI 的 RC DOM 刷新）广播给浏览器；浏览器下发的 `SERVO_MID`/`MOTOR_MID`/`THROTTLE_MIN`/`THROTTLE_MAX` 命令经后端 HTTP `POST /api/cmd?target=web` 转发 ESP32（首次自动 `AUTH:`，密码可配，默认为空）。两个 UI 以 ESP32 固件为唯一数据源，任一侧修改经遥测广播同步到另一侧，双向同步天然成立。
+  - 后端新增 `web_ui/backend/routers/esp32.py`：`Esp32Link` 单例管理到 ESP32 的 WS 重连循环（3s 退避、配置变更 kick 立即重连）、遥测解析 `parse_telemetry_frame()`（`struct '<4BIIIHhh6fBB6H4h2fBB2f4H2h'` 与固件 `WebTelemetry.cpp::pushWifiWebSocketData()` 逐字段对齐）、命令白名单（仅 4 条校准命令，正则严格校验）、浏览器 WS 通道与空闲释放（浏览器全部断开 30s 后释放 ESP32 连接——固件仅允许 2 个并发 WS 客户端）；路由 `GET /api/esp32/status`、`GET/POST /api/esp32/config`、`POST /api/esp32/command`、`WS /api/esp32/ws`，挂载于 `web_ui/backend/main.py`。连接配置（host/password）持久化到 `esp32_link.json`（目录约定同 `drive_params.json`：DONKEY_CAR_DIR → ~/mycar → backend/data），默认 host `mus4-esp.local`（固件默认 AP SSID `MUS4-ESP` 的 mDNS 名），可用 `ESP32_HOST` 环境变量覆盖。
+  - 前端新增 `web_ui/frontend/src/hooks/useEsp32Rc.ts`（连 `/api/esp32/ws`，处理 `esp32_state` 快照与 `esp32_rc` 广播，3s 自动重连，命令 100ms latest-value-wins 节流）与 `web_ui/frontend/src/components/calibrate/RcChannelsPanel.tsx`——1:1 复刻 ESP32 UI 的 RC Channels 面板：6 通道网格（CH4 Mode 黄色高亮边框、窄屏 3 列）、OUT Steering/Throttle 行、Mid S/Mid T（Set 按钮把当前 OUT 值设为中点）、Min T/Max T 滑杆（Min T 上限=Mid T、Max T 下限=Mid T 动态跟随，量程 4915-9830），样式沿用固件 rcCell 配色（#0d1219/#2b3441/#8fa1b5）；滑杆拖动期间用本地值避免遥测回跳。面板头部含连接状态点、主机设置（保存并重连）与手动重连按钮。`web_ui/frontend/src/services/api.ts` 新增 `Esp32RcTelemetry`/`Esp32Status` 类型与 `getEsp32Status`/`getEsp32Config`/`setEsp32Config`/`sendEsp32Command`/`getEsp32WebSocketUrl`。`web_ui/frontend/src/pages/CalibratePage.tsx` 顶部集成该面板；原有 5 个 PWM 滑杆（面向 PCA9685 直驱车型）保留不变。
+  - 测试同步：新增 `web_ui/backend/tests/test_esp32.py` 13 个契约用例（路由挂载经 `collect_route_paths`、帧解析含坏 magic/短帧拒绝、配置持久化与非法 host 拒绝、命令白名单/首次 AUTH/ACK/NACK/认证失败 502/不可达 502、WS 快照与遥测广播）；前端新增 `src/hooks/useEsp32Rc.test.tsx` 与 `src/components/calibrate/RcChannelsPanel.test.tsx` 共 7 用例（标签渲染、Set 按钮下发 SERVO_MID/MOTOR_MID 当前 OUT 值、滑杆节流命令、Max T 下限跟随 Mid T、离线禁用控件）。
+  - 验证：后端 `python -m pytest tests -q` 83 项全绿；前端 `npm run test` 54 项全绿、`npm run check` 无错误、`npm run lint` 0 errors（2 个既有 warning 与本次无关）、`npm run build` 成功；另用伪 ESP32（websockets + http.server）做实链路冒烟：二进制帧→浏览器广播、AUTH→命令 ACK、空闲自动释放连接全部符合预期。待实车联调（需 ESP32 在线时打开 Calibrate 页验证真实遥测与命令回环）。
+
+- refactor(web_ui): 移除 UI 皮肤切换功能，Web UI 只保留 DonkeyDrifter 自身皮肤
+  - 删除 `web_ui/frontend/src/components/SkinSwitcher.tsx`（顶栏 `Drifter Console UI` / `DonkeyDrifter Web UI` 分段切换按钮）及其测试 `SkinSwitcher.test.tsx`、`web_ui/frontend/src/store/useUiPrefsStore.ts`（zustand 持久化皮肤状态）、`web_ui/frontend/src/themes/theme-mus4.css`（MUS4/ESP32 Drifter Console 皮肤样式表）。
+  - `web_ui/frontend/src/components/Layout.tsx`：移除 SkinSwitcher 渲染与 `theme-mus4` class 切换副作用；`web_ui/frontend/src/main.tsx`：移除 theme-mus4.css 导入；`web_ui/frontend/src/components/drive/DriveModeSelector.tsx`：清理引用 theme-mus4.css 的过期注释（`data-mode`/`mode-active` 钩子保留，仍被测试使用）。
+  - 验证：`npm run test`（vitest 8 文件 47 用例全部通过）、`npm run check`（tsc 无错误）、`npm run lint`（0 errors，2 个既有 warning 与本次无关）。
+  - 配套：ESP32 固件仓库（`Firmware/MUS4_FW`）同步移除 Web Console 的 DonkeyDrift 皮肤与切换按钮，两边各自只保留自己的 UI。
+
 - fix(provisioning): 修复 TUN 模式 VPN 运行时 ESP32 Drifter Console HOST 分页显示错误上位机 IP（198.18.0.1，ESP32 不可达）的问题
   - 根因：`donkeycar/parts/provisioning.py` 的 `detect_lan_ip()` 用 UDP socket connect `8.8.8.8` 做路由查询取默认出口 IP；Clash Meta/mihomo 等 TUN 模式 VPN 会劫持默认路由到虚拟接口（本机 `Meta` 接口，198.18.0.1/30，属 198.18.0.0/15 基准测试网段伪装的假 IP），内核应答的源地址即为 VPN 假 IP，经 `HOSTIP|<ipv4>` 帧上报后 ESP32 Web Console Network 卡片 HOST 分页显示 198.18.0.1 而非真实局域网地址 192.168.3.41。
   - 修复：`detect_lan_ip()` 改为分级探测——① UDP 路由查询结果（默认出口 IP）是 RFC1918 私有地址**且不位于虚拟接口上**时直接返回（无 VPN/分流 VPN 的常见路径，行为不变）；② 出口被 VPN 劫持或 UDP 查询失败（离线局域网）时，先经 `_physical_default_iface()` 解析 `ip route show default` 找残留的物理网关默认路由（mihomo auto-route、OpenVPN def1、wg-quick 策略路由均会保留高 metric 的物理默认路由），取其接口上的 RFC1918 地址；③ 物理默认路由被完全移除时，用 `_select_lan_ip()` 从 `_enum_inet_entries()`（解析 `ip -4 -o addr show`）的接口地址表中选择——跳过回环与虚拟接口（docker/br0/br-/lxdbr/veth/tun/tap/wg/Clash Meta 等，见 `_VIRTUAL_IFACE_RE`），优先物理命名接口（wl*/en*/eth*/usb*/bond*）；④ 仍无结果保留旧行为返回默认出口地址（公网直连兼容），最后回退主机名解析。新增 `_is_rfc1918()` 统一判定 10/8、172.16/12、192.168/16，显式排除 198.18/15（VPN 假 IP）、100.64/10（CGNAT/Tailscale）、169.254/16（链路本地）。
   - 关键分支：UDP 查询结果为 RFC1918 时须先确认其接口不在 `_VIRTUAL_IFACE_RE` 之列——全隧道 WireGuard/OpenVPN 会把 10.x 隧道地址分到 wg0/tun0 并劫持默认路由，只看地址段会把隧道 IP 报给 ESP32（与 198.18.0.1 同一故障模式）。
   - 测试同步：`donkeycar/tests/test_provisioning.py` 的 `TestDetectLanIp` 全部改为 hermetic 风格（`_mock_udp`/`_mock_net` 辅助 mock socket 与两个 `ip` 命令解析函数），含 2 个 VPN 劫持回归用例（198.18 假 IP、RFC1918 隧道地址）；新增 `TestIsRfc1918`（11 个参数化地址判定）、`TestSelectLanIp`（物理优先于靠前非虚拟、跳过虚拟接口、lxdbr0/br0 网桥与 bond0 命名、非虚拟兜底、无可用地址 5 用例）、`TestEnumInetEntries`（`-o` 格式解析含 veth `@ifN` 后缀剥离、命令失败 2 用例）、`TestPhysicalDefaultIface`（TUN 劫持下认出残留物理默认路由、跳过虚拟网关路由、仅虚拟默认返回 None、命令失败 4 用例）。
   - 验证：本机复现环境（wlp1s0=192.168.3.41 + Meta=198.18.0.1）下 `detect_lan_ip()` 返回 192.168.3.41，`_physical_default_iface()` 正确认出 wlp1s0；`pytest donkeycar/tests/test_provisioning.py` 92 项全部通过。另经多视角对抗评审（correctness/test-quality/compat 三视角 + 逐条反驳验证）确认并修复了全隧道 VPN 绕过、网桥命名缺口、优先级未被测试锁定等残余问题。
+
+
+## 2026-08-04
+
+- feat(web_ui): 驾驶页模式选择器按 ESP32 Drifter Console 模式卡片配色，一种颜色代表一种模式（手动=绿 `#39d98a`、半自动=琥珀 `#ffcc66`、全自动=蓝 `#5cc8ff`）
+  - `web_ui/frontend/src/components/drive/DriveModeSelector.tsx`：`MODE_OPTIONS` 为每个模式增加 `activeClass`（默认皮肤为对应模式色的 20% 底 + 同色文字，替代原先三模式统一的 cyan 激活态）；按钮新增 `data-mode` 属性与激活时的 `mode-active` 标记类，供主题精确定位每个分段。
+  - `web_ui/frontend/src/themes/theme-mus4.css`：原先把所有激活分段统一覆盖为蓝色实心填充的规则，改为按 `button.mode-active[data-mode=...]` 分别填充绿/琥珀/蓝 + 黑色加粗标签（沿用 Drifter Console `.netTabs.active` 的选中态语言），hover 色分别为 `#74e4ad` / `#ffdb94` / `#8bdcff`；配色与既有固件模式徽标 `data-rc-mode` 规则一致。
+  - 测试：新增 `web_ui/frontend/src/components/drive/DriveModeSelector.test.tsx` 4 个用例（渲染/点击回调/三模式激活色类/disabled），`npm run check`（tsc）与 vitest 全部通过。
 
 
 ## 2026-08-03
