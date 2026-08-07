@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-07
+
+- fix(cli): 第二次启动 `donkey drive` 时自动杀掉上一次启动的进程，释放摄像头等硬件资源，避免旧进程占用硬件导致车端离线
+  - 新增 PID 记录文件 `~/.donkeycar/drive.pid`：`donkeycar/management/base.py` 与 `donkeycar/management/tui.py` 各提供一组 `_read_drive_pid_file()` / `_write_drive_pid_file()` / `_remove_drive_pid_file()` / `_kill_previous_drive_processes()` 辅助函数；`Drive.run()`（CLI）与 TUI 选项 6 `DriveCommand` 在启动新进程前读取 PID 文件，先 SIGTERM 优雅终止、0.5s 后对仍存活进程 SIGKILL，随后删除 PID 文件。
+  - 只精确杀掉 PID 文件中记录的进程（前端 / 后端 / 车端三个子进程），不按端口扫杀，不会误杀其他程序；进程已不存在时静默跳过。本次启动成功后写入新的三个 PID；后端就绪超时或正常 Ctrl+C 退出时清理 PID 文件。
+  - 影响范围：CLI `donkey drive` 命令与 TUI 选项 6（DriveCommand）。
+  - 测试同步：`donkeycar/tests/test_drive_command.py` 的 `_FakeProcess` 补 `pid` 属性（原用例未随 PID 记录功能更新而失败）；`test_drive_run_spawns_three_processes_and_injects_env` 将 `_DRIVE_PID_FILE` monkeypatch 到临时目录，避免测试读写真实 `~/.donkeycar/drive.pid` 误杀实车进程。验证：`test_drive_command.py` / `test_tui_drive.py` / `test_tui_menu.py` 共 21 项全部通过。
+
+- fix(web_ui): 移除前端右下角的 TRAE SOLO badge
+  - `web_ui/frontend/package.json`：移除 devDependency `vite-plugin-trae-solo-badge`；`web_ui/frontend/vite.config.ts`：移除 `traeBadgePlugin` 的 import 与插件配置（dark / bottom-right / prodOnly / 点击跳转 trae.ai）。
+
 ## 2026-08-06
 
 - feat(web_ui): Calibrate 页面新增 RC Channels 实时面板，与 ESP32 Drifter Console 双向同步（后端 WiFi 直连 ESP32，不动固件、无需车端 manage.py 在跑）

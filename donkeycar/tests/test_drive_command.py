@@ -87,6 +87,7 @@ class _FakeProcess:
     def __init__(self, return_codes):
         self.return_codes = iter(return_codes)
         self.returncode = None
+        self.pid = id(self) % 30000 + 2000
 
     def poll(self):
         try:
@@ -137,6 +138,8 @@ def test_drive_run_spawns_three_processes_and_injects_env(monkeypatch, tmp_path)
     monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
     monkeypatch.setattr("donkeycar.management.base.webbrowser.open", lambda _url: None)
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _s: None)
+    # 隔离 PID 记录文件，避免读写真实 ~/.donkeycar/drive.pid
+    monkeypatch.setattr("donkeycar.management.base._DRIVE_PID_FILE", tmp_path / "drive.pid")
 
     with pytest.raises(SystemExit):
         Drive().run([
