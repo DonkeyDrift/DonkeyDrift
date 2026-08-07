@@ -318,28 +318,6 @@ async def load_model(request: LoadModelRequest):
     return {"success": True, "message": "模型加载指令已下发"}
 
 
-class CalibrateRequest(BaseModel):
-    STEERING_LEFT_PWM: Optional[int] = None
-    STEERING_RIGHT_PWM: Optional[int] = None
-    THROTTLE_FORWARD_PWM: Optional[int] = None
-    THROTTLE_STOPPED_PWM: Optional[int] = None
-    THROTTLE_REVERSE_PWM: Optional[int] = None
-    save: Optional[bool] = False
-
-
-@router.post("/calibrate")
-async def calibrate(request: CalibrateRequest):
-    """下发校准参数到车端，可选保存到配置"""
-    if not drive_state.car_online():
-        raise HTTPException(status_code=400, detail="车端未连接，无法校准")
-
-    payload = {"type": "calibrate", **request.dict(exclude_none=True)}
-    ok = await drive_state.send_to_car(payload)
-    if not ok:
-        raise HTTPException(status_code=500, detail="发送到车端失败")
-    return {"success": True, "message": "校准参数已下发"}
-
-
 # ------------------------------------------------------------------
 # WebRTC 信令接口
 # ------------------------------------------------------------------

@@ -31,12 +31,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               Drive
             </Link>
             <Link
-              to="/calibrate"
-              className={`transition-colors hover:text-cyan-400 ${isActive('/calibrate') ? 'text-cyan-500' : 'text-zinc-400'}`}
-            >
-              Calibrate
-            </Link>
-            <Link
               to="/pilot"
               className={`transition-colors hover:text-cyan-400 ${isActive('/pilot') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
