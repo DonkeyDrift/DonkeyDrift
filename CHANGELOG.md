@@ -2,6 +2,12 @@
 
 ## 2026-08-07
 
+- feat(web_ui): 移除 Web UI 的 Calibrate 校准功能，舵机/电调 PWM 校准统一在 ESP32 Drifter Console（Web Console）中进行
+  - 前端：删除 `web_ui/frontend/src/pages/CalibratePage.tsx`（5 个 PWM 滑杆校准页面）；`web_ui/frontend/src/App.tsx` 移除 `/calibrate` 路由与 `CalibratePage` 懒加载；`web_ui/frontend/src/components/Layout.tsx` 移除顶部导航 Calibrate 入口；`web_ui/frontend/src/services/api.ts` 移除 `sendCalibrate()`。
+  - 后端：`web_ui/backend/routers/drive.py` 移除 `CalibrateRequest` 模型与 `POST /api/drive/calibrate` 端点（原实现向车端 WebSocket 下发 `type=calibrate` 消息）。
+  - 文档：`docs/guide/web-drive-console-user-guide.md` 移除「校准页面」章节、导航表 Calibrate 行、API 表 `/calibrate` 行及文件结构中的 `CalibratePage.tsx`，新增简短「校准」说明指向 ESP32 Drifter Console 与 `donkey calibrate --channel` CLI。
+  - 验证：后端 `python -m pytest tests -q` 70 项全绿；前端 `npm run test` 47 项全绿、`npm run check`（tsc）无错误、`npm run lint` 0 errors（2 个既有 warning 与本次无关）。
+
 - fix(cli): 第二次启动 `donkey drive` 时自动杀掉上一次启动的进程，释放摄像头等硬件资源，避免旧进程占用硬件导致车端离线
   - 新增 PID 记录文件 `~/.donkeycar/drive.pid`：`donkeycar/management/base.py` 与 `donkeycar/management/tui.py` 各提供一组 `_read_drive_pid_file()` / `_write_drive_pid_file()` / `_remove_drive_pid_file()` / `_kill_previous_drive_processes()` 辅助函数；`Drive.run()`（CLI）与 TUI 选项 6 `DriveCommand` 在启动新进程前读取 PID 文件，先 SIGTERM 优雅终止、0.5s 后对仍存活进程 SIGKILL，随后删除 PID 文件。
   - 只精确杀掉 PID 文件中记录的进程（前端 / 后端 / 车端三个子进程），不按端口扫杀，不会误杀其他程序；进程已不存在时静默跳过。本次启动成功后写入新的三个 PID；后端就绪超时或正常 Ctrl+C 退出时清理 PID 文件。
