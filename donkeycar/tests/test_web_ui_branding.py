@@ -19,7 +19,7 @@ def test_frontend_package_uses_donkeydrifter_name():
 def test_frontend_html_title_uses_donkeydrifter_brand():
     html = read_text(FRONTEND_DIR / "index.html")
 
-    assert "<title>DonkeyDrifter Web UI</title>" in html
+    assert "<title>DonkeyDrifter</title>" in html
 
 
 def test_layout_visible_brand_uses_donkeydrifter():

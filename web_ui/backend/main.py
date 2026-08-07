@@ -25,7 +25,7 @@ if not DEBUG:
     # 抑制后端业务路由日志（连接/断连统计等）
     logging.getLogger("routers.drive").setLevel(logging.WARNING)
 
-app = FastAPI(title="DonkeyDrifter Web UI")
+app = FastAPI(title="DonkeyDrifter")
 
 # Configure CORS
 app.add_middleware(
@@ -64,11 +64,11 @@ if os.path.isdir(FRONTEND_DIST):
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)
-        return {"message": "DonkeyDrifter Web UI is running"}
+        return {"message": "DonkeyDrifter is running"}
 else:
     @app.get("/")
     async def root():
-        return {"message": "DonkeyDrifter Web UI is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
+        return {"message": "DonkeyDrifter is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("DRIVE_WEB_PORT", 8000))

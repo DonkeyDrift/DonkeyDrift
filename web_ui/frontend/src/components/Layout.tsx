@@ -50,7 +50,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </main>
       <footer className="border-t border-zinc-800 py-4 mt-8">
         <div className="container mx-auto px-4 text-center text-sm text-zinc-500">
-          DonkeyDrifter Web UI
+          DonkeyDrifter
         </div>
       </footer>
       <HelpModal />

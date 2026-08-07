@@ -14,7 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 def test_app_title_uses_donkeydrifter_brand():
     main = importlib.import_module("main")
 
-    assert main.app.title == "DonkeyDrifter Web UI"
+    assert main.app.title == "DonkeyDrifter"
 
 
 def test_root_message_uses_donkeydrifter_brand():
@@ -30,5 +30,5 @@ def test_root_message_uses_donkeydrifter_brand():
     else:
         # 前端未构建：返回 JSON 提示
         assert response.json()["message"].startswith(
-            "DonkeyDrifter Web UI is running"
+            "DonkeyDrifter is running"
         )

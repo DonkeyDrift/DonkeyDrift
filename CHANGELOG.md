@@ -2,6 +2,12 @@
 
 ## 2026-08-07
 
+- refactor(web_ui): UI 品牌名从 `DonkeyDrifter Web UI` 统一简化为 `DonkeyDrifter`
+  - 前端：`web_ui/frontend/index.html` 浏览器标签页标题改为 `DonkeyDrifter`；`web_ui/frontend/src/components/Layout.tsx` 页脚品牌文字同步修改（顶部导航本来即为 `DonkeyDrifter`，无需改动）。
+  - 后端：`web_ui/backend/main.py` FastAPI `title` 改为 `DonkeyDrifter`，根路径两条 JSON 提示消息改为 `DonkeyDrifter is running`。
+  - CLI：`donkeycar/management/tui.py` TUI 选项 6 的启动提示文案「将启动 DonkeyDrifter 的 Drive 标签页」同步修改。
+  - 测试同步：`web_ui/backend/tests/test_branding.py`（标题与根消息断言）、`donkeycar/tests/test_web_ui_branding.py`（index.html 标题断言）更新为新名称；验证两组测试全部通过（2 + 3 passed）。`CHANGELOG.md` 与 `docs/` 中的历史记录保持原样未动。
+
 - feat(web_ui): 移除 Web UI 的 Calibrate 校准功能，舵机/电调 PWM 校准统一在 ESP32 Drifter Console（Web Console）中进行
   - 前端：删除 `web_ui/frontend/src/pages/CalibratePage.tsx`（5 个 PWM 滑杆校准页面）；`web_ui/frontend/src/App.tsx` 移除 `/calibrate` 路由与 `CalibratePage` 懒加载；`web_ui/frontend/src/components/Layout.tsx` 移除顶部导航 Calibrate 入口；`web_ui/frontend/src/services/api.ts` 移除 `sendCalibrate()`。
   - 后端：`web_ui/backend/routers/drive.py` 移除 `CalibrateRequest` 模型与 `POST /api/drive/calibrate` 端点（原实现向车端 WebSocket 下发 `type=calibrate` 消息）。
