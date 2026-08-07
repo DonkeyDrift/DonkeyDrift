@@ -42,28 +42,198 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def detect_lan_ip():
-    """探测本机在默认路由出口上的局域网 IPv4 地址。
+def _is_rfc1918(ip: str) -> bool:
+    """判断 IPv4 地址是否属于 RFC1918 私有网段（10/8、172.16/12、192.168/16）。
 
-    用 UDP socket connect 外部地址做路由查询（UDP connect 不实际发包），
-    拿到默认出口接口的 IP；失败时回退到主机名解析。均失败返回 None。
+    ESP32 与上位机同处一个局域网，只有私有地址才可能被 ESP32 访问到；
+    198.18.0.0/15（Clash Meta/mihomo TUN 假 IP 段）、100.64.0.0/10（CGNAT/
+    Tailscale）、169.254/16（链路本地）等虽可能出现在本机接口上，但对
+    局域网内的 ESP32 不可达，一律不视为局域网地址。
+    """
+    if ip.startswith("192.168.") or ip.startswith("10."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second = int(ip.split(".")[1])
+        except (IndexError, ValueError):
+            return False
+        return 16 <= second <= 31
+    return False
+
+
+# 常见虚拟接口命名（VPN/TUN、容器网桥、虚拟机网卡等），其上的地址
+# 对局域网内的 ESP32 不可达，枚举时跳过
+_VIRTUAL_IFACE_RE = re.compile(
+    r"^(lo|docker|br(?:-|\d)|lxdbr|veth|virbr|vnet|tun|tap|utun|wg|"
+    r"tailscale|ts-|meta|cni-|flannel|kube|vboxnet|vmnet|zt|ppp|clash|"
+    r"mihomo|sing-box|ovs|vxlan|gre)",
+    re.IGNORECASE,
+)
+
+# 物理网卡常见命名前缀（无线 wl*/wlan*、有线 en*/eth*、USB 网卡 usb*、
+# 链路聚合 bond*）
+_PHYSICAL_IFACE_PREFIXES = ("wl", "en", "eth", "usb", "bond")
+
+
+def _enum_inet_entries():
+    """枚举本机全部 IPv4 接口地址。
+
+    解析 ``ip -4 -o addr show`` 输出为 ``[(ip, iface), ...]``（含回环与
+    虚拟接口，由调用方按需过滤）。
+
+    Returns:
+        list — ``(ipv4, iface)`` 元组列表
+        None — ``ip`` 命令不可用或执行失败
+    """
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+
+    entries = []
+    for line in result.stdout.splitlines():
+        # -o 单行格式：
+        # "2: wlp1s0    inet 192.168.3.41/24 brd 192.168.3.255 scope global ..."
+        parts = line.split()
+        if len(parts) < 4 or parts[2] != "inet":
+            continue
+        iface = parts[1].split("@")[0].rstrip(":")
+        ip = parts[3].split("/")[0]
+        entries.append((ip, iface))
+    return entries
+
+
+def _select_lan_ip(entries):
+    """从接口地址表中选出局域网 IP（绕过被 VPN/TUN 劫持的默认路由）。
+
+    跳过回环与常见虚拟接口（docker/bridge/tun/tap/wg/Clash Meta 等）；
+    优先返回物理命名接口（wl*/en*/eth*/usb*/bond*）上的 RFC1918 地址，
+    其次任一非虚拟接口的 RFC1918 地址。
+
+    Args:
+        entries: ``_enum_inet_entries()`` 返回的 ``[(ip, iface), ...]``
+
+    Returns:
+        str  — 物理/非虚拟接口上的 RFC1918 IPv4 地址
+        None — 找不到
+    """
+    fallback = None
+    for ip, iface in entries:
+        if not _is_rfc1918(ip):
+            continue
+        if _VIRTUAL_IFACE_RE.match(iface):
+            continue
+        if iface.startswith(_PHYSICAL_IFACE_PREFIXES):
+            return ip
+        if fallback is None:
+            fallback = ip
+    return fallback
+
+
+def _physical_default_iface():
+    """从 ``ip route show default`` 找经物理网关的默认路由接口。
+
+    TUN 模式 VPN 劫持默认路由时，原物理默认路由通常以更高 metric 残留
+    （mihomo/Clash auto-route、OpenVPN redirect-gateway def1、wg-quick
+    策略路由均如此），其接口即真实局域网出口。只认经网关（via）的路由
+    ——TUN 的 ``default dev <iface>`` 无网关，正是需要绕过的劫持项。
+
+    Returns:
+        str  — 非虚拟默认路由接口名（优先物理命名）
+        None — 找不到或 ``ip`` 命令不可用
+    """
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+
+    fallback = None
+    for line in result.stdout.splitlines():
+        # "default via 192.168.3.1 dev wlp1s0 proto dhcp metric 600"
+        parts = line.split()
+        if not parts or parts[0] != "default" or "via" not in parts:
+            continue
+        try:
+            iface = parts[parts.index("dev") + 1]
+        except (ValueError, IndexError):
+            continue
+        if _VIRTUAL_IFACE_RE.match(iface):
+            continue
+        if iface.startswith(_PHYSICAL_IFACE_PREFIXES):
+            return iface
+        if fallback is None:
+            fallback = iface
+    return fallback
+
+
+def detect_lan_ip():
+    """探测本机局域网 IPv4 地址（供 ESP32 经同一局域网访问上位机）。
+
+    探测顺序：
+        1. UDP socket connect 外部地址做路由查询（不实际发包）取默认出口
+           IP；是 RFC1918 私有地址且不位于虚拟接口上时直接返回
+           （无 VPN / 分流 VPN 的常见情况）。``ip`` 命令不可用时无法
+           校验接口属性，保留旧行为直接返回。
+        2. 默认出口被 VPN 劫持（TUN 假 IP，或全隧道 VPN 分在 tun/wg 上
+           的 RFC1918 隧道地址）或 UDP 查询失败（离线局域网）时：
+           a. 从 ``ip route show default`` 找经物理网关残留的默认路由，
+              取其接口上的 RFC1918 地址；
+           b. 否则枚举全部接口，优先物理命名接口的 RFC1918 地址，其次
+              任一非虚拟接口的 RFC1918 地址。
+        3. 仍无结果时保留旧行为返回默认出口地址（公网直连等场景兼容）。
+        4. 最后回退主机名解析；均失败返回 None。
 
     Returns:
         str  — 非 127.x 的 IPv4 地址
         None — 无法确定（无网络等）
     """
+    udp_ip = None
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect(("8.8.8.8", 80))
         ip = sock.getsockname()[0]
         if ip and not ip.startswith("127."):
-            return ip
+            udp_ip = ip
     except OSError:
         pass
     finally:
         if sock is not None:
             sock.close()
+
+    entries = _enum_inet_entries()
+
+    if udp_ip and _is_rfc1918(udp_ip):
+        if entries is None:
+            return udp_ip
+        iface = next((ifc for addr, ifc in entries if addr == udp_ip), None)
+        if iface is None or not _VIRTUAL_IFACE_RE.match(iface):
+            return udp_ip
+        # 默认出口是虚拟接口上的私有地址（全隧道 WireGuard/OpenVPN 的
+        # tun/wg 常分到 10.x 隧道地址）——对 ESP32 不可达，继续物理探测
+
+    if entries:
+        default_iface = _physical_default_iface()
+        if default_iface:
+            for addr, ifc in entries:
+                if ifc == default_iface and _is_rfc1918(addr):
+                    return addr
+        lan_ip = _select_lan_ip(entries)
+        if lan_ip:
+            return lan_ip
+
+    if udp_ip:
+        return udp_ip
 
     try:
         ip = socket.gethostbyname(socket.gethostname())

@@ -777,30 +777,133 @@ class TestProvisioningPartScanSerialPorts:
 # detect_lan_ip / HOSTIP 上报测试（v1.7.39）
 # ===========================================================================
 class TestDetectLanIp:
-    """验证 detect_lan_ip() 默认出口 IP 探测与回退。"""
+    """验证 detect_lan_ip() 默认出口 IP 探测、VPN 劫持规避与回退。"""
 
-    def test_udp_route_query_success(self, monkeypatch):
-        """UDP 路由查询拿到非 127.x 地址时直接返回。"""
-        from donkeycar.parts import provisioning
-
+    @staticmethod
+    def _mock_udp(monkeypatch, provisioning, ip=None, fail=False):
+        """mock UDP 路由查询 socket；fail=True 模拟无路由。"""
         mock_sock = MagicMock()
-        mock_sock.getsockname.return_value = ("192.168.3.45", 0)
+        if fail:
+            mock_sock.connect.side_effect = OSError("network unreachable")
+        else:
+            mock_sock.getsockname.return_value = (ip, 0)
         monkeypatch.setattr(
             provisioning.socket, "socket", lambda *a, **kw: mock_sock
+        )
+        return mock_sock
+
+    @staticmethod
+    def _mock_net(monkeypatch, provisioning, entries=None, default_iface=None):
+        """mock 接口枚举与默认路由探测，保持测试 hermetic。"""
+        monkeypatch.setattr(
+            provisioning, "_enum_inet_entries", lambda: entries
+        )
+        monkeypatch.setattr(
+            provisioning, "_physical_default_iface", lambda: default_iface
+        )
+
+    def test_udp_route_query_success(self, monkeypatch):
+        """UDP 路由查询拿到物理接口私有地址时直接返回。"""
+        from donkeycar.parts import provisioning
+
+        mock_sock = self._mock_udp(monkeypatch, provisioning, ip="192.168.3.45")
+        self._mock_net(
+            monkeypatch, provisioning,
+            entries=[("192.168.3.45", "wlp1s0")],
         )
 
         assert provisioning.detect_lan_ip() == "192.168.3.45"
         mock_sock.close.assert_called_once()
 
-    def test_udp_failure_falls_back_to_hostname(self, monkeypatch):
-        """UDP connect 失败时回退主机名解析。"""
+    def test_enum_unavailable_keeps_udp_result(self, monkeypatch):
+        """ip 命令不可用（无法校验接口属性）时保留旧的默认出口行为。"""
         from donkeycar.parts import provisioning
 
-        mock_sock = MagicMock()
-        mock_sock.connect.side_effect = OSError("network unreachable")
-        monkeypatch.setattr(
-            provisioning.socket, "socket", lambda *a, **kw: mock_sock
+        self._mock_udp(monkeypatch, provisioning, ip="192.168.3.45")
+        self._mock_net(monkeypatch, provisioning, entries=None)
+
+        assert provisioning.detect_lan_ip() == "192.168.3.45"
+
+    def test_full_tunnel_vpn_rfc1918_tunnel_ip_bypassed(self, monkeypatch):
+        """全隧道 VPN 分到 RFC1918 隧道地址时改取物理接口私有地址。
+
+        回归用例：WireGuard/OpenVPN 全网关（AllowedIPs=0.0.0.0/0 /
+        redirect-gateway def1）下 UDP 路由查询返回 tun/wg 上的 10.x
+        隧道地址（属 RFC1918，但对 ESP32 不可达），应识别其位于
+        虚拟接口并改取 WiFi 接口地址。
+        """
+        from donkeycar.parts import provisioning
+
+        self._mock_udp(monkeypatch, provisioning, ip="10.8.0.6")
+        self._mock_net(
+            monkeypatch, provisioning,
+            entries=[("10.8.0.6", "tun0"), ("192.168.3.41", "wlp1s0")],
+            default_iface="wlp1s0",
         )
+
+        assert provisioning.detect_lan_ip() == "192.168.3.41"
+
+    def test_tun_vpn_hijack_prefers_physical_rfc1918(self, monkeypatch):
+        """默认路由被 TUN VPN 劫持（198.18.x 假 IP）时改取物理接口私有地址。
+
+        回归用例：Clash Meta/mihomo TUN 模式下 UDP 路由查询返回
+        198.18.0.1（对 ESP32 不可达），应经残留的物理默认路由找到
+        WiFi 接口的 192.168.x 地址。
+        """
+        from donkeycar.parts import provisioning
+
+        self._mock_udp(monkeypatch, provisioning, ip="198.18.0.1")
+        self._mock_net(
+            monkeypatch, provisioning,
+            entries=[("198.18.0.1", "Meta"), ("192.168.3.41", "wlp1s0")],
+            default_iface="wlp1s0",
+        )
+
+        assert provisioning.detect_lan_ip() == "192.168.3.41"
+
+    def test_hijack_without_leftover_default_route(self, monkeypatch):
+        """物理默认路由被完全移除时退而按接口命名枚举物理私有地址。"""
+        from donkeycar.parts import provisioning
+
+        self._mock_udp(monkeypatch, provisioning, ip="198.18.0.1")
+        self._mock_net(
+            monkeypatch, provisioning,
+            entries=[("198.18.0.1", "Meta"), ("192.168.3.41", "wlp1s0")],
+            default_iface=None,
+        )
+
+        assert provisioning.detect_lan_ip() == "192.168.3.41"
+
+    def test_udp_failure_uses_enumeration(self, monkeypatch):
+        """离线局域网（UDP 无路由）时枚举物理接口私有地址。"""
+        from donkeycar.parts import provisioning
+
+        self._mock_udp(monkeypatch, provisioning, fail=True)
+        self._mock_net(
+            monkeypatch, provisioning,
+            entries=[("192.168.4.2", "wlp1s0")],
+        )
+
+        assert provisioning.detect_lan_ip() == "192.168.4.2"
+
+    def test_non_rfc1918_udp_result_kept_when_no_lan_iface(self, monkeypatch):
+        """无私有地址时保留旧的默认出口行为（公网直连等场景）。"""
+        from donkeycar.parts import provisioning
+
+        self._mock_udp(monkeypatch, provisioning, ip="203.0.113.5")
+        self._mock_net(
+            monkeypatch, provisioning,
+            entries=[("203.0.113.5", "eth0")],
+        )
+
+        assert provisioning.detect_lan_ip() == "203.0.113.5"
+
+    def test_udp_failure_falls_back_to_hostname(self, monkeypatch):
+        """UDP connect 失败且无可用接口信息时回退主机名解析。"""
+        from donkeycar.parts import provisioning
+
+        self._mock_udp(monkeypatch, provisioning, fail=True)
+        self._mock_net(monkeypatch, provisioning, entries=None)
         monkeypatch.setattr(
             provisioning.socket, "gethostbyname", lambda name: "10.0.0.8"
         )
@@ -808,14 +911,11 @@ class TestDetectLanIp:
         assert provisioning.detect_lan_ip() == "10.0.0.8"
 
     def test_loopback_results_return_none(self, monkeypatch):
-        """两条路径都只拿到 127.x 时返回 None。"""
+        """各条路径都只拿到 127.x 时返回 None。"""
         from donkeycar.parts import provisioning
 
-        mock_sock = MagicMock()
-        mock_sock.getsockname.return_value = ("127.0.0.1", 0)
-        monkeypatch.setattr(
-            provisioning.socket, "socket", lambda *a, **kw: mock_sock
-        )
+        self._mock_udp(monkeypatch, provisioning, ip="127.0.0.1")
+        self._mock_net(monkeypatch, provisioning, entries=[])
         monkeypatch.setattr(
             provisioning.socket, "gethostbyname", lambda name: "127.0.1.1"
         )
@@ -826,11 +926,8 @@ class TestDetectLanIp:
         """全部失败时返回 None 而不是抛异常。"""
         from donkeycar.parts import provisioning
 
-        mock_sock = MagicMock()
-        mock_sock.connect.side_effect = OSError("no route")
-        monkeypatch.setattr(
-            provisioning.socket, "socket", lambda *a, **kw: mock_sock
-        )
+        self._mock_udp(monkeypatch, provisioning, fail=True)
+        self._mock_net(monkeypatch, provisioning, entries=None)
         monkeypatch.setattr(
             provisioning.socket,
             "gethostbyname",
@@ -838,6 +935,200 @@ class TestDetectLanIp:
         )
 
         assert provisioning.detect_lan_ip() is None
+
+
+class TestIsRfc1918:
+    """验证 _is_rfc1918() 私有网段判定。"""
+
+    @pytest.mark.parametrize(
+        "ip",
+        ["10.0.0.8", "192.168.3.41", "172.16.0.1", "172.31.255.254"],
+    )
+    def test_private_addresses(self, ip):
+        from donkeycar.parts.provisioning import _is_rfc1918
+
+        assert _is_rfc1918(ip) is True
+
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "172.15.0.1",      # 172.16/12 之外
+            "172.32.0.1",      # 172.16/12 之外
+            "198.18.0.1",      # Clash Meta/mihomo TUN 假 IP 段
+            "100.64.0.1",      # CGNAT/Tailscale
+            "169.254.1.1",     # 链路本地
+            "127.0.0.1",       # 回环
+            "8.8.8.8",         # 公网
+        ],
+    )
+    def test_non_lan_addresses(self, ip):
+        from donkeycar.parts.provisioning import _is_rfc1918
+
+        assert _is_rfc1918(ip) is False
+
+
+class TestSelectLanIp:
+    """验证 _select_lan_ip() 接口地址表筛选与两级优先级。"""
+
+    def test_prefers_physical_over_earlier_non_virtual(self):
+        """物理命名接口优先于排序更靠前的其他非虚拟接口（锁定两级优先级）。"""
+        from donkeycar.parts.provisioning import _select_lan_ip
+
+        entries = [
+            ("192.168.7.1", "rndis0"),  # 非虚拟但非物理命名，排在前面
+            ("192.168.3.41", "wlp1s0"),
+        ]
+        assert _select_lan_ip(entries) == "192.168.3.41"
+
+    def test_skips_virtual_interfaces(self):
+        """docker/wg 等虚拟接口上的 RFC1918 地址不可作为局域网地址。"""
+        from donkeycar.parts.provisioning import _select_lan_ip
+
+        entries = [
+            ("172.17.0.1", "docker0"),
+            ("10.2.0.2", "wg0"),
+            ("192.168.1.10", "enp3s0"),
+        ]
+        assert _select_lan_ip(entries) == "192.168.1.10"
+
+    def test_bridge_names_skipped_and_bond_is_physical(self):
+        """lxdbr0/br0 等网桥按虚拟接口跳过，bond0 按物理接口选中。"""
+        from donkeycar.parts.provisioning import _select_lan_ip
+
+        entries = [
+            ("10.206.0.1", "lxdbr0"),
+            ("10.1.0.1", "br0"),
+            ("192.168.1.10", "bond0"),
+        ]
+        assert _select_lan_ip(entries) == "192.168.1.10"
+
+    def test_non_virtual_fallback_when_no_physical_name(self):
+        """无物理命名接口时退而取任一非虚拟接口的私有地址。"""
+        from donkeycar.parts.provisioning import _select_lan_ip
+
+        entries = [
+            ("172.17.0.1", "docker0"),
+            ("192.168.7.1", "rndis0"),
+        ]
+        assert _select_lan_ip(entries) == "192.168.7.1"
+
+    def test_no_usable_address_returns_none(self):
+        """只有回环/虚拟接口时返回 None。"""
+        from donkeycar.parts.provisioning import _select_lan_ip
+
+        entries = [
+            ("127.0.0.1", "lo"),
+            ("172.17.0.1", "docker0"),
+        ]
+        assert _select_lan_ip(entries) is None
+
+
+class TestEnumInetEntries:
+    """验证 _enum_inet_entries() 的 ip addr 输出解析。"""
+
+    @staticmethod
+    def _fake_run(monkeypatch, provisioning, stdout="", returncode=0):
+        result = MagicMock()
+        result.returncode = returncode
+        result.stdout = stdout
+        monkeypatch.setattr(
+            provisioning.subprocess,
+            "run",
+            MagicMock(return_value=result),
+        )
+
+    def test_parses_oneline_format(self, monkeypatch):
+        """解析 -o 单行格式并剥离 veth 的 @ifN 后缀。"""
+        from donkeycar.parts import provisioning
+
+        stdout = (
+            "1: lo    inet 127.0.0.1/8 scope host lo\n"
+            "2: wlp1s0    inet 192.168.3.41/24 brd 192.168.3.255 scope global dynamic noprefixroute wlp1s0\n"
+            "5: veth1a2b3c@if7    inet 172.18.0.1/16 brd 172.18.255.255 scope global veth1a2b3c\n"
+        )
+        self._fake_run(monkeypatch, provisioning, stdout)
+
+        assert provisioning._enum_inet_entries() == [
+            ("127.0.0.1", "lo"),
+            ("192.168.3.41", "wlp1s0"),
+            ("172.18.0.1", "veth1a2b3c"),
+        ]
+
+    def test_command_failure_returns_none(self, monkeypatch):
+        """ip 命令不存在/非零退出时返回 None 而不是抛异常。"""
+        from donkeycar.parts import provisioning
+
+        monkeypatch.setattr(
+            provisioning.subprocess,
+            "run",
+            MagicMock(side_effect=OSError("no such file")),
+        )
+        assert provisioning._enum_inet_entries() is None
+
+        self._fake_run(monkeypatch, provisioning, stdout="", returncode=1)
+        assert provisioning._enum_inet_entries() is None
+
+
+class TestPhysicalDefaultIface:
+    """验证 _physical_default_iface() 残留物理默认路由探测。"""
+
+    @staticmethod
+    def _fake_run(monkeypatch, provisioning, stdout="", returncode=0):
+        result = MagicMock()
+        result.returncode = returncode
+        result.stdout = stdout
+        monkeypatch.setattr(
+            provisioning.subprocess,
+            "run",
+            MagicMock(return_value=result),
+        )
+
+    def test_prefers_physical_gateway_route_over_tun(self, monkeypatch):
+        """TUN 劫持默认路由后，残留的物理网关默认路由被认出。"""
+        from donkeycar.parts import provisioning
+
+        stdout = (
+            "default dev Meta scope link\n"
+            "default via 192.168.3.1 dev wlp1s0 proto dhcp metric 600\n"
+        )
+        self._fake_run(monkeypatch, provisioning, stdout)
+
+        assert provisioning._physical_default_iface() == "wlp1s0"
+
+    def test_ignores_virtual_gateway_routes(self, monkeypatch):
+        """经虚拟接口的默认路由跳过，取非虚拟兜底。"""
+        from donkeycar.parts import provisioning
+
+        stdout = (
+            "default via 10.2.0.1 dev wg0\n"
+            "default via 10.0.0.1 dev rndis0 metric 700\n"
+        )
+        self._fake_run(monkeypatch, provisioning, stdout)
+
+        assert provisioning._physical_default_iface() == "rndis0"
+
+    def test_only_virtual_default_returns_none(self, monkeypatch):
+        """只有 TUN 劫持项（无 via 网关）时返回 None。"""
+        from donkeycar.parts import provisioning
+
+        self._fake_run(
+            monkeypatch, provisioning, "default dev Meta scope link\n"
+        )
+        assert provisioning._physical_default_iface() is None
+
+    def test_command_failure_returns_none(self, monkeypatch):
+        """ip 命令不存在/非零退出时返回 None 而不是抛异常。"""
+        from donkeycar.parts import provisioning
+
+        monkeypatch.setattr(
+            provisioning.subprocess,
+            "run",
+            MagicMock(side_effect=OSError("no such file")),
+        )
+        assert provisioning._physical_default_iface() is None
+
+        self._fake_run(monkeypatch, provisioning, stdout="", returncode=1)
+        assert provisioning._physical_default_iface() is None
 
 
 class TestProtocolBuildHostIp:

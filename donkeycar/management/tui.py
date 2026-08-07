@@ -6,6 +6,7 @@ Donkey Car 交互式管理终端 (DonkeyUI)
 import sys
 import os
 import json
+import signal
 import subprocess
 import time
 import threading
@@ -369,6 +370,72 @@ def _restore_terminal():
         termios.tcsetattr(fd, termios.TCSAFLUSH, attr)
     except Exception:
         pass
+
+
+# -----------------------------------------------------------------------------
+# PID 文件管理（用于 Drive 命令的进程追踪与复用清理）
+# -----------------------------------------------------------------------------
+_DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
+
+
+def _read_drive_pid_file():
+    """读取上次 donkey drive 记录的进程 PID 列表。"""
+    if not _DRIVE_PID_FILE.exists():
+        return []
+    try:
+        with open(_DRIVE_PID_FILE, "r") as f:
+            return [int(line.strip()) for line in f if line.strip()]
+    except Exception:
+        return []
+
+
+def _write_drive_pid_file(pids):
+    """将当前 donkey drive 启动的进程 PID 写入记录文件。"""
+    _DRIVE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_DRIVE_PID_FILE, "w") as f:
+        for pid in pids:
+            f.write(f"{pid}\n")
+
+
+def _remove_drive_pid_file():
+    """删除 PID 记录文件。"""
+    try:
+        _DRIVE_PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _kill_previous_drive_processes():
+    """读取 PID 文件，精确杀掉上一次 donkey drive 启动的进程。
+
+    只杀 PID 文件中记录的进程，不会误杀其他程序占用的端口。
+    如果进程已不存在（OSError），则跳过。
+    """
+    pids = _read_drive_pid_file()
+    if not pids:
+        return
+
+    console.print("[yellow]检测到上一次 donkey drive 的进程仍在运行，正在停止...[/yellow]")
+
+    # 先发送 SIGTERM 优雅终止
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    # 等待进程退出
+    time.sleep(0.5)
+
+    # 对仍存活的进程发送 SIGKILL 强制终止
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    _remove_drive_pid_file()
+    console.print("[green]✓ 上一次的进程已停止[/green]")
 
 
 # -----------------------------------------------------------------------------
@@ -1246,6 +1313,9 @@ class DriveCommand(DonkeyCommand):
         self.history_mgr.update_last_params(self.name, current_params)
         self.history_mgr.add_command_log(cmd_str)
 
+        # 杀掉上一次 donkey drive 启动的进程，释放硬件资源（摄像头等）
+        _kill_previous_drive_processes()
+
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")
 
@@ -1271,6 +1341,9 @@ class DriveCommand(DonkeyCommand):
             )
             processes.append(car_process)
 
+            # 记录本次启动的进程 PID，供下次启动时清理
+            _write_drive_pid_file([p.pid for p in processes])
+
             self.monitor_processes(web_process, car_process)
             console.print(f"\n[bold green]✓ 执行结束[/bold green]")
         except KeyboardInterrupt:
@@ -1280,6 +1353,7 @@ class DriveCommand(DonkeyCommand):
             console.print(f"\n[bold red]✗ 发生异常: {e}[/bold red]")
             self.stop_processes(processes)
         finally:
+            _remove_drive_pid_file()
             _restore_terminal()
 
         Prompt.ask("\n按回车键返回菜单...")

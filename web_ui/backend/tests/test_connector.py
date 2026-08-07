@@ -6,9 +6,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from conftest import collect_route_paths
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
 
 
 def make_client(monkeypatch, tmp_path):
@@ -22,7 +25,7 @@ def make_client(monkeypatch, tmp_path):
 
 def test_main_registers_connector_router():
     main = importlib.import_module("main")
-    routes = {route.path for route in main.app.routes}
+    routes = collect_route_paths(main.app.routes)
     assert "/api/connector/config" in routes
     assert "/api/connector/status" in routes
     assert "/api/connector/local_ips" in routes

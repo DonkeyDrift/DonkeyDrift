@@ -9,10 +9,12 @@ interface DriveModeSelectorProps {
   className?: string;
 }
 
-const MODE_OPTIONS: { value: DriveMode; label: string }[] = [
-  { value: 'user', label: '手动' },
-  { value: 'local_angle', label: '半自动' },
-  { value: 'local', label: '全自动' },
+// Active-segment colors mirror the ESP32 Drifter Console mode cards
+// (mode0=手动 green #39d98a, mode1=半自动 amber #ffcc66, mode2=全自动 blue #5cc8ff).
+const MODE_OPTIONS: { value: DriveMode; label: string; activeClass: string }[] = [
+  { value: 'user', label: '手动', activeClass: 'bg-[#39d98a]/20 text-[#39d98a]' },
+  { value: 'local_angle', label: '半自动', activeClass: 'bg-[#ffcc66]/20 text-[#ffcc66]' },
+  { value: 'local', label: '全自动', activeClass: 'bg-[#5cc8ff]/20 text-[#5cc8ff]' },
 ];
 
 export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
@@ -28,11 +30,12 @@ export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
         return (
           <button
             key={mode.value}
+            data-mode={mode.value}
             onClick={() => onChange(mode.value)}
             disabled={disabled}
             className={`px-3 py-1.5 text-xs font-medium transition-colors
               ${active
-                ? 'bg-cyan-500/20 text-cyan-400'
+                ? `mode-active ${mode.activeClass}`
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
               }
               ${disabled ? 'opacity-50 cursor-not-allowed' : ''}

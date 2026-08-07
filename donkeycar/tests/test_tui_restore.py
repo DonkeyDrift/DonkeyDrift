@@ -23,7 +23,9 @@ class TestRestoreData(unittest.TestCase):
 
     def test_get_data_cache_dir(self):
         # This expects the function to return the local data_cache
-        expected = Path(self.test_dir) / "data_cache"
+        # macOS 上 /var 是 /private/var 的符号链接，Path.cwd() 返回解析后的
+        # 物理路径，比较前需对 mkdtemp 结果做 realpath
+        expected = Path(os.path.realpath(self.test_dir)) / "data_cache"
         self.assertEqual(_get_data_cache_dir(), expected)
 
     def test_list_backup_archives(self):

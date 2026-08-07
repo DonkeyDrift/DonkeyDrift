@@ -61,14 +61,13 @@ DRIVE_WEBRTC_ENABLED = True
 
 ## 页面导航
 
-顶部导航栏包含四个入口：
+顶部导航栏包含以下主要入口：
 
 | 入口 | 功能 |
 |------|------|
 | **Tub Manager** | Tub 数据浏览、编辑、删除 |
 | **Trainer** | 模型训练（本地/在线）、模型管理 |
 | **Drive** | 实车驾驶控制台 |
-| **Calibrate** | 舵机与电调 PWM 校准 |
 
 ---
 
@@ -227,28 +226,9 @@ Drive 页面在 WebSocket 已连接时会以 60Hz 持续发送完整控制状态
 
 ---
 
-## 校准页面
+## 校准
 
-访问顶部导航「Calibrate」进入舵机与电调校准页面。
-
-### 使用方法
-
-1. 确保车端已连接（底部状态显示「在线」）
-2. 拖动滑杆调整 PWM 值
-3. 点击每项右侧的「发送」按钮实时测试当前值
-4. 确认无误后点击顶部「保存全部到车端」持久化
-
-### 参数说明
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| 左转极限 PWM | 460 | 舵机向左打满时的脉冲宽度 |
-| 右转极限 PWM | 290 | 舵机向右打满时的脉冲宽度 |
-| 全油门前进 PWM | 500 | 电调最大前进脉冲宽度 |
-| 油门零点 PWM | 370 | 电机静止时的脉冲宽度 |
-| 全油门倒车 PWM | 220 | 电调最大倒车脉冲宽度 |
-
-> **安全提示**：油门相关参数请从小值开始测试，确认车轮转向正确后再逐步增大。
+Web UI 已不再提供校准页面；舵机与电调 PWM 校准统一在 ESP32 的 Drifter Console（Web Console）中完成，单针 PWM 标定也可使用 `donkey calibrate --channel <通道>` CLI。
 
 ---
 
@@ -284,7 +264,6 @@ Drive 页面在 WebSocket 已连接时会以 60Hz 持续发送完整控制状态
 | `GET` | `/params` | 加载驾驶参数 |
 | `POST` | `/params` | 保存驾驶参数 |
 | `POST` | `/load_model` | 下发模型加载指令 |
-| `POST` | `/calibrate` | 下发校准参数 |
 
 ### WebSocket 消息协议
 
@@ -355,12 +334,11 @@ Drive 页面在 WebSocket 已连接时会以 60Hz 持续发送完整控制状态
 web_ui/
 ├── backend/
 │   └── routers/
-│       └── drive.py          # 驾驶 API（WebSocket/MJPEG/参数/校准）
+│       └── drive.py          # 驾驶 API（WebSocket/MJPEG/参数）
 └── frontend/
     └── src/
         ├── pages/
-        │   ├── DrivePage.tsx      # 驾驶控制台页面
-        │   └── CalibratePage.tsx  # 校准页面
+        │   └── DrivePage.tsx      # 驾驶控制台页面
         ├── components/drive/
         │   ├── VideoStream.tsx      # MJPEG 视频流
         │   ├── VirtualJoystick.tsx  # 虚拟摇杆

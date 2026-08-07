@@ -14,10 +14,68 @@ from progress.bar import IncrementalBar
 import donkeycar as dk
 from donkeycar.management.joystick_creator import CreateJoystick
 
+from pathlib import Path
+
 from donkeycar.utils import normalize_image, load_image, math
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
+
+# PID 文件路径，与 tui.py 保持一致
+_DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
+
+
+def _read_drive_pid_file():
+    """读取上次 donkey drive 记录的进程 PID 列表。"""
+    if not _DRIVE_PID_FILE.exists():
+        return []
+    try:
+        with open(_DRIVE_PID_FILE, "r") as f:
+            return [int(line.strip()) for line in f if line.strip()]
+    except Exception:
+        return []
+
+
+def _write_drive_pid_file(pids):
+    """将当前 donkey drive 启动的进程 PID 写入记录文件。"""
+    _DRIVE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_DRIVE_PID_FILE, "w") as f:
+        for pid in pids:
+            f.write(f"{pid}\n")
+
+
+def _remove_drive_pid_file():
+    """删除 PID 记录文件。"""
+    try:
+        _DRIVE_PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _kill_previous_drive_processes():
+    """读取 PID 文件，精确杀掉上一次 donkey drive 启动的进程。"""
+    pids = _read_drive_pid_file()
+    if not pids:
+        return
+
+    print("检测到上一次 donkey drive 的进程仍在运行，正在停止...")
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    time.sleep(0.5)
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    _remove_drive_pid_file()
+    print("上一次的进程已停止")
 HELP_CONFIG = 'location of config file to use. default: ./config.py'
 logger = logging.getLogger(__name__)
 
@@ -935,6 +993,9 @@ class Drive(Web):
         args = self.parse_args(args)
         car_path = self._resolve_car_path(args.car)
 
+        # 杀掉上一次 donkey drive 启动的进程，释放硬件资源
+        _kill_previous_drive_processes()
+
         frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
             self._launch_web_ui(args)
 
@@ -942,6 +1003,7 @@ class Drive(Web):
         if not self._wait_for_backend_ready(backend_port):
             self._terminate_process(frontend_proc)
             self._terminate_process(backend_proc)
+            _remove_drive_pid_file()
             raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
 
         car_cmd = self._build_car_command(args)
@@ -959,6 +1021,9 @@ class Drive(Web):
             car_cmd, cwd=car_path, env=car_env,
             stdin=subprocess.DEVNULL, **popen_kwargs,
         )
+
+        # 记录本次启动的进程 PID，供下次启动时清理
+        _write_drive_pid_file([frontend_proc.pid, backend_proc.pid, car_proc.pid])
 
         if args.open:
             webbrowser.open(frontend_url)
@@ -985,6 +1050,7 @@ class Drive(Web):
             self._terminate_process(frontend_proc)
             self._terminate_process(backend_proc)
             self._terminate_process(car_proc)
+            _remove_drive_pid_file()
 
     # ------------------------------------------------------------------
     # 车辆子进程构造（纯逻辑，便于单测）
