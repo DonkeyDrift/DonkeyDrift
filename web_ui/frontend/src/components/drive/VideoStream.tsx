@@ -3,6 +3,7 @@ import { API_URL, getDriveVideoTransport, type DriveVideoTransport } from '../..
 import { Wifi, WifiOff } from 'lucide-react';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 import type { WebRtcSignal } from '../../hooks/useDriveWebsocket';
+import { useTranslation } from '@/i18n';
 
 export const DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS = 3000;
 
@@ -15,6 +16,7 @@ interface VideoStreamProps {
 }
 
 export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomingSignal = null, transport, clientId, onLatencyChange }) => {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<'loading' | 'connected' | 'error'>('loading');
   const [retryCount, setRetryCount] = useState(0);
   const [mjpegFps, setMjpegFps] = useState(0);
@@ -126,29 +128,6 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   }, [webRtcVisible]);
 
   useEffect(() => {
-    const wasVisible = prevWebRtcVisibleRef.current;
-    if (webRtcVisible && !wasVisible) {
-      // WebRTC 刚连上：等它完全渐入（500ms）后再淡出 MJPEG，避免中间 Gap 闪烁
-      mjpegFadeTimerRef.current = setTimeout(() => {
-        setMjpegVisible(false);
-      }, 500);
-    } else if (!webRtcVisible) {
-      if (mjpegFadeTimerRef.current) {
-        clearTimeout(mjpegFadeTimerRef.current);
-        mjpegFadeTimerRef.current = null;
-      }
-      setMjpegVisible(true);
-    }
-    prevWebRtcVisibleRef.current = webRtcVisible;
-    return () => {
-      if (mjpegFadeTimerRef.current) {
-        clearTimeout(mjpegFadeTimerRef.current);
-        mjpegFadeTimerRef.current = null;
-      }
-    };
-  }, [webRtcVisible]);
-
-  useEffect(() => {
     if (!degraded) {
       return;
     }
@@ -182,22 +161,22 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
 
   const statusMeta = (() => {
     if (forceMjpeg) {
-      return { icon: Wifi, text: 'MJPEG', color: 'text-amber-400', pulse: false };
+      return { icon: Wifi, text: t('driveViz.transportMjpeg'), color: 'text-amber-400', pulse: false };
     }
     if (webRtcConnected) {
-      return { icon: Wifi, text: 'WebRTC', color: 'text-emerald-400', pulse: false };
+      return { icon: Wifi, text: t('driveViz.transportWebRtc'), color: 'text-emerald-400', pulse: false };
     }
     if (!degraded) {
-      return { icon: Wifi, text: 'Connecting...', color: 'text-zinc-400', pulse: true };
+      return { icon: Wifi, text: t('driveViz.connecting'), color: 'text-zinc-400', pulse: true };
     }
     switch (status) {
       case 'connected':
-        return { icon: Wifi, text: 'MJPEG 降级', color: 'text-amber-400', pulse: false };
+        return { icon: Wifi, text: t('driveViz.mjpegFallback'), color: 'text-amber-400', pulse: false };
       case 'loading':
-        return { icon: Wifi, text: 'Connecting...', color: 'text-zinc-400', pulse: true };
+        return { icon: Wifi, text: t('driveViz.connecting'), color: 'text-zinc-400', pulse: true };
       case 'error':
       default:
-        return { icon: WifiOff, text: 'Disconnected', color: 'text-red-400', pulse: false };
+        return { icon: WifiOff, text: t('driveViz.disconnected'), color: 'text-red-400', pulse: false };
     }
   })();
   const StatusIcon = statusMeta.icon;
@@ -214,7 +193,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         </div>
         {degraded && (
           <span className="rounded bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300">
-            非 60FPS 验收路径
+            {t('driveViz.non60FpsPath')}
           </span>
         )}
       </div>
@@ -227,7 +206,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         key={retryCount}
         ref={imgRef}
         src={streamUrl}
-        alt="Camera feed"
+        alt={t('driveViz.cameraFeedAlt')}
         onLoad={() => {
           setStatus('connected');
           if (imgRef.current && imgRef.current.naturalWidth > 0 && imgRef.current.naturalHeight > 0) {
@@ -244,7 +223,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       {!forceMjpeg && (
         <video
           ref={videoRef}
-          aria-label="WebRTC camera feed"
+          aria-label={t('driveViz.webrtcFeedLabel')}
           autoPlay
           playsInline
           muted
@@ -257,8 +236,8 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 pointer-events-none z-20">
           <div className="text-center text-zinc-500 text-sm">
             {carOnline === false
-              ? '车端离线：等待 DriveApiBridge 连接到 /api/drive/ws?role=car'
-              : status === 'loading' ? '正在连接摄像头...' : '摄像头未连接'}
+              ? t('driveViz.carOfflineWaiting')
+              : status === 'loading' ? t('driveViz.connectingCamera') : t('driveViz.cameraNotConnected')}
           </div>
         </div>
       )}

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { t } from '@/i18n';
 
 const DEFAULT_API_BASE = '/api';
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -48,13 +49,13 @@ export const getDriveCarWebSocketUrl = (clientId?: string) => {
   return `${protocol}//${host}${apiBase}/drive/ws${query}`;
 };
 
-export const getApiErrorMessage = (error: unknown, fallback = '未知错误') => {
+export const getApiErrorMessage = (error: unknown, fallback = t('common.unknownError')) => {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === 'string') return detail;
     // 服务器不可达时给出明确提示
     if (!error.response && error.message === 'Network Error') {
-      return '无法连接后端服务，请确认已执行 donkey web 并且后端端口可访问';
+      return t('common.cannotConnectBackend');
     }
     return error.message || fallback;
   }

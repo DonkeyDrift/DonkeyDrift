@@ -23,6 +23,7 @@ import {
 import { useConnectorJob } from '../hooks/useConnectorJob';
 import { useDriveWebsocket } from '../hooks/useDriveWebsocket';
 import { useStore } from '../store/useStore';
+import { useTranslation } from '@/i18n';
 import { useNavigate } from 'react-router-dom';
 
 type FormatOption = 'h5' | 'savedmodel' | 'tflite' | 'trt';
@@ -47,6 +48,7 @@ const MODEL_TYPES = [
 
 export const CarConnectorPage: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { setTub, setError } = useStore();
   const { connected: driveConnected, carState } = useDriveWebsocket();
 
@@ -116,7 +118,7 @@ export const CarConnectorPage: React.FC = () => {
             .replace('localhost', bestIp)
             .replace('127.0.0.1', bestIp);
           setBridgeServerUrl(corrected);
-          setStatusMessage(`已自动将回连地址修正为局域网 IP: ${bestIp}`);
+          setStatusMessage(t('connector.ipAutoCorrected', { ip: bestIp }));
         }
       })
       .catch(() => {});
@@ -154,11 +156,11 @@ export const CarConnectorPage: React.FC = () => {
       setStatusMessage(result.message);
     } catch (error) {
       setOnline(false);
-      setStatusMessage(getApiErrorMessage(error, '连接检查失败'));
+      setStatusMessage(getApiErrorMessage(error, t('connector.checkFailed')));
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [t]);
 
   // 扫描局域网发现车辆
   const handleDiscoverCars = useCallback(async () => {
@@ -168,16 +170,16 @@ export const CarConnectorPage: React.FC = () => {
       const result = await discoverConnectorCars();
       if (result.found && result.found.length > 0) {
         setFoundCars(result.found);
-        setStatusMessage(`发现 ${result.found.length} 个开放 SSH 端口的主机（扫描了 ${result.scanned} 个地址）`);
+        setStatusMessage(t('connector.discoverFound', { count: result.found.length, scanned: result.scanned }));
       } else {
         setStatusMessage(result.message);
       }
     } catch (error) {
-      setStatusMessage(getApiErrorMessage(error, '扫描局域网失败'));
+      setStatusMessage(getApiErrorMessage(error, t('connector.scanFailed')));
     } finally {
       setDiscovering(false);
     }
-  }, []);
+  }, [t]);
 
   // 加载远端列表
   const loadRemoteLists = useCallback(async () => {
@@ -189,9 +191,9 @@ export const CarConnectorPage: React.FC = () => {
       setTubs(tubResult.items);
       setRemoteModels(modelResult.items);
     } catch (error) {
-      setStatusMessage(getApiErrorMessage(error, '远端列表加载失败'));
+      setStatusMessage(getApiErrorMessage(error, t('connector.remoteListLoadFailed')));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (online) loadRemoteLists();
@@ -201,13 +203,13 @@ export const CarConnectorPage: React.FC = () => {
     try {
       const data = await loadTub(localTubPath);
       setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
-      setStatusMessage(`Tub 已拉取并刷新: ${data.path}`);
+      setStatusMessage(t('connector.tubPulledAndRefreshed', { path: data.path }));
     } catch (error) {
-      const message = getApiErrorMessage(error, '本地 Tub 刷新失败');
-      setStatusMessage(`Tub 已拉取，但本地刷新失败: ${message}`);
+      const message = getApiErrorMessage(error, t('connector.localTubRefreshFailed'));
+      setStatusMessage(t('connector.tubPulledButRefreshFailed', { message }));
       setError(message);
     }
-  }, [setTub, setError]);
+  }, [setTub, setError, t]);
 
   // 拉取 Tub
   const handlePullTub = useCallback(() => {
@@ -262,7 +264,7 @@ export const CarConnectorPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-zinc-100">Car Connector</h1>
+      <h1 className="text-2xl font-bold text-zinc-100">{t('connector.pageTitle')}</h1>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* 左栏 */}
@@ -270,12 +272,12 @@ export const CarConnectorPage: React.FC = () => {
           {/* 连接配置 */}
           <Card>
             <CardHeader>
-              <CardTitle>连接配置</CardTitle>
+              <CardTitle>{t('connector.configTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">主机地址</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.hostLabel')}</label>
                   <div className="flex gap-2">
                     <Input
                       className="flex-1"
@@ -289,12 +291,12 @@ export const CarConnectorPage: React.FC = () => {
                       variant="secondary"
                       size="sm"
                     >
-                      {discovering ? '扫描中…' : '扫描局域网'}
+                      {discovering ? t('connector.scanning') : t('connector.scanLan')}
                     </Button>
                   </div>
                   {foundCars.length > 0 && (
                     <div className="mt-2 space-y-1">
-                      <p className="text-xs text-zinc-400">发现以下主机（按延迟排序）：</p>
+                      <p className="text-xs text-zinc-400">{t('connector.foundHosts')}</p>
                       <div className="max-h-32 overflow-y-auto space-y-1">
                         {foundCars.map((car) => (
                           <button
@@ -302,7 +304,7 @@ export const CarConnectorPage: React.FC = () => {
                             onClick={() => {
                               setConfig((prev) => ({ ...prev, host: car.ip }));
                               setFoundCars([]);
-                              setStatusMessage(`已选择车端 IP：${car.ip}`);
+                              setStatusMessage(t('connector.carIpSelected', { ip: car.ip }));
                             }}
                             className={`w-full flex items-center justify-between rounded-md border px-2 py-1.5 text-left transition-colors ${
                               config.host === car.ip
@@ -319,7 +321,7 @@ export const CarConnectorPage: React.FC = () => {
                   )}
                 </div>
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">用户名</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.usernameLabel')}</label>
                   <Input
                     value={config.user}
                     onChange={(e) => setConfig({ ...config, user: e.target.value })}
@@ -329,7 +331,7 @@ export const CarConnectorPage: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">SSH 端口</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.sshPortLabel')}</label>
                   <Input
                     type="number"
                     value={config.port}
@@ -337,7 +339,7 @@ export const CarConnectorPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">车端目录</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.carDirLabel')}</label>
                   <Input
                     value={config.car_dir}
                     onChange={(e) => setConfig({ ...config, car_dir: e.target.value })}
@@ -346,7 +348,7 @@ export const CarConnectorPage: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">SSH 密钥路径（可选）</label>
+                <label className="block text-xs text-zinc-400 mb-1">{t('connector.sshKeyPathLabel')}</label>
                 <Input
                   value={config.key_path || ''}
                   onChange={(e) => setConfig({ ...config, key_path: e.target.value || null })}
@@ -355,10 +357,10 @@ export const CarConnectorPage: React.FC = () => {
               </div>
               <div className="flex items-center gap-3">
                 <Button onClick={handleSaveConfig} disabled={configSaving} size="sm">
-                  {configSaving ? '保存中...' : '保存配置'}
+                  {configSaving ? t('connector.saving') : t('connector.saveConfig')}
                 </Button>
                 <Button onClick={handleCheckStatus} disabled={checking} variant="secondary" size="sm">
-                  {checking ? '检查中...' : '检查连接'}
+                  {checking ? t('connector.checking') : t('connector.checkConnection')}
                 </Button>
                 {online !== null && (
                   <span
@@ -374,20 +376,20 @@ export const CarConnectorPage: React.FC = () => {
           {/* 拉取 Tub */}
           <Card>
             <CardHeader>
-              <CardTitle>拉取 Tub</CardTitle>
+              <CardTitle>{t('connector.pullTubTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">选择远端 Tub 目录</label>
+                <label className="block text-xs text-zinc-400 mb-1">{t('connector.selectRemoteTubLabel')}</label>
                 <select
                   className="w-full h-10 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   value={selectedTub}
                   onChange={(e) => setSelectedTub(e.target.value)}
                 >
-                  <option value="">-- 选择 Tub --</option>
-                  {tubs.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
+                  <option value="">{t('connector.selectTubPlaceholder')}</option>
+                  {tubs.map((tub) => (
+                    <option key={tub} value={tub}>
+                      {tub}
                     </option>
                   ))}
                 </select>
@@ -399,14 +401,14 @@ export const CarConnectorPage: React.FC = () => {
                   onChange={(e) => setCreateNewDir(e.target.checked)}
                   className="rounded border-zinc-600 bg-zinc-800 text-cyan-500 focus:ring-cyan-500"
                 />
-                创建新目录（不覆盖现有数据）
+                {t('connector.createNewDirLabel')}
               </label>
               <Button
                 onClick={handlePullTub}
                 disabled={!online || !selectedTub || isJobRunning}
                 size="sm"
               >
-                拉取 {selectedTub || 'Tub'}
+                {t('connector.pullTubButton', { tub: selectedTub || 'Tub' })}
               </Button>
             </CardContent>
           </Card>
@@ -414,7 +416,7 @@ export const CarConnectorPage: React.FC = () => {
           {/* 推送 Pilots */}
           <Card>
             <CardHeader>
-              <CardTitle>推送 Pilots</CardTitle>
+              <CardTitle>{t('connector.pushPilotsTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -442,7 +444,7 @@ export const CarConnectorPage: React.FC = () => {
                   onClick={() => setSelectedFormats(new Set(FORMAT_OPTIONS.map(({ key }) => key)))}
                   className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors border bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-zinc-100"
                 >
-                  一键全选
+                  {t('connector.selectAll')}
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -451,7 +453,7 @@ export const CarConnectorPage: React.FC = () => {
                   disabled={!online || isJobRunning || selectedFormats.size === 0}
                   size="sm"
                 >
-                  推送选中格式（{Array.from(selectedFormats).join(', ')}）
+                  {t('connector.pushSelectedFormats', { formats: Array.from(selectedFormats).join(', ') })}
                 </Button>
                 <Button
                   onClick={handlePushAllPilots}
@@ -459,7 +461,7 @@ export const CarConnectorPage: React.FC = () => {
                   variant="secondary"
                   size="sm"
                 >
-                  同步全部
+                  {t('connector.syncAll')}
                 </Button>
               </div>
             </CardContent>
@@ -471,32 +473,32 @@ export const CarConnectorPage: React.FC = () => {
           {/* 远程驾驶 */}
           <Card>
             <CardHeader>
-              <CardTitle>远程驾驶</CardTitle>
+              <CardTitle>{t('connector.remoteDriveTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">模型类型</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.modelTypeLabel')}</label>
                   <select
                     className="w-full h-10 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     value={modelType}
                     onChange={(e) => setModelType(e.target.value)}
                   >
-                    {MODEL_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
+                    {MODEL_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">选择 Pilot</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.selectPilotLabel')}</label>
                   <select
                     className="w-full h-10 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     value={selectedPilot}
                     onChange={(e) => setSelectedPilot(e.target.value)}
                   >
-                    <option value="">无 Pilot（手动驾驶）</option>
+                    <option value="">{t('connector.noPilot')}</option>
                     {remoteModels.map((m) => (
                       <option key={m} value={m}>
                         {m}
@@ -506,25 +508,25 @@ export const CarConnectorPage: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">DriveApiBridge 回连地址</label>
+                <label className="block text-xs text-zinc-400 mb-1">{t('connector.bridgeUrlLabel')}</label>
                 <Input
                   value={bridgeServerUrl}
                   onChange={(e) => setBridgeServerUrl(e.target.value)}
-                  placeholder="ws://你的电脑IP:8000/api/drive/ws"
+                  placeholder={t('connector.bridgeUrlPlaceholder')}
                 />
                 <p className="mt-1 text-xs text-zinc-500">
-                  车端会使用这个地址连接 Web UI 后端；如果车端在另一台机器，请把 localhost 改成电脑局域网 IP。
+                  {t('connector.bridgeUrlHint')}
                 </p>
               </div>
               <div className={`text-xs ${driveConnected && carState.online ? 'text-green-400' : 'text-zinc-500'}`}>
                 {driveConnected
                   ? carState.online
-                    ? '车端已在线，可直接打开驾驶控制台'
-                    : '车端尚未连接 Drive 控制通道'
-                  : 'Drive 状态通道连接中...'}
+                    ? t('connector.carOnline')
+                    : t('connector.carNotConnected')
+                  : t('connector.driveStatusConnecting')}
               </div>
               <div className="text-xs text-zinc-400">
-                当前远程驾驶 PID: {drivePid ?? '未运行'}
+                {t('connector.drivePidLabel', { pid: drivePid ?? t('connector.notRunning') })}
               </div>
               <div className="flex items-center gap-3">
                 <Button
@@ -532,7 +534,7 @@ export const CarConnectorPage: React.FC = () => {
                   disabled={!online || isJobRunning}
                   size="sm"
                 >
-                  启动驾驶
+                  {t('connector.startDrive')}
                 </Button>
                 <Button
                   onClick={handleDriveStop}
@@ -540,14 +542,14 @@ export const CarConnectorPage: React.FC = () => {
                   variant="danger"
                   size="sm"
                 >
-                  停止驾驶
+                  {t('connector.stopDrive')}
                 </Button>
                 <Button
                   onClick={() => navigate('/drive')}
                   variant="ghost"
                   size="sm"
                 >
-                  打开驾驶控制台
+                  {t('connector.openDriveConsole')}
                 </Button>
               </div>
             </CardContent>
@@ -558,11 +560,11 @@ export const CarConnectorPage: React.FC = () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>
-                  {isJobRunning ? '任务进行中' : '任务日志'}
+                  {isJobRunning ? t('connector.jobRunning') : t('connector.jobLog')}
                 </CardTitle>
                 {isJobRunning && (
                   <Button onClick={cancelJob} variant="danger" size="sm">
-                    取消
+                    {t('connector.cancel')}
                   </Button>
                 )}
               </div>
@@ -577,14 +579,14 @@ export const CarConnectorPage: React.FC = () => {
                 </div>
               )}
               {jobStatus?.status === 'completed' && (
-                <div className="text-green-400 text-sm">任务完成</div>
+                <div className="text-green-400 text-sm">{t('connector.jobCompleted')}</div>
               )}
               {jobStatus?.status === 'failed' && (
-                <div className="text-red-400 text-sm">任务失败: {jobStatus.error}</div>
+                <div className="text-red-400 text-sm">{t('connector.jobFailed', { error: jobStatus.error ?? '' })}</div>
               )}
               <div className="max-h-64 overflow-y-auto space-y-0.5 font-mono text-xs text-zinc-400 bg-zinc-950 rounded p-3">
                 {jobLogs.length === 0 && (
-                  <div className="text-zinc-600">暂无日志</div>
+                  <div className="text-zinc-600">{t('connector.noLogs')}</div>
                 )}
                 {jobLogs.map((log, i) => (
                   <div key={i}>{log}</div>
@@ -597,4 +599,3 @@ export const CarConnectorPage: React.FC = () => {
     </div>
   );
 };
-

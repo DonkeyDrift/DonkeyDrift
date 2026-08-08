@@ -1,8 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { HelpModal } from './HelpModal';
+import { FabActions } from './FabActions';
+import { LanguageSwitcher } from './LanguageSwitcher';
+import { GitHubLink } from './GitHubLink';
+import { useTranslation } from '@/i18n';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t } = useTranslation();
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
 
@@ -16,44 +20,43 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               to="/" 
               className={`transition-colors hover:text-cyan-400 ${isActive('/') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
-              Tub Manager
+              {t('common.nav.tubManager')}
             </Link>
             <Link
               to="/trainer"
               className={`transition-colors hover:text-cyan-400 ${isActive('/trainer') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
-              Trainer
+              {t('common.nav.trainer')}
             </Link>
             <Link
               to="/drive"
               className={`transition-colors hover:text-cyan-400 ${isActive('/drive') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
-              Drive
+              {t('common.nav.drive')}
             </Link>
             <Link
               to="/pilot"
               className={`transition-colors hover:text-cyan-400 ${isActive('/pilot') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
-              Pilot Arena
+              {t('common.nav.pilotArena')}
             </Link>
             <Link
               to="/connector"
               className={`transition-colors hover:text-cyan-400 ${isActive('/connector') ? 'text-cyan-500' : 'text-zinc-400'}`}
             >
-              Car Connector
+              {t('common.nav.carConnector')}
             </Link>
           </nav>
+          <div className="ml-auto flex items-center gap-4">
+            <GitHubLink />
+            <LanguageSwitcher />
+          </div>
         </div>
       </header>
       <main className="container mx-auto px-4 py-6 space-y-6">
         {children}
       </main>
-      <footer className="border-t border-zinc-800 py-4 mt-8">
-        <div className="container mx-auto px-4 text-center text-sm text-zinc-500">
-          DonkeyDrifter
-        </div>
-      </footer>
-      <HelpModal />
+      <FabActions />
     </div>
   );
 };

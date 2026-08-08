@@ -6,8 +6,10 @@ import { useStore } from '../store/useStore';
 import { loadConfig, loadTub, getApiErrorMessage } from '../services/api';
 import { FolderCog, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
+import { useTranslation } from '@/i18n';
 
 export const ConfigLoader: React.FC = () => {
+  const { t } = useTranslation();
   const { configPath, setConfig, setError, setLoading, config, setTub } = useStore();
   const [path, setPath] = useState(configPath);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -55,11 +57,11 @@ export const ConfigLoader: React.FC = () => {
     } catch (err: unknown) {
       // 任何加载失败（包括目录不存在、缺少 config.py）都要反馈给用户，
       // 否则路径错误时界面毫无提示，只剩控制台里的 404。
-      setError(getApiErrorMessage(err, 'Failed to load config'));
+      setError(getApiErrorMessage(err, t('common.configLoader.failedToLoad')));
     } finally {
       setLoading(false);
     }
-  }, [path, autoLoadTub, setConfig, setError, setLoading, setTub]);
+  }, [path, autoLoadTub, setConfig, setError, setLoading, setTub, t]);
 
   const handleBrowserSelect = async (selectedPath: string) => {
     setPath(selectedPath);
@@ -72,7 +74,7 @@ export const ConfigLoader: React.FC = () => {
       setConfig(data.config, selectedPath);
       await autoLoadTub(selectedPath);
     } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Failed to load config from selected directory'));
+      setError(getApiErrorMessage(err, t('common.configLoader.failedToLoadFromDir')));
     } finally {
       setLoading(false);
     }
@@ -93,47 +95,47 @@ export const ConfigLoader: React.FC = () => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FolderCog className="w-5 h-5" />
-          Config Loader
+          {t('common.configLoader.title')}
         </CardTitle>
-        <p className="text-sm text-zinc-400">Select car directory (created via donkey createcar)</p>
-        <p className="text-xs text-zinc-600">API: {window.location.origin}/api</p>
+        <p className="text-sm text-zinc-400">{t('common.configLoader.description')}</p>
+        <p className="text-xs text-zinc-600">{t('common.configLoader.apiLabel', { origin: window.location.origin })}</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-3">
           <Input
-            placeholder="Config path, e.g. /home/dkc/projects/mycar"
+            placeholder={t('common.configLoader.pathPlaceholder')}
             value={path}
             onChange={(e) => setPath(e.target.value)}
-            aria-label="Config path input field"
+            aria-label={t('common.configLoader.pathInputAria')}
           />
           <div className="flex justify-end gap-2">
             <Button 
               variant="secondary"
               onClick={() => setIsBrowserOpen(true)}
               className="min-w-[100px]"
-              aria-label="Browse configuration directory"
+              aria-label={t('common.configLoader.browseAria')}
             >
               <Search className="w-4 h-4" />
-              Browse
+              {t('common.configLoader.browse')}
             </Button>
             <Button 
               onClick={handleManualLoad}
               className="min-w-[100px]"
-              aria-label="Load configuration"
+              aria-label={t('common.configLoader.loadAria')}
             >
               <FolderOpen className="w-4 h-4" />
-              Load
+              {t('common.configLoader.load')}
             </Button>
           </div>
         </div>
         {config && (
           <p className="mt-3 text-xs text-emerald-400">
-            Config loaded: {configPath}
+            {t('common.configLoader.configLoaded', { path: configPath })}
           </p>
         )}
         {!config && (
           <p className="mt-3 text-xs text-zinc-400">
-            No config loaded
+            {t('common.configLoader.noConfig')}
           </p>
         )}
       </CardContent>
@@ -143,7 +145,7 @@ export const ConfigLoader: React.FC = () => {
         onClose={() => setIsBrowserOpen(false)}
         onSelect={handleBrowserSelect}
         initialPath={path || undefined}
-        title="Select Car Directory"
+        title={t('common.configLoader.selectCarDirectory')}
       />
     </Card>
   );

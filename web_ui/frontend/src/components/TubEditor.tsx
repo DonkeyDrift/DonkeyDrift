@@ -4,6 +4,7 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
 import { deleteRecords, getRecords, restoreRecords } from '../services/api';
+import { useTranslation } from '@/i18n';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -38,6 +39,7 @@ type RecordAction = {
 };
 
 export const TubEditor: React.FC = () => {
+  const { t } = useTranslation();
   const records = useStore((state) => state.records);
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -264,33 +266,33 @@ export const TubEditor: React.FC = () => {
 
     if (!normalizedStart) {
       return {
-        startError: '请输入开始索引',
+        startError: t('tubEditor.errorStartRequired'),
         endError: null,
-        message: '请输入完整的开始和结束索引',
+        message: t('tubEditor.errorRangeIncomplete'),
       };
     }
 
     if (!normalizedEnd) {
       return {
         startError: null,
-        endError: '请输入结束索引',
-        message: '请输入完整的开始和结束索引',
+        endError: t('tubEditor.errorEndRequired'),
+        message: t('tubEditor.errorRangeIncomplete'),
       };
     }
 
     if (!/^\d+$/.test(normalizedStart)) {
       return {
-        startError: '开始索引必须是非负整数',
+        startError: t('tubEditor.errorStartInteger'),
         endError: null,
-        message: '索引必须是非负整数',
+        message: t('tubEditor.errorInteger'),
       };
     }
 
     if (!/^\d+$/.test(normalizedEnd)) {
       return {
         startError: null,
-        endError: '结束索引必须是非负整数',
-        message: '索引必须是非负整数',
+        endError: t('tubEditor.errorEndInteger'),
+        message: t('tubEditor.errorInteger'),
       };
     }
 
@@ -300,8 +302,8 @@ export const TubEditor: React.FC = () => {
     if (end < start) {
       return {
         startError: null,
-        endError: '结束索引不能小于开始索引',
-        message: '结束索引不能小于开始索引',
+        endError: t('tubEditor.errorEndBeforeStart'),
+        message: t('tubEditor.errorEndBeforeStart'),
       };
     }
 
@@ -310,7 +312,7 @@ export const TubEditor: React.FC = () => {
       endError: null,
       message: null,
     };
-  }, [rangeEndInput, rangeStartInput]);
+  }, [rangeEndInput, rangeStartInput, t]);
 
   const parseRange = useCallback(() => {
     if (rangeValidation.message) {
@@ -338,7 +340,7 @@ export const TubEditor: React.FC = () => {
       rememberAction = true
     ) => {
       if (indexes.length === 0) {
-        setActionError('No records in selected range');
+        setActionError(t('tubEditor.errorNoRecordsInRange'));
         return false;
       }
 
@@ -368,20 +370,20 @@ export const TubEditor: React.FC = () => {
         }
         return true;
       } catch {
-        setActionError(mode === 'delete' ? 'Delete failed' : 'Restore failed');
+        setActionError(mode === 'delete' ? t('tubEditor.errorDeleteFailed') : t('tubEditor.errorRestoreFailed'));
         return false;
       } finally {
         setIsProcessing(false);
         setProcessingMode(null);
       }
     },
-    [setAllRecords]
+    [setAllRecords, t]
   );
 
   const handleAction = useCallback(async (mode: 'delete' | 'restore') => {
     const range = parseRange();
     if (!range) {
-      setActionError('Invalid index range');
+      setActionError(t('tubEditor.errorInvalidRange'));
       return;
     }
 
@@ -405,7 +407,7 @@ export const TubEditor: React.FC = () => {
       // We generate all physical indexes from the _index of the first selected
       // record to the _index of the last selected record.
       if (records.length === 0) {
-        setActionError('No records available');
+        setActionError(t('tubEditor.errorNoRecordsAvailable'));
         return;
       }
       const startXValue = records[start]._index;
@@ -418,7 +420,7 @@ export const TubEditor: React.FC = () => {
     }
 
     if (indexes.length === 0) {
-      setActionError('No valid records in selected range');
+      setActionError(t('tubEditor.errorNoValidRecords'));
       return;
     }
 
@@ -427,7 +429,7 @@ export const TubEditor: React.FC = () => {
     visualSelectionRef.current = null;
     selectionDraftRef.current = null;
     setSelectionDraft(null);
-  }, [parseRange, runRecordAction, clearSelectionRange, records]);
+  }, [parseRange, runRecordAction, clearSelectionRange, records, t]);
 
   const handleUndoLastAction = useCallback(async () => {
     const lastAction = actionHistory[actionHistory.length - 1];
@@ -1041,7 +1043,7 @@ export const TubEditor: React.FC = () => {
       data: {
         datasets: [
           {
-            label: 'Steering',
+            label: t('tubEditor.datasetSteering'),
             data: angleData,
             borderColor: 'rgb(6, 182, 212)',
             backgroundColor: 'rgba(6, 182, 212, 0.5)',
@@ -1051,7 +1053,7 @@ export const TubEditor: React.FC = () => {
             spanGaps: false,
           },
           {
-            label: 'Throttle',
+            label: t('tubEditor.datasetThrottle'),
             data: throttleData,
             borderColor: 'rgb(234, 179, 8)',
             backgroundColor: 'rgba(234, 179, 8, 0.5)',
@@ -1064,7 +1066,7 @@ export const TubEditor: React.FC = () => {
       },
       sampledIndices: sampledX,
     };
-  }, [records, zoomPercent]);
+  }, [records, zoomPercent, t]);
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
@@ -1498,10 +1500,10 @@ export const TubEditor: React.FC = () => {
           <CardTitle className="group flex w-fit items-center cursor-default">
             <div className="flex items-center gap-2">
               <LineChart className="w-5 h-5" />
-              <span>Tub Editor</span>
+              <span>{t('tubEditor.title')}</span>
             </div>
             <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-normal text-zinc-400 opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[320px] group-hover:opacity-100">
-              Edit Tub with functions
+              {t('tubEditor.subtitle')}
             </span>
           </CardTitle>
         </CardHeader>
@@ -1509,9 +1511,9 @@ export const TubEditor: React.FC = () => {
             <div
               id="empty-chart"
               className="empty-chart-placeholder flex h-[150px] w-full items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-400"
-              aria-label="empty-chart placeholder"
+              aria-label={t('tubEditor.emptyChartAria')}
             >
-              Select files to view telemetry data
+              {t('tubEditor.emptyState')}
             </div>
           </CardContent>
       </Card>
@@ -1526,15 +1528,15 @@ export const TubEditor: React.FC = () => {
         <CardTitle className="group flex w-fit items-center cursor-default">
           <div className="flex items-center gap-2">
             <LineChart className="w-5 h-5" />
-            <span>Tub Editor</span>
+            <span>{t('tubEditor.title')}</span>
             {isDragging && (
               <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-400 animate-pulse">
-                Live Update
+                {t('tubEditor.liveUpdate')}
               </span>
             )}
           </div>
           <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-normal text-zinc-400 opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[320px] group-hover:opacity-100">
-            Edit Tub with functions
+            {t('tubEditor.subtitle')}
           </span>
         </CardTitle>
         <div className="flex w-full max-w-full items-start justify-between gap-2">
@@ -1542,9 +1544,9 @@ export const TubEditor: React.FC = () => {
             <div className="flex min-h-[30px] flex-wrap items-center justify-end gap-2">
               <div className="relative">
                 <Input
-                  aria-label="Start index"
+                  aria-label={t('tubEditor.startIndexAria')}
                   aria-invalid={hasRangeInput && !!visibleRangeValidation.startError}
-                  placeholder="Start"
+                  placeholder={t('tubEditor.startPlaceholder')}
                   value={rangeStartInput}
                   onChange={(e) =>
                     setRangeInputDraft({
@@ -1569,12 +1571,12 @@ export const TubEditor: React.FC = () => {
                   </span>
                 )}
               </div>
-              <span className="text-xs text-zinc-400">to</span>
+              <span className="text-xs text-zinc-400">{t('tubEditor.rangeTo')}</span>
               <div className="relative">
                 <Input
-                  aria-label="End index"
+                  aria-label={t('tubEditor.endIndexAria')}
                   aria-invalid={hasRangeInput && !!visibleRangeValidation.endError}
-                  placeholder="End"
+                  placeholder={t('tubEditor.endPlaceholder')}
                   value={rangeEndInput}
                   onChange={(e) =>
                     setRangeInputDraft({
@@ -1605,9 +1607,9 @@ export const TubEditor: React.FC = () => {
                 onClick={() => void handleAction('delete')}
                 disabled={isProcessing || !hasValidRange}
                 className="h-full text-xs"
-                title="删除选中范围 (Del / Backspace)"
+                title={t('tubEditor.deleteTitle')}
               >
-                {isProcessing && processingMode === 'delete' ? 'Deleting...' : 'Delete'}
+                {isProcessing && processingMode === 'delete' ? t('tubEditor.deleting') : t('tubEditor.delete')}
               </Button>
               <Button
                 size="sm"
@@ -1615,9 +1617,9 @@ export const TubEditor: React.FC = () => {
                 onClick={() => void handleAction('restore')}
                 disabled={isProcessing || !hasValidRange}
                 className="h-full text-xs"
-                title="恢复选中范围 (\\)"
+                title={t('tubEditor.restoreTitle')}
               >
-                {isProcessing && processingMode === 'restore' ? 'Restoring...' : 'Restore'}
+                {isProcessing && processingMode === 'restore' ? t('tubEditor.restoring') : t('tubEditor.restore')}
               </Button>
               {actionError && (
                 <span className="ml-2 text-xs text-red-400">
@@ -1630,8 +1632,8 @@ export const TubEditor: React.FC = () => {
                 onClick={() => void handleUndoLastAction()}
                 disabled={isProcessing || actionHistory.length === 0}
                 className="ml-auto h-full px-2"
-                aria-label="撤销最近一次删除或恢复，最多 10 步，快捷键 Ctrl+Z"
-                title={`撤销最近一次删除或恢复 (Ctrl+Z，最多 ${MAX_UNDO_HISTORY} 步)`}
+                aria-label={t('tubEditor.undoAria')}
+                title={t('tubEditor.undoTitle', { max: MAX_UNDO_HISTORY })}
               >
                 <Undo2 className="h-4 w-4" />
               </Button>
@@ -1641,8 +1643,8 @@ export const TubEditor: React.FC = () => {
                 onClick={() => void handleRedoLastAction()}
                 disabled={isProcessing || redoHistory.length === 0}
                 className="h-full px-2"
-                aria-label="重做最近一次撤销的删除或恢复，最多 10 步，快捷键 Ctrl+Y"
-                title={`重做最近一次撤销的删除或恢复 (Ctrl+Y，最多 ${MAX_UNDO_HISTORY} 步)`}
+                aria-label={t('tubEditor.redoAria')}
+                title={t('tubEditor.redoTitle', { max: MAX_UNDO_HISTORY })}
               >
                 <Redo2 className="h-4 w-4" />
               </Button>
@@ -1650,7 +1652,7 @@ export const TubEditor: React.FC = () => {
           </div>
           <div className="order-first flex min-h-[30px] items-center justify-start gap-2">
             <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0">
-              <div className="h-4 box-content text-xs text-zinc-400 uppercase">ZOOM</div>
+              <div className="h-4 box-content text-xs text-zinc-400 uppercase">{t('tubEditor.zoomLabel')}</div>
               <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
             </div>
             <Button
@@ -1659,8 +1661,8 @@ export const TubEditor: React.FC = () => {
               onClick={handleZoomReset}
               disabled={zoomPercent === MIN_ZOOM_PERCENT}
               className="h-full text-xs"
-              aria-label="还原图表缩放"
-              title="还原图表缩放 (P)"
+              aria-label={t('tubEditor.zoomResetAria')}
+              title={t('tubEditor.zoomResetTitle')}
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
@@ -1670,8 +1672,8 @@ export const TubEditor: React.FC = () => {
               onClick={handleZoomOut}
               disabled={zoomPercent <= MIN_ZOOM_PERCENT}
               className="h-full text-xs"
-              aria-label="缩小图表"
-              title="缩小图表 (-)"
+              aria-label={t('tubEditor.zoomOutAria')}
+              title={t('tubEditor.zoomOutTitle')}
             >
               <ZoomOut className="h-4 w-4" />
             </Button>
@@ -1681,8 +1683,8 @@ export const TubEditor: React.FC = () => {
               onClick={handleZoomIn}
               disabled={zoomPercent >= MAX_ZOOM_PERCENT}
               className="h-full text-xs"
-              aria-label="放大图表"
-              title="放大图表 (=)"
+              aria-label={t('tubEditor.zoomInAria')}
+              title={t('tubEditor.zoomInTitle')}
             >
               <ZoomIn className="h-4 w-4" />
             </Button>
@@ -1722,14 +1724,14 @@ export const TubEditor: React.FC = () => {
                    transform: `translate(${tooltipData.x > (containerRef.current?.clientWidth || 0) / 2 ? 'calc(-100% - 15px)' : '15px'}, ${tooltipData.y > (containerRef.current?.clientHeight || 0) / 2 ? 'calc(-100% - 15px)' : '15px'})`,
                  }}
                >
-              <div className="font-semibold text-zinc-200 mb-2 whitespace-nowrap">Frame: {tooltipData.index}</div>
+              <div className="font-semibold text-zinc-200 mb-2 whitespace-nowrap">{t('tubEditor.tooltipFrame', { index: tooltipData.index })}</div>
               <div className="space-y-1">
                 <div className="flex justify-between gap-4">
-                  <span className="text-zinc-400">Steering:</span>
+                  <span className="text-zinc-400">{t('tubEditor.tooltipSteering')}</span>
                   <span className="text-cyan-400 font-mono">{tooltipData.steering.toFixed(3)}</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span className="text-zinc-400">Throttle:</span>
+                  <span className="text-zinc-400">{t('tubEditor.tooltipThrottle')}</span>
                   <span className="text-yellow-400 font-mono">{tooltipData.throttle.toFixed(3)}</span>
                 </div>
               </div>
@@ -1765,7 +1767,7 @@ export const TubEditor: React.FC = () => {
             value={Math.round(scrollProgress * 1000)}
             onChange={handleScrollSliderChange}
             disabled={zoomPercent === MIN_ZOOM_PERCENT || records.length <= visibleRange.visibleCount}
-            aria-label="图表横向滚动"
+            aria-label={t('tubEditor.scrollAria')}
             className="tub-editor-scroll-slider relative z-20 h-4 w-full appearance-none cursor-pointer bg-transparent accent-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
           />
         </div>

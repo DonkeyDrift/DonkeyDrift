@@ -5,6 +5,7 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
 import { loadTub } from '../services/api';
+import { useTranslation } from '@/i18n';
 import { Database, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
 
@@ -18,6 +19,7 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export const TubLoader: React.FC = () => {
+  const { t } = useTranslation();
   const { tubPath, setTub, setError, setLoading, config, totalRecords, fields } = useStore();
   const [path, setPath] = useState(tubPath);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -34,7 +36,7 @@ export const TubLoader: React.FC = () => {
       const data = await loadTub(path);
       setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to load tub'));
+      setError(getErrorMessage(err, t('tub.loadFailed')));
     } finally {
       setLoading(false);
     }
@@ -49,7 +51,7 @@ export const TubLoader: React.FC = () => {
       const data = await loadTub(selectedPath);
       setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to load tub from selected directory'));
+      setError(getErrorMessage(err, t('tub.loadFailedFromDir')));
     } finally {
       setLoading(false);
     }
@@ -60,17 +62,17 @@ export const TubLoader: React.FC = () => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Database className="w-5 h-5" />
-          Tub Loader
+          {t('tub.loaderTitle')}
         </CardTitle>
-        <p className="text-sm text-zinc-400">Select tub directory, typically ./data</p>
+        <p className="text-sm text-zinc-400">{t('tub.loaderSubtitle')}</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-3">
           <Input
-            placeholder="Tub path, e.g. /home/dkc/projects/mycar/data"
+            placeholder={t('tub.pathPlaceholder')}
             value={path}
             onChange={(e) => setPath(e.target.value)}
-            aria-label="Tub path input field"
+            aria-label={t('tub.pathInputAria')}
           />
           <div className="flex justify-end gap-2">
             <Button 
@@ -78,35 +80,35 @@ export const TubLoader: React.FC = () => {
               onClick={() => setIsBrowserOpen(true)}
               disabled={!config}
               className="min-w-[100px]"
-              aria-label="Browse tub directory"
+              aria-label={t('tub.browseAria')}
             >
               <Search className="w-4 h-4" />
-              Browse
+              {t('tub.browse')}
             </Button>
             <Button 
               onClick={handleManualLoad}
               disabled={!config}
               className="min-w-[100px]"
-              aria-label="Load tub"
+              aria-label={t('tub.loadAria')}
             >
               <FolderOpen className="w-4 h-4" />
-              Load
+              {t('tub.load')}
             </Button>
           </div>
         </div>
         {!config && (
           <p className="text-xs text-yellow-500 mt-2">
-            Please load config first
+            {t('tub.loadConfigFirst')}
           </p>
         )}
         {config && totalRecords > 0 && (
           <p className="text-xs text-emerald-400 mt-2">
-            Success: Loaded {totalRecords} records and {fields.length} fields
+            {t('tub.loadSuccess', { records: totalRecords, fields: fields.length })}
           </p>
         )}
         {config && totalRecords === 0 && (
           <p className="text-xs text-zinc-400 mt-2">
-            No tub loaded
+            {t('tub.noTubLoaded')}
           </p>
         )}
       </CardContent>
@@ -116,7 +118,7 @@ export const TubLoader: React.FC = () => {
         onClose={() => setIsBrowserOpen(false)}
         onSelect={handleBrowserSelect}
         initialPath={path || undefined}
-        title="Select Tub Directory"
+        title={t('tub.selectTubDir')}
       />
     </Card>
   );

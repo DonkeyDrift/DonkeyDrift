@@ -26,6 +26,7 @@ import {
   unloadArenaPilot,
   getApiErrorMessage,
 } from '../services/api';
+import { useTranslation } from '@/i18n';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -113,6 +114,7 @@ const getRecordUserControl = (record: Record<string, unknown> | undefined) => {
 };
 
 export const PilotArenaPage: React.FC = () => {
+  const { t } = useTranslation();
   const configPath = useStore((state) => state.configPath);
   const tubPath = useStore((state) => state.tubPath);
   const records = useStore((state) => state.records);
@@ -241,7 +243,7 @@ export const PilotArenaPage: React.FC = () => {
           setModelTypes(data.model_types);
         }
       })
-      .catch((error) => setPageError(error?.response?.data?.detail || error.message));
+      .catch((error) => setPageError(getApiErrorMessage(error)));
   }, []);
 
   const updateViewer = useCallback((localId: string, patch: Partial<ViewerState>) => {
@@ -556,7 +558,7 @@ export const PilotArenaPage: React.FC = () => {
 
   const loadViewer = useCallback(async (viewer: ViewerState) => {
     if (!viewer.modelPath) {
-      updateViewer(viewer.localId, { error: '请选择模型文件' });
+      updateViewer(viewer.localId, { error: t('arena.selectModelFileError') });
       return;
     }
 
@@ -574,7 +576,7 @@ export const PilotArenaPage: React.FC = () => {
     } catch (error) {
       updateViewer(viewer.localId, { loading: false, error: getApiErrorMessage(error) });
     }
-  }, [clearViewerPredictionState, configPath, currentIndex, refreshPrediction, updateViewer]);
+  }, [clearViewerPredictionState, configPath, currentIndex, refreshPrediction, t, updateViewer]);
 
   const unloadViewer = useCallback(async (viewer: ViewerState) => {
     if (viewer.pilot) {
@@ -688,7 +690,7 @@ export const PilotArenaPage: React.FC = () => {
 
   const loadPlot = async () => {
     if (!plotPilotId) {
-      setPlotError('请选择已加载的 Pilot');
+      setPlotError(t('arena.selectLoadedPilotError'));
       return;
     }
     setPlotLoading(true);
@@ -711,28 +713,28 @@ export const PilotArenaPage: React.FC = () => {
     labels: plotPoints.map((point) => String(point.index)),
     datasets: [
       {
-        label: 'user angle',
+        label: t('arena.plotUserAngle'),
         data: plotPoints.map((point) => point.user_angle),
         borderColor: '#22c55e',
         backgroundColor: '#22c55e',
         tension: 0.2,
       },
       {
-        label: 'pilot angle',
+        label: t('arena.plotPilotAngle'),
         data: plotPoints.map((point) => point.pilot_angle),
         borderColor: '#3b82f6',
         backgroundColor: '#3b82f6',
         tension: 0.2,
       },
       {
-        label: 'user throttle',
+        label: t('arena.plotUserThrottle'),
         data: plotPoints.map((point) => point.user_throttle),
         borderColor: '#a3e635',
         backgroundColor: '#a3e635',
         tension: 0.2,
       },
       {
-        label: 'pilot throttle',
+        label: t('arena.plotPilotThrottle'),
         data: plotPoints.map((point) => point.pilot_throttle),
         borderColor: '#38bdf8',
         backgroundColor: '#38bdf8',
@@ -745,9 +747,9 @@ export const PilotArenaPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Pilot Arena</h1>
+          <h1 className="text-2xl font-bold text-zinc-100">{t('arena.pageTitle')}</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            并排加载多个 pilot，比较当前 Tub record 的用户控制与模型预测。
+            {t('arena.pageDescription')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -757,10 +759,10 @@ export const PilotArenaPage: React.FC = () => {
             className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
           >
             {[1, 2, 3, 4].map((value) => (
-              <option key={value} value={value}>{value} 列</option>
+              <option key={value} value={value}>{t('arena.columnCount', { value })}</option>
             ))}
           </select>
-          <Button onClick={() => setViewers((items) => [...items, defaultViewer()])}>添加 Pilot</Button>
+          <Button onClick={() => setViewers((items) => [...items, defaultViewer()])}>{t('arena.addPilot')}</Button>
         </div>
       </div>
 
@@ -772,13 +774,13 @@ export const PilotArenaPage: React.FC = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>当前数据</CardTitle>
+          <CardTitle>{t('arena.currentData')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
-            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">Config: {configPath || '未选择'}</div>
-            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">Tub: {tubPath || '未选择'}</div>
-            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">Records: {records.length}</div>
+            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">{t('arena.configLabel')}: {configPath || t('arena.notSelected')}</div>
+            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">{t('arena.tubLabel')}: {tubPath || t('arena.notSelected')}</div>
+            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">{t('arena.recordsLabel')}: {records.length}</div>
           </div>
           <input
             type="range"
@@ -790,30 +792,30 @@ export const PilotArenaPage: React.FC = () => {
             className="w-full accent-cyan-500"
           />
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(0)} disabled={!hasRecords}>首帧</Button>
-            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(currentIndex - 1)} disabled={!hasRecords}>上一帧</Button>
-            <Button size="sm" onClick={togglePlayback} disabled={!hasRecords}>{isPlaying ? '暂停' : '播放'}</Button>
+            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(0)} disabled={!hasRecords}>{t('arena.firstFrame')}</Button>
+            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(currentIndex - 1)} disabled={!hasRecords}>{t('arena.prevFrame')}</Button>
+            <Button size="sm" onClick={togglePlayback} disabled={!hasRecords}>{isPlaying ? t('arena.pause') : t('arena.play')}</Button>
             <Button variant={isLooping ? 'primary' : 'secondary'} size="sm" onClick={() => setIsLooping(!isLooping)} disabled={!hasRecords}>
-              {isLooping ? '循环' : '单次'}
+              {isLooping ? t('arena.loop') : t('arena.single')}
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(currentIndex + 1)} disabled={!hasRecords}>下一帧</Button>
-            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(maxIndex)} disabled={!hasRecords}>末帧</Button>
+            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(currentIndex + 1)} disabled={!hasRecords}>{t('arena.nextFrame')}</Button>
+            <Button variant="secondary" size="sm" onClick={() => jumpToRecord(maxIndex)} disabled={!hasRecords}>{t('arena.lastFrame')}</Button>
             <span className="text-xs text-zinc-500">
-              播放 {Math.round(playbackSpeed)}ms / 推理目标 {Math.round(evaluationIntervalMs)}ms / 并发 {maxInferenceConcurrency}
+              {t('arena.playbackStats', { playback: Math.round(playbackSpeed), inference: Math.round(evaluationIntervalMs), concurrency: maxInferenceConcurrency })}
             </span>
           </div>
           <div className="flex flex-wrap gap-3 text-sm text-zinc-400">
-            <span>当前序号: {displayRecordIndex}</span>
-            <span>Record index: {displayRecord?._index ?? '--'}</span>
-            <span>user/angle: {formatValue(displayUserControl?.angle)}</span>
-            <span>user/throttle: {formatValue(displayUserControl?.throttle)}</span>
+            <span>{t('arena.currentSeq', { index: displayRecordIndex })}</span>
+            <span>{t('arena.recordIndex', { index: String(displayRecord?._index ?? '--') })}</span>
+            <span>{t('arena.userAngleLabel')}: {formatValue(displayUserControl?.angle)}</span>
+            <span>{t('arena.userThrottleLabel')}: {formatValue(displayUserControl?.throttle)}</span>
           </div>
         </CardContent>
       </Card>
 
       {!hasRecords && (
         <div className="rounded-md border border-amber-700 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
-          请先在 Tub Manager 加载 Tub 数据，再进入 Pilot Arena 做模型对比。
+          {t('arena.loadTubFirst')}
         </div>
       )}
 
@@ -823,16 +825,16 @@ export const PilotArenaPage: React.FC = () => {
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <CardTitle>{viewer.pilot?.name || '未加载 Pilot'}</CardTitle>
+                  <CardTitle>{viewer.pilot?.name || t('arena.noPilotLoaded')}</CardTitle>
                   <p className="mt-1 text-xs text-zinc-500">{viewer.pilot?.model_type || viewer.modelType}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => unloadViewer(viewer)}>移除</Button>
+                <Button variant="ghost" size="sm" onClick={() => unloadViewer(viewer)}>{t('arena.remove')}</Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <label className="space-y-1 text-sm">
-                  <span className="text-zinc-400">模型类型</span>
+                  <span className="text-zinc-400">{t('arena.modelType')}</span>
                   <select
                     value={viewer.modelType}
                     onChange={(event) => updateViewer(viewer.localId, { modelType: event.target.value, modelPath: '', models: [], pilot: undefined })}
@@ -845,19 +847,19 @@ export const PilotArenaPage: React.FC = () => {
                 </label>
                 <div className="flex items-end">
                   <Button variant="secondary" className="w-full" onClick={() => refreshModels(viewer)} disabled={viewer.loading}>
-                    扫描模型
+                    {t('arena.scanModels')}
                   </Button>
                 </div>
               </div>
 
               <label className="space-y-1 text-sm block">
-                <span className="text-zinc-400">模型文件</span>
+                <span className="text-zinc-400">{t('arena.modelFile')}</span>
                 <select
                   value={viewer.modelPath}
                   onChange={(event) => updateViewer(viewer.localId, { modelPath: event.target.value, pilot: undefined })}
                   className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
                 >
-                  <option value="">请选择模型</option>
+                  <option value="">{t('arena.selectModel')}</option>
                   {viewer.models.map((model) => (
                     <option key={model.path} value={model.path}>{model.name}</option>
                   ))}
@@ -865,9 +867,9 @@ export const PilotArenaPage: React.FC = () => {
               </label>
 
               <div className="grid grid-cols-2 gap-2">
-                <Button onClick={() => loadViewer(viewer)} disabled={viewer.loading || !viewer.modelPath}>加载并预测</Button>
+                <Button onClick={() => loadViewer(viewer)} disabled={viewer.loading || !viewer.modelPath}>{t('arena.loadAndPredict')}</Button>
                 <Button variant="secondary" onClick={() => refreshPrediction(viewer, currentIndex)} disabled={viewer.loading || !viewer.pilot || !hasRecords}>
-                  刷新预测
+                  {t('arena.refreshPrediction')}
                 </Button>
               </div>
 
@@ -880,11 +882,11 @@ export const PilotArenaPage: React.FC = () => {
               <div className="aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
                 <div className="absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur-md">
                   <div>
-                    <div className="text-[10px] uppercase leading-none text-zinc-400">播放</div>
+                    <div className="text-[10px] uppercase leading-none text-zinc-400">{t('arena.playbackLabel')}</div>
                     <div className="font-mono text-sm leading-tight text-cyan-400">{viewer.playbackFps}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase leading-none text-zinc-400">推理</div>
+                    <div className="text-[10px] uppercase leading-none text-zinc-400">{t('arena.inferenceLabel')}</div>
                     <div className="font-mono text-sm leading-tight text-blue-400">{viewer.inferenceFps}</div>
                   </div>
                 </div>
@@ -901,20 +903,20 @@ export const PilotArenaPage: React.FC = () => {
                     height={240}
                   />
                 ) : (
-                  <span className="text-sm text-zinc-500">加载 Tub 后显示播放画面</span>
+                  <span className="text-sm text-zinc-500">{t('arena.loadTubToView')}</span>
                 )}
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-md bg-zinc-950 p-3">
-                  <div className="text-xs uppercase text-zinc-500">User</div>
-                  <div className="mt-2 font-mono text-green-400">Angle {formatValue(displayUserControl?.angle)}</div>
-                  <div className="font-mono text-green-400">Throttle {formatValue(displayUserControl?.throttle)}</div>
+                  <div className="text-xs uppercase text-zinc-500">{t('arena.userLabel')}</div>
+                  <div className="mt-2 font-mono text-green-400">{t('arena.angleLabel')} {formatValue(displayUserControl?.angle)}</div>
+                  <div className="font-mono text-green-400">{t('arena.throttleLabel')} {formatValue(displayUserControl?.throttle)}</div>
                 </div>
                 <div className="rounded-md bg-zinc-950 p-3">
-                  <div className="text-xs uppercase text-zinc-500">Pilot</div>
-                  <div className="mt-2 font-mono text-blue-400">Angle {formatValue(viewer.prediction?.angle)}</div>
-                  <div className="font-mono text-blue-400">Throttle {formatValue(viewer.prediction?.throttle)}</div>
+                  <div className="text-xs uppercase text-zinc-500">{t('arena.pilotLabel')}</div>
+                  <div className="mt-2 font-mono text-blue-400">{t('arena.angleLabel')} {formatValue(viewer.prediction?.angle)}</div>
+                  <div className="font-mono text-blue-400">{t('arena.throttleLabel')} {formatValue(viewer.prediction?.throttle)}</div>
                 </div>
               </div>
             </CardContent>
@@ -924,9 +926,9 @@ export const PilotArenaPage: React.FC = () => {
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle>图像处理</CardTitle>
+          <CardTitle>{t('arena.imageProcessing')}</CardTitle>
           <Button variant="secondary" size="sm" onClick={() => setImageProcessingCollapsed((collapsed) => !collapsed)}>
-            {imageProcessingCollapsed ? '展开' : '折叠'}
+            {imageProcessingCollapsed ? t('arena.expand') : t('arena.collapse')}
           </Button>
         </CardHeader>
         {!imageProcessingCollapsed && (
@@ -935,7 +937,7 @@ export const PilotArenaPage: React.FC = () => {
               <label className="space-y-2 text-sm text-zinc-300">
                 <span className="flex items-center gap-2">
                   <input type="checkbox" checked={brightnessEnabled} onChange={(event) => setBrightnessEnabled(event.target.checked)} />
-                  Brightness {brightness.toFixed(2)}
+                  {t('arena.brightnessLabel', { value: brightness.toFixed(2) })}
                 </span>
                 <input
                   type="range"
@@ -951,7 +953,7 @@ export const PilotArenaPage: React.FC = () => {
               <label className="space-y-2 text-sm text-zinc-300">
                 <span className="flex items-center gap-2">
                   <input type="checkbox" checked={blurEnabled} onChange={(event) => setBlurEnabled(event.target.checked)} />
-                  Blur {blur.toFixed(2)}
+                  {t('arena.blurLabel', { value: blur.toFixed(2) })}
                 </span>
                 <input
                   type="range"
@@ -967,7 +969,7 @@ export const PilotArenaPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div>
-                <div className="mb-2 text-sm font-medium text-zinc-300">Pre Transformations</div>
+                <div className="mb-2 text-sm font-medium text-zinc-300">{t('arena.preTransformations')}</div>
                 <div className="flex flex-wrap gap-2">
                   {TRANSFORMATION_OPTIONS.map((name) => (
                     <button
@@ -982,7 +984,7 @@ export const PilotArenaPage: React.FC = () => {
                 </div>
               </div>
               <div>
-                <div className="mb-2 text-sm font-medium text-zinc-300">Post Transformations</div>
+                <div className="mb-2 text-sm font-medium text-zinc-300">{t('arena.postTransformations')}</div>
                 <div className="flex flex-wrap gap-2">
                   {TRANSFORMATION_OPTIONS.map((name) => (
                     <button
@@ -1003,7 +1005,7 @@ export const PilotArenaPage: React.FC = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Tub Plot</CardTitle>
+          <CardTitle>{t('arena.tubPlot')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_140px_auto]">
@@ -1012,7 +1014,7 @@ export const PilotArenaPage: React.FC = () => {
               onChange={(event) => setPlotPilotId(event.target.value)}
               className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
             >
-              <option value="">选择已加载 Pilot</option>
+              <option value="">{t('arena.selectLoadedPilot')}</option>
               {loadedPilots.map((viewer) => viewer.pilot && (
                 <option key={viewer.pilot.id} value={viewer.pilot.id}>{viewer.pilot.name}</option>
               ))}
@@ -1026,7 +1028,7 @@ export const PilotArenaPage: React.FC = () => {
               className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
             />
             <Button onClick={loadPlot} disabled={plotLoading || !plotPilotId || !hasRecords}>
-              {plotLoading ? '生成中...' : '生成曲线'}
+              {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
             </Button>
           </div>
           {plotError && (
