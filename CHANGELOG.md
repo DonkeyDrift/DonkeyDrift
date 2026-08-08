@@ -2,6 +2,10 @@
 
 ## 2026-08-08
 
+- fix(test): 修复配网循环韧性回归测试在 macOS CI 上的时序抖动（main 分支 run #198 失败）
+  - 背景：main 分支 CI（macos-latest 任务）报 `donkeycar/tests/test_provisioning.py::TestProvisioningPartUpdateResilience::test_loop_continues_after_unexpected_exception` 失败（`assert 3 > 3`）——用例固定 `sleep(0.5)` 后断言循环调用超过 3 次，macOS runner 线程启动慢时 0.5s 内只跑了 3 次循环（ubuntu 与本地正常）。
+  - `donkeycar/tests/test_provisioning.py`：改为轮询等待（`monotonic()` 5s 超时、20ms 间隔），循环跑过前 3 次异常调用后再 shutdown，不再依赖固定时长 sleep；测试意图（循环兜住异常继续运行）与断言不变。
+  - 验证：该用例本地连跑 5 遍通过；`pytest donkeycar/tests/test_provisioning.py` 94 项全部通过。
 - feat(web_ui): Web UI 全站中英文国际化（i18n）：默认中文（逐字保留现有中英混排界面），可一键切换为全英文界面，语言选择持久化、关机重启后保留
   - 新增 `web_ui/frontend/src/i18n/`：`index.tsx` 提供 `LanguageProvider`、`useTranslation()` hook 与供普通模块（services/stores）使用的独立 `t()`；支持 `{var}` 插值，回退链为 当前语言 → zh → key 本身；语言选择写入 localStorage `donkeydrifter.ui.lang`，首次访问默认 `zh`。`messages/` 下按 10 个命名空间组织字典（common/fab/tubnav/tubeditor/trainer/arena/connector/drive/driveviz/drivehooks），共 427 对 zh/en 词条，zh 侧逐字镜像现有界面，en 侧为完整英文翻译。
   - `web_ui/frontend/src/main.tsx` 挂载 `LanguageProvider`；顶栏 `LanguageSwitcher.tsx` 由占位改为真实切换；右下角 `FabActions.tsx` 语言菜单改接 i18n 上下文（两处切换等效），帮助弹窗全部文案走 `fab.*` 字典。

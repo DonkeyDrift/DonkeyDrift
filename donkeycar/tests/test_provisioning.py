@@ -1290,7 +1290,11 @@ class TestProvisioningPartUpdateResilience:
 
         thread = threading.Thread(target=part.update, daemon=True)
         thread.start()
-        real_time.sleep(0.5)
+        # 轮询等待循环跑过前 3 次异常调用，而不是固定 sleep 0.5s：
+        # 慢的 CI runner（macOS）线程启动延迟大，0.5s 内可能只跑了 3 次循环
+        deadline = real_time.monotonic() + 5.0
+        while calls["read"] <= 3 and real_time.monotonic() < deadline:
+            real_time.sleep(0.02)
         part.shutdown()
         thread.join(timeout=2)
 
