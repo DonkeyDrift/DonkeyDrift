@@ -18,9 +18,11 @@ import { useStore } from '../store/useStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
+import { useTranslation } from '@/i18n';
 import { Circle } from 'lucide-react';
 
 export const DrivePage: React.FC = () => {
+  const { t } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const clientIdRef = useRef(createDriveClientId());
@@ -233,7 +235,7 @@ export const DrivePage: React.FC = () => {
     <div className="space-y-4">
       {/* 顶部工具栏 */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-zinc-200">驾驶控制台</h2>
+        <h2 className="text-lg font-semibold text-zinc-200">{t('drive.title')}</h2>
         <div className="flex items-center gap-3">
           <InputSourceSelector
             value={inputSource}
@@ -264,10 +266,10 @@ export const DrivePage: React.FC = () => {
             ) : (
               <Circle className="w-3.5 h-3.5" />
             )}
-            {recording ? `录制中 ${formatDuration(recordDuration)}` : '录制'}
+            {recording ? t('drive.recording', { duration: formatDuration(recordDuration) }) : t('drive.record')}
           </button>
           <span className="text-xs text-zinc-500 whitespace-nowrap">
-            已录制条数 {carState.numRecords}
+            {t('drive.recordedCount', { count: carState.numRecords })}
           </span>
         </div>
       </div>
@@ -281,12 +283,15 @@ export const DrivePage: React.FC = () => {
             <div className="mt-2 flex items-center gap-2 text-xs">
               {telemetry?.rc_mode !== undefined && (
                 <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400" data-rc-mode={telemetry.rc_mode}>
-                  固件模式：{['手动', '半自动', '全自动'][telemetry.rc_mode] ?? `未知(${telemetry.rc_mode})`}
+                  {t('drive.firmwareMode', {
+                    mode: [t('drive.modeUser'), t('drive.modeSemiAuto'), t('drive.modeFullAuto')][telemetry.rc_mode]
+                      ?? t('drive.unknownMode', { code: telemetry.rc_mode }),
+                  })}
                 </span>
               )}
               {telemetry?.rc_park === 1 && (
                 <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
-                  Park 锁定 · 油门被钳 0
+                  {t('drive.parkLocked')}
                 </span>
               )}
             </div>
@@ -297,8 +302,8 @@ export const DrivePage: React.FC = () => {
         {/* 控制区 */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col">
           <div className="text-sm text-zinc-400 mb-4 flex items-center justify-between">
-            <span>虚拟摇杆</span>
-            <span className="text-[10px] text-zinc-500">支持鼠标 / 触屏</span>
+            <span>{t('drive.virtualJoystick')}</span>
+            <span className="text-[10px] text-zinc-500">{t('drive.mouseTouchSupport')}</span>
           </div>
           <div className="flex-1 flex flex-col items-center gap-4">
             <div className="grid grid-cols-[auto_220px] gap-6">
@@ -317,8 +322,8 @@ export const DrivePage: React.FC = () => {
             <ProgrammableButtons className="w-full max-w-[240px]" />
             <ParameterPanel className="w-full max-w-[240px]" />
             <div className="text-[10px] text-zinc-500 text-center">
-              键盘快捷键: I 前进 · K 倒车 · J 左转 · L 右转<br />
-              R 切换录制 · M 切换模式
+              {t('drive.hotkeysLine1')}<br />
+              {t('drive.hotkeysLine2')}
             </div>
           </div>
         </div>

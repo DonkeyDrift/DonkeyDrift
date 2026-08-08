@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, RotateCcw, Download, Upload } from 'lucide-react';
 import { useDriveStore, DriveParams } from '../../store/useDriveStore';
+import { useTranslation } from '@/i18n';
 
 interface ParamSliderProps {
   label: string;
@@ -35,6 +36,7 @@ interface ParameterPanelProps {
 }
 
 export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }) => {
+  const { t } = useTranslation();
   const { params, setParam, setPidParam, resetToDefault, importParams } = useDriveStore();
   const [open, setOpen] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
@@ -57,9 +59,9 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
       try {
         const data = JSON.parse(ev.target?.result as string) as DriveParams;
         importParams(data);
-        alert('参数导入成功');
+        alert(t('driveViz.importSuccess'));
       } catch {
-        alert('参数文件格式错误');
+        alert(t('driveViz.importFormatError'));
       }
     };
     reader.readAsText(file);
@@ -71,16 +73,16 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
         onClick={() => setOpen(!open)}
         className="w-full px-3 py-2 flex items-center justify-between text-xs text-zinc-400 hover:text-zinc-200"
       >
-        <span className="font-medium">控制参数</span>
+        <span className="font-medium">{t('driveViz.controlParams')}</span>
         {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
       </button>
 
       {open && (
         <div className="px-3 pb-3 space-y-3 border-t border-zinc-800 pt-3">
           <div className="space-y-3">
-            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">PID 平滑参数</p>
+            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{t('driveViz.pidParams')}</p>
             <ParamSlider
-              label="比例系数 Kp"
+              label={t('driveViz.kp')}
               value={params.pid.kp}
               min={0}
               max={3}
@@ -88,7 +90,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               onChange={(v) => setPidParam('kp', v)}
             />
             <ParamSlider
-              label="积分系数 Ki"
+              label={t('driveViz.ki')}
               value={params.pid.ki}
               min={0}
               max={1}
@@ -96,7 +98,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               onChange={(v) => setPidParam('ki', v)}
             />
             <ParamSlider
-              label="微分系数 Kd"
+              label={t('driveViz.kd')}
               value={params.pid.kd}
               min={0}
               max={0.1}
@@ -106,9 +108,9 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
           </div>
 
           <div className="space-y-3">
-            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">响应速率</p>
+            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{t('driveViz.responseRates')}</p>
             <ParamSlider
-              label="回中速度"
+              label={t('driveViz.recenterRate')}
               value={params.recenterRate}
               min={0}
               max={2}
@@ -117,7 +119,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               unit=" /s"
             />
             <ParamSlider
-              label="转向角速度"
+              label={t('driveViz.steerRate')}
               value={params.steerRate}
               min={0}
               max={3}
@@ -126,7 +128,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               unit=" /s"
             />
             <ParamSlider
-              label="加速度变化率"
+              label={t('driveViz.accelRate')}
               value={params.accelRate}
               min={0}
               max={3}
@@ -135,7 +137,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               unit=" /s"
             />
             <ParamSlider
-              label="刹车变化率"
+              label={t('driveViz.brakeRate')}
               value={params.brakeRate}
               min={0}
               max={3}
@@ -151,14 +153,14 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
             >
               <RotateCcw className="w-3 h-3" />
-              重置默认
+              {t('driveViz.resetDefault')}
             </button>
             <button
               onClick={handleExport}
               className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
             >
               <Download className="w-3 h-3" />
-              导出
+              {t('driveViz.export')}
             </button>
             <label className="flex-1">
               <input
@@ -173,12 +175,12 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
                 className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
               >
                 <Upload className="w-3 h-3" />
-                导入
+                {t('driveViz.import')}
               </button>
             </label>
           </div>
           <p className="text-[10px] text-zinc-600 text-center">
-            参数自动保存到本地和服务器
+            {t('driveViz.autoSaveNote')}
           </p>
         </div>
       )}

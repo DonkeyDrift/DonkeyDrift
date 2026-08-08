@@ -1,5 +1,27 @@
 # 变更日志
 
+## 2026-08-08
+
+- feat(web_ui): Web UI 全站中英文国际化（i18n）：默认中文（逐字保留现有中英混排界面），可一键切换为全英文界面，语言选择持久化、关机重启后保留
+  - 新增 `web_ui/frontend/src/i18n/`：`index.tsx` 提供 `LanguageProvider`、`useTranslation()` hook 与供普通模块（services/stores）使用的独立 `t()`；支持 `{var}` 插值，回退链为 当前语言 → zh → key 本身；语言选择写入 localStorage `donkeydrifter.ui.lang`，首次访问默认 `zh`。`messages/` 下按 10 个命名空间组织字典（common/fab/tubnav/tubeditor/trainer/arena/connector/drive/driveviz/drivehooks），共 427 对 zh/en 词条，zh 侧逐字镜像现有界面，en 侧为完整英文翻译。
+  - `web_ui/frontend/src/main.tsx` 挂载 `LanguageProvider`；顶栏 `LanguageSwitcher.tsx` 由占位改为真实切换；右下角 `FabActions.tsx` 语言菜单改接 i18n 上下文（两处切换等效），帮助弹窗全部文案走 `fab.*` 字典。
+  - 全站 40+ 源文件（pages/components/hooks/services）的用户可见字符串——含标题、按钮、label、placeholder、aria-label、title、alt、canvas fillText、图表 legend、alert/confirm/toast/setError 及状态枚举→显示映射——全部改走 `t()`；品牌名、后端数据值（模型名/tub 名/路径/错误 message）、协议枚举值、`<kbd>` 键名、单位按约定不译。
+  - 顺带修复（工作中发现）：`pages/PilotArenaPage.tsx` 模型类型加载失败分支改用 `getApiErrorMessage`（原直接渲染英文 `error.message`，与全页其他 5 处不一致）；`components/drive/VideoStream.tsx` 删除被重复注册一遍的 MJPEG 淡出 `useEffect`；`tubEditor.restoreTitle` 快捷键提示由双反斜杠 `(\\)` 修正为单 `\`；`SimulatorConfig` toast 与 `FileBrowserModal` 的关闭按钮补 `aria-label`（新增 `common.close` 词条）。
+  - 测试同步：`components/LanguageSwitcher.test.tsx` 重写为 3 项用例（默认中文激活、点击切换并持久化、重新挂载恢复选择）；新增 `components/FabActions.test.tsx` 2 项用例（默认中文渲染、持久化 en 时英文渲染）；其余测试因 zh 逐字镜像原界面无需改动。验证：`tsc -b --noEmit` 零错误、`vitest` 54/54 通过、`npm run build` 通过；脚本核对 427 对词条 zh/en 完全对等、代码引用 key 无一缺失、无残留硬编码界面文案（注释与 console 除外）。
+
+- feat(web_ui): MUS4 皮肤固化为永久主题并新增顶栏 GitHub 链接与语言切换组件（此前未提交界面统一改动，随本次一并入库）
+  - `web_ui/frontend/index.html`：`<html>` 硬设 `class="theme-mus4"`；`web_ui/frontend/src/main.tsx` 无条件引入 `themes/theme-mus4.css`（不再存在运行时主题切换器）。
+  - `web_ui/frontend/src/themes/theme-mus4.css`：文档头重写为"永久主题"约定，并补齐 ESP32 Drifter Console 的填充/线框视觉语言说明与对应规则（选中态实心 `#5cc8ff` + 近黑文字、状态色绿/黄/红/灰线框等）。
+  - 新增 `web_ui/frontend/src/components/GitHubLink.tsx`（+ `GitHubLink.test.tsx`）：顶栏 GitHub 仓库链接图标；新增 `web_ui/frontend/src/components/LanguageSwitcher.tsx`（初版为占位组件，本次已接通真实切换，见上条）。
+  - 测试同步：`GitHubLink.test.tsx` 2 项用例通过。
+
+- feat(web_ui): 右下角帮助入口改为复刻 ESP32 Drifter Console 的 FAB 组合（发光圆点开关 + 语言球 + 帮助球 + 语言菜单 + 帮助弹窗），并移除底部页脚
+  - 新增 `web_ui/frontend/src/components/FabActions.tsx`（替代 `web_ui/frontend/src/components/HelpModal.tsx`）：1:1 复刻 ESP32 `WebConsoleAssets.h` 的 `.fabToggle`（18px 发光青点、双层辉光阴影、hover 放大 1.18 倍）、`.fabActions` 展开动画（语言球上飞 56px、帮助球左飞 56px、.18s 过渡）、`.langFab`（46px 蓝球 🌐）/ `.helpFab`（46px 青球深色粗体 ?）、`.langMenu`（中文/English 菜单、选中高亮、选择持久化到 localStorage `donkeydrifter.ui.lang`）与 `.helpModal`（右下角锚定、`#5cc8ff` 边框渐变面板）；document 级点击收起行为与 ESP 一致。帮助弹窗中的快捷键列表内容保持 DonkeyDrifter 独有（播放控制 / 时间轴导航 / 选择与图表）。
+  - 弹窗关闭按钮 × 与 Drifter Console「功能说明」弹窗统一为幽灵样式（28px 透明底 + `#a1a1aa`，hover `#27272a` 底白字）。
+  - `web_ui/frontend/src/components/Layout.tsx`：移除底部页脚行（`<footer>` 品牌文字行）；`HelpModal` 引用替换为 `FabActions`。
+  - `web_ui/frontend/src/themes/theme-mus4.css`：移除旧的 help 按钮颜色覆盖段（组件已内置 ESP 样式，覆盖段会破坏一致外观）。
+  - 验证：`npm run check`（tsc）与 `npm run test`（vitest）通过；Playwright 截图核对收起 / 展开 / 语言菜单 / 帮助弹窗四态外观。
+
 ## 2026-08-07
 
 - refactor(web_ui): UI 品牌名从 `DonkeyDrifter Web UI` 统一简化为 `DonkeyDrifter`

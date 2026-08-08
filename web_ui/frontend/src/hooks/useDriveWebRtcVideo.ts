@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from '@/i18n';
 import {
   createDriveClientId,
   createDriveWebRtcSession,
@@ -135,6 +136,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     clientId,
     carOnline,
   } = options;
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -324,14 +326,14 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
         startInFlightRef.current = false;
         return;
       }
-      setError(exc instanceof Error ? exc.message : 'WebRTC 视频连接失败');
+      setError(exc instanceof Error ? exc.message : t('driveHooks.webRtcConnectFailed'));
       setState('degraded');
       setStats((current) => ({ ...current, degraded: true }));
       closePeer();
       scheduleRetry();
       startInFlightRef.current = false;
     }
-  }, [closePeer, createPeer, disabled, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats]);
+  }, [closePeer, createPeer, disabled, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats, t]);
 
   useEffect(() => {
     startRef.current = start;
@@ -360,17 +362,17 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     }
     if (incomingSignal.signal_type === 'answer' && incomingSignal.sdp) {
       peerRef.current.setRemoteDescription({ type: 'answer', sdp: incomingSignal.sdp }).catch((exc) => {
-        setError(exc instanceof Error ? exc.message : '设置 WebRTC answer 失败');
+        setError(exc instanceof Error ? exc.message : t('driveHooks.setAnswerFailed'));
         setState('error');
       });
     }
     if (incomingSignal.signal_type === 'ice' && incomingSignal.candidate) {
       peerRef.current.addIceCandidate(incomingSignal.candidate).catch((exc) => {
-        setError(exc instanceof Error ? exc.message : '添加 ICE candidate 失败');
+        setError(exc instanceof Error ? exc.message : t('driveHooks.addIceCandidateFailed'));
         setState('error');
       });
     }
-  }, [incomingSignal]);
+  }, [incomingSignal, t]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

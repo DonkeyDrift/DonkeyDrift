@@ -7,6 +7,7 @@ import {
   type ConnectorJobState,
   type ConnectorJobStatus,
 } from '../services/api';
+import { useTranslation } from '@/i18n';
 
 type ConnectorJobEvent = {
   type: 'progress' | 'log' | 'status' | 'drive_pid';
@@ -35,6 +36,7 @@ type UseConnectorJobOptions = {
 const TERMINAL_STATUSES: ConnectorJobState[] = ['completed', 'failed', 'stopped'];
 
 export const useConnectorJob = (options: UseConnectorJobOptions = {}) => {
+  const { t } = useTranslation();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<ConnectorJobStatus | null>(null);
   const [jobProgress, setJobProgress] = useState(0);
@@ -84,7 +86,7 @@ export const useConnectorJob = (options: UseConnectorJobOptions = {}) => {
           await finishJob(status);
         }
       } catch (error) {
-        setJobLogs([`任务状态读取失败: ${getApiErrorMessage(error)}`]);
+        setJobLogs([t('connector.jobStatusReadFailed', { message: getApiErrorMessage(error) })]);
         clearSubscriptions();
       }
     };
@@ -93,7 +95,7 @@ export const useConnectorJob = (options: UseConnectorJobOptions = {}) => {
     pollTimerRef.current = setInterval(() => {
       void loadStatus();
     }, 2000);
-  }, [applyStatus, clearSubscriptions, finishJob]);
+  }, [applyStatus, clearSubscriptions, finishJob, t]);
 
   const subscribeJobEvents = useCallback((jobId: string) => {
     clearSubscriptions();
@@ -157,9 +159,9 @@ export const useConnectorJob = (options: UseConnectorJobOptions = {}) => {
       setJobStatus(initialStatus);
       subscribeJobEvents(result.job_id);
     } catch (error) {
-      setJobLogs([`启动失败: ${getApiErrorMessage(error)}`]);
+      setJobLogs([t('connector.jobStartFailed', { message: getApiErrorMessage(error) })]);
     }
-  }, [clearSubscriptions, subscribeJobEvents]);
+  }, [clearSubscriptions, subscribeJobEvents, t]);
 
   const cancelJob = useCallback(async () => {
     if (!activeJobId) return;

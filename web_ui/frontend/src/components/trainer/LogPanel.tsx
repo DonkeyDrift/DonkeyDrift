@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TrainingJob } from '../../store/useStore';
+import { useTranslation } from '@/i18n';
 
 interface LogPanelProps {
   job: TrainingJob | null;
@@ -9,6 +10,7 @@ interface LogPanelProps {
 const MAX_VISIBLE_LOGS = 500;
 
 export const LogPanel: React.FC<LogPanelProps> = ({ job }) => {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const logs = job?.logs ?? [];
@@ -28,9 +30,9 @@ export const LogPanel: React.FC<LogPanelProps> = ({ job }) => {
         onClick={() => setIsExpanded(!isExpanded)}
         className="px-4 py-2 border-b border-zinc-800 flex items-center justify-between w-full hover:bg-zinc-800/50 transition-colors"
       >
-        <span className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Training Log</span>
+        <span className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainingLog')}</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-600">{logs.length} lines</span>
+          <span className="text-xs text-zinc-600">{t('trainer.logLines', { count: logs.length })}</span>
           {isExpanded ? (
             <ChevronUp className="w-4 h-4 text-zinc-500" />
           ) : (
@@ -44,7 +46,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ job }) => {
           className="overflow-y-auto p-3 font-mono text-xs space-y-0.5 h-96"
         >
           {visibleLogs.length === 0 && (
-            <div className="text-zinc-600 italic">Logs will appear here when training starts...</div>
+            <div className="text-zinc-600 italic">{t('trainer.logEmpty')}</div>
           )}
           {visibleLogs.map((line, idx) => (
             <div key={idx} className="text-zinc-300 break-all">
@@ -53,7 +55,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ job }) => {
           ))}
           {logs.length > MAX_VISIBLE_LOGS && (
             <div className="text-zinc-600 italic">
-              ... {logs.length - MAX_VISIBLE_LOGS} older lines hidden
+              {t('trainer.olderLinesHidden', { count: logs.length - MAX_VISIBLE_LOGS })}
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '@/i18n';
 
 interface ModeTabsProps {
   mode: 'local' | 'online';
@@ -6,6 +7,8 @@ interface ModeTabsProps {
 }
 
 export const ModeTabs: React.FC<ModeTabsProps> = ({ mode, onChange }) => {
+  const { t } = useTranslation();
+
   return (
     <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
       <button
@@ -16,7 +19,7 @@ export const ModeTabs: React.FC<ModeTabsProps> = ({ mode, onChange }) => {
             : 'text-zinc-400 hover:text-zinc-200'
         }`}
       >
-        Local
+        {t('trainer.tabLocal')}
       </button>
       <button
         onClick={() => onChange('online')}
@@ -26,7 +29,7 @@ export const ModeTabs: React.FC<ModeTabsProps> = ({ mode, onChange }) => {
             : 'text-zinc-400 hover:text-zinc-200'
         }`}
       >
-        Cloud
+        {t('trainer.tabCloud')}
       </button>
     </div>
   );

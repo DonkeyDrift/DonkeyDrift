@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore, type TrainerLocalConfig } from '../../store/useStore';
+import { useTranslation } from '@/i18n';
 
 interface LocalConfigFormProps {
   config: TrainerLocalConfig;
@@ -20,14 +21,15 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
   config,
   onConfigChange,
 }) => {
+  const { t } = useTranslation();
   const { configPath } = useStore();
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Training Config</h3>
+      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainingConfig')}</h3>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Tub Path</label>
+        <label className="text-xs text-zinc-500">{t('trainer.tubPath')}</label>
         <div className="flex gap-2">
           <input
             type="text"
@@ -36,40 +38,40 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
           />
         </div>
-        <div className="text-xs text-zinc-600">Working dir: {configPath}</div>
+        <div className="text-xs text-zinc-600">{t('trainer.workingDir', { path: configPath })}</div>
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Model Name</label>
+        <label className="text-xs text-zinc-500">{t('trainer.modelName')}</label>
         <input
           type="text"
           value={config.model}
           onChange={(e) => onConfigChange({ model: e.target.value })}
-          placeholder="e.g. my_model"
+          placeholder={t('trainer.modelNamePlaceholder')}
           className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
         />
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Model Type</label>
+        <label className="text-xs text-zinc-500">{t('trainer.modelType')}</label>
         <select
           value={config.modelType}
           onChange={(e) => onConfigChange({ modelType: e.target.value })}
           className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
         >
-          {MODEL_TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
+          {MODEL_TYPES.map((type) => (
+            <option key={type} value={type}>{type}</option>
           ))}
         </select>
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Transfer Model (optional)</label>
+        <label className="text-xs text-zinc-500">{t('trainer.transferModel')}</label>
         <input
           type="text"
           value={config.transfer}
           onChange={(e) => onConfigChange({ transfer: e.target.value })}
-          placeholder="path to base model"
+          placeholder={t('trainer.transferPlaceholder')}
           className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
         />
       </div>
@@ -83,13 +85,13 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             onChange={(e) => onConfigChange({ advancedEnabled: e.target.checked })}
             className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-600 focus:ring-cyan-600"
           />
-          <span className="text-sm font-medium text-zinc-300">Advanced Options</span>
+          <span className="text-sm font-medium text-zinc-300">{t('trainer.advancedOptions')}</span>
         </label>
 
         {config.advancedEnabled && (
           <div className="mt-3 grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Batch Size</label>
+              <label className="text-xs text-zinc-500">{t('trainer.batchSize')}</label>
               <input
                 type="number"
                 value={config.batchSize}
@@ -99,7 +101,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Train/Test Split</label>
+              <label className="text-xs text-zinc-500">{t('trainer.trainTestSplit')}</label>
               <input
                 type="number"
                 step="0.01"
@@ -112,7 +114,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Max Epochs</label>
+              <label className="text-xs text-zinc-500">{t('trainer.maxEpochs')}</label>
               <input
                 type="number"
                 value={config.maxEpochs}
@@ -122,7 +124,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Learning Rate</label>
+              <label className="text-xs text-zinc-500">{t('trainer.learningRate')}</label>
               <input
                 type="number"
                 step="0.0001"
@@ -133,7 +135,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Early Stop Patience</label>
+              <label className="text-xs text-zinc-500">{t('trainer.earlyStopPatience')}</label>
               <input
                 type="number"
                 value={config.earlyStopPatience}
@@ -143,7 +145,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Prune Val Loss Limit</label>
+              <label className="text-xs text-zinc-500">{t('trainer.pruneValLossLimit')}</label>
               <input
                 type="number"
                 step="0.1"
@@ -160,7 +162,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 onChange={(e) => onConfigChange({ showPlot: e.target.checked })}
                 className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-600 focus:ring-cyan-600"
               />
-              <span className="text-xs text-zinc-400">Show Plot</span>
+              <span className="text-xs text-zinc-400">{t('trainer.showPlot')}</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer">
@@ -170,7 +172,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 onChange={(e) => onConfigChange({ useEarlyStop: e.target.checked })}
                 className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-600 focus:ring-cyan-600"
               />
-              <span className="text-xs text-zinc-400">Use Early Stop</span>
+              <span className="text-xs text-zinc-400">{t('trainer.useEarlyStop')}</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer">
@@ -180,7 +182,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 onChange={(e) => onConfigChange({ createTfLite: e.target.checked })}
                 className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-600 focus:ring-cyan-600"
               />
-              <span className="text-xs text-zinc-400">Create TF Lite</span>
+              <span className="text-xs text-zinc-400">{t('trainer.createTfLite')}</span>
             </label>
           </div>
         )}

@@ -1,0 +1,95 @@
+// common namespace: zh values mirror the current UI strings verbatim (the
+// "Chinese interface" is exactly today's mixed zh/en UI); en values are the
+// full English translation of every entry.
+export const common: { zh: Record<string, string>; en: Record<string, string> } = {
+  zh: {
+    // Layout top navigation
+    'common.nav.tubManager': 'Tub Manager',
+    'common.nav.trainer': 'Trainer',
+    'common.nav.drive': 'Drive',
+    'common.nav.pilotArena': 'Pilot Arena',
+    'common.nav.carConnector': 'Car Connector',
+    // App shell
+    'common.app.somethingWentWrong': 'Something went wrong.',
+    'common.app.failedToRefreshTub': 'Failed to refresh tub',
+    'common.app.errorPrefix': 'Error: {message}',
+    'common.loading': 'Loading',
+    // ConfigLoader
+    'common.configLoader.failedToLoad': 'Failed to load config',
+    'common.configLoader.failedToLoadFromDir': 'Failed to load config from selected directory',
+    'common.configLoader.title': 'Config Loader',
+    'common.configLoader.description': 'Select car directory (created via donkey createcar)',
+    'common.configLoader.apiLabel': 'API: {origin}/api',
+    'common.configLoader.pathPlaceholder': 'Config path, e.g. /home/dkc/projects/mycar',
+    'common.configLoader.pathInputAria': 'Config path input field',
+    'common.configLoader.browse': 'Browse',
+    'common.configLoader.browseAria': 'Browse configuration directory',
+    'common.configLoader.load': 'Load',
+    'common.configLoader.loadAria': 'Load configuration',
+    'common.configLoader.configLoaded': 'Config loaded: {path}',
+    'common.configLoader.noConfig': 'No config loaded',
+    'common.configLoader.selectCarDirectory': 'Select Car Directory',
+    // FileBrowserModal
+    'common.fileBrowser.selectDirectory': 'Select Directory',
+    'common.fileBrowser.failedToLoad': 'Failed to load directories',
+    'common.fileBrowser.loading': 'Loading...',
+    'common.fileBrowser.goBack': 'Go Back',
+    'common.fileBrowser.noDirectories': 'No directories found',
+    'common.fileBrowser.cancel': 'Cancel',
+    'common.fileBrowser.selectCurrent': 'Select Current Directory',
+    // SidePanel
+    'common.sidePanel.loaders': 'Loaders',
+    'common.sidePanel.connectors': 'Connectors',
+    // GitHubLink
+    'common.githubLink.label': 'DonkeyDrift on GitHub',
+    // services/api.ts
+    'common.unknownError': '未知错误',
+    'common.cannotConnectBackend': '无法连接后端服务，请确认已执行 donkey web 并且后端端口可访问',
+    'common.close': '关闭',
+  },
+  en: {
+    // Layout top navigation
+    'common.nav.tubManager': 'Tub Manager',
+    'common.nav.trainer': 'Trainer',
+    'common.nav.drive': 'Drive',
+    'common.nav.pilotArena': 'Pilot Arena',
+    'common.nav.carConnector': 'Car Connector',
+    // App shell
+    'common.app.somethingWentWrong': 'Something went wrong.',
+    'common.app.failedToRefreshTub': 'Failed to refresh tub',
+    'common.app.errorPrefix': 'Error: {message}',
+    'common.loading': 'Loading',
+    // ConfigLoader
+    'common.configLoader.failedToLoad': 'Failed to load config',
+    'common.configLoader.failedToLoadFromDir': 'Failed to load config from selected directory',
+    'common.configLoader.title': 'Config Loader',
+    'common.configLoader.description': 'Select car directory (created via donkey createcar)',
+    'common.configLoader.apiLabel': 'API: {origin}/api',
+    'common.configLoader.pathPlaceholder': 'Config path, e.g. /home/dkc/projects/mycar',
+    'common.configLoader.pathInputAria': 'Config path input field',
+    'common.configLoader.browse': 'Browse',
+    'common.configLoader.browseAria': 'Browse configuration directory',
+    'common.configLoader.load': 'Load',
+    'common.configLoader.loadAria': 'Load configuration',
+    'common.configLoader.configLoaded': 'Config loaded: {path}',
+    'common.configLoader.noConfig': 'No config loaded',
+    'common.configLoader.selectCarDirectory': 'Select Car Directory',
+    // FileBrowserModal
+    'common.fileBrowser.selectDirectory': 'Select Directory',
+    'common.fileBrowser.failedToLoad': 'Failed to load directories',
+    'common.fileBrowser.loading': 'Loading...',
+    'common.fileBrowser.goBack': 'Go Back',
+    'common.fileBrowser.noDirectories': 'No directories found',
+    'common.fileBrowser.cancel': 'Cancel',
+    'common.fileBrowser.selectCurrent': 'Select Current Directory',
+    // SidePanel
+    'common.sidePanel.loaders': 'Loaders',
+    'common.sidePanel.connectors': 'Connectors',
+    // GitHubLink
+    'common.githubLink.label': 'DonkeyDrift on GitHub',
+    // services/api.ts
+    'common.unknownError': 'Unknown error',
+    'common.cannotConnectBackend': 'Cannot connect to the backend service. Please make sure donkey web is running and the backend port is accessible.',
+    'common.close': 'Close',
+  },
+};

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { useStore } from '../store/useStore';
 import { getImageUrl } from '../services/api';
+import { useTranslation } from '@/i18n';
 import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine } from 'lucide-react';
 
 interface RecordStatsProps {
@@ -10,18 +11,21 @@ interface RecordStatsProps {
   throttle: string;
 }
 
-const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => (
+const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => {
+  const { t } = useTranslation();
+  return (
   <div className="flex gap-4 text-left">
     <div className="bg-zinc-800 rounded-md flex h-[60px] w-[88px] flex-col items-start justify-center px-3 pt-[10px] pb-[10px] text-left">
-      <div className="text-xs text-zinc-400 uppercase">STEERING</div>
+      <div className="text-xs text-zinc-400 uppercase">{t('tub.steering')}</div>
       <div className="text-lg font-mono text-cyan-400">{steering}</div>
     </div>
     <div className="bg-zinc-800 rounded-md flex h-[60px] w-[88px] flex-col items-start justify-center px-3 pt-[10px] pb-[10px] text-left">
-      <div className="text-xs text-zinc-400 uppercase">Throttle</div>
+      <div className="text-xs text-zinc-400 uppercase">{t('tub.throttle')}</div>
       <div className="text-lg font-mono text-cyan-400">{throttle}</div>
     </div>
   </div>
-));
+  );
+});
 
 interface TimelineSliderProps {
   max: number;
@@ -34,6 +38,7 @@ interface TimelineSliderProps {
 }
 
 const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, onMouseDown, onMouseUp, recordIndex, totalRecords }: TimelineSliderProps & { recordIndex: number; totalRecords: number }) => {
+  const { t } = useTranslation();
   const progress = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
   const accentColor = isDragging ? '#22d3ee' : '#06b6d4';
 
@@ -41,10 +46,10 @@ const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, 
     <div className="flex flex-col gap-2">
       <div className="w-full flex items-center gap-2 justify-between">
         <label className="text-xs text-zinc-400 flex items-center gap-2">
-          Timeline
-          {isDragging && <span className="text-cyan-400 text-xs">(Dragging...)</span>}
+          {t('tub.timeline')}
+          {isDragging && <span className="text-cyan-400 text-xs">{t('tub.dragging')}</span>}
         </label>
-        <span className="text-xs text-white bg-black/70 px-2 py-1 rounded">Index {recordIndex} / {totalRecords}</span>
+        <span className="text-xs text-white bg-black/70 px-2 py-1 rounded">{t('tub.indexLabel', { index: recordIndex, total: totalRecords })}</span>
       </div>
       <input 
         type="range" 
@@ -65,6 +70,7 @@ const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, 
 });
 
 export const TubNavigator: React.FC = () => {
+  const { t } = useTranslation();
   const records = useStore((state) => state.records);
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
   const totalRecords = useStore((state) => state.totalRecords);
@@ -342,7 +348,7 @@ export const TubNavigator: React.FC = () => {
           ctx.font = '14px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('No Image Available', canvas.width / 2, canvas.height / 2);
+          ctx.fillText(t('tub.noImageAvailable'), canvas.width / 2, canvas.height / 2);
         }
       }
       return;
@@ -410,7 +416,7 @@ export const TubNavigator: React.FC = () => {
     };
     // Removed imagePath from dependencies to avoid redundant triggers, imageUrl is sufficient
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl]);
+  }, [imageUrl, t]);
 
   useEffect(() => {
     if (!records.length) return;
@@ -465,11 +471,11 @@ export const TubNavigator: React.FC = () => {
     return (
       <Card className="opacity-50 pointer-events-none">
         <CardHeader>
-          <CardTitle>Tub Navigator</CardTitle>
+          <CardTitle>{t('tub.title')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-64 flex items-center justify-center bg-zinc-950 rounded-lg border border-zinc-800 text-zinc-600">
-            No records loaded
+            {t('tub.noRecordsLoaded')}
           </div>
         </CardContent>
       </Card>
@@ -486,7 +492,7 @@ export const TubNavigator: React.FC = () => {
         return parsed.toFixed(2);
       }
     }
-    return 'N/A';
+    return t('tub.notAvailable');
   };
 
   const getRecordValue = (key: string, altKey?: string) => {
@@ -500,10 +506,10 @@ export const TubNavigator: React.FC = () => {
         <CardTitle className="flex items-center w-fit group cursor-default">
           <div className="flex items-center gap-2">
             <Navigation className="w-5 h-5" />
-            <span>Tub Navigator</span>
+            <span>{t('tub.title')}</span>
           </div>
           <span className="text-sm text-zinc-400 font-normal max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3">
-            Navigate through tub records
+            {t('tub.subtitle')}
           </span>
         </CardTitle>
       </CardHeader>
@@ -526,10 +532,10 @@ export const TubNavigator: React.FC = () => {
                 {imageError ? (
                   <>
                     <AlertCircle className="w-8 h-8 text-red-500" />
-                    <span className="text-red-500">Image Load Error</span>
+                    <span className="text-red-500">{t('tub.imageLoadError')}</span>
                   </>
                 ) : (
-                  <span>No Image</span>
+                  <span>{t('tub.noImage')}</span>
                 )}
               </div>
             )}
@@ -557,7 +563,7 @@ export const TubNavigator: React.FC = () => {
               <Button
                 variant="secondary"
                 size="sm"
-                aria-label="First record"
+                aria-label={t('tub.firstRecordAria')}
                 disabled={isPlaying}
                 onClick={() => {
                   setLocalIndex(0);
@@ -566,12 +572,12 @@ export const TubNavigator: React.FC = () => {
                 }}
               >
                 <ChevronsLeft className="w-4 h-4" />
-                <span className="ml-1 text-xs">First</span>
+                <span className="ml-1 text-xs">{t('tub.first')}</span>
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
-                aria-label="Previous record"
+                aria-label={t('tub.prevRecordAria')}
                 disabled={isPlaying}
                 onClick={() => {
                   const newIndex = Math.max(0, localIndex - 1);
@@ -581,12 +587,12 @@ export const TubNavigator: React.FC = () => {
                 }}
               >
                 <ChevronLeft className="w-4 h-4" />
-                <span className="ml-1 text-xs">Prev</span>
+                <span className="ml-1 text-xs">{t('tub.prev')}</span>
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
-                aria-label="Next record"
+                aria-label={t('tub.nextRecordAria')}
                 disabled={isPlaying}
                 onClick={() => {
                   const newIndex = Math.min(totalRecords - 1, localIndex + 1);
@@ -596,12 +602,12 @@ export const TubNavigator: React.FC = () => {
                 }}
               >
                 <ChevronRight className="w-4 h-4" />
-                <span className="ml-1 text-xs">Next</span>
+                <span className="ml-1 text-xs">{t('tub.next')}</span>
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
-                aria-label="Last record"
+                aria-label={t('tub.lastRecordAria')}
                 disabled={isPlaying}
                 onClick={() => {
                   const newIndex = Math.max(0, totalRecords - 1);
@@ -611,7 +617,7 @@ export const TubNavigator: React.FC = () => {
                 }}
               >
                 <ChevronsRight className="w-4 h-4" />
-                <span className="ml-1 text-xs">Last</span>
+                <span className="ml-1 text-xs">{t('tub.last')}</span>
               </Button>
             </div>
 
@@ -620,18 +626,18 @@ export const TubNavigator: React.FC = () => {
                 size="sm"
                 className="flex-1 h-full"
                 variant={isPlaying ? "danger" : "primary"}
-                aria-label={isPlaying ? 'Stop playback' : 'Start playback'}
+                aria-label={isPlaying ? t('tub.stopPlaybackAria') : t('tub.startPlaybackAria')}
                 onClick={() => setIsPlaying(!isPlaying)}
               >
-                {isPlaying ? <><Pause className="w-4 h-4" /> Stop</> : <><Play className="w-4 h-4" /> Play</>}
+                {isPlaying ? <><Pause className="w-4 h-4" /> {t('tub.stop')}</> : <><Play className="w-4 h-4" /> {t('tub.play')}</>}
               </Button>
               
               <Button
                 size="sm"
                 variant={isLooping ? "primary" : "secondary"}
-                aria-label={isLooping ? 'Loop mode active' : 'Play once mode'}
+                aria-label={isLooping ? t('tub.loopModeActiveAria') : t('tub.playOnceModeAria')}
                 onClick={() => setIsLooping(!isLooping)}
-                title={isLooping ? "循环播放 (M)" : "播放后停止 (M)"}
+                title={isLooping ? t('tub.loopPlaybackTitle') : t('tub.playOnceTitle')}
                 className="px-3 h-full"
               >
                 {isLooping ? <Repeat className="w-4 h-4" /> : <ArrowRightToLine className="w-4 h-4" />}

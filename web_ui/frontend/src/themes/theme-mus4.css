@@ -1,24 +1,29 @@
 /*
- * MUS4 Web Console skin for the Donkey Web UI.
+ * MUS4 (ESP32 Drifter Console) skin for the DonkeyDrifter Web UI.
  *
- * Activated by toggling the `theme-mus4` class on <html>
- * (state in src/store/useUiPrefsStore.ts, applied in src/components/Layout.tsx).
- * Every rule is prefixed with `html.theme-mus4` so it beats the original
- * Tailwind utilities on specificity alone.
+ * PERMANENT theme: the `theme-mus4` class is hard-set on <html> in
+ * index.html and this file is imported unconditionally from main.tsx.
+ * There is no runtime switcher anymore — the whole Web UI always renders
+ * in the MUS4 style. (SkinSwitcher / useUiPrefsStore were removed; the
+ * class is now static. Every rule stays prefixed with `html.theme-mus4`
+ * so the skin beats the original Tailwind utilities on specificity alone.)
  *
  * Visual-only skin: rules may only touch color, background-color,
  * background-image (gradients), border-color, border-radius, box-shadow,
- * outline/outline-offset (inset hairline frames), accent-color, font-family
- * and the corresponding --tw-* color variables. Layout-affecting
- * properties (display/position/flex/grid/order/width/height/margin/
- * padding/top/right/bottom/left/float/...) are forbidden here.
+ * outline/outline-offset (inset hairline frames), accent-color,
+ * font-family, font-weight and the corresponding --tw-* color variables.
+ * Layout-affecting properties (display/position/flex/grid/order/width/
+ * height/margin/padding/top/right/bottom/left/float/...) are forbidden.
  *
- * The panel/state frames mimic the ESP32 Drifter Console: its `.stateCard`
- * draws a 1px frame plus a diagonal gradient, and state cards recolor the
- * frame (green = normal/on, red = locked/off, yellow = transitional,
- * cyan = info). Donkey blocks often carry no border class at all, so the
- * frames here are drawn with `outline` + negative offset: they never shift
- * layout and never clobber Tailwind's box-shadow based drop shadows.
+ * Design source: Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h
+ * (Drifter Console). Selected/active controls use the FILL language:
+ * solid blue #5cc8ff + near-black text #061019 + bold, hover #8bdcff.
+ * State uses the FRAME language: green #39d98a = normal/on, amber
+ * #ffcc66 = transitional/warn, red #ff6b6b = locked/danger, grey
+ * #475569 = off/disconnected; drive modes map to 手动=green, 半自动=amber,
+ * 全自动=blue. Panels mimic `.stateCard`: 135deg gradient #1c2430→#121821
+ * plus a 1px frame drawn with `outline` (never shifts layout and never
+ * clobbers Tailwind's box-shadow based drop shadows).
  */
 
 html.theme-mus4 {
@@ -64,7 +69,7 @@ html.theme-mus4 .bg-zinc-800\/50 {
 html.theme-mus4 .bg-zinc-800\/80 {
   background-color: rgba(17, 24, 32, 0.8);
 }
-/* raised controls (toggle off state, slider tracks) */
+/* raised controls (slider tracks, joystick well) */
 html.theme-mus4 .bg-zinc-700 {
   background-color: #232c3a;
 }
@@ -86,11 +91,12 @@ html.theme-mus4 .hover\:bg-zinc-700:hover {
 html.theme-mus4 .active\:bg-zinc-900:active {
   background-color: #141a22;
 }
+/* toggle knob (ESP32 .slider:before is pure white) */
 html.theme-mus4 .bg-white {
-  background-color: #e8edf2;
+  background-color: #ffffff;
 }
 
-/* ---------- Accent (bright cyan) ---------- */
+/* ---------- Accent (Drifter Console blue) ---------- */
 html.theme-mus4 .bg-cyan-600,
 html.theme-mus4 .bg-cyan-500 {
   background-color: #5cc8ff;
@@ -98,10 +104,10 @@ html.theme-mus4 .bg-cyan-500 {
 html.theme-mus4 .hover\:bg-cyan-700:hover {
   background-color: #8bdcff;
 }
-/* dark text on bright accent buttons */
+/* near-black text on bright accent buttons (ESP32 #061019) */
 html.theme-mus4 .bg-cyan-600.text-white,
 html.theme-mus4 .bg-cyan-500.text-white {
-  color: #0b1220;
+  color: #061019;
 }
 html.theme-mus4 .bg-cyan-500\/50 {
   background-color: rgba(92, 200, 255, 0.5);
@@ -120,29 +126,29 @@ html.theme-mus4 .bg-cyan-950\/30 {
   background-color: rgba(92, 200, 255, 0.08);
 }
 
-/* ---------- Semantic surfaces ---------- */
+/* ---------- Semantic surfaces (red #ff6b6b / green #39d98a / amber #ffcc66) ---------- */
 html.theme-mus4 .bg-red-600,
 html.theme-mus4 .bg-red-500 {
-  background-color: #ef4444;
+  background-color: #ff6b6b;
 }
 html.theme-mus4 .hover\:bg-red-700:hover {
-  background-color: #f06161;
+  background-color: #ff8585;
 }
 html.theme-mus4 .bg-red-500\/40 {
-  background-color: rgba(239, 68, 68, 0.4);
+  background-color: rgba(255, 107, 107, 0.4);
 }
 html.theme-mus4 .bg-red-500\/20 {
-  background-color: rgba(239, 68, 68, 0.18);
+  background-color: rgba(255, 107, 107, 0.18);
 }
 html.theme-mus4 .hover\:bg-red-500\/30:hover {
-  background-color: rgba(239, 68, 68, 0.3);
+  background-color: rgba(255, 107, 107, 0.3);
 }
 html.theme-mus4 .bg-red-900\/50,
 html.theme-mus4 .bg-red-950\/90 {
-  background-color: rgba(239, 68, 68, 0.16);
+  background-color: rgba(255, 107, 107, 0.16);
 }
 html.theme-mus4 .bg-red-950\/60 {
-  background-color: rgba(239, 68, 68, 0.14);
+  background-color: rgba(255, 107, 107, 0.14);
 }
 html.theme-mus4 .bg-emerald-600,
 html.theme-mus4 .bg-emerald-500,
@@ -178,7 +184,6 @@ html.theme-mus4 .bg-zinc-900 {
 html.theme-mus4 .bg-zinc-900\/35,
 html.theme-mus4 .bg-zinc-900\/50,
 html.theme-mus4 .supports-\[backdrop-filter\]\:bg-zinc-900\/50,
-html.theme-mus4 .bg-zinc-900\/70,
 html.theme-mus4 .bg-zinc-900\/90,
 html.theme-mus4 .bg-zinc-900\/95 {
   outline: 1px solid rgba(52, 65, 84, 0.85);
@@ -212,7 +217,7 @@ html.theme-mus4 .bg-red-500\/20,
 html.theme-mus4 .bg-red-900\/50,
 html.theme-mus4 .bg-red-950\/90,
 html.theme-mus4 .bg-red-950\/60 {
-  outline: 1px solid rgba(239, 68, 68, 0.55);
+  outline: 1px solid rgba(255, 107, 107, 0.55);
   outline-offset: -1px;
 }
 html.theme-mus4 .bg-cyan-500\/20,
@@ -260,7 +265,8 @@ html.theme-mus4 .hover\:text-white:hover {
 /* accent text */
 html.theme-mus4 .text-cyan-400,
 html.theme-mus4 .text-cyan-500,
-html.theme-mus4 .text-cyan-600 {
+html.theme-mus4 .text-cyan-600,
+html.theme-mus4 .text-blue-400 {
   color: #5cc8ff;
 }
 html.theme-mus4 .text-cyan-200 {
@@ -274,19 +280,19 @@ html.theme-mus4 .group-hover\:text-cyan-400 {
 /* semantic text */
 html.theme-mus4 .text-red-400,
 html.theme-mus4 .text-red-500 {
-  color: #ef4444;
+  color: #ff6b6b;
 }
 html.theme-mus4 .text-red-300 {
-  color: #f2a0a0;
+  color: #ffb3b3;
 }
 html.theme-mus4 .text-red-200 {
-  color: #f6c0c0;
+  color: #ffc9c9;
 }
 html.theme-mus4 .text-red-100 {
   color: #fad9d9;
 }
 html.theme-mus4 .placeholder\:text-red-300\/70::placeholder {
-  color: rgba(242, 160, 160, 0.7);
+  color: rgba(255, 179, 179, 0.7);
 }
 html.theme-mus4 .text-emerald-400,
 html.theme-mus4 .text-green-400 {
@@ -344,24 +350,24 @@ html.theme-mus4 .border-cyan-800\/60 {
   border-color: rgba(92, 200, 255, 0.35);
 }
 html.theme-mus4 .border-red-500 {
-  border-color: #ef4444;
+  border-color: #ff6b6b;
 }
 html.theme-mus4 .border-red-800 {
-  border-color: rgba(239, 68, 68, 0.5);
+  border-color: rgba(255, 107, 107, 0.5);
 }
 html.theme-mus4 .border-red-700\/50 {
-  border-color: rgba(239, 68, 68, 0.4);
+  border-color: rgba(255, 107, 107, 0.4);
 }
 html.theme-mus4 .border-red-700,
 html.theme-mus4 .border-red-400 {
-  border-color: rgba(239, 68, 68, 0.6);
+  border-color: rgba(255, 107, 107, 0.6);
 }
 html.theme-mus4 .border-red-500\/50 {
-  border-color: rgba(239, 68, 68, 0.5);
+  border-color: rgba(255, 107, 107, 0.5);
 }
 html.theme-mus4 .border-red-500\/60,
 html.theme-mus4 .border-red-400\/60 {
-  border-color: rgba(239, 68, 68, 0.6);
+  border-color: rgba(255, 107, 107, 0.6);
 }
 html.theme-mus4 .border-emerald-500,
 html.theme-mus4 .border-emerald-400 {
@@ -384,7 +390,7 @@ html.theme-mus4 .focus\:ring-cyan-600:focus {
   --tw-ring-color: #5cc8ff;
 }
 html.theme-mus4 .focus\:ring-red-500:focus {
-  --tw-ring-color: #ef4444;
+  --tw-ring-color: #ff6b6b;
 }
 html.theme-mus4 .accent-cyan-500,
 html.theme-mus4 .accent-cyan-400 {
@@ -407,6 +413,7 @@ html.theme-mus4 .rounded-lg {
 html.theme-mus4 .rounded-xl {
   border-radius: 16px;
 }
+html.theme-mus4 button.rounded-sm,
 html.theme-mus4 button.rounded,
 html.theme-mus4 button.rounded-md,
 html.theme-mus4 button.rounded-lg {
@@ -468,42 +475,118 @@ html.theme-mus4 .tub-editor-scroll-slider:disabled::-moz-range-thumb {
   background: rgba(92, 200, 255, 0.3);
 }
 
-/* ---------- Skin switcher: active segment stays visibly darker than its pill ---------- */
-html.theme-mus4 button[aria-pressed="true"].bg-zinc-950 {
-  background-color: #05070a;
-  outline: 1px solid #5cc8ff;
-  outline-offset: -1px;
+/* ======================================================================
+ * Component-level refinements (signatures tied to specific components;
+ * verify against the component source when editing it).
+ * ====================================================================== */
+
+/* ---------- Filled buttons: near-black bold text (ESP32 fill language) ---------- */
+html.theme-mus4 button.bg-cyan-600,
+html.theme-mus4 button.bg-cyan-500 {
+  font-weight: 700;
+}
+html.theme-mus4 button.bg-red-600.text-white,
+html.theme-mus4 button.bg-red-500.text-white,
+html.theme-mus4 button.bg-emerald-600.text-white,
+html.theme-mus4 button.bg-emerald-500.text-white,
+html.theme-mus4 button.bg-emerald-400.text-white {
+  color: #061019;
+  font-weight: 700;
+}
+/* selected pill segments (trainer ModeTabs etc.) = blue fill, bold */
+html.theme-mus4 button.rounded-full.bg-cyan-600 {
+  font-weight: 800;
 }
 
-/* ---------- State frames addition: red badge surface (VideoStream degraded badge) ---------- */
-html.theme-mus4 .bg-red-400\/10 {
-  outline: 1px solid rgba(239, 68, 68, 0.55);
-  outline-offset: -1px;
+/* ---------- Selectable chips: solid blue fill + near-black text ---------- */
+/* small toggle chips only; wide w-full list rows keep the frame language */
+html.theme-mus4 button.border-cyan-500.bg-cyan-950,
+html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50 {
+  background-color: #5cc8ff;
+  border-color: #5cc8ff;
+  color: #061019;
+  font-weight: 800;
+  outline: none;
+}
+html.theme-mus4 button.border-cyan-500.bg-cyan-950:hover,
+html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50:hover {
+  background-color: #8bdcff;
+  border-color: #8bdcff;
+}
+html.theme-mus4 button.border-cyan-500.bg-cyan-950 > span,
+html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50 > span {
+  color: #061019;
 }
 
-/* ---------- Drive mode selector: ESP32 mode-card accents (手动=绿, 半自动=黄, 全自动=蓝) ---------- */
-/* mirrors the Drifter Console .mode0/.mode1/.mode2 state-card colors;
-   only the active segment (bg-cyan-500/20) is recolored, container is unique
-   to DriveModeSelector (inline-flex rounded-lg overflow-hidden) */
-html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button:nth-child(1).bg-cyan-500\/20 {
-  background-color: rgba(57, 217, 138, 0.18);
-  color: #39d98a;
+/* ---------- Drive mode selector: ESP32 mode colors (手动=绿, 半自动=黄, 全自动=蓝) ---------- */
+/* component: src/components/drive/DriveModeSelector.tsx (mode-active + data-mode) */
+html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden {
+  border-radius: 999px;
+}
+/* every segment is a pill: hover highlight follows the shape, not a rectangle */
+html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button {
+  border-radius: 999px;
+}
+html.theme-mus4 button.mode-active {
+  border-radius: 999px;
+  font-weight: 700;
+}
+html.theme-mus4 button.mode-active[data-mode="user"] {
   outline: 1px solid rgba(57, 217, 138, 0.55);
   outline-offset: -1px;
 }
-html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button:nth-child(2).bg-cyan-500\/20 {
-  background-color: rgba(255, 204, 102, 0.16);
-  color: #ffcc66;
+html.theme-mus4 button.mode-active[data-mode="local_angle"] {
   outline: 1px solid rgba(255, 204, 102, 0.55);
   outline-offset: -1px;
 }
-html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button:nth-child(3).bg-cyan-500\/20 {
+html.theme-mus4 button.mode-active[data-mode="local"] {
   outline: 1px solid rgba(92, 200, 255, 0.55);
   outline-offset: -1px;
 }
 
-/* ---------- Record button: 录制键常驻红框（record = red，全局仅驾驶页录制键匹配该签名） ---------- */
+/* ---------- Status badges: pill shape, ESP32 statusPill language ---------- */
+html.theme-mus4 span.rounded {
+  border-radius: 999px;
+}
+html.theme-mus4 span.bg-zinc-800 {
+  color: #e8edf2;
+  font-weight: 700;
+}
+/* 固件模式 badge (DrivePage, data-rc-mode): mode-colored text + frame */
+html.theme-mus4 span[data-rc-mode="0"] {
+  color: #39d98a;
+  outline-color: rgba(57, 217, 138, 0.55);
+}
+html.theme-mus4 span[data-rc-mode="1"] {
+  color: #ffcc66;
+  outline-color: rgba(255, 204, 102, 0.55);
+}
+html.theme-mus4 span[data-rc-mode="2"] {
+  color: #5cc8ff;
+  outline-color: rgba(92, 200, 255, 0.55);
+}
+
+/* ---------- Record button: 常驻红框（record = red，全局仅驾驶页录制键匹配该签名） ---------- */
 html.theme-mus4 button.inline-flex.rounded-lg.bg-zinc-800:not(.border) {
-  outline: 1px solid rgba(239, 68, 68, 0.5);
+  outline: 1px solid rgba(255, 107, 107, 0.5);
+  outline-offset: -1px;
+}
+
+/* ---------- Toggle switch: ESP32 .toggleSwitch colors ---------- */
+/* component: src/components/SimulatorConfig.tsx (DONKEY_GYM toggle) */
+html.theme-mus4 button[aria-label="Toggle simulator mode"].bg-zinc-700 {
+  background-color: #475569;
+}
+
+/* ---------- Dialogs: ESP32 .dialog amber frame (after generic panel rules) ---------- */
+html.theme-mus4 .rounded-xl.bg-zinc-900\/70 {
+  outline: 1px solid rgba(255, 204, 102, 0.6);
+  outline-offset: -1px;
+}
+
+/* ---------- Degraded badge surface (VideoStream degraded badge) ---------- */
+html.theme-mus4 .bg-red-400\/10 {
+  background-color: rgba(255, 107, 107, 0.1);
+  outline: 1px solid rgba(255, 107, 107, 0.55);
   outline-offset: -1px;
 }

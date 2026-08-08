@@ -8,6 +8,7 @@ import { ProgressPanel } from '../components/trainer/ProgressPanel';
 import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
 import { useTrainingJob } from '../hooks/useTrainingJob';
+import { useTranslation } from '@/i18n';
 
 type TrainerMode = 'local' | 'online';
 
@@ -24,6 +25,7 @@ const TRAINING_KEYS = [
 ];
 
 export const TrainerPage: React.FC = () => {
+  const { t } = useTranslation();
   const [mode, setMode] = React.useState<TrainerMode>('local');
   const { job, startLocal, startOnline, stopJob, isRunning } = useTrainingJob();
   const { configPath, trainerOnlineConfig, setTrainerOnlineConfig, trainerLocalConfig, setTrainerLocalConfig } = useStore();
@@ -153,7 +155,7 @@ export const TrainerPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-zinc-100">Trainer</h1>
+        <h1 className="text-2xl font-bold text-zinc-100">{t('trainer.title')}</h1>
         <ModeTabs mode={mode} onChange={setMode} />
       </div>
 
@@ -196,10 +198,10 @@ export const TrainerPage: React.FC = () => {
             }`}
           >
             {isRunning
-              ? 'Stop Training'
+              ? t('trainer.stopTraining')
               : mode === 'local'
-              ? 'Start Local Training'
-              : 'Start Cloud Training'}
+              ? t('trainer.startLocalTraining')
+              : t('trainer.startCloudTraining')}
           </button>
 
           <ModelsList />

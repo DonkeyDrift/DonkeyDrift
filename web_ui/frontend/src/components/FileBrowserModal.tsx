@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { browseDirectory, getApiErrorMessage } from '../services/api';
 import { Folder, ArrowLeft, X, FolderOpen } from 'lucide-react';
 import { Button } from './ui/Button';
+import { useTranslation } from '@/i18n';
 
 interface FileBrowserModalProps {
   isOpen: boolean;
@@ -16,8 +17,10 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
   onClose,
   onSelect,
   initialPath,
-  title = "Select Directory"
+  title
 }) => {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t('common.fileBrowser.selectDirectory');
   const [currentPath, setCurrentPath] = useState<string>(initialPath || '');
   const [parentPath, setParentPath] = useState<string | null>(null);
   const [directories, setDirectories] = useState<string[]>([]);
@@ -33,10 +36,10 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
       setParentPath(data.parent);
       setDirectories(data.directories);
     } catch (err) {
-      const msg = getApiErrorMessage(err, 'Failed to load directories');
+      const msg = getApiErrorMessage(err, t('common.fileBrowser.failedToLoad'));
       setError(msg);
       // 网络错误时，如果是初始加载失败，尝试回退到用户主目录
-      if (msg.includes('无法连接后端') || msg === 'Network Error') {
+      if (msg.includes(t('common.cannotConnectBackend')) || msg === 'Network Error') {
         setCurrentPath('/');
         setParentPath(null);
         setDirectories([]);
@@ -61,10 +64,11 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50 shrink-0">
           <h2 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
             <FolderOpen className="w-5 h-5 text-cyan-500" />
-            {title}
+            {resolvedTitle}
           </h2>
           <button
             onClick={onClose}
+            aria-label={t('common.close')}
             className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-100 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -73,21 +77,21 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
 
         {/* Current Path */}
         <div className="p-3 bg-zinc-950 border-b border-zinc-800 text-sm font-mono text-cyan-400 break-all shrink-0">
-          {currentPath || 'Loading...'}
+          {currentPath || t('common.fileBrowser.loading')}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-2 min-h-0">
           {loading ? (
             <div className="flex justify-center items-center h-full text-zinc-500">
-              Loading...
+              {t('common.fileBrowser.loading')}
             </div>
           ) : error ? (
             <div className="text-red-400 p-4 text-center">
               {error}
               <div className="mt-4">
                 <Button variant="secondary" size="sm" onClick={() => loadDirectories(parentPath || undefined)}>
-                  Go Back
+                  {t('common.fileBrowser.goBack')}
                 </Button>
               </div>
             </div>
@@ -104,7 +108,7 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
               )}
               {directories.length === 0 && (
                 <div className="p-4 text-center text-zinc-500 text-sm">
-                  No directories found
+                  {t('common.fileBrowser.noDirectories')}
                 </div>
               )}
               {directories.map(dir => (
@@ -124,13 +128,13 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3 shrink-0">
           <Button variant="secondary" onClick={onClose}>
-            Cancel
+            {t('common.fileBrowser.cancel')}
           </Button>
           <Button 
             onClick={() => onSelect(currentPath)}
             disabled={loading || !!error || !currentPath}
           >
-            Select Current Directory
+            {t('common.fileBrowser.selectCurrent')}
           </Button>
         </div>
       </div>

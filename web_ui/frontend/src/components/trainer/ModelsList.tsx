@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { listModels, deleteModel, downloadModelUrl, loadModelToCar, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
 import { FileText, Copy, TrendingDown, Download, Send } from 'lucide-react';
+import { useTranslation } from '@/i18n';
 
 interface ModelItem {
   name: string;
@@ -25,6 +26,7 @@ function formatSize(bytes: number): string {
 }
 
 export const ModelsList: React.FC = () => {
+  const { t } = useTranslation();
   const { configPath, trainingJob } = useStore();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -143,18 +145,18 @@ export const ModelsList: React.FC = () => {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3 relative">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Trained Models</h3>
+        <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainedModels')}</h3>
         <button
           onClick={refresh}
           disabled={loading}
           className="text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
         >
-          {loading ? 'Loading...' : 'Refresh'}
+          {loading ? t('trainer.loading') : t('trainer.refresh')}
         </button>
       </div>
 
       {models.length === 0 && (
-        <div className="text-sm text-zinc-600">No models found in ./models</div>
+        <div className="text-sm text-zinc-600">{t('trainer.noModels')}</div>
       )}
 
       <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -182,7 +184,7 @@ export const ModelsList: React.FC = () => {
                 <a
                   href={downloadModelUrl(m.path)}
                   onClick={(e) => e.stopPropagation()}
-                  title="Download model"
+                  title={t('trainer.downloadModel')}
                   className="p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
                   download
                 >
@@ -193,12 +195,12 @@ export const ModelsList: React.FC = () => {
                     e.stopPropagation();
                     try {
                       await loadModelToCar(m.path, configPath);
-                      alert('模型加载指令已下发到车端');
+                      alert(t('trainer.loadToCarSent'));
                     } catch (error) {
-                      alert(`加载失败: ${getApiErrorMessage(error)}`);
+                      alert(t('trainer.loadFailed', { message: getApiErrorMessage(error) }));
                     }
                   }}
-                  title="加载到车端"
+                  title={t('trainer.loadToCar')}
                   className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
                 >
                   <Send className="w-3.5 h-3.5" />
@@ -208,7 +210,7 @@ export const ModelsList: React.FC = () => {
                     e.stopPropagation();
                     navigator.clipboard.writeText(m.path);
                   }}
-                  title="Copy path"
+                  title={t('trainer.copyPath')}
                   className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" />
@@ -222,7 +224,7 @@ export const ModelsList: React.FC = () => {
                 {formatSize(m.size)} · {new Date(m.modified).toLocaleString()}
                 {typeof m.bestLoss === 'number' && typeof m.finalLoss === 'number' && m.bestLoss !== m.finalLoss && (
                   <span className="ml-2 text-zinc-500">
-                    best: {m.bestLoss.toFixed(4)}
+                    {t('trainer.bestLoss', { loss: m.bestLoss.toFixed(4) })}
                   </span>
                 )}
               </span>
@@ -246,12 +248,12 @@ export const ModelsList: React.FC = () => {
           </div>
           {previewLoading && (
             <div className="w-full h-32 flex items-center justify-center text-zinc-500 text-sm">
-              Loading...
+              {t('trainer.loading')}
             </div>
           )}
           <img
             src={`${API_URL}/trainer/models/preview?path=${encodeURIComponent(activePreview.path)}`}
-            alt="Training loss chart"
+            alt={t('trainer.lossChartAlt')}
             className={`w-full h-auto rounded ${previewLoading ? 'hidden' : ''}`}
             style={{ maxHeight: 220 }}
             draggable={false}
@@ -265,9 +267,9 @@ export const ModelsList: React.FC = () => {
       {confirmDelete && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setConfirmDelete(null)}>
           <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-sm font-semibold text-zinc-200 mb-2">Delete Model</h4>
+            <h4 className="text-sm font-semibold text-zinc-200 mb-2">{t('trainer.deleteModel')}</h4>
             <p className="text-xs text-zinc-400 mb-4">
-              Are you sure you want to delete <span className="text-zinc-200 font-medium">{confirmDelete.name}</span>? This will also remove its preview image and metadata. This action cannot be undone.
+              {t('trainer.deleteConfirm', { name: confirmDelete.name })}
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -275,14 +277,14 @@ export const ModelsList: React.FC = () => {
                 disabled={deleting === confirmDelete.path}
                 className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors disabled:text-zinc-600"
               >
-                Cancel
+                {t('trainer.cancel')}
               </button>
               <button
                 onClick={() => handleDelete(confirmDelete)}
                 disabled={deleting === confirmDelete.path}
                 className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors disabled:text-zinc-600 disabled:bg-zinc-800"
               >
-                {deleting === confirmDelete.path ? 'Deleting...' : 'Delete'}
+                {deleting === confirmDelete.path ? t('trainer.deleting') : t('trainer.delete')}
               </button>
             </div>
           </div>

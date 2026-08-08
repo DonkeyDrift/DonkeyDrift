@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '@/i18n';
 
 interface VerticalThrottleBarProps {
   throttle: number;
@@ -11,6 +12,7 @@ interface VerticalThrottleBarProps {
  * 条形区域高度与容器一致，中心严格对齐虚拟摇杆水平直径
  */
 export const VerticalThrottleBar: React.FC<VerticalThrottleBarProps> = ({ throttle, className = '' }) => {
+  const { t } = useTranslation();
   const throttlePercent = Math.abs(throttle) * 50;
 
   return (
@@ -37,9 +39,9 @@ export const VerticalThrottleBar: React.FC<VerticalThrottleBarProps> = ({ thrott
 
       {/* 右侧标签：前进 / 油门 / 倒车 */}
       <div className="absolute left-full ml-2 flex flex-col justify-between h-full py-1 text-[10px] text-zinc-500 items-start">
-        <span>前进</span>
-        <span className="[writing-mode:vertical-rl] -translate-x-1">油 门</span>
-        <span>倒车</span>
+        <span>{t('driveViz.forward')}</span>
+        <span className="[writing-mode:vertical-rl] -translate-x-1">{t('driveViz.throttleLabel')}</span>
+        <span>{t('driveViz.reverse')}</span>
       </div>
     </div>
   );
