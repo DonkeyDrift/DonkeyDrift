@@ -556,6 +556,8 @@ class ProvisioningPart:
         self._host_ip_report = host_ip_report
         self._host_ip_report_interval = host_ip_report_interval
         self._last_host_ip_report_ts = 0.0
+        # 连续探测不到本机 IP 的计数（用于限频告警与恢复日志）
+        self._host_ip_skip_count = 0
 
         # 状态字段
         self._status = "idle"       # idle / connecting / connected / failed
@@ -709,7 +711,22 @@ class ProvisioningPart:
         self._last_host_ip_report_ts = now
         ip = detect_lan_ip()
         if ip:
+            if self._host_ip_skip_count >= 3:
+                logger.info(
+                    "本机局域网 IP 探测恢复，继续上报 HOSTIP（此前连续跳过 %d 次）",
+                    self._host_ip_skip_count,
+                )
+            self._host_ip_skip_count = 0
             self._write_line(ProvisioningProtocol.build_host_ip(ip))
+        else:
+            self._host_ip_skip_count += 1
+            # 探测不到本机 IP 时静默跳过会把"上位机 IP 停报"藏得无影无踪，
+            # 限频告警（首次及每 30 次）以便从 manage 日志定位问题
+            if self._host_ip_skip_count == 1 or self._host_ip_skip_count % 30 == 0:
+                logger.warning(
+                    "无法探测本机局域网 IP，已连续 %d 次跳过 HOSTIP 上报",
+                    self._host_ip_skip_count,
+                )
 
     def _write_line(self, data: str):
         """线程安全的串口写入。
@@ -789,15 +806,19 @@ class ProvisioningPart:
             logger.info("配网 Part 运行于 Arduino 共享串口模式")
 
             while self._running:
-                self._maybe_report_host_ip()
-                # 检查 Arduino 控制器是否有新的配网请求
-                wifi_req = self._arduino_controller.wifi_provisioning
-                if wifi_req and wifi_req.get('ssid'):
-                    ssid = wifi_req['ssid']
-                    password = wifi_req.get('password', '')
-                    # 清空已处理的请求，防止重复处理
-                    self._arduino_controller.wifi_provisioning = {}
-                    self._handle_wifi_request(ssid, password)
+                try:
+                    self._maybe_report_host_ip()
+                    # 检查 Arduino 控制器是否有新的配网请求
+                    wifi_req = self._arduino_controller.wifi_provisioning
+                    if wifi_req and wifi_req.get('ssid'):
+                        ssid = wifi_req['ssid']
+                        password = wifi_req.get('password', '')
+                        # 清空已处理的请求，防止重复处理
+                        self._arduino_controller.wifi_provisioning = {}
+                        self._handle_wifi_request(ssid, password)
+                except Exception:
+                    # 后台线程不允许死于未捕获异常（否则功能静默消失且无法恢复）
+                    logger.exception("配网 Part 循环异常（已忽略并继续运行）")
                 time.sleep(0.5)  # 配网对实时性要求不高
             return
 
@@ -823,8 +844,12 @@ class ProvisioningPart:
         self._running = True
 
         while self._running:
-            self._read_and_process()
-            self._maybe_report_host_ip()
+            try:
+                self._read_and_process()
+                self._maybe_report_host_ip()
+            except Exception:
+                # 后台线程不允许死于未捕获异常（否则功能静默消失且无法恢复）
+                logger.exception("配网 Part 循环异常（已忽略并继续运行）")
             time.sleep(0.1)  # ~10Hz 轮询，配网对实时性要求不高
 
     def run_threaded(self, trigger=None):
