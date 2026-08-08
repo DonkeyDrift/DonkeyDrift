@@ -6,6 +6,7 @@ import { TubNavigator } from './components/TubNavigator';
 import { TubEditor } from './components/TubEditor';
 import { useStore } from './store/useStore';
 import { getApiErrorMessage, loadTub } from './services/api';
+import { useTranslation, t as translate } from '@/i18n';
 
 const TrainerPage = React.lazy(() => import('./pages/TrainerPage').then((module) => ({ default: module.TrainerPage })));
 const DrivePage = React.lazy(() => import('./pages/DrivePage').then((module) => ({ default: module.DrivePage })));
@@ -31,13 +32,14 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
   render() {
     if (this.state.hasError) {
-      return <div>Something went wrong.</div>;
+      return <div>{translate('common.app.somethingWentWrong')}</div>;
     }
     return this.props.children;
   }
 }
 
 function TubManagerPage() {
+  const { t } = useTranslation();
   const { isLoading, error, tubPath, setTub, setLoading, setError } = useStore();
   const location = useLocation();
 
@@ -57,7 +59,7 @@ function TubManagerPage() {
             data.deleted_indexes,
           );
         } catch (err: unknown) {
-          setError(getApiErrorMessage(err, 'Failed to refresh tub'));
+          setError(getApiErrorMessage(err, t('common.app.failedToRefreshTub')));
         } finally {
           setLoading(false);
         }
@@ -65,13 +67,13 @@ function TubManagerPage() {
 
       refreshCurrentTub();
     }
-  }, [location.pathname, tubPath, setTub, setLoading, setError]);
+  }, [location.pathname, tubPath, setTub, setLoading, setError, t]);
 
   return (
     <>
       {error && (
         <div className="bg-red-900/50 border border-red-800 text-red-200 px-4 py-3 rounded-md mb-4">
-          Error: {error}
+          {t('common.app.errorPrefix', { message: error })}
         </div>
       )}
       
@@ -79,7 +81,7 @@ function TubManagerPage() {
         <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500" />
-            <div className="text-sm text-zinc-200">Loading</div>
+            <div className="text-sm text-zinc-200">{t('common.loading')}</div>
           </div>
         </div>
       )}
@@ -93,11 +95,12 @@ function TubManagerPage() {
 }
 
 function AppShell() {
+  const { t } = useTranslation();
   return (
     <ErrorBoundary>
       <SidePanel />
       <Layout>
-        <React.Suspense fallback={<div className="text-sm text-zinc-400">Loading</div>}>
+        <React.Suspense fallback={<div className="text-sm text-zinc-400">{t('common.loading')}</div>}>
           <Routes>
             <Route path="/" element={<TubManagerPage />} />
             <Route path="/trainer" element={<TrainerPage />} />

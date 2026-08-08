@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '@/i18n';
 
 export type DriveMode = 'user' | 'local_angle' | 'local';
 
@@ -11,10 +12,10 @@ interface DriveModeSelectorProps {
 
 // Active-segment colors mirror the ESP32 Drifter Console mode cards
 // (mode0=手动 green #39d98a, mode1=半自动 amber #ffcc66, mode2=全自动 blue #5cc8ff).
-const MODE_OPTIONS: { value: DriveMode; label: string; activeClass: string }[] = [
-  { value: 'user', label: '手动', activeClass: 'bg-[#39d98a]/20 text-[#39d98a]' },
-  { value: 'local_angle', label: '半自动', activeClass: 'bg-[#ffcc66]/20 text-[#ffcc66]' },
-  { value: 'local', label: '全自动', activeClass: 'bg-[#5cc8ff]/20 text-[#5cc8ff]' },
+const MODE_OPTIONS: { value: DriveMode; labelKey: string; activeClass: string }[] = [
+  { value: 'user', labelKey: 'drive.modeUser', activeClass: 'bg-[#39d98a]/20 text-[#39d98a]' },
+  { value: 'local_angle', labelKey: 'drive.modeSemiAuto', activeClass: 'bg-[#ffcc66]/20 text-[#ffcc66]' },
+  { value: 'local', labelKey: 'drive.modeFullAuto', activeClass: 'bg-[#5cc8ff]/20 text-[#5cc8ff]' },
 ];
 
 export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
@@ -23,6 +24,7 @@ export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
   disabled = false,
   className = '',
 }) => {
+  const { t } = useTranslation();
   return (
     <div className={`inline-flex rounded-lg border border-zinc-800 overflow-hidden ${className}`}>
       {MODE_OPTIONS.map((mode) => {
@@ -41,7 +43,7 @@ export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
               ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
-            {mode.label}
+            {t(mode.labelKey)}
           </button>
         );
       })}

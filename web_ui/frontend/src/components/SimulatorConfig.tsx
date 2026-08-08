@@ -9,6 +9,7 @@ import {
   getApiErrorMessage,
   type SimulatorHost,
 } from '../services/api';
+import { useTranslation } from '@/i18n';
 import {
   Gamepad2,
   Search,
@@ -31,6 +32,7 @@ interface ToastItem {
 }
 
 export const SimulatorConfig: React.FC = () => {
+  const { t } = useTranslation();
   const { config, configPath, setLoading, isLoading } = useStore();
 
   const [simHost, setSimHost] = useState('');
@@ -58,7 +60,7 @@ export const SimulatorConfig: React.FC = () => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 5000);
   }, []);
 
@@ -66,7 +68,7 @@ export const SimulatorConfig: React.FC = () => {
     setIsDiscovering(true);
     setFoundHosts([]);
     setSaveSuccess(false);
-    pushToast('正在扫描局域网中的 DonkeySim...', 'info');
+    pushToast(t('tub.scanningToast'), 'info');
     try {
       const data = await discoverSimulator(configPath || undefined);
       if (data.found && data.found.length > 0) {
@@ -74,7 +76,7 @@ export const SimulatorConfig: React.FC = () => {
         const best = data.found[0];
         setSimHost(best.ip);
         pushToast(
-          `发现 ${data.found.length} 个可用模拟器（扫描了 ${data.scanned} 个地址），已自动填入最佳 IP：${best.ip}`,
+          t('tub.foundToast', { count: data.found.length, scanned: data.scanned, ip: best.ip }),
           'success'
         );
       } else {
@@ -84,22 +86,22 @@ export const SimulatorConfig: React.FC = () => {
         );
       }
     } catch (err: unknown) {
-      const msg = getApiErrorMessage(err, '发现模拟器失败');
+      const msg = getApiErrorMessage(err, t('tub.discoverFailed'));
       pushToast(msg, 'error');
     } finally {
       setIsDiscovering(false);
     }
-  }, [configPath, pushToast]);
+  }, [configPath, pushToast, t]);
 
   const handleSelectHost = (host: SimulatorHost) => {
     setSimHost(host.ip);
     setSaveSuccess(false);
-    pushToast(`已选择模拟器 IP：${host.ip}`, 'info');
+    pushToast(t('tub.selectHostToast', { ip: host.ip }), 'info');
   };
 
   const handleSave = useCallback(async () => {
     if (!configPath) {
-      pushToast('请先加载车辆配置目录', 'error');
+      pushToast(t('tub.loadConfigDirFirstToast'), 'error');
       return;
     }
     setLoading(true);
@@ -113,19 +115,19 @@ export const SimulatorConfig: React.FC = () => {
         },
       });
       setSaveSuccess(true);
-      pushToast('配置已保存到 myconfig.py，车辆进程将自动重连', 'success');
+      pushToast(t('tub.savedToast'), 'success');
       if (config) {
         useStore.setState({
           config: { ...config, SIM_HOST: simHost, DONKEY_GYM: donkeyGym },
         });
       }
     } catch (err: unknown) {
-      const msg = getApiErrorMessage(err, '保存模拟器配置失败');
+      const msg = getApiErrorMessage(err, t('tub.saveFailed'));
       pushToast(msg, 'error');
     } finally {
       setLoading(false);
     }
-  }, [configPath, simHost, donkeyGym, config, pushToast, setLoading]);
+  }, [configPath, simHost, donkeyGym, config, pushToast, setLoading, t]);
 
   const toastIcon = (type: ToastType) => {
     switch (type) {
@@ -154,29 +156,29 @@ export const SimulatorConfig: React.FC = () => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Gamepad2 className="w-5 h-5" />
-          模拟器配置
+          {t('tub.simTitle')}
         </CardTitle>
-        <p className="text-sm text-zinc-400">配置 DonkeySim 模拟器连接</p>
+        <p className="text-sm text-zinc-400">{t('tub.simSubtitle')}</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">
           {/* SIM_HOST input */}
           <div className="space-y-1">
-            <label className="text-sm text-zinc-300 font-medium">模拟器主机 IP</label>
+            <label className="text-sm text-zinc-300 font-medium">{t('tub.simHostLabel')}</label>
             <Input
-              placeholder="例如 192.168.1.100"
+              placeholder={t('tub.simHostPlaceholder')}
               value={simHost}
               onChange={(e) => {
                 setSimHost(e.target.value);
                 setSaveSuccess(false);
               }}
-              aria-label="Simulator host IP"
+              aria-label={t('tub.simHostAria')}
             />
           </div>
 
           {/* DONKEY_GYM toggle */}
           <div className="flex items-center justify-between">
-            <label className="text-sm text-zinc-300 font-medium">启用模拟器模式</label>
+            <label className="text-sm text-zinc-300 font-medium">{t('tub.simModeLabel')}</label>
             <button
               onClick={() => {
                 setDonkeyGym((v) => !v);
@@ -185,7 +187,7 @@ export const SimulatorConfig: React.FC = () => {
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 donkeyGym ? 'bg-cyan-600' : 'bg-zinc-700'
               }`}
-              aria-label="Toggle simulator mode"
+              aria-label={t('tub.simModeAria')}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -201,20 +203,20 @@ export const SimulatorConfig: React.FC = () => {
             onClick={handleDiscover}
             disabled={isDiscovering}
             className="w-full"
-            aria-label="Discover simulator"
+            aria-label={t('tub.discoverAria')}
           >
             {isDiscovering ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Search className="w-4 h-4" />
             )}
-            {isDiscovering ? '正在扫描局域网…' : '自动发现模拟器'}
+            {isDiscovering ? t('tub.scanning') : t('tub.discover')}
           </Button>
 
           {/* Found hosts list */}
           {foundHosts.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs text-zinc-400">发现以下可用模拟器（按延迟排序）：</p>
+              <p className="text-xs text-zinc-400">{t('tub.foundHosts')}</p>
               <div className="max-h-40 overflow-y-auto space-y-1.5">
                 {foundHosts.map((host) => (
                   <button
@@ -245,7 +247,7 @@ export const SimulatorConfig: React.FC = () => {
           {!isDiscovering && foundHosts.length === 0 && (
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <WifiOff className="w-3.5 h-3.5" />
-              <span>点击上方按钮扫描局域网中的模拟器</span>
+              <span>{t('tub.scanHint')}</span>
             </div>
           )}
 
@@ -254,29 +256,30 @@ export const SimulatorConfig: React.FC = () => {
             onClick={handleSave}
             disabled={isLoading || !configPath}
             className="w-full"
-            aria-label="Save simulator config"
+            aria-label={t('tub.saveAria')}
           >
             {saveSuccess ? (
               <CheckCircle2 className="w-4 h-4" />
             ) : (
               <Save className="w-4 h-4" />
             )}
-            {saveSuccess ? '已保存' : '保存配置'}
+            {saveSuccess ? t('tub.saved') : t('tub.saveConfig')}
           </Button>
         </div>
       </CardContent>
 
       {/* Toast overlay */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => (
+        {toasts.map((toast) => (
           <div
-            key={t.id}
-            className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm text-sm text-zinc-100 max-w-sm animate-in fade-in slide-in-from-right-4 duration-300 ${toastBg(t.type)}`}
+            key={toast.id}
+            className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm text-sm text-zinc-100 max-w-sm animate-in fade-in slide-in-from-right-4 duration-300 ${toastBg(toast.type)}`}
           >
-            {toastIcon(t.type)}
-            <span className="flex-1 leading-relaxed">{t.message}</span>
+            {toastIcon(toast.type)}
+            <span className="flex-1 leading-relaxed">{toast.message}</span>
             <button
-              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== toast.id))}
+              aria-label={t('common.close')}
               className="shrink-0 text-zinc-400 hover:text-white transition-colors"
             >
               <X className="w-3.5 h-3.5" />

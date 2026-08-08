@@ -5,8 +5,10 @@ import { SimulatorConfig } from './SimulatorConfig';
 import { FolderOpen, Plug } from 'lucide-react';
 
 import { useStore } from '../store/useStore';
+import { useTranslation } from '@/i18n';
 
 export const SidePanel: React.FC = () => {
+  const { t } = useTranslation();
   const { activeDrawer, setActiveDrawer } = useStore();
   const [hovered, setHovered] = React.useState<'loaders' | 'connectors' | null>(null);
 
@@ -43,7 +45,7 @@ export const SidePanel: React.FC = () => {
           >
             <FolderOpen className={`w-5 h-5 shrink-0 transition-colors duration-300 ${isLoadersOpen ? 'text-cyan-400' : hovered === 'loaders' ? 'text-white' : 'text-zinc-400'}`} />
             <span className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ${anyOpen || hovered === 'loaders' ? 'max-w-[100px] opacity-100 ml-2' : 'max-w-0 opacity-0 ml-0'}`}>
-              Loaders
+              {t('common.sidePanel.loaders')}
             </span>
           </button>
 
@@ -62,7 +64,7 @@ export const SidePanel: React.FC = () => {
           >
             <Plug className={`w-5 h-5 shrink-0 transition-colors duration-300 ${isConnectorsOpen ? 'text-cyan-400' : hovered === 'connectors' ? 'text-white' : 'text-zinc-400'}`} />
             <span className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ${anyOpen || hovered === 'connectors' ? 'max-w-[100px] opacity-100 ml-2' : 'max-w-0 opacity-0 ml-0'}`}>
-              Connectors
+              {t('common.sidePanel.connectors')}
             </span>
           </button>
         </div>
@@ -74,7 +76,7 @@ export const SidePanel: React.FC = () => {
               <>
                 <div className="flex items-center gap-2 mb-2 text-zinc-100 font-bold text-lg border-b border-zinc-800 pb-4">
                   <FolderOpen className="w-5 h-5 text-cyan-500" />
-                  Loaders
+                  {t('common.sidePanel.loaders')}
                 </div>
                 <div className="space-y-6">
                   <ConfigLoader />
@@ -87,7 +89,7 @@ export const SidePanel: React.FC = () => {
               <>
                 <div className="flex items-center gap-2 mb-2 text-zinc-100 font-bold text-lg border-b border-zinc-800 pb-4">
                   <Plug className="w-5 h-5 text-cyan-500" />
-                  Connectors
+                  {t('common.sidePanel.connectors')}
                 </div>
                 <div className="space-y-6">
                   <SimulatorConfig />

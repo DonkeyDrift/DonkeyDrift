@@ -13,6 +13,7 @@ import { Line } from 'react-chartjs-2';
 import { Pause, Play, Trash2, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Telemetry } from '../../hooks/useDriveWebsocket';
+import { useTranslation } from '@/i18n';
 
 ChartJS.register(
   CategoryScale,
@@ -29,8 +30,8 @@ const BUFFER_SIZE = 256;
 
 /** 单条曲线的显示配置。 */
 interface CurveConfig {
-  /** 显示名。 */
-  label: string;
+  /** 显示名的 i18n key（driveViz 命名空间）。 */
+  labelKey: string;
   /** CSS 颜色。 */
   color: string;
   /** 从 Telemetry 取值的键。 */
@@ -46,18 +47,18 @@ interface CurveConfig {
 
 /** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
 const CURVES: CurveConfig[] = [
-  { label: 'Throttle', color: '#39d98a', key: 'throttle', defaultOn: true },
-  { label: 'Steering', color: '#5cc8ff', key: 'steering', defaultOn: true },
-  { label: 'GyroZ', color: '#ff6b6b', key: 'gz', defaultOn: true, scale: 0.2 },
-  { label: 'RC Steering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
-  { label: 'RC Throttle', color: '#15803d', key: 'rc_throttle', defaultOn: true },
-  { label: 'GyroX', color: '#ffcc66', key: 'gx', defaultOn: false, scale: 0.2 },
-  { label: 'GyroY', color: '#d96bff', key: 'gy', defaultOn: false, scale: 0.2 },
-  { label: 'AccX', color: '#a3e635', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
-  { label: 'AccY', color: '#fb923c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
-  { label: 'AccZ', color: '#f472b6', key: 'az', defaultOn: false, scale: 1 / 9.8 },
-  { label: 'Pilot Angle', color: '#22d3ee', key: 'pilot_angle', defaultOn: false },
-  { label: 'Pilot Throttle', color: '#c084fc', key: 'pilot_throttle', defaultOn: false },
+  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', key: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', key: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', key: 'gz', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
+  { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', key: 'rc_throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', key: 'gx', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', key: 'gy', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveAccX', color: '#a3e635', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccY', color: '#fb923c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', key: 'az', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', key: 'pilot_angle', defaultOn: false },
+  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', key: 'pilot_throttle', defaultOn: false },
 ];
 
 interface TelemetryChartProps {
@@ -74,6 +75,7 @@ interface TelemetryChartProps {
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
  */
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '' }) => {
+  const { t } = useTranslation();
   // 各曲线的环形缓冲：number[] 长度恒为 BUFFER_SIZE，未填满处为 NaN
   const buffersRef = useRef<Record<string, number[]>>({});
   const writeIndexRef = useRef(0);
@@ -190,7 +192,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
         ordered = buf.slice(writeIdx).concat(buf.slice(0, writeIdx));
       }
       return {
-        label: c.label,
+        label: t(c.labelKey),
         data: ordered,
         borderColor: c.color,
         backgroundColor: c.color,
@@ -239,17 +241,17 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
     >
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wider text-slate-400">遥测曲线</span>
-          {!hasData && <span className="text-xs text-slate-500">（等待数据）</span>}
-          {paused && <span className="text-xs text-amber-400">已暂停</span>}
+          <span className="text-xs uppercase tracking-wider text-slate-400">{t('driveViz.chartTitle')}</span>
+          {!hasData && <span className="text-xs text-slate-500">{t('driveViz.waitingData')}</span>}
+          {paused && <span className="text-xs text-amber-400">{t('driveViz.paused')}</span>}
         </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={handlePauseToggle}
             className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
-            title={paused ? '继续' : '暂停'}
-            aria-label={paused ? '继续' : '暂停'}
+            title={paused ? t('driveViz.resume') : t('driveViz.pause')}
+            aria-label={paused ? t('driveViz.resume') : t('driveViz.pause')}
           >
             {paused ? <Play size={14} /> : <Pause size={14} />}
           </button>
@@ -257,8 +259,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
             type="button"
             onClick={handleClear}
             className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
-            title="清空"
-            aria-label="清空"
+            title={t('driveViz.clear')}
+            aria-label={t('driveViz.clear')}
           >
             <Trash2 size={14} />
           </button>
@@ -266,8 +268,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
             type="button"
             onClick={toggleFullscreen}
             className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
-            title={fullscreen ? '退出全屏' : '全屏'}
-            aria-label={fullscreen ? '退出全屏' : '全屏'}
+            title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+            aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
           >
             {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
@@ -291,7 +293,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
                 className="accent-[var(--curve-color)]"
                 style={{ ['--curve-color' as string]: c.color }}
               />
-              <span style={{ color: on ? c.color : undefined }}>{c.label}</span>
+              <span style={{ color: on ? c.color : undefined }}>{t(c.labelKey)}</span>
             </label>
           );
         })}

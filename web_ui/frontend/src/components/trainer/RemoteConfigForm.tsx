@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../../store/useStore';
+import { useTranslation } from '@/i18n';
 
 interface RemoteConfigFormProps {
   host: string;
@@ -30,15 +31,16 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
   pythonPath,
   onPythonPathChange,
 }) => {
+  const { t } = useTranslation();
   const { configPath } = useStore();
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Cloud Training</h3>
+      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.cloudTraining')}</h3>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-xs text-zinc-500">Host</label>
+          <label className="text-xs text-zinc-500">{t('trainer.host')}</label>
           <input
             type="text"
             value={host}
@@ -47,7 +49,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-zinc-500">User</label>
+          <label className="text-xs text-zinc-500">{t('trainer.user')}</label>
           <input
             type="text"
             value={user}
@@ -58,7 +60,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Password</label>
+        <label className="text-xs text-zinc-500">{t('trainer.password')}</label>
         <input
           type="password"
           value={password}
@@ -68,7 +70,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Remote Dir Base</label>
+        <label className="text-xs text-zinc-500">{t('trainer.remoteDirBase')}</label>
         <input
           type="text"
           value={remoteDirBase}
@@ -78,7 +80,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Model Name</label>
+        <label className="text-xs text-zinc-500">{t('trainer.modelName')}</label>
         <input
           type="text"
           value={modelName}
@@ -88,7 +90,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Python Path</label>
+        <label className="text-xs text-zinc-500">{t('trainer.pythonPath')}</label>
         <input
           type="text"
           value={pythonPath}
@@ -97,7 +99,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
         />
       </div>
 
-      <div className="text-xs text-zinc-600">Working dir: {configPath}</div>
+      <div className="text-xs text-zinc-600">{t('trainer.workingDir', { path: configPath })}</div>
     </div>
   );
 };

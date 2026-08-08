@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Box } from 'lucide-react';
+import { useTranslation } from '@/i18n';
 
 interface ModelSelectorProps {
   value: string;
@@ -10,7 +11,6 @@ interface ModelSelectorProps {
 }
 
 const EMPTY_VALUE = '';
-const EMPTY_LABEL = '无模型';
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
   value,
@@ -19,12 +19,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   disabled = false,
   className = '',
 }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const emptyLabel = t('drive.noModel');
   const allOptions = [EMPTY_VALUE, ...options];
   const effectiveValue = options.includes(value) ? value : EMPTY_VALUE;
-  const selectedLabel = effectiveValue || EMPTY_LABEL;
+  const selectedLabel = effectiveValue || emptyLabel;
   const otherOptions = allOptions.filter((v) => v !== effectiveValue);
 
   const handleSelect = (model: string) => {
@@ -58,7 +60,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         className={`w-full px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-medium flex items-center justify-between gap-2 text-cyan-400 hover:bg-zinc-800 transition-colors min-w-[6.5rem]
           ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
         `}
-        title="当前模型"
+        title={t('drive.currentModel')}
       >
         <span className="flex items-center gap-1.5">
           <Box className="w-3.5 h-3.5" />
@@ -70,7 +72,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         <div className="absolute top-full left-0 w-full pt-1 z-50">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 shadow-[0_8px_24px_rgba(0,0,0,0.25)] overflow-hidden">
             {otherOptions.map((model) => {
-              const label = model || EMPTY_LABEL;
+              const label = model || emptyLabel;
               return (
                 <button
                   key={label}

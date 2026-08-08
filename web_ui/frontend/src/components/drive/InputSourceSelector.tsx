@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Gamepad2, Smartphone, Joystick, Keyboard, ChevronDown, ChevronUp } from 'lucide-react';
+import { useTranslation } from '@/i18n';
 
 export type InputSource = 'joystick' | 'keyboard' | 'gamepad' | 'gyro';
 
@@ -11,11 +12,11 @@ interface InputSourceSelectorProps {
   className?: string;
 }
 
-const SOURCES: { value: InputSource; label: string; icon: React.ReactNode }[] = [
-  { value: 'joystick', label: '摇杆', icon: <Joystick className="w-3.5 h-3.5" /> },
-  { value: 'keyboard', label: '键盘', icon: <Keyboard className="w-3.5 h-3.5" /> },
-  { value: 'gamepad', label: '手柄', icon: <Gamepad2 className="w-3.5 h-3.5" /> },
-  { value: 'gyro', label: '陀螺仪', icon: <Smartphone className="w-3.5 h-3.5" /> },
+const SOURCES: { value: InputSource; labelKey: string; icon: React.ReactNode }[] = [
+  { value: 'joystick', labelKey: 'drive.sourceJoystick', icon: <Joystick className="w-3.5 h-3.5" /> },
+  { value: 'keyboard', labelKey: 'drive.sourceKeyboard', icon: <Keyboard className="w-3.5 h-3.5" /> },
+  { value: 'gamepad', labelKey: 'drive.sourceGamepad', icon: <Gamepad2 className="w-3.5 h-3.5" /> },
+  { value: 'gyro', labelKey: 'drive.sourceGyro', icon: <Smartphone className="w-3.5 h-3.5" /> },
 ];
 
 export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
@@ -25,6 +26,7 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
   gyroAvailable = true,
   className = '',
 }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -62,12 +64,12 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
     >
       <button
         onClick={() => setOpen(!open)}
-        className="w-full px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-medium flex items-center justify-between gap-2 text-cyan-400 hover:bg-zinc-800 transition-colors min-w-[6.5rem]"
-        title="输入源"
+        className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-medium flex items-center justify-between gap-2 text-cyan-400 hover:bg-zinc-800 transition-colors whitespace-nowrap"
+        title={t('drive.inputSource')}
       >
         <span className="flex items-center gap-1.5">
           {selected.icon}
-          <span>{selected.label}</span>
+          <span>{t(selected.labelKey)}</span>
           {selected.value === 'gamepad' && gamepadConnected && (
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           )}
@@ -75,7 +77,7 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
         {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
       </button>
       {open && (
-        <div className="absolute top-full left-0 w-full pt-1 z-50">
+        <div className="absolute top-full left-0 w-max min-w-full pt-1 z-50">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 shadow-[0_8px_24px_rgba(0,0,0,0.25)] overflow-hidden">
             {others.map((src) => {
               const disabled = isDisabled(src.value);
@@ -84,7 +86,7 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
                   key={src.value}
                   onClick={() => handleSelect(src.value)}
                   disabled={disabled}
-                  className={`w-full px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 transition-colors text-left
+                  className={`w-full px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 transition-colors text-left whitespace-nowrap
                     ${disabled
                       ? 'text-zinc-600 cursor-not-allowed'
                       : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
@@ -92,14 +94,14 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
                   `}
                   title={
                     src.value === 'gamepad'
-                      ? gamepadConnected ? '已连接手柄' : '未检测到手柄'
+                      ? gamepadConnected ? t('drive.gamepadConnected') : t('drive.gamepadNotDetected')
                       : src.value === 'gyro'
-                        ? gyroAvailable ? '设备支持陀螺仪' : '设备不支持陀螺仪'
-                        : src.label
+                        ? gyroAvailable ? t('drive.gyroSupported') : t('drive.gyroNotSupported')
+                        : t(src.labelKey)
                   }
                 >
                   {src.icon}
-                  <span>{src.label}</span>
+                  <span>{t(src.labelKey)}</span>
                   {src.value === 'gamepad' && gamepadConnected && (
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   )}
