@@ -1205,3 +1205,96 @@ class TestProvisioningPartHostIpReport:
 
         part._write_line.assert_not_called()
         assert part._last_host_ip_report_ts == 100.0
+
+    def test_no_ip_detected_warns_rate_limited_and_recovers(
+        self, monkeypatch, caplog
+    ):
+        """连续探测失败限频告警、恢复时记录日志（2026-08-07 停报排查回归）。
+
+        实车曾出现 manage.py 进程内 HOSTIP 静默停报数十分钟却无任何日志，
+        告警/恢复日志保证下次能从 manage 输出直接定位。"""
+        import logging
+
+        from donkeycar.parts import provisioning
+
+        state = {"ip": None}
+        clock = {"now": 100.0}
+        monkeypatch.setattr(
+            provisioning, "detect_lan_ip", lambda: state["ip"]
+        )
+        monkeypatch.setattr(
+            provisioning.time, "monotonic", lambda: clock["now"]
+        )
+        part = self._make_part(host_ip_report_interval=10.0)
+        logger_name = "donkeycar.parts.provisioning"
+
+        with caplog.at_level(logging.WARNING, logger=logger_name):
+            part._maybe_report_host_ip()          # 第 1 次跳过
+            clock["now"] += 10
+            part._maybe_report_host_ip()          # 第 2 次跳过
+            clock["now"] += 10
+            part._maybe_report_host_ip()          # 第 3 次跳过
+
+        part._write_line.assert_not_called()
+        assert part._host_ip_skip_count == 3
+        assert "已连续 1 次跳过" in caplog.text   # 首次跳过即告警
+        assert "已连续 2 次跳过" not in caplog.text  # 限频：2、3 次不重复告警
+
+        caplog.clear()
+        state["ip"] = "192.168.3.45"
+        clock["now"] += 10
+        with caplog.at_level(logging.INFO, logger=logger_name):
+            part._maybe_report_host_ip()
+
+        part._write_line.assert_called_once_with("HOSTIP|192.168.3.45")
+        assert part._host_ip_skip_count == 0
+        assert "探测恢复" in caplog.text
+        assert "此前连续跳过 3 次" in caplog.text
+
+
+class TestProvisioningPartUpdateResilience:
+    """回归：配网后台线程不得死于未捕获异常。
+
+    实车排查（2026-08-07）发现 update() 线程一旦异常退出，HOSTIP 上报
+    静默停止且永不恢复，进程表象一切正常。循环体必须兜住所有异常。
+    """
+
+    def test_loop_continues_after_unexpected_exception(self, monkeypatch):
+        import threading
+        import time as real_time
+        from unittest.mock import MagicMock
+
+        from donkeycar.parts import provisioning
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        mock_ser = MagicMock()
+        mock_ser.in_waiting = 0
+        monkeypatch.setattr(
+            provisioning.serial, "Serial", lambda **kwargs: mock_ser
+        )
+
+        part = ProvisioningPart(serial_port="/dev/null", baudrate=115200)
+        calls = {"read": 0, "report": 0}
+
+        def flaky_read():
+            calls["read"] += 1
+            if calls["read"] <= 3:
+                raise RuntimeError("simulated unexpected error")
+
+        monkeypatch.setattr(part, "_read_and_process", flaky_read)
+        monkeypatch.setattr(
+            part,
+            "_maybe_report_host_ip",
+            lambda: calls.__setitem__("report", calls["report"] + 1),
+        )
+
+        thread = threading.Thread(target=part.update, daemon=True)
+        thread.start()
+        real_time.sleep(0.5)
+        part.shutdown()
+        thread.join(timeout=2)
+
+        assert not thread.is_alive()
+        # 前 3 次抛异常后循环仍继续执行（线程未死）
+        assert calls["read"] > 3
+        assert calls["report"] > 0

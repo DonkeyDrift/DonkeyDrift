@@ -24,6 +24,12 @@
 
 ## 2026-08-07
 
+- fix(provisioning): 配网后台线程异常防护与上位机 IP 停报诊断日志
+  - 背景（实车排查）：ESP32 经 HTTP OTA 重启后，manage.py 进程的 HOSTIP 周期上报曾长时间静默停止（线程存活、串口 fd 正常、日志无任何记录），只能等进程自愈或重启；为根因定位与兜底防护做两处加固。
+  - `donkeycar/parts/provisioning.py`：`update()` 两个后台循环（独立串口模式 / Arduino 共享模式）循环体加 `try/except Exception`，异常经 `logger.exception` 记录后继续运行，线程不再因未捕获异常静默死亡；`_maybe_report_host_ip()` 新增 `_host_ip_skip_count` 计数——`detect_lan_ip()` 连续探测失败时按「首次 + 每 30 次」限频输出 WARNING 告警，恢复时输出 INFO 日志（含此前连续跳过次数）。
+  - 测试同步：`donkeycar/tests/test_provisioning.py` 新增 `test_no_ip_detected_warns_rate_limited_and_recovers`（限频告警与恢复日志）与 `TestProvisioningPartUpdateResilience::test_loop_continues_after_unexpected_exception`（循环连续抛异常后线程仍存活、上报仍执行）。
+  - 验证：`pytest donkeycar/tests/test_provisioning.py` 94 项全部通过。
+
 - refactor(web_ui): UI 品牌名从 `DonkeyDrifter Web UI` 统一简化为 `DonkeyDrifter`
   - 前端：`web_ui/frontend/index.html` 浏览器标签页标题改为 `DonkeyDrifter`；`web_ui/frontend/src/components/Layout.tsx` 页脚品牌文字同步修改（顶部导航本来即为 `DonkeyDrifter`，无需改动）。
   - 后端：`web_ui/backend/main.py` FastAPI `title` 改为 `DonkeyDrifter`，根路径两条 JSON 提示消息改为 `DonkeyDrifter is running`。
