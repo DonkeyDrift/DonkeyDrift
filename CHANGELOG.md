@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-10
+
+- fix(cli): `donkey web`/`donkey drive` 自动打开浏览器前等待前端端口就绪，修复 TUI 选项 6/7 启动后浏览器打开"无法连接"页面的问题
+  - 根因：`_launch_web_ui()` 拉起 Vite 前端进程后立刻 `webbrowser.open()`，Vite 需数秒才开始监听，浏览器在端口未监听时打开即显示无法连接且不会自动恢复（VS Code "View in Browser" 弹窗在端口监听后才出现，故点击总能正常打开）。
+  - `donkeycar/management/base.py`：`Web` 新增 `_wait_for_port_ready()`（TCP 轮询本机端口直至可连接，默认 30s 超时）与 `_open_browser_when_frontend_ready()`（先等前端端口就绪再开浏览器；超时仍打开并打印警告，退化为旧行为由用户自行刷新）；`Web.run()` 与 `Drive.run()` 的 `--open` 路径统一改走该等待；`Drive._wait_for_backend_ready()` 复用 `_wait_for_port_ready()` 实现。
+  - 测试同步：`donkeycar/tests/test_web_command.py` 的 `test_web_command_opens_requested_route` 补 `_wait_for_port_ready` monkeypatch（避免真实 socket 等待），新增 3 项用例（`_wait_for_port_ready` 对监听/关闭端口的探测、等待前端端口后再开浏览器、等待超时仍打开浏览器兜底）；`donkeycar/tests/test_drive_command.py` 新增 `test_drive_run_waits_for_frontend_port_before_opening_browser`。
+  - 验证：相关 30 项测试全部通过；真实拉起 `donkey web --open` 端到端验证——浏览器打开回调在 Vite 就绪后才触发，打开瞬间该 URL 已返回 HTTP 200，退出时子进程清理正常。
+
 ## 2026-08-08
 
 - fix(test): 修复配网循环韧性回归测试在 macOS CI 上的时序抖动（main 分支 run #198 失败）
