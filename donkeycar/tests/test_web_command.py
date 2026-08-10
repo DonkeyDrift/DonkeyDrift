@@ -1,3 +1,5 @@
+import socket
+
 import pytest
 
 from donkeycar.management.base import Web
@@ -105,6 +107,7 @@ def test_web_command_opens_requested_route(monkeypatch, tmp_path):
 
     monkeypatch.setattr("donkeycar.management.base.shutil.which", lambda name: "npm")
     monkeypatch.setattr(Web, "_choose_available_port", lambda self, host, preferred_port: preferred_port)
+    monkeypatch.setattr(Web, "_wait_for_port_ready", lambda self, port, timeout=30.0: True)
     monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
     monkeypatch.setattr("donkeycar.management.base.webbrowser.open", opened_urls.append)
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
@@ -163,3 +166,121 @@ def test_web_command_sets_vite_proxy_target_to_actual_backend_port(monkeypatch, 
 
     _, frontend_kwargs = popen_calls[1]
     assert frontend_kwargs["env"]["VITE_API_PROXY_TARGET"] == "http://127.0.0.1:8100"
+
+
+def test_wait_for_port_ready_detects_listening_and_closed_ports():
+    """_wait_for_port_ready 应对监听中的端口返回 True，对未监听端口超时返回 False。"""
+    web = Web()
+
+    with socket.socket() as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        assert web._wait_for_port_ready(port, timeout=2.0) is True
+
+    # socket 已关闭，端口不再监听
+    assert web._wait_for_port_ready(port, timeout=0.3) is False
+
+
+def test_web_command_waits_for_frontend_port_before_opening_browser(monkeypatch, tmp_path):
+    """--open 时必须等前端端口就绪再开浏览器。
+
+    Vite 启动需要数秒；若在其监听前打开浏览器，页面会显示无法连接且不会自动恢复。
+    """
+    frontend_path = tmp_path / "web_ui" / "frontend"
+    backend_path = tmp_path / "web_ui" / "backend"
+    frontend_path.mkdir(parents=True)
+    backend_path.mkdir(parents=True)
+    opened_urls = []
+    wait_calls = []
+
+    class FakeProcess:
+        def __init__(self, return_codes):
+            self.return_codes = iter(return_codes)
+            self.returncode = None
+
+        def poll(self):
+            try:
+                self.returncode = next(self.return_codes)
+            except StopIteration:
+                pass
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode or 0
+
+    processes = [FakeProcess([None, 0]), FakeProcess([None, None])]
+
+    def fake_popen(cmd, **kwargs):
+        return processes.pop(0)
+
+    def fake_wait(self, port, timeout=30.0):
+        wait_calls.append(port)
+        return True
+
+    monkeypatch.setattr("donkeycar.management.base.shutil.which", lambda name: "npm")
+    monkeypatch.setattr(Web, "_choose_available_port", lambda self, host, preferred_port: preferred_port)
+    monkeypatch.setattr(Web, "_wait_for_port_ready", fake_wait)
+    monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("donkeycar.management.base.webbrowser.open", opened_urls.append)
+    monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(SystemExit):
+        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive"])
+
+    # 等待的是前端端口（5188），且浏览器最终打开正确的 URL
+    assert wait_calls == [5188]
+    assert opened_urls == ["http://localhost:5188/#/drive"]
+
+
+def test_web_command_opens_browser_even_when_frontend_wait_times_out(monkeypatch, tmp_path):
+    """前端端口等待超时也仍应打开浏览器（与旧行为一致，由用户自行刷新）。"""
+    frontend_path = tmp_path / "web_ui" / "frontend"
+    backend_path = tmp_path / "web_ui" / "backend"
+    frontend_path.mkdir(parents=True)
+    backend_path.mkdir(parents=True)
+    opened_urls = []
+
+    class FakeProcess:
+        def __init__(self, return_codes):
+            self.return_codes = iter(return_codes)
+            self.returncode = None
+
+        def poll(self):
+            try:
+                self.returncode = next(self.return_codes)
+            except StopIteration:
+                pass
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode or 0
+
+    processes = [FakeProcess([None, 0]), FakeProcess([None, None])]
+
+    def fake_popen(cmd, **kwargs):
+        return processes.pop(0)
+
+    monkeypatch.setattr("donkeycar.management.base.shutil.which", lambda name: "npm")
+    monkeypatch.setattr(Web, "_choose_available_port", lambda self, host, preferred_port: preferred_port)
+    monkeypatch.setattr(Web, "_wait_for_port_ready", lambda self, port, timeout=30.0: False)
+    monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("donkeycar.management.base.webbrowser.open", opened_urls.append)
+    monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(SystemExit):
+        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive"])
+
+    assert opened_urls == ["http://localhost:5188/#/drive"]
