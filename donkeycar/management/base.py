@@ -710,7 +710,7 @@ class Web(BaseCommand):
             self._launch_web_ui(args)
 
         if args.open:
-            webbrowser.open(frontend_url)
+            self._open_browser_when_frontend_ready(frontend_port, frontend_url)
 
         stop_requested = {'value': False}
 
@@ -838,6 +838,27 @@ class Web(BaseCommand):
             return f'http://localhost:{frontend_port}/'
         normalized_route = route if str(route).startswith('/') else f'/{route}'
         return f'http://localhost:{frontend_port}/#{normalized_route}'
+
+    def _wait_for_port_ready(self, port, timeout=30.0):
+        """轮询本机端口直至可连接或超时。返回是否就绪。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=0.5):
+                    return True
+            except OSError:
+                time.sleep(0.2)
+        return False
+
+    def _open_browser_when_frontend_ready(self, frontend_port, frontend_url, timeout=30.0):
+        """等前端端口开始监听后再打开浏览器。
+
+        Vite 启动需要数秒；若在其就绪前打开浏览器，页面会显示无法连接，
+        且浏览器不会自动恢复，用户只能手动刷新。超时仍打开（由用户自行刷新）。
+        """
+        if not self._wait_for_port_ready(frontend_port, timeout):
+            print(f'警告: 前端端口 {frontend_port} 在 {timeout:.0f}s 内未就绪，仍将打开浏览器')
+        webbrowser.open(frontend_url)
 
     def _choose_available_port(self, host, preferred_port, max_tries=50):
         port = int(preferred_port)
@@ -1026,7 +1047,7 @@ class Drive(Web):
         _write_drive_pid_file([frontend_proc.pid, backend_proc.pid, car_proc.pid])
 
         if args.open:
-            webbrowser.open(frontend_url)
+            self._open_browser_when_frontend_ready(frontend_port, frontend_url)
         print('按 Ctrl+C 停止前端、后端与车辆进程')
 
         stop_requested = {'value': False}
@@ -1084,14 +1105,7 @@ class Drive(Web):
 
     def _wait_for_backend_ready(self, backend_port, timeout=30.0):
         """轮询后端端口直至可连或超时。返回是否就绪。"""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                with socket.create_connection(('127.0.0.1', backend_port), timeout=0.5):
-                    return True
-            except OSError:
-                time.sleep(0.2)
-        return False
+        return self._wait_for_port_ready(backend_port, timeout)
 
 
 class InstallWebUI(BaseCommand):

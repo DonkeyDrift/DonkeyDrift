@@ -167,3 +167,45 @@ def test_drive_run_rejects_missing_manage_py(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit):
         Drive().run(["--path", str(web_ui), "--car", str(car_dir)])
+
+
+def test_drive_run_waits_for_frontend_port_before_opening_browser(monkeypatch, tmp_path):
+    """--open 时必须等前端端口就绪再开浏览器（与 donkey web 同一修复路径）。"""
+    web_ui, car_dir = _setup_web_ui_tree(tmp_path)
+
+    processes = [
+        _FakeProcess([None, None, None]),  # backend
+        _FakeProcess([None, None, None]),  # frontend
+        _FakeProcess([None, 0]),           # car 先退出 → 触发终止
+    ]
+
+    def fake_popen(cmd, **kwargs):
+        return processes.pop(0)
+
+    wait_calls = []
+    opened_urls = []
+
+    def fake_wait(self, port, timeout=30.0):
+        wait_calls.append(port)
+        return True
+
+    monkeypatch.setattr("donkeycar.management.base.shutil.which", lambda name: "npm")
+    monkeypatch.setattr(Drive, "_choose_available_port", lambda self, host, p: p)
+    monkeypatch.setattr(Drive, "_wait_for_backend_ready", lambda self, port, timeout=30.0: True)
+    monkeypatch.setattr(Drive, "_wait_for_port_ready", fake_wait)
+    monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("donkeycar.management.base.webbrowser.open", opened_urls.append)
+    monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _s: None)
+    # 隔离 PID 记录文件，避免读写真实 ~/.donkeycar/drive.pid
+    monkeypatch.setattr("donkeycar.management.base._DRIVE_PID_FILE", tmp_path / "drive.pid")
+
+    with pytest.raises(SystemExit):
+        Drive().run([
+            "--path", str(web_ui),
+            "--car", str(car_dir),
+            "--open",
+        ])
+
+    # _wait_for_backend_ready 被单独 monkeypatch，这里只应捕获前端端口等待
+    assert wait_calls == [5188]
+    assert opened_urls == ["http://localhost:5188/#/drive"]
