@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-11 (8)
+
+- feat(launcher): 输入 6 后在新标签页打开 Drive 页面，保留 Launcher 菜单
+  - 此前按 6 后 `window.location.href` 直接在当前标签页跳转，Launcher 菜单被替换掉。
+  - `donkeycar/launcher/server.py`：`launchDrive()` 中改为 `window.open(url, '_blank')` 在新标签页打开；若被弹窗拦截器阻止则回退到当前页跳转。
+
+## 2026-08-11 (7)
+
+- fix(web_ui): DrivePage 在非安全上下文下 `crypto.randomUUID()` 崩溃导致"Something went wrong"
+  - 问题：通过局域网 IP（非 localhost、非 HTTPS）访问 Drive 页面时，`crypto.randomUUID()` 不可用（返回 undefined），`createDriveClientId()` 调用时抛 TypeError；其 catch 块再次调用同一 API，异常未被捕获，传播到 React ErrorBoundary 显示"Something went wrong"。
+  - `web_ui/frontend/src/services/api.ts`：新增 `generateUuid()` 辅助函数，优先使用 `crypto.randomUUID()`，不可用时回退到 `crypto.getRandomValues()`（非安全上下文也可用）；替换 `createDriveClientId()` 和 `createDriveWebRtcSession()` 默认参数中的 2 处 `crypto.randomUUID()` 调用。
+
 ## 2026-08-11 (6)
 
 - fix(tubplot): 修复 Ubuntu 上 Tub 数据图表不显示--matplotlib 自动检测图形会话 DISPLAY 并切换 TkAgg 后端

@@ -752,9 +752,16 @@ MENU_HTML = r"""<!DOCTYPE html>
                         'localhost', window.location.hostname
                     );
                     overlayText.textContent =
-                        '启动成功！正在跳转到 Web Console...';
+                        '启动成功！正在打开 Web Console...';
                     setTimeout(function() {
-                        window.location.href = url;
+                        // 在新标签页打开 Drive 页面，保留 Launcher 菜单
+                        var newTab = window.open(url, '_blank');
+                        // 若被弹窗拦截器阻止，回退到当前页跳转
+                        if (!newTab) {
+                            window.location.href = url;
+                        } else {
+                            overlay.classList.remove('active');
+                        }
                     }, 1500);
                 } else if (data.status === 'error') {
                     overlayText.textContent = '启动失败';
