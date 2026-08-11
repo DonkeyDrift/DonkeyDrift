@@ -26,3 +26,19 @@ def test_load_config_merges_base_config_and_myconfig(tmp_path):
     assert payload["config"]["IMAGE_H"] == 240
     assert payload["config"]["IMAGE_W"] == 160
     assert payload["config"]["IMAGE_DEPTH"] == 3
+
+
+def test_get_version_returns_version_string():
+    from donkeycar._version import __version__
+
+    from routers import config
+
+    app = FastAPI()
+    app.include_router(config.router, prefix="/api/config")
+    client = TestClient(app)
+
+    response = client.get("/api/config/version")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["version"] == __version__

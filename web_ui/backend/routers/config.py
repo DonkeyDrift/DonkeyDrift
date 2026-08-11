@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import os
 from donkeycar import load_config
+from donkeycar._version import __version__
 import logging
 import tkinter as tk
 from tkinter import filedialog
@@ -10,6 +11,13 @@ from network_utils import discover_hosts
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.get("/version")
+async def get_version():
+    """Return the DonkeyDrifter version string."""
+    return {"version": __version__}
+
 
 TRAINING_CONFIG_KEYS = [
     'BATCH_SIZE',

@@ -25,6 +25,60 @@ TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
 _DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
 
 
+def _ensure_display_and_backend():
+    """确保 matplotlib 能在 GUI 窗口中显示图表。
+
+    在无 DISPLAY 的环境下（SSH、Web 后台等），matplotlib 默认使用 agg
+    非交互式后端，导致 plt.show() 不弹窗。此函数尝试从当前图形会话
+    检测 DISPLAY 和 XAUTHORITY，并切换到 TkAgg 后端。
+    """
+    import matplotlib
+
+    # 如果已有交互式后端，无需处理
+    if matplotlib.get_backend().lower() != 'agg':
+        return
+
+    # 尝试从图形会话进程检测 DISPLAY 和 XAUTHORITY
+    if not os.environ.get('DISPLAY'):
+        _detect_graphical_display()
+
+    # 尝试切换到 TkAgg 后端
+    try:
+        matplotlib.use('TkAgg')
+    except Exception:
+        logger.warning(
+            '无法启用 TkAgg GUI 后端，图表将不会显示窗口。'
+            '请在桌面终端中运行，或使用 --noshow 仅保存图表文件。'
+        )
+
+
+def _detect_graphical_display():
+    """从当前用户的 Xwayland/Xorg 进程检测 DISPLAY 和 XAUTHORITY。"""
+    try:
+        result = subprocess.run(
+            ['pgrep', '-a', '-u', str(os.getuid())],
+            capture_output=True, text=True, timeout=2
+        )
+        for line in result.stdout.splitlines():
+            if 'Xwayland' not in line and '/Xorg' not in line:
+                continue
+            pid = line.split()[0]
+            environ_path = f'/proc/{pid}/environ'
+            with open(environ_path, 'rb') as f:
+                environ = f.read().decode('utf-8', errors='replace')
+            for entry in environ.split('\0'):
+                if entry.startswith('DISPLAY='):
+                    os.environ['DISPLAY'] = entry.split('=', 1)[1]
+                elif entry.startswith('XAUTHORITY='):
+                    os.environ['XAUTHORITY'] = entry.split('=', 1)[1]
+            if os.environ.get('DISPLAY'):
+                logger.info(
+                    f'检测到图形会话: DISPLAY={os.environ["DISPLAY"]}')
+                return
+    except Exception:
+        pass
+
+
 def _read_drive_pid_file():
     """读取上次 donkey drive 记录的进程 PID 列表。"""
     if not _DRIVE_PID_FILE.exists():
@@ -393,6 +447,7 @@ class ShowHistogram(BaseCommand):
         """
         Produce a histogram of record type frequency in the given tub
         """
+        _ensure_display_and_backend()
         import pandas as pd
         from matplotlib import pyplot as plt
         from donkeycar.parts.tub_v2 import Tub
@@ -433,6 +488,7 @@ class ShowHistogram(BaseCommand):
 class ShowCnnActivations(BaseCommand):
 
     def __init__(self):
+        _ensure_display_and_backend()
         import matplotlib.pyplot as plt
         self.plt = plt
 
@@ -509,6 +565,7 @@ class ShowPredictionPlots(BaseCommand):
         """
         Plot model predictions for angle and throttle against data from tubs.
         """
+        _ensure_display_and_backend()
         import matplotlib.pyplot as plt
         import pandas as pd
         from pathlib import Path
