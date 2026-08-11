@@ -71,6 +71,34 @@ def _kill_previous_drive_processes():
     _remove_drive_pid_file()
 
 
+def _kill_orphaned_donkey_processes():
+    """通过进程名搜索并杀掉所有 donkey web 和 manage.py drive 进程。
+
+    作为 PID 文件方式的补充，处理未通过正常流程启动的孤儿进程
+    （如用户直接在终端运行 donkey web 而未写入 PID 文件，
+    或多次启动导致旧进程未被追踪）。
+    """
+    for pattern in ["donkey web", "manage.py drive"]:
+        try:
+            subprocess.run(
+                ["pkill", "-f", pattern],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+    # 等待进程退出
+    threading.Event().wait(0.5)
+    # SIGKILL 仍存活的进程
+    for pattern in ["donkey web", "manage.py drive"]:
+        try:
+            subprocess.run(
+                ["pkill", "-9", "-f", pattern],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+
+
 # ── 项目查找与端口选择 ──────────────────────────────────────────────
 
 def _is_valid_project_dir(project_path):
@@ -141,6 +169,8 @@ def _launch_drive():
     with _proc_lock:
         # 杀掉上一次的进程（通过 PID 文件追踪，包括终端和 Launcher 启动的）
         _kill_previous_drive_processes()
+        # 兜底：通过进程名搜索杀掉所有 donkey web / manage.py drive 孤儿进程
+        _kill_orphaned_donkey_processes()
         # 清理 launcher 自己跟踪的进程引用
         for key in ("web", "car"):
             _processes[key] = None
