@@ -82,6 +82,11 @@ export const getApiErrorMessage = (error: unknown, fallback = t('common.unknownE
   return fallback;
 };
 
+export const getVersion = async (): Promise<string> => {
+  const response = await api.get('/config/version');
+  return response.data.version as string;
+};
+
 export const loadConfig = async (path: string) => {
   const response = await api.post('/config/load', { path });
   return response.data;
