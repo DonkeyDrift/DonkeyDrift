@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-11 (3)
+
+- fix(launcher): 每次启动 drive 前强制杀掉上一次的进程，不再返回 already_running
+  - 问题：此前 Launcher 检测到自己跟踪的进程仍在运行时直接返回 `already_running` 而不杀掉重启，导致用户反复点击"进入 DonkeyDrifter"或菜单输入 6 时无法清理旧进程（可能占用摄像头等硬件资源）。
+  - `donkeycar/launcher/server.py`：`_launch_drive()` 移除 `already_running` 早退逻辑，改为每次调用都先执行 `_kill_previous_drive_processes()`（通过 `~/.donkeycar/drive.pid` 追踪并 SIGTERM→SIGKILL），再清理 launcher 内部进程引用，然后启动新进程。
+  - 验证：代码逻辑检查通过（无 already_running、仅一次 kill 调用）；服务重启后 API 正常响应。
+
 ## 2026-08-11 (2)
 
 - fix(launcher): Launcher 服务启动时通过串口向 ESP32 报告本机 IP（HOSTIP|<ipv4>），配合 Firmware v1.7.57 按钮动态获取 IP
