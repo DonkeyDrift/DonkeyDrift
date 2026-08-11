@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-11
+
+- feat(launcher): 新增 `donkeycar/launcher/` 模块--浏览器端 DonkeyDrifter 启动服务，无需打开终端即可从 ESP32 Drifter Console 一键进入 DonkeyDrifter
+  - 背景：此前进入 DonkeyDrifter 需在终端输入 `donkey` 再输入 `6`，启动 `donkey web` + `manage.py drive` 两个子进程。新方案在宿主机上运行常驻 Launcher 服务（端口 8090），ESP32 Web Console 的"进入 donkey"/"进入 DonkeyDrifter"按钮直接跳转到该服务。
+  - `donkeycar/launcher/server.py`：基于标准库 `http.server` 的轻量 HTTP 服务（无 Flask/FastAPI 依赖）。`GET /` 提供仿 TUI 菜单页面（dark theme、rich 风格表格、10 项菜单与 tui.py 一致、键盘数字选择）；`GET /api/status` 返回进程状态 JSON；`POST /api/launch/drive` 启动 `donkey web`（指定 `--backend-port` + `--frontend-port`，不带 `--open`）和 `manage.py drive`（注入 `DRIVE_API_SERVER_URL` 环境变量），PID 写入 `~/.donkeycar/drive.pid`，返回前端 URL（`http://<host>:<frontend_port>/#/drive`）。
+  - `donkeycar/launcher/__main__.py`：入口点，支持 `--port`（默认 8090）和 `--host`（默认 0.0.0.0）参数。
+  - `donkeycar/launcher/donkeydrifter-launcher.service`：systemd 用户服务模板，使用 conda 环境 Python，`WorkingDirectory=/home/dkc/projects/mycar`，`Restart=always`。
+  - 前端页面 JS：键盘 1-9/10 选择菜单项（与终端一致），输入 6 触发 `/api/launch/drive` POST 并重定向；URL 中 `localhost` 替换为 `window.location.hostname` 以支持远程设备访问。
+  - 安装方式：`cp donkeydrifter-launcher.service ~/.config/systemd/user/ && systemctl --user enable --now donkeydrifter-launcher`，`loginctl enable-linger dkc` 开机自启。
+  - 验证：服务启动正常，`GET /` 返回菜单 HTML，`GET /api/status` 返回正确 JSON；systemd 用户服务 active (running)。
+
 ## 2026-08-10
 
 - fix(cli): `donkey web`/`donkey drive` 自动打开浏览器前等待前端端口就绪，修复 TUI 选项 6/7 启动后浏览器打开"无法连接"页面的问题

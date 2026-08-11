@@ -1,0 +1,16 @@
+[Unit]
+Description=DonkeyDrifter Launcher Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/dkc/miniconda3/envs/donkey/bin/python3 -m donkeycar.launcher
+WorkingDirectory=/home/dkc/projects/mycar
+Restart=always
+RestartSec=3
+User=dkc
+Environment=PYTHONPATH=/home/dkc/projects/DonkeyDrift
+Environment=PATH=/home/dkc/miniconda3/envs/donkey/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
