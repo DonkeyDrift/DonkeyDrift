@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-11 (9)
+
+- feat(launcher): 新增 GET `/launch/drive` 端点，返回极简跳转 HTML 页面
+  - 背景：Drifter Console（ESP32 Web Console）的"进入 DonkeyDrifter"按钮原先用 `location.href` 导航到 POST-only 的 `/api/launch/drive`，GET 请求返回 404；且跨域 fetch 会被浏览器 CORS 拦截。
+  - `donkeycar/launcher/server.py`：`do_GET` 新增 `/launch/drive` 路由，返回 `LAUNCH_DRIVE_HTML` 页面；页面加载后自动 fetch POST `/api/launch/drive`（同源），拿到 drive URL 后 `window.location.href` 重定向到 Drive 页面。Drifter Console 侧改为 `window.open('http://'+ip+':8090/launch/drive','_blank')` 在新标签页打开。
+
 ## 2026-08-11 (8)
 
 - feat(launcher): 输入 6 后在新标签页打开 Drive 页面，保留 Launcher 菜单
