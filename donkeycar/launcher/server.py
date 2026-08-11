@@ -133,16 +133,19 @@ _processes = {
 
 
 def _launch_drive():
-    """启动 donkey web + manage.py drive，返回结果字典。"""
+    """启动 donkey web + manage.py drive，返回结果字典。
+
+    每次调用都会先杀掉上一次的 donkey drive 进程（通过 PID 文件追踪），
+    然后启动新的进程。这确保不会出现硬件资源冲突（如摄像头占用）。
+    """
     with _proc_lock:
-        # 检查是否已在运行
-        web_proc = _processes["web"]
-        if web_proc is not None and web_proc.poll() is None:
-            port = _processes["frontend_port"]
-            return {
-                "status": "already_running",
-                "url": f"http://localhost:{port}/#/drive",
-            }
+        # 杀掉上一次的进程（通过 PID 文件追踪，包括终端和 Launcher 启动的）
+        _kill_previous_drive_processes()
+        # 清理 launcher 自己跟踪的进程引用
+        for key in ("web", "car"):
+            _processes[key] = None
+        _processes["backend_port"] = None
+        _processes["frontend_port"] = None
 
         # 查找 mycar 项目
         project_path = _find_mycar_project()
@@ -152,9 +155,6 @@ def _launch_drive():
                 "error": "未找到有效的 mycar 项目"
                          "（需包含 manage.py 和 myconfig.py）",
             }
-
-        # 杀掉上一次的进程
-        _kill_previous_drive_processes()
 
         # 选择可用端口
         backend_port = _choose_available_backend_port(8100)
