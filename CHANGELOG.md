@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-11 (4)
+
+- fix(launcher): 新增孤儿进程清理--通过 pkill 按进程名搜索杀掉所有 donkey web / manage.py drive 进程
+  - 背景：PID 文件方式只能杀掉最后一次启动的进程；如果用户在终端多次启动 DonkeyDrifter（或直接运行 `donkey web` 未写 PID 文件），旧进程会成为孤儿占用硬件资源。
+  - `donkeycar/launcher/server.py`：新增 `_kill_orphaned_donkey_processes()`，使用 `pkill -f "donkey web"` 和 `pkill -f "manage.py drive"` 先 SIGTERM 后 SIGKILL 清理所有匹配进程；`_launch_drive()` 在 `_kill_previous_drive_processes()` 之后调用该函数作为兜底。
+  - 验证：4 项测试全部通过（PID 文件杀进程、孤儿进程清理、5 次反复点击循环、混合场景）。
+
 ## 2026-08-11 (3)
 
 - fix(launcher): 每次启动 drive 前强制杀掉上一次的进程，不再返回 already_running
