@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-11 (6)
+
+- feat(launcher): 输入 6 后在新标签页打开 Drive 页面，保留 Launcher 菜单
+  - 此前按 6 后 `window.location.href` 直接在当前标签页跳转，Launcher 菜单被替换掉。
+  - `donkeycar/launcher/server.py`：`launchDrive()` 中改为 `window.open(url, '_blank')` 在新标签页打开；若被弹窗拦截器阻止则回退到当前页跳转。
+
 ## 2026-08-11 (5)
 
 - fix(web_ui): DrivePage 在非安全上下文下 `crypto.randomUUID()` 崩溃导致"Something went wrong"
