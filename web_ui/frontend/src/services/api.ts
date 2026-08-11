@@ -12,6 +12,23 @@ export const getDriveVideoTransport = (): DriveVideoTransport => {
   return value === 'webrtc' || value === 'mjpeg' ? value : 'auto';
 };
 
+/**
+ * 生成 UUID v4，兼容非安全上下文（HTTP + 非 localhost）。
+ * crypto.randomUUID() 仅在 secure context（HTTPS 或 localhost）下可用，
+ * 通过局域网 IP 访问时需回退到 crypto.getRandomValues()。
+ */
+const generateUuid = (): string => {
+  if (typeof crypto?.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+};
+
 export const createDriveClientId = (): string => {
   const key = 'donkeydrifter_drive_client_id';
   try {
@@ -19,11 +36,11 @@ export const createDriveClientId = (): string => {
     if (existing) {
       return existing;
     }
-    const created = crypto.randomUUID();
+    const created = generateUuid();
     window.sessionStorage.setItem(key, created);
     return created;
   } catch {
-    return crypto.randomUUID();
+    return generateUuid();
   }
 };
 
@@ -189,7 +206,7 @@ export interface DriveWebRtcStats {
   degraded: boolean;
 }
 
-export const createDriveWebRtcSession = async (clientId: string = crypto.randomUUID()) => {
+export const createDriveWebRtcSession = async (clientId: string = generateUuid()) => {
   const response = await api.post('/drive/webrtc/session', { client_id: clientId });
   return response.data as { success: boolean; session_id: string; single_client: boolean };
 };
