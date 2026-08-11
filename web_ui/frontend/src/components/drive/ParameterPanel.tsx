@@ -26,7 +26,13 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       step={step}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer
+        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
+        [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer
+        [&::-webkit-slider-thumb]:-mt-1 [&::-webkit-slider-thumb]:shadow-[0_0_0_2px_#09090b]
+        [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full
+        [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer
+        [&::-moz-range-thumb]:shadow-[0_0_0_2px_#09090b]"
     />
   </div>
 );
@@ -150,17 +156,17 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
           <div className="flex gap-2 pt-2 border-t border-zinc-800">
             <button
               onClick={resetToDefault}
-              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
             >
-              <RotateCcw className="w-3 h-3" />
-              {t('driveViz.resetDefault')}
+              <RotateCcw size={12} className="shrink-0" />
+              <span className="whitespace-nowrap">{t('driveViz.resetDefault')}</span>
             </button>
             <button
               onClick={handleExport}
-              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
             >
-              <Download className="w-3 h-3" />
-              {t('driveViz.export')}
+              <Download size={12} className="shrink-0" />
+              <span className="whitespace-nowrap">{t('driveViz.export')}</span>
             </button>
             <label className="flex-1">
               <input
@@ -172,10 +178,10 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               />
               <button
                 onClick={() => importRef.current?.click()}
-                className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
+                className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
               >
-                <Upload className="w-3 h-3" />
-                {t('driveViz.import')}
+                <Upload size={12} className="shrink-0" />
+                <span className="whitespace-nowrap">{t('driveViz.import')}</span>
               </button>
             </label>
           </div>
