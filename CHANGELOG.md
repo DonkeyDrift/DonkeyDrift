@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-11 (5)
+
+- fix(web_ui): DrivePage 在非安全上下文下 `crypto.randomUUID()` 崩溃导致"Something went wrong"
+  - 问题：通过局域网 IP（非 localhost、非 HTTPS）访问 Drive 页面时，`crypto.randomUUID()` 不可用（返回 undefined），`createDriveClientId()` 调用时抛 TypeError；其 catch 块再次调用同一 API，异常未被捕获，传播到 React ErrorBoundary 显示"Something went wrong"。
+  - `web_ui/frontend/src/services/api.ts`：新增 `generateUuid()` 辅助函数，优先使用 `crypto.randomUUID()`，不可用时回退到 `crypto.getRandomValues()`（非安全上下文也可用）；替换 `createDriveClientId()` 和 `createDriveWebRtcSession()` 默认参数中的 2 处 `crypto.randomUUID()` 调用。
+
 ## 2026-08-11 (4)
 
 - fix(launcher): 新增孤儿进程清理--通过 pkill 按进程名搜索杀掉所有 donkey web / manage.py drive 进程
