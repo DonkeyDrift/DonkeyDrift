@@ -320,7 +320,7 @@ export const DrivePage: React.FC = () => {
               </div>
             </div>
             <ProgrammableButtons className="w-full max-w-[240px]" />
-            <ParameterPanel className="w-full max-w-[240px]" />
+            <ParameterPanel className="w-full max-w-[360px]" />
             <div className="text-[10px] text-zinc-500 text-center">
               {t('drive.hotkeysLine1')}<br />
               {t('drive.hotkeysLine2')}

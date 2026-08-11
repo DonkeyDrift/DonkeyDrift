@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-11 (10)
+
+- fix(web_ui): Drive 页面控制参数面板三个显示问题修复
+  - 滑块拖拽点透出轨道：白色拖拽点（`::-webkit-slider-thumb` / `::-moz-range-thumb`）添加 `shadow-[0_0_0_2px_#09090b]`，用面板背景色（zinc-950）在拖拽点周围生成 2px 实心环，遮住背后深色轨道（zinc-800），拖拽点保持纯白。
+  - "重置默认"按钮文字换行：ParameterPanel 宽度从 `max-w-[320px]` 加宽到 `max-w-[360px]`（内边距 `px-3` 不变，按钮到边框距离不变）；三个按钮文本各自包裹 `<span className="whitespace-nowrap">` 双重保险防止换行。
+  - 导出/导入图标大小不一致：三个图标（RotateCcw / Download / Upload）从 Tailwind `w-3 h-3` 类改为 lucide-react `size={12}` prop，统一尺寸设置方式。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`、`web_ui/frontend/src/pages/DrivePage.tsx`
+
 ## 2026-08-11 (9)
 
 - feat(launcher): 新增 GET `/launch/drive` 端点，返回极简跳转 HTML 页面
