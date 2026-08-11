@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-11 (2)
+
+- fix(launcher): Launcher 服务启动时通过串口向 ESP32 报告本机 IP（HOSTIP|<ipv4>），配合 Firmware v1.7.57 按钮动态获取 IP
+  - `donkeycar/launcher/server.py`：新增 `_get_local_ip()`（优先返回 192.168.x.x 局域网 IP，排除 VPN/TUN 接口）、`_report_hostip_to_esp32()`（尝试 /dev/ttyACM0、/dev/ttyACM1、/dev/ttyUSB0 写入 HOSTIP 帧）、`_hostip_reporter_loop()`（每 30 秒上报一次的后台线程）、`_start_hostip_reporter()`；`run_server()` 启动时调用后者拉起 daemon 线程。
+  - 说明：此为 best-effort 机制；当 `manage.py drive` 运行时，其 `ProvisioningPart` 会通过 Arduino 共享串口正确上报 HOSTIP，Launcher 的独立串口写入仅在没有车辆进程时作为补充。
+
 ## 2026-08-11
 
 - feat(launcher): 新增 `donkeycar/launcher/` 模块--浏览器端 DonkeyDrifter 启动服务，无需打开终端即可从 ESP32 Drifter Console 一键进入 DonkeyDrifter

@@ -253,6 +253,61 @@ def _get_status():
         }
 
 
+# ── HOSTIP 串口报告（让 ESP32 /api/status 输出 host_ip） ──────────────
+
+def _get_local_ip():
+    """获取本机在局域网中的 IP 地址（排除 VPN/TUN 接口）。"""
+    try:
+        result = subprocess.check_output(
+            ["hostname", "-I"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        ips = result.split()
+        # 优先选择 192.168.x.x（局域网）
+        for ip in ips:
+            if ip.startswith("192.168."):
+                return ip
+        # 回退到第一个非 VPN/loopback 的 IP
+        for ip in ips:
+            if (not ip.startswith("127.") and
+                    not ip.startswith("198.18.")):
+                return ip
+    except Exception:
+        pass
+    return None
+
+
+def _report_hostip_to_esp32():
+    """通过串口向 ESP32 报告本机 IP。"""
+    local_ip = _get_local_ip()
+    if not local_ip:
+        return
+    # 尝试常见串口设备
+    for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0"]:
+        try:
+            with open(port, 'w') as f:
+                f.write(f"HOSTIP|{local_ip}\n")
+                f.flush()
+            break  # 成功写入一个即可
+        except (OSError, IOError):
+            pass
+
+
+def _hostip_reporter_loop():
+    """后台线程：定期向 ESP32 报告本机 IP。"""
+    while True:
+        try:
+            _report_hostip_to_esp32()
+        except Exception:
+            pass
+        threading.Event().wait(30)
+
+
+def _start_hostip_reporter():
+    """启动 HOSTIP 报告后台线程（daemon）。"""
+    t = threading.Thread(target=_hostip_reporter_loop, daemon=True)
+    t.start()
+
+
 # ── HTTP 请求处理 ──────────────────────────────────────────────────
 
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
@@ -316,6 +371,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
 
 def run_server(host="0.0.0.0", port=8090):
     """启动 Launcher HTTP 服务器。"""
+    # 启动 HOSTIP 报告后台线程
+    _start_hostip_reporter()
     server = http.server.ThreadingHTTPServer(
         (host, port), LauncherHandler
     )
