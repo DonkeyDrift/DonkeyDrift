@@ -350,6 +350,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_html()
+        elif path == "/launch/drive":
+            self._serve_launch_drive_page()
         elif path == "/api/status":
             self._serve_json(_get_status())
         else:
@@ -375,6 +377,19 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         """提供菜单 HTML 页面。"""
         html = MENU_HTML.replace("{{CWD}}", str(Path.cwd()))
         body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_launch_drive_page(self):
+        """提供启动 DonkeyDrifter 的跳转页面（GET /launch/drive）。
+
+        返回一个极简 HTML 页面，页面加载后自动 POST /api/launch/drive
+        （同源请求，无需 CORS），拿到 drive URL 后重定向当前标签页。
+        """
+        body = LAUNCH_DRIVE_HTML.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -416,6 +431,51 @@ def run_server(host="0.0.0.0", port=8090):
 
 
 # ── 菜单 HTML 页面（嵌入为字符串常量） ──────────────────────────────
+
+LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>启动 DonkeyDrifter</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.box{text-align:center}
+.spinner{width:40px;height:40px;border:3px solid #2b3441;border-top-color:#5cc8ff;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.text{font-size:16px}
+.error{color:#ff6b6b;margin-top:12px;font-size:14px}
+</style>
+</head>
+<body>
+<div class="box">
+<div class="spinner" id="spinner"></div>
+<div class="text" id="text">正在启动 DonkeyDrifter...</div>
+<div class="error" id="error"></div>
+</div>
+<script>
+(async function(){
+  try{
+    var r=await fetch('/api/launch/drive',{method:'POST'});
+    var d=await r.json();
+    if(d.status==='launched'){
+      var url=d.url.replace('localhost',window.location.hostname);
+      window.location.href=url;
+    }else{
+      document.getElementById('spinner').style.display='none';
+      document.getElementById('text').textContent='启动失败';
+      document.getElementById('error').textContent=d.error||'未知错误';
+    }
+  }catch(e){
+    document.getElementById('spinner').style.display='none';
+    document.getElementById('text').textContent='启动失败';
+    document.getElementById('error').textContent='网络错误: '+e.message;
+  }
+})();
+</script>
+</body>
+</html>
+"""
 
 MENU_HTML = r"""<!DOCTYPE html>
 <html lang="zh-CN">
