@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-12 (4)
+
+- fix(web_ui): 控制参数滑块拖拽点改为纯白色（仅改颜色，不改形状）
+  - 移除 PR #47 添加的全部自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb` 样式（改变了原生椭圆形），改为 `accent-white`：浏览器原生渲染形状完全不变，仅将 accent-color 从 `#5cc8ff`（MUS4 主题覆写后的 accent-cyan-500）改为 `#ffffff` 纯白。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (3)
 
 - fix(web_ui): 控制参数滑块拖拽点改为纯白不透明椭圆形
