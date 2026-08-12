@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-12 (12)
+
+- fix(web_ui): 滑块 thumb 垂直居中于轨道
+  - input 高度从 `h-1.5`（6px）改为 `h-3`（12px）容纳原生 thumb；轨道仍 `h-1.5`（6px）但加 `mt-[3px]` 在 12px 空间中垂直居中，thumb 原生渲染（`accent-white`）在 12px 空间中自然居中于轨道。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (11)
 
 - fix(web_ui): 滑块 thumb 恢复原生渲染，仅将轨道移到独立伪元素层
