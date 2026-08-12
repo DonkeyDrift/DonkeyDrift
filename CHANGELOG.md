@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-12 (7)
+
+- fix(web_ui): 修正滑块 thumb 尺寸为 12×12px 匹配原生渲染
+  - PR #53 的 `w-3 h-2`（12×8px）尺寸过小且加了不必要的 `-mt-px` 偏移，与原生 thumb 形状不符。
+  - 通过 Playwright 截图对比确认：原生 thumb 约 12px 圆形、Chrome 在 `appearance: none` 下自动居中、无需手动 margin。
+  - 本次改为 `w-3 h-3 rounded-full bg-white border-none`，不加 margin，与原生渲染尺寸/位置/形状一致。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (6)
 
 - fix(web_ui): 修复滑块 thumb 无法遮挡轨道的问题（渲染层级分离）
