@@ -26,8 +26,8 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       step={step}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="w-full h-1.5 appearance-none cursor-pointer accent-white
-        [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:bg-zinc-800 [&::-webkit-slider-runnable-track]:rounded-lg
+      className="w-full h-3 appearance-none cursor-pointer accent-white
+        [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:bg-zinc-800 [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-runnable-track]:mt-[3px]
         [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:bg-zinc-800 [&::-moz-range-track]:rounded-lg"
     />
   </div>
