@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-12 (3)
+
+- fix(web_ui): 控制参数滑块拖拽点改为纯白不透明椭圆形
+  - 上一版（#45）恢复 `accent-cyan-500` 浏览器原生渲染后，原生 thumb 仍透出下方深色轨道。
+  - 本次使用自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb` 样式：`w-3.5 h-3 rounded-full bg-white`，椭圆形（14×12px）、垂直居中（无 `-mt-1` 偏移）、纯白不透明，完全遮挡下方轨道。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (2)
 
 - fix(launcher): `/launch/drive` 跳转页等待 vite 就绪后再重定向
