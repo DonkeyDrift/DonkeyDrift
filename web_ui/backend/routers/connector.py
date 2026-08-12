@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -268,5 +269,36 @@ async def discover_cars():
         else:
             message = f"扫描了 {scanned} 个地址，发现 {len(found)} 个开放 SSH 端口的主机。"
         return {"status": True, "found": found, "count": len(found), "scanned": scanned, "message": message}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+async def _check_drifter_console(ip: str) -> dict | None:
+    try:
+        def _fetch():
+            req = urllib.request.Request(f"http://{ip}/", method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                html = resp.read(4096).decode("utf-8", errors="ignore")
+                return "Drifter Console" in html
+        is_console = await asyncio.to_thread(_fetch)
+        if is_console:
+            return {"ip": ip, "port": 80, "reachable": True}
+    except Exception:
+        pass
+    return None
+
+
+@router.post("/discover_console")
+async def discover_consoles():
+    try:
+        found, scanned = await discover_hosts(port=80)
+        tasks = [_check_drifter_console(h["ip"]) for h in found]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        consoles = [r for r in results if isinstance(r, dict)]
+        message = ""
+        if not consoles:
+            message = f"扫描了 {scanned} 个地址，未在局域网中发现 Drifter Console 设备。请确认 ESP32 已开机并与本机处于同一网络。"
+        else:
+            message = f"发现 {len(consoles)} 个 Drifter Console 设备。"
+        return {"status": True, "found": consoles, "count": len(consoles), "scanned": scanned, "message": message}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

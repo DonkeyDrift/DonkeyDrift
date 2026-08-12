@@ -402,6 +402,17 @@ export const discoverConnectorCars = async () => {
   };
 };
 
+export const discoverConnectorConsoles = async () => {
+  const response = await api.post('/connector/discover_console');
+  return response.data as {
+    status: boolean;
+    found: { ip: string; port: number; reachable: boolean }[];
+    count: number;
+    scanned: number;
+    message: string;
+  };
+};
+
 // ------------------------------------------------------------------
 // Pilot Arena APIs
 // ------------------------------------------------------------------
