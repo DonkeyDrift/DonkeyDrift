@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-12 (2)
+
+- fix(launcher): `/launch/drive` 跳转页等待 vite 就绪后再重定向
+  - 背景：POST `/api/launch/drive` 启动 `donkey web`（vite 开发服务器）时会先杀旧进程再启新进程，POST 立即返回后页面立即重定向到端口 5188，但新 vite 需数秒才就绪，导致 Safari 显示"无法连接服务器"。
+  - `donkeycar/launcher/server.py`：`LAUNCH_DRIVE_HTML` 的 JS 改为先轮询前端 URL（`fetch` + `mode:'no-cors'`，最多 30 次 × 1s = 30s），就绪后再 `window.location.href` 跳转；等待期间显示进度计数器 `(N/30)`。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+- fix(web_ui): 恢复 Drive 页面控制参数滑块为浏览器原生样式
+  - 上一版（#43）为滑块添加了自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb` 样式（`w-3.5 h-3.5 rounded-full -mt-1 shadow-[0_0_0_2px_#09090b]`），导致拖拽点由原生椭圆形变成正圆形、垂直方向偏上、且 shadow 环仍透出轨道。
+  - 本次移除全部自定义 thumb 样式，恢复为 `accent-cyan-500` 浏览器原生渲染：拖拽点恢复为椭圆形、垂直居中、完全不透明（看不到下方轨道）。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-11 (10)
 
 - fix(web_ui): Drive 页面控制参数面板三个显示问题修复
