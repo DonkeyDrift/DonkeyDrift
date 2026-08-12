@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-12 (11)
+
+- fix(web_ui): 滑块 thumb 恢复原生渲染，仅将轨道移到独立伪元素层
+  - 移除全部自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb` 样式（多轮尝试均未匹配原生形状/大小）。
+  - 保留 `accent-white`（原生 thumb：形状/大小/位置完全不变，纯白色）。
+  - 轨道样式从 input 背景移到 `::-webkit-slider-runnable-track` / `::-moz-range-track` 伪元素，确保轨道画在 thumb 下方而非覆盖其上。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (10)
 
 - fix(web_ui): 滑块 thumb 宽度从 16px 缩至 14px（w-4 → w-3.5），高度/位置不变
