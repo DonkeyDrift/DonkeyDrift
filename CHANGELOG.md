@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-12 (8)
+
+- feat(launcher): Donkey 菜单页采用 Drifter Console 设计语言
+  - `MENU_HTML` 完全重写为 DC 暗色仪表盘风格：背景 `#101318`、`system-ui` 字体、DC headerRow（h1 "Donkey" + version 副标题）、DC panel（`#171c24` bg + `#2b3441` border）、菜单项从 table 改为 DC state card（`linear-gradient` + `#344154` border）、分类标签用 DC 语义色 pill（管理=cyan, 数据=green, 驾驶=amber, 筛选=purple, 训练=red）、编号用 Consolas monospace cyan 徽章、DC reconnect overlay、DC dialog 风格帮助弹窗。
+  - `LAUNCH_DRIVE_HTML`：`<title>` 改为 "Donkey"，添加 favicon link。
+  - `do_GET` 新增 `/favicon.png` 路由 + `_serve_favicon()` 方法。
+  - 新增 `donkeycar/launcher/donkey_favicon.png`：使用 projects 原有头盔 PNG 图标（与 `287205692.png` 一致）。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/donkey_favicon.png`
+
 ## 2026-08-12 (7)
 
 - fix(web_ui): 修正滑块 thumb 尺寸为 12×12px 匹配原生渲染
