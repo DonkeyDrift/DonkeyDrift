@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-08-12 (10)
+
+- fix(web_ui): 滑块 thumb 宽度从 16px 缩至 14px（w-4 → w-3.5），高度/位置不变
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (9)
 
 - fix(web_ui): 滑块 thumb 改为 16×12px 椭圆形匹配 Safari 原生渲染
