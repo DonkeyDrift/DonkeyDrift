@@ -28,11 +28,11 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       onChange={(e) => onChange(Number(e.target.value))}
       className="w-full h-1.5 appearance-none cursor-pointer
         [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:bg-zinc-800 [&::-webkit-slider-runnable-track]:rounded-lg
-        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3
+        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3
         [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-none
         [&::-webkit-slider-thumb]:-mt-[3px] [&::-webkit-slider-thumb]:cursor-pointer
         [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:bg-zinc-800 [&::-moz-range-track]:rounded-lg
-        [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full
+        [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full
         [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer"
     />
   </div>
