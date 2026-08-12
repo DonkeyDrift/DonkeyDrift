@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-12 (9)
+
+- fix(web_ui): 滑块 thumb 改为 16×12px 椭圆形匹配 Safari 原生渲染
+  - PR #55 的 `w-3 h-3`（12×12px）是正圆形，且不加 margin 在 Safari 中位置不对。
+  - 用户浏览器（Safari/macOS）原生 thumb 是椭圆形（宽大于高），改为 `w-4 h-3`（16×12px）+ `rounded-full`（椭圆）+ `-mt-[3px]`（垂直居中：(12-6)/2=3px）。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (8)
 
 - feat(launcher): Donkey 菜单页采用 Drifter Console 设计语言
