@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-12 (6)
+
+- fix(web_ui): 修复滑块 thumb 无法遮挡轨道的问题（渲染层级分离）
+  - 问题根因：`bg-zinc-800` 直接画在 `<input>` 元素背景上，可能与原生 thumb 的渲染层级冲突，导致轨道穿透 thumb 显示。
+  - 将轨道样式从 input 背景移到 `::-webkit-slider-runnable-track` / `::-moz-range-track` 伪元素，确保轨道作为独立层绘制在 thumb 下方。
+  - thumb 使用自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb`：`w-3 h-2 rounded-full bg-white border-none -mt-px`（12×8px 椭圆形、垂直居中、纯白不透明），完全遮挡下方 6px 轨道。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (5)
 
 - fix(launcher): 菜单页检测 `#drive` hash 自动启动 DonkeyDrifter
