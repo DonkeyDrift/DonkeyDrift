@@ -350,6 +350,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_html()
+        elif path == "/favicon.png":
+            self._serve_favicon()
         elif path == "/launch/drive":
             self._serve_launch_drive_page()
         elif path == "/api/status":
@@ -382,6 +384,20 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_favicon(self):
+        """提供 Donkey favicon 图标。"""
+        favicon_path = Path(__file__).parent / "donkey_favicon.png"
+        if favicon_path.exists():
+            body = favicon_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def _serve_launch_drive_page(self):
         """提供启动 DonkeyDrifter 的跳转页面（GET /launch/drive）。
@@ -437,7 +453,8 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>启动 DonkeyDrifter</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>Donkey</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
 .box{text-align:center}
@@ -482,295 +499,179 @@ MENU_HTML = r"""<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Donkey Car 交互式管理终端</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <title>Donkey</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{
+            background:#101318;color:#e8edf2;
+            font-family:system-ui,sans-serif;
+            margin:12px;min-height:100vh;
         }
-        body {
-            background: #0d1117;
-            color: #e8edf2;
-            font-family: 'Courier New', 'Consolas', 'Monaco', monospace;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
+        .container{max-width:900px;margin:0 auto}
+
+        /* DC headerRow */
+        .headerRow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 10px}
+        .headerRow h1{font-size:22px;margin:0}
+        .version{color:#8fa1b5;font-size:12px;text-transform:uppercase;letter-spacing:.08em;display:inline-block;transform:translateY(-1px)}
+
+        /* DC panel */
+        .panel{background:#171c24;border:1px solid #2b3441;border-radius:8px;padding:10px}
+
+        /* DC section title */
+        .sectionTitle{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#d6deea;margin-bottom:8px}
+
+        /* DC label */
+        .label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8fa1b5}
+
+        /* CWD bar */
+        .cwdBar{background:#111820;border:1px solid #2b3441;border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+        .cwdBar .path{font-family:Consolas,monospace;color:#5cc8ff;font-size:13px;word-break:break-all}
+
+        /* Menu items as DC state cards */
+        .menuGrid{display:grid;gap:8px}
+        .menuItem{
+            background:linear-gradient(135deg,#1c2430,#121821);
+            border:1px solid #344154;border-radius:10px;padding:12px;
+            cursor:pointer;transition:.25s;
+            display:flex;align-items:center;gap:12px;
         }
-        .container {
-            width: 100%;
-            max-width: 900px;
-        }
-        /* 橙色头部面板 */
-        .header-panel {
-            background: linear-gradient(135deg, #f78166 0%, #e5534b 100%);
-            border-radius: 8px 8px 0 0;
-            padding: 20px 30px;
-            text-align: center;
-            border: 1px solid #f78166;
-            border-bottom: none;
-        }
-        .header-panel h1 {
-            font-size: 22px;
-            color: #fff;
-            font-weight: bold;
-            letter-spacing: 2px;
-        }
-        .header-panel .subtitle {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.8);
-            margin-top: 6px;
-        }
-        /* 当前目录显示 */
-        .cwd-display {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-top: none;
-            padding: 10px 30px;
-            font-size: 13px;
-            color: #8b949e;
-        }
-        .cwd-display .label {
-            color: #f78166;
-        }
-        .cwd-display .path {
-            color: #56d4dd;
-        }
-        /* 菜单表格 */
-        .menu-table {
-            width: 100%;
-            border-collapse: collapse;
-            border: 1px solid #ff00ff;
-            border-top: none;
-            border-radius: 0 0 8px 8px;
-            overflow: hidden;
-        }
-        .menu-table thead th {
-            background: rgba(255, 0, 255, 0.12);
-            color: #ff00ff;
-            padding: 10px 16px;
-            text-align: left;
-            font-size: 14px;
-            border-bottom: 1px solid rgba(255, 0, 255, 0.3);
-            font-weight: bold;
-        }
-        .menu-table tbody tr {
-            cursor: pointer;
-            transition: background 0.15s;
-            border-bottom: 1px solid #21262d;
-        }
-        .menu-table tbody tr:hover {
-            background: rgba(56, 212, 221, 0.08);
-        }
-        .menu-table tbody tr.selected {
-            background: rgba(56, 212, 221, 0.15);
-            border-left: 3px solid #56d4dd;
-        }
-        .menu-table td {
-            padding: 8px 16px;
-            font-size: 13px;
-        }
-        .col-no   { color: #56d4dd; width: 50px;  text-align: center; }
-        .col-cat  { color: #e3b341; width: 60px; }
-        .col-name { color: #7ee787; width: 180px; }
-        .col-name .favorite { color: #d2a8ff; }
-        .col-desc { color: #8b949e; }
-        /* 底部提示 */
-        .footer-hint {
-            margin-top: 16px;
-            text-align: center;
-            font-size: 13px;
-            color: #6e7681;
-        }
-        .footer-hint .key {
-            color: #f78166;
-            background: rgba(247, 129, 102, 0.1);
-            padding: 2px 8px;
-            border-radius: 3px;
-            margin: 0 2px;
-        }
-        /* 加载遮罩 */
-        .overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.85);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-        }
-        .overlay.active { display: flex; }
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid #30363d;
-            border-top-color: #f78166;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .overlay-text {
-            margin-top: 20px;
-            font-size: 16px;
-            color: #e8edf2;
-        }
-        .overlay-error {
-            margin-top: 12px;
-            font-size: 14px;
-            color: #f85149;
-            max-width: 500px;
-            text-align: center;
-        }
-        /* 帮助模态框 */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 1001;
-            justify-content: center;
-            align-items: center;
-        }
-        .modal.active { display: flex; }
-        .modal-content {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 30px;
-            max-width: 500px;
-            width: 90%;
-        }
-        .modal-content h2 {
-            color: #f78166;
-            font-size: 18px;
-            margin-bottom: 16px;
-        }
-        .modal-content p {
-            color: #e8edf2;
-            font-size: 13px;
-            line-height: 1.8;
-            margin-bottom: 8px;
-        }
-        .modal-content .close-btn {
-            margin-top: 20px;
-            padding: 8px 24px;
-            background: #f78166;
-            color: #fff;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            font-family: inherit;
-        }
-        .modal-content .close-btn:hover { background: #e5534b; }
+        .menuItem:hover{border-color:#5cc8ff;background:linear-gradient(135deg,#1c2430,#151f2a)}
+        .menuItem.selected{border-color:#5cc8ff;box-shadow:0 0 12px rgba(92,200,255,.2)}
+
+        /* Number badge (monospace cyan) */
+        .menuNo{flex:none;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font:800 16px Consolas,monospace;color:#5cc8ff;background:#0d1219;border:1px solid #2b3441;border-radius:8px}
+
+        /* Category pill (DC semantic colors) */
+        .catPill{flex:none;display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.05em}
+        .cat-manage{background:rgba(92,200,255,.12);color:#5cc8ff;border:1px solid rgba(92,200,255,.3)}
+        .cat-data{background:rgba(57,217,138,.12);color:#39d98a;border:1px solid rgba(57,217,138,.3)}
+        .cat-drive{background:rgba(255,204,102,.12);color:#ffcc66;border:1px solid rgba(255,204,102,.3)}
+        .cat-filter{background:rgba(217,107,255,.12);color:#d96bff;border:1px solid rgba(217,107,255,.3)}
+        .cat-train{background:rgba(255,107,107,.12);color:#ff6b6b;border:1px solid rgba(255,107,107,.3)}
+
+        /* Menu item content */
+        .menuContent{flex:1;min-width:0}
+        .menuName{font-size:15px;font-weight:700;color:#e8edf2}
+        .menuName .favorite{color:#d96bff;font-size:11px;margin-left:4px}
+        .menuDesc{font-size:12px;color:#8fa1b5;margin-top:2px}
+
+        /* Footer hint */
+        .footerHint{margin-top:12px;text-align:center;font-size:12px;color:#8fa1b5}
+        .footerHint .key{color:#5cc8ff;background:rgba(92,200,255,.1);padding:2px 8px;border-radius:999px;margin:0 2px;font-weight:700}
+
+        /* DC reconnect overlay */
+        .reconnectOverlay{position:fixed;inset:0;background:rgba(16,19,24,.88);display:none;align-items:center;justify-content:center;z-index:100}
+        .reconnectOverlay.show{display:flex}
+        .reconnectBox{text-align:center;color:#e8edf2}
+        .reconnectSpinner{width:48px;height:48px;border:4px solid #2b3441;border-top-color:#5cc8ff;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+        .reconnectText{font-size:16px;line-height:1.6}
+        .reconnectError{color:#ff6b6b;margin-top:8px;font-size:14px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+
+        /* DC dialog (help modal) */
+        .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,7,10,.72);z-index:10}
+        .modal.show{display:flex}
+        .dialog{width:min(420px,calc(100vw - 28px));background:linear-gradient(135deg,#1c2430,#121821);border:1px solid #ffcc66;border-radius:14px;padding:18px;box-shadow:0 18px 60px rgba(0,0,0,.45)}
+        .dialog h2{margin:0 0 8px;font-size:20px;color:#ffcc66}
+        .dialog p{color:#b7c6d8;font-size:14px;line-height:1.5;margin-bottom:6px}
+        .dialogActions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+        .dialogBtn{background:#5cc8ff;color:#061019;border:1px solid #5cc8ff;border-radius:999px;padding:6px 16px;font-weight:700;font-size:12px;cursor:pointer}
+        .dialogBtn:hover{background:#8bdcff}
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- 橙色头部面板 -->
-        <div class="header-panel">
-            <h1>Donkey Car 交互式管理终端</h1>
-            <div class="subtitle">DonkeyDrifter Web Launcher</div>
+        <div class="headerRow">
+            <h1>Donkey</h1>
+            <span class="version">DonkeyDrifter Web Launcher</span>
         </div>
 
-        <!-- 当前目录 -->
-        <div class="cwd-display">
-            <span class="label">当前目录:</span>
+        <div class="cwdBar">
+            <span class="label">CWD</span>
             <span class="path" id="cwd-path">{{CWD}}</span>
         </div>
 
-        <!-- 菜单表格 -->
-        <table class="menu-table" id="menu-table">
-            <thead>
-                <tr>
-                    <th class="col-no">No.</th>
-                    <th class="col-cat">分类</th>
-                    <th class="col-name">功能名称</th>
-                    <th class="col-desc">描述</th>
-                </tr>
-            </thead>
-            <tbody id="menu-body">
-            </tbody>
-        </table>
+        <div class="panel">
+            <div class="sectionTitle">菜单</div>
+            <div class="menuGrid" id="menu-grid"></div>
+        </div>
 
-        <!-- 底部提示 -->
-        <div class="footer-hint">
-            提示: 输入<span class="key">编号</span>选择功能，
-            输入 <span class="key">?</span> 显示帮助，
-            输入 <span class="key">0</span> 退出
+        <div class="footerHint">
+            输入<span class="key">编号</span>选择功能，<span class="key">?</span>帮助，<span class="key">0</span>退出
         </div>
     </div>
 
-    <!-- 加载遮罩 -->
-    <div class="overlay" id="overlay">
-        <div class="spinner"></div>
-        <div class="overlay-text" id="overlay-text">正在启动 DonkeyDrifter...</div>
-        <div class="overlay-error" id="overlay-error"></div>
+    <!-- DC reconnect overlay -->
+    <div class="reconnectOverlay" id="overlay">
+        <div class="reconnectBox">
+            <div class="reconnectSpinner"></div>
+            <div class="reconnectText" id="overlay-text">正在启动 DonkeyDrifter...</div>
+            <div class="reconnectError" id="overlay-error"></div>
+        </div>
     </div>
 
-    <!-- 帮助模态框 -->
+    <!-- DC dialog (help) -->
     <div class="modal" id="help-modal">
-        <div class="modal-content">
+        <div class="dialog">
             <h2>帮助</h2>
-            <p><span style="color:#56d4dd">数字键 1-10</span> — 选择对应菜单项</p>
-            <p><span style="color:#56d4dd">?</span> — 显示此帮助信息</p>
-            <p><span style="color:#56d4dd">0</span> — 返回上一页</p>
-            <p><span style="color:#56d4dd">ESC</span> — 关闭弹窗</p>
-            <p style="margin-top:12px;color:#8b949e;">
-                带 <span style="color:#d2a8ff">[*]</span> 标记的为常用功能。
-            </p>
-            <p style="color:#8b949e;">
-                目前仅支持通过浏览器启动「驾驶」功能 (选项 6)。
-            </p>
-            <button class="close-btn" onclick="hideHelp()">关闭</button>
+            <p><span style="color:#5cc8ff">数字键 1-10</span> 选择对应菜单项</p>
+            <p><span style="color:#5cc8ff">?</span> 显示此帮助信息</p>
+            <p><span style="color:#5cc8ff">0</span> 返回上一页</p>
+            <p><span style="color:#5cc8ff">ESC</span> 关闭弹窗</p>
+            <p style="margin-top:8px;color:#8fa1b5;">带 <span style="color:#d96bff">[*]</span> 标记的为常用功能</p>
+            <p style="color:#8fa1b5;">目前仅支持通过浏览器启动「驾驶」功能 (选项 6)</p>
+            <div class="dialogActions">
+                <button class="dialogBtn" onclick="hideHelp()">关闭</button>
+            </div>
         </div>
     </div>
 
     <script>
         // 菜单项数据（与 tui.py 保持一致）
         const menuItems = [
-            {no: 1,  category: "管理", name: "createcar",    desc: "创建新的 DonkeyCar 项目",                    favorite: true},
-            {no: 2,  category: "管理", name: "open",         desc: "打开已有 DonkeyCar 项目",                    favorite: false},
-            {no: 3,  category: "数据", name: "clear_data",   desc: "清空当前项目 data 目录",                     favorite: true},
-            {no: 4,  category: "数据", name: "backup_data",  desc: "备份当前项目 data 目录",                     favorite: false},
-            {no: 5,  category: "数据", name: "restore_data", desc: "从备份恢复 data 目录",                       favorite: false},
-            {no: 6,  category: "驾驶", name: "drive",        desc: "打开 Web Console 驾驶控制台",                 favorite: true},
-            {no: 7,  category: "筛选", name: "web",          desc: "启动 Web UI（前后端）",                      favorite: true},
-            {no: 8,  category: "筛选", name: "donkey_ui",    desc: "启动数据筛选工具（Windows下需要WSL来运行）", favorite: false},
-            {no: 9,  category: "训练", name: "train_local",  desc: "本地训练",                                    favorite: false},
-            {no: 10, category: "训练", name: "train_online", desc: "云端训练（train_online.conf）",              favorite: true},
+            {no: 1,  cat: "manage", catLabel: "管理", name: "createcar",    desc: "创建新的 DonkeyCar 项目",                    favorite: true},
+            {no: 2,  cat: "manage", catLabel: "管理", name: "open",         desc: "打开已有 DonkeyCar 项目",                    favorite: false},
+            {no: 3,  cat: "data",   catLabel: "数据", name: "clear_data",   desc: "清空当前项目 data 目录",                     favorite: true},
+            {no: 4,  cat: "data",   catLabel: "数据", name: "backup_data",  desc: "备份当前项目 data 目录",                     favorite: false},
+            {no: 5,  cat: "data",   catLabel: "数据", name: "restore_data", desc: "从备份恢复 data 目录",                       favorite: false},
+            {no: 6,  cat: "drive",  catLabel: "驾驶", name: "drive",        desc: "打开 Web Console 驾驶控制台",                 favorite: true},
+            {no: 7,  cat: "filter", catLabel: "筛选", name: "web",          desc: "启动 Web UI（前后端）",                      favorite: true},
+            {no: 8,  cat: "filter", catLabel: "筛选", name: "donkey_ui",    desc: "启动数据筛选工具（Windows下需要WSL来运行）", favorite: false},
+            {no: 9,  cat: "train",  catLabel: "训练", name: "train_local",  desc: "本地训练",                                    favorite: false},
+            {no: 10, cat: "train",  catLabel: "训练", name: "train_online", desc: "云端训练（train_online.conf）",              favorite: true},
         ];
 
         let selectedNo = null;
         let pendingDigit1 = null;
 
-        // 渲染菜单表格
+        // 渲染菜单（DC state card 风格）
         function renderMenu() {
-            const tbody = document.getElementById('menu-body');
-            tbody.innerHTML = '';
+            const grid = document.getElementById('menu-grid');
+            grid.innerHTML = '';
             menuItems.forEach(item => {
-                const tr = document.createElement('tr');
-                tr.dataset.no = item.no;
-                tr.onclick = () => selectItem(item.no);
+                const div = document.createElement('div');
+                div.className = 'menuItem';
+                div.dataset.no = item.no;
+                div.onclick = () => selectItem(item.no);
                 const favMark = item.favorite
                     ? ' <span class="favorite">[*]</span>' : '';
-                tr.innerHTML =
-                    '<td class="col-no">' + item.no + '</td>' +
-                    '<td class="col-cat">' + item.category + '</td>' +
-                    '<td class="col-name">' + item.name + favMark + '</td>' +
-                    '<td class="col-desc">' + item.desc + '</td>';
-                tbody.appendChild(tr);
+                div.innerHTML =
+                    '<div class="menuNo">' + item.no + '</div>' +
+                    '<div class="catPill cat-' + item.cat + '">' + item.catLabel + '</div>' +
+                    '<div class="menuContent">' +
+                        '<div class="menuName">' + item.name + favMark + '</div>' +
+                        '<div class="menuDesc">' + item.desc + '</div>' +
+                    '</div>';
+                grid.appendChild(div);
             });
         }
 
-        // 高亮选中行
+        // 高亮选中项
         function highlightRow(no) {
-            document.querySelectorAll('#menu-body tr').forEach(tr => {
-                tr.classList.toggle(
-                    'selected', parseInt(tr.dataset.no) === no
+            document.querySelectorAll('#menu-grid .menuItem').forEach(el => {
+                el.classList.toggle(
+                    'selected', parseInt(el.dataset.no) === no
                 );
             });
             selectedNo = no;
@@ -794,7 +695,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             const overlay = document.getElementById('overlay');
             const overlayText = document.getElementById('overlay-text');
             const overlayError = document.getElementById('overlay-error');
-            overlay.classList.add('active');
+            overlay.classList.add('show');
             overlayText.textContent = '正在启动 DonkeyDrifter...';
             overlayError.textContent = '';
 
@@ -806,36 +707,47 @@ MENU_HTML = r"""<!DOCTYPE html>
 
                 if (data.status === 'launched' ||
                     data.status === 'already_running') {
-                    // 替换 localhost 为实际主机名
-                    // （用户可能从其他设备访问）
                     const url = data.url.replace(
                         'localhost', window.location.hostname
                     );
-                    overlayText.textContent =
-                        '启动成功！正在打开 Web Console...';
-                    setTimeout(function() {
-                        // 在新标签页打开 Drive 页面，保留 Launcher 菜单
-                        var newTab = window.open(url, '_blank');
-                        // 若被弹窗拦截器阻止，回退到当前页跳转
-                        if (!newTab) {
-                            window.location.href = url;
-                        } else {
-                            overlay.classList.remove('active');
+                    // 轮询等待前端 vite 就绪后再跳转（最多 30 次 × 1s = 30s）
+                    var ready = false;
+                    for (var i = 0; i < 30; i++) {
+                        try {
+                            await fetch(url, {mode: 'no-cors'});
+                            ready = true;
+                            break;
+                        } catch (e) {
+                            overlayText.textContent =
+                                '正在启动 DonkeyDrifter... (' + (i + 1) + '/30)';
+                            await new Promise(function(res) {
+                                setTimeout(res, 1000);
+                            });
                         }
-                    }, 1500);
+                    }
+                    if (ready) {
+                        overlayText.textContent = '启动成功！正在跳转...';
+                        window.location.href = url;
+                    } else {
+                        overlayText.textContent =
+                            '前端服务启动较慢，正在跳转...';
+                        setTimeout(function() {
+                            window.location.href = url;
+                        }, 1000);
+                    }
                 } else if (data.status === 'error') {
                     overlayText.textContent = '启动失败';
                     overlayError.textContent =
                         data.error || '未知错误';
                     setTimeout(function() {
-                        overlay.classList.remove('active');
+                        overlay.classList.remove('show');
                     }, 3000);
                 }
             } catch (e) {
                 overlayText.textContent = '启动失败';
                 overlayError.textContent = '网络错误: ' + e.message;
                 setTimeout(function() {
-                    overlay.classList.remove('active');
+                    overlay.classList.remove('show');
                 }, 3000);
             }
         }
@@ -845,22 +757,22 @@ MENU_HTML = r"""<!DOCTYPE html>
             const overlay = document.getElementById('overlay');
             const overlayText = document.getElementById('overlay-text');
             const overlayError = document.getElementById('overlay-error');
-            overlay.classList.add('active');
+            overlay.classList.add('show');
             overlayText.textContent = '';
             overlayError.textContent = msg;
             setTimeout(function() {
-                overlay.classList.remove('active');
+                overlay.classList.remove('show');
             }, 2500);
         }
 
-        // 帮助模态框
+        // 帮助弹窗
         function showHelp() {
             document.getElementById('help-modal')
-                .classList.add('active');
+                .classList.add('show');
         }
         function hideHelp() {
             document.getElementById('help-modal')
-                .classList.remove('active');
+                .classList.remove('show');
         }
 
         // 键盘事件
@@ -871,13 +783,13 @@ MENU_HTML = r"""<!DOCTYPE html>
             if (key === 'Escape') {
                 hideHelp();
                 document.getElementById('overlay')
-                    .classList.remove('active');
+                    .classList.remove('show');
                 return;
             }
 
             // 帮助弹窗打开时，仅响应 ? 和 0 关闭
             if (document.getElementById('help-modal')
-                .classList.contains('active')) {
+                .classList.contains('show')) {
                 if (key === '?' || key === '0') {
                     hideHelp();
                 }
@@ -886,7 +798,7 @@ MENU_HTML = r"""<!DOCTYPE html>
 
             // 遮罩打开时不处理菜单导航
             if (document.getElementById('overlay')
-                .classList.contains('active')) {
+                .classList.contains('show')) {
                 return;
             }
 
@@ -898,7 +810,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                     selectItem(10);
                     return;
                 }
-                // 非 0 则继续正常处理
             }
 
             if (key === '1') {
@@ -911,7 +822,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             } else if (key >= '2' && key <= '9') {
                 selectItem(parseInt(key));
             } else if (key === '0') {
-                // 返回上一页
                 if (document.referrer) {
                     history.back();
                 } else {
@@ -939,6 +849,10 @@ MENU_HTML = r"""<!DOCTYPE html>
         // 初始化
         renderMenu();
         fetchStatus();
+        // 检测 #drive hash 自动启动 DonkeyDrifter
+        if (location.hash === '#drive') {
+            launchDrive();
+        }
     </script>
 </body>
 </html>"""

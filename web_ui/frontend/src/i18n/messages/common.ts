@@ -42,6 +42,13 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.sidePanel.connectors': 'Connectors',
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrift on GitHub',
+    // EnterButtons
+    'common.enterButtons.donkey': '进入 Donkey',
+    'common.enterButtons.drifterConsole': '进入 DrifterConsole',
+    'common.enterButtons.donkeyTitle': '打开 Donkey Launcher',
+    'common.enterButtons.drifterConsoleTitle': '打开 ESP32 Drifter Console',
+    'common.enterButtons.scanning': '扫描中…',
+    'common.enterButtons.consoleNotFound': '未在局域网中发现 Drifter Console 设备',
     // services/api.ts
     'common.unknownError': '未知错误',
     'common.cannotConnectBackend': '无法连接后端服务，请确认已执行 donkey web 并且后端端口可访问',
@@ -87,6 +94,13 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.sidePanel.connectors': 'Connectors',
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrift on GitHub',
+    // EnterButtons
+    'common.enterButtons.donkey': 'Enter Donkey',
+    'common.enterButtons.drifterConsole': 'Enter DrifterConsole',
+    'common.enterButtons.donkeyTitle': 'Open Donkey Launcher',
+    'common.enterButtons.drifterConsoleTitle': 'Open ESP32 Drifter Console',
+    'common.enterButtons.scanning': 'Scanning…',
+    'common.enterButtons.consoleNotFound': 'No Drifter Console device found on the LAN',
     // services/api.ts
     'common.unknownError': 'Unknown error',
     'common.cannotConnectBackend': 'Cannot connect to the backend service. Please make sure donkey web is running and the backend port is accessible.',

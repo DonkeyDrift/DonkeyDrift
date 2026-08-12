@@ -1,5 +1,27 @@
 # 变更日志
 
+## 2026-08-12 (5)
+
+- fix(launcher): 菜单页检测 `#drive` hash 自动启动 DonkeyDrifter
+  - Drifter Console 固件 v1.7.62 起，"进入 DonkeyDrifter"按钮改为 `<a href="http://<ip>:8090/#drive" target="_blank">`，与"进入 Donkey"使用相同的 `/` 路径（仅 hash 不同），规避 Safari 无法加载 `/launch/drive` 的问题。
+  - `donkeycar/launcher/server.py`：`MENU_HTML` 初始化代码检测 `location.hash === '#drive'`，自动调用 `launchDrive()` 启动驾驶。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+- feat(web_ui): 添加进入 Donkey 和进入 DrifterConsole 按钮
+  - 新增 `EnterButtons` 组件，样式与 Drifter Console 的 otaButton 一致。
+  - 进入 Donkey：打开 `http://<host>:8090/` Launcher。
+  - 进入 DrifterConsole：扫描局域网 ESP32 设备并打开 Web Console。
+  - 后端新增 `/connector/discover_console` 端点。
+  - 布局：GitHub 图标右侧、语言切换键左侧。
+  - 涉及文件：`web_ui/frontend/src/components/EnterButtons.tsx`、`EnterButtons.test.tsx`、`Layout.tsx`、`i18n/messages/common.ts`、`services/api.ts`、`web_ui/backend/routers/connector.py`、`web_ui/backend/tests/test_connector.py`
+
+- feat(launcher): Donkey 菜单页采用 Drifter Console 设计语言
+  - `MENU_HTML` 完全重写为 DC 暗色仪表盘风格：DC panel + state card 菜单项 + 语义色 pill 分类标签 + DC reconnect overlay + DC dialog 帮助弹窗。
+  - `LAUNCH_DRIVE_HTML`：title 改为 Donkey，添加 favicon link。
+  - `do_GET` 新增 `/favicon.png` 路由 + `_serve_favicon()` 方法。
+  - 新增 `donkey_favicon.png`（200×200 cyan D 图标）。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/donkey_favicon.png`
+
 ## 2026-08-12 (4)
 
 - fix(web_ui): 控制参数滑块拖拽点改为纯白色（仅改颜色，不改形状）

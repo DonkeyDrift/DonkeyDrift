@@ -30,6 +30,7 @@ def test_main_registers_connector_router():
     assert "/api/connector/status" in routes
     assert "/api/connector/local_ips" in routes
     assert "/api/connector/discover" in routes
+    assert "/api/connector/discover_console" in routes
 
 
 def test_config_round_trip(monkeypatch, tmp_path):
@@ -433,3 +434,34 @@ def test_discover_endpoint_empty_result(monkeypatch, tmp_path):
     assert data["status"] is True
     assert data["count"] == 0
     assert "未在局域网中发现开放 SSH 端口的主机" in data["message"]
+
+def test_discover_console_endpoint_finds_console(monkeypatch, tmp_path):
+    client, connector = make_client(monkeypatch, tmp_path)
+    async def fake_discover_hosts(port, timeout=0.4, max_concurrent=64):
+        return [{"ip": "192.168.3.46", "port": port, "latency_ms": 1.2, "reachable": True}], 256
+    async def fake_check(ip):
+        if ip == "192.168.3.46":
+            return {"ip": ip, "port": 80, "reachable": True}
+        return None
+    monkeypatch.setattr(connector, "discover_hosts", fake_discover_hosts)
+    monkeypatch.setattr(connector, "_check_drifter_console", fake_check)
+    response = client.post("/api/connector/discover_console")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] is True
+    assert data["count"] == 1
+    assert data["found"][0]["ip"] == "192.168.3.46"
+
+
+def test_discover_console_endpoint_empty(monkeypatch, tmp_path):
+    client, connector = make_client(monkeypatch, tmp_path)
+    async def fake_discover_hosts(port, timeout=0.4, max_concurrent=64):
+        return [], 256
+    async def fake_check(ip):
+        return None
+    monkeypatch.setattr(connector, "discover_hosts", fake_discover_hosts)
+    monkeypatch.setattr(connector, "_check_drifter_console", fake_check)
+    response = client.post("/api/connector/discover_console")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 0
