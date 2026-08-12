@@ -849,6 +849,10 @@ MENU_HTML = r"""<!DOCTYPE html>
         // 初始化
         renderMenu();
         fetchStatus();
+        // 检测 #drive hash 自动启动 DonkeyDrifter
+        if (location.hash === '#drive') {
+            launchDrive();
+        }
     </script>
 </body>
 </html>"""
