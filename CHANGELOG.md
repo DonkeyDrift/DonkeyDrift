@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-12 (13)
+
+- fix(web_ui): 滑块 thumb 改为 14×12px 纯白椭圆并精确垂直居中于轨道
+  - 根因（实测验证）：WebKit/Blink 在轨道被自定义样式后，将原生 thumb 的**顶边对齐轨道顶边**，导致 thumb 中心比轨道中心低 (thumb高−轨道高)/2（Chromium 实测偏下 4.9px，WebKit 实测偏下 6.9px），上一版仅靠 `h-3` + 轨道 `mt-[3px]` 无法修正。
+  - 修复：thumb 用自定义样式 `w-[14px] h-[12px] bg-white rounded-full border-none`（横向椭圆，与 Safari/macOS 原生 thumb 形状一致，纯白不透明完全遮挡轨道），居中 margin 按公式计算：`margin-top = (轨道高 6px − thumb 高 12px) / 2 = -3px`，非试凑值。
+  - 验证：Playwright Chromium + WebKit 双引擎截图像素级测量，thumb 中心与轨道中心偏差均为 0.0px；`npm run build` 与 `vitest`（13 文件 61 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (12)
 
 - fix(web_ui): 滑块 thumb 垂直居中于轨道
