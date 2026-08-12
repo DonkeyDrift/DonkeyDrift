@@ -22,6 +22,21 @@
   - 新增 `donkey_favicon.png`（200×200 cyan D 图标）。
   - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/donkey_favicon.png`
 
+## 2026-08-12 (4)
+
+- fix(web_ui): 控制参数滑块拖拽点改为纯白色（仅改颜色，不改形状）
+  - 移除 PR #47 添加的全部自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb` 样式（改变了原生椭圆形），改为 `accent-white`：浏览器原生渲染形状完全不变，仅将 accent-color 从 `#5cc8ff`（MUS4 主题覆写后的 accent-cyan-500）改为 `#ffffff` 纯白。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
+## 2026-08-12 (3)
+
+- fix(web_ui): 控制参数滑块拖拽点改为纯白不透明椭圆形
+  - 上一版（#45）恢复 `accent-cyan-500` 浏览器原生渲染后，原生 thumb 仍透出下方深色轨道。
+  - 本次使用自定义 `::-webkit-slider-thumb` / `::-moz-range-thumb` 样式：`w-3.5 h-3 rounded-full bg-white`，椭圆形（14×12px）、垂直居中（无 `-mt-1` 偏移）、纯白不透明，完全遮挡下方轨道。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
+## 2026-08-12 (2)
+
 - fix(launcher): `/launch/drive` 跳转页等待 vite 就绪后再重定向
   - 背景：POST `/api/launch/drive` 启动 `donkey web`（vite 开发服务器）时会先杀旧进程再启新进程，POST 立即返回后页面立即重定向到端口 5188，但新 vite 需数秒才就绪，导致 Safari 显示"无法连接服务器"。
   - `donkeycar/launcher/server.py`：`LAUNCH_DRIVE_HTML` 的 JS 改为先轮询前端 URL（`fetch` + `mode:'no-cors'`，最多 30 次 × 1s = 30s），就绪后再 `window.location.href` 跳转；等待期间显示进度计数器 `(N/30)`。

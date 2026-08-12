@@ -26,7 +26,7 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       step={step}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white"
     />
   </div>
 );
