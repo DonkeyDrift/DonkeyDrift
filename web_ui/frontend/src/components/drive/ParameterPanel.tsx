@@ -19,6 +19,8 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       <span className="text-xs text-zinc-400">{label}</span>
       <span className="text-xs text-zinc-500">{value.toFixed(step < 0.01 ? 3 : 2)}{unit}</span>
     </div>
+    {/* thumb 垂直居中公式：margin-top = (轨道高 6px − thumb 高 12px) / 2 = −3px，
+        解决 WebKit/Blink 将 thumb 顶边对齐轨道顶边导致的偏下问题 */}
     <input
       type="range"
       min={min}
@@ -28,7 +30,9 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       onChange={(e) => onChange(Number(e.target.value))}
       className="w-full h-3 appearance-none cursor-pointer accent-white
         [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:bg-zinc-800 [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-runnable-track]:mt-[3px]
-        [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:bg-zinc-800 [&::-moz-range-track]:rounded-lg"
+        [&::-webkit-slider-thumb]:[-webkit-appearance:none] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-[14px] [&::-webkit-slider-thumb]:h-[12px] [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-none [&::-webkit-slider-thumb]:-mt-[3px]
+        [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:bg-zinc-800 [&::-moz-range-track]:rounded-lg
+        [&::-moz-range-thumb]:w-[14px] [&::-moz-range-thumb]:h-[12px] [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none"
     />
   </div>
 );
