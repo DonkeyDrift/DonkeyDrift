@@ -5,6 +5,7 @@ import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
 import { VersionBadge } from './VersionBadge';
 import { EnterButtons } from './EnterButtons';
+import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -53,6 +54,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <VersionBadge />
             <GitHubLink />
             <EnterButtons />
+            <ThemeSwitcher />
             <LanguageSwitcher />
           </div>
         </div>
