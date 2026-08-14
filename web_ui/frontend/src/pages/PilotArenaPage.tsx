@@ -83,8 +83,8 @@ const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
 
 /**
  * canvas 绘制线 / chart.js 数据系列的 JS 配色,深色值即现状;
- * 浅色值对标 theme-light.css 的“墨色”板(同色相、降明度):
- * 绿→#1a8952、蓝→#0280bd、黄绿→琥珀 #a87900、浅蓝→实色蓝 #5cc8ff。
+ * 浅色值对标 theme-light.css 色板(同色相、保饱和、适度降明度):
+ * 绿→#0ea35e、蓝→#0f96d6、黄绿→琥珀 #a87900、浅蓝→深蓝 #0a6f9e。
  */
 const ARENA_SERIES_COLORS = {
   dark: {
@@ -96,10 +96,10 @@ const ARENA_SERIES_COLORS = {
     ticks: '#a1a1aa',
   },
   light: {
-    user: '#1a8952',
-    pilot: '#0280bd',
+    user: '#0ea35e',
+    pilot: '#0f96d6',
     userThrottle: '#a87900',
-    pilotThrottle: '#5cc8ff',
+    pilotThrottle: '#0a6f9e',
     legend: '#42546a',
     ticks: '#5f7185',
   },

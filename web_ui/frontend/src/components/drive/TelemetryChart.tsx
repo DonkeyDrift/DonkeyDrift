@@ -54,8 +54,8 @@ const curveColor = (c: CurveConfig, theme: ResolvedTheme): string =>
 
 /** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
 const CURVES: CurveConfig[] = [
-  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1a8952', key: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0280bd', key: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#0ea35e', key: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0f96d6', key: 'steering', defaultOn: true },
   { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e03131', key: 'gz', defaultOn: true, scale: 0.2 },
   { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
   { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', defaultOn: true },

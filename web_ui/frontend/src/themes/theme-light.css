@@ -2,7 +2,7 @@
  * MUS4 Light — DonkeyDrifter Web UI 浅色皮肤,与深色皮肤 theme-mus4.css
  * 同源同构:同一份 ESP32 Drifter Console 设计语言(Design source:
  * Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h),
- * 仅把色板翻转到浅色背景上。
+ * 色板翻转到浅色背景,但保留原主题的颜色身份。
  *
  * 主题切换:`theme-light` class 由 ThemeSwitcher / src/lib/theme.ts 写到
  * <html> 上(与 `theme-mus4` 互斥),index.html 内联脚本负责首屏前应用。
@@ -15,20 +15,20 @@
  * Layout-affecting properties (display/position/flex/grid/order/width/
  * height/margin/padding/top/right/bottom/left/float/...) are forbidden.
  *
- * 浅色化原则(与深色皮肤逐 token 对标):
- * - 中性面:页面 #e9edf3 略深于面板,面板用 135deg 渐变 #ffffff→#edf1f6
- *   (对标深色 #1c2430→#121821) + 1px outline 细框 #c8d2df;凹槽/输入框
- *   比面板略暗(#edf1f6),凸起控件(滑轨/摇杆槽)用 #dfe6ef。
- * - FILL 语言不变:选中/激活控件仍用 ESP32 实色填充(蓝 #5cc8ff /
- *   绿 #39d98a / 红 #ff6b6b) + 近黑文字 #061019 + 加粗;hover 在浅色下
- *   改为加深(蓝 #3eb6f0 / 红 #f25454),与深色的变亮(#8bdcff)镜像。
- * - FRAME 语言不变:绿=正常/开、琥珀=过渡/警告、红=锁定/危险、
- *   灰 #a4b3c4 = 关/断开;驾驶模式仍映射 手动=绿、半自动=琥珀、
- *   全自动=蓝。
- * - 文字/细线/状态文字换成“墨色”版本(同色相、降明度):主文字
- *   #1c2733,次级 #42546a / #5f7185,占位 #7c8da0,禁用 #98a6b7;
- *   强调文字蓝 #0280bd、绿 #1a8952、琥珀 #a87900、红 #e03131;
- *   状态薄底用对应墨色的低透明度,细框用同墨色中透明度。
+ * 浅色化原则(v2,按用户反馈"太亮/太 white/丢了标志性颜色"调整):
+ * - 中性面整体压暗为蓝灰“雾面”浅色(页面 #c4cdd9、面板渐变
+ *   #e2e8f1→#d6dee9,不用纯白),与深色 #101318/#171c24 的蓝灰血统一致;
+ *   凹槽 #cfd7e2 略暗于面板,凸起控件 #eaeef5 略亮于面板。
+ * - 保留 ESP32 原色:FILL 填充、状态薄底、状态细框、辉光均直接使用
+ *   原主题的蓝 #5cc8ff / 绿 #39d98a / 琥珀 #ffcc66 / 红 #ff6b6b
+ *   (薄底=原色低透明度),让浅色 UI 一眼仍是同一套配色。
+ * - 文字与功能性描边用同色相的饱和中间色(保证浅底可读):
+ *   蓝 #0f96d6、绿 #0ea35e、琥珀 #a87900、红 #e03131;主文字
+ *   #1c2733,次级 #42546a / #5f7185,占位 #7c8da0,禁用 #98a6b7。
+ * - FILL 语言:选中/激活控件实色填充 + 近黑文字 #061019 + 加粗;
+ *   hover 在浅色下加深(蓝 #3eb6f0 / 红 #f25454),镜像深色的变亮。
+ * - FRAME 语言:绿=正常/开、琥珀=过渡/警告、红=锁定/危险、
+ *   灰 #93a2b4 = 关/断开;驾驶模式 手动=绿、半自动=琥珀、全自动=蓝。
  */
 
 html.theme-light {
@@ -38,70 +38,70 @@ html.theme-light {
 /* ---------- Surfaces ---------- */
 /* page background / deepest wells */
 html.theme-light .bg-zinc-950 {
-  background-color: #e9edf3;
+  background-color: #c4cdd9;
 }
 html.theme-light .bg-zinc-950\/80 {
-  background-color: rgba(233, 237, 243, 0.8);
+  background-color: rgba(196, 205, 217, 0.8);
 }
 /* panels / cards */
 html.theme-light .bg-zinc-900 {
-  background-color: #fbfcfe;
+  background-color: #dde4ee;
 }
 html.theme-light .bg-zinc-900\/35 {
-  background-color: rgba(251, 252, 254, 0.4);
+  background-color: rgba(226, 232, 241, 0.4);
 }
 html.theme-light .bg-zinc-900\/50,
 html.theme-light .supports-\[backdrop-filter\]\:bg-zinc-900\/50 {
-  background-color: rgba(251, 252, 254, 0.72);
+  background-color: rgba(226, 232, 241, 0.72);
 }
 html.theme-light .bg-zinc-900\/70 {
-  background-color: rgba(251, 252, 254, 0.8);
+  background-color: rgba(226, 232, 241, 0.8);
 }
 html.theme-light .bg-zinc-900\/90 {
-  background-color: rgba(251, 252, 254, 0.93);
+  background-color: rgba(226, 232, 241, 0.93);
 }
 html.theme-light .bg-zinc-900\/95 {
-  background-color: rgba(251, 252, 254, 0.96);
+  background-color: rgba(226, 232, 241, 0.96);
 }
 /* inner cards / inputs */
 html.theme-light .bg-zinc-800,
 html.theme-light .disabled\:bg-zinc-800:disabled {
-  background-color: #edf1f6;
+  background-color: #cfd7e2;
 }
 html.theme-light .bg-zinc-800\/50 {
-  background-color: rgba(237, 241, 246, 0.55);
+  background-color: rgba(207, 215, 226, 0.55);
 }
 html.theme-light .bg-zinc-800\/80 {
-  background-color: rgba(237, 241, 246, 0.85);
+  background-color: rgba(207, 215, 226, 0.85);
 }
 /* raised controls (slider tracks, joystick well) */
 html.theme-light .bg-zinc-700 {
-  background-color: #dfe6ef;
+  background-color: #eaeef5;
 }
 html.theme-light .bg-zinc-600 {
-  background-color: #d1dbe7;
+  background-color: #f0f3f8;
 }
 html.theme-light .bg-zinc-500 {
-  background-color: #c0cddb;
+  background-color: #f5f8fb;
 }
 html.theme-light .hover\:bg-zinc-800:hover {
-  background-color: #e2e9f1;
+  background-color: #c5cfdb;
 }
 html.theme-light .hover\:bg-zinc-800\/50:hover {
-  background-color: rgba(226, 233, 241, 0.55);
+  background-color: rgba(197, 207, 219, 0.55);
 }
 html.theme-light .hover\:bg-zinc-700:hover {
-  background-color: #d5dfea;
+  background-color: #dfe5ee;
 }
 html.theme-light .active\:bg-zinc-900:active {
-  background-color: #f0f4f8;
+  background-color: #d9e0ea;
 }
 /* toggle knob (ESP32 .slider:before is pure white) */
 html.theme-light .bg-white {
   background-color: #ffffff;
 }
 
-/* ---------- Accent (Drifter Console blue) ---------- */
+/* ---------- Accent (Drifter Console blue, original #5cc8ff kept) ---------- */
 html.theme-light .bg-cyan-600,
 html.theme-light .bg-cyan-500 {
   background-color: #5cc8ff;
@@ -115,23 +115,23 @@ html.theme-light .bg-cyan-500.text-white {
   color: #061019;
 }
 html.theme-light .bg-cyan-500\/50 {
-  background-color: rgba(2, 128, 189, 0.3);
+  background-color: rgba(92, 200, 255, 0.4);
 }
 html.theme-light .bg-cyan-500\/20,
 html.theme-light .bg-cyan-600\/20 {
-  background-color: rgba(2, 128, 189, 0.1);
+  background-color: rgba(92, 200, 255, 0.25);
 }
 html.theme-light .hover\:bg-cyan-500\/30:hover {
-  background-color: rgba(2, 128, 189, 0.16);
+  background-color: rgba(92, 200, 255, 0.35);
 }
 html.theme-light .bg-cyan-950 {
-  background-color: #dff1fc;
+  background-color: #c4e7fa;
 }
 html.theme-light .bg-cyan-950\/30 {
-  background-color: rgba(2, 128, 189, 0.06);
+  background-color: rgba(92, 200, 255, 0.18);
 }
 
-/* ---------- Semantic surfaces (red #e03131 / green #1a8952 / amber #a87900 inks) ---------- */
+/* ---------- Semantic surfaces (original red/green/amber tints kept) ---------- */
 html.theme-light .bg-red-600,
 html.theme-light .bg-red-500 {
   background-color: #ff6b6b;
@@ -140,20 +140,20 @@ html.theme-light .hover\:bg-red-700:hover {
   background-color: #f25454;
 }
 html.theme-light .bg-red-500\/40 {
-  background-color: rgba(224, 49, 49, 0.32);
+  background-color: rgba(255, 107, 107, 0.35);
 }
 html.theme-light .bg-red-500\/20 {
-  background-color: rgba(224, 49, 49, 0.14);
+  background-color: rgba(255, 107, 107, 0.2);
 }
 html.theme-light .hover\:bg-red-500\/30:hover {
-  background-color: rgba(224, 49, 49, 0.22);
+  background-color: rgba(255, 107, 107, 0.28);
 }
 html.theme-light .bg-red-900\/50,
 html.theme-light .bg-red-950\/90 {
-  background-color: rgba(224, 49, 49, 0.09);
+  background-color: rgba(255, 107, 107, 0.18);
 }
 html.theme-light .bg-red-950\/60 {
-  background-color: rgba(224, 49, 49, 0.07);
+  background-color: rgba(255, 107, 107, 0.14);
 }
 html.theme-light .bg-emerald-600,
 html.theme-light .bg-emerald-500,
@@ -161,29 +161,29 @@ html.theme-light .bg-emerald-400 {
   background-color: #39d98a;
 }
 html.theme-light .bg-emerald-500\/25 {
-  background-color: rgba(26, 137, 82, 0.2);
+  background-color: rgba(57, 217, 138, 0.28);
 }
 html.theme-light .bg-emerald-400\/10 {
-  background-color: rgba(26, 137, 82, 0.09);
+  background-color: rgba(57, 217, 138, 0.15);
 }
 html.theme-light .bg-emerald-950\/90 {
-  background-color: rgba(26, 137, 82, 0.1);
+  background-color: rgba(57, 217, 138, 0.18);
 }
 html.theme-light .bg-amber-950\/40 {
-  background-color: rgba(168, 121, 0, 0.1);
+  background-color: rgba(255, 204, 102, 0.25);
 }
 html.theme-light .bg-amber-400\/10 {
-  background-color: rgba(168, 121, 0, 0.08);
+  background-color: rgba(255, 204, 102, 0.18);
 }
 
 /* ---------- Panel frames (ESP32 .stateCard look, light edition) ---------- */
 /* diagonal gradient face, same as the Drifter Console state cards */
 html.theme-light .bg-zinc-900 {
-  background-image: linear-gradient(135deg, #ffffff, #edf1f6);
+  background-image: linear-gradient(135deg, #e2e8f1, #d6dee9);
 }
 /* every panel/card gets a visible hairline frame */
 html.theme-light .bg-zinc-900 {
-  outline: 1px solid #c8d2df;
+  outline: 1px solid #a6b4c6;
   outline-offset: -1px;
 }
 html.theme-light .bg-zinc-900\/35,
@@ -191,17 +191,17 @@ html.theme-light .bg-zinc-900\/50,
 html.theme-light .supports-\[backdrop-filter\]\:bg-zinc-900\/50,
 html.theme-light .bg-zinc-900\/90,
 html.theme-light .bg-zinc-900\/95 {
-  outline: 1px solid rgba(200, 210, 223, 0.9);
+  outline: 1px solid rgba(166, 180, 198, 0.9);
   outline-offset: -1px;
 }
 html.theme-light .bg-zinc-800,
 html.theme-light .disabled\:bg-zinc-800:disabled {
-  outline: 1px solid #dce3ec;
+  outline: 1px solid #b4c1d1;
   outline-offset: -1px;
 }
 html.theme-light .bg-zinc-800\/50,
 html.theme-light .bg-zinc-800\/80 {
-  outline: 1px solid rgba(220, 227, 236, 0.9);
+  outline: 1px solid rgba(180, 193, 209, 0.9);
   outline-offset: -1px;
 }
 
@@ -212,7 +212,7 @@ html.theme-light .bg-emerald-400,
 html.theme-light .bg-emerald-500\/25,
 html.theme-light .bg-emerald-400\/10,
 html.theme-light .bg-emerald-950\/90 {
-  outline: 1px solid rgba(26, 137, 82, 0.45);
+  outline: 1px solid rgba(57, 217, 138, 0.65);
   outline-offset: -1px;
 }
 html.theme-light .bg-red-600,
@@ -222,19 +222,19 @@ html.theme-light .bg-red-500\/20,
 html.theme-light .bg-red-900\/50,
 html.theme-light .bg-red-950\/90,
 html.theme-light .bg-red-950\/60 {
-  outline: 1px solid rgba(224, 49, 49, 0.45);
+  outline: 1px solid rgba(255, 107, 107, 0.6);
   outline-offset: -1px;
 }
 html.theme-light .bg-cyan-500\/20,
 html.theme-light .bg-cyan-600\/20,
 html.theme-light .bg-cyan-950,
 html.theme-light .bg-cyan-950\/30 {
-  outline: 1px solid rgba(2, 128, 189, 0.35);
+  outline: 1px solid rgba(92, 200, 255, 0.6);
   outline-offset: -1px;
 }
 html.theme-light .bg-amber-950\/40,
 html.theme-light .bg-amber-400\/10 {
-  outline: 1px solid rgba(168, 121, 0, 0.4);
+  outline: 1px solid rgba(217, 164, 41, 0.6);
   outline-offset: -1px;
 }
 
@@ -267,22 +267,22 @@ html.theme-light .hover\:text-white:hover {
   color: #000000;
 }
 
-/* accent text */
+/* accent text (saturated mid-tone of #5cc8ff) */
 html.theme-light .text-cyan-400,
 html.theme-light .text-cyan-500,
 html.theme-light .text-cyan-600,
 html.theme-light .text-blue-400 {
-  color: #0280bd;
+  color: #0f96d6;
 }
 html.theme-light .text-cyan-200 {
-  color: #046795;
+  color: #0a6f9e;
 }
 html.theme-light .hover\:text-cyan-400:hover,
 html.theme-light .group-hover\:text-cyan-400 {
-  color: #026a9e;
+  color: #0a6f9e;
 }
 
-/* semantic text */
+/* semantic text (saturated mid-tones of the original state colors) */
 html.theme-light .text-red-400,
 html.theme-light .text-red-500 {
   color: #e03131;
@@ -301,10 +301,10 @@ html.theme-light .placeholder\:text-red-300\/70::placeholder {
 }
 html.theme-light .text-emerald-400,
 html.theme-light .text-green-400 {
-  color: #1a8952;
+  color: #0ea35e;
 }
 html.theme-light .hover\:text-emerald-400:hover {
-  color: #147a48;
+  color: #0a7042;
 }
 html.theme-light .text-amber-400,
 html.theme-light .text-yellow-400,
@@ -321,85 +321,85 @@ html.theme-light .text-amber-100 {
 
 /* ---------- Borders ---------- */
 html.theme-light .border-zinc-800 {
-  border-color: #d9e1ea;
+  border-color: #b9c5d4;
 }
 html.theme-light .border-zinc-700 {
-  border-color: #c6d1de;
+  border-color: #a8b7c8;
 }
 html.theme-light .border-zinc-800\/50 {
-  border-color: rgba(133, 150, 170, 0.3);
+  border-color: rgba(90, 110, 135, 0.3);
 }
 html.theme-light .border-zinc-700\/50 {
-  border-color: rgba(133, 150, 170, 0.4);
+  border-color: rgba(90, 110, 135, 0.4);
 }
 html.theme-light .border-zinc-800\/60 {
-  border-color: rgba(133, 150, 170, 0.35);
+  border-color: rgba(90, 110, 135, 0.35);
 }
 html.theme-light .border-zinc-600 {
-  border-color: #aebdce;
+  border-color: #93a4b8;
 }
 html.theme-light .border-white\/10 {
-  border-color: #c6d1de;
+  border-color: #a8b7c8;
 }
 html.theme-light .border-cyan-500,
 html.theme-light .focus\:border-cyan-600:focus {
-  border-color: #0280bd;
+  border-color: #0f96d6;
 }
 html.theme-light .border-cyan-500\/50 {
-  border-color: rgba(2, 128, 189, 0.45);
+  border-color: rgba(15, 150, 214, 0.45);
 }
 html.theme-light .border-cyan-500\/60 {
-  border-color: rgba(2, 128, 189, 0.5);
+  border-color: rgba(15, 150, 214, 0.5);
 }
 html.theme-light .border-cyan-800\/60 {
-  border-color: rgba(2, 128, 189, 0.3);
+  border-color: rgba(15, 150, 214, 0.3);
 }
 html.theme-light .border-red-500 {
   border-color: #e03131;
 }
 html.theme-light .border-red-800 {
-  border-color: rgba(224, 49, 49, 0.4);
+  border-color: rgba(255, 107, 107, 0.5);
 }
 html.theme-light .border-red-700\/50 {
-  border-color: rgba(224, 49, 49, 0.35);
+  border-color: rgba(255, 107, 107, 0.4);
 }
 html.theme-light .border-red-700,
 html.theme-light .border-red-400 {
-  border-color: rgba(224, 49, 49, 0.5);
+  border-color: rgba(255, 107, 107, 0.6);
 }
 html.theme-light .border-red-500\/50 {
-  border-color: rgba(224, 49, 49, 0.45);
+  border-color: rgba(255, 107, 107, 0.45);
 }
 html.theme-light .border-red-500\/60,
 html.theme-light .border-red-400\/60 {
-  border-color: rgba(224, 49, 49, 0.5);
+  border-color: rgba(255, 107, 107, 0.6);
 }
 html.theme-light .border-emerald-500,
 html.theme-light .border-emerald-400 {
-  border-color: rgba(26, 137, 82, 0.55);
+  border-color: rgba(57, 217, 138, 0.65);
 }
 html.theme-light .border-emerald-400\/70 {
-  border-color: rgba(26, 137, 82, 0.6);
+  border-color: rgba(57, 217, 138, 0.7);
 }
 html.theme-light .border-emerald-700,
 html.theme-light .border-emerald-700\/50 {
-  border-color: rgba(26, 137, 82, 0.35);
+  border-color: rgba(57, 217, 138, 0.45);
 }
 html.theme-light .border-amber-700 {
-  border-color: rgba(168, 121, 0, 0.5);
+  border-color: rgba(184, 137, 0, 0.5);
 }
 
 /* ---------- Focus rings & form accents ---------- */
 html.theme-light .focus\:ring-cyan-500:focus,
 html.theme-light .focus\:ring-cyan-600:focus {
-  --tw-ring-color: #0280bd;
+  --tw-ring-color: #0f96d6;
 }
 html.theme-light .focus\:ring-red-500:focus {
   --tw-ring-color: #e03131;
 }
 html.theme-light .accent-cyan-500,
 html.theme-light .accent-cyan-400 {
-  accent-color: #0280bd;
+  accent-color: #0f96d6;
 }
 
 /* ---------- Radii (cards 8-12px, pill buttons) ---------- */
@@ -450,34 +450,34 @@ html.theme-light .shadow-2xl {
 
 /* ---------- Custom scroll slider (index.css, cyan hardcoded) ---------- */
 html.theme-light .tub-editor-scroll-slider::-webkit-slider-thumb {
-  border-color: #0280bd;
-  background: rgba(2, 128, 189, 0.45);
+  border-color: #0f96d6;
+  background: rgba(92, 200, 255, 0.55);
 }
 html.theme-light .tub-editor-scroll-slider:hover::-webkit-slider-thumb {
-  background: rgba(2, 128, 189, 0.65);
-  box-shadow: 0 0 0 4px rgba(2, 128, 189, 0.16), 0 0 12px rgba(2, 128, 189, 0.3);
+  background: rgba(92, 200, 255, 0.8);
+  box-shadow: 0 0 0 4px rgba(92, 200, 255, 0.18), 0 0 12px rgba(92, 200, 255, 0.35);
 }
 html.theme-light .tub-editor-scroll-slider:active::-webkit-slider-thumb {
-  background: rgba(2, 128, 189, 0.9);
-  box-shadow: 0 0 0 5px rgba(2, 128, 189, 0.2), 0 0 16px rgba(2, 128, 189, 0.4);
+  background: rgba(92, 200, 255, 1);
+  box-shadow: 0 0 0 5px rgba(92, 200, 255, 0.24), 0 0 16px rgba(92, 200, 255, 0.45);
 }
 html.theme-light .tub-editor-scroll-slider:disabled::-webkit-slider-thumb {
-  background: rgba(2, 128, 189, 0.25);
+  background: rgba(92, 200, 255, 0.3);
 }
 html.theme-light .tub-editor-scroll-slider::-moz-range-thumb {
-  border-color: #0280bd;
-  background: rgba(2, 128, 189, 0.45);
+  border-color: #0f96d6;
+  background: rgba(92, 200, 255, 0.55);
 }
 html.theme-light .tub-editor-scroll-slider:hover::-moz-range-thumb {
-  background: rgba(2, 128, 189, 0.65);
-  box-shadow: 0 0 0 4px rgba(2, 128, 189, 0.16), 0 0 12px rgba(2, 128, 189, 0.3);
+  background: rgba(92, 200, 255, 0.8);
+  box-shadow: 0 0 0 4px rgba(92, 200, 255, 0.18), 0 0 12px rgba(92, 200, 255, 0.35);
 }
 html.theme-light .tub-editor-scroll-slider:active::-moz-range-thumb {
-  background: rgba(2, 128, 189, 0.9);
-  box-shadow: 0 0 0 5px rgba(2, 128, 189, 0.2), 0 0 16px rgba(2, 128, 189, 0.4);
+  background: rgba(92, 200, 255, 1);
+  box-shadow: 0 0 0 5px rgba(92, 200, 255, 0.24), 0 0 16px rgba(92, 200, 255, 0.45);
 }
 html.theme-light .tub-editor-scroll-slider:disabled::-moz-range-thumb {
-  background: rgba(2, 128, 189, 0.25);
+  background: rgba(92, 200, 255, 0.3);
 }
 
 /* ======================================================================
@@ -537,15 +537,15 @@ html.theme-light button.mode-active {
   font-weight: 700;
 }
 html.theme-light button.mode-active[data-mode="user"] {
-  outline: 1px solid rgba(26, 137, 82, 0.55);
+  outline: 1px solid rgba(57, 217, 138, 0.65);
   outline-offset: -1px;
 }
 html.theme-light button.mode-active[data-mode="local_angle"] {
-  outline: 1px solid rgba(168, 121, 0, 0.55);
+  outline: 1px solid rgba(217, 164, 41, 0.65);
   outline-offset: -1px;
 }
 html.theme-light button.mode-active[data-mode="local"] {
-  outline: 1px solid rgba(2, 128, 189, 0.55);
+  outline: 1px solid rgba(92, 200, 255, 0.65);
   outline-offset: -1px;
 }
 
@@ -559,40 +559,40 @@ html.theme-light span.bg-zinc-800 {
 }
 /* 固件模式 badge (DrivePage, data-rc-mode): mode-colored text + frame */
 html.theme-light span[data-rc-mode="0"] {
-  color: #1a8952;
-  outline-color: rgba(26, 137, 82, 0.55);
+  color: #0ea35e;
+  outline-color: rgba(57, 217, 138, 0.65);
 }
 html.theme-light span[data-rc-mode="1"] {
   color: #a87900;
-  outline-color: rgba(168, 121, 0, 0.55);
+  outline-color: rgba(217, 164, 41, 0.65);
 }
 html.theme-light span[data-rc-mode="2"] {
-  color: #0280bd;
-  outline-color: rgba(2, 128, 189, 0.55);
+  color: #0f96d6;
+  outline-color: rgba(92, 200, 255, 0.65);
 }
 
 /* ---------- Record button: 常驻红框(record = red,全局仅驾驶页录制键匹配该签名) ---------- */
 html.theme-light button.inline-flex.rounded-lg.bg-zinc-800:not(.border) {
-  outline: 1px solid rgba(224, 49, 49, 0.45);
+  outline: 1px solid rgba(255, 107, 107, 0.55);
   outline-offset: -1px;
 }
 
 /* ---------- Toggle switch: ESP32 .toggleSwitch colors ---------- */
 /* component: src/components/SimulatorConfig.tsx (DONKEY_GYM toggle) */
 html.theme-light button[aria-label="Toggle simulator mode"].bg-zinc-700 {
-  background-color: #a4b3c4;
+  background-color: #93a2b4;
 }
 
 /* ---------- Dialogs: ESP32 .dialog amber frame (after generic panel rules) ---------- */
 html.theme-light .rounded-xl.bg-zinc-900\/70 {
-  outline: 1px solid rgba(168, 121, 0, 0.55);
+  outline: 1px solid rgba(217, 164, 41, 0.6);
   outline-offset: -1px;
 }
 
 /* ---------- Degraded badge surface (VideoStream degraded badge) ---------- */
 html.theme-light .bg-red-400\/10 {
-  background-color: rgba(224, 49, 49, 0.07);
-  outline: 1px solid rgba(224, 49, 49, 0.4);
+  background-color: rgba(255, 107, 107, 0.12);
+  outline: 1px solid rgba(255, 107, 107, 0.5);
   outline-offset: -1px;
 }
 
@@ -600,18 +600,18 @@ html.theme-light .bg-red-400\/10 {
 /* dark theme leaves these at Tailwind defaults; light maps them onto the
  * same roles as their zinc counterparts above. */
 html.theme-light .bg-slate-900\/60 {
-  background-color: rgba(251, 252, 254, 0.75);
-  outline: 1px solid rgba(200, 210, 223, 0.9);
+  background-color: rgba(226, 232, 241, 0.78);
+  outline: 1px solid rgba(166, 180, 198, 0.9);
   outline-offset: -1px;
 }
 html.theme-light .bg-slate-950 {
-  background-color: #e9edf3;
+  background-color: #c4cdd9;
 }
 html.theme-light .border-slate-700 {
-  border-color: #c6d1de;
+  border-color: #a8b7c8;
 }
 html.theme-light .hover\:bg-slate-700:hover {
-  background-color: #d5dfea;
+  background-color: #dfe5ee;
 }
 html.theme-light .text-slate-300 {
   color: #42546a;

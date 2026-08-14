@@ -1054,8 +1054,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetSteering'),
             data: angleData,
-            borderColor: theme === 'light' ? '#0280bd' : 'rgb(6, 182, 212)',
-            backgroundColor: theme === 'light' ? 'rgba(2, 128, 189, 0.5)' : 'rgba(6, 182, 212, 0.5)',
+            borderColor: theme === 'light' ? '#0f96d6' : 'rgb(6, 182, 212)',
+            backgroundColor: theme === 'light' ? 'rgba(15, 150, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)',
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1104,7 +1104,7 @@ export const TubEditor: React.FC = () => {
               color: theme === 'light' ? '#5f7185' : '#71717a',
               callback: (value: string | number) => `${Math.round(Number(value))}`,
             },
-            grid: { color: theme === 'light' ? '#d9e1ea' : '#27272a' }
+            grid: { color: theme === 'light' ? '#b9c5d4' : '#27272a' }
         },
         y: {
             min: -1,
@@ -1113,7 +1113,7 @@ export const TubEditor: React.FC = () => {
               color: theme === 'light' ? '#5f7185' : '#71717a',
               stepSize: 0.2,
             },
-            grid: { color: theme === 'light' ? '#d9e1ea' : '#27272a' }
+            grid: { color: theme === 'light' ? '#b9c5d4' : '#27272a' }
         }
     },
     animation: {
@@ -1143,8 +1143,8 @@ export const TubEditor: React.FC = () => {
         // 浅色主题下的 canvas 配色;深色保持原值不变
         const isLightTheme = themeRef.current === 'light';
         const playheadColor = isLightTheme ? '#e03131' : 'rgb(239, 68, 68)';
-        const selectionColor = isLightTheme ? '#1a8952' : 'rgb(34, 197, 94)';
-        const selectionFillColor = isLightTheme ? 'rgba(26, 137, 82, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+        const selectionColor = isLightTheme ? '#0ea35e' : 'rgb(34, 197, 94)';
+        const selectionFillColor = isLightTheme ? 'rgba(14, 163, 94, 0.15)' : 'rgba(34, 197, 94, 0.15)';
         const latestIndex = currentIndexRef.current;
         const totalRecords = records.length;
         const currentRecord = records[latestIndex];

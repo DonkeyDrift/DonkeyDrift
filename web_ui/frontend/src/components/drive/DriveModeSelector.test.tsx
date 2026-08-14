@@ -50,7 +50,7 @@ describe('DriveModeSelector', () => {
       applyTheme('light');
     });
 
-    expect(screen.getByRole('button', { name: '手动' }).className).toContain('#1a8952');
+    expect(screen.getByRole('button', { name: '手动' }).className).toContain('#0ea35e');
     expect(screen.getByRole('button', { name: '手动' }).className).not.toContain('#39d98a');
 
     rerender(<DriveModeSelector value="local_angle" onChange={vi.fn()} />);
@@ -58,7 +58,7 @@ describe('DriveModeSelector', () => {
     expect(screen.getByRole('button', { name: '半自动' }).className).not.toContain('#ffcc66');
 
     rerender(<DriveModeSelector value="local" onChange={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '全自动' }).className).toContain('#0280bd');
+    expect(screen.getByRole('button', { name: '全自动' }).className).toContain('#0f96d6');
     expect(screen.getByRole('button', { name: '全自动' }).className).not.toContain('#5cc8ff');
 
     act(() => {
