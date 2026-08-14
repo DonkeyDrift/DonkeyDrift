@@ -1,8 +1,18 @@
 # DonkeyDrifter
 
-DonkeyDrifter is a Python autonomous driving and drifting robotics platform derived from Donkeycar. It keeps the modular Vehicle + Part architecture, Tub data workflow, training tools, simulator support, and Web UI workflows while establishing an independent DonkeyDrifter identity.
+DonkeyDrifter is an open-source Python platform for small-scale autonomous driving and drifting RC cars. Derived from Donkeycar, it keeps the modular Vehicle + Part architecture, the Tub data workflow, neural-network pilot training, and simulator support, while adding a unified Web UI, a launcher service, and first-class integration with the MUS4 ESP32 firmware.
 
 > Independent fork notice: DonkeyDrifter is derived from Donkeycar and is not affiliated with, sponsored by, or endorsed by the Donkeycar maintainers.
+
+## Features
+
+- **Modular vehicle framework**: the Donkeycar Vehicle + Part pipeline (camera, controller, pilot, actuator, datastore, IMU, encoders, and more) with managed drive loops.
+- **Car templates**: `basic`, `complete`, `just_drive`, `arduino_drive`, `simulator`, `cv_control`, `path_follow`, `square`, and `train`, created through the `donkey` CLI.
+- **Data and training**: Tub recording, local and online training of neural-network pilots, TFLite conversion, and dataset tooling under `scripts/`.
+- **Simulator support**: Donkey gym / simulator integration for driving and training without hardware.
+- **Unified Web UI**: FastAPI backend plus React/Vite frontend for driving, Tub management, training, connectors, and arena views.
+- **Launcher service**: a menu and process-launch service (default port `8090`) that starts the drive stack and Web UI, and serves a browser-based host terminal at `/terminal`.
+- **MUS4 firmware integration**: serial Pilot control and telemetry pairing with the ESP32 firmware in the companion [Firmware](https://github.com/DonkeyDrift/Firmware) repository.
 
 ## Quick Start
 
@@ -15,9 +25,13 @@ python manage.py drive
 
 The CLI command remains `donkey` for compatibility with the Donkeycar ecosystem and existing vehicle projects.
 
+Requires Python 3.11.
+
 For local development:
 
 ```bash
+git clone https://github.com/DonkeyDrift/DonkeyDrift.git
+cd DonkeyDrift
 pip install -e ".[pc,dev]"
 pytest
 ```
@@ -38,24 +52,11 @@ import donkeycar as dk
 
 Submodule imports are also compatible. New templates prefer `donkeydrifter`, while existing vehicle directories using `donkeycar` do not need to be changed immediately.
 
-## Compatibility with Donkeycar
-
-DonkeyDrifter is intentionally compatible with existing Donkeycar-based projects during the migration period:
-
-- `pip install donkeydrifter` is the new package target.
-- `import donkeydrifter as dk` is the recommended import path for new code.
-- `import donkeycar as dk` remains supported as a compatibility path.
-- CLI command remains `donkey`.
-- Existing vehicle projects can migrate gradually.
-- Existing `/api/*` Web UI paths and drive WebSocket protocols are not renamed in the first migration stage.
-
-See [Donkeycar compatibility guide](docs/guide/donkeycar-compatibility.md) for details.
-
 ## Web UI
 
 DonkeyDrifter includes a unified Web UI under `web_ui/`:
 
-- Backend: FastAPI, default port `8000`.
+- Backend: FastAPI, default port `8000` (override with `DRIVE_WEB_PORT`).
 - Frontend: React/Vite, default port `5188`.
 - Integrated startup remains available through:
 
@@ -63,6 +64,18 @@ DonkeyDrifter includes a unified Web UI under `web_ui/`:
 donkey installweb --path ./web_ui
 donkey web
 ```
+
+The launcher service (`donkeycar/launcher/`) provides the host menu page on port `8090`, starts the drive stack and Web UI as background processes, and exposes a full host shell in the browser at `/terminal` (xterm.js over a WebSocket↔PTY bridge).
+
+## Repository Layout
+
+- [`donkeycar/`](donkeycar/): main Python package — vehicle framework, parts, templates, management CLI, launcher, and tests.
+- [`donkeydrifter/`](donkeydrifter/): alias package that re-exports `donkeycar` and maps `donkeydrifter.*` submodule imports onto it.
+- [`web_ui/`](web_ui/): Web UI — FastAPI backend (`web_ui/backend/`) and React/Vite frontend (`web_ui/frontend/`).
+- [`docs/`](docs/): guides, architecture notes, RFCs, and plans.
+- [`scripts/`](scripts/): standalone utilities (training aids, TFLite conversion, profiling, visualization).
+- [`tests/`](tests/): top-level tests.
+- [`arduino/`](arduino/): Arduino encoder sketches used by the `arduino_drive` template.
 
 ## Development
 
@@ -89,6 +102,30 @@ npm run check
 npm run lint
 npm run build
 ```
+
+## Compatibility with Donkeycar
+
+DonkeyDrifter is intentionally compatible with existing Donkeycar-based projects during the migration period:
+
+- `pip install donkeydrifter` is the new package target.
+- `import donkeydrifter as dk` is the recommended import path for new code.
+- `import donkeycar as dk` remains supported as a compatibility path.
+- The CLI command remains `donkey`.
+- Existing vehicle projects can migrate gradually.
+- Existing `/api/*` Web UI paths and drive WebSocket protocols are not renamed in the first migration stage.
+
+See the [Donkeycar compatibility guide](docs/guide/donkeycar-compatibility.md) for details.
+
+## Documentation
+
+- [Donkeycar compatibility guide](docs/guide/donkeycar-compatibility.md)
+- [Web drive console user guide](docs/guide/web-drive-console-user-guide.md)
+- [License and attribution](docs/guide/license-and-attribution.md)
+- [Parallel development with worktrees](docs/guide/parallel-development-with-worktrees.md)
+
+## Related Repositories
+
+- [Firmware](https://github.com/DonkeyDrift/Firmware): MUS4 (LP-MU-S4) ESP32 low-level control firmware — RC input capture, driving-mode blending, Park / emergency braking, Drift Assist, Web Console, and OTA.
 
 ## License
 
