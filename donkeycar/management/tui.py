@@ -575,7 +575,7 @@ class DonkeyCommand:
 
 class CreateCarCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("createcar", "创建新的 DonkeyCar 项目", "管理", is_favorite=False, requires_mycar_folder=False)
+        super().__init__("Create Car", "创建新的 DonkeyCar 项目", "管理", is_favorite=False, requires_mycar_folder=False)
         self.options = [
             CommandOption("folder", "项目名称", default="mycar", help_text="将在 ~/projects/ 下创建此目录"),
             CommandOption("template", "模板名称", default=None, required=False, help_text="可选模板: basic, square 等 (留空使用默认)"),
@@ -609,7 +609,7 @@ class CreateCarCommand(DonkeyCommand):
 
 class OpenProjectCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("open", "打开已有 DonkeyCar 项目", "管理", is_favorite=False, requires_mycar_folder=False)
+        super().__init__("Open", "打开已有 DonkeyCar 项目", "管理", is_favorite=False, requires_mycar_folder=False)
         self.options = [] # No options needed, we'll ask interactively
 
     def execute(self):
@@ -666,7 +666,7 @@ class OpenProjectCommand(DonkeyCommand):
 
 class ClearDataCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("clear_data", "清空当前项目 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
+        super().__init__("Clear Data", "清空当前项目 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
         self.options = []
 
     def execute(self):
@@ -815,7 +815,7 @@ class ClearDataCommand(DonkeyCommand):
 
 class BackupDataCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("backup_data", "备份当前项目 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
+        super().__init__("Backup Data", "备份当前项目 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
         self.options = []
 
     def execute(self):
@@ -920,7 +920,7 @@ class BackupDataCommand(DonkeyCommand):
 
 class RestoreDataCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("restore_data", "从备份恢复 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
+        super().__init__("Restore Data", "从备份恢复 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
         self.options = []
 
     def execute(self):
@@ -1153,7 +1153,7 @@ from donkeycar.management.train_local import run_local_train
 
 class TrainLocalCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("train_local", "本地训练", "训练", is_favorite=True, requires_mycar_folder=True)
+        super().__init__("Train Local", "本地训练", "训练", is_favorite=True, requires_mycar_folder=True)
         self.options = [
             CommandOption("tub", "数据目录 (Tub)", default="./data", help_text="包含训练数据的目录"),
             CommandOption("model", "模型输出路径", default=self._get_next_model_name(), help_text="训练后的模型保存路径 (自动递增)"),
@@ -1221,7 +1221,7 @@ class TrainLocalCommand(DonkeyCommand):
 
 class TrainOnlineCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("train_online", "云端训练（train_online.conf）", "训练", is_favorite=True, requires_mycar_folder=True)
+        super().__init__("Train Online", "云端训练（train_online.conf）", "训练", is_favorite=True, requires_mycar_folder=True)
         self.options = [] # Configuration is via file, not CLI args for simplicity as per requirements
 
     def execute(self):
@@ -1254,7 +1254,7 @@ class TrainOnlineCommand(DonkeyCommand):
 
 class DriveCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("drive", "打开 Web Console 驾驶控制台", "驾驶", is_favorite=True)
+        super().__init__("Drive", "打开 Web Console 驾驶控制台", "驾驶", is_favorite=True)
         self.options = []
 
     def execute(self):
@@ -1494,7 +1494,7 @@ class DriveCommand(DonkeyCommand):
 
 class DrifterConsoleCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("drifter_console", "打开 Drifter Console", "驾驶", is_favorite=True, requires_mycar_folder=False)
+        super().__init__("Drifter Console", "打开 Drifter Console", "驾驶", is_favorite=True, requires_mycar_folder=False)
         self.options = []
 
     def execute(self):
@@ -1517,7 +1517,7 @@ class DrifterConsoleCommand(DonkeyCommand):
 
 class DonkeyUICommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("donkey_ui", "启动数据筛选工具（Windows下需要WSL来运行）", "筛选", is_favorite=True, requires_mycar_folder=False)
+        super().__init__("Donkey UI", "启动数据筛选工具（Windows下需要WSL来运行）", "筛选", is_favorite=True, requires_mycar_folder=False)
         self.options = []
 
     def get_command_line(self, params):
@@ -1525,7 +1525,7 @@ class DonkeyUICommand(DonkeyCommand):
 
 class WebUICommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("web", "启动 Web UI（前后端）", "筛选", is_favorite=True, requires_mycar_folder=False)
+        super().__init__("Web", "启动 Web UI（前后端）", "筛选", is_favorite=True, requires_mycar_folder=False)
         self.options = []
 
     def get_command_line(self, params):
