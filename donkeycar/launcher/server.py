@@ -509,7 +509,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             font-family:system-ui,sans-serif;
             margin:12px;min-height:100vh;
         }
-        .container{max-width:900px;margin:0 auto}
+        .container{width:100%;margin:0}
 
         /* DC headerRow */
         .headerRow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 10px}
