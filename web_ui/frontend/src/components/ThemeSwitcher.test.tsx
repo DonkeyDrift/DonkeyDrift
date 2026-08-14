@@ -45,7 +45,7 @@ describe('ThemeSwitcher', () => {
     window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
   });
 
-  it('renders 跟随系统, 浅色 and 深色 segments with 跟随系统 active by default', () => {
+  it('renders 跟随系统, 浅色 and 深色 segments with 深色 active by default', () => {
     render(<ThemeSwitcher />);
     expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'false');
@@ -128,9 +128,9 @@ describe('ThemeSwitcher', () => {
     expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('falls back to 跟随系统 for unknown stored values', () => {
+  it('falls back to 深色 for unknown stored values', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'unknown');
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
