@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from donkeycar._version import __version__
 from donkeycar.launcher.dc_discovery import find_drifter_console
+from donkeycar.launcher.terminal import handle_terminal_ws
 
 
 # ── PID 文件管理（与 tui.py / base.py 保持一致） ────────────────────────
@@ -34,6 +35,16 @@ _ICON_FILES = {
     "/favicon.ico": ("donkey_favicon.ico", "image/x-icon"),
     "/favicon.svg": ("donkey_favicon.svg", "image/svg+xml"),
     "/apple-touch-icon.png": ("donkey_touch_icon.png", "image/png"),
+}
+
+# 上位机终端（/terminal）静态资源目录与白名单：URL 路径段 → (文件名, Content-Type)。
+# xterm.js / addon-fit.js 为 MIT 许可的 vendored 依赖（LICENSE-xterm.txt）。
+_TERMINAL_STATIC_DIR = Path(__file__).parent / "terminal_static"
+_TERMINAL_STATIC_FILES = {
+    "xterm.js": ("xterm.js", "text/javascript; charset=utf-8"),
+    "xterm.css": ("xterm.css", "text/css; charset=utf-8"),
+    "addon-fit.js": ("addon-fit.js", "text/javascript; charset=utf-8"),
+    "LICENSE-xterm.txt": ("LICENSE-xterm.txt", "text/plain; charset=utf-8"),
 }
 
 
@@ -394,6 +405,13 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._serve_icon(path)
         elif path == "/launch/drive":
             self._serve_launch_drive_page()
+        elif path == "/terminal" or path == "/terminal/index.html":
+            self._serve_terminal_page()
+        elif path.startswith("/terminal/static/"):
+            self._serve_terminal_static(path)
+        elif path == "/terminal/ws":
+            # WebSocket 升级：连接被终端桥接管，直到断开后才返回
+            handle_terminal_ws(self)
         elif path == "/api/status":
             self._serve_json(_get_status())
         else:
@@ -464,6 +482,48 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         body = LAUNCH_DRIVE_HTML.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_terminal_page(self):
+        """提供上位机终端页面（GET /terminal）。
+
+        页面加载 /terminal/static/ 下的 xterm.js 并连接 /terminal/ws，
+        内容由 Drifter Console 的 Serial 目标以 iframe 嵌入，也可直接
+        在浏览器新标签页打开。每次实时读取文件，便于前端迭代免重启。
+        """
+        page = _TERMINAL_STATIC_DIR / "terminal.html"
+        if not page.exists():
+            self._serve_json({"error": "terminal not installed"}, code=404)
+            return
+        body = page.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_terminal_static(self, path):
+        """提供终端页面依赖的静态资源（白名单，防路径穿越）。
+
+        xterm.js 等库文件内容随版本固定，可长缓存。
+        """
+        name = path[len("/terminal/static/"):]
+        filename, content_type = _TERMINAL_STATIC_FILES.get(
+            name, (None, None))
+        if filename is None:
+            self._serve_json({"error": "not found"}, code=404)
+            return
+        asset = _TERMINAL_STATIC_DIR / filename
+        if not asset.exists():
+            self._serve_json({"error": "not found"}, code=404)
+            return
+        body = asset.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "max-age=86400")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

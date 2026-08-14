@@ -23,8 +23,9 @@ export const SidePanel: React.FC = () => {
   return (
     <>
       {/* Shared Drawer Container — width only changes when opening/closing, not when switching tabs */}
+      {/* top 偏移：桌面顶栏 57px→top-16；手机版三行标题区 135px→top-[143px]，均留约 8px 间距 */}
       <div
-        className={`fixed left-0 top-16 h-[calc(100vh-4rem)] z-40 transition-all duration-300 ease-in-out ${
+        className={`fixed left-0 top-[143px] lg:top-16 h-[calc(100vh-143px)] lg:h-[calc(100vh-4rem)] z-40 transition-all duration-300 ease-in-out ${
           anyOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
         }`}
       >
