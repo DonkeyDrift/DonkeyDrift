@@ -300,41 +300,66 @@ def _get_status():
 
 # ── HOSTIP 串口报告（让 ESP32 /api/status 输出 host_ip） ──────────────
 
+# ESP32 配网串口（Serial2）候选设备：车上上位机经 UART 直连为 /dev/ttyS6，
+# 其余为 USB 线直连 ESP32 时的常见设备名
+_HOSTIP_SERIAL_PORTS = ("/dev/ttyS6", "/dev/ttyACM0", "/dev/ttyACM1",
+                        "/dev/ttyUSB0")
+# 与固件 Serial2 波特率（BAUD_RATE_1）一致
+_HOSTIP_SERIAL_BAUD = 115200
+
+try:
+    import termios
+except ImportError:  # 非 POSIX 平台无串口上报
+    termios = None  # type: ignore[assignment]
+
+
 def _get_local_ip():
-    """获取本机在局域网中的 IP 地址（排除 VPN/TUN 接口）。"""
+    """获取本机局域网 IP（复用配网模块的 VPN/TUN 感知探测）。"""
     try:
-        result = subprocess.check_output(
-            ["hostname", "-I"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        ips = result.split()
-        # 优先选择 192.168.x.x（局域网）
-        for ip in ips:
-            if ip.startswith("192.168."):
-                return ip
-        # 回退到第一个非 VPN/loopback 的 IP
-        for ip in ips:
-            if (not ip.startswith("127.") and
-                    not ip.startswith("198.18.")):
-                return ip
+        from donkeycar.parts.provisioning import detect_lan_ip
+        return detect_lan_ip()
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _report_hostip_to_esp32():
-    """通过串口向 ESP32 报告本机 IP。"""
+    """通过串口向 ESP32 报告本机 IP（HOSTIP|<ipv4> 帧）。
+
+    每次发送都重新打开端口并显式 tcsetattr 波特率：ModemManager 等外部
+    进程探测串口会把 termios 改掉（实测车上 ttyS6 被改成 9600），若在
+    进程启动时只配置一次，被篡改后发出的帧对固件而言全是乱码；每次发送
+    前重设可在下一个周期自愈。
+    """
     local_ip = _get_local_ip()
     if not local_ip:
         return
-    # 尝试常见串口设备
-    for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0"]:
+    frame = f"HOSTIP|{local_ip}\n".encode("ascii")
+    for port in _HOSTIP_SERIAL_PORTS:
         try:
-            with open(port, 'w') as f:
-                f.write(f"HOSTIP|{local_ip}\n")
-                f.flush()
+            fd = os.open(port, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        try:
+            if termios is not None:
+                attrs = termios.tcgetattr(fd)
+                attrs[4] = attrs[5] = termios.B115200  # ispeed/ospeed
+                # 8N1、无校验，使能接收与本地连接（无视载波）
+                attrs[2] &= ~(termios.CSIZE | termios.PARENB
+                              | termios.CSTOPB)
+                attrs[2] |= termios.CS8 | termios.CLOCAL | termios.CREAD
+                attrs[1] &= ~termios.ONLCR  # 关闭输出换行翻译
+                termios.tcsetattr(fd, termios.TCSANOW, attrs)
+            os.write(fd, frame)
+            if termios is not None:
+                termios.tcdrain(fd)  # 等字节真正移位发出再关闭
             break  # 成功写入一个即可
-        except (OSError, IOError):
+        except OSError:
             pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _hostip_reporter_loop():

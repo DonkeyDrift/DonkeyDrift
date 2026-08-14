@@ -1,5 +1,19 @@
 # 变更日志
 
+## 2026-08-14 (14)
+
+- fix(launcher,provisioning): 修复 Drifter Console 上看不到上位机 IP
+  - 根因①：launcher 常驻 HOSTIP 上报（`server.py` `_report_hostip_to_esp32`，30s 周期）候选端口仅 `/dev/ttyACM0/1`、`/dev/ttyUSB0`，不覆盖本车 ESP32 配网串口 `/dev/ttyS6`（UART 直连），一个都不命中等于从没发过；且裸 `open()` 不配置 termios，按端口残留波特率（默认 9600）发送，固件 115200 收到全乱码。
+  - 根因②：ModemManager 会探测 `ID_MM_CANDIDATE=1` 的串口并篡改 termios（实测车上 `/dev/ttyS6` 在 `manage.py` 持有期间被从 115200 改成 9600），`ProvisioningPart` 只在打开时配置一次，被篡改后持续乱码，HOSTIP 帧固件无法解析。
+  - 修复：`server.py` 候选端口补 `/dev/ttyS6` 置顶；改为每次发送前 open → tcsetattr 115200 8N1（CLOCAL|CREAD、关 ONLCR 输出翻译）→ write → tcdrain → close，被篡改下一周期自愈；IP 探测由 `hostname -I` 简易解析换用 `provisioning.detect_lan_ip()`（VPN/TUN 感知，与配网模块同一逻辑）。`provisioning.py` `_write_line()` 独立串口模式发送前重新断言波特率（Arduino 共享串口不动，由 actuator 管理）。
+  - 测试：新增 `donkeycar/tests/test_launcher_hostip.py` 11 例（端口优先级与回退、115200/8N1 标志位断言、无 IP 不触碰串口、端口全灭静默、写失败换口、无 termios 平台回退）；`test_provisioning.py` 补 2 例（独立模式重设波特率、Arduino 共享模式不动波特率）。
+  - 验证：本地 pytest 相关 106 项通过；实机调用修复版上报后 ESP32 `/api/status` 出现 `host_ip=192.168.3.41`（本机 IP）；分支 CI 全绿。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/parts/provisioning.py`、`donkeycar/tests/test_launcher_hostip.py`（新增）、`donkeycar/tests/test_provisioning.py`
+
+- test(tui): 同步菜单名大写排版改动，修复 Tony CI 红
+  - #88 把菜单功能名改为首字母大写（"drive"→"Drive"）后漏改 `test_main_menu_sixth_item_is_drive_page` 期望，Tony 主干 CI 持续红；期望值修正为 "Drive"。
+  - 涉及文件：`donkeycar/tests/test_tui_menu.py`
+
 ## 2026-08-14 (13)
 
 - feat(web_ui,launcher): 三端主题默认由深色改回"跟随系统"（DonkeyDrifter web_ui + Donkey launcher；Drifter Console 见 Firmware v1.7.67 / Firmware#49）
