@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-14 (7)
+
+- feat(web_ui): 页头 "DonkeyDrifter" 标题左侧新增 logo 图标
+  - 图标文件取自主目录 `logo.png`（经 MD5 比对与 Donkey 启动页 8090 的 `/favicon.png` 为同一文件），新增为 `web_ui/frontend/public/logo.png`，构建后随 dist 以 `/logo.png` 提供。
+  - 样式对齐 Donkey 启动页 headerLogo：32×32（`w-8 h-8`）、`rounded-lg`(8px)、1px `#2b3441` 边框、与标题间距 12px（`gap-3`）、flex 垂直居中；页头高度与导航布局不变。
+  - 验证：Playwright 实测 8100 实页深/浅双主题页头截图，图标显示与参考样式一致；`/logo.png` HTTP 200；`npm run build` 与 `vitest`（14 文件 72 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/public/logo.png`（新增）
+
 ## 2026-08-14 (6)
 
 - fix(web_ui): 控制参数滑块 thumb 加宽对齐最初 Safari 原生尺寸（24×16px 纯白椭圆）
