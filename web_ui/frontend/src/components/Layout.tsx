@@ -74,7 +74,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </button>
             </div>
           </div>
-          {/* 手机端标题区第二行：进入按钮（DrifterConsole 在左，Donkey 在右） */}
+          {/* 手机端标题区第二行：进入按钮（DrifterConsole 在左，Kimi Code Web 在右） */}
           <div className="flex items-center pb-2 lg:hidden">
             <EnterButtons consoleFirst />
           </div>
