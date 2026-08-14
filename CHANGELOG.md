@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-14
+
+- fix(web_ui): 滑块 input 补 `bg-transparent`，消除白色背景条（用户所见"第三根线"）
+  - 根因（实测验证）：Chrome/Safari 对 `appearance:none` 的 range input 默认绘制**白色背景**，上一版把 input 高度从 6px 改为 12px 且未覆盖背景后，深色面板上出现一条 12px 白色横条，轨道嵌在其中，视觉上成了"三根线"，白色 thumb 叠在白条上也难以辨认形状。
+  - 修复：input 增加 `bg-transparent`；thumb 保持 `w-[14px] h-[12px]` 纯白椭圆（即 #47 用户认可的"最开始的椭圆形"尺寸）不变。
+  - 验证：Playwright Chromium + WebKit 双引擎截图对比，加 `bg-transparent` 后白色横条消失，只剩锌色轨道（原始"两根线"观感）+ 居中白色椭圆 thumb；`npm run build` 与 `vitest`（13 文件 61 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-12 (13)
 
 - fix(web_ui): 滑块 thumb 改为 14×12px 纯白椭圆并精确垂直居中于轨道
