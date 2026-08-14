@@ -2,6 +2,13 @@
 
 ## 2026-08-14
 
+- fix(web_ui): 控制参数滑块恢复最初的原生样式（用户指示"直接复制最初的白色小点和轨道"）
+  - ParamSlider 的 input 恢复为最初未改动版本：`w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer`（input 自身即轨道，thumb 完全原生渲染），移除全部 `::-webkit-slider-thumb` / `::-webkit-slider-runnable-track` 等伪元素自定义样式。
+  - 与最初版本唯一差别：`accent-cyan-500` → `accent-white`，保证任何浏览器下 thumb 都是纯白（Safari 下两者均渲染为白色原生椭圆）。
+  - 实测（Playwright Chromium + WebKit）：该布局下原生 thumb 与轨道中心偏差 0.0px，无白色背景条（input 背景已被 bg-zinc-800 覆盖），thumb 渲染在轨道之上。
+  - 验证：`npm run build` 与 `vitest`（13 文件 61 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 - fix(web_ui): 滑块 input 补 `bg-transparent`，消除白色背景条（用户所见"第三根线"）
   - 根因（实测验证）：Chrome/Safari 对 `appearance:none` 的 range input 默认绘制**白色背景**，上一版把 input 高度从 6px 改为 12px 且未覆盖背景后，深色面板上出现一条 12px 白色横条，轨道嵌在其中，视觉上成了"三根线"，白色 thumb 叠在白条上也难以辨认形状。
   - 修复：input 增加 `bg-transparent`；thumb 保持 `w-[14px] h-[12px]` 纯白椭圆（即 #47 用户认可的"最开始的椭圆形"尺寸）不变。
