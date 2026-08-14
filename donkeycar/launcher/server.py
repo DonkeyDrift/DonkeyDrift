@@ -350,7 +350,7 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_html()
-        elif path == "/favicon.png":
+        elif path in ("/favicon.png", "/favicon.ico"):
             self._serve_favicon()
         elif path == "/launch/drive":
             self._serve_launch_drive_page()
@@ -392,6 +392,7 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             body = favicon_path.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -453,7 +454,7 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="icon" type="image/png" href="/favicon.png?v=2">
 <title>Donkey</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
@@ -499,7 +500,7 @@ MENU_HTML = r"""<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="icon" type="image/png" href="/favicon.png?v=2">
     <title>Donkey</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
