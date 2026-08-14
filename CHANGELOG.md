@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-14 (18)
+
+- feat(web_ui): 头部入口按钮——删除"打开 Donkey"，新增"打开 Kimi Code Web"占位键，"进入"改名"打开"
+  - EnterButtons 组件移除 Donkey 按钮及 enterDonkey 跳转逻辑，i18n 删除 `common.enterButtons.donkey` / `donkeyTitle` 键。
+  - 新增"打开 Kimi Code Web"占位按钮（功能预留，无 onClick/跳转）：桌面版头部排在"打开 DrifterConsole"左侧；手机版汉堡菜单内（`<EnterButtons consoleFirst />`）排在其右侧——`consoleFirst` 语义由交换 donkey/console 改为交换 kimi/console。
+  - 按钮文案"进入 DrifterConsole"→"打开 DrifterConsole"（zh），"Enter DrifterConsole"→"Open DrifterConsole"（en），其余词条不变。
+  - 测试：`EnterButtons.test.tsx` 重写为 6 例（双键渲染、桌面默认顺序、手机 consoleFirst 顺序、Kimi 占位点击无动作、DC 扫描成功新开标签、扫描失败 alert），vitest 6/6 通过；全量 77 例中唯一失败的 ThemeSwitcher 用例为 Tony 基线被 main 合线回退的既有问题（另一会话修复中），与本次无关。
+  - 涉及文件：`web_ui/frontend/src/components/EnterButtons.tsx`、`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/src/i18n/messages/common.ts`、`web_ui/frontend/src/components/EnterButtons.test.tsx`
+
 ## 2026-08-14 (17)
 
 - feat(launcher): Donkey 菜单页手机版顶栏两行布局 + 英文版菜单标题对齐修复
