@@ -600,6 +600,15 @@ MENU_HTML = r"""<!DOCTYPE html>
         .langTabs button.active{background:#5cc8ff;color:#061019}
         .langTabs button.active:hover{background:#8bdcff;color:#061019}
         #themeTabs{margin-left:auto}
+        .headerBreak{display:none}
+
+        /* 手机版顶栏两行：第一行 图标/标题/GitHub/版本号（与电脑版一致），
+           第二行 主题切换(最左) + 中英文切换(最右) */
+        @media (max-width:640px){
+            .headerBreak{display:block;width:100%;height:0}
+            #themeTabs{margin-left:0}
+            #langTabs{margin-left:auto}
+        }
 
         /* DC panel */
         .panel{background:#171c24;border:1px solid #2b3441;border-radius:8px;padding:10px}
@@ -635,6 +644,10 @@ MENU_HTML = r"""<!DOCTYPE html>
         .cat-drive{background:rgba(255,204,102,.12);color:#ffcc66;border:1px solid rgba(255,204,102,.3)}
         .cat-filter{background:rgba(217,107,255,.12);color:#d96bff;border:1px solid rgba(217,107,255,.3)}
         .cat-train{background:rgba(255,107,107,.12);color:#ff6b6b;border:1px solid rgba(255,107,107,.3)}
+
+        /* 英文版分类标签等宽：中文均为二字天然等宽，英文 Manage/Data/Drive/Filter/Train
+           宽度不一导致各行标题错位，固定宽度后标题左对齐（电脑版与手机版同效） */
+        html[lang="en"] .catPill{width:70px;justify-content:center}
 
         /* Menu item content */
         .menuContent{flex:1;min-width:0}
@@ -741,6 +754,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
             </a>
             <span class="versionBadge">v{{VERSION}}</span>
+            <div class="headerBreak"></div>
             <span class="langTabs" id="themeTabs" title="主题" data-i18n-title="theme.title">
                 <button type="button" data-theme="light" data-i18n="theme.light">浅色</button>
                 <button type="button" data-theme="system" data-i18n="theme.auto">跟随系统</button>
