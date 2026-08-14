@@ -747,6 +747,15 @@ class ProvisioningPart:
 
         if ser is None:
             return
+        # 独立串口模式：发送前重新断言波特率。ModemManager 等外部进程探测
+        # 串口会篡改 termios（实测车上 /dev/ttyS6 被改成 9600），不重置则
+        # 后续发出的帧对固件（115200）而言全是乱码。Arduino 共享串口的
+        # 波特率由 actuator 管理，此处不动。
+        if self._arduino_controller is None:
+            try:
+                ser.baudrate = self._baudrate
+            except Exception:
+                pass
         try:
             text = data.rstrip("\n") + "\n"
             ser.write(text.encode("utf-8", errors="ignore"))
