@@ -752,7 +752,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupNotes">说明</h3>
             <ul class="helpList">
-                <li data-i18n="help.noteFavorite">带 [*] 标记的为常用功能</li>
                 <li data-i18n="help.noteDrive">目前仅支持通过浏览器启动「驾驶」功能（选项 6）</li>
             </ul>
         </section>
@@ -782,6 +781,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'fab.quick': '快捷入口',
                 'fab.help': '帮助',
                 'menu.section': '菜单',
+                'menu.favorite': '「常用」',
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
@@ -790,7 +790,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.keyZero': '0：返回上一页',
                 'help.keyEsc': 'ESC：关闭弹窗',
                 'help.groupNotes': '说明',
-                'help.noteFavorite': '带 [*] 标记的为常用功能',
                 'help.noteDrive': '目前仅支持通过浏览器启动「驾驶」功能（选项 6）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.failed': '启动失败',
@@ -809,6 +808,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'fab.quick': 'Quick actions',
                 'fab.help': 'Help',
                 'menu.section': 'Menu',
+                'menu.favorite': '「Common」',
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
@@ -817,7 +817,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.keyZero': '0: go back',
                 'help.keyEsc': 'ESC: close dialogs',
                 'help.groupNotes': 'Notes',
-                'help.noteFavorite': 'Items marked [*] are favorites',
                 'help.noteDrive': 'Only "Drive" (option 6) can be launched from the browser for now',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.failed': 'Launch failed',
@@ -962,7 +961,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 div.dataset.no = item.no;
                 div.onclick = () => selectItem(item.no);
                 const favMark = item.favorite
-                    ? ' <span class="favorite">[*]</span>' : '';
+                    ? ' <span class="favorite">' + t('menu.favorite') + '</span>' : '';
                 const catLabel = catLabels[item.cat][uiLang];
                 const desc = uiLang === 'en' ? item.descEn : item.descZh;
                 div.innerHTML =
