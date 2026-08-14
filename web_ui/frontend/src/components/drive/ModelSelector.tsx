@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Box } from 'lucide-react';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme } from '@/lib/theme';
 
 interface ModelSelectorProps {
   value: string;
@@ -20,8 +21,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   className = '',
 }) => {
   const { t } = useTranslation();
+  const theme = useResolvedTheme();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 任意值阴影皮肤 CSS 覆盖不到:浅色改用皮肤同款软 slate 阴影
+  const panelShadow = theme === 'light'
+    ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]'
+    : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]';
 
   const emptyLabel = t('drive.noModel');
   const allOptions = [EMPTY_VALUE, ...options];
@@ -70,7 +77,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
       </button>
       {open && !disabled && (
         <div className="absolute top-full left-0 w-full pt-1 z-50">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 shadow-[0_8px_24px_rgba(0,0,0,0.25)] overflow-hidden">
+          <div className={`rounded-lg border border-zinc-800 bg-zinc-900 ${panelShadow} overflow-hidden`}>
             {otherOptions.map((model) => {
               const label = model || emptyLabel;
               return (

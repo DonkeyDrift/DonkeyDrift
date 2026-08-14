@@ -38,6 +38,15 @@
   - 验证：Playwright Chromium + WebKit 双引擎截图对比，加 `bg-transparent` 后白色横条消失，只剩锌色轨道（原始"两根线"观感）+ 居中白色椭圆 thumb；`npm run build` 与 `vitest`（13 文件 61 用例）全部通过。
   - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
 
+## 2026-08-14 (1)
+
+- feat(web_ui): 新增 MUS4 Light 浅色皮肤并接入主题切换(切换按钮 47ee39fb 随本分支一并合入)
+  - 新皮肤 `web_ui/frontend/src/themes/theme-light.css`:与深色皮肤 `theme-mus4.css` 同源同构,以 `html.theme-light` 前缀覆盖 Tailwind 工具类;色板直接对标固件自带浅色主题(`Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h` 的 `html[data-theme="light"]` 与 `CHART_THEMES.light`)——页面 `#eef1f5`、面板 `#fff` + `135deg #fff→#edf1f6` 渐变 + 细框 `#ccd5df`,状态文字/细框/图表线用固件浅色饱和色(蓝 `#0c9bd6`、绿 `#1fae6b`、红 `#e5484d`、琥珀 `#d99a17`),FILL 实色填充语言(蓝 `#5cc8ff` 等 + 近黑文字 `#061019`)保持不变;深色皮肤所有颜色逐字节未动。
+  - 主题设施 `web_ui/frontend/src/lib/theme.ts`:localStorage 持久化(key `donkeydrifter.ui.theme`)、`<html>` 皮肤 class 切换、`useResolvedTheme()` 订阅钩子(canvas/图表配色用);`web_ui/frontend/index.html` 内联脚本首屏前应用主题防闪烁(跟随系统经 matchMedia 解析);`web_ui/frontend/src/components/ThemeSwitcher.tsx` 接入真实切换;"跟随系统"经 `matchMedia('(prefers-color-scheme: dark)')` 实时解析并监听系统主题变化自动跟随。
+  - canvas/图表/内联样式/Tailwind 任意值类等皮肤 CSS 覆盖不到的 JS 配色全部改为主题感知(深色值逐字节保留在三元分支中):`drive/TelemetryChart.tsx`、`TubEditor.tsx`、`pages/PilotArenaPage.tsx`、`FabActions.tsx`、`EnterButtons.tsx`、`drive/DriveModeSelector.tsx`、`drive/ModelSelector.tsx`、`drive/InputSourceSelector.tsx`、`drive/VideoStream.tsx`、`TubNavigator.tsx`、`ui/Button.tsx`。
+  - 测试同步:`ThemeSwitcher.test.tsx` 新增皮肤 class 应用/挂载恢复/跟随系统解析/系统主题实时跟随等 7 个用例;`drive/DriveModeSelector.test.tsx` 新增浅色配色切换用例;vitest 全量 14 文件 72 用例通过,`tsc -b` 与 `vite build` 通过,Playwright 5 页 × 深浅双主题截图复核。
+  - `theme-mus4.css` 仅更新文件头注释(皮肤机制说明),无样式改动。
+
 ## 2026-08-12 (13)
 
 - fix(web_ui): 滑块 thumb 改为 14×12px 纯白椭圆并精确垂直居中于轨道

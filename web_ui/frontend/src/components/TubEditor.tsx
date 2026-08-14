@@ -5,6 +5,7 @@ import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
 import { deleteRecords, getRecords, restoreRecords } from '../services/api';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme } from '@/lib/theme';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -40,6 +41,8 @@ type RecordAction = {
 
 export const TubEditor: React.FC = () => {
   const { t } = useTranslation();
+  const theme = useResolvedTheme();
+  const themeRef = useRef(theme);
   const records = useStore((state) => state.records);
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -168,6 +171,12 @@ export const TubEditor: React.FC = () => {
     },
     [ensureChartRenderLoop]
   );
+
+  // 主题切换时同步 ref(供 canvas 插件读取)并触发一次重绘
+  useEffect(() => {
+    themeRef.current = theme;
+    requestChartRender();
+  }, [theme, requestChartRender]);
 
   const flushPendingSelectionRange = useCallback(() => {
     selectionRangeFrameRef.current = null;
@@ -1045,8 +1054,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetSteering'),
             data: angleData,
-            borderColor: 'rgb(6, 182, 212)',
-            backgroundColor: 'rgba(6, 182, 212, 0.5)',
+            borderColor: theme === 'light' ? '#0c9bd6' : 'rgb(6, 182, 212)',
+            backgroundColor: theme === 'light' ? 'rgba(12, 155, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)',
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1055,8 +1064,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetThrottle'),
             data: throttleData,
-            borderColor: 'rgb(234, 179, 8)',
-            backgroundColor: 'rgba(234, 179, 8, 0.5)',
+            borderColor: theme === 'light' ? '#d99a17' : 'rgb(234, 179, 8)',
+            backgroundColor: theme === 'light' ? 'rgba(217, 154, 23, 0.5)' : 'rgba(234, 179, 8, 0.5)',
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1066,7 +1075,7 @@ export const TubEditor: React.FC = () => {
       },
       sampledIndices: sampledX,
     };
-  }, [records, zoomPercent, t]);
+  }, [records, zoomPercent, t, theme]);
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
@@ -1079,7 +1088,7 @@ export const TubEditor: React.FC = () => {
       legend: {
         position: 'top' as const,
         labels: {
-            color: '#e4e4e7' // zinc-200
+            color: theme === 'light' ? '#1a2330' : '#e4e4e7' // zinc-200
         }
       },
       tooltip: {
@@ -1092,19 +1101,19 @@ export const TubEditor: React.FC = () => {
             min: records.length > 0 && records[visibleRange.startIndex] ? records[visibleRange.startIndex]._index : visibleRange.startIndex,
             max: records.length > 0 && records[visibleRange.endIndex] ? records[visibleRange.endIndex]._index : visibleRange.endIndex,
             ticks: {
-              color: '#71717a',
+              color: theme === 'light' ? '#5b6b7d' : '#71717a',
               callback: (value: string | number) => `${Math.round(Number(value))}`,
             },
-            grid: { color: '#27272a' }
+            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
         },
         y: {
             min: -1,
             max: 1,
             ticks: {
-              color: '#71717a',
+              color: theme === 'light' ? '#5b6b7d' : '#71717a',
               stepSize: 0.2,
             },
-            grid: { color: '#27272a' }
+            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
         }
     },
     animation: {
@@ -1131,6 +1140,11 @@ export const TubEditor: React.FC = () => {
         
         const ctx = chart.ctx;
         const chartArea = chart.chartArea;
+        // 浅色主题下的 canvas 配色;深色保持原值不变
+        const isLightTheme = themeRef.current === 'light';
+        const playheadColor = isLightTheme ? '#e5484d' : 'rgb(239, 68, 68)';
+        const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
+        const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
         const latestIndex = currentIndexRef.current;
         const totalRecords = records.length;
         const currentRecord = records[latestIndex];
@@ -1140,7 +1154,7 @@ export const TubEditor: React.FC = () => {
 
         if (!isNaN(currentX) && currentX >= chart.chartArea.left && currentX <= chart.chartArea.right) {
           ctx.save();
-          ctx.strokeStyle = 'rgb(239, 68, 68)';
+          ctx.strokeStyle = playheadColor;
           ctx.lineWidth = 2;
           ctx.globalAlpha = 0.9;
           ctx.setLineDash([5, 3]);
@@ -1151,7 +1165,7 @@ export const TubEditor: React.FC = () => {
           ctx.stroke();
           
           ctx.setLineDash([]);
-          ctx.fillStyle = 'rgb(239, 68, 68)';
+          ctx.fillStyle = playheadColor;
           ctx.beginPath();
           ctx.arc(currentX, yAxis.top, 3, 0, 2 * Math.PI);
           ctx.fill();
@@ -1185,11 +1199,11 @@ export const TubEditor: React.FC = () => {
                 
                 if (isDraft) {
                     // 拖动过程中也使用绿色，确保用户体验一致
-                    ctx.fillStyle = 'rgba(34, 197, 94, 0.15)'; 
-                    ctx.strokeStyle = 'rgb(34, 197, 94)';
+                    ctx.fillStyle = selectionFillColor;
+                    ctx.strokeStyle = selectionColor;
                 } else {
-                    ctx.fillStyle = 'rgba(34, 197, 94, 0.15)'; 
-                    ctx.strokeStyle = 'rgb(34, 197, 94)';
+                    ctx.fillStyle = selectionFillColor;
+                    ctx.strokeStyle = selectionColor;
                 }
 
                 ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
@@ -1215,8 +1229,8 @@ export const TubEditor: React.FC = () => {
                 ctx.clip();
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
-                ctx.fillStyle = 'rgba(34, 197, 94, 0.15)'; 
-                ctx.strokeStyle = 'rgb(34, 197, 94)';
+                ctx.fillStyle = selectionFillColor;
+                ctx.strokeStyle = selectionColor;
 
                 ctx.fillRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
                 ctx.lineWidth = 2;
@@ -1233,7 +1247,7 @@ export const TubEditor: React.FC = () => {
         const hoverPosData = hoverPositionRef.current;
         if (hoverPosData && hoverPosData.x >= chartArea.left && hoverPosData.x <= chartArea.right && !selectionDraftRef.current) {
           ctx.save();
-          ctx.strokeStyle = 'rgb(34, 197, 94)';
+          ctx.strokeStyle = selectionColor;
           ctx.lineWidth = 2;
           ctx.globalAlpha = 0.8;
           ctx.setLineDash([]);
@@ -1243,7 +1257,7 @@ export const TubEditor: React.FC = () => {
           ctx.lineTo(hoverPosData.x, yAxis.bottom);
           ctx.stroke();
           
-          ctx.fillStyle = 'rgb(34, 197, 94)';
+          ctx.fillStyle = selectionColor;
           ctx.beginPath();
           ctx.arc(hoverPosData.x, yAxis.top, 2, 0, 2 * Math.PI);
           ctx.fill();

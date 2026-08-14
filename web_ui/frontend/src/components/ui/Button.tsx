@@ -1,6 +1,7 @@
 import React from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useResolvedTheme } from '@/lib/theme';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,8 +18,14 @@ export const Button: React.FC<ButtonProps> = ({
   size = 'md',
   ...props
 }) => {
+  const theme = useResolvedTheme();
+  // Arbitrary-value shadows bypass the skin CSS: in light theme keep the raised
+  // look with a brighter top highlight and a soft slate (not heavy black) drop.
+  const primaryShadow = theme === 'light'
+    ? 'shadow-[0_1px_0_rgba(255,255,255,0.35)_inset,0_1px_2px_rgba(15,23,42,0.15)]'
+    : 'shadow-[0_1px_0_rgba(255,255,255,0.1)_inset,0_1px_2px_rgba(0,0,0,0.5)]';
   const variants = {
-    primary: 'bg-cyan-600 text-white hover:bg-cyan-700 shadow-[0_1px_0_rgba(255,255,255,0.1)_inset,0_1px_2px_rgba(0,0,0,0.5)] active:shadow-inner border border-cyan-500/50',
+    primary: `bg-cyan-600 text-white hover:bg-cyan-700 ${primaryShadow} active:shadow-inner border border-cyan-500/50`,
     secondary: 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700 shadow-sm active:bg-zinc-900',
     danger: 'bg-red-600 text-white hover:bg-red-700 shadow-sm border border-red-500/50',
     ghost: 'bg-transparent text-zinc-300 hover:text-white hover:bg-zinc-800',
