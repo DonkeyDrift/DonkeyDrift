@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-14 (12)
+
+- feat(launcher): 菜单页与启动中转页语言跟随浏览器自动检测
+  - `donkeycar/launcher/server.py` 菜单页（MENU_HTML）：新增 `detectBrowserLanguage()`（`navigator.language` 小写后以 `zh` 开头→中文，其余一律→英文，异常兜底中文）；`readStoredLanguage()` 改为 localStorage `donkeydrifter.ui.lang` 显式选择优先、无存储时回退浏览器检测（原先无存储时硬编码中文）。用户手动切换仍写 localStorage 持久化、跨重启优先于自动检测——与 DD web_ui（Tony-webui-lang-autodetect 在制）和 DC 固件 v1.7.66 同一语义。
+  - 启动中转页 `LAUNCH_DRIVE_HTML` 补自包含中英 i18n：经同一 localStorage 键读取显式选择、无存储跟随浏览器；「正在启动/启动失败/未知错误/网络错误」四条文案双语化并全部经 `t()` 渲染，`<html lang>` 动态设置。
+  - 测试同步：新增 `tests/test_launcher_language_autodetect.py` 2 项（菜单页检测接线与回退语义、中转页双语字典对齐及 `t()` 全覆盖、无残留硬编码中文）。
+  - 验证：新增 2 项 pytest 通过；临时实例（127.0.0.1:18090）实测 `/` 与 `/launch/drive` 均正确下发新代码；两页全部 `<script>` 块经 `node --check` 语法校验通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`tests/test_launcher_language_autodetect.py`
+
 ## 2026-08-14 (11)
 
 - feat(web_ui): 手机版/竖屏平板响应式适配（<1024px 与手机一致）
