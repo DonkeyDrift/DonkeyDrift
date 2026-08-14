@@ -1,5 +1,22 @@
 # 变更日志
 
+## 2026-08-14 (17)
+
+- feat(launcher): Donkey 菜单页手机版顶栏两行布局 + 英文版菜单标题对齐修复
+  - 手机版（≤640px）顶栏改为两行：第一行与电脑版完全一致（logo 图标 → Donkey 标题 → GitHub 图标 → 版本号），第二行最左为浅色/跟随系统/深色切换键、最右为中文/English 切换键；实现为新增仅手机端显示的 `.headerBreak` 换行元素 + `@media (max-width:640px)` 内 `#themeTabs{margin-left:0}` / `#langTabs{margin-left:auto}`，桌面端布局零改动。
+  - 英文版菜单 0/1 号标题（Drifter Console / Create Car）错位修复：根源是英文分类标签 Manage/Data/Drive/Filter/Train 宽度不一，中文版二字标签天然等宽无此问题；新增 `html[lang="en"] .catPill{width:70px;justify-content:center}` 仅对英文版固定分类 pill 等宽，中文版像素级不变，电脑版与手机版同效。
+  - 验证：`py_compile` 通过；8091 临时实例 + Playwright 实测——英文版 0/1/2 号标题 x 坐标均为 162（修复前错位），中文版保持 137.1 不变；手机端 390px 下主题键 x=12（最左）、语言键 x=270（贴右边框）；桌面端顶栏仍为单行。中英文 × 桌面/手机四种组合截图确认。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+## 2026-08-14 (16)
+
+- fix(launcher): systemd 单元改 `KillMode=process`，launcher 重启不再连坐杀死 drive 进程
+  - 根因：`donkeydrifter-launcher.service` 此前用默认 `KillMode=control-group`，每次停止/重启 launcher（部署新代码、手工 restart）都会按 cgroup 整体回收，把经 launcher 启动的 `donkey web`（后端 8100 + 前端 5188）与 `manage.py drive` 一并杀掉，正在使用的 DonkeyDrifter 驾驶界面随即掉线且不会自动恢复（launcher 无重启后自动重拉 drive 的逻辑）；且 `manage.py drive` 的 WS 重连循环会拖住 SIGTERM，导致 stop 触发 90s 超时报 `Failed with result 'timeout'`。今日 17:05/17:29/17:47 三次重启均复现"进不去 DonkeyDrifter"。
+  - 修复：`donkeycar/launcher/donkeydrifter-launcher.service` 新增 `KillMode=process`——停止/重启只向 launcher 主进程发信号，drive 子进程继续存活；下次 `POST /api/launch/drive` 仍按 `~/.donkeycar/drive.pid` 先杀旧进程再启动，不累积孤儿。顺带消除 stop 超时（不再等子进程退出）。
+  - 已同步本机已安装单元 `~/.config/systemd/user/donkeydrifter-launcher.service` 并 `systemctl --user daemon-reload`（无需重启服务，下次 stop/restart 即生效）；实机验证：daemon-reload 后 `systemctl --user restart`，8090 数秒内恢复，`manage.py drive`（8100）与 vite（5188）进程全程存活、页面持续 200。
+  - 测试：新增 `tests/test_launcher_service_unit.py`（断言 `KillMode=process`、保留 `Restart=always`、无 `control-group` 回退、unit 基本形态不变）。
+  - 涉及文件：`donkeycar/launcher/donkeydrifter-launcher.service`、`tests/test_launcher_service_unit.py`（新增）
+
 ## 2026-08-14 (15)
 
 - feat(web_ui): UI 语言首访自动跟随浏览器语言

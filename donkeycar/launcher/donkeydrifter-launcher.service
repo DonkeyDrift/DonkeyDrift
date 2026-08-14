@@ -8,6 +8,9 @@ ExecStart=/home/dkc/miniconda3/envs/donkey/bin/python3 -m donkeycar.launcher
 WorkingDirectory=/home/dkc/projects/mycar
 Restart=always
 RestartSec=3
+# Launcher 停止/重启时只杀主进程：drive 子进程（donkey web / manage.py drive）
+# 继续存活，避免 DonkeyDrifter 驾驶界面随服务重启掉线；下次 launch 仍按 PID 文件先杀旧进程
+KillMode=process
 User=dkc
 Environment=PYTHONPATH=/home/dkc/projects/DonkeyDrift
 Environment=PATH=/home/dkc/miniconda3/envs/donkey/bin:/usr/bin:/bin
