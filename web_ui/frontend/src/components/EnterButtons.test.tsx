@@ -22,6 +22,18 @@ describe('EnterButtons', () => {
     expect(screen.getByText('common.enterButtons.donkey')).toBeInTheDocument();
     expect(screen.getByText('common.enterButtons.drifterConsole')).toBeInTheDocument();
   });
+  it('renders Donkey left of DrifterConsole by default', () => {
+    render(<EnterButtons />);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons[0]).toHaveTextContent('common.enterButtons.donkey');
+    expect(buttons[1]).toHaveTextContent('common.enterButtons.drifterConsole');
+  });
+  it('renders DrifterConsole left of Donkey when consoleFirst', () => {
+    render(<EnterButtons consoleFirst />);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons[0]).toHaveTextContent('common.enterButtons.drifterConsole');
+    expect(buttons[1]).toHaveTextContent('common.enterButtons.donkey');
+  });
   it('opens Donkey launcher', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<EnterButtons />);
