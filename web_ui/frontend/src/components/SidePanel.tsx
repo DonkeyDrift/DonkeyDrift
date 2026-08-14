@@ -25,7 +25,7 @@ export const SidePanel: React.FC = () => {
       {/* Shared Drawer Container — width only changes when opening/closing, not when switching tabs */}
       <div
         className={`fixed left-0 top-16 h-[calc(100vh-4rem)] z-40 transition-all duration-300 ease-in-out ${
-          anyOpen ? 'w-96' : 'w-0'
+          anyOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
         }`}
       >
         {/* Floating Trigger Buttons — outside overflow-hidden content */}

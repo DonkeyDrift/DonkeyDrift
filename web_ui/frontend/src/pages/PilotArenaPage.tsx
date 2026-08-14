@@ -804,10 +804,10 @@ export const PilotArenaPage: React.FC = () => {
           <CardTitle>{t('arena.currentData')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
-            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">{t('arena.configLabel')}: {configPath || t('arena.notSelected')}</div>
-            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">{t('arena.tubLabel')}: {tubPath || t('arena.notSelected')}</div>
-            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300">{t('arena.recordsLabel')}: {records.length}</div>
+          <div className="grid grid-cols-1 gap-3 text-sm lg:grid-cols-3">
+            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300 min-w-0 break-all">{t('arena.configLabel')}: {configPath || t('arena.notSelected')}</div>
+            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300 min-w-0 break-all">{t('arena.tubLabel')}: {tubPath || t('arena.notSelected')}</div>
+            <div className="rounded-md bg-zinc-950 px-3 py-2 text-zinc-300 min-w-0 break-all">{t('arena.recordsLabel')}: {records.length}</div>
           </div>
           <input
             type="range"
@@ -859,7 +859,7 @@ export const PilotArenaPage: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <label className="space-y-1 text-sm">
                   <span className="text-zinc-400">{t('arena.modelType')}</span>
                   <select

@@ -9,6 +9,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.drive': 'Drive',
     'common.nav.pilotArena': 'Pilot Arena',
     'common.nav.carConnector': 'Car Connector',
+    'common.nav.menu': '菜单',
     // App shell
     'common.app.somethingWentWrong': 'Something went wrong.',
     'common.app.failedToRefreshTub': 'Failed to refresh tub',
@@ -61,6 +62,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.drive': 'Drive',
     'common.nav.pilotArena': 'Pilot Arena',
     'common.nav.carConnector': 'Car Connector',
+    'common.nav.menu': 'Menu',
     // App shell
     'common.app.somethingWentWrong': 'Something went wrong.',
     'common.app.failedToRefreshTub': 'Failed to refresh tub',
