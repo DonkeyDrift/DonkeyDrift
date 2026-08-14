@@ -7,14 +7,21 @@
     <title>DonkeyDrifter</title>
     <script>
       // 首屏前应用持久化主题,避免闪烁;与 src/lib/theme.ts 保持同一 storage key。
-      // 跟随系统暂未实现,system 暂时解析为深色(theme-mus4)。
+      // "跟随系统"(system)经 matchMedia('(prefers-color-scheme: dark)') 解析,matchMedia 不可用时回退深色。
       (function () {
         try {
           var t = window.localStorage.getItem('donkeydrifter.ui.theme');
+          if (t !== 'light' && t !== 'dark') {
+            var m =
+              typeof window.matchMedia === 'function'
+                ? window.matchMedia('(prefers-color-scheme: dark)')
+                : null;
+            t = m === null || m.matches ? 'dark' : 'light';
+          }
           document.documentElement.classList.remove('theme-mus4', 'theme-light');
           document.documentElement.classList.add(t === 'light' ? 'theme-light' : 'theme-mus4');
         } catch (e) {
-          /* localStorage 不可用时保持默认深色 */
+          /* localStorage 或 matchMedia 不可用时保持默认深色 */
         }
       })();
     </script>

@@ -1,13 +1,48 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeSwitcher, THEME_STORAGE_KEY } from './ThemeSwitcher';
+
+type SystemThemeChangeHandler = (event: { matches: boolean }) => void;
+
+// jsdom 无 matchMedia 实现;mock 成共享同一监听器集合的对象,
+// 使 theme.ts 的模块级单例监听在整个测试文件内始终可达。
+let systemDark = true;
+const systemThemeChangeHandlers = new Set<SystemThemeChangeHandler>();
+
+const matchMediaMock = (query: string): MediaQueryList =>
+  ({
+    matches: query === '(prefers-color-scheme: dark)' ? systemDark : false,
+    media: query,
+    onchange: null,
+    addEventListener: (_type: string, handler: SystemThemeChangeHandler) => {
+      systemThemeChangeHandlers.add(handler);
+    },
+    removeEventListener: (_type: string, handler: SystemThemeChangeHandler) => {
+      systemThemeChangeHandlers.delete(handler);
+    },
+    addListener: (handler: SystemThemeChangeHandler) => {
+      systemThemeChangeHandlers.add(handler);
+    },
+    removeListener: (handler: SystemThemeChangeHandler) => {
+      systemThemeChangeHandlers.delete(handler);
+    },
+    dispatchEvent: () => false,
+  }) as unknown as MediaQueryList;
+
+/** 设置系统深色偏好并触发 change 事件(模拟系统主题切换)。 */
+const setSystemDark = (dark: boolean) => {
+  systemDark = dark;
+  systemThemeChangeHandlers.forEach((handler) => handler({ matches: dark }));
+};
 
 describe('ThemeSwitcher', () => {
   beforeEach(() => {
     window.localStorage.clear();
     document.documentElement.classList.remove('theme-mus4', 'theme-light');
+    systemDark = true;
+    window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
   });
 
   it('renders 跟随系统, 浅色 and 深色 segments with 跟随系统 active by default', () => {
@@ -43,9 +78,31 @@ describe('ThemeSwitcher', () => {
     expect(document.documentElement.classList.contains('theme-light')).toBe(false);
   });
 
-  it('resolves 跟随系统 to the dark skin for now (跟随系统 not implemented yet)', () => {
+  it('resolves 跟随系统 to the dark skin when the system prefers dark', () => {
+    setSystemDark(true);
     render(<ThemeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
+  });
+
+  it('resolves 跟随系统 to the light skin when the system prefers light', () => {
+    setSystemDark(false);
+    render(<ThemeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
+  });
+
+  it('follows system theme changes while 跟随系统 is selected', () => {
+    setSystemDark(true);
+    render(<ThemeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    setSystemDark(false);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
+    setSystemDark(true);
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
     expect(document.documentElement.classList.contains('theme-light')).toBe(false);
   });
