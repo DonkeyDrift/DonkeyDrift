@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from donkeycar._version import __version__
+from donkeycar.launcher.dc_discovery import find_drifter_console
 
 
 # ── PID 文件管理（与 tui.py / base.py 保持一致） ────────────────────────
@@ -386,6 +387,15 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             result = _launch_drive()
             code = 200 if result.get("status") != "error" else 500
             self._serve_json(result, code=code)
+        elif path == "/api/launch/dc":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                self.rfile.read(content_length)
+            url = find_drifter_console()
+            if url:
+                self._serve_json({"status": "ok", "url": url})
+            else:
+                self._serve_json({"status": "not_found"})
         else:
             self._serve_json({"error": "not found"}, code=404)
 
@@ -740,7 +750,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 1-10：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 1-11：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -774,7 +784,9 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 1-10：选择对应菜单项',
+                'help.keyNumbers': '数字键 1-11：选择对应菜单项',
+                'overlay.findingDc': '正在查找 Drifter Console...',
+                'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
@@ -797,7 +809,9 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 1-10: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 1-11: select the corresponding menu item',
+                'overlay.findingDc': 'Locating Drifter Console...',
+                'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
@@ -915,10 +929,11 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 4,  cat: "data",   name: "backup_data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "restore_data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
             {no: 6,  cat: "drive",  name: "drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
-            {no: 7,  cat: "filter", name: "web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
-            {no: 8,  cat: "filter", name: "donkey_ui",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
-            {no: 9,  cat: "train",  name: "train_local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
-            {no: 10, cat: "train",  name: "train_online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
+            {no: 7,  cat: "drive",  name: "drifter_console", descZh: "打开 Drifter Console",               descEn: "Open Drifter Console",                           favorite: true},
+            {no: 8,  cat: "filter", name: "web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
+            {no: 9,  cat: "filter", name: "donkey_ui",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
+            {no: 10, cat: "train",  name: "train_local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
+            {no: 11, cat: "train",  name: "train_online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -973,8 +988,35 @@ MENU_HTML = r"""<!DOCTYPE html>
 
             if (no === 6) {
                 launchDrive();
+            } else if (no === 7) {
+                openDrifterConsole();
             } else {
                 showError(t('overlay.notImplemented'));
+            }
+        }
+
+        // 打开 Drifter Console（ESP32 Web Console，服务端局域网发现）
+        async function openDrifterConsole() {
+            const overlay = document.getElementById('overlay');
+            const overlayText = document.getElementById('overlay-text');
+            const overlayError = document.getElementById('overlay-error');
+            overlay.classList.add('show');
+            overlayText.textContent = t('overlay.findingDc');
+            overlayError.textContent = '';
+
+            try {
+                const resp = await fetch('/api/launch/dc', {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+                if (data.status === 'ok' && data.url) {
+                    overlayText.textContent = t('overlay.success');
+                    window.location.href = data.url;
+                } else {
+                    showError(t('overlay.dcNotFound'));
+                }
+            } catch (e) {
+                showError(t('overlay.networkError') + ': ' + e.message);
             }
         }
 
@@ -1080,12 +1122,16 @@ MENU_HTML = r"""<!DOCTYPE html>
                 return;
             }
 
-            // 处理 "10" 输入：先按 1，400ms 内按 0 则选中 10
+            // 处理 "10"/"11" 输入：先按 1，400ms 内按 0 选中 10、按 1 选中 11
             if (pendingDigit1 !== null) {
                 clearTimeout(pendingDigit1.timer);
                 pendingDigit1 = null;
                 if (key === '0') {
                     selectItem(10);
+                    return;
+                }
+                if (key === '1') {
+                    selectItem(11);
                     return;
                 }
             }

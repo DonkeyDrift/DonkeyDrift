@@ -16,6 +16,7 @@ import getpass
 import tarfile
 import re
 import socket
+import webbrowser
 from donkeycar.management.data_migrator import DataMigrator
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable, Tuple
@@ -35,6 +36,8 @@ try:
     from donkeycar.management.ui.rc_file_handler import rc_handler
 except Exception:
     rc_handler = None
+
+from donkeycar.launcher.dc_discovery import find_drifter_console
 
 # 初始化 Console
 console = Console()
@@ -1489,6 +1492,29 @@ class DriveCommand(DonkeyCommand):
             # 兜底：显式恢复 ECHO 和 ICANON，避免旧设置恢复失败时终端仍处于无回显状态
             _restore_terminal()
 
+class DrifterConsoleCommand(DonkeyCommand):
+    def __init__(self):
+        super().__init__("drifter_console", "打开 Drifter Console", "驾驶", is_favorite=True, requires_mycar_folder=False)
+        self.options = []
+
+    def execute(self):
+        console.clear()
+        console.print(Panel(f"[bold orange1]{self.description}[/bold orange1]", title=f"配置 {self.name}"))
+
+        with console.status("[bold]正在局域网内查找 Drifter Console...[/bold]"):
+            url = find_drifter_console()
+
+        if not url:
+            console.print("[red]✗ 未找到 Drifter Console（请确认车辆已开机并与本机在同一局域网）[/red]")
+            Prompt.ask("按回车键返回菜单...")
+            return
+
+        console.print(f"[green]✓ 找到 Drifter Console: {url}[/green]")
+        webbrowser.open(url)
+        console.print("[dim]已在默认浏览器打开。[/dim]")
+        Prompt.ask("按回车键返回菜单...")
+
+
 class DonkeyUICommand(DonkeyCommand):
     def __init__(self):
         super().__init__("donkey_ui", "启动数据筛选工具（Windows下需要WSL来运行）", "筛选", is_favorite=True, requires_mycar_folder=False)
@@ -1516,7 +1542,7 @@ class MenuSystem:
         self.commands: Dict[str, List[DonkeyCommand]] = {
             "管理": [CreateCarCommand(), OpenProjectCommand()],
             "数据": [ClearDataCommand(), BackupDataCommand(), RestoreDataCommand()],
-            "驾驶": [DriveCommand()],
+            "驾驶": [DriveCommand(), DrifterConsoleCommand()],
             "筛选": [WebUICommand(), DonkeyUICommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
