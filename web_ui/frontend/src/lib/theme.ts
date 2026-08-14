@@ -13,13 +13,14 @@ export const THEME_CLASS: Record<ResolvedTheme, string> = {
 
 const THEME_CHANGE_EVENT = 'donkeydrifter:theme-changed';
 
+/** 读取持久化主题选择;无存储或存储值非法时默认深色('dark'),仅显式存储 'system' 才跟随系统。 */
 export const readStoredTheme = (): ThemeMode => {
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark') return stored;
-    return 'system';
+    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+    return 'dark';
   } catch {
-    return 'system';
+    return 'dark';
   }
 };
 

@@ -7,11 +7,12 @@
     <title>DonkeyDrifter</title>
     <script>
       // 首屏前应用持久化主题,避免闪烁;与 src/lib/theme.ts 保持同一 storage key。
-      // "跟随系统"(system)经 matchMedia('(prefers-color-scheme: dark)') 解析,matchMedia 不可用时回退深色。
+      // 默认深色;仅持久化选择为"跟随系统"(system)时才经 matchMedia('(prefers-color-scheme: dark)') 解析,matchMedia 不可用时回退深色。
       (function () {
         try {
           var t = window.localStorage.getItem('donkeydrifter.ui.theme');
-          if (t !== 'light' && t !== 'dark') {
+          if (t !== 'light' && t !== 'dark' && t !== 'system') t = 'dark';
+          if (t === 'system') {
             var m =
               typeof window.matchMedia === 'function'
                 ? window.matchMedia('(prefers-color-scheme: dark)')

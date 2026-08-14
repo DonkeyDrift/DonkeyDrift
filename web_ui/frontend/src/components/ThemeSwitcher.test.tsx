@@ -45,11 +45,12 @@ describe('ThemeSwitcher', () => {
     window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
   });
 
-  it('renders 跟随系统, 浅色 and 深色 segments with 跟随系统 active by default', () => {
+  it('renders 跟随系统, 浅色 and 深色 segments with 深色 active by default', () => {
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '浅色' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'false');
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
   });
 
   it('switches to 浅色 on click and persists the selection', () => {
@@ -107,6 +108,14 @@ describe('ThemeSwitcher', () => {
     expect(document.documentElement.classList.contains('theme-light')).toBe(false);
   });
 
+  it('does not follow system theme changes by default', () => {
+    render(<ThemeSwitcher />);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    setSystemDark(false);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
+  });
+
   it('applies the persisted skin class on mount', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
     render(<ThemeSwitcher />);
@@ -119,9 +128,9 @@ describe('ThemeSwitcher', () => {
     expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('falls back to 跟随系统 for unknown stored values', () => {
+  it('falls back to 深色 for unknown stored values', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'unknown');
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
