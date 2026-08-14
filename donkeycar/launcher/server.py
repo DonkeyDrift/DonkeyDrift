@@ -529,6 +529,15 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
 <div class="error" id="error"></div>
 </div>
 <script>
+// 语言：显式存储选择优先，否则跟随浏览器语言（zh* → 中文，其余 → 英文）
+var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
+var T={
+  zh:{starting:'正在启动 DonkeyDrifter...',failed:'启动失败',unknown:'未知错误',network:'网络错误: '},
+  en:{starting:'Starting DonkeyDrifter...',failed:'Launch failed',unknown:'Unknown error',network:'Network error: '}
+};
+function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
+document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
+document.getElementById('text').textContent=t('starting');
 (async function(){
   try{
     var r=await fetch('/api/launch/drive',{method:'POST'});
@@ -538,13 +547,13 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
       window.location.href=url;
     }else{
       document.getElementById('spinner').style.display='none';
-      document.getElementById('text').textContent='启动失败';
-      document.getElementById('error').textContent=d.error||'未知错误';
+      document.getElementById('text').textContent=t('failed');
+      document.getElementById('error').textContent=d.error||t('unknown');
     }
   }catch(e){
     document.getElementById('spinner').style.display='none';
-    document.getElementById('text').textContent='启动失败';
-    document.getElementById('error').textContent='网络错误: '+e.message;
+    document.getElementById('text').textContent=t('failed');
+    document.getElementById('error').textContent=t('network')+e.message;
   }
 })();
 </script>
@@ -558,8 +567,8 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
-    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认深色，仅"跟随系统"经 matchMedia 实时解析）
-    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t==='system'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}else if(t!=='light'&&t!=='dark'){t='dark'}document.documentElement.dataset.theme=t}catch(e){}})();
+    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统，经 matchMedia 实时解析）
+    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
@@ -848,12 +857,21 @@ MENU_HTML = r"""<!DOCTYPE html>
         };
 
         let uiLang = 'zh';
-        let uiTheme = 'dark';
+        let uiTheme = 'system';
 
         function normalizeLanguage(lang) { return lang === 'en' ? 'en' : 'zh'; }
-        function readStoredLanguage() {
-            try { return normalizeLanguage(localStorage.getItem(LANG_STORAGE_KEY)); }
+        // 浏览器语言自动检测（zh* → 中文，其余 → 英文），仅在没有显式存储选择时生效；
+        // 一旦用户手动切换，localStorage 中的显式选择优先并跨重启保持（与 DD web_ui 同语义）
+        function detectBrowserLanguage() {
+            try { return String(navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
             catch (e) { return 'zh'; }
+        }
+        function readStoredLanguage() {
+            try {
+                const v = localStorage.getItem(LANG_STORAGE_KEY);
+                if (v === 'zh' || v === 'en') return v;
+            } catch (e) {}
+            return detectBrowserLanguage();
         }
         function t(key) {
             return (I18N[uiLang] && I18N[uiLang][key]) || I18N.zh[key] || key;
@@ -881,7 +899,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             closeLanguageMenu();
         }
 
-        // ── 主题：浅色 / 跟随系统 / 深色（默认深色，仅选中 system 时经 matchMedia 实时解析并监听） ──
+        // ── 主题：浅色 / 跟随系统 / 深色（默认跟随系统，选中 system 时经 matchMedia 实时解析并监听） ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -904,7 +922,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             applyTheme(mode);
         }
         function initTheme() {
-            var stored = 'dark';
+            var stored = 'system';
             try {
                 var s = localStorage.getItem(THEME_STORAGE_KEY);
                 if (s === 'light' || s === 'dark' || s === 'system') stored = s;
