@@ -23,6 +23,18 @@ from donkeycar._version import __version__
 
 _DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
 
+# ── 图标静态文件 ────────────────────────────────────────────────────
+
+# URL 路径 → (文件名, Content-Type)，文件位于本模块同目录。
+# favicon.svg 是 Safari 固定标签页的 mask-icon（单色头盔描摹自 logo.png），
+# apple-touch-icon 用于 Safari 收藏/书签，favicon.ico 兼容旧路径请求。
+_ICON_FILES = {
+    "/favicon.png": ("donkey_favicon.png", "image/png"),
+    "/favicon.ico": ("donkey_favicon.ico", "image/x-icon"),
+    "/favicon.svg": ("donkey_favicon.svg", "image/svg+xml"),
+    "/apple-touch-icon.png": ("donkey_touch_icon.png", "image/png"),
+}
+
 
 def _read_drive_pid_file():
     """读取上次 donkey drive 记录的进程 PID 列表。"""
@@ -352,8 +364,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_html()
-        elif path in ("/favicon.png", "/favicon.ico"):
-            self._serve_favicon()
+        elif path in _ICON_FILES:
+            self._serve_icon(path)
         elif path == "/launch/drive":
             self._serve_launch_drive_page()
         elif path == "/api/status":
@@ -388,13 +400,14 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_favicon(self):
-        """提供 Donkey favicon 图标。"""
-        favicon_path = Path(__file__).parent / "donkey_favicon.png"
-        if favicon_path.exists():
-            body = favicon_path.read_bytes()
+    def _serve_icon(self, path):
+        """提供图标静态文件（favicon PNG/ICO/SVG、apple-touch-icon）。"""
+        filename, content_type = _ICON_FILES[path]
+        icon_path = Path(__file__).parent / filename
+        if icon_path.exists():
+            body = icon_path.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -457,7 +470,9 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="/favicon.png?v=2">
+<link rel="icon" type="image/png" href="/favicon.png?v=3">
+<link rel="mask-icon" href="/favicon.svg?v=3" color="#5cc8ff">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
 <title>Donkey</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
@@ -507,7 +522,9 @@ MENU_HTML = r"""<!DOCTYPE html>
     // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，"跟随系统"经 matchMedia 实时解析）
     (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
     </script>
-    <link rel="icon" type="image/png" href="/favicon.png?v=2">
+    <link rel="icon" type="image/png" href="/favicon.png?v=3">
+    <link rel="mask-icon" href="/favicon.svg?v=3" color="#5cc8ff">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
     <title>Donkey</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
@@ -672,7 +689,7 @@ MENU_HTML = r"""<!DOCTYPE html>
 <body>
     <div class="container">
         <div class="headerRow">
-            <img class="headerLogo" src="/favicon.png?v=2" alt="Donkey">
+            <img class="headerLogo" src="/favicon.png?v=3" alt="Donkey">
             <h1>Donkey</h1>
             <span class="version">DonkeyDrifter Web Launcher</span>
             <a class="ghLink" href="https://github.com/DonkeyDrift/DonkeyDrift" target="_blank" rel="noopener noreferrer" aria-label="DonkeyDrift on GitHub" title="DonkeyDrift on GitHub">
