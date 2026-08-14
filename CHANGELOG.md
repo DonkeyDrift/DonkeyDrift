@@ -1,12 +1,26 @@
 # 变更日志
 
-## 2026-08-14 (14)
+## 2026-08-14 (15)
 
 - feat(web_ui): UI 语言首访自动跟随浏览器语言
   - `web_ui/frontend/src/i18n/index.tsx` 初始化顺序改为：localStorage 已存选择优先，无存则读取 `navigator.language`——`zh` 开头（zh-CN/zh-TW 等）用中文，其余一律英文；自动检测结果不落盘，仅用户手动切换时写入 localStorage `donkeydrifter.ui.lang` 并在后续访问优先生效（关机/重启后仍记住手动选择）。
   - 测试同步：`LanguageSwitcher.test.tsx` 扩为 5 项（中文浏览器默认中文、英文浏览器首访自动英文且不落盘、点击切换并持久化、恢复已存选择、已存选择优先于浏览器语言），新增 `setBrowserLanguage` mock 辅助；`FabActions.test.tsx` 默认中文用例补浏览器语言 mock 保持确定性。
   - 验证：`tsc -b --noEmit` 零错误、`vitest` 14 个文件 75/75 通过、`npm run build` 成功。
   - 涉及文件：`web_ui/frontend/src/i18n/index.tsx`、`web_ui/frontend/src/components/LanguageSwitcher.test.tsx`、`web_ui/frontend/src/components/FabActions.test.tsx`
+
+## 2026-08-14 (14)
+
+- fix(launcher,provisioning): 修复 Drifter Console 上看不到上位机 IP
+  - 根因①：launcher 常驻 HOSTIP 上报（`server.py` `_report_hostip_to_esp32`，30s 周期）候选端口仅 `/dev/ttyACM0/1`、`/dev/ttyUSB0`，不覆盖本车 ESP32 配网串口 `/dev/ttyS6`（UART 直连），一个都不命中等于从没发过；且裸 `open()` 不配置 termios，按端口残留波特率（默认 9600）发送，固件 115200 收到全乱码。
+  - 根因②：ModemManager 会探测 `ID_MM_CANDIDATE=1` 的串口并篡改 termios（实测车上 `/dev/ttyS6` 在 `manage.py` 持有期间被从 115200 改成 9600），`ProvisioningPart` 只在打开时配置一次，被篡改后持续乱码，HOSTIP 帧固件无法解析。
+  - 修复：`server.py` 候选端口补 `/dev/ttyS6` 置顶；改为每次发送前 open → tcsetattr 115200 8N1（CLOCAL|CREAD、关 ONLCR 输出翻译）→ write → tcdrain → close，被篡改下一周期自愈；IP 探测由 `hostname -I` 简易解析换用 `provisioning.detect_lan_ip()`（VPN/TUN 感知，与配网模块同一逻辑）。`provisioning.py` `_write_line()` 独立串口模式发送前重新断言波特率（Arduino 共享串口不动，由 actuator 管理）。
+  - 测试：新增 `donkeycar/tests/test_launcher_hostip.py` 11 例（端口优先级与回退、115200/8N1 标志位断言、无 IP 不触碰串口、端口全灭静默、写失败换口、无 termios 平台回退）；`test_provisioning.py` 补 2 例（独立模式重设波特率、Arduino 共享模式不动波特率）。
+  - 验证：本地 pytest 相关 106 项通过；实机调用修复版上报后 ESP32 `/api/status` 出现 `host_ip=192.168.3.41`（本机 IP）；分支 CI 全绿。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/parts/provisioning.py`、`donkeycar/tests/test_launcher_hostip.py`（新增）、`donkeycar/tests/test_provisioning.py`
+
+- test(tui): 同步菜单名大写排版改动，修复 Tony CI 红
+  - #88 把菜单功能名改为首字母大写（"drive"→"Drive"）后漏改 `test_main_menu_sixth_item_is_drive_page` 期望，Tony 主干 CI 持续红；期望值修正为 "Drive"。
+  - 涉及文件：`donkeycar/tests/test_tui_menu.py`
 
 ## 2026-08-14 (13)
 
