@@ -80,7 +80,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               ))}
             </nav>
             <div className="container mx-auto px-4 pb-4 flex flex-wrap items-center gap-3">
-              <EnterButtons />
+              <EnterButtons consoleFirst />
               <ThemeSwitcher />
               <LanguageSwitcher />
               <VersionBadge />

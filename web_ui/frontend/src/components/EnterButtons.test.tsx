@@ -17,16 +17,30 @@ const mockDiscover = vi.mocked(discoverConnectorConsoles);
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('EnterButtons', () => {
-  it('renders both buttons', () => {
+  it('renders Kimi Code Web and DrifterConsole buttons', () => {
     render(<EnterButtons />);
-    expect(screen.getByText('common.enterButtons.donkey')).toBeInTheDocument();
+    expect(screen.getByText('common.enterButtons.kimiCodeWeb')).toBeInTheDocument();
     expect(screen.getByText('common.enterButtons.drifterConsole')).toBeInTheDocument();
   });
-  it('opens Donkey launcher', () => {
+  it('renders Kimi Code Web left of DrifterConsole by default (desktop)', () => {
+    render(<EnterButtons />);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toHaveTextContent('common.enterButtons.kimiCodeWeb');
+    expect(buttons[1]).toHaveTextContent('common.enterButtons.drifterConsole');
+  });
+  it('renders DrifterConsole left of Kimi Code Web when consoleFirst (mobile)', () => {
+    render(<EnterButtons consoleFirst />);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toHaveTextContent('common.enterButtons.drifterConsole');
+    expect(buttons[1]).toHaveTextContent('common.enterButtons.kimiCodeWeb');
+  });
+  it('Kimi Code Web button is a placeholder without any action', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<EnterButtons />);
-    fireEvent.click(screen.getByText('common.enterButtons.donkey'));
-    expect(openSpy).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
+    expect(openSpy).not.toHaveBeenCalled();
     openSpy.mockRestore();
   });
   it('opens Drifter Console on success', async () => {
