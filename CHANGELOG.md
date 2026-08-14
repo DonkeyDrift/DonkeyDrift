@@ -1,5 +1,20 @@
 # 变更日志
 
+## 2026-08-14 (10)
+
+- feat(launcher): 菜单新增「Drifter Console」项（0 号置顶、常用），一键打开车上控制台
+  - 新增 `donkeycar/launcher/dc_discovery.py`：Drifter Console 局域网发现模块。固件 v1.7.14 起默认禁用 mDNS/NetBIOS/LLMNR 名称发现（`DISABLE_WIFI_NAME_DISCOVERY`），无法依赖主机名，改为探测 `/api/status` 的 MUS4 特征字段（`version=`/`ap_ip=`）定位车辆：先探车辆 AP 固定地址 192.168.4.1，未命中再并行扫描本机所在 /24 网段（48 线程、单地址 0.6s 超时），结果缓存 60 秒。
+  - `server.py` 新增 `POST /api/launch/dc` 返回 DC URL；menuItems 将 Drifter Console 编号 0 置顶（其余项编号不变）；键盘 0 由「返回上一页/关闭标签页」改为选中 0 号，删除 history.back()/window.close() 分支；帮助按键说明更新为数字键 0-10（中英 + HTML 兜底同步）。
+  - `tui.py`「驾驶」分类新增 DrifterConsoleCommand（is_favorite=True，无需 mycar 目录），经同一发现模块定位后用默认浏览器打开；TUI 菜单编号不变（0 在 TUI 仍为退出）。
+  - 验证：`POST /api/launch/dc` 实测 1.8s 返回 `http://192.168.3.46/`（`/api/status` 确认为车上 MUS4 v1.7.66）；Playwright 实测点击 0 号/按 0 键跳转 DC、按 1,0 选中 10 号；截图确认 0 号置顶排版。
+  - 涉及文件：`donkeycar/launcher/dc_discovery.py`（新增）、`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`
+
+- feat(launcher): 菜单功能名排版改为首字母大写、空格分词
+  - 规则：每个单词首字母大写，单词间用空格连接不再用下划线；"UI" 两字母全大写。11 项依次为 Create Car / Open / Clear Data / Backup Data / Restore Data / Drive / Drifter Console / Web / Donkey UI / Train Local / Train Online；网页菜单与 TUI 命令显示名同步修改。
+  - 注：TUI 参数历史以功能名为键，改名后对应功能的历史参数会重置一次。
+  - 验证：临时实例 + Playwright 截图实测 11 项名称渲染正确；TUI 菜单列表逐项核对一致。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`
+
 ## 2026-08-14 (9)
 
 - feat(launcher): CWD 栏标签改为双语全称，不再用缩写
