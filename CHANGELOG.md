@@ -1,5 +1,35 @@
 # 变更日志
 
+## 2026-08-14 (20)
+
+- feat(launcher): 新增 `/terminal` 上位机 Web 终端——浏览器里得到上位机完整 bash 终端
+  - 背景：Drifter Console 的 cmdTarget 下拉框此前只有 Web 一项（Serial 日志源在固件 v1.7.29 后与 Web 同源重复被去掉）。本改动把 Serial 选项恢复并升级为真正的上位机终端：固件侧选中 Serial 时以 iframe 嵌入 `http://<host_ip>:8090/terminal`，可在浏览器里直接使用上位机 bash（kimi/claude/codex/donkey 等全屏 TUI 程序可用）。
+  - `donkeycar/launcher/terminal.py`（新增）：WebSocket↔PTY 桥——每个 ws 连接 fork 一个 PTY 跑 login shell，双向转发 stdin/stdout，支持浏览器端窗口缩放（resize 消息同步 TIOCSWINSZ）、连接关闭时回收子进程、shell 退出时主动通知前端。
+  - `donkeycar/launcher/terminal_static/`（新增）：xterm.js 自包含终端页（`index.html` + 本地 vendored `xterm.js`/`xterm.css`/`addon-fit.js`，无 CDN 依赖，车内无互联网可用）。
+  - `donkeycar/launcher/server.py`：新增 `/terminal` 终端页路由、`/terminal/static/*` 静态资源与 `/terminal/ws` WebSocket 端点。
+  - 安全口径（用户已决策）：与固件控制台免密（Firmware v1.7.71）同口径——家用局域网场景不加认证，谁连上谁可用；后续如需暴露到非信任网络再补鉴权。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py`（新增）14 项——PTY 桥回显/resize/退出通知、路由与静态资源、server 集成。launcher + provisioning 全量 120 项通过。
+  - 验证：systemd --user 重启部署后实测 `ws://192.168.3.41:8090/terminal/ws` 命令回显/窗口缩放/Ctrl-C/shell 退出通知全通；Playwright 无头浏览器对车上真实页面 E2E 九项全过（默认选中 Serial、选项顺序 serial→web、终端 iframe 自动加载并挂载 xterm、键入命令真实执行回显、切换 Web 恢复日志视图、localStorage 记住选择且刷新后恢复）。
+  - 配套固件改动在 Firmware 仓库（PR #56，v1.7.72）：cmdTarget 恢复 Serial 选项（第一位、默认、记忆），选中后日志区切换为该终端 iframe。
+  - 涉及文件：`donkeycar/launcher/terminal.py`、`donkeycar/launcher/terminal_static/`（index.html/xterm.js/xterm.css/addon-fit.js）、`donkeycar/launcher/server.py`、`donkeycar/tests/test_launcher_terminal.py`
+
+## 2026-08-14 (19)
+
+- feat(web_ui): DonkeyDrifter 手机版标题区三行布局——版本号常驻可见，进入按钮/主题/语言移入标题区
+  - 背景：手机版（<lg）此前把版本号、进入按钮、主题/语言切换全部收进汉堡菜单，不展开菜单就看不到版本号。
+  - `Layout.tsx`：手机版标题区改为三行——第一行 logo+标题、GitHub 图标紧跟标题右侧、版本号在 GitHub 右边（菜单收起也常驻），右端仅汉堡按钮；第二行进入按钮（DrifterConsole 在左；与当日 (18) 合并后 Donkey 键已删除，右侧为"打开 Kimi Code Web"占位键）；第三行左边浅色/跟随系统/深色切换、右边中文/English 切换。汉堡菜单展开后仅保留 5 个导航项（版本号/按钮/切换全部移出）。桌面版（≥lg）布局与按钮顺序零改动。
+  - `EnterButtons.tsx`：新增 `consoleFirst` 属性，仅手机版标题区使用；桌面端默认顺序不变。（与当日 (18) 合并后 `consoleFirst` 语义以 (18) 为准：交换 kimi/console）
+  - `SidePanel.tsx`：左侧 Loaders/Connectors 抽屉为 fixed 定位、顶部偏移原写死 top-16（64px，对应单行顶栏），三行标题区（实测 135px）把抽屉顶部约 70px 压进 sticky 顶栏下方被遮挡；改为手机版 `top-[143px]`（135px+8px 间距）、高度 `calc(100vh-143px)`，≥lg 保持 top-16 不变。
+  - 测试同步：`EnterButtons.test.tsx` 补 2 项顺序断言，该文件共 6 项通过（与当日 (18) 合并后以 Tony 侧重写版 6 例为准）。
+  - 验证：`tsc -b --noEmit` 零错误；vitest 全量 77/77 通过；Playwright 390px 手机视口（菜单开/关）与 1400px 桌面视口截图确认——手机版符合目标布局、桌面版零变化、抽屉下移后 Loaders 不再被遮挡。
+  - 涉及文件：`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/src/components/EnterButtons.tsx`、`web_ui/frontend/src/components/EnterButtons.test.tsx`、`web_ui/frontend/src/components/SidePanel.tsx`
+
+- fix(web_ui): 恢复被 main 合线（3a57408f）回退的主题回退逻辑
+  - 根因：6b7e39bf（主题默认改回跟随系统）的三处改动在 main 合回 Tony 的 merge（3a57408f）中被旧版本覆盖回退——`theme.ts` `readStoredTheme()` catch 分支（localStorage 异常时）变回 `return 'dark'`、`ThemeSwitcher.test.tsx` 两处断言（默认态用例标题、非法存储值回退"深色"）。实现与测试互相矛盾，导致 `falls back to 深色 for unknown stored values` 在 Tony 上持续红（76/77）。
+  - 修复：恢复 6b7e39bf 语义——catch 回退 `'system'`、非法存储值断言改回"跟随系统"、默认态用例标题改回"跟随系统 active by default"。`index.html` 首屏脚本与 launcher `server.py` 三处默认值未被回退，无需改动。
+  - 验证：vitest 全量 77/77 通过。
+  - 涉及文件：`web_ui/frontend/src/lib/theme.ts`、`web_ui/frontend/src/components/ThemeSwitcher.test.tsx`
+
 ## 2026-08-14 (18)
 
 - feat(web_ui): 头部入口按钮——删除"打开 Donkey"，新增"打开 Kimi Code Web"占位键，"进入"改名"打开"
