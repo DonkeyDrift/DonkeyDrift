@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Gamepad2, Smartphone, Joystick, Keyboard, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme } from '@/lib/theme';
 
 export type InputSource = 'joystick' | 'keyboard' | 'gamepad' | 'gyro';
 
@@ -27,8 +28,14 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
   className = '',
 }) => {
   const { t } = useTranslation();
+  const theme = useResolvedTheme();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 任意值阴影皮肤 CSS 覆盖不到:浅色改用皮肤同款软 slate 阴影
+  const panelShadow = theme === 'light'
+    ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]'
+    : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]';
 
   const selected = SOURCES.find((s) => s.value === value)!;
   const others = SOURCES.filter((s) => s.value !== value);
@@ -78,7 +85,7 @@ export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({
       </button>
       {open && (
         <div className="absolute top-full left-0 w-max min-w-full pt-1 z-50">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 shadow-[0_8px_24px_rgba(0,0,0,0.25)] overflow-hidden">
+          <div className={`rounded-lg border border-zinc-800 bg-zinc-900 ${panelShadow} overflow-hidden`}>
             {others.map((src) => {
               const disabled = isDisabled(src.value);
               return (

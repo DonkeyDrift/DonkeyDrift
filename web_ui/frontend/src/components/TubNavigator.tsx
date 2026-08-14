@@ -4,6 +4,7 @@ import { Button } from './ui/Button';
 import { useStore } from '../store/useStore';
 import { getImageUrl } from '../services/api';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme } from '@/lib/theme';
 import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine } from 'lucide-react';
 
 interface RecordStatsProps {
@@ -40,7 +41,14 @@ interface TimelineSliderProps {
 const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, onMouseDown, onMouseUp, recordIndex, totalRecords }: TimelineSliderProps & { recordIndex: number; totalRecords: number }) => {
   const { t } = useTranslation();
   const progress = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
-  const accentColor = isDragging ? '#22d3ee' : '#06b6d4';
+  const theme = useResolvedTheme();
+  // Slider fill/track are JS-drawn colors the skin CSS cannot reach: light theme
+  // uses ink blue (dragging deepens, mirroring the light hover language) and the
+  // light raised-control track surface.
+  const accentColor = isDragging
+    ? (theme === 'light' ? '#0a6f9e' : '#22d3ee')
+    : (theme === 'light' ? '#0c9bd6' : '#06b6d4');
+  const trackColor = theme === 'light' ? '#dfe6ef' : '#3f3f46';
 
   return (
     <div className="flex flex-col gap-2">
@@ -62,7 +70,7 @@ const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, 
         onMouseUp={onMouseUp}
         onTouchStart={onMouseDown}
         onTouchEnd={onMouseUp}
-        style={{ background: `linear-gradient(to right, ${accentColor} 0%, ${accentColor} ${progress}%, #3f3f46 ${progress}%, #3f3f46 100%)` }}
+        style={{ background: `linear-gradient(to right, ${accentColor} 0%, ${accentColor} ${progress}%, ${trackColor} ${progress}%, ${trackColor} 100%)` }}
         className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${isDragging ? 'accent-cyan-400' : 'accent-cyan-500'}`}
       />
     </div>
@@ -71,6 +79,7 @@ const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, 
 
 export const TubNavigator: React.FC = () => {
   const { t } = useTranslation();
+  const theme = useResolvedTheme();
   const records = useStore((state) => state.records);
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
   const totalRecords = useStore((state) => state.totalRecords);
@@ -340,11 +349,11 @@ export const TubNavigator: React.FC = () => {
         if (ctx) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           // Draw a placeholder or just leave it blank, but ensure we don't hold old data
-          ctx.fillStyle = '#18181b'; // zinc-900 to match background roughly
+          ctx.fillStyle = theme === 'light' ? '#f4f6f9' : '#18181b'; // zinc-900 to match background roughly
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           
           // Draw some text to indicate no image
-          ctx.fillStyle = '#52525b'; // zinc-500
+          ctx.fillStyle = theme === 'light' ? '#98a6b7' : '#52525b'; // zinc-600
           ctx.font = '14px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -416,7 +425,7 @@ export const TubNavigator: React.FC = () => {
     };
     // Removed imagePath from dependencies to avoid redundant triggers, imageUrl is sufficient
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl, t]);
+  }, [imageUrl, t, theme]);
 
   useEffect(() => {
     if (!records.length) return;
@@ -516,7 +525,7 @@ export const TubNavigator: React.FC = () => {
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="w-full md:max-w-[40vw] aspect-[4/3] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
-            <div className="absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur-md">
+            <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'} backdrop-blur-md`}>
               <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
               <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
             </div>
