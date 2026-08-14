@@ -19,9 +19,10 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       <span className="text-xs text-zinc-400">{label}</span>
       <span className="text-xs text-zinc-500">{value.toFixed(step < 0.01 ? 3 : 2)}{unit}</span>
     </div>
-    {/* thumb 为 18×15.4px 纯白椭圆：宽度对齐最初版本（d3349014，无自定义 thumb）在 WebKit 下
-        原生 thumb 的实测 18px，高度按已确认的 14:12 椭圆比例折算 15.4px；垂直居中公式：
-        margin-top = (轨道高 6px − thumb 高 15.4px) / 2 = −4.7px（WebKit/Blink 会把 thumb 顶边对齐轨道顶边）；
+    {/* thumb 为 24×16px 纯白椭圆：对齐最初版本（d3349014，无自定义 thumb）在 Safari/WebKit 下的
+        原生 thumb 尺寸——WebKit 源码 RenderThemeCocoa.mm 硬编码 kDefaultSliderThumbWidth=24 /
+        kDefaultSliderThumbHeight=16（宽大于高的白色椭圆，即"最初"看到的样式）；垂直居中公式：
+        margin-top = (轨道高 6px − thumb 高 16px) / 2 = −5px（WebKit/Blink 会把 thumb 顶边对齐轨道顶边）；
         bg-transparent 必需：Chrome/Safari 对 appearance:none 的 range input 默认画白色背景条 */}
     <input
       type="range"
@@ -32,9 +33,9 @@ const ParamSlider: React.FC<ParamSliderProps> = ({ label, value, min, max, step,
       onChange={(e) => onChange(Number(e.target.value))}
       className="w-full h-3 bg-transparent appearance-none cursor-pointer accent-white
         [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:bg-zinc-800 [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-runnable-track]:mt-[3px]
-        [&::-webkit-slider-thumb]:[-webkit-appearance:none] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-[18px] [&::-webkit-slider-thumb]:h-[15.4px] [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-none [&::-webkit-slider-thumb]:-mt-[4.7px]
+        [&::-webkit-slider-thumb]:[-webkit-appearance:none] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-[24px] [&::-webkit-slider-thumb]:h-[16px] [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-none [&::-webkit-slider-thumb]:-mt-[5px]
         [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:bg-zinc-800 [&::-moz-range-track]:rounded-lg
-        [&::-moz-range-thumb]:w-[18px] [&::-moz-range-thumb]:h-[15.4px] [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none"
+        [&::-moz-range-thumb]:w-[24px] [&::-moz-range-thumb]:h-[16px] [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none"
     />
   </div>
 );
