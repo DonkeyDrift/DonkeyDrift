@@ -14,6 +14,7 @@ import { Pause, Play, Trash2, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Telemetry } from '../../hooks/useDriveWebsocket';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
 
 ChartJS.register(
   CategoryScale,
@@ -32,8 +33,10 @@ const BUFFER_SIZE = 256;
 interface CurveConfig {
   /** 显示名的 i18n key（driveViz 命名空间）。 */
   labelKey: string;
-  /** CSS 颜色。 */
+  /** CSS 颜色（深色主题 theme-mus4）。 */
   color: string;
+  /** 浅色主题（theme-light）下的墨色版本；缺省表示该颜色两主题通用。 */
+  lightColor?: string;
   /** 从 Telemetry 取值的键。 */
   key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle' | 'rc_steering' | 'rc_throttle'>;
   /** 是否默认显示。 */
@@ -45,20 +48,24 @@ interface CurveConfig {
   scale?: number;
 }
 
+/** 按当前生效主题取曲线颜色：浅色用墨色版，缺省回退深色值。 */
+const curveColor = (c: CurveConfig, theme: ResolvedTheme): string =>
+  theme === 'light' ? c.lightColor ?? c.color : c.color;
+
 /** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
 const CURVES: CurveConfig[] = [
-  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', key: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', key: 'steering', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', key: 'gz', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1a8952', key: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0280bd', key: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e03131', key: 'gz', defaultOn: true, scale: 0.2 },
   { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
-  { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', key: 'rc_throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', key: 'gx', defaultOn: false, scale: 0.2 },
-  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', key: 'gy', defaultOn: false, scale: 0.2 },
-  { labelKey: 'driveViz.curveAccX', color: '#a3e635', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccY', color: '#fb923c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', key: 'az', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', key: 'pilot_angle', defaultOn: false },
-  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', key: 'pilot_throttle', defaultOn: false },
+  { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#a87900', key: 'gx', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', defaultOn: false },
+  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', defaultOn: false },
 ];
 
 interface TelemetryChartProps {
@@ -76,6 +83,8 @@ interface TelemetryChartProps {
  */
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '' }) => {
   const { t } = useTranslation();
+  // canvas/图表配色不受皮肤 CSS 控制，订阅主题以重建 chart 配置
+  const theme = useResolvedTheme();
   // 各曲线的环形缓冲：number[] 长度恒为 BUFFER_SIZE，未填满处为 NaN
   const buffersRef = useRef<Record<string, number[]>>({});
   const writeIndexRef = useRef(0);
@@ -191,11 +200,12 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
         // 已填满：从 writeIdx 开始环绕
         ordered = buf.slice(writeIdx).concat(buf.slice(0, writeIdx));
       }
+      const color = curveColor(c, theme);
       return {
         label: t(c.labelKey),
         data: ordered,
-        borderColor: c.color,
-        backgroundColor: c.color,
+        borderColor: color,
+        backgroundColor: color,
         pointRadius: 0,
         borderWidth: 1.5,
         spanGaps: false, // NaN 处断开曲线
@@ -205,9 +215,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
 
     const labels = datasets[0]?.data.map((_, i) => i) ?? [];
     return { labels, datasets };
-    // renderTick 驱动重绘
+    // renderTick 驱动重绘；theme 变化时按新主题重建配色
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleKeys, renderTick]);
+  }, [visibleKeys, renderTick, theme]);
 
   const chartOptions = useMemo(
     () => ({
@@ -223,12 +233,12 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
         y: {
           min: -1,
           max: 1,
-          grid: { color: 'rgba(255,255,255,0.06)' },
-          ticks: { color: '#8fa1b5', font: { size: 10 } },
+          grid: { color: theme === 'light' ? 'rgba(100,116,136,0.25)' : 'rgba(255,255,255,0.06)' },
+          ticks: { color: theme === 'light' ? '#5f7185' : '#8fa1b5', font: { size: 10 } },
         },
       },
     }),
-    [],
+    [theme],
   );
 
   return (
@@ -281,6 +291,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
         {CURVES.map((c) => {
           const on = visibleKeys.has(c.key as string);
+          const color = curveColor(c, theme);
           return (
             <label
               key={c.key as string}
@@ -291,9 +302,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
                 checked={on}
                 onChange={() => toggleCurve(c.key as string)}
                 className="accent-[var(--curve-color)]"
-                style={{ ['--curve-color' as string]: c.color }}
+                style={{ ['--curve-color' as string]: color }}
               />
-              <span style={{ color: on ? c.color : undefined }}>{t(c.labelKey)}</span>
+              <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
             </label>
           );
         })}

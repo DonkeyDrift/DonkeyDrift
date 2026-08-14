@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { applyTheme, readStoredTheme, setTheme, THEME_STORAGE_KEY, type ThemeMode } from '@/lib/theme';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
-
-export const THEME_STORAGE_KEY = 'donkeydrifter.ui.theme';
+export { THEME_STORAGE_KEY };
+export type { ThemeMode };
 
 const SEGMENTS: ReadonlyArray<{ value: ThemeMode; label: string }> = [
   { value: 'light', label: '浅色' },
@@ -10,26 +10,18 @@ const SEGMENTS: ReadonlyArray<{ value: ThemeMode; label: string }> = [
   { value: 'dark', label: '深色' },
 ];
 
-const readStoredTheme = (): ThemeMode => {
-  try {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark') return stored;
-    return 'system';
-  } catch {
-    return 'system';
-  }
-};
-
 export const ThemeSwitcher: React.FC = () => {
-  const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
+  const [theme, setThemeState] = useState<ThemeMode>(readStoredTheme);
+
+  // 与 index.html 的首屏内联脚本保持一致:挂载时按本地存储再应用一次,
+  // 保证 <html> 皮肤 class 与持久化选择始终同步。
+  useEffect(() => {
+    applyTheme(readStoredTheme());
+  }, []);
 
   const handleChange = (value: ThemeMode) => {
+    setThemeState(value);
     setTheme(value);
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, value);
-    } catch {
-      /* localStorage unavailable: keep in-memory selection */
-    }
   };
 
   return (

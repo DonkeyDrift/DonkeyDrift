@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { useTranslation } from '@/i18n';
 import { discoverConnectorConsoles } from '@/services/api';
+import { useResolvedTheme } from '@/lib/theme';
 
 export const EnterButtons: React.FC = () => {
   const { t } = useTranslation();
   const [scanning, setScanning] = useState(false);
+  // The fill + near-black text follow the ESP32 fill language in both themes;
+  // only the hover fill is JS-side and branches on the resolved theme.
+  const isLight = useResolvedTheme() === 'light';
 
   const enterDonkey = () => {
     const host = window.location.hostname;
@@ -28,7 +32,7 @@ export const EnterButtons: React.FC = () => {
     }
   };
 
-  const cls = 'flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-6 rounded-full leading-none transition-colors hover:bg-[#8bdcff] cursor-pointer whitespace-nowrap';
+  const cls = `flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-6 rounded-full leading-none transition-colors ${isLight ? 'hover:bg-[#3eb6f0]' : 'hover:bg-[#8bdcff]'} cursor-pointer whitespace-nowrap`;
 
   return (
     <div className="flex items-center gap-2">

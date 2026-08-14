@@ -5,6 +5,19 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=520, initial-scale=1.0" />
     <title>DonkeyDrifter</title>
+    <script>
+      // 首屏前应用持久化主题,避免闪烁;与 src/lib/theme.ts 保持同一 storage key。
+      // 跟随系统暂未实现,system 暂时解析为深色(theme-mus4)。
+      (function () {
+        try {
+          var t = window.localStorage.getItem('donkeydrifter.ui.theme');
+          document.documentElement.classList.remove('theme-mus4', 'theme-light');
+          document.documentElement.classList.add(t === 'light' ? 'theme-light' : 'theme-mus4');
+        } catch (e) {
+          /* localStorage 不可用时保持默认深色 */
+        }
+      })();
+    </script>
     <script type="module">
       if (import.meta.hot?.on) {
         import.meta.hot.on('vite:error', (error) => {

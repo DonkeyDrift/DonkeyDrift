@@ -7,6 +7,7 @@ import { ThemeSwitcher, THEME_STORAGE_KEY } from './ThemeSwitcher';
 describe('ThemeSwitcher', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    document.documentElement.classList.remove('theme-mus4', 'theme-light');
   });
 
   it('renders 跟随系统, 浅色 and 深色 segments with 跟随系统 active by default', () => {
@@ -30,6 +31,29 @@ describe('ThemeSwitcher', () => {
     expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'false');
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+  });
+
+  it('applies the skin class on <html> for each selection', () => {
+    render(<ThemeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: '浅色' }));
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '深色' }));
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
+  });
+
+  it('resolves 跟随系统 to the dark skin for now (跟随系统 not implemented yet)', () => {
+    render(<ThemeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
+  });
+
+  it('applies the persisted skin class on mount', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
+    render(<ThemeSwitcher />);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
   });
 
   it('restores the persisted selection on render', () => {

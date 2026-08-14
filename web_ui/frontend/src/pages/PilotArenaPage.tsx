@@ -27,6 +27,7 @@ import {
   getApiErrorMessage,
 } from '../services/api';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme } from '@/lib/theme';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -80,6 +81,30 @@ const ARENA_IMAGE_MIN_INTERVAL_MS = 16;
 const ARENA_PREDICTION_MIN_INTERVAL_MS = 250;
 const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
 
+/**
+ * canvas 绘制线 / chart.js 数据系列的 JS 配色,深色值即现状;
+ * 浅色值对标 theme-light.css 的“墨色”板(同色相、降明度):
+ * 绿→#1a8952、蓝→#0280bd、黄绿→琥珀 #a87900、浅蓝→实色蓝 #5cc8ff。
+ */
+const ARENA_SERIES_COLORS = {
+  dark: {
+    user: '#22c55e',
+    pilot: '#3b82f6',
+    userThrottle: '#a3e635',
+    pilotThrottle: '#38bdf8',
+    legend: '#d4d4d8',
+    ticks: '#a1a1aa',
+  },
+  light: {
+    user: '#1a8952',
+    pilot: '#0280bd',
+    userThrottle: '#a87900',
+    pilotThrottle: '#5cc8ff',
+    legend: '#42546a',
+    ticks: '#5f7185',
+  },
+};
+
 const formatValue = (value: number | undefined) =>
   value === undefined || Number.isNaN(value) ? '--' : value.toFixed(3);
 
@@ -115,6 +140,8 @@ const getRecordUserControl = (record: Record<string, unknown> | undefined) => {
 
 export const PilotArenaPage: React.FC = () => {
   const { t } = useTranslation();
+  const theme = useResolvedTheme();
+  const seriesColors = ARENA_SERIES_COLORS[theme];
   const configPath = useStore((state) => state.configPath);
   const tubPath = useStore((state) => state.tubPath);
   const records = useStore((state) => state.records);
@@ -363,8 +390,8 @@ export const PilotArenaPage: React.FC = () => {
       ctx.drawImage(imageToDraw, 0, 0);
       const userControl = getRecordUserControl(record);
       const cachedPrediction = predictionCacheRef.current[viewer.localId]?.[recordIndex];
-      drawControlLine(ctx, userControl?.angle, userControl?.throttle, '#22c55e');
-      drawControlLine(ctx, cachedPrediction?.pilot.angle ?? viewer.prediction?.angle, cachedPrediction?.pilot.throttle ?? viewer.prediction?.throttle, '#3b82f6');
+      drawControlLine(ctx, userControl?.angle, userControl?.throttle, seriesColors.user);
+      drawControlLine(ctx, cachedPrediction?.pilot.angle ?? viewer.prediction?.angle, cachedPrediction?.pilot.throttle ?? viewer.prediction?.throttle, seriesColors.pilot);
     };
     const image = cacheImage(imageUrl, viewer.localId, (loadedImage) => {
       if (currentIndexRef.current === recordIndex) {
@@ -374,7 +401,7 @@ export const PilotArenaPage: React.FC = () => {
     if (image?.complete) {
       draw(image);
     }
-  }, [cacheImage, records, tubPath]);
+  }, [cacheImage, records, seriesColors, tubPath]);
 
   useEffect(() => {
     if (!isPlaying || !hasRecords) return;
@@ -715,29 +742,29 @@ export const PilotArenaPage: React.FC = () => {
       {
         label: t('arena.plotUserAngle'),
         data: plotPoints.map((point) => point.user_angle),
-        borderColor: '#22c55e',
-        backgroundColor: '#22c55e',
+        borderColor: seriesColors.user,
+        backgroundColor: seriesColors.user,
         tension: 0.2,
       },
       {
         label: t('arena.plotPilotAngle'),
         data: plotPoints.map((point) => point.pilot_angle),
-        borderColor: '#3b82f6',
-        backgroundColor: '#3b82f6',
+        borderColor: seriesColors.pilot,
+        backgroundColor: seriesColors.pilot,
         tension: 0.2,
       },
       {
         label: t('arena.plotUserThrottle'),
         data: plotPoints.map((point) => point.user_throttle),
-        borderColor: '#a3e635',
-        backgroundColor: '#a3e635',
+        borderColor: seriesColors.userThrottle,
+        backgroundColor: seriesColors.userThrottle,
         tension: 0.2,
       },
       {
         label: t('arena.plotPilotThrottle'),
         data: plotPoints.map((point) => point.pilot_throttle),
-        borderColor: '#38bdf8',
-        backgroundColor: '#38bdf8',
+        borderColor: seriesColors.pilotThrottle,
+        backgroundColor: seriesColors.pilotThrottle,
         tension: 0.2,
       },
     ],
@@ -880,7 +907,7 @@ export const PilotArenaPage: React.FC = () => {
               )}
 
               <div className="aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
-                <div className="absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur-md">
+                <div className={`absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(133,150,170,0.35)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>
                   <div>
                     <div className="text-[10px] uppercase leading-none text-zinc-400">{t('arena.playbackLabel')}</div>
                     <div className="font-mono text-sm leading-tight text-cyan-400">{viewer.playbackFps}</div>
@@ -1038,7 +1065,7 @@ export const PilotArenaPage: React.FC = () => {
           )}
           {plotPoints.length > 0 && (
             <div className="rounded-md border border-zinc-800 bg-zinc-950 p-4">
-              <Line data={plotData} options={{ responsive: true, plugins: { legend: { labels: { color: '#d4d4d8' } } }, scales: { x: { ticks: { color: '#a1a1aa' } }, y: { ticks: { color: '#a1a1aa' } } } }} />
+              <Line data={plotData} options={{ responsive: true, plugins: { legend: { labels: { color: seriesColors.legend } } }, scales: { x: { ticks: { color: seriesColors.ticks } }, y: { ticks: { color: seriesColors.ticks } } } }} />
             </div>
           )}
         </CardContent>

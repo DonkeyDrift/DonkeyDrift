@@ -1,12 +1,12 @@
 /*
  * MUS4 (ESP32 Drifter Console) skin for the DonkeyDrifter Web UI.
  *
- * PERMANENT theme: the `theme-mus4` class is hard-set on <html> in
- * index.html and this file is imported unconditionally from main.tsx.
- * There is no runtime switcher anymore — the whole Web UI always renders
- * in the MUS4 style. (SkinSwitcher / useUiPrefsStore were removed; the
- * class is now static. Every rule stays prefixed with `html.theme-mus4`
- * so the skin beats the original Tailwind utilities on specificity alone.)
+ * Dark skin (default). Selected via the `theme-mus4` class on <html>:
+ * ThemeSwitcher / src/lib/theme.ts swaps it with `theme-light`
+ * (src/themes/theme-light.css) at runtime, and an inline script in
+ * index.html applies the persisted choice before first paint.
+ * Every rule stays prefixed with `html.theme-mus4`
+ * so the skin beats the original Tailwind utilities on specificity alone.
  *
  * Visual-only skin: rules may only touch color, background-color,
  * background-image (gradients), border-color, border-radius, box-shadow,

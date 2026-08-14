@@ -4,6 +4,7 @@ import { Wifi, WifiOff } from 'lucide-react';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 import type { WebRtcSignal } from '../../hooks/useDriveWebsocket';
 import { useTranslation } from '@/i18n';
+import { useResolvedTheme } from '@/lib/theme';
 
 export const DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS = 3000;
 
@@ -17,6 +18,7 @@ interface VideoStreamProps {
 
 export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomingSignal = null, transport, clientId, onLatencyChange }) => {
   const { t } = useTranslation();
+  const theme = useResolvedTheme();
   const [status, setStatus] = useState<'loading' | 'connected' | 'error'>('loading');
   const [retryCount, setRetryCount] = useState(0);
   const [mjpegFps, setMjpegFps] = useState(0);
@@ -33,6 +35,10 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const { videoRef, state, stats, metrics, videoReady } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline: carOnline ?? false });
 
   const streamUrl = `${API_URL}/drive/video`;
+  // 任意值阴影皮肤 CSS 覆盖不到:浅色改用皮肤同款软 slate 阴影
+  const overlayShadow = theme === 'light'
+    ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]'
+    : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]';
   const webRtcConnected = state === 'connected' && !stats.degraded;
   const webRtcVisible = webRtcConnected && videoReady;
   const degraded = forceMjpeg || mjpegFallbackAllowed;
@@ -184,7 +190,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   return (
     <div className={`relative bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden ${className}`} style={{ aspectRatio }}>
       <div className="absolute top-2 left-2 z-30 flex items-start gap-2">
-        <div className="rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur-md min-w-[4.5rem]">
+        <div className={`rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${overlayShadow} backdrop-blur-md min-w-[4.5rem]`}>
           <div className={`text-[10px] leading-none flex items-center justify-center gap-1 ${statusMeta.color}`}>
             <StatusIcon className={`w-3 h-3 ${statusMeta.pulse ? 'animate-pulse' : ''}`} />
             {statusMeta.text}
@@ -197,7 +203,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           </span>
         )}
       </div>
-      <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur-md">
+      <div className={`absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${overlayShadow} backdrop-blur-md`}>
         <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
         <div className="text-base font-mono leading-tight text-cyan-400">{webRtcConnected ? browserFps : mjpegFps}</div>
       </div>
