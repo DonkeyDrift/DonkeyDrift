@@ -20,6 +20,7 @@ const openHelp = () => {
 describe('FabActions i18n', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    Object.defineProperty(window.navigator, 'language', { value: 'zh-CN', configurable: true });
   });
 
   it('renders the help modal in Chinese by default', () => {

@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-14 (15)
+## 2026-08-14 (16)
 
 - fix(launcher): systemd 单元改 `KillMode=process`，launcher 重启不再连坐杀死 drive 进程
   - 根因：`donkeydrifter-launcher.service` 此前用默认 `KillMode=control-group`，每次停止/重启 launcher（部署新代码、手工 restart）都会按 cgroup 整体回收，把经 launcher 启动的 `donkey web`（后端 8100 + 前端 5188）与 `manage.py drive` 一并杀掉，正在使用的 DonkeyDrifter 驾驶界面随即掉线且不会自动恢复（launcher 无重启后自动重拉 drive 的逻辑）；且 `manage.py drive` 的 WS 重连循环会拖住 SIGTERM，导致 stop 触发 90s 超时报 `Failed with result 'timeout'`。今日 17:05/17:29/17:47 三次重启均复现"进不去 DonkeyDrifter"。
@@ -8,6 +8,14 @@
   - 已同步本机已安装单元 `~/.config/systemd/user/donkeydrifter-launcher.service` 并 `systemctl --user daemon-reload`（无需重启服务，下次 stop/restart 即生效）；实机验证：daemon-reload 后 `systemctl --user restart`，8090 数秒内恢复，`manage.py drive`（8100）与 vite（5188）进程全程存活、页面持续 200。
   - 测试：新增 `tests/test_launcher_service_unit.py`（断言 `KillMode=process`、保留 `Restart=always`、无 `control-group` 回退、unit 基本形态不变）。
   - 涉及文件：`donkeycar/launcher/donkeydrifter-launcher.service`、`tests/test_launcher_service_unit.py`（新增）
+
+## 2026-08-14 (15)
+
+- feat(web_ui): UI 语言首访自动跟随浏览器语言
+  - `web_ui/frontend/src/i18n/index.tsx` 初始化顺序改为：localStorage 已存选择优先，无存则读取 `navigator.language`——`zh` 开头（zh-CN/zh-TW 等）用中文，其余一律英文；自动检测结果不落盘，仅用户手动切换时写入 localStorage `donkeydrifter.ui.lang` 并在后续访问优先生效（关机/重启后仍记住手动选择）。
+  - 测试同步：`LanguageSwitcher.test.tsx` 扩为 5 项（中文浏览器默认中文、英文浏览器首访自动英文且不落盘、点击切换并持久化、恢复已存选择、已存选择优先于浏览器语言），新增 `setBrowserLanguage` mock 辅助；`FabActions.test.tsx` 默认中文用例补浏览器语言 mock 保持确定性。
+  - 验证：`tsc -b --noEmit` 零错误、`vitest` 14 个文件 75/75 通过、`npm run build` 成功。
+  - 涉及文件：`web_ui/frontend/src/i18n/index.tsx`、`web_ui/frontend/src/components/LanguageSwitcher.test.tsx`、`web_ui/frontend/src/components/FabActions.test.tsx`
 
 ## 2026-08-14 (14)
 
