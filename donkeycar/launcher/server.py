@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from donkeycar._version import __version__
+from donkeycar.launcher.dc_discovery import find_drifter_console
 
 
 # ── PID 文件管理（与 tui.py / base.py 保持一致） ────────────────────────
@@ -386,6 +387,15 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             result = _launch_drive()
             code = 200 if result.get("status") != "error" else 500
             self._serve_json(result, code=code)
+        elif path == "/api/launch/dc":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                self.rfile.read(content_length)
+            url = find_drifter_console()
+            if url:
+                self._serve_json({"status": "ok", "url": url})
+            else:
+                self._serve_json({"status": "not_found"})
         else:
             self._serve_json({"error": "not found"}, code=404)
 
@@ -494,6 +504,15 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
 <div class="error" id="error"></div>
 </div>
 <script>
+// 语言：显式存储选择优先，否则跟随浏览器语言（zh* → 中文，其余 → 英文）
+var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
+var T={
+  zh:{starting:'正在启动 DonkeyDrifter...',failed:'启动失败',unknown:'未知错误',network:'网络错误: '},
+  en:{starting:'Starting DonkeyDrifter...',failed:'Launch failed',unknown:'Unknown error',network:'Network error: '}
+};
+function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
+document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
+document.getElementById('text').textContent=t('starting');
 (async function(){
   try{
     var r=await fetch('/api/launch/drive',{method:'POST'});
@@ -503,13 +522,13 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
       window.location.href=url;
     }else{
       document.getElementById('spinner').style.display='none';
-      document.getElementById('text').textContent='启动失败';
-      document.getElementById('error').textContent=d.error||'未知错误';
+      document.getElementById('text').textContent=t('failed');
+      document.getElementById('error').textContent=d.error||t('unknown');
     }
   }catch(e){
     document.getElementById('spinner').style.display='none';
-    document.getElementById('text').textContent='启动失败';
-    document.getElementById('error').textContent='网络错误: '+e.message;
+    document.getElementById('text').textContent=t('failed');
+    document.getElementById('error').textContent=t('network')+e.message;
   }
 })();
 </script>
@@ -523,8 +542,8 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
-    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认深色，仅"跟随系统"经 matchMedia 实时解析）
-    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t==='system'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}else if(t!=='light'&&t!=='dark'){t='dark'}document.documentElement.dataset.theme=t}catch(e){}})();
+    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统，经 matchMedia 实时解析）
+    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
@@ -740,7 +759,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 1-10：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 0-10：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -774,7 +793,9 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 1-10：选择对应菜单项',
+                'help.keyNumbers': '数字键 0-10：选择对应菜单项',
+                'overlay.findingDc': '正在查找 Drifter Console...',
+                'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
@@ -797,7 +818,9 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 1-10: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 0-10: select the corresponding menu item',
+                'overlay.findingDc': 'Locating Drifter Console...',
+                'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
@@ -809,12 +832,21 @@ MENU_HTML = r"""<!DOCTYPE html>
         };
 
         let uiLang = 'zh';
-        let uiTheme = 'dark';
+        let uiTheme = 'system';
 
         function normalizeLanguage(lang) { return lang === 'en' ? 'en' : 'zh'; }
-        function readStoredLanguage() {
-            try { return normalizeLanguage(localStorage.getItem(LANG_STORAGE_KEY)); }
+        // 浏览器语言自动检测（zh* → 中文，其余 → 英文），仅在没有显式存储选择时生效；
+        // 一旦用户手动切换，localStorage 中的显式选择优先并跨重启保持（与 DD web_ui 同语义）
+        function detectBrowserLanguage() {
+            try { return String(navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
             catch (e) { return 'zh'; }
+        }
+        function readStoredLanguage() {
+            try {
+                const v = localStorage.getItem(LANG_STORAGE_KEY);
+                if (v === 'zh' || v === 'en') return v;
+            } catch (e) {}
+            return detectBrowserLanguage();
         }
         function t(key) {
             return (I18N[uiLang] && I18N[uiLang][key]) || I18N.zh[key] || key;
@@ -842,7 +874,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             closeLanguageMenu();
         }
 
-        // ── 主题：浅色 / 跟随系统 / 深色（默认深色，仅选中 system 时经 matchMedia 实时解析并监听） ──
+        // ── 主题：浅色 / 跟随系统 / 深色（默认跟随系统，选中 system 时经 matchMedia 实时解析并监听） ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -865,7 +897,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             applyTheme(mode);
         }
         function initTheme() {
-            var stored = 'dark';
+            var stored = 'system';
             try {
                 var s = localStorage.getItem(THEME_STORAGE_KEY);
                 if (s === 'light' || s === 'dark' || s === 'system') stored = s;
@@ -907,18 +939,20 @@ MENU_HTML = r"""<!DOCTYPE html>
             document.getElementById('helpModal').classList.remove('show');
         }
 
-        // 菜单项数据（与 tui.py 保持一致，desc/catLabel 双语）
+        // 菜单项数据（条目与 tui.py 保持一致，desc/catLabel 双语；
+        // 网页版 0 号为 Drifter Console 置顶，编号/顺序与 TUI 不同）
         const menuItems = [
-            {no: 1,  cat: "manage", name: "createcar",    descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
-            {no: 2,  cat: "manage", name: "open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
-            {no: 3,  cat: "data",   name: "clear_data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
-            {no: 4,  cat: "data",   name: "backup_data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
-            {no: 5,  cat: "data",   name: "restore_data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
-            {no: 6,  cat: "drive",  name: "drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
-            {no: 7,  cat: "filter", name: "web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
-            {no: 8,  cat: "filter", name: "donkey_ui",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
-            {no: 9,  cat: "train",  name: "train_local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
-            {no: 10, cat: "train",  name: "train_online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
+            {no: 0,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",               descEn: "Open Drifter Console",                           favorite: true},
+            {no: 1,  cat: "manage", name: "Create Car",   descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
+            {no: 2,  cat: "manage", name: "Open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
+            {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
+            {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
+            {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
+            {no: 6,  cat: "drive",  name: "Drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
+            {no: 7,  cat: "filter", name: "Web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
+            {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
+            {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
+            {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -971,10 +1005,37 @@ MENU_HTML = r"""<!DOCTYPE html>
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
 
-            if (no === 6) {
+            if (no === 0) {
+                openDrifterConsole();
+            } else if (no === 6) {
                 launchDrive();
             } else {
                 showError(t('overlay.notImplemented'));
+            }
+        }
+
+        // 打开 Drifter Console（ESP32 Web Console，服务端局域网发现）
+        async function openDrifterConsole() {
+            const overlay = document.getElementById('overlay');
+            const overlayText = document.getElementById('overlay-text');
+            const overlayError = document.getElementById('overlay-error');
+            overlay.classList.add('show');
+            overlayText.textContent = t('overlay.findingDc');
+            overlayError.textContent = '';
+
+            try {
+                const resp = await fetch('/api/launch/dc', {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+                if (data.status === 'ok' && data.url) {
+                    overlayText.textContent = t('overlay.success');
+                    window.location.href = data.url;
+                } else {
+                    showError(t('overlay.dcNotFound'));
+                }
+            } catch (e) {
+                showError(t('overlay.networkError') + ': ' + e.message);
             }
         }
 
@@ -1100,11 +1161,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             } else if (key >= '2' && key <= '9') {
                 selectItem(parseInt(key));
             } else if (key === '0') {
-                if (document.referrer) {
-                    history.back();
-                } else {
-                    window.close();
-                }
+                selectItem(0);
             } else if (key === '?') {
                 openHelpModal();
             }

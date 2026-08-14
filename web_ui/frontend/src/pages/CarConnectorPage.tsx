@@ -275,7 +275,7 @@ export const CarConnectorPage: React.FC = () => {
               <CardTitle>{t('connector.configTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-zinc-400 mb-1">{t('connector.hostLabel')}</label>
                   <div className="flex gap-2">
@@ -329,7 +329,7 @@ export const CarConnectorPage: React.FC = () => {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-zinc-400 mb-1">{t('connector.sshPortLabel')}</label>
                   <Input
@@ -476,7 +476,7 @@ export const CarConnectorPage: React.FC = () => {
               <CardTitle>{t('connector.remoteDriveTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-zinc-400 mb-1">{t('connector.modelTypeLabel')}</label>
                   <select
@@ -589,7 +589,7 @@ export const CarConnectorPage: React.FC = () => {
                   <div className="text-zinc-600">{t('connector.noLogs')}</div>
                 )}
                 {jobLogs.map((log, i) => (
-                  <div key={i}>{log}</div>
+                  <div key={i} className="break-all">{log}</div>
                 ))}
               </div>
             </CardContent>

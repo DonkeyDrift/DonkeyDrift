@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=520, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DonkeyDrifter</title>
     <script>
       // 首屏前应用持久化主题,避免闪烁;与 src/lib/theme.ts 保持同一 storage key。
-      // 默认深色;仅持久化选择为"跟随系统"(system)时才经 matchMedia('(prefers-color-scheme: dark)') 解析,matchMedia 不可用时回退深色。
+      // 默认跟随系统(system),经 matchMedia('(prefers-color-scheme: dark)') 解析;matchMedia 不可用时回退深色。
       (function () {
         try {
           var t = window.localStorage.getItem('donkeydrifter.ui.theme');
-          if (t !== 'light' && t !== 'dark' && t !== 'system') t = 'dark';
+          if (t !== 'light' && t !== 'dark' && t !== 'system') t = 'system';
           if (t === 'system') {
             var m =
               typeof window.matchMedia === 'function'

@@ -233,10 +233,10 @@ export const DrivePage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* 顶部工具栏 */}
-      <div className="flex items-center justify-between">
+      {/* 顶部工具栏：窄屏允许换行，避免一排溢出 */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-zinc-200">{t('drive.title')}</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 lg:gap-3">
           <InputSourceSelector
             value={inputSource}
             onChange={setInputSource}
