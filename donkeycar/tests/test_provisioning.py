@@ -688,6 +688,51 @@ class TestProvisioningPartWriteLine:
         # 不应抛异常
         part._write_line("STATUS|CONNECTING")
 
+    def test_write_line_reasserts_baudrate(self):
+        """独立串口模式：发送前重新断言波特率（防 ModemManager 等篡改 termios）。"""
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        mock_ser = MagicMock()
+        part = ProvisioningPart(baudrate=115200)
+        part._ser = mock_ser
+
+        part._write_line("HOSTIP|192.168.3.45")
+
+        assert mock_ser.baudrate == 115200
+        mock_ser.write.assert_called_once_with(b"HOSTIP|192.168.3.45\n")
+        mock_ser.flush.assert_called_once()
+
+    def test_write_line_keeps_baudrate_in_arduino_mode(self, monkeypatch):
+        """Arduino 共享串口模式：波特率由 actuator 管理，_write_line 不改动。"""
+        import sys
+        import types
+        from donkeycar.parts.provisioning import ProvisioningPart
+
+        class FakeDev:
+            """极简串口替身：无 baudrate 属性，只记录写入。"""
+
+            def __init__(self):
+                self.writes = []
+
+            def write(self, data):
+                self.writes.append(data)
+
+            def flush(self):
+                pass
+
+        dev = FakeDev()
+        fake_actuator = types.ModuleType("donkeycar.parts.actuator")
+        fake_actuator.Arduino = types.SimpleNamespace(ard_device=dev)
+        monkeypatch.setitem(
+            sys.modules, "donkeycar.parts.actuator", fake_actuator
+        )
+
+        part = ProvisioningPart(arduino_controller=MagicMock())
+        part._write_line("HOSTIP|192.168.3.45")
+
+        assert dev.writes == [b"HOSTIP|192.168.3.45\n"]
+        assert not hasattr(dev, "baudrate")
+
 
 class TestProvisioningPartReadAndProcess:
     """验证 _read_and_process() 方法。"""
