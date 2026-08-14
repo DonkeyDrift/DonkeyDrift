@@ -89,7 +89,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
         </label>
 
         {config.advancedEnabled && (
-          <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs text-zinc-500">{t('trainer.batchSize')}</label>
               <input

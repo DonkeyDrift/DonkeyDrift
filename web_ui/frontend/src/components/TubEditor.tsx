@@ -1553,7 +1553,7 @@ export const TubEditor: React.FC = () => {
             {t('tubEditor.subtitle')}
           </span>
         </CardTitle>
-        <div className="flex w-full max-w-full items-start justify-between gap-2">
+        <div className="flex w-full max-w-full flex-wrap items-start justify-between gap-2">
           <div className="ml-auto flex flex-col items-end gap-1">
             <div className="flex min-h-[30px] flex-wrap items-center justify-end gap-2">
               <div className="relative">
