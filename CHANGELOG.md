@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-14 (13)
+
+- feat(web_ui,launcher): 三端主题默认由深色改回"跟随系统"（DonkeyDrifter web_ui + Donkey launcher；Drifter Console 见 Firmware v1.7.67 / Firmware#49）
+  - `web_ui/frontend/src/lib/theme.ts`：`readStoredTheme()` 无存储或存储值非法时回退由 `'dark'` 改回 `'system'`（跟随系统）；用户显式点选浅色/深色后仍以存储值为准。
+  - `web_ui/frontend/index.html`：首屏防闪烁脚本默认改为 `'system'`，经 `matchMedia('(prefers-color-scheme: dark)')` 解析，matchMedia 不可用时回退深色。
+  - `donkeycar/launcher/server.py`：三处默认值同步——首屏内联脚本（无存储/非法值一律 matchMedia 解析）、`let uiTheme = 'system'`、`initTheme()` 兜底 `stored = 'system'`。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：默认态断言同步翻转（默认激活"跟随系统"、默认跟随系统主题变化、非法存储值回退"跟随系统"）。
+  - 验证：vitest 全量 73 项通过；Playwright 实测全新浏览器（无任何存储）系统浅色 → `theme-light`、系统深色 → `theme-mus4`，切换键激活态为"跟随系统"。
+
 ## 2026-08-14 (12)
 
 - feat(launcher): 菜单页与启动中转页语言跟随浏览器自动检测
@@ -573,3 +582,4 @@
 - ESP32 串口协议与 Arduino 控制器
 - CLI 工具链（createcar、calibrate、web、train 等）
 - 模拟器集成（DonkeyGym）
+
