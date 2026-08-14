@@ -1,5 +1,43 @@
 # 变更日志
 
+## 2026-08-14 (3)
+
+- fix(launcher): Donkey 菜单页容器去掉 900px 限宽，全宽贴合浏览器两边
+  - 问题：`MENU_HTML` 的 `.container` 原为 `max-width:900px; margin:0 auto`，宽屏浏览器下页面左右两侧大片空白，与 DonkeyDrifter / Drifter Console 随浏览器宽度贴合两边的全宽设计语言不一致。
+  - 修复：`.container` 改为 `width:100%; margin:0`，页头、CWD 栏、菜单面板、底部提示随浏览器宽度整行铺满（保留 body 12px 边距）。
+  - 验证：本机 8091 端口测试实例 + Playwright 截图实测，1920px 宽屏下菜单整行铺满到两边，800px 窄视口下排版正常无溢出。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+## 2026-08-14 (2)
+
+- fix(launcher): 修复 Donkey 页浏览器标签页 favicon 不显示 + 页头新增 logo 图标
+  - 根因：浏览器将早期"该页无图标"的状态缓存在本地 favicon 数据库中（重启系统不会清除），导致服务端虽已正确提供图标，标签页仍不显示。
+  - 修复：两处 HTML 模板（`MENU_HTML`、`LAUNCH_DRIVE_HTML`）的 favicon 链接改为 `/favicon.png?v=2`，URL 变化强制浏览器重新拉取，绕过旧缓存；favicon 响应增加 `Cache-Control: no-cache`。
+  - 新增 `/favicon.ico` 路由，与 `/favicon.png` 共用同一 PNG（即 projects 主文件夹的头盔 logo，MD5 `82ddb5cf…`）。
+  - 菜单页页头 Donkey 标题左侧新增 32px 可见 logo（`.headerLogo`，复用 `/favicon.png`），圆角描边样式与菜单序号徽标一致。
+  - 验证：本地测试实例实测页面输出正确、`/favicon.png?v=2` 与 `/favicon.ico` 均返回 200 且字节与 logo.png 一致。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+- fix(web_ui): 滑块恢复为 #47 用户确认的 14×12px 纯白椭圆 thumb（撤销 #71 的原生回退）
+  - 用户确认"最初的椭圆形"= #47 的自定义纯白椭圆（14×12px rounded-full）；#71 按字面恢复 pre-#43 原生 thumb 后在 Chrome 渲染为半透明圆环（可见轨道），非用户所要。
+  - 恢复 #68 状态：`h-3 bg-transparent` + 轨道伪元素 `h-1.5 mt-[3px]` + thumb `w-[14px] h-[12px] bg-white rounded-full border-none -mt-[3px]`（居中公式 (6−12)/2=−3px）。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
+## 2026-08-14
+
+- fix(web_ui): 控制参数滑块恢复最初的原生样式（用户指示"直接复制最初的白色小点和轨道"）
+  - ParamSlider 的 input 恢复为最初未改动版本：`w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer`（input 自身即轨道，thumb 完全原生渲染），移除全部 `::-webkit-slider-thumb` / `::-webkit-slider-runnable-track` 等伪元素自定义样式。
+  - 与最初版本唯一差别：`accent-cyan-500` → `accent-white`，保证任何浏览器下 thumb 都是纯白（Safari 下两者均渲染为白色原生椭圆）。
+  - 实测（Playwright Chromium + WebKit）：该布局下原生 thumb 与轨道中心偏差 0.0px，无白色背景条（input 背景已被 bg-zinc-800 覆盖），thumb 渲染在轨道之上。
+  - 验证：`npm run build` 与 `vitest`（13 文件 61 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
+- fix(web_ui): 滑块 input 补 `bg-transparent`，消除白色背景条（用户所见"第三根线"）
+  - 根因（实测验证）：Chrome/Safari 对 `appearance:none` 的 range input 默认绘制**白色背景**，上一版把 input 高度从 6px 改为 12px 且未覆盖背景后，深色面板上出现一条 12px 白色横条，轨道嵌在其中，视觉上成了"三根线"，白色 thumb 叠在白条上也难以辨认形状。
+  - 修复：input 增加 `bg-transparent`；thumb 保持 `w-[14px] h-[12px]` 纯白椭圆（即 #47 用户认可的"最开始的椭圆形"尺寸）不变。
+  - 验证：Playwright Chromium + WebKit 双引擎截图对比，加 `bg-transparent` 后白色横条消失，只剩锌色轨道（原始"两根线"观感）+ 居中白色椭圆 thumb；`npm run build` 与 `vitest`（13 文件 61 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-14 (1)
 
 - feat(web_ui): 新增 MUS4 Light 浅色皮肤并接入主题切换(切换按钮 47ee39fb 随本分支一并合入)
