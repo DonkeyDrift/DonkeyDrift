@@ -544,7 +544,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         .headerRow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 10px}
         .headerLogo{width:32px;height:32px;border-radius:8px;border:1px solid #2b3441;align-self:center}
         .headerRow h1{font-size:22px;margin:0}
-        .version{color:#8fa1b5;font-size:12px;text-transform:uppercase;letter-spacing:.08em;display:inline-block;transform:translateY(-1px)}
         /* DD GitHubLink / VersionBadge */
         .ghLink{display:inline-flex;align-items:center;color:#8fa1b5;transform:translateY(-1px)}
         .ghLink:hover{color:#5cc8ff}
@@ -644,7 +643,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         html[data-theme="light"]{color-scheme:light}
         html[data-theme="light"] body{background:#eef1f5;color:#1a2330}
         html[data-theme="light"] .headerLogo{border-color:#d5dce4}
-        html[data-theme="light"] .version{color:#5b6b7d}
         html[data-theme="light"] .ghLink{color:#5b6b7d}
         html[data-theme="light"] .ghLink:hover{color:#0c9bd6}
         html[data-theme="light"] .versionBadge{color:#7c8da0}
@@ -695,7 +693,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         <div class="headerRow">
             <img class="headerLogo" src="/favicon.png" alt="Donkey">
             <h1>Donkey</h1>
-            <span class="version">DonkeyDrifter Web Launcher</span>
             <a class="ghLink" href="https://github.com/DonkeyDrift/DonkeyDrift" target="_blank" rel="noopener noreferrer" aria-label="DonkeyDrift on GitHub" title="DonkeyDrift on GitHub">
                 <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
             </a>
