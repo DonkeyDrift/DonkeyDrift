@@ -513,6 +513,7 @@ MENU_HTML = r"""<!DOCTYPE html>
 
         /* DC headerRow */
         .headerRow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 10px}
+        .headerLogo{width:32px;height:32px;border-radius:8px;border:1px solid #2b3441;align-self:center}
         .headerRow h1{font-size:22px;margin:0}
         .version{color:#8fa1b5;font-size:12px;text-transform:uppercase;letter-spacing:.08em;display:inline-block;transform:translateY(-1px)}
 
@@ -584,6 +585,7 @@ MENU_HTML = r"""<!DOCTYPE html>
 <body>
     <div class="container">
         <div class="headerRow">
+            <img class="headerLogo" src="/favicon.png?v=2" alt="Donkey">
             <h1>Donkey</h1>
             <span class="version">DonkeyDrifter Web Launcher</span>
         </div>
