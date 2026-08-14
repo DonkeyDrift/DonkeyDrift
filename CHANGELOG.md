@@ -10,6 +10,11 @@
   - 验证：本地测试实例实测页面输出正确、`/favicon.png?v=2` 与 `/favicon.ico` 均返回 200 且字节与 logo.png 一致。
   - 涉及文件：`donkeycar/launcher/server.py`
 
+- fix(web_ui): 滑块恢复为 #47 用户确认的 14×12px 纯白椭圆 thumb（撤销 #71 的原生回退）
+  - 用户确认"最初的椭圆形"= #47 的自定义纯白椭圆（14×12px rounded-full）；#71 按字面恢复 pre-#43 原生 thumb 后在 Chrome 渲染为半透明圆环（可见轨道），非用户所要。
+  - 恢复 #68 状态：`h-3 bg-transparent` + 轨道伪元素 `h-1.5 mt-[3px]` + thumb `w-[14px] h-[12px] bg-white rounded-full border-none -mt-[3px]`（居中公式 (6−12)/2=−3px）。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
 ## 2026-08-14
 
 - fix(web_ui): 控制参数滑块恢复最初的原生样式（用户指示"直接复制最初的白色小点和轨道"）
