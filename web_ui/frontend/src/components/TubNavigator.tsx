@@ -47,7 +47,7 @@ const TimelineSlider = React.memo(({ max, value, isDragging, onInput, onChange, 
   // light raised-control track surface.
   const accentColor = isDragging
     ? (theme === 'light' ? '#0a6f9e' : '#22d3ee')
-    : (theme === 'light' ? '#0f96d6' : '#06b6d4');
+    : (theme === 'light' ? '#0c9bd6' : '#06b6d4');
   const trackColor = theme === 'light' ? '#dfe6ef' : '#3f3f46';
 
   return (
@@ -349,7 +349,7 @@ export const TubNavigator: React.FC = () => {
         if (ctx) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           // Draw a placeholder or just leave it blank, but ensure we don't hold old data
-          ctx.fillStyle = theme === 'light' ? '#dde4ee' : '#18181b'; // zinc-900 to match background roughly
+          ctx.fillStyle = theme === 'light' ? '#f4f6f9' : '#18181b'; // zinc-900 to match background roughly
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           
           // Draw some text to indicate no image

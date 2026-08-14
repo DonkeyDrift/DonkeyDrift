@@ -14,11 +14,11 @@ interface DriveModeSelectorProps {
 // Active-segment colors mirror the ESP32 Drifter Console mode cards
 // (mode0=手动 green #39d98a, mode1=半自动 amber #ffcc66, mode2=全自动 blue #5cc8ff).
 // 任意值类皮肤 CSS 覆盖不到:浅色主题改用同色相饱和中间色文字 + 薄底
-// (绿 #0ea35e / 琥珀 #a87900 / 蓝 #0f96d6)。
+// (绿 #1fae6b / 琥珀 #b57d0e / 蓝 #0c9bd6)。
 const MODE_OPTIONS: { value: DriveMode; labelKey: string; activeClass: string; activeClassLight: string }[] = [
-  { value: 'user', labelKey: 'drive.modeUser', activeClass: 'bg-[#39d98a]/20 text-[#39d98a]', activeClassLight: 'bg-[#0ea35e]/15 text-[#0ea35e]' },
-  { value: 'local_angle', labelKey: 'drive.modeSemiAuto', activeClass: 'bg-[#ffcc66]/20 text-[#ffcc66]', activeClassLight: 'bg-[#a87900]/15 text-[#a87900]' },
-  { value: 'local', labelKey: 'drive.modeFullAuto', activeClass: 'bg-[#5cc8ff]/20 text-[#5cc8ff]', activeClassLight: 'bg-[#0f96d6]/15 text-[#0f96d6]' },
+  { value: 'user', labelKey: 'drive.modeUser', activeClass: 'bg-[#39d98a]/20 text-[#39d98a]', activeClassLight: 'bg-[#1fae6b]/15 text-[#1fae6b]' },
+  { value: 'local_angle', labelKey: 'drive.modeSemiAuto', activeClass: 'bg-[#ffcc66]/20 text-[#ffcc66]', activeClassLight: 'bg-[#b57d0e]/15 text-[#b57d0e]' },
+  { value: 'local', labelKey: 'drive.modeFullAuto', activeClass: 'bg-[#5cc8ff]/20 text-[#5cc8ff]', activeClassLight: 'bg-[#0c9bd6]/15 text-[#0c9bd6]' },
 ];
 
 export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({

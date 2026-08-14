@@ -54,12 +54,12 @@ const curveColor = (c: CurveConfig, theme: ResolvedTheme): string =>
 
 /** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
 const CURVES: CurveConfig[] = [
-  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#0ea35e', key: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0f96d6', key: 'steering', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e03131', key: 'gz', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1fae6b', key: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0c9bd6', key: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', key: 'gz', defaultOn: true, scale: 0.2 },
   { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
   { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#a87900', key: 'gx', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', key: 'gx', defaultOn: false, scale: 0.2 },
   { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', defaultOn: false, scale: 0.2 },
   { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
   { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
@@ -233,8 +233,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
         y: {
           min: -1,
           max: 1,
-          grid: { color: theme === 'light' ? 'rgba(100,116,136,0.25)' : 'rgba(255,255,255,0.06)' },
-          ticks: { color: theme === 'light' ? '#5f7185' : '#8fa1b5', font: { size: 10 } },
+          grid: { color: theme === 'light' ? '#dbe2ea' : 'rgba(255,255,255,0.06)' },
+          ticks: { color: theme === 'light' ? '#5b6b7d' : '#8fa1b5', font: { size: 10 } },
         },
       },
     }),

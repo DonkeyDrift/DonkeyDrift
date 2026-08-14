@@ -1054,8 +1054,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetSteering'),
             data: angleData,
-            borderColor: theme === 'light' ? '#0f96d6' : 'rgb(6, 182, 212)',
-            backgroundColor: theme === 'light' ? 'rgba(15, 150, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)',
+            borderColor: theme === 'light' ? '#0c9bd6' : 'rgb(6, 182, 212)',
+            backgroundColor: theme === 'light' ? 'rgba(12, 155, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)',
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1064,8 +1064,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetThrottle'),
             data: throttleData,
-            borderColor: theme === 'light' ? '#a87900' : 'rgb(234, 179, 8)',
-            backgroundColor: theme === 'light' ? 'rgba(168, 121, 0, 0.5)' : 'rgba(234, 179, 8, 0.5)',
+            borderColor: theme === 'light' ? '#d99a17' : 'rgb(234, 179, 8)',
+            backgroundColor: theme === 'light' ? 'rgba(217, 154, 23, 0.5)' : 'rgba(234, 179, 8, 0.5)',
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1088,7 +1088,7 @@ export const TubEditor: React.FC = () => {
       legend: {
         position: 'top' as const,
         labels: {
-            color: theme === 'light' ? '#1c2733' : '#e4e4e7' // zinc-200
+            color: theme === 'light' ? '#1a2330' : '#e4e4e7' // zinc-200
         }
       },
       tooltip: {
@@ -1101,19 +1101,19 @@ export const TubEditor: React.FC = () => {
             min: records.length > 0 && records[visibleRange.startIndex] ? records[visibleRange.startIndex]._index : visibleRange.startIndex,
             max: records.length > 0 && records[visibleRange.endIndex] ? records[visibleRange.endIndex]._index : visibleRange.endIndex,
             ticks: {
-              color: theme === 'light' ? '#5f7185' : '#71717a',
+              color: theme === 'light' ? '#5b6b7d' : '#71717a',
               callback: (value: string | number) => `${Math.round(Number(value))}`,
             },
-            grid: { color: theme === 'light' ? '#b9c5d4' : '#27272a' }
+            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
         },
         y: {
             min: -1,
             max: 1,
             ticks: {
-              color: theme === 'light' ? '#5f7185' : '#71717a',
+              color: theme === 'light' ? '#5b6b7d' : '#71717a',
               stepSize: 0.2,
             },
-            grid: { color: theme === 'light' ? '#b9c5d4' : '#27272a' }
+            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
         }
     },
     animation: {
@@ -1142,9 +1142,9 @@ export const TubEditor: React.FC = () => {
         const chartArea = chart.chartArea;
         // 浅色主题下的 canvas 配色;深色保持原值不变
         const isLightTheme = themeRef.current === 'light';
-        const playheadColor = isLightTheme ? '#e03131' : 'rgb(239, 68, 68)';
-        const selectionColor = isLightTheme ? '#0ea35e' : 'rgb(34, 197, 94)';
-        const selectionFillColor = isLightTheme ? 'rgba(14, 163, 94, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+        const playheadColor = isLightTheme ? '#e5484d' : 'rgb(239, 68, 68)';
+        const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
+        const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
         const latestIndex = currentIndexRef.current;
         const totalRecords = records.length;
         const currentRecord = records[latestIndex];

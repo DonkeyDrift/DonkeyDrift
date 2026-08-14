@@ -68,30 +68,30 @@ export const FabActions: React.FC = () => {
     : 'pointer-events-none scale-[0.55] opacity-0';
 
   const fabToggleColors = isLight
-    ? 'border-[#5cc8ff] bg-[#5cc8ff] shadow-[0_0_18px_rgba(15,150,214,0.45),0_0_36px_rgba(15,150,214,0.3)] hover:shadow-[0_0_22px_rgba(15,150,214,0.5),0_0_44px_rgba(15,150,214,0.4)] focus-visible:shadow-[0_0_22px_rgba(15,150,214,0.5),0_0_44px_rgba(15,150,214,0.4)]'
+    ? 'border-[#5cc8ff] bg-[#5cc8ff] shadow-[0_0_18px_rgba(12,155,214,0.45),0_0_36px_rgba(12,155,214,0.3)] hover:shadow-[0_0_22px_rgba(12,155,214,0.5),0_0_44px_rgba(12,155,214,0.4)] focus-visible:shadow-[0_0_22px_rgba(12,155,214,0.5),0_0_44px_rgba(12,155,214,0.4)]'
     : 'border-[#8bdcff] bg-[#8bdcff] shadow-[0_0_18px_#5cc8ff,0_0_36px_rgba(92,200,255,0.55)] hover:shadow-[0_0_22px_#8bdcff,0_0_44px_rgba(92,200,255,0.72)] focus-visible:shadow-[0_0_22px_#8bdcff,0_0_44px_rgba(92,200,255,0.72)]';
   const langFabColors = isLight
-    ? 'border-[#5cc8ff] bg-[#0f96d6] hover:border-[#5cc8ff] hover:bg-[#0a6f9e] hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] focus-visible:border-[#5cc8ff] focus-visible:bg-[#0a6f9e]'
+    ? 'border-[#5cc8ff] bg-[#0c9bd6] hover:border-[#5cc8ff] hover:bg-[#0a6f9e] hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] focus-visible:border-[#5cc8ff] focus-visible:bg-[#0a6f9e]'
     : 'border-[rgba(92,200,255,0.68)] bg-[rgba(37,99,235,0.58)] hover:border-[#5cc8ff] hover:bg-[#3b82f6] hover:shadow-[0_12px_32px_rgba(0,0,0,0.35)] focus-visible:border-[#5cc8ff] focus-visible:bg-[#3b82f6]';
   const helpFabColors = isLight
     ? 'border-[#5cc8ff] bg-[#5cc8ff] hover:border-[#3eb6f0] hover:bg-[#3eb6f0] hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] focus-visible:border-[#3eb6f0] focus-visible:bg-[#3eb6f0]'
     : 'border-[rgba(92,200,255,0.72)] bg-[rgba(92,200,255,0.62)] hover:border-[#8bdcff] hover:bg-[#8bdcff] hover:shadow-[0_12px_32px_rgba(0,0,0,0.35)] focus-visible:border-[#8bdcff] focus-visible:bg-[#8bdcff]';
   const langMenuColors = isLight
-    ? 'border-[#0f96d6] bg-[#cfd7e2] shadow-[0_12px_32px_rgba(15,23,42,0.18)]'
+    ? 'border-[#0c9bd6] bg-[#f4f6f9] shadow-[0_12px_32px_rgba(15,23,42,0.18)]'
     : 'border-[#5cc8ff] bg-[#111820] shadow-[0_12px_32px_rgba(0,0,0,0.35)]';
   const langItemIdleColors = isLight
     ? 'font-bold text-[#1c2733] hover:bg-[#dfe6ef]'
     : 'font-bold text-[#dbeafe] hover:bg-[#222b36]';
   const helpModalColors = isLight
-    ? 'border-[#0f96d6] bg-[linear-gradient(135deg,#e2e8f1,#d6dee9)] shadow-[0_18px_60px_rgba(15,23,42,0.24)]'
+    ? 'border-[#0c9bd6] bg-[linear-gradient(135deg,#ffffff,#edf1f6)] shadow-[0_18px_60px_rgba(15,23,42,0.24)]'
     : 'border-[#5cc8ff] bg-[linear-gradient(135deg,#1c2430,#121821)] shadow-[0_18px_60px_rgba(0,0,0,0.45)]';
   const helpCloseColors = isLight
-    ? 'text-[#5f7185] hover:bg-[#c5cfdb] hover:text-[#1c2733]'
+    ? 'text-[#5f7185] hover:bg-[#eaf0f6] hover:text-[#1c2733]'
     : 'text-[#a1a1aa] hover:bg-[#27272a] hover:text-[#f4f4f5]';
   const helpBodyText = isLight ? 'text-[#1c2733]' : 'text-[#dbeafe]';
   const sectionHeadText = isLight ? 'text-[#5f7185]' : 'text-[#8fa1b5]';
   const kbdColors = isLight
-    ? 'border-[#b9c5d4] bg-[#fbfcfe] text-[#1c2733]'
+    ? 'border-[#d5dce4] bg-[#fbfcfe] text-[#1c2733]'
     : 'border-[#2b3441] bg-[#171c24] text-[#dbeafe]';
 
   return (
