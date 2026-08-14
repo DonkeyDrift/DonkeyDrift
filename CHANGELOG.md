@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-14 (15)
+
+- feat(web_ui): UI 语言首访自动跟随浏览器语言
+  - `web_ui/frontend/src/i18n/index.tsx` 初始化顺序改为：localStorage 已存选择优先，无存则读取 `navigator.language`——`zh` 开头（zh-CN/zh-TW 等）用中文，其余一律英文；自动检测结果不落盘，仅用户手动切换时写入 localStorage `donkeydrifter.ui.lang` 并在后续访问优先生效（关机/重启后仍记住手动选择）。
+  - 测试同步：`LanguageSwitcher.test.tsx` 扩为 5 项（中文浏览器默认中文、英文浏览器首访自动英文且不落盘、点击切换并持久化、恢复已存选择、已存选择优先于浏览器语言），新增 `setBrowserLanguage` mock 辅助；`FabActions.test.tsx` 默认中文用例补浏览器语言 mock 保持确定性。
+  - 验证：`tsc -b --noEmit` 零错误、`vitest` 14 个文件 75/75 通过、`npm run build` 成功。
+  - 涉及文件：`web_ui/frontend/src/i18n/index.tsx`、`web_ui/frontend/src/components/LanguageSwitcher.test.tsx`、`web_ui/frontend/src/components/FabActions.test.tsx`
+
 ## 2026-08-14 (14)
 
 - fix(launcher,provisioning): 修复 Drifter Console 上看不到上位机 IP

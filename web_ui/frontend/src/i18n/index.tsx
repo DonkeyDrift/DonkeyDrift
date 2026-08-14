@@ -1,23 +1,36 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { MESSAGES } from './messages';
 
-// UI i18n: 'zh' is the default locale and mirrors the current (mixed zh/en)
-// interface verbatim; 'en' is the full English translation. The selection is
-// persisted in localStorage so it survives browser close and system reboot.
+// UI i18n: 'zh' mirrors the original (mixed zh/en) interface verbatim; 'en' is
+// the full English translation. On first visit the locale follows the browser
+// language (zh* -> zh, everything else -> en). Once the user switches manually
+// the choice is persisted in localStorage and takes precedence from then on,
+// so it survives browser close and system reboot.
 export type UiLanguage = 'zh' | 'en';
 
 export const LANG_STORAGE_KEY = 'donkeydrifter.ui.lang';
 
 type TranslateVars = Record<string, string | number>;
 
-const normalizeLanguage = (lang: string | null): UiLanguage => (lang === 'en' ? 'en' : 'zh');
+const normalizeLanguage = (lang: string | null): UiLanguage | null =>
+  lang === 'zh' || lang === 'en' ? lang : null;
 
-const readStoredLanguage = (): UiLanguage => {
+const detectBrowserLanguage = (): UiLanguage => {
   try {
-    return normalizeLanguage(window.localStorage.getItem(LANG_STORAGE_KEY));
+    return (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
   } catch {
     return 'zh';
   }
+};
+
+const readInitialLanguage = (): UiLanguage => {
+  try {
+    const stored = normalizeLanguage(window.localStorage.getItem(LANG_STORAGE_KEY));
+    if (stored) return stored;
+  } catch {
+    /* localStorage unavailable: fall through to browser detection */
+  }
+  return detectBrowserLanguage();
 };
 
 const interpolate = (text: string, vars?: TranslateVars): string => {
@@ -34,7 +47,7 @@ const translate = (lang: UiLanguage, key: string, vars?: TranslateVars): string 
 };
 
 // Non-React access path (services, zustand stores): mirrors the provider state.
-let currentLanguage: UiLanguage = readStoredLanguage();
+let currentLanguage: UiLanguage = readInitialLanguage();
 
 export const getLanguage = (): UiLanguage => currentLanguage;
 
@@ -54,7 +67,7 @@ const I18nContext = createContext<I18nContextValue>({
 });
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [lang, setLang] = useState<UiLanguage>(readStoredLanguage);
+  const [lang, setLang] = useState<UiLanguage>(readInitialLanguage);
 
   const setLanguage = useCallback((next: UiLanguage) => {
     currentLanguage = next;
