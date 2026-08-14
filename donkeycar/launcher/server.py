@@ -16,10 +16,24 @@ import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
+from donkeycar._version import __version__
+
 
 # ── PID 文件管理（与 tui.py / base.py 保持一致） ────────────────────────
 
 _DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
+
+# ── 图标静态文件 ────────────────────────────────────────────────────
+
+# URL 路径 → (文件名, Content-Type)，文件位于本模块同目录。
+# favicon.svg 是 Safari 固定标签页的 mask-icon（单色头盔描摹自 logo.png），
+# apple-touch-icon 用于 Safari 收藏/书签，favicon.ico 兼容旧路径请求。
+_ICON_FILES = {
+    "/favicon.png": ("donkey_favicon.png", "image/png"),
+    "/favicon.ico": ("donkey_favicon.ico", "image/x-icon"),
+    "/favicon.svg": ("donkey_favicon.svg", "image/svg+xml"),
+    "/apple-touch-icon.png": ("donkey_touch_icon.png", "image/png"),
+}
 
 
 def _read_drive_pid_file():
@@ -350,8 +364,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_html()
-        elif path in ("/favicon.png", "/favicon.ico"):
-            self._serve_favicon()
+        elif path in _ICON_FILES:
+            self._serve_icon(path)
         elif path == "/launch/drive":
             self._serve_launch_drive_page()
         elif path == "/api/status":
@@ -378,6 +392,7 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
     def _serve_html(self):
         """提供菜单 HTML 页面。"""
         html = MENU_HTML.replace("{{CWD}}", str(Path.cwd()))
+        html = html.replace("{{VERSION}}", __version__)
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -385,14 +400,19 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_favicon(self):
-        """提供 Donkey favicon 图标。"""
-        favicon_path = Path(__file__).parent / "donkey_favicon.png"
-        if favicon_path.exists():
-            body = favicon_path.read_bytes()
+    def _serve_icon(self, path):
+        """提供图标静态文件（favicon PNG/ICO/SVG、apple-touch-icon）。"""
+        filename, content_type = _ICON_FILES[path]
+        icon_path = Path(__file__).parent / filename
+        if icon_path.exists():
+            body = icon_path.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-cache")
+            self.send_header(
+                "Last-Modified",
+                self.date_time_string(icon_path.stat().st_mtime)
+            )
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -454,7 +474,9 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="/favicon.png?v=2">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Donkey</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
@@ -500,10 +522,17 @@ MENU_HTML = r"""<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/png" href="/favicon.png?v=2">
+    <script>
+    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，"跟随系统"经 matchMedia 实时解析）
+    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
+    </script>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <title>Donkey</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
+        html{color-scheme:dark}
         body{
             background:#101318;color:#e8edf2;
             font-family:system-ui,sans-serif;
@@ -516,6 +545,18 @@ MENU_HTML = r"""<!DOCTYPE html>
         .headerLogo{width:32px;height:32px;border-radius:8px;border:1px solid #2b3441;align-self:center}
         .headerRow h1{font-size:22px;margin:0}
         .version{color:#8fa1b5;font-size:12px;text-transform:uppercase;letter-spacing:.08em;display:inline-block;transform:translateY(-1px)}
+        /* DD GitHubLink / VersionBadge */
+        .ghLink{display:inline-flex;align-items:center;color:#8fa1b5;transform:translateY(-1px)}
+        .ghLink:hover{color:#5cc8ff}
+        .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block;transform:translateY(-1px)}
+
+        /* DC langTabs（顶栏主题/语言分段控件，逐字对齐 WebConsoleAssets.h） */
+        .langTabs{display:inline-flex;align-items:center;gap:2px;background:#171c24;border:none;border-radius:999px;padding:0 2px;height:24px;box-sizing:border-box;box-shadow:inset 0 0 0 1px #2b3441}
+        .langTabs button{padding:0 10px;height:24px;min-width:0;border:none;border-radius:999px;background:transparent;color:#8fa1b5;font-size:11px;font-weight:800;line-height:1;cursor:pointer}
+        .langTabs button:hover{background:#222b36;color:#e8f6ff}
+        .langTabs button.active{background:#5cc8ff;color:#061019}
+        .langTabs button.active:hover{background:#8bdcff;color:#061019}
+        #themeTabs{margin-left:auto}
 
         /* DC panel */
         .panel{background:#171c24;border:1px solid #2b3441;border-radius:8px;padding:10px}
@@ -558,10 +599,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         .menuName .favorite{color:#d96bff;font-size:11px;margin-left:4px}
         .menuDesc{font-size:12px;color:#8fa1b5;margin-top:2px}
 
-        /* Footer hint */
-        .footerHint{margin-top:12px;text-align:center;font-size:12px;color:#8fa1b5}
-        .footerHint .key{color:#5cc8ff;background:rgba(92,200,255,.1);padding:2px 8px;border-radius:999px;margin:0 2px;font-weight:700}
-
         /* DC reconnect overlay */
         .reconnectOverlay{position:fixed;inset:0;background:rgba(16,19,24,.88);display:none;align-items:center;justify-content:center;z-index:100}
         .reconnectOverlay.show{display:flex}
@@ -571,23 +608,107 @@ MENU_HTML = r"""<!DOCTYPE html>
         .reconnectError{color:#ff6b6b;margin-top:8px;font-size:14px}
         @keyframes spin{to{transform:rotate(360deg)}}
 
-        /* DC dialog (help modal) */
-        .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,7,10,.72);z-index:10}
-        .modal.show{display:flex}
-        .dialog{width:min(420px,calc(100vw - 28px));background:linear-gradient(135deg,#1c2430,#121821);border:1px solid #ffcc66;border-radius:14px;padding:18px;box-shadow:0 18px 60px rgba(0,0,0,.45)}
-        .dialog h2{margin:0 0 8px;font-size:20px;color:#ffcc66}
-        .dialog p{color:#b7c6d8;font-size:14px;line-height:1.5;margin-bottom:6px}
-        .dialogActions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
-        .dialogBtn{background:#5cc8ff;color:#061019;border:1px solid #5cc8ff;border-radius:999px;padding:6px 16px;font-weight:700;font-size:12px;cursor:pointer}
-        .dialogBtn:hover{background:#8bdcff}
+        /* DC FAB（右下角帮助小点，逐字对齐 WebConsoleAssets.h） */
+        .fabToggle{position:fixed;right:24px;bottom:24px;width:18px;height:18px;min-width:0;padding:0;border-radius:50%;background:#8bdcff;border:1px solid #8bdcff;z-index:17;box-shadow:0 0 18px #5cc8ff,0 0 36px rgba(92,200,255,.55);cursor:pointer;transition:transform .18s}
+        .fabToggle:hover,.fabToggle:focus-visible,.fabToggle:active{background:#8bdcff;border-color:#8bdcff;transform:scale(1.18);box-shadow:0 0 22px #8bdcff,0 0 44px rgba(92,200,255,.72)}
+        .fabActions{position:fixed;right:18px;bottom:18px;z-index:17;pointer-events:none}
+        .fabActions .langFab,.fabActions .helpFab{position:absolute;right:0;bottom:0;opacity:0;transform:scale(.55);pointer-events:none;transition:opacity .18s,transform .18s;display:flex;align-items:center;justify-content:center;cursor:pointer}
+        .fabActions.show .langFab{opacity:1;transform:translateY(-56px) scale(1);pointer-events:auto}
+        .fabActions.show .helpFab{opacity:1;transform:translateX(-56px) scale(1);pointer-events:auto}
+        .fabActions .helpFab{width:46px;height:46px;min-width:0;padding:0;border-radius:50%;background:rgba(92,200,255,.62);color:#061019;border:1px solid rgba(92,200,255,.72);font-size:24px;font-weight:900;line-height:1;box-shadow:0 8px 22px rgba(0,0,0,.22);backdrop-filter:blur(4px)}
+        .fabActions .helpFab:hover,.fabActions .helpFab:focus-visible{background:#8bdcff;border-color:#8bdcff;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+        .fabActions .langFab{width:46px;height:46px;min-width:0;padding:0;border-radius:50%;background:rgba(37,99,235,.58);color:#eef;border:1px solid rgba(92,200,255,.68);font-size:23px;font-weight:900;line-height:1;box-shadow:0 8px 22px rgba(0,0,0,.22);backdrop-filter:blur(4px)}
+        .fabActions .langFab:hover,.fabActions .langFab:focus-visible{background:#3b82f6;border-color:#5cc8ff;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+        .langMenu{position:fixed;right:72px;bottom:74px;display:none;min-width:132px;background:#111820;border:1px solid #5cc8ff;border-radius:12px;padding:6px;z-index:17;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+        .langMenu.show{display:block}
+        .langMenu button{display:block;width:100%;min-width:0;text-align:left;margin:2px 0;padding:7px 10px;background:transparent;border:none;border-radius:8px;color:#dbeafe;font-size:13px;cursor:pointer}
+        .langMenu button:hover{background:#222b36}
+        .langMenu button.active{background:#5cc8ff;color:#061019;font-weight:800}
+
+        /* DC 帮助面板（锚定右下角 FAB 簇上方） */
+        .helpOverlay{position:fixed;inset:0;display:none;background:rgba(5,7,10,.45);z-index:18}
+        .helpOverlay.show{display:block}
+        .helpModal{position:fixed;right:18px;bottom:74px;width:min(340px,calc(100vw - 36px));max-height:calc(100vh - 100px);overflow-y:auto;display:none;background:linear-gradient(135deg,#1c2430,#121821);border:1px solid #5cc8ff;border-radius:14px;padding:14px;box-shadow:0 18px 60px rgba(0,0,0,.45);color:#dbeafe;z-index:19}
+        .helpModal.show{display:block}
+        .helpHead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+        .helpHead h2{margin:0;font-size:16px;font-weight:700;color:#e8edf2}
+        .helpClose{min-width:0;width:28px;height:28px;padding:0;border:none;border-radius:50%;background:transparent;color:#a1a1aa;font-size:20px;line-height:1;cursor:pointer}
+        .helpClose:hover{background:#27272a;color:#f4f4f5}
+        .helpSection{margin-bottom:16px}
+        .helpSection:last-child{margin-bottom:0}
+        .helpSection h3{margin:0 0 8px;font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:#8fa1b5}
+        .helpList{margin:0;padding-left:18px;color:#dbeafe;font-size:13px;line-height:1.55}
+        .helpList li{margin:0 0 8px}
+
+        /* ── 浅色主题（逐字对齐 DC WebConsoleAssets.h / DD theme-light.css 浅色版） ── */
+        html[data-theme="light"]{color-scheme:light}
+        html[data-theme="light"] body{background:#eef1f5;color:#1a2330}
+        html[data-theme="light"] .headerLogo{border-color:#d5dce4}
+        html[data-theme="light"] .version{color:#5b6b7d}
+        html[data-theme="light"] .ghLink{color:#5b6b7d}
+        html[data-theme="light"] .ghLink:hover{color:#0c9bd6}
+        html[data-theme="light"] .versionBadge{color:#7c8da0}
+        html[data-theme="light"] .panel{background:#fff;border-color:#d5dce4}
+        html[data-theme="light"] .sectionTitle{color:#3f4f63}
+        html[data-theme="light"] .label{color:#5b6b7d}
+        html[data-theme="light"] .cwdBar{background:#f4f6f9;border-color:#d5dce4}
+        html[data-theme="light"] .cwdBar .path{color:#0c9bd6}
+        html[data-theme="light"] .menuItem{background:linear-gradient(135deg,#fff,#edf1f6);border-color:#ccd5df;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+        html[data-theme="light"] .menuItem:hover{border-color:#0c9bd6;background:linear-gradient(135deg,#fff,#e8f4fb)}
+        html[data-theme="light"] .menuItem.selected{border-color:#0c9bd6;box-shadow:0 0 12px rgba(12,155,214,.18)}
+        html[data-theme="light"] .menuNo{color:#0c9bd6;background:#eef1f6;border-color:#d5dce4}
+        html[data-theme="light"] .cat-manage{background:rgba(12,155,214,.12);color:#0c9bd6;border-color:rgba(12,155,214,.3)}
+        html[data-theme="light"] .cat-data{background:rgba(31,174,107,.12);color:#1fae6b;border-color:rgba(31,174,107,.3)}
+        html[data-theme="light"] .cat-drive{background:rgba(217,154,23,.12);color:#b57d0e;border-color:rgba(217,154,23,.3)}
+        html[data-theme="light"] .cat-filter{background:rgba(177,74,224,.12);color:#b14ae0;border-color:rgba(177,74,224,.3)}
+        html[data-theme="light"] .cat-train{background:rgba(229,72,77,.12);color:#e5484d;border-color:rgba(229,72,77,.3)}
+        html[data-theme="light"] .menuName{color:#1a2330}
+        html[data-theme="light"] .menuName .favorite{color:#b14ae0}
+        html[data-theme="light"] .menuDesc{color:#5b6b7d}
+        html[data-theme="light"] .reconnectOverlay{background:rgba(15,23,42,.45)}
+        html[data-theme="light"] .reconnectBox{color:#1a2330}
+        html[data-theme="light"] .reconnectSpinner{border-color:#d5dce4;border-top-color:#0c9bd6}
+        html[data-theme="light"] .reconnectError{color:#e5484d}
+        html[data-theme="light"] .langTabs{background:#dde3ec;box-shadow:inset 0 0 0 1px #aeb9c7}
+        html[data-theme="light"] .langTabs button{background:transparent;color:#5b6b7d}
+        html[data-theme="light"] .langTabs button:hover{background:#d3dce6;color:#0b2536}
+        html[data-theme="light"] .langTabs button.active{background:#5cc8ff;color:#061019}
+        html[data-theme="light"] .langTabs button.active:hover{background:#8bdcff;color:#061019}
+        html[data-theme="light"] .langMenu{background:#f4f6f9;border-color:#0c9bd6;box-shadow:0 12px 32px rgba(15,23,42,.16)}
+        html[data-theme="light"] .langMenu button{color:#1f3a52}
+        html[data-theme="light"] .langMenu button:hover{background:#e8eef5}
+        html[data-theme="light"] .langMenu button.active{background:#5cc8ff;color:#061019}
+        html[data-theme="light"] .fabToggle{background:#5cc8ff;border-color:#5cc8ff}
+        html[data-theme="light"] .fabToggle:hover,html[data-theme="light"] .fabToggle:focus-visible,html[data-theme="light"] .fabToggle:active{background:#3aa8dd;border-color:#3aa8dd}
+        html[data-theme="light"] .fabActions .langFab,html[data-theme="light"] .fabActions .helpFab{box-shadow:0 8px 22px rgba(15,23,42,.16)}
+        html[data-theme="light"] .helpOverlay{background:rgba(15,23,42,.3)}
+        html[data-theme="light"] .helpModal{background:linear-gradient(135deg,#fff,#edf1f6);border-color:#0c9bd6;color:#1f3a52;box-shadow:0 18px 60px rgba(15,23,42,.18)}
+        html[data-theme="light"] .helpHead h2{color:#1c2733}
+        html[data-theme="light"] .helpClose{color:#6b7280}
+        html[data-theme="light"] .helpClose:hover{background:#e5e7eb;color:#111827}
+        html[data-theme="light"] .helpSection h3{color:#5b6b7d}
+        html[data-theme="light"] .helpList{color:#1f3a52}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="headerRow">
-            <img class="headerLogo" src="/favicon.png?v=2" alt="Donkey">
+            <img class="headerLogo" src="/favicon.png" alt="Donkey">
             <h1>Donkey</h1>
             <span class="version">DonkeyDrifter Web Launcher</span>
+            <a class="ghLink" href="https://github.com/DonkeyDrift/DonkeyDrift" target="_blank" rel="noopener noreferrer" aria-label="DonkeyDrift on GitHub" title="DonkeyDrift on GitHub">
+                <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            </a>
+            <span class="versionBadge">v{{VERSION}}</span>
+            <span class="langTabs" id="themeTabs" title="主题" data-i18n-title="theme.title">
+                <button type="button" data-theme="light" data-i18n="theme.light">浅色</button>
+                <button type="button" data-theme="system" data-i18n="theme.auto">跟随系统</button>
+                <button type="button" data-theme="dark" data-i18n="theme.dark">深色</button>
+            </span>
+            <span class="langTabs" id="langTabs" title="语言" data-i18n-title="language.title">
+                <button type="button" data-lang="zh">中文</button>
+                <button type="button" data-lang="en">English</button>
+            </span>
         </div>
 
         <div class="cwdBar">
@@ -596,13 +717,44 @@ MENU_HTML = r"""<!DOCTYPE html>
         </div>
 
         <div class="panel">
-            <div class="sectionTitle">菜单</div>
+            <div class="sectionTitle" data-i18n="menu.section">菜单</div>
             <div class="menuGrid" id="menu-grid"></div>
         </div>
+    </div>
 
-        <div class="footerHint">
-            输入<span class="key">编号</span>选择功能，<span class="key">?</span>帮助，<span class="key">0</span>退出
+    <!-- DC FAB 帮助小点（发光小点 + 语言球 + 帮助球） -->
+    <button id="fabToggle" class="fabToggle" aria-label="快捷入口" data-i18n-aria="fab.quick"></button>
+    <div id="fabActions" class="fabActions">
+        <button id="langFab" class="langFab" aria-label="语言" data-i18n-aria="language.title">🌐</button>
+        <button id="helpFab" class="helpFab" aria-label="帮助" data-i18n-aria="fab.help">?</button>
+    </div>
+    <div id="langMenu" class="langMenu">
+        <button type="button" data-lang="zh">中文</button>
+        <button type="button" data-lang="en">English</button>
+    </div>
+
+    <!-- DC 帮助面板 -->
+    <div id="helpOverlay" class="helpOverlay"></div>
+    <div id="helpModal" class="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <div class="helpHead">
+            <h2 id="helpTitle" data-i18n="help.title">帮助</h2>
+            <button class="helpClose" id="helpClose" aria-label="关闭帮助" data-i18n-aria="help.close">×</button>
         </div>
+        <section class="helpSection">
+            <h3 data-i18n="help.groupKeys">键盘操作</h3>
+            <ul class="helpList">
+                <li data-i18n="help.keyNumbers">数字键 1-10：选择对应菜单项</li>
+                <li data-i18n="help.keyQuestion">?：显示此帮助信息</li>
+                <li data-i18n="help.keyZero">0：返回上一页</li>
+                <li data-i18n="help.keyEsc">ESC：关闭弹窗</li>
+            </ul>
+        </section>
+        <section class="helpSection">
+            <h3 data-i18n="help.groupNotes">说明</h3>
+            <ul class="helpList">
+                <li data-i18n="help.noteDrive">目前仅支持通过浏览器启动「驾驶」功能（选项 6）</li>
+            </ul>
+        </section>
     </div>
 
     <!-- DC reconnect overlay -->
@@ -614,36 +766,187 @@ MENU_HTML = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- DC dialog (help) -->
-    <div class="modal" id="help-modal">
-        <div class="dialog">
-            <h2>帮助</h2>
-            <p><span style="color:#5cc8ff">数字键 1-10</span> 选择对应菜单项</p>
-            <p><span style="color:#5cc8ff">?</span> 显示此帮助信息</p>
-            <p><span style="color:#5cc8ff">0</span> 返回上一页</p>
-            <p><span style="color:#5cc8ff">ESC</span> 关闭弹窗</p>
-            <p style="margin-top:8px;color:#8fa1b5;">带 <span style="color:#d96bff">[*]</span> 标记的为常用功能</p>
-            <p style="color:#8fa1b5;">目前仅支持通过浏览器启动「驾驶」功能 (选项 6)</p>
-            <div class="dialogActions">
-                <button class="dialogBtn" onclick="hideHelp()">关闭</button>
-            </div>
-        </div>
-    </div>
-
     <script>
-        // 菜单项数据（与 tui.py 保持一致）
+        // ── i18n（与 DD/DC 同一套 data-i18n 模式与交互） ──
+        const LANG_STORAGE_KEY = 'donkeydrifter.ui.lang';
+        const THEME_STORAGE_KEY = 'donkeydrifter.ui.theme';
+
+        const I18N = {
+            zh: {
+                'language.title': '语言',
+                'theme.title': '主题',
+                'theme.light': '浅色',
+                'theme.auto': '跟随系统',
+                'theme.dark': '深色',
+                'fab.quick': '快捷入口',
+                'fab.help': '帮助',
+                'menu.section': '菜单',
+                'menu.favorite': '「常用」',
+                'help.title': '帮助',
+                'help.close': '关闭帮助',
+                'help.groupKeys': '键盘操作',
+                'help.keyNumbers': '数字键 1-10：选择对应菜单项',
+                'help.keyQuestion': '?：显示此帮助信息',
+                'help.keyZero': '0：返回上一页',
+                'help.keyEsc': 'ESC：关闭弹窗',
+                'help.groupNotes': '说明',
+                'help.noteDrive': '目前仅支持通过浏览器启动「驾驶」功能（选项 6）',
+                'overlay.starting': '正在启动 DonkeyDrifter...',
+                'overlay.failed': '启动失败',
+                'overlay.success': '启动成功！正在跳转...',
+                'overlay.slow': '前端服务启动较慢，正在跳转...',
+                'overlay.networkError': '网络错误',
+                'overlay.unknownError': '未知错误',
+                'overlay.notImplemented': '该功能暂未在浏览器中实现，请使用终端',
+            },
+            en: {
+                'language.title': 'Language',
+                'theme.title': 'Theme',
+                'theme.light': 'Light',
+                'theme.auto': 'Auto',
+                'theme.dark': 'Dark',
+                'fab.quick': 'Quick actions',
+                'fab.help': 'Help',
+                'menu.section': 'Menu',
+                'menu.favorite': '「Common」',
+                'help.title': 'Help',
+                'help.close': 'Close help',
+                'help.groupKeys': 'Keyboard',
+                'help.keyNumbers': 'Number keys 1-10: select the corresponding menu item',
+                'help.keyQuestion': '?: show this help',
+                'help.keyZero': '0: go back',
+                'help.keyEsc': 'ESC: close dialogs',
+                'help.groupNotes': 'Notes',
+                'help.noteDrive': 'Only "Drive" (option 6) can be launched from the browser for now',
+                'overlay.starting': 'Starting DonkeyDrifter...',
+                'overlay.failed': 'Launch failed',
+                'overlay.success': 'Started! Redirecting...',
+                'overlay.slow': 'Frontend is slow to start, redirecting...',
+                'overlay.networkError': 'Network error',
+                'overlay.unknownError': 'Unknown error',
+                'overlay.notImplemented': 'This feature is not available in the browser yet; please use the terminal',
+            },
+        };
+
+        let uiLang = 'zh';
+        let uiTheme = 'system';
+
+        function normalizeLanguage(lang) { return lang === 'en' ? 'en' : 'zh'; }
+        function readStoredLanguage() {
+            try { return normalizeLanguage(localStorage.getItem(LANG_STORAGE_KEY)); }
+            catch (e) { return 'zh'; }
+        }
+        function t(key) {
+            return (I18N[uiLang] && I18N[uiLang][key]) || I18N.zh[key] || key;
+        }
+        function applyLanguage(lang) {
+            uiLang = normalizeLanguage(lang);
+            document.documentElement.lang = uiLang === 'zh' ? 'zh-CN' : 'en';
+            document.querySelectorAll('[data-i18n]').forEach(function(el) {
+                el.textContent = t(el.dataset.i18n);
+            });
+            document.querySelectorAll('[data-i18n-aria]').forEach(function(el) {
+                el.setAttribute('aria-label', t(el.dataset.i18nAria));
+            });
+            document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
+                el.title = t(el.dataset.i18nTitle);
+            });
+            document.querySelectorAll('[data-lang]').forEach(function(b) {
+                b.classList.toggle('active', b.dataset.lang === uiLang);
+            });
+            renderMenu();
+        }
+        function setLanguage(lang) {
+            try { localStorage.setItem(LANG_STORAGE_KEY, normalizeLanguage(lang)); } catch (e) {}
+            applyLanguage(lang);
+            closeLanguageMenu();
+        }
+
+        // ── 主题：浅色 / 跟随系统 / 深色（system 经 matchMedia 实时解析并监听） ──
+        function systemTheme() {
+            try {
+                return window.matchMedia('(prefers-color-scheme: light)').matches
+                    ? 'light' : 'dark';
+            } catch (e) { return 'dark'; }
+        }
+        function renderThemeTabs() {
+            document.querySelectorAll('#themeTabs button[data-theme]').forEach(function(b) {
+                b.classList.toggle('active', b.dataset.theme === uiTheme);
+            });
+        }
+        function applyTheme(mode) {
+            uiTheme = (mode === 'light' || mode === 'dark') ? mode : 'system';
+            document.documentElement.dataset.theme =
+                uiTheme === 'system' ? systemTheme() : uiTheme;
+            renderThemeTabs();
+        }
+        function setTheme(mode) {
+            try { localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (e) {}
+            applyTheme(mode);
+        }
+        function initTheme() {
+            var stored = 'system';
+            try {
+                var s = localStorage.getItem(THEME_STORAGE_KEY);
+                if (s === 'light' || s === 'dark' || s === 'system') stored = s;
+            } catch (e) {}
+            applyTheme(stored);
+            try {
+                var mq = window.matchMedia('(prefers-color-scheme: light)');
+                var onChange = function() { if (uiTheme === 'system') applyTheme('system'); };
+                if (mq.addEventListener) mq.addEventListener('change', onChange);
+                else if (mq.addListener) mq.addListener(onChange);
+            } catch (e) {}
+        }
+
+        // ── DC FAB 帮助小点 ──
+        function toggleFabActions(e) {
+            if (e) e.stopPropagation();
+            document.getElementById('fabActions').classList.toggle('show');
+        }
+        function collapseFabActions() {
+            document.getElementById('fabActions').classList.remove('show');
+            closeLanguageMenu();
+        }
+        function toggleLanguageMenu(e) {
+            if (e) e.stopPropagation();
+            document.getElementById('fabActions').classList.add('show');
+            document.getElementById('langMenu').classList.toggle('show');
+        }
+        function closeLanguageMenu() {
+            document.getElementById('langMenu').classList.remove('show');
+        }
+        function openHelpModal() {
+            document.getElementById('fabActions').classList.add('show');
+            closeLanguageMenu();
+            document.getElementById('helpOverlay').classList.add('show');
+            document.getElementById('helpModal').classList.add('show');
+        }
+        function closeHelpModal() {
+            document.getElementById('helpOverlay').classList.remove('show');
+            document.getElementById('helpModal').classList.remove('show');
+        }
+
+        // 菜单项数据（与 tui.py 保持一致，desc/catLabel 双语）
         const menuItems = [
-            {no: 1,  cat: "manage", catLabel: "管理", name: "createcar",    desc: "创建新的 DonkeyCar 项目",                    favorite: true},
-            {no: 2,  cat: "manage", catLabel: "管理", name: "open",         desc: "打开已有 DonkeyCar 项目",                    favorite: false},
-            {no: 3,  cat: "data",   catLabel: "数据", name: "clear_data",   desc: "清空当前项目 data 目录",                     favorite: true},
-            {no: 4,  cat: "data",   catLabel: "数据", name: "backup_data",  desc: "备份当前项目 data 目录",                     favorite: false},
-            {no: 5,  cat: "data",   catLabel: "数据", name: "restore_data", desc: "从备份恢复 data 目录",                       favorite: false},
-            {no: 6,  cat: "drive",  catLabel: "驾驶", name: "drive",        desc: "打开 Web Console 驾驶控制台",                 favorite: true},
-            {no: 7,  cat: "filter", catLabel: "筛选", name: "web",          desc: "启动 Web UI（前后端）",                      favorite: true},
-            {no: 8,  cat: "filter", catLabel: "筛选", name: "donkey_ui",    desc: "启动数据筛选工具（Windows下需要WSL来运行）", favorite: false},
-            {no: 9,  cat: "train",  catLabel: "训练", name: "train_local",  desc: "本地训练",                                    favorite: false},
-            {no: 10, cat: "train",  catLabel: "训练", name: "train_online", desc: "云端训练（train_online.conf）",              favorite: true},
+            {no: 1,  cat: "manage", name: "createcar",    descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: true},
+            {no: 2,  cat: "manage", name: "open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
+            {no: 3,  cat: "data",   name: "clear_data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: true},
+            {no: 4,  cat: "data",   name: "backup_data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
+            {no: 5,  cat: "data",   name: "restore_data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
+            {no: 6,  cat: "drive",  name: "drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
+            {no: 7,  cat: "filter", name: "web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
+            {no: 8,  cat: "filter", name: "donkey_ui",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: false},
+            {no: 9,  cat: "train",  name: "train_local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: false},
+            {no: 10, cat: "train",  name: "train_online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
         ];
+        const catLabels = {
+            manage: {zh: "管理", en: "Manage"},
+            data:   {zh: "数据", en: "Data"},
+            drive:  {zh: "驾驶", en: "Drive"},
+            filter: {zh: "筛选", en: "Filter"},
+            train:  {zh: "训练", en: "Train"},
+        };
 
         let selectedNo = null;
         let pendingDigit1 = null;
@@ -658,13 +961,15 @@ MENU_HTML = r"""<!DOCTYPE html>
                 div.dataset.no = item.no;
                 div.onclick = () => selectItem(item.no);
                 const favMark = item.favorite
-                    ? ' <span class="favorite">[*]</span>' : '';
+                    ? ' <span class="favorite">' + t('menu.favorite') + '</span>' : '';
+                const catLabel = catLabels[item.cat][uiLang];
+                const desc = uiLang === 'en' ? item.descEn : item.descZh;
                 div.innerHTML =
                     '<div class="menuNo">' + item.no + '</div>' +
-                    '<div class="catPill cat-' + item.cat + '">' + item.catLabel + '</div>' +
+                    '<div class="catPill cat-' + item.cat + '">' + catLabel + '</div>' +
                     '<div class="menuContent">' +
                         '<div class="menuName">' + item.name + favMark + '</div>' +
-                        '<div class="menuDesc">' + item.desc + '</div>' +
+                        '<div class="menuDesc">' + desc + '</div>' +
                     '</div>';
                 grid.appendChild(div);
             });
@@ -689,7 +994,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             if (no === 6) {
                 launchDrive();
             } else {
-                showError('该功能暂未在浏览器中实现，请使用终端');
+                showError(t('overlay.notImplemented'));
             }
         }
 
@@ -699,7 +1004,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             const overlayText = document.getElementById('overlay-text');
             const overlayError = document.getElementById('overlay-error');
             overlay.classList.add('show');
-            overlayText.textContent = '正在启动 DonkeyDrifter...';
+            overlayText.textContent = t('overlay.starting');
             overlayError.textContent = '';
 
             try {
@@ -722,33 +1027,33 @@ MENU_HTML = r"""<!DOCTYPE html>
                             break;
                         } catch (e) {
                             overlayText.textContent =
-                                '正在启动 DonkeyDrifter... (' + (i + 1) + '/30)';
+                                t('overlay.starting') + ' (' + (i + 1) + '/30)';
                             await new Promise(function(res) {
                                 setTimeout(res, 1000);
                             });
                         }
                     }
                     if (ready) {
-                        overlayText.textContent = '启动成功！正在跳转...';
+                        overlayText.textContent = t('overlay.success');
                         window.location.href = url;
                     } else {
-                        overlayText.textContent =
-                            '前端服务启动较慢，正在跳转...';
+                        overlayText.textContent = t('overlay.slow');
                         setTimeout(function() {
                             window.location.href = url;
                         }, 1000);
                     }
                 } else if (data.status === 'error') {
-                    overlayText.textContent = '启动失败';
+                    overlayText.textContent = t('overlay.failed');
                     overlayError.textContent =
-                        data.error || '未知错误';
+                        data.error || t('overlay.unknownError');
                     setTimeout(function() {
                         overlay.classList.remove('show');
                     }, 3000);
                 }
             } catch (e) {
-                overlayText.textContent = '启动失败';
-                overlayError.textContent = '网络错误: ' + e.message;
+                overlayText.textContent = t('overlay.failed');
+                overlayError.textContent =
+                    t('overlay.networkError') + ': ' + e.message;
                 setTimeout(function() {
                     overlay.classList.remove('show');
                 }, 3000);
@@ -768,33 +1073,23 @@ MENU_HTML = r"""<!DOCTYPE html>
             }, 2500);
         }
 
-        // 帮助弹窗
-        function showHelp() {
-            document.getElementById('help-modal')
-                .classList.add('show');
-        }
-        function hideHelp() {
-            document.getElementById('help-modal')
-                .classList.remove('show');
-        }
-
         // 键盘事件
         document.addEventListener('keydown', function(e) {
             const key = e.key;
 
             // ESC 关闭弹窗
             if (key === 'Escape') {
-                hideHelp();
+                closeHelpModal();
                 document.getElementById('overlay')
                     .classList.remove('show');
                 return;
             }
 
-            // 帮助弹窗打开时，仅响应 ? 和 0 关闭
-            if (document.getElementById('help-modal')
+            // 帮助面板打开时，仅响应 ? 和 0 关闭
+            if (document.getElementById('helpModal')
                 .classList.contains('show')) {
                 if (key === '?' || key === '0') {
-                    hideHelp();
+                    closeHelpModal();
                 }
                 return;
             }
@@ -831,7 +1126,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                     window.close();
                 }
             } else if (key === '?') {
-                showHelp();
+                openHelpModal();
             }
         });
 
@@ -849,8 +1144,38 @@ MENU_HTML = r"""<!DOCTYPE html>
             }
         }
 
+        // 控件事件绑定
+        document.getElementById('fabToggle')
+            .addEventListener('click', toggleFabActions);
+        document.getElementById('langFab')
+            .addEventListener('click', toggleLanguageMenu);
+        document.getElementById('helpFab')
+            .addEventListener('click', function(e) {
+                if (e) e.stopPropagation();
+                openHelpModal();
+            });
+        document.getElementById('helpOverlay')
+            .addEventListener('click', closeHelpModal);
+        document.getElementById('helpClose')
+            .addEventListener('click', closeHelpModal);
+        document.querySelectorAll('[data-lang]').forEach(function(b) {
+            b.addEventListener('click', function() {
+                setLanguage(b.dataset.lang);
+            });
+        });
+        document.querySelectorAll('#themeTabs button[data-theme]')
+            .forEach(function(b) {
+                b.addEventListener('click', function() {
+                    setTheme(b.dataset.theme);
+                });
+            });
+        document.addEventListener('click', collapseFabActions);
+        window.addEventListener('scroll', collapseFabActions, {passive: true});
+        window.addEventListener('touchmove', collapseFabActions, {passive: true});
+
         // 初始化
-        renderMenu();
+        initTheme();
+        applyLanguage(readStoredLanguage());
         fetchStatus();
         // 检测 #drive hash 自动启动 DonkeyDrifter
         if (location.hash === '#drive') {

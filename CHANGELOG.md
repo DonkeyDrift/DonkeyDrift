@@ -1,5 +1,38 @@
 # 变更日志
 
+## 2026-08-14 (6)
+
+- fix(web_ui): 控制参数滑块 thumb 加宽对齐最初 Safari 原生尺寸（24×16px 纯白椭圆）
+  - 用户反馈 14×12px 版本比"最初"小、比例不对：最初版本（d3349014）未自定义 thumb，其尺寸由浏览器原生渲染决定。本机实测 Firefox 153 原生为 ~16px 圆形、Linux WebKit(WPE) 为 18px 圆形，均与用户描述的"宽大于高的白色椭圆"不符；最终查 WebKit 源码 `RenderThemeCocoa.mm` 确认 Safari 原生 thumb 硬编码尺寸为 `kDefaultSliderThumbWidth=24` / `kDefaultSliderThumbHeight=16`，即 24×16px 白色椭圆，与用户描述的最初样式一致（高度 16≈15.4 被认可、宽度 24>18 补齐差距）。
+  - thumb 由 14×12px 改为 `w-[24px] h-[16px]`（纯白不透明 rounded-full 椭圆形状不变），居中 margin 按公式 (轨道 6px − thumb 16px)/2 更新为 `-mt-[5px]`；轨道样式（6px 锌色）未动。
+  - 验证：Playwright Chromium + WebKit 双引擎实测 8100 实页（深/浅双主题），thumb 精确渲染 24.00×16.00、纯白 (255,255,255) 不透明、与轨道垂直居中偏差 0.00px、轨道 6.00px 未变；`npm run build` 与 `vitest`（14 文件 72 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
+
+## 2026-08-14 (5)
+
+- feat(launcher): 常用项标注由 `[*]` 改为「常用」，删除帮助面板星号说明行
+  - 菜单常用项徽标文字由 `[*]` 改为「常用」（英文「Common」），紫色徽标样式不变，经 i18n 词条 `menu.favorite` 随语言切换。
+  - 帮助面板「说明」分组删除"带 [*] 标记的为常用功能"一行（中英文词条同步移除）。
+  - 验证：本机测试实例 + Playwright 截图实测中/英文菜单徽标与帮助面板，无 JS 报错。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+## 2026-08-14 (4)
+
+- feat(launcher): Donkey 菜单页接入 Drifter Console 全套控件、浅色主题与页头徽章
+  - 右下角帮助小点：逐字复刻 DC 的 FAB 簇——18px 发光小点点击展开 🌐 语言球（向上）与 ? 帮助球（向左），帮助面板锚定右下角（× 关闭、点遮罩关闭），保留 ESC/? 键盘交互；原居中帮助弹窗移除。
+  - 顶栏右侧新增 DC langTabs 胶囊分段控件：浅色/跟随系统/深色 三态主题 + 中文/English 语言切换。
+  - 浅色主题整套配色对齐 DC/DD 浅色版（背景 `#eef1f5`、白渐变卡片、强调色 `#0c9bd6`、语义色浅色变体 绿 `#1fae6b`/琥珀 `#b57d0e`/红 `#e5484d`/紫 `#b14ae0`）；主题落 `<html data-theme>`，localStorage key `donkeydrifter.ui.theme`，"跟随系统"经 matchMedia 实时解析并监听；head 内联脚本防首屏闪烁。
+  - i18n 走 `data-i18n` 属性扫描（textContent/aria-label/title），菜单项、分类 pill、帮助面板、启动遮罩文案全部双语；localStorage key `donkeydrifter.ui.lang`。
+  - 页头 "DonkeyDrifter Web Launcher" 右侧新增 GitHub 图标（SVG 与 DD `GitHubLink.tsx` 逐字一致，新标签页打开 DonkeyDrift 仓库）与版本徽章（DD VersionBadge 样式，版本源与 DD 后端 `/api/config/version` 同为 `donkeycar._version.__version__`）；删除底部"输入编号选择功能，?帮助，0退出"提示行及其 CSS/i18n 词条。
+  - 验证：本机测试实例 + Playwright 8 场景截图（深/浅 × 中/英、FAB 展开、帮助面板、语言菜单、跟随系统+浅色系统偏好）全部正确，页面无 JS 报错。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+- fix(launcher): 修复 Safari 标签页图标显示为首字符"1"而非头盔 logo
+  - 根因（两层）：① Safari 固定标签页不用 PNG favicon，需专用 mask-icon（单色 SVG），缺失时按访问地址首字符显示符号（IP 访问显示"1"）；② 2026-08-14 (2) 为破 Chrome 缓存给图标链接加的 `?v=N` 查询串触发 WebKit 图标处理异常——日志显示 Safari 成功拉到图标（200）仍回退首字符符号，而 DD/DC 均为无参数 `/favicon.png` 且工作正常。
+  - 修复：用 cv2 从 `logo.png` 描摹黑色头盔线条生成单色 mask-icon SVG（`fill-rule=evenodd` 保留镂空细节）；生成 180×180 `apple-touch-icon.png` 与多尺寸 `favicon.ico`（16/32/48）；`_serve_favicon` 泛化为 `_serve_icon` + `_ICON_FILES` 路由表（正确 Content-Type + 补 `Last-Modified`，与 Vite 行为一致）；所有图标链接去掉查询串与 DD/DC 对齐，取代 (2) 的 `?v=2` 方案。
+  - 验证：本机测试实例四个图标 URL 均返回 200 与正确 Content-Type；SVG 描摹经浏览器放大渲染目检与原 logo 一致。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/donkey_favicon.svg`（新增）、`donkeycar/launcher/donkey_touch_icon.png`（新增）、`donkeycar/launcher/donkey_favicon.ico`（新增）
+
 ## 2026-08-14 (3)
 
 - fix(launcher): Donkey 菜单页容器去掉 900px 限宽，全宽贴合浏览器两边
