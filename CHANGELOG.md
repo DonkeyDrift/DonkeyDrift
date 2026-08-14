@@ -1,5 +1,31 @@
 # 变更日志
 
+## 2026-08-14 (11)
+
+- feat(web_ui): 手机版/竖屏平板响应式适配（<1024px 与手机一致）
+  - 根因修复：`index.html` viewport 由写死 `width=520` 改为 `width=device-width`；`index.css` 删除 `html,body,#root` 的 `min-width: 520px`（此前手机一律按 520px 排版再整体缩小，"显示不全"即由此而来）。
+  - 页头（`Layout.tsx`）：<lg 改为汉堡菜单——logo+标题常驻，右侧仅保留 GitHub 图标与汉堡按钮；菜单面板内含 5 个导航项、"进入 Donkey"/"进入 DrifterConsole"按钮、主题/语言切换、版本徽章，路由切换自动收起。≥lg 桌面布局不变（与旧版构建同宽度截图逐像素比对一致）。新增 i18n 词条 `common.nav.menu`（中「菜单」/英 "Menu"）。
+  - Drive 页：顶部工具栏（输入源/模式/模型/录制/计数）改 `flex-wrap` 允许换行。
+  - SidePanel 抽屉：打开宽度由固定 `w-96` 改为 `min(24rem, 100vw-3.5rem)`，窄屏下触发按钮不再被推出屏外。
+  - 网格与小布局：Trainer 标题行补 `flex-wrap`；LocalConfigForm/RemoteConfigForm/CarConnectorPage 共 5 处无前缀 `grid-cols-2` 改 `grid-cols-1 lg:grid-cols-2`；CarConnectorPage 任务日志长行补 `break-all`；PilotArena 当前数据卡片 `md:grid-cols-3`→`lg:` 并补 `min-w-0 break-all` 防长路径撑破；TubNavigator 图像区 `md:`→`lg:`、首尾帧按钮组 `grid-cols-4`→`grid-cols-2 lg:grid-cols-4`；TubEditor 工具条补 `flex-wrap`。
+  - 验证：vitest 全量 73 项通过；`npm run build`（tsc+vite）通过；Playwright 实测 390×844（手机）/768×1024（竖屏平板）/1280×800（桌面）× 5 个路由共 15 组全部零横向溢出；dist 已部署 8100 供手机浏览器实测。
+  - 涉及文件：`web_ui/frontend/index.html`、`web_ui/frontend/src/index.css`、`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/src/components/SidePanel.tsx`、`web_ui/frontend/src/components/TubEditor.tsx`、`web_ui/frontend/src/components/TubNavigator.tsx`、`web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`、`web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`、`web_ui/frontend/src/i18n/messages/common.ts`、`web_ui/frontend/src/pages/CarConnectorPage.tsx`、`web_ui/frontend/src/pages/DrivePage.tsx`、`web_ui/frontend/src/pages/PilotArenaPage.tsx`、`web_ui/frontend/src/pages/TrainerPage.tsx`
+
+## 2026-08-14 (10)
+
+- feat(launcher): 菜单新增「Drifter Console」项（0 号置顶、常用），一键打开车上控制台
+  - 新增 `donkeycar/launcher/dc_discovery.py`：Drifter Console 局域网发现模块。固件 v1.7.14 起默认禁用 mDNS/NetBIOS/LLMNR 名称发现（`DISABLE_WIFI_NAME_DISCOVERY`），无法依赖主机名，改为探测 `/api/status` 的 MUS4 特征字段（`version=`/`ap_ip=`）定位车辆：先探车辆 AP 固定地址 192.168.4.1，未命中再并行扫描本机所在 /24 网段（48 线程、单地址 0.6s 超时），结果缓存 60 秒。
+  - `server.py` 新增 `POST /api/launch/dc` 返回 DC URL；menuItems 将 Drifter Console 编号 0 置顶（其余项编号不变）；键盘 0 由「返回上一页/关闭标签页」改为选中 0 号，删除 history.back()/window.close() 分支；帮助按键说明更新为数字键 0-10（中英 + HTML 兜底同步）。
+  - `tui.py`「驾驶」分类新增 DrifterConsoleCommand（is_favorite=True，无需 mycar 目录），经同一发现模块定位后用默认浏览器打开；TUI 菜单编号不变（0 在 TUI 仍为退出）。
+  - 验证：`POST /api/launch/dc` 实测 1.8s 返回 `http://192.168.3.46/`（`/api/status` 确认为车上 MUS4 v1.7.66）；Playwright 实测点击 0 号/按 0 键跳转 DC、按 1,0 选中 10 号；截图确认 0 号置顶排版。
+  - 涉及文件：`donkeycar/launcher/dc_discovery.py`（新增）、`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`
+
+- feat(launcher): 菜单功能名排版改为首字母大写、空格分词
+  - 规则：每个单词首字母大写，单词间用空格连接不再用下划线；"UI" 两字母全大写。11 项依次为 Create Car / Open / Clear Data / Backup Data / Restore Data / Drive / Drifter Console / Web / Donkey UI / Train Local / Train Online；网页菜单与 TUI 命令显示名同步修改。
+  - 注：TUI 参数历史以功能名为键，改名后对应功能的历史参数会重置一次。
+  - 验证：临时实例 + Playwright 截图实测 11 项名称渲染正确；TUI 菜单列表逐项核对一致。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`
+
 ## 2026-08-14 (9)
 
 - feat(launcher): CWD 栏标签改为双语全称，不再用缩写

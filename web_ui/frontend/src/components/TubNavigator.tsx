@@ -523,8 +523,8 @@ export const TubNavigator: React.FC = () => {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="w-full md:max-w-[40vw] aspect-[4/3] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="w-full lg:max-w-[40vw] aspect-[4/3] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
             <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'} backdrop-blur-md`}>
               <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
               <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
@@ -568,7 +568,7 @@ export const TubNavigator: React.FC = () => {
               totalRecords={totalRecords}
             />
 
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               <Button
                 variant="secondary"
                 size="sm"
