@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-14 (3)
+
+- fix(launcher): Donkey 菜单页容器去掉 900px 限宽，全宽贴合浏览器两边
+  - 问题：`MENU_HTML` 的 `.container` 原为 `max-width:900px; margin:0 auto`，宽屏浏览器下页面左右两侧大片空白，与 DonkeyDrifter / Drifter Console 随浏览器宽度贴合两边的全宽设计语言不一致。
+  - 修复：`.container` 改为 `width:100%; margin:0`，页头、CWD 栏、菜单面板、底部提示随浏览器宽度整行铺满（保留 body 12px 边距）。
+  - 验证：本机 8091 端口测试实例 + Playwright 截图实测，1920px 宽屏下菜单整行铺满到两边，800px 窄视口下排版正常无溢出。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
 ## 2026-08-14 (2)
 
 - fix(launcher): 修复 Donkey 页浏览器标签页 favicon 不显示 + 页头新增 logo 图标
