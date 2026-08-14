@@ -572,7 +572,7 @@ class DonkeyCommand:
 
 class CreateCarCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("createcar", "创建新的 DonkeyCar 项目", "管理", is_favorite=True, requires_mycar_folder=False)
+        super().__init__("createcar", "创建新的 DonkeyCar 项目", "管理", is_favorite=False, requires_mycar_folder=False)
         self.options = [
             CommandOption("folder", "项目名称", default="mycar", help_text="将在 ~/projects/ 下创建此目录"),
             CommandOption("template", "模板名称", default=None, required=False, help_text="可选模板: basic, square 等 (留空使用默认)"),
@@ -663,7 +663,7 @@ class OpenProjectCommand(DonkeyCommand):
 
 class ClearDataCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("clear_data", "清空当前项目 data 目录", "数据", is_favorite=True, requires_mycar_folder=True)
+        super().__init__("clear_data", "清空当前项目 data 目录", "数据", is_favorite=False, requires_mycar_folder=True)
         self.options = []
 
     def execute(self):
@@ -1150,7 +1150,7 @@ from donkeycar.management.train_local import run_local_train
 
 class TrainLocalCommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("train_local", "本地训练", "训练", is_favorite=False, requires_mycar_folder=True)
+        super().__init__("train_local", "本地训练", "训练", is_favorite=True, requires_mycar_folder=True)
         self.options = [
             CommandOption("tub", "数据目录 (Tub)", default="./data", help_text="包含训练数据的目录"),
             CommandOption("model", "模型输出路径", default=self._get_next_model_name(), help_text="训练后的模型保存路径 (自动递增)"),
@@ -1491,7 +1491,7 @@ class DriveCommand(DonkeyCommand):
 
 class DonkeyUICommand(DonkeyCommand):
     def __init__(self):
-        super().__init__("donkey_ui", "启动数据筛选工具（Windows下需要WSL来运行）", "筛选", is_favorite=False, requires_mycar_folder=False)
+        super().__init__("donkey_ui", "启动数据筛选工具（Windows下需要WSL来运行）", "筛选", is_favorite=True, requires_mycar_folder=False)
         self.options = []
 
     def get_command_line(self, params):

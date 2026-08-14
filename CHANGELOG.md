@@ -1,5 +1,30 @@
 # 变更日志
 
+## 2026-08-14 (9)
+
+- feat(launcher): CWD 栏标签改为双语全称，不再用缩写
+  - 中文由 "CWD" 改为「当前工作目录」，英文改为 "Current Working Directory"（i18n 词条 `cwd.label`）。
+  - 验证：本机测试实例 + Playwright 截图实测中/英文显示正确。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+- feat(launcher): 删除页头 "DonkeyDrifter Web Launcher" 文字
+  - 页头仅保留 logo + Donkey 标题 + GitHub 图标 + 版本徽章，右侧副标题文字及其 i18n 词条移除。
+  - 验证：本机测试实例 + Playwright 截图实测页头渲染正常。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+- feat(launcher): 调整菜单常用项标记：去掉 createcar/clear_data，新增 donkey_ui/train_local
+  - 网页菜单（`launcher/server.py` menuItems）：1 号 createcar、3 号 clear_data 的 favorite 改为 false；8 号 donkey_ui、9 号 train_local 改为 true；现常用项为 6/7/8/9/10（drive、web、donkey_ui、train_local、train_online）。
+  - 终端 TUI（`management/tui.py`）对应 Command 的 is_favorite 同步修改，与网页菜单保持一致。
+  - 验证：本机临时实例（8091）+ Playwright 截图实测菜单徽标渲染正确；8090 重启后抽查页面内容一致。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`
+
+- feat(launcher): 精简帮助弹窗内容
+  - 键盘操作分区删除「?：显示此帮助信息」「0：返回上一页」「ESC：关闭弹窗」三条（仅删帮助文案，键盘实际功能未动）。
+  - 删除「说明」分区及其唯一一条「目前仅支持通过浏览器启动「驾驶」功能（选项 6）」；中英文 i18n 词条同步移除。
+  - 帮助弹窗现仅保留「键盘操作」分区下数字键 1-10 选菜单一条。
+  - 验证：本机临时实例 + Playwright 截图实测帮助弹窗渲染正确；8090 重启后线上页面无残留词条。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
 ## 2026-08-14 (8)
 
 - feat(web_ui,launcher): 主题默认改为深色，"跟随系统"仅在用户显式点选后生效

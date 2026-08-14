@@ -544,7 +544,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         .headerRow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 10px}
         .headerLogo{width:32px;height:32px;border-radius:8px;border:1px solid #2b3441;align-self:center}
         .headerRow h1{font-size:22px;margin:0}
-        .version{color:#8fa1b5;font-size:12px;text-transform:uppercase;letter-spacing:.08em;display:inline-block;transform:translateY(-1px)}
         /* DD GitHubLink / VersionBadge */
         .ghLink{display:inline-flex;align-items:center;color:#8fa1b5;transform:translateY(-1px)}
         .ghLink:hover{color:#5cc8ff}
@@ -644,7 +643,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         html[data-theme="light"]{color-scheme:light}
         html[data-theme="light"] body{background:#eef1f5;color:#1a2330}
         html[data-theme="light"] .headerLogo{border-color:#d5dce4}
-        html[data-theme="light"] .version{color:#5b6b7d}
         html[data-theme="light"] .ghLink{color:#5b6b7d}
         html[data-theme="light"] .ghLink:hover{color:#0c9bd6}
         html[data-theme="light"] .versionBadge{color:#7c8da0}
@@ -695,7 +693,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         <div class="headerRow">
             <img class="headerLogo" src="/favicon.png" alt="Donkey">
             <h1>Donkey</h1>
-            <span class="version">DonkeyDrifter Web Launcher</span>
             <a class="ghLink" href="https://github.com/DonkeyDrift/DonkeyDrift" target="_blank" rel="noopener noreferrer" aria-label="DonkeyDrift on GitHub" title="DonkeyDrift on GitHub">
                 <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
             </a>
@@ -712,7 +709,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         </div>
 
         <div class="cwdBar">
-            <span class="label">CWD</span>
+            <span class="label" data-i18n="cwd.label">当前工作目录</span>
             <span class="path" id="cwd-path">{{CWD}}</span>
         </div>
 
@@ -744,15 +741,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
                 <li data-i18n="help.keyNumbers">数字键 1-10：选择对应菜单项</li>
-                <li data-i18n="help.keyQuestion">?：显示此帮助信息</li>
-                <li data-i18n="help.keyZero">0：返回上一页</li>
-                <li data-i18n="help.keyEsc">ESC：关闭弹窗</li>
-            </ul>
-        </section>
-        <section class="helpSection">
-            <h3 data-i18n="help.groupNotes">说明</h3>
-            <ul class="helpList">
-                <li data-i18n="help.noteDrive">目前仅支持通过浏览器启动「驾驶」功能（选项 6）</li>
             </ul>
         </section>
     </div>
@@ -780,17 +768,13 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'theme.dark': '深色',
                 'fab.quick': '快捷入口',
                 'fab.help': '帮助',
+                'cwd.label': '当前工作目录',
                 'menu.section': '菜单',
                 'menu.favorite': '「常用」',
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
                 'help.keyNumbers': '数字键 1-10：选择对应菜单项',
-                'help.keyQuestion': '?：显示此帮助信息',
-                'help.keyZero': '0：返回上一页',
-                'help.keyEsc': 'ESC：关闭弹窗',
-                'help.groupNotes': '说明',
-                'help.noteDrive': '目前仅支持通过浏览器启动「驾驶」功能（选项 6）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
@@ -807,17 +791,13 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'theme.dark': 'Dark',
                 'fab.quick': 'Quick actions',
                 'fab.help': 'Help',
+                'cwd.label': 'Current Working Directory',
                 'menu.section': 'Menu',
                 'menu.favorite': '「Common」',
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
                 'help.keyNumbers': 'Number keys 1-10: select the corresponding menu item',
-                'help.keyQuestion': '?: show this help',
-                'help.keyZero': '0: go back',
-                'help.keyEsc': 'ESC: close dialogs',
-                'help.groupNotes': 'Notes',
-                'help.noteDrive': 'Only "Drive" (option 6) can be launched from the browser for now',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
@@ -929,15 +909,15 @@ MENU_HTML = r"""<!DOCTYPE html>
 
         // 菜单项数据（与 tui.py 保持一致，desc/catLabel 双语）
         const menuItems = [
-            {no: 1,  cat: "manage", name: "createcar",    descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: true},
+            {no: 1,  cat: "manage", name: "createcar",    descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
             {no: 2,  cat: "manage", name: "open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
-            {no: 3,  cat: "data",   name: "clear_data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: true},
+            {no: 3,  cat: "data",   name: "clear_data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
             {no: 4,  cat: "data",   name: "backup_data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "restore_data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
             {no: 6,  cat: "drive",  name: "drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
             {no: 7,  cat: "filter", name: "web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
-            {no: 8,  cat: "filter", name: "donkey_ui",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: false},
-            {no: 9,  cat: "train",  name: "train_local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: false},
+            {no: 8,  cat: "filter", name: "donkey_ui",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
+            {no: 9,  cat: "train",  name: "train_local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "train_online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
         ];
         const catLabels = {
