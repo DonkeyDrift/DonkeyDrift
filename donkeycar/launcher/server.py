@@ -741,15 +741,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
                 <li data-i18n="help.keyNumbers">数字键 1-10：选择对应菜单项</li>
-                <li data-i18n="help.keyQuestion">?：显示此帮助信息</li>
-                <li data-i18n="help.keyZero">0：返回上一页</li>
-                <li data-i18n="help.keyEsc">ESC：关闭弹窗</li>
-            </ul>
-        </section>
-        <section class="helpSection">
-            <h3 data-i18n="help.groupNotes">说明</h3>
-            <ul class="helpList">
-                <li data-i18n="help.noteDrive">目前仅支持通过浏览器启动「驾驶」功能（选项 6）</li>
             </ul>
         </section>
     </div>
@@ -784,11 +775,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
                 'help.keyNumbers': '数字键 1-10：选择对应菜单项',
-                'help.keyQuestion': '?：显示此帮助信息',
-                'help.keyZero': '0：返回上一页',
-                'help.keyEsc': 'ESC：关闭弹窗',
-                'help.groupNotes': '说明',
-                'help.noteDrive': '目前仅支持通过浏览器启动「驾驶」功能（选项 6）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
@@ -812,11 +798,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
                 'help.keyNumbers': 'Number keys 1-10: select the corresponding menu item',
-                'help.keyQuestion': '?: show this help',
-                'help.keyZero': '0: go back',
-                'help.keyEsc': 'ESC: close dialogs',
-                'help.groupNotes': 'Notes',
-                'help.noteDrive': 'Only "Drive" (option 6) can be launched from the browser for now',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
