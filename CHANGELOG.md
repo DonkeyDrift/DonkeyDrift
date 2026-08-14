@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-14 (6)
+## 2026-08-14 (8)
 
 - feat(web_ui,launcher): 主题默认改为深色，"跟随系统"仅在用户显式点选后生效
   - 按用户要求调整默认：此前 DD web_ui / D launcher 无持久化选择时默认"跟随系统"（首屏即按系统偏好渲染）；现默认深色，matchMedia 系统主题解析与变化监听仅在用户点选"跟随系统"后才生效。DC（Drifter Console，Firmware 仓库）同款修改在同名分支 `Tony-theme-default-dark` 另行进行。
@@ -8,6 +8,22 @@
   - D（launcher）：`donkeycar/launcher/server.py` 三处默认由 `'system'` 改为 `'dark'`——首屏防闪烁内联脚本、`let uiTheme` 初值、`initTheme()` 的 stored 兜底值；两处注释同步更新。
   - 测试：`web_ui/frontend/src/components/ThemeSwitcher.test.tsx` 默认激活分段断言由"跟随系统"改为"深色"并补"默认挂载即应用 `theme-mus4` 皮肤"断言，未知存储值回退断言同步改为"深色"，新增"默认状态下系统主题变化不生效"用例；vitest 全量 73 项通过，`server.py` 通过 py_compile。
   - 涉及文件：`web_ui/frontend/src/lib/theme.ts`、`web_ui/frontend/index.html`、`web_ui/frontend/src/components/ThemeSwitcher.test.tsx`、`donkeycar/launcher/server.py`
+
+## 2026-08-14 (7)
+
+- feat(web_ui): 页头 "DonkeyDrifter" 标题左侧新增 logo 图标
+  - 图标文件取自主目录 `logo.png`（经 MD5 比对与 Donkey 启动页 8090 的 `/favicon.png` 为同一文件），新增为 `web_ui/frontend/public/logo.png`，构建后随 dist 以 `/logo.png` 提供。
+  - 样式对齐 Donkey 启动页 headerLogo：32×32（`w-8 h-8`）、`rounded-lg`(8px)、1px `#2b3441` 边框、与标题间距 12px（`gap-3`）、flex 垂直居中；页头高度与导航布局不变。
+  - 验证：Playwright 实测 8100 实页深/浅双主题页头截图，图标显示与参考样式一致；`/logo.png` HTTP 200；`npm run build` 与 `vitest`（14 文件 72 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/public/logo.png`（新增）
+
+## 2026-08-14 (6)
+
+- fix(web_ui): 控制参数滑块 thumb 加宽对齐最初 Safari 原生尺寸（24×16px 纯白椭圆）
+  - 用户反馈 14×12px 版本比"最初"小、比例不对：最初版本（d3349014）未自定义 thumb，其尺寸由浏览器原生渲染决定。本机实测 Firefox 153 原生为 ~16px 圆形、Linux WebKit(WPE) 为 18px 圆形，均与用户描述的"宽大于高的白色椭圆"不符；最终查 WebKit 源码 `RenderThemeCocoa.mm` 确认 Safari 原生 thumb 硬编码尺寸为 `kDefaultSliderThumbWidth=24` / `kDefaultSliderThumbHeight=16`，即 24×16px 白色椭圆，与用户描述的最初样式一致（高度 16≈15.4 被认可、宽度 24>18 补齐差距）。
+  - thumb 由 14×12px 改为 `w-[24px] h-[16px]`（纯白不透明 rounded-full 椭圆形状不变），居中 margin 按公式 (轨道 6px − thumb 16px)/2 更新为 `-mt-[5px]`；轨道样式（6px 锌色）未动。
+  - 验证：Playwright Chromium + WebKit 双引擎实测 8100 实页（深/浅双主题），thumb 精确渲染 24.00×16.00、纯白 (255,255,255) 不透明、与轨道垂直居中偏差 0.00px、轨道 6.00px 未变；`npm run build` 与 `vitest`（14 文件 72 用例）全部通过。
+  - 涉及文件：`web_ui/frontend/src/components/drive/ParameterPanel.tsx`
 
 ## 2026-08-14 (5)
 
