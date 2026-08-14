@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-14 (12)
+## 2026-08-14 (15)
 
 - fix(launcher): systemd 单元改 `KillMode=process`，launcher 重启不再连坐杀死 drive 进程
   - 根因：`donkeydrifter-launcher.service` 此前用默认 `KillMode=control-group`，每次停止/重启 launcher（部署新代码、手工 restart）都会按 cgroup 整体回收，把经 launcher 启动的 `donkey web`（后端 8100 + 前端 5188）与 `manage.py drive` 一并杀掉，正在使用的 DonkeyDrifter 驾驶界面随即掉线且不会自动恢复（launcher 无重启后自动重拉 drive 的逻辑）；且 `manage.py drive` 的 WS 重连循环会拖住 SIGTERM，导致 stop 触发 90s 超时报 `Failed with result 'timeout'`。今日 17:05/17:29/17:47 三次重启均复现"进不去 DonkeyDrifter"。
@@ -8,6 +8,38 @@
   - 已同步本机已安装单元 `~/.config/systemd/user/donkeydrifter-launcher.service` 并 `systemctl --user daemon-reload`（无需重启服务，下次 stop/restart 即生效）；实机验证：daemon-reload 后 `systemctl --user restart`，8090 数秒内恢复，`manage.py drive`（8100）与 vite（5188）进程全程存活、页面持续 200。
   - 测试：新增 `tests/test_launcher_service_unit.py`（断言 `KillMode=process`、保留 `Restart=always`、无 `control-group` 回退、unit 基本形态不变）。
   - 涉及文件：`donkeycar/launcher/donkeydrifter-launcher.service`、`tests/test_launcher_service_unit.py`（新增）
+
+## 2026-08-14 (14)
+
+- fix(launcher,provisioning): 修复 Drifter Console 上看不到上位机 IP
+  - 根因①：launcher 常驻 HOSTIP 上报（`server.py` `_report_hostip_to_esp32`，30s 周期）候选端口仅 `/dev/ttyACM0/1`、`/dev/ttyUSB0`，不覆盖本车 ESP32 配网串口 `/dev/ttyS6`（UART 直连），一个都不命中等于从没发过；且裸 `open()` 不配置 termios，按端口残留波特率（默认 9600）发送，固件 115200 收到全乱码。
+  - 根因②：ModemManager 会探测 `ID_MM_CANDIDATE=1` 的串口并篡改 termios（实测车上 `/dev/ttyS6` 在 `manage.py` 持有期间被从 115200 改成 9600），`ProvisioningPart` 只在打开时配置一次，被篡改后持续乱码，HOSTIP 帧固件无法解析。
+  - 修复：`server.py` 候选端口补 `/dev/ttyS6` 置顶；改为每次发送前 open → tcsetattr 115200 8N1（CLOCAL|CREAD、关 ONLCR 输出翻译）→ write → tcdrain → close，被篡改下一周期自愈；IP 探测由 `hostname -I` 简易解析换用 `provisioning.detect_lan_ip()`（VPN/TUN 感知，与配网模块同一逻辑）。`provisioning.py` `_write_line()` 独立串口模式发送前重新断言波特率（Arduino 共享串口不动，由 actuator 管理）。
+  - 测试：新增 `donkeycar/tests/test_launcher_hostip.py` 11 例（端口优先级与回退、115200/8N1 标志位断言、无 IP 不触碰串口、端口全灭静默、写失败换口、无 termios 平台回退）；`test_provisioning.py` 补 2 例（独立模式重设波特率、Arduino 共享模式不动波特率）。
+  - 验证：本地 pytest 相关 106 项通过；实机调用修复版上报后 ESP32 `/api/status` 出现 `host_ip=192.168.3.41`（本机 IP）；分支 CI 全绿。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/parts/provisioning.py`、`donkeycar/tests/test_launcher_hostip.py`（新增）、`donkeycar/tests/test_provisioning.py`
+
+- test(tui): 同步菜单名大写排版改动，修复 Tony CI 红
+  - #88 把菜单功能名改为首字母大写（"drive"→"Drive"）后漏改 `test_main_menu_sixth_item_is_drive_page` 期望，Tony 主干 CI 持续红；期望值修正为 "Drive"。
+  - 涉及文件：`donkeycar/tests/test_tui_menu.py`
+
+## 2026-08-14 (13)
+
+- feat(web_ui,launcher): 三端主题默认由深色改回"跟随系统"（DonkeyDrifter web_ui + Donkey launcher；Drifter Console 见 Firmware v1.7.67 / Firmware#49）
+  - `web_ui/frontend/src/lib/theme.ts`：`readStoredTheme()` 无存储或存储值非法时回退由 `'dark'` 改回 `'system'`（跟随系统）；用户显式点选浅色/深色后仍以存储值为准。
+  - `web_ui/frontend/index.html`：首屏防闪烁脚本默认改为 `'system'`，经 `matchMedia('(prefers-color-scheme: dark)')` 解析，matchMedia 不可用时回退深色。
+  - `donkeycar/launcher/server.py`：三处默认值同步——首屏内联脚本（无存储/非法值一律 matchMedia 解析）、`let uiTheme = 'system'`、`initTheme()` 兜底 `stored = 'system'`。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：默认态断言同步翻转（默认激活"跟随系统"、默认跟随系统主题变化、非法存储值回退"跟随系统"）。
+  - 验证：vitest 全量 73 项通过；Playwright 实测全新浏览器（无任何存储）系统浅色 → `theme-light`、系统深色 → `theme-mus4`，切换键激活态为"跟随系统"。
+
+## 2026-08-14 (12)
+
+- feat(launcher): 菜单页与启动中转页语言跟随浏览器自动检测
+  - `donkeycar/launcher/server.py` 菜单页（MENU_HTML）：新增 `detectBrowserLanguage()`（`navigator.language` 小写后以 `zh` 开头→中文，其余一律→英文，异常兜底中文）；`readStoredLanguage()` 改为 localStorage `donkeydrifter.ui.lang` 显式选择优先、无存储时回退浏览器检测（原先无存储时硬编码中文）。用户手动切换仍写 localStorage 持久化、跨重启优先于自动检测——与 DD web_ui（Tony-webui-lang-autodetect 在制）和 DC 固件 v1.7.66 同一语义。
+  - 启动中转页 `LAUNCH_DRIVE_HTML` 补自包含中英 i18n：经同一 localStorage 键读取显式选择、无存储跟随浏览器；「正在启动/启动失败/未知错误/网络错误」四条文案双语化并全部经 `t()` 渲染，`<html lang>` 动态设置。
+  - 测试同步：新增 `tests/test_launcher_language_autodetect.py` 2 项（菜单页检测接线与回退语义、中转页双语字典对齐及 `t()` 全覆盖、无残留硬编码中文）。
+  - 验证：新增 2 项 pytest 通过；临时实例（127.0.0.1:18090）实测 `/` 与 `/launch/drive` 均正确下发新代码；两页全部 `<script>` 块经 `node --check` 语法校验通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`tests/test_launcher_language_autodetect.py`
 
 ## 2026-08-14 (11)
 
@@ -573,3 +605,4 @@
 - ESP32 串口协议与 Arduino 控制器
 - CLI 工具链（createcar、calibrate、web、train 等）
 - 模拟器集成（DonkeyGym）
+

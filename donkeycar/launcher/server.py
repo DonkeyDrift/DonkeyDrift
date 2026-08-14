@@ -300,41 +300,66 @@ def _get_status():
 
 # ── HOSTIP 串口报告（让 ESP32 /api/status 输出 host_ip） ──────────────
 
+# ESP32 配网串口（Serial2）候选设备：车上上位机经 UART 直连为 /dev/ttyS6，
+# 其余为 USB 线直连 ESP32 时的常见设备名
+_HOSTIP_SERIAL_PORTS = ("/dev/ttyS6", "/dev/ttyACM0", "/dev/ttyACM1",
+                        "/dev/ttyUSB0")
+# 与固件 Serial2 波特率（BAUD_RATE_1）一致
+_HOSTIP_SERIAL_BAUD = 115200
+
+try:
+    import termios
+except ImportError:  # 非 POSIX 平台无串口上报
+    termios = None  # type: ignore[assignment]
+
+
 def _get_local_ip():
-    """获取本机在局域网中的 IP 地址（排除 VPN/TUN 接口）。"""
+    """获取本机局域网 IP（复用配网模块的 VPN/TUN 感知探测）。"""
     try:
-        result = subprocess.check_output(
-            ["hostname", "-I"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        ips = result.split()
-        # 优先选择 192.168.x.x（局域网）
-        for ip in ips:
-            if ip.startswith("192.168."):
-                return ip
-        # 回退到第一个非 VPN/loopback 的 IP
-        for ip in ips:
-            if (not ip.startswith("127.") and
-                    not ip.startswith("198.18.")):
-                return ip
+        from donkeycar.parts.provisioning import detect_lan_ip
+        return detect_lan_ip()
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _report_hostip_to_esp32():
-    """通过串口向 ESP32 报告本机 IP。"""
+    """通过串口向 ESP32 报告本机 IP（HOSTIP|<ipv4> 帧）。
+
+    每次发送都重新打开端口并显式 tcsetattr 波特率：ModemManager 等外部
+    进程探测串口会把 termios 改掉（实测车上 ttyS6 被改成 9600），若在
+    进程启动时只配置一次，被篡改后发出的帧对固件而言全是乱码；每次发送
+    前重设可在下一个周期自愈。
+    """
     local_ip = _get_local_ip()
     if not local_ip:
         return
-    # 尝试常见串口设备
-    for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0"]:
+    frame = f"HOSTIP|{local_ip}\n".encode("ascii")
+    for port in _HOSTIP_SERIAL_PORTS:
         try:
-            with open(port, 'w') as f:
-                f.write(f"HOSTIP|{local_ip}\n")
-                f.flush()
+            fd = os.open(port, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        try:
+            if termios is not None:
+                attrs = termios.tcgetattr(fd)
+                attrs[4] = attrs[5] = termios.B115200  # ispeed/ospeed
+                # 8N1、无校验，使能接收与本地连接（无视载波）
+                attrs[2] &= ~(termios.CSIZE | termios.PARENB
+                              | termios.CSTOPB)
+                attrs[2] |= termios.CS8 | termios.CLOCAL | termios.CREAD
+                attrs[1] &= ~termios.ONLCR  # 关闭输出换行翻译
+                termios.tcsetattr(fd, termios.TCSANOW, attrs)
+            os.write(fd, frame)
+            if termios is not None:
+                termios.tcdrain(fd)  # 等字节真正移位发出再关闭
             break  # 成功写入一个即可
-        except (OSError, IOError):
+        except OSError:
             pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _hostip_reporter_loop():
@@ -504,6 +529,15 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
 <div class="error" id="error"></div>
 </div>
 <script>
+// 语言：显式存储选择优先，否则跟随浏览器语言（zh* → 中文，其余 → 英文）
+var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
+var T={
+  zh:{starting:'正在启动 DonkeyDrifter...',failed:'启动失败',unknown:'未知错误',network:'网络错误: '},
+  en:{starting:'Starting DonkeyDrifter...',failed:'Launch failed',unknown:'Unknown error',network:'Network error: '}
+};
+function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
+document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
+document.getElementById('text').textContent=t('starting');
 (async function(){
   try{
     var r=await fetch('/api/launch/drive',{method:'POST'});
@@ -513,13 +547,13 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
       window.location.href=url;
     }else{
       document.getElementById('spinner').style.display='none';
-      document.getElementById('text').textContent='启动失败';
-      document.getElementById('error').textContent=d.error||'未知错误';
+      document.getElementById('text').textContent=t('failed');
+      document.getElementById('error').textContent=d.error||t('unknown');
     }
   }catch(e){
     document.getElementById('spinner').style.display='none';
-    document.getElementById('text').textContent='启动失败';
-    document.getElementById('error').textContent='网络错误: '+e.message;
+    document.getElementById('text').textContent=t('failed');
+    document.getElementById('error').textContent=t('network')+e.message;
   }
 })();
 </script>
@@ -533,8 +567,8 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
-    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认深色，仅"跟随系统"经 matchMedia 实时解析）
-    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t==='system'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}else if(t!=='light'&&t!=='dark'){t='dark'}document.documentElement.dataset.theme=t}catch(e){}})();
+    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统，经 matchMedia 实时解析）
+    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
@@ -823,12 +857,21 @@ MENU_HTML = r"""<!DOCTYPE html>
         };
 
         let uiLang = 'zh';
-        let uiTheme = 'dark';
+        let uiTheme = 'system';
 
         function normalizeLanguage(lang) { return lang === 'en' ? 'en' : 'zh'; }
-        function readStoredLanguage() {
-            try { return normalizeLanguage(localStorage.getItem(LANG_STORAGE_KEY)); }
+        // 浏览器语言自动检测（zh* → 中文，其余 → 英文），仅在没有显式存储选择时生效；
+        // 一旦用户手动切换，localStorage 中的显式选择优先并跨重启保持（与 DD web_ui 同语义）
+        function detectBrowserLanguage() {
+            try { return String(navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
             catch (e) { return 'zh'; }
+        }
+        function readStoredLanguage() {
+            try {
+                const v = localStorage.getItem(LANG_STORAGE_KEY);
+                if (v === 'zh' || v === 'en') return v;
+            } catch (e) {}
+            return detectBrowserLanguage();
         }
         function t(key) {
             return (I18N[uiLang] && I18N[uiLang][key]) || I18N.zh[key] || key;
@@ -856,7 +899,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             closeLanguageMenu();
         }
 
-        // ── 主题：浅色 / 跟随系统 / 深色（默认深色，仅选中 system 时经 matchMedia 实时解析并监听） ──
+        // ── 主题：浅色 / 跟随系统 / 深色（默认跟随系统，选中 system 时经 matchMedia 实时解析并监听） ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -879,7 +922,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             applyTheme(mode);
         }
         function initTheme() {
-            var stored = 'dark';
+            var stored = 'system';
             try {
                 var s = localStorage.getItem(THEME_STORAGE_KEY);
                 if (s === 'light' || s === 'dark' || s === 'system') stored = s;
