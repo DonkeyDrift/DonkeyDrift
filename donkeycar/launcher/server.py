@@ -712,7 +712,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         </div>
 
         <div class="cwdBar">
-            <span class="label">CWD</span>
+            <span class="label" data-i18n="cwd.label">当前工作目录</span>
             <span class="path" id="cwd-path">{{CWD}}</span>
         </div>
 
@@ -780,6 +780,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'theme.dark': '深色',
                 'fab.quick': '快捷入口',
                 'fab.help': '帮助',
+                'cwd.label': '当前工作目录',
                 'menu.section': '菜单',
                 'menu.favorite': '「常用」',
                 'help.title': '帮助',
@@ -807,6 +808,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'theme.dark': 'Dark',
                 'fab.quick': 'Quick actions',
                 'fab.help': 'Help',
+                'cwd.label': 'Current Working Directory',
                 'menu.section': 'Menu',
                 'menu.favorite': '「Common」',
                 'help.title': 'Help',
