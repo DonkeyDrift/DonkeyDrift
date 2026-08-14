@@ -504,6 +504,15 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
 <div class="error" id="error"></div>
 </div>
 <script>
+// 语言：显式存储选择优先，否则跟随浏览器语言（zh* → 中文，其余 → 英文）
+var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
+var T={
+  zh:{starting:'正在启动 DonkeyDrifter...',failed:'启动失败',unknown:'未知错误',network:'网络错误: '},
+  en:{starting:'Starting DonkeyDrifter...',failed:'Launch failed',unknown:'Unknown error',network:'Network error: '}
+};
+function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
+document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
+document.getElementById('text').textContent=t('starting');
 (async function(){
   try{
     var r=await fetch('/api/launch/drive',{method:'POST'});
@@ -513,13 +522,13 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
       window.location.href=url;
     }else{
       document.getElementById('spinner').style.display='none';
-      document.getElementById('text').textContent='启动失败';
-      document.getElementById('error').textContent=d.error||'未知错误';
+      document.getElementById('text').textContent=t('failed');
+      document.getElementById('error').textContent=d.error||t('unknown');
     }
   }catch(e){
     document.getElementById('spinner').style.display='none';
-    document.getElementById('text').textContent='启动失败';
-    document.getElementById('error').textContent='网络错误: '+e.message;
+    document.getElementById('text').textContent=t('failed');
+    document.getElementById('error').textContent=t('network')+e.message;
   }
 })();
 </script>
@@ -826,9 +835,18 @@ MENU_HTML = r"""<!DOCTYPE html>
         let uiTheme = 'system';
 
         function normalizeLanguage(lang) { return lang === 'en' ? 'en' : 'zh'; }
-        function readStoredLanguage() {
-            try { return normalizeLanguage(localStorage.getItem(LANG_STORAGE_KEY)); }
+        // 浏览器语言自动检测（zh* → 中文，其余 → 英文），仅在没有显式存储选择时生效；
+        // 一旦用户手动切换，localStorage 中的显式选择优先并跨重启保持（与 DD web_ui 同语义）
+        function detectBrowserLanguage() {
+            try { return String(navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
             catch (e) { return 'zh'; }
+        }
+        function readStoredLanguage() {
+            try {
+                const v = localStorage.getItem(LANG_STORAGE_KEY);
+                if (v === 'zh' || v === 'en') return v;
+            } catch (e) {}
+            return detectBrowserLanguage();
         }
         function t(key) {
             return (I18N[uiLang] && I18N[uiLang][key]) || I18N.zh[key] || key;
