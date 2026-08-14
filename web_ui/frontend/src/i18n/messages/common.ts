@@ -44,9 +44,8 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrift on GitHub',
     // EnterButtons
-    'common.enterButtons.donkey': '进入 Donkey',
-    'common.enterButtons.drifterConsole': '进入 DrifterConsole',
-    'common.enterButtons.donkeyTitle': '打开 Donkey Launcher',
+    'common.enterButtons.kimiCodeWeb': '打开 Kimi Code Web',
+    'common.enterButtons.drifterConsole': '打开 DrifterConsole',
     'common.enterButtons.drifterConsoleTitle': '打开 ESP32 Drifter Console',
     'common.enterButtons.scanning': '扫描中…',
     'common.enterButtons.consoleNotFound': '未在局域网中发现 Drifter Console 设备',
@@ -97,9 +96,8 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrift on GitHub',
     // EnterButtons
-    'common.enterButtons.donkey': 'Enter Donkey',
-    'common.enterButtons.drifterConsole': 'Enter DrifterConsole',
-    'common.enterButtons.donkeyTitle': 'Open Donkey Launcher',
+    'common.enterButtons.kimiCodeWeb': 'Open Kimi Code Web',
+    'common.enterButtons.drifterConsole': 'Open DrifterConsole',
     'common.enterButtons.drifterConsoleTitle': 'Open ESP32 Drifter Console',
     'common.enterButtons.scanning': 'Scanning…',
     'common.enterButtons.consoleNotFound': 'No Drifter Console device found on the LAN',
