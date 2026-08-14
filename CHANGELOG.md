@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-14 (21)
+
+- docs(readme): 重写仓库根 README
+  - `README.md` 整体重写：补充平台定位（本仓库与 Firmware 仓库的 MUS4 ESP32 固件配套，构成完整漂移车平台）。
+  - 新增 Features 一节：模板、数据训练、模拟器、Web UI、Launcher、MUS4 集成。
+  - 新增 Repository Layout 一节，说明仓库目录结构。
+  - Quick Start 注明要求 Python 3.11。
+  - 仓库链接修正为 `github.com/DonkeyDrift/DonkeyDrift`。
+  - 新增 Related Repositories 一节，指向 Firmware 仓库。
+  - 保留原有 fork 声明、Donkeycar 兼容性说明与 License/致谢结构。
+  - 测试同步：纯文档改动，无代码与测试变更，未运行测试。
+  - 涉及文件：`README.md`
+
 ## 2026-08-14 (20)
 
 - feat(launcher): 新增 `/terminal` 上位机 Web 终端——浏览器里得到上位机完整 bash 终端
