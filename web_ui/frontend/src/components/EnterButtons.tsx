@@ -3,18 +3,13 @@ import { useTranslation } from '@/i18n';
 import { discoverConnectorConsoles } from '@/services/api';
 import { useResolvedTheme } from '@/lib/theme';
 
-// consoleFirst=true 时 DrifterConsole 按钮排在 Donkey 左边（手机版标题区）；桌面默认 Donkey 在左
+// consoleFirst=true 时 DrifterConsole 在左、Kimi Code Web 在右（手机版）；桌面默认 Kimi Code Web 在左
 export const EnterButtons: React.FC<{ consoleFirst?: boolean }> = ({ consoleFirst = false }) => {
   const { t } = useTranslation();
   const [scanning, setScanning] = useState(false);
   // The fill + near-black text follow the ESP32 fill language in both themes;
   // only the hover fill is JS-side and branches on the resolved theme.
   const isLight = useResolvedTheme() === 'light';
-
-  const enterDonkey = () => {
-    const host = window.location.hostname;
-    window.open(`http://${host}:8090/`, '_blank', 'noopener,noreferrer');
-  };
 
   const enterDrifterConsole = async () => {
     if (scanning) return;
@@ -35,9 +30,10 @@ export const EnterButtons: React.FC<{ consoleFirst?: boolean }> = ({ consoleFirs
 
   const cls = `flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-6 rounded-full leading-none transition-colors ${isLight ? 'hover:bg-[#3eb6f0]' : 'hover:bg-[#8bdcff]'} cursor-pointer whitespace-nowrap`;
 
-  const donkeyButton = (
-    <button type="button" onClick={enterDonkey} title={t('common.enterButtons.donkeyTitle')} className={cls}>
-      {t('common.enterButtons.donkey')}
+  // “打开 Kimi Code Web” 为占位按钮，功能预留，暂未实现跳转
+  const kimiButton = (
+    <button type="button" className={cls}>
+      {t('common.enterButtons.kimiCodeWeb')}
     </button>
   );
   const consoleButton = (
@@ -51,11 +47,11 @@ export const EnterButtons: React.FC<{ consoleFirst?: boolean }> = ({ consoleFirs
       {consoleFirst ? (
         <>
           {consoleButton}
-          {donkeyButton}
+          {kimiButton}
         </>
       ) : (
         <>
-          {donkeyButton}
+          {kimiButton}
           {consoleButton}
         </>
       )}

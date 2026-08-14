@@ -17,10 +17,10 @@
 
 - feat(web_ui): DonkeyDrifter 手机版标题区三行布局——版本号常驻可见，进入按钮/主题/语言移入标题区
   - 背景：手机版（<lg）此前把版本号、进入按钮、主题/语言切换全部收进汉堡菜单，不展开菜单就看不到版本号。
-  - `Layout.tsx`：手机版标题区改为三行——第一行 logo+标题、GitHub 图标紧跟标题右侧、版本号在 GitHub 右边（菜单收起也常驻），右端仅汉堡按钮；第二行进入按钮（DrifterConsole 在左、Donkey 在右）；第三行左边浅色/跟随系统/深色切换、右边中文/English 切换。汉堡菜单展开后仅保留 5 个导航项（版本号/按钮/切换全部移出）。桌面版（≥lg）布局与按钮顺序零改动。
-  - `EnterButtons.tsx`：新增 `consoleFirst` 属性（true 时 DrifterConsole 排在 Donkey 左边），仅手机版标题区使用；桌面端默认顺序不变。
+  - `Layout.tsx`：手机版标题区改为三行——第一行 logo+标题、GitHub 图标紧跟标题右侧、版本号在 GitHub 右边（菜单收起也常驻），右端仅汉堡按钮；第二行进入按钮（DrifterConsole 在左；与当日 (18) 合并后 Donkey 键已删除，右侧为"打开 Kimi Code Web"占位键）；第三行左边浅色/跟随系统/深色切换、右边中文/English 切换。汉堡菜单展开后仅保留 5 个导航项（版本号/按钮/切换全部移出）。桌面版（≥lg）布局与按钮顺序零改动。
+  - `EnterButtons.tsx`：新增 `consoleFirst` 属性，仅手机版标题区使用；桌面端默认顺序不变。（与当日 (18) 合并后 `consoleFirst` 语义以 (18) 为准：交换 kimi/console）
   - `SidePanel.tsx`：左侧 Loaders/Connectors 抽屉为 fixed 定位、顶部偏移原写死 top-16（64px，对应单行顶栏），三行标题区（实测 135px）把抽屉顶部约 70px 压进 sticky 顶栏下方被遮挡；改为手机版 `top-[143px]`（135px+8px 间距）、高度 `calc(100vh-143px)`，≥lg 保持 top-16 不变。
-  - 测试同步：`EnterButtons.test.tsx` 补 2 项顺序断言（默认 Donkey 在左、consoleFirst 时 DrifterConsole 在左），该文件共 6 项通过。
+  - 测试同步：`EnterButtons.test.tsx` 补 2 项顺序断言，该文件共 6 项通过（与当日 (18) 合并后以 Tony 侧重写版 6 例为准）。
   - 验证：`tsc -b --noEmit` 零错误；vitest 全量 77/77 通过；Playwright 390px 手机视口（菜单开/关）与 1400px 桌面视口截图确认——手机版符合目标布局、桌面版零变化、抽屉下移后 Loaders 不再被遮挡。
   - 涉及文件：`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/src/components/EnterButtons.tsx`、`web_ui/frontend/src/components/EnterButtons.test.tsx`、`web_ui/frontend/src/components/SidePanel.tsx`
 
@@ -29,6 +29,15 @@
   - 修复：恢复 6b7e39bf 语义——catch 回退 `'system'`、非法存储值断言改回"跟随系统"、默认态用例标题改回"跟随系统 active by default"。`index.html` 首屏脚本与 launcher `server.py` 三处默认值未被回退，无需改动。
   - 验证：vitest 全量 77/77 通过。
   - 涉及文件：`web_ui/frontend/src/lib/theme.ts`、`web_ui/frontend/src/components/ThemeSwitcher.test.tsx`
+
+## 2026-08-14 (18)
+
+- feat(web_ui): 头部入口按钮——删除"打开 Donkey"，新增"打开 Kimi Code Web"占位键，"进入"改名"打开"
+  - EnterButtons 组件移除 Donkey 按钮及 enterDonkey 跳转逻辑，i18n 删除 `common.enterButtons.donkey` / `donkeyTitle` 键。
+  - 新增"打开 Kimi Code Web"占位按钮（功能预留，无 onClick/跳转）：桌面版头部排在"打开 DrifterConsole"左侧；手机版汉堡菜单内（`<EnterButtons consoleFirst />`）排在其右侧——`consoleFirst` 语义由交换 donkey/console 改为交换 kimi/console。
+  - 按钮文案"进入 DrifterConsole"→"打开 DrifterConsole"（zh），"Enter DrifterConsole"→"Open DrifterConsole"（en），其余词条不变。
+  - 测试：`EnterButtons.test.tsx` 重写为 6 例（双键渲染、桌面默认顺序、手机 consoleFirst 顺序、Kimi 占位点击无动作、DC 扫描成功新开标签、扫描失败 alert），vitest 6/6 通过；全量 77 例中唯一失败的 ThemeSwitcher 用例为 Tony 基线被 main 合线回退的既有问题（另一会话修复中），与本次无关。
+  - 涉及文件：`web_ui/frontend/src/components/EnterButtons.tsx`、`web_ui/frontend/src/components/Layout.tsx`、`web_ui/frontend/src/i18n/messages/common.ts`、`web_ui/frontend/src/components/EnterButtons.test.tsx`
 
 ## 2026-08-14 (17)
 
