@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-14 (8)
+## 2026-08-14 (9)
 
 - feat(launcher): CWD 栏标签改为双语全称，不再用缩写
   - 中文由 "CWD" 改为「当前工作目录」，英文改为 "Current Working Directory"（i18n 词条 `cwd.label`）。
@@ -24,6 +24,15 @@
   - 帮助弹窗现仅保留「键盘操作」分区下数字键 1-10 选菜单一条。
   - 验证：本机临时实例 + Playwright 截图实测帮助弹窗渲染正确；8090 重启后线上页面无残留词条。
   - 涉及文件：`donkeycar/launcher/server.py`
+
+## 2026-08-14 (8)
+
+- feat(web_ui,launcher): 主题默认改为深色，"跟随系统"仅在用户显式点选后生效
+  - 按用户要求调整默认：此前 DD web_ui / D launcher 无持久化选择时默认"跟随系统"（首屏即按系统偏好渲染）；现默认深色，matchMedia 系统主题解析与变化监听仅在用户点选"跟随系统"后才生效。DC（Drifter Console，Firmware 仓库）同款修改在同名分支 `Tony-theme-default-dark` 另行进行。
+  - DD（web_ui）：`src/lib/theme.ts` `readStoredTheme()` 无存储或存储值非法时由回退 `'system'` 改为回退 `'dark'`（`'system'` 仍是合法持久化值）；`index.html` 首屏防闪烁内联脚本同步——无有效存储值直接取深色，仅存储值为 `'system'` 时才经 matchMedia 解析。
+  - D（launcher）：`donkeycar/launcher/server.py` 三处默认由 `'system'` 改为 `'dark'`——首屏防闪烁内联脚本、`let uiTheme` 初值、`initTheme()` 的 stored 兜底值；两处注释同步更新。
+  - 测试：`web_ui/frontend/src/components/ThemeSwitcher.test.tsx` 默认激活分段断言由"跟随系统"改为"深色"并补"默认挂载即应用 `theme-mus4` 皮肤"断言，未知存储值回退断言同步改为"深色"，新增"默认状态下系统主题变化不生效"用例；vitest 全量 73 项通过，`server.py` 通过 py_compile。
+  - 涉及文件：`web_ui/frontend/src/lib/theme.ts`、`web_ui/frontend/index.html`、`web_ui/frontend/src/components/ThemeSwitcher.test.tsx`、`donkeycar/launcher/server.py`
 
 ## 2026-08-14 (7)
 
