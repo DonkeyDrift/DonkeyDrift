@@ -750,7 +750,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 1-11：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 0-10：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -784,7 +784,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 1-11：选择对应菜单项',
+                'help.keyNumbers': '数字键 0-10：选择对应菜单项',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
@@ -809,7 +809,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 1-11: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 0-10: select the corresponding menu item',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
@@ -921,19 +921,20 @@ MENU_HTML = r"""<!DOCTYPE html>
             document.getElementById('helpModal').classList.remove('show');
         }
 
-        // 菜单项数据（与 tui.py 保持一致，desc/catLabel 双语）
+        // 菜单项数据（条目与 tui.py 保持一致，desc/catLabel 双语；
+        // 网页版 0 号为 Drifter Console 置顶，编号/顺序与 TUI 不同）
         const menuItems = [
+            {no: 0,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",               descEn: "Open Drifter Console",                           favorite: true},
             {no: 1,  cat: "manage", name: "Create Car",   descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
             {no: 2,  cat: "manage", name: "Open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
             {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
             {no: 6,  cat: "drive",  name: "Drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
-            {no: 7,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",               descEn: "Open Drifter Console",                           favorite: true},
-            {no: 8,  cat: "filter", name: "Web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
-            {no: 9,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
-            {no: 10, cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
-            {no: 11, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
+            {no: 7,  cat: "filter", name: "Web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
+            {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
+            {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
+            {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -986,10 +987,10 @@ MENU_HTML = r"""<!DOCTYPE html>
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
 
-            if (no === 6) {
-                launchDrive();
-            } else if (no === 7) {
+            if (no === 0) {
                 openDrifterConsole();
+            } else if (no === 6) {
+                launchDrive();
             } else {
                 showError(t('overlay.notImplemented'));
             }
@@ -1122,16 +1123,12 @@ MENU_HTML = r"""<!DOCTYPE html>
                 return;
             }
 
-            // 处理 "10"/"11" 输入：先按 1，400ms 内按 0 选中 10、按 1 选中 11
+            // 处理 "10" 输入：先按 1，400ms 内按 0 则选中 10
             if (pendingDigit1 !== null) {
                 clearTimeout(pendingDigit1.timer);
                 pendingDigit1 = null;
                 if (key === '0') {
                     selectItem(10);
-                    return;
-                }
-                if (key === '1') {
-                    selectItem(11);
                     return;
                 }
             }
@@ -1146,11 +1143,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             } else if (key >= '2' && key <= '9') {
                 selectItem(parseInt(key));
             } else if (key === '0') {
-                if (document.referrer) {
-                    history.back();
-                } else {
-                    window.close();
-                }
+                selectItem(0);
             } else if (key === '?') {
                 openHelpModal();
             }
