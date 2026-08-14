@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-14 (2)
+
+- fix(launcher): 修复 Donkey 页浏览器标签页 favicon 不显示 + 页头新增 logo 图标
+  - 根因：浏览器将早期"该页无图标"的状态缓存在本地 favicon 数据库中（重启系统不会清除），导致服务端虽已正确提供图标，标签页仍不显示。
+  - 修复：两处 HTML 模板（`MENU_HTML`、`LAUNCH_DRIVE_HTML`）的 favicon 链接改为 `/favicon.png?v=2`，URL 变化强制浏览器重新拉取，绕过旧缓存；favicon 响应增加 `Cache-Control: no-cache`。
+  - 新增 `/favicon.ico` 路由，与 `/favicon.png` 共用同一 PNG（即 projects 主文件夹的头盔 logo，MD5 `82ddb5cf…`）。
+  - 菜单页页头 Donkey 标题左侧新增 32px 可见 logo（`.headerLogo`，复用 `/favicon.png`），圆角描边样式与菜单序号徽标一致。
+  - 验证：本地测试实例实测页面输出正确、`/favicon.png?v=2` 与 `/favicon.ico` 均返回 200 且字节与 logo.png 一致。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
 ## 2026-08-14
 
 - fix(web_ui): 滑块 input 补 `bg-transparent`，消除白色背景条（用户所见"第三根线"）
