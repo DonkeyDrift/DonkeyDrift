@@ -409,6 +409,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-cache")
+            self.send_header(
+                "Last-Modified",
+                self.date_time_string(icon_path.stat().st_mtime)
+            )
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -470,9 +474,9 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="/favicon.png?v=3">
-<link rel="mask-icon" href="/favicon.svg?v=3" color="#5cc8ff">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Donkey</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
@@ -522,9 +526,9 @@ MENU_HTML = r"""<!DOCTYPE html>
     // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，"跟随系统"经 matchMedia 实时解析）
     (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
     </script>
-    <link rel="icon" type="image/png" href="/favicon.png?v=3">
-    <link rel="mask-icon" href="/favicon.svg?v=3" color="#5cc8ff">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <title>Donkey</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
@@ -689,7 +693,7 @@ MENU_HTML = r"""<!DOCTYPE html>
 <body>
     <div class="container">
         <div class="headerRow">
-            <img class="headerLogo" src="/favicon.png?v=3" alt="Donkey">
+            <img class="headerLogo" src="/favicon.png" alt="Donkey">
             <h1>Donkey</h1>
             <span class="version">DonkeyDrifter Web Launcher</span>
             <a class="ghLink" href="https://github.com/DonkeyDrift/DonkeyDrift" target="_blank" rel="noopener noreferrer" aria-label="DonkeyDrift on GitHub" title="DonkeyDrift on GitHub">
