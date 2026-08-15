@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-15 (7)
+
+- feat(launcher): 终端页把输入行首词 postMessage 给 Drifter Console，用于 Serial 终端标签页改名
+  - `donkeycar/launcher/terminal_static/terminal.html`：
+    - 新增行捕获：`term.onData` 在转发 WebSocket 后追加 `trackLine(d)`——可打印字符入 `lineBuf`，退格 `\x7f`/`\b` 删尾字符，Ctrl+C/ESC 清空缓冲（方向键等转义序列不会拼出假名字），回车 `\r`/`\n` 触发 `commitLine()`。
+    - `commitLine()`：取 trim 后第一个空白前的词（输入 `abc defg hijk` 上报 `abc`），截断 16 字符，非空才 `window.parent.postMessage({type:'donkeydrifter.term.name',name},'*')`（跨源 iframe，父页按 `e.source` 匹配自己的标签）。
+    - TUI 防误改：`scanAltScreen()` 在 PTY 输出流扫描 `ESC[?1049h/l` 维护 `inAlt`，备用屏幕缓冲区期间（kimi/claude/codex 等全屏 TUI）清空并暂停行捕获。
+  - 配套：固件侧（Firmware 仓库）新增 message 监听按 iframe 改名标签，重编号时自定义名优先。
+  - 测试同步：新增 `tests/test_launcher_terminal.py` 静态断言 2 项通过；node --check 校验 script 块通过。
+
 ## 2026-08-15 (6)
 
 - fix(launcher): D 页切换胶囊补浅色变体，深浅双色值全部改为 DD 主题重映射后的真实渲染值
