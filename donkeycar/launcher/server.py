@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from donkeycar._version import __version__
 from donkeycar.launcher.dc_discovery import find_drifter_console
+from donkeycar.launcher.kimi_web import launch_kimi_code_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 
 
@@ -391,6 +392,13 @@ def _start_hostip_reporter():
 
 # ── HTTP 请求处理 ──────────────────────────────────────────────────
 
+# /api/launch/kimi-code-web 的 CORS 响应头：DC 页面由 ESP32 提供服务，浏览器
+# 从 ESP32 的 origin 跨域 fetch 上位机 :8090（空体 POST，simple request，
+# 无预检）；没有 Access-Control-Allow-Origin 浏览器会拦截响应，DC 按钮永远
+# 失败。仅该端点放行，不扩散到其它端点。
+_KIMI_WEB_CORS_HEADERS = (("Access-Control-Allow-Origin", "*"),)
+
+
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
     """Launcher HTTP 请求处理器。"""
 
@@ -439,8 +447,49 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                 self._serve_json({"status": "ok", "url": url})
             else:
                 self._serve_json({"status": "not_found"})
+        elif path == "/api/launch/kimi-code-web":
+            self._handle_launch_kimi_code_web()
         else:
             self._serve_json({"error": "not found"}, code=404)
+
+    def _handle_launch_kimi_code_web(self):
+        """POST /api/launch/kimi-code-web：启动 kimi 并注入 /web，回 URL。
+
+        请求体可选 JSON {"cwd": "/abs/path"} 指定 kimi 运行目录，缺省为
+        上位机用户主目录；cwd 不存在直接报错，绝不回退到其它目录。
+        长请求：kimi 冷启动可达数十秒，服务端整体超时 120s，
+        客户端超时必须 ≥120s。所有响应带 CORS 头（DC 跨域调用，
+        见 _KIMI_WEB_CORS_HEADERS）。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        cwd = None
+        if content_length > 0:
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._serve_json(
+                    {"status": "error", "error": "请求体不是合法 JSON"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+            if not isinstance(body, dict):
+                self._serve_json(
+                    {"status": "error", "error": "请求体必须是 JSON 对象"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+            cwd = body.get("cwd")
+            if cwd is not None and not isinstance(cwd, str):
+                self._serve_json(
+                    {"status": "error", "error": "cwd 必须是字符串"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+        result = launch_kimi_code_web(cwd=cwd)
+        code = 200 if result.get("status") == "ok" else 500
+        self._serve_json(result, code=code,
+                         extra_headers=_KIMI_WEB_CORS_HEADERS)
 
     def _serve_html(self):
         """提供菜单 HTML 页面。"""
@@ -528,13 +577,16 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_json(self, data, code=200):
-        """提供 JSON 响应。"""
+    def _serve_json(self, data, code=200, extra_headers=None):
+        """提供 JSON 响应。extra_headers 为额外的响应头名值对序列（如
+        _KIMI_WEB_CORS_HEADERS），仅需要跨域放行的端点使用。"""
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header(
             "Content-Type", "application/json; charset=utf-8"
         )
+        for header_name, header_value in extra_headers or ():
+            self.send_header(header_name, header_value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -858,7 +910,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 0-10：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 0-11：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -892,10 +944,11 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 0-10：选择对应菜单项',
+                'help.keyNumbers': '数字键 0-11：选择对应菜单项',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
+                'overlay.startingKimiWeb': '正在启动 Kimi Code Web（kimi 启动较慢，请耐心等待）...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
                 'overlay.slow': '前端服务启动较慢，正在跳转...',
@@ -917,10 +970,11 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 0-10: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 0-11: select the corresponding menu item',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
+                'overlay.startingKimiWeb': 'Starting Kimi Code Web (kimi starts slowly, please wait)...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
                 'overlay.slow': 'Frontend is slow to start, redirecting...',
@@ -1052,6 +1106,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
+            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                    descEn: "Open Kimi Code Web",                             favorite: false},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -1108,6 +1163,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                 openDrifterConsole();
             } else if (no === 6) {
                 launchDrive();
+            } else if (no === 11) {
+                launchKimiCodeWeb();
             } else {
                 showError(t('overlay.notImplemented'));
             }
@@ -1200,6 +1257,47 @@ MENU_HTML = r"""<!DOCTYPE html>
             }
         }
 
+        // 打开 Kimi Code Web（菜单 11 号）：POST /api/launch/kimi-code-web，
+        // cwd 固定 /home/dkc/projects（issue 要求先进入 projects 主文件夹再
+        // 执行 kimi；目录不存在服务端会报错）。kimi 冷启动可达数十秒，
+        // 服务端整体超时 120s，浏览器 fetch 默认无超时、耐心等待即可；
+        // 拿到 URL 后当前标签页跳转。
+        async function launchKimiCodeWeb() {
+            const overlay = document.getElementById('overlay');
+            const overlayText = document.getElementById('overlay-text');
+            const overlayError = document.getElementById('overlay-error');
+            overlay.classList.add('show');
+            overlayText.textContent = t('overlay.startingKimiWeb');
+            overlayError.textContent = '';
+
+            try {
+                const resp = await fetch('/api/launch/kimi-code-web', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({cwd: '/home/dkc/projects'})
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'ok' && data.url) {
+                    overlayText.textContent = t('overlay.success');
+                    window.location.href = data.url;
+                } else {
+                    overlayText.textContent = t('overlay.failed');
+                    overlayError.textContent =
+                        data.error || t('overlay.unknownError');
+                    setTimeout(function() {
+                        overlay.classList.remove('show');
+                    }, 3000);
+                }
+            } catch (e) {
+                overlayText.textContent = t('overlay.failed');
+                overlayError.textContent =
+                    t('overlay.networkError') + ': ' + e.message;
+                setTimeout(function() {
+                    overlay.classList.remove('show');
+                }, 3000);
+            }
+        }
+
         // 显示错误提示
         function showError(msg) {
             const overlay = document.getElementById('overlay');
@@ -1240,12 +1338,16 @@ MENU_HTML = r"""<!DOCTYPE html>
                 return;
             }
 
-            // 处理 "10" 输入：先按 1，400ms 内按 0 则选中 10
+            // 处理 "10"/"11" 输入：先按 1，400ms 内按 0 选中 10、再按 1 选中 11
             if (pendingDigit1 !== null) {
                 clearTimeout(pendingDigit1.timer);
                 pendingDigit1 = null;
                 if (key === '0') {
                     selectItem(10);
+                    return;
+                }
+                if (key === '1') {
+                    selectItem(11);
                     return;
                 }
             }

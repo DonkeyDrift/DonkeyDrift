@@ -413,6 +413,24 @@ export const discoverConnectorConsoles = async () => {
   };
 };
 
+export interface LaunchKimiCodeWebResult {
+  status: string;
+  url?: string;
+  error?: string;
+}
+
+export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // 转发到 launcher（:8090）的自动化端点；kimi 冷启动可达数十秒，launcher
+  // 端整体超时 120s，客户端须耐心等待（调用方用 AbortController 控制超时）。
+  // validateStatus 全放行：launcher 的业务错误（非 200）同样带 JSON
+  // {status, error} 体，交给调用方按 status 判断，不按 HTTP 状态码抛异常。
+  const response = await api.post('/launch/kimi-code-web', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
 // ------------------------------------------------------------------
 // Pilot Arena APIs
 // ------------------------------------------------------------------

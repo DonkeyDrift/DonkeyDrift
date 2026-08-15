@@ -148,6 +148,14 @@ class _WsWriter:
         return self.send(json.dumps(obj).encode("utf-8"), OP_TEXT)
 
 
+def _default_cwd() -> str:
+    """新会话的默认工作目录：~/projects（工作区主文件夹），不存在时回退 ~。"""
+    projects = os.path.expanduser("~/projects")
+    if os.path.isdir(projects):
+        return projects
+    return os.path.expanduser("~")
+
+
 class TerminalSession:
     """一个 WebSocket 连接对应的 bash PTY 会话。
 
@@ -194,7 +202,7 @@ class TerminalSession:
             list(shell),
             stdin=slave, stdout=slave, stderr=slave,
             preexec_fn=_become_tty_leader,
-            cwd=cwd or os.path.expanduser("~"),
+            cwd=cwd or _default_cwd(),
             env=child_env,
             close_fds=True,
         )
