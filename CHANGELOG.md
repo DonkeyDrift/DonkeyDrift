@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-15 (2)
+
+- feat(launcher,web_ui): 实现"打开 Kimi Code Web"（issue #103/#104；配套 Firmware 侧 #59，固件 v1.7.74）
+  - `donkeycar/launcher/kimi_web.py`（新增）：自动化核心——复用 `terminal.TerminalSession` 建独立 PTY bash 会话（writer 换成本模块的 `_BufferWriter` 缓冲输出，不动现有 WebSocket 桥），注入 `kimi` → TUI 就绪判定（alternate-screen 进入序列 `\x1b[?1049h` + 输出静默 2s，上限 60s）→ 注入 `/web` → 从注入点之后的输出剥 ANSI 捕获 URL（`Session:` 深链优先，`Local:`/`URL:`/`Network:` 次之，任意 http(s) 兜底）；`command not found`/`Trust this folder`/`No active session`/内嵌 server 失败均有专门报错；整体超时 120s；成功时会话保持存活（kimi web server 挂在该 PTY 前台），失败一律 close 不留孤儿。
+  - `donkeycar/launcher/server.py`：新增 `POST /api/launch/kimi-code-web`——请求体可选 JSON `{"cwd": "/abs/path"}`（缺省上位机主目录；目录不存在直接报错，绝不回退）；成功 `200 {"status":"ok","url"}`、失败非 200 `{"status":"error","error"}`；**所有响应带 `Access-Control-Allow-Origin: *`**（DC 页面由 ESP32 提供服务，浏览器跨域 fetch :8090 依赖此头，仅此端点放行）；`_serve_json` 新增 `extra_headers` 参数承载。
+  - D 页面（MENU_HTML）新增 **11 号菜单项"打开 Kimi Code Web"**（#104）：点击/数字键（先 1 再 1 二段输入）触发 `launchKimiCodeWeb()`，POST 固定带 `{"cwd":"/home/dkc/projects"}`（issue 要求先进入 projects 主文件夹），等待期间 overlay 显示"正在启动 Kimi Code Web（kimi 启动较慢，请耐心等待）..."，拿到 URL 后**当前标签页**跳转（区别于 #103 的新标签页）；help 文案数字键范围 0-10 改为 0-11。
+  - `web_ui/backend/routers/launch.py`（新增）：`POST /api/launch/kimi-code-web` 转发路由——DD 前端与后端同源，相对路径到达本后端后原样转发到 launcher `http://localhost:8090`（125s 超时；连接失败回 502 中文错误；launcher 的业务错误 JSON 原样透传），`main.py` 挂载 `/api/launch` 前缀。
+  - DD 前端（#103）：`services/api.ts` 新增 `launchKimiCodeWeb(signal)`（`validateStatus` 全放行，业务错误交给调用方按 status 判断）；`EnterButtons.tsx` 的 kimi 按钮接功能——防重复点击、点击同步上下文先 `window.open('about:blank','_blank')` 拿句柄规避弹窗拦截、`AbortController` 125s 超时、成功 `win.location.href=url`、失败关句柄并 alert；`i18n/messages/common.ts` 补 zh/en 词条（title/启动中…/失败/网络错误）。
+  - 测试同步：`tests/test_launcher_kimi_web.py`（新增）19 项——strip_ansi/extract_web_url 纯函数、`_FakeSession` 脚本化 PTY（成功保活/cwd 透传/cwd 非法不建会话/command not found/Trust folder/No active session/超时回收/默认 session_factory）、内存 HTTP 服务器端点路由与 CORS 断言；`EnterButtons.test.tsx` 占位断言改为行为断言（成功填入预开标签页、失败关页+alert），共 7 例。全量回归：pytest 71 项、vitest 78 项通过。
+  - 涉及文件：`donkeycar/launcher/kimi_web.py`、`donkeycar/launcher/server.py`、`web_ui/backend/routers/launch.py`、`web_ui/backend/main.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/EnterButtons.tsx`、`web_ui/frontend/src/components/EnterButtons.test.tsx`、`web_ui/frontend/src/i18n/messages/common.ts`、`tests/test_launcher_kimi_web.py`
+
 ## 2026-08-15 (1)
 
 - fix(launcher): 新开 Serial 上位机终端会话默认工作目录改为 `~/projects`（Closes #102）
