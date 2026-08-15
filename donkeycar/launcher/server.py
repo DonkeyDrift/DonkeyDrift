@@ -696,21 +696,25 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
         .container{width:100%;margin:0}
 
-        /* DC headerRow */
-        .headerRow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 10px}
-        .headerLogo{width:32px;height:32px;border-radius:8px;border:1px solid #2b3441;align-self:center}
+        /* DC headerRow（整行垂直居中：logo/标题/GitHub/版本号/两个切换胶囊） */
+        .headerRow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px}
+        .headerLogo{width:32px;height:32px;border-radius:8px;border:1px solid #2b3441}
         .headerRow h1{font-size:22px;margin:0}
         /* DD GitHubLink / VersionBadge */
-        .ghLink{display:inline-flex;align-items:center;color:#8fa1b5;transform:translateY(-1px)}
+        .ghLink{display:inline-flex;align-items:center;color:#8fa1b5}
         .ghLink:hover{color:#5cc8ff}
-        .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block;transform:translateY(-1px)}
+        .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block}
 
-        /* DC langTabs（顶栏主题/语言分段控件，逐字对齐 WebConsoleAssets.h） */
-        .langTabs{display:inline-flex;align-items:center;gap:2px;background:#171c24;border:none;border-radius:999px;padding:0 2px;height:24px;box-sizing:border-box;box-shadow:inset 0 0 0 1px #2b3441}
-        .langTabs button{padding:0 10px;height:24px;min-width:0;border:none;border-radius:999px;background:transparent;color:#8fa1b5;font-size:11px;font-weight:800;line-height:1;cursor:pointer}
-        .langTabs button:hover{background:#222b36;color:#e8f6ff}
-        .langTabs button.active{background:#5cc8ff;color:#061019}
-        .langTabs button.active:hover{background:#8bdcff;color:#061019}
+        /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言分段控件，
+           逐值复刻 web_ui/frontend/src/components/ThemeSwitcher.tsx 的
+           Tailwind 类：容器 bg-zinc-800/border-zinc-700/p-1/gap-1，
+           按钮 px-3 py-1 text-xs，激活 bg-cyan-600 text-white；
+           浅色模式下 DD 胶囊保持深色，故无 light 变体） */
+        .langTabs{display:inline-flex;align-items:center;gap:4px;background:#27272a;border:1px solid #3f3f46;border-radius:9999px;padding:4px;box-sizing:border-box}
+        .langTabs button{padding:4px 12px;min-width:0;border:none;border-radius:9999px;background:transparent;color:#a1a1aa;font-size:12px;font-weight:400;line-height:16px;white-space:nowrap;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
+        .langTabs button:hover{color:#e4e4e7}
+        .langTabs button.active{background:#0891b2;color:#fff}
+        .langTabs button.active:hover{background:#0891b2;color:#fff}
         #themeTabs{margin-left:auto}
         .headerBreak{display:none}
 
@@ -836,11 +840,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         html[data-theme="light"] .reconnectBox{color:#1a2330}
         html[data-theme="light"] .reconnectSpinner{border-color:#d5dce4;border-top-color:#0c9bd6}
         html[data-theme="light"] .reconnectError{color:#e5484d}
-        html[data-theme="light"] .langTabs{background:#dde3ec;box-shadow:inset 0 0 0 1px #aeb9c7}
-        html[data-theme="light"] .langTabs button{background:transparent;color:#5b6b7d}
-        html[data-theme="light"] .langTabs button:hover{background:#d3dce6;color:#0b2536}
-        html[data-theme="light"] .langTabs button.active{background:#5cc8ff;color:#061019}
-        html[data-theme="light"] .langTabs button.active:hover{background:#8bdcff;color:#061019}
         html[data-theme="light"] .langMenu{background:#f4f6f9;border-color:#0c9bd6;box-shadow:0 12px 32px rgba(15,23,42,.16)}
         html[data-theme="light"] .langMenu button{color:#1f3a52}
         html[data-theme="light"] .langMenu button:hover{background:#e8eef5}
@@ -1106,7 +1105,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
-            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                    descEn: "Open Kimi Code Web",                             favorite: false},
+            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                    descEn: "Open Kimi Code Web",                             favorite: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
