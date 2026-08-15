@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-15 (10)
+
+- feat(web_ui): D/DD 切换胶囊外框统一为 DC 粗框语言——border 1px 外圈 + box-shadow inset 1px 内圈（两条相加，视觉 2px），取代与 border 重叠只剩 1px 的 outline 负偏移描边
+  - `donkeycar/launcher/server.py`（D 页 MENU_HTML；主题 #themeTabs 与语言 #langTabs 两胶囊共用 .langTabs）：
+    - 深色基础：`outline:1px solid #2b3441;outline-offset:-1px` → `box-shadow:inset 0 0 0 1px #2b3441`；浅色变体（`html[data-theme="light"] .langTabs`）：`outline-color:#d5dce4` → `box-shadow:inset 0 0 0 1px #d5dce4`。色值不变，只改描边实现。
+  - `web_ui/frontend/src/themes/theme-mus4.css`、`web_ui/frontend/src/themes/theme-light.css`（DD ThemeSwitcher/LanguageSwitcher）：
+    - 通用 `.bg-zinc-800` outline 规则不动——影响面太大（Button secondary 的 shadow-sm、Input 的 focus ring、多处 h-2 细轨道条都会被 inset 阴影波及）；新增专用选择器 `html.theme-mus4/theme-light div.rounded-full.bg-zinc-800.border{outline:none;box-shadow:inset 0 0 0 1px …}`，只命中两个切换胶囊容器（ModeTabs 容器是 bg-zinc-900，不误伤；DriveModeSelector 等其它控件族不在本次范围）。
+  - 配套：Firmware 仓库同把 DC 的 RGB 开关（.langTabs）升级为同一粗框语言（v1.7.89），三处 D/DD/DC 切换键框体语言完全一致。
+  - 测试同步：无已入库测试断言皮肤 CSS/模板样式，无需修改；全量验证：`tests/` + `web_ui/backend/tests/` pytest 151 项通过，前端 vitest 78 例（14 文件）通过，`npm run build`（tsc -b + vite）无错误。
+  - 验证：D 页（worktree 临时 8091 实例）与 DD（vite preview 构建产物）Playwright 深/浅截图复核，两组胶囊均为 2px 粗框，与 DC 一致。
+  - 部署注意：合并后需在上位机 `git pull` 并重启 `donkeydrifter-launcher.service`（D 页），DD 需重新 `npm run build`。
+  - 涉及文件：`donkeycar/launcher/server.py`、`web_ui/frontend/src/themes/theme-mus4.css`、`web_ui/frontend/src/themes/theme-light.css`
+
 ## 2026-08-15 (9)
 
 - feat(web_ui): DD 标题区入口按键文案去掉"打开 "/"Open "前缀——"打开 DrifterConsole"→"DrifterConsole"、"打开 Kimi Code Web"→"Kimi Code Web"（en 同步 "Open DrifterConsole"/"Open Kimi Code Web"→去前缀），中英文保持一致
