@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-15 (9)
+
+- feat(web_ui): DD 标题区入口按键文案去掉"打开 "/"Open "前缀——"打开 DrifterConsole"→"DrifterConsole"、"打开 Kimi Code Web"→"Kimi Code Web"（en 同步 "Open DrifterConsole"/"Open Kimi Code Web"→去前缀），中英文保持一致
+  - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 两段各改 `common.enterButtons.drifterConsole`、`common.enterButtons.kimiCodeWeb` 两条；tooltip（`kimiCodeWebTitle`/`drifterConsoleTitle`）、失败提示（`kimiCodeWebFailed`）等其它含"打开/open"的词条一律不动。
+  - `web_ui/frontend/src/components/EnterButtons.tsx` 确认无硬编码兜底文案、无渲染时前缀拼接（按钮直接渲染 i18n key），无需改动；桌面版头部与手机版汉堡菜单共用这两个 key，一处改两处同时生效。
+  - 测试同步：`EnterButtons.test.tsx` 断言的是 i18n key 而非具体文案，无需修改；全量验证：后端 pytest 78 项通过，前端 vitest 78 例（14 文件）通过，`tsc -b --noEmit` 无错误，eslint 0 error（6 个 warning 均为既有、位于本次未触碰文件）。
+  - 涉及文件：`web_ui/frontend/src/i18n/messages/common.ts`
+
 ## 2026-08-15 (8)
 
 - fix(launcher): 修复 DC/DD/D 三处"打开 Kimi Code Web"全部失效（about:blank / 启动超时）——kimi 0.36.0 起 TUI 不再进 alternate-screen，旧的"PTY 注入 `kimi` → `/web`"自动化永远等不到就绪信号，每次必等满 60s 超时（避让：并行会话已合入 #118 占用 (7)，本条改号为 (8)）
