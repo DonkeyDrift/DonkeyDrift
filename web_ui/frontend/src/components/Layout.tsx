@@ -29,7 +29,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   ];
 
   const linkClass = (path: string) =>
-    `transition-colors hover:text-cyan-400 ${isActive(path) ? 'text-cyan-500' : 'text-zinc-400'}`;
+    `transition-colors hover:text-cyan-400 whitespace-nowrap ${isActive(path) ? 'text-cyan-500' : 'text-zinc-400'}`;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">

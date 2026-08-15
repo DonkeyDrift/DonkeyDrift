@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-15 (4)
+
+- fix(web_ui): 顶栏胶囊与导航文本禁止换行——头部空间不足时"中文"/"跟随系统"竖排两行把切换键撑到 50px、导航 "Tub Manager" 折行
+  - `web_ui/frontend/src/components/LanguageSwitcher.tsx`、`ThemeSwitcher.tsx`：分段按钮加 `whitespace-nowrap`；`Layout.tsx` 导航链接 `linkClass` 加 `whitespace-nowrap`。修后两个切换键恢复 34px，与"打开"按键同高；无头浏览器实测整行（图标/标题/导航/版本号/GitHub 图标/进入按键/切换键）垂直中心偏差全部 0.0px。
+  - 测试同步：纯类名调整，无断言涉及；全量 vitest 78 例通过。
+  - 涉及文件：`web_ui/frontend/src/components/LanguageSwitcher.tsx`、`web_ui/frontend/src/components/ThemeSwitcher.tsx`、`web_ui/frontend/src/components/Layout.tsx`
+
 ## 2026-08-15 (3)
 
 - fix(web_ui): DD 标题区"打开 Drifter Console" / "打开 Kimi Code Web"按键高度由 24px（h-6）提至 34px，与右侧中英文切换键精确同高（LanguageSwitcher 总高 = 内部键 24px + 外壳 p-1×2 + border×2）
