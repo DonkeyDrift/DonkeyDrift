@@ -51,8 +51,39 @@ var ws=null;
 var encoder=new TextEncoder();
 function sendCtrl(o){if(ws&&ws.readyState===WebSocket.OPEN){ws.send(JSON.stringify(o));}}
 
+// 标签页命名：跟踪当前输入行，回车时把第一个词（空格前内容）postMessage 给父页（Drifter Console）
+// 全屏 TUI（备用屏幕缓冲区 ESC[?1049h/l，如 kimi/claude/codex）内的按键不计入，避免在 TUI 里输入时误改标签名
+var lineBuf='';
+var inAlt=false;
+function scanAltScreen(buf){
+  for(var i=0;i+7<buf.length;i++){
+    if(buf[i]===0x1b&&buf[i+1]===91&&buf[i+2]===63&&buf[i+3]===49&&buf[i+4]===48&&buf[i+5]===52&&buf[i+6]===57){
+      var e=buf[i+7];
+      if(e===104){inAlt=true;lineBuf='';}
+      else if(e===108){inAlt=false;lineBuf='';}
+    }
+  }
+}
+function commitLine(){
+  var name=lineBuf.replace(/^\s+|\s+$/g,'').split(/\s+/)[0]||'';
+  lineBuf='';
+  if(name.length>16)name=name.slice(0,16);
+  if(name){try{window.parent.postMessage({type:'donkeydrifter.term.name',name:name},'*');}catch(e){}}
+}
+function trackLine(d){
+  if(inAlt){lineBuf='';return;}
+  for(var i=0;i<d.length;i++){
+    var ch=d.charAt(i);
+    if(ch==='\r'||ch==='\n'){commitLine();}
+    else if(ch==='\x7f'||ch==='\b'){lineBuf=lineBuf.slice(0,-1);}
+    else if(ch==='\x03'||ch==='\x1b'){lineBuf='';}
+    else if(ch>=' '){lineBuf+=ch;}
+  }
+}
+
 term.onData(function(d){
   if(ws&&ws.readyState===WebSocket.OPEN){ws.send(encoder.encode(d));}
+  trackLine(d);
 });
 
 function connect(){
@@ -69,7 +100,9 @@ function connect(){
       try{var j=JSON.parse(e.data);if(j&&j.type==='exit'){showOverlay(t('closed')+' (exit '+j.code+') · '+t('reconnect'));}}catch(_){/* 忽略非 JSON 文本帧 */}
       return;
     }
-    term.write(new Uint8Array(e.data));
+    var bytes=new Uint8Array(e.data);
+    scanAltScreen(bytes);
+    term.write(bytes);
   };
   ws.onclose=function(){showOverlay(t('closed')+' · '+t('reconnect'));};
   ws.onerror=function(){/* onclose 随后触发，统一在那里处理 */};
