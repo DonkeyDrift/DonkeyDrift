@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-15 (1)
+## 2026-08-15 (2)
 
 - feat(launcher,web_ui): 实现"打开 Kimi Code Web"（issue #103/#104；配套 Firmware 侧 #59，固件 v1.7.74）
   - `donkeycar/launcher/kimi_web.py`（新增）：自动化核心——复用 `terminal.TerminalSession` 建独立 PTY bash 会话（writer 换成本模块的 `_BufferWriter` 缓冲输出，不动现有 WebSocket 桥），注入 `kimi` → TUI 就绪判定（alternate-screen 进入序列 `\x1b[?1049h` + 输出静默 2s，上限 60s）→ 注入 `/web` → 从注入点之后的输出剥 ANSI 捕获 URL（`Session:` 深链优先，`Local:`/`URL:`/`Network:` 次之，任意 http(s) 兜底）；`command not found`/`Trust this folder`/`No active session`/内嵌 server 失败均有专门报错；整体超时 120s；成功时会话保持存活（kimi web server 挂在该 PTY 前台），失败一律 close 不留孤儿。
@@ -10,6 +10,14 @@
   - DD 前端（#103）：`services/api.ts` 新增 `launchKimiCodeWeb(signal)`（`validateStatus` 全放行，业务错误交给调用方按 status 判断）；`EnterButtons.tsx` 的 kimi 按钮接功能——防重复点击、点击同步上下文先 `window.open('about:blank','_blank')` 拿句柄规避弹窗拦截、`AbortController` 125s 超时、成功 `win.location.href=url`、失败关句柄并 alert；`i18n/messages/common.ts` 补 zh/en 词条（title/启动中…/失败/网络错误）。
   - 测试同步：`tests/test_launcher_kimi_web.py`（新增）19 项——strip_ansi/extract_web_url 纯函数、`_FakeSession` 脚本化 PTY（成功保活/cwd 透传/cwd 非法不建会话/command not found/Trust folder/No active session/超时回收/默认 session_factory）、内存 HTTP 服务器端点路由与 CORS 断言；`EnterButtons.test.tsx` 占位断言改为行为断言（成功填入预开标签页、失败关页+alert），共 7 例。全量回归：pytest 71 项、vitest 78 项通过。
   - 涉及文件：`donkeycar/launcher/kimi_web.py`、`donkeycar/launcher/server.py`、`web_ui/backend/routers/launch.py`、`web_ui/backend/main.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/EnterButtons.tsx`、`web_ui/frontend/src/components/EnterButtons.test.tsx`、`web_ui/frontend/src/i18n/messages/common.ts`、`tests/test_launcher_kimi_web.py`
+
+## 2026-08-15 (1)
+
+- fix(launcher): 新开 Serial 上位机终端会话默认工作目录改为 `~/projects`（Closes #102）
+  - 背景：/terminal 上位机终端新会话此前落在用户主目录 `~`（`terminal.py` `_spawn()` 的 `cwd or os.path.expanduser("~")`），每次用 kimi 等工具前都要手动 `cd`。
+  - `donkeycar/launcher/terminal.py`：新增 `_default_cwd()`——优先返回 `os.path.expanduser("~/projects")`（不硬编码 `/home/dkc`），目录不存在时回退 `~`；`_spawn()` 默认 cwd 改走该函数，显式传 cwd 的调用方行为不变。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增「默认工作目录」一节 3 个用例（`~/projects` 存在时默认指向它、不存在回退 `~`、真实 bash PTY 会话 `pwd` 端到端验证），全部用 `monkeypatch.setenv("HOME", tmp_path)` 隔离机器状态；launcher 相关 27 项测试通过。
+  - 涉及文件：`donkeycar/launcher/terminal.py`、`donkeycar/tests/test_launcher_terminal.py`
 
 ## 2026-08-14 (21)
 
