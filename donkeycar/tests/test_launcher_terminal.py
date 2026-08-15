@@ -2,8 +2,9 @@
 
 测试覆盖 donkeycar.launcher.terminal 与 server.py 的路由集成：
 - ws_accept_key / build_frame / read_frame：RFC6455 握手与帧编解码
+- _default_cwd：默认工作目录优先 ~/projects，目录不存在时回退 ~
 - TerminalSession：bash PTY 回显、Ctrl-C 信号投递（控制终端设置正确性）、
-  窗口大小调整（TIOCSWINSZ）、exit 通知与会话清理
+  窗口大小调整（TIOCSWINSZ）、初始工作目录、exit 通知与会话清理
 - handle_terminal_ws：经真实 ThreadingHTTPServer + 原始 socket 客户端的
   端到端握手、binary 输入/输出桥接、close 帧应答
 """
@@ -201,6 +202,36 @@ def test_session_exit_notifies_and_closes(session):
                                    and m.get("code") == 7
                                    for m in writer.json_messages()))
     assert _wait_until(lambda: sess._closed, timeout=5)
+
+
+# ===========================================================================
+# 默认工作目录（~/projects 优先，缺失时回退 ~）
+# ===========================================================================
+def test_default_cwd_prefers_projects(tmp_path, monkeypatch):
+    """~/projects 存在时，默认工作目录指向它。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "projects").mkdir()
+    assert terminal._default_cwd() == str(tmp_path / "projects")
+
+
+def test_default_cwd_falls_back_to_home(tmp_path, monkeypatch):
+    """~/projects 不存在时，回退到用户主目录 ~。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert terminal._default_cwd() == str(tmp_path)
+
+
+def test_session_starts_in_default_cwd(tmp_path, monkeypatch):
+    """真实 PTY 会话的初始工作目录为 ~/projects（issue #102 端到端验证）。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    writer = _FakeWriter()
+    sess = TerminalSession(writer)
+    try:
+        sess.on_input(b"pwd\n")
+        assert _wait_until(lambda: str(projects).encode() in writer.output())
+    finally:
+        sess.close()
 
 
 # ===========================================================================

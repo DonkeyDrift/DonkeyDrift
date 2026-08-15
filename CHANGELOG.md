@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-15 (1)
+
+- fix(launcher): 新开 Serial 上位机终端会话默认工作目录改为 `~/projects`（Closes #102）
+  - 背景：/terminal 上位机终端新会话此前落在用户主目录 `~`（`terminal.py` `_spawn()` 的 `cwd or os.path.expanduser("~")`），每次用 kimi 等工具前都要手动 `cd`。
+  - `donkeycar/launcher/terminal.py`：新增 `_default_cwd()`——优先返回 `os.path.expanduser("~/projects")`（不硬编码 `/home/dkc`），目录不存在时回退 `~`；`_spawn()` 默认 cwd 改走该函数，显式传 cwd 的调用方行为不变。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增「默认工作目录」一节 3 个用例（`~/projects` 存在时默认指向它、不存在回退 `~`、真实 bash PTY 会话 `pwd` 端到端验证），全部用 `monkeypatch.setenv("HOME", tmp_path)` 隔离机器状态；launcher 相关 27 项测试通过。
+  - 涉及文件：`donkeycar/launcher/terminal.py`、`donkeycar/tests/test_launcher_terminal.py`
+
 ## 2026-08-14 (21)
 
 - docs(readme): 重写仓库根 README
