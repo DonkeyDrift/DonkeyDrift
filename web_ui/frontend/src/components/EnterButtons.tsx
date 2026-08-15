@@ -61,7 +61,8 @@ export const EnterButtons: React.FC<{ consoleFirst?: boolean }> = ({ consoleFirs
     }
   };
 
-  const cls = `flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-6 rounded-full leading-none transition-colors ${isLight ? 'hover:bg-[#3eb6f0]' : 'hover:bg-[#8bdcff]'} cursor-pointer whitespace-nowrap`;
+  // h-[34px] 与 LanguageSwitcher 整体高度一致（内部键 24px + 外壳 p-1×2 + border×2）
+  const cls = `flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-[34px] rounded-full leading-none transition-colors ${isLight ? 'hover:bg-[#3eb6f0]' : 'hover:bg-[#8bdcff]'} cursor-pointer whitespace-nowrap`;
 
   const kimiButton = (
     <button type="button" onClick={enterKimiCodeWeb} disabled={kimiLaunching} title={t('common.enterButtons.kimiCodeWebTitle')} className={kimiLaunching ? `${cls} opacity-60 cursor-wait` : cls}>
