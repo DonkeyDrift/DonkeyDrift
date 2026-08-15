@@ -712,7 +712,7 @@ MENU_HTML = r"""<!DOCTYPE html>
            text-zinc-400→#8fa1b5、hover 仅文字变 #e8edf2，激活
            bg-cyan-600→#5cc8ff + 近黑 #061019 + 字重 800；
            浅色变体见下方 html[data-theme="light"] 段（theme-light.css 值）） */
-        .langTabs{display:inline-flex;align-items:center;gap:4px;background:#111820;border:1px solid #344154;outline:1px solid #2b3441;outline-offset:-1px;border-radius:9999px;padding:4px;box-sizing:border-box}
+        .langTabs{display:inline-flex;align-items:center;gap:4px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;border-radius:9999px;padding:4px;box-sizing:border-box}
         .langTabs button{padding:4px 12px;min-width:0;border:none;border-radius:9999px;background:transparent;color:#8fa1b5;font-size:12px;font-weight:400;line-height:16px;white-space:nowrap;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
         .langTabs button:not(.active):hover{color:#e8edf2}
         .langTabs button.active{background:#5cc8ff;color:#061019;font-weight:800}
@@ -844,7 +844,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         /* DD theme-light 胶囊变体（theme-light.css 重映射值）：
            容器 #f4f6f9 + border #ccd5df + 内描边 #d5dce4，文字 #5b6b7d、
            hover #1a2330；激活态深浅一致（#5cc8ff/#061019/800）无需覆盖 */
-        html[data-theme="light"] .langTabs{background:#f4f6f9;border-color:#ccd5df;outline-color:#d5dce4}
+        html[data-theme="light"] .langTabs{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4}
         html[data-theme="light"] .langTabs button:not(.active){color:#5b6b7d}
         html[data-theme="light"] .langTabs button:not(.active):hover{color:#1a2330}
         html[data-theme="light"] .langMenu{background:#f4f6f9;border-color:#0c9bd6;box-shadow:0 12px 32px rgba(15,23,42,.16)}

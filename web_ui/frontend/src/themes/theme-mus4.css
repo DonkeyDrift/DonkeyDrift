@@ -194,6 +194,12 @@ html.theme-mus4 .disabled\:bg-zinc-800:disabled {
   outline: 1px solid #2b3441;
   outline-offset: -1px;
 }
+/* 主题/语言切换胶囊（ThemeSwitcher/LanguageSwitcher 容器）：DC 粗框语言——
+   去掉与 border 重叠的 outline 描边，改为 inset 内圈，与 border 相加成视觉 2px */
+html.theme-mus4 div.rounded-full.bg-zinc-800.border {
+  outline: none;
+  box-shadow: inset 0 0 0 1px #2b3441;
+}
 html.theme-mus4 .bg-zinc-800\/50,
 html.theme-mus4 .bg-zinc-800\/80 {
   outline: 1px solid rgba(43, 52, 65, 0.9);
