@@ -11,9 +11,11 @@ vi.mock('@/i18n', () => ({
 }));
 vi.mock('@/services/api', () => ({
   discoverConnectorConsoles: vi.fn(),
+  launchKimiCodeWeb: vi.fn(),
 }));
-import { discoverConnectorConsoles } from '@/services/api';
+import { discoverConnectorConsoles, launchKimiCodeWeb } from '@/services/api';
 const mockDiscover = vi.mocked(discoverConnectorConsoles);
+const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('EnterButtons', () => {
@@ -36,12 +38,27 @@ describe('EnterButtons', () => {
     expect(buttons[0]).toHaveTextContent('common.enterButtons.drifterConsole');
     expect(buttons[1]).toHaveTextContent('common.enterButtons.kimiCodeWeb');
   });
-  it('Kimi Code Web button is a placeholder without any action', () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+  it('opens Kimi Code Web URL in the pre-opened tab on success', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    mockLaunchKimi.mockResolvedValue({ status: 'ok', url: 'https://kimi.example/web#token=x' });
     render(<EnterButtons />);
     fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
-    expect(openSpy).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    await waitFor(() => { expect(fakeWin.location.href).toBe('https://kimi.example/web#token=x'); });
     openSpy.mockRestore();
+  });
+  it('closes the tab and alerts on Kimi Code Web failure', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mockLaunchKimi.mockResolvedValue({ status: 'error', error: 'boom' });
+    render(<EnterButtons />);
+    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
+    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    expect(fakeWin.close).toHaveBeenCalled();
+    openSpy.mockRestore();
+    alertSpy.mockRestore();
   });
   it('opens Drifter Console on success', async () => {
     mockDiscover.mockResolvedValue({ status: true, found: [{ ip: '192.168.3.46', port: 80, reachable: true }], count: 1, scanned: 256, message: '' });
