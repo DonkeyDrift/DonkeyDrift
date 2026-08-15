@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-15 (3)
+
+- fix(web_ui): DD 标题区"打开 Drifter Console" / "打开 Kimi Code Web"按键高度由 24px（h-6）提至 34px，与右侧中英文切换键精确同高（LanguageSwitcher 总高 = 内部键 24px + 外壳 p-1×2 + border×2）
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：按钮类名 `h-6` 改为 `h-[34px]` 并附注释，其余样式不动；桌面端与手机端（consoleFirst）两处实例同时生效。
+  - 配套：Firmware 仓库 v1.7.76 把 DC 头部三个"打开"按键同样提至 34px（`#enterDonkeyBtn,#enterDonkeyDrifterBtn,#openKimiCodeWebBtn{height:34px}` 专属规则，OTA 按钮保持 24px），已 OTA 上车确认。
+  - 测试同步：纯样式类名调整，无断言涉及高度；`EnterButtons.test.tsx` 7 例及全量 vitest 回归通过。
+  - 涉及文件：`web_ui/frontend/src/components/EnterButtons.tsx`
+
 ## 2026-08-15 (2)
 
 - feat(launcher,web_ui): 实现"打开 Kimi Code Web"（issue #103/#104；配套 Firmware 侧 #59，固件 v1.7.74）
