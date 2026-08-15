@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-15 (5)
+
+- feat(launcher): D 页顶栏主题/语言切换胶囊复刻 DD 样式、整行垂直居中，11 号 Kimi Code Web 设为常用
+  - `donkeycar/launcher/server.py` 菜单数据：11 号 "Kimi Code Web" `favorite: false → true`，菜单卡片显示「常用」标签。
+  - 顶栏切换胶囊（`.langTabs`）逐值复刻 DD 的 `ThemeSwitcher.tsx`/`LanguageSwitcher.tsx` Tailwind 规格：容器 `bg-zinc-800(#27272a)` + 1px `border-zinc-700(#3f3f46)` + `p-1`/`gap-1`（原为 `#171c24` + 内阴影描边、固定高 24px）；按钮 `px-3 py-1`、`text-xs`（12px/16px）、字重 400（原 800），激活 `bg-cyan-600(#0891b2) text-white`（原 `#5cc8ff`），未激活 `text-zinc-400(#a1a1aa)` 且 hover 仅文字变 `zinc-200(#e4e4e7)` 不改背景，加 `transition-colors` 过渡。
+  - 与 DD 行为一致：浅色模式下胶囊保持深色外观——删除 `html[data-theme="light"] .langTabs` 五条例外覆盖（DD 的胶囊为固定 Tailwind 色，无 light 变体）。
+  - 顶栏整行垂直居中：`.headerRow` `align-items:flex-end → center`，删除 `.ghLink`/`.versionBadge` 的 `translateY(-1px)` 补偿与 `.headerLogo` 的 `align-self` 补丁；手机端两行布局不变。
+  - 测试同步：纯模板内 CSS/数据改动，无断言涉及；全量 pytest 98 项通过。Playwright 无头实测：桌面深/浅下整行（图标/标题/GitHub/版本号/两个胶囊）垂直中心均为 29.0px 零偏差，手机端两行各自居中（28px/85px）；胶囊计算样式与 DD 逐项一致（含浅色保持深色）；11 号「常用」标签渲染确认。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
 ## 2026-08-15 (4)
 
 - fix(web_ui): 顶栏胶囊与导航文本禁止换行——头部空间不足时"中文"/"跟随系统"竖排两行把切换键撑到 50px、导航 "Tub Manager" 折行
