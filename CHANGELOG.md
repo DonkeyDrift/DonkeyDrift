@@ -1,5 +1,19 @@
 # 变更日志
 
+## 2026-08-15 (11)
+
+- fix(packaging): 排查并修复 macOS 上 `pip install donkeycar\[pc\]` 后 `donkey` 命令功能与 DonkeyDrifter 不一致的问题
+  - 根因分析（实证验证）：
+    - `donkeycar[pc]` 与 `donkeycar\[pc\]` 两种写法装出的东西**完全相同**——bash/zsh 会消耗 `\`，pip 收到的需求字符串一致；zsh 下裸 `[pc]` 触发 glob 报 `no matches found`，`\[pc\]` 只是让方括号存活到 pip 的转义写法。
+    - 若反斜杠真的传给 pip（PowerShell/cmd/复制 Markdown 转义源码），新旧 pip（实测 26.1.2 / 23.3.2）均把它当本地目录，安装直接失败，不存在"装出功能不同版本"的路径。
+    - 真正根因：PyPI 上 `donkeycar` 是官方上游包（autorope）。macOS 上执行该命令装的是**官方 donkeycar**——它覆盖 DonkeyDrifter 提供的 `donkeycar` 兼容包并重新生成 `donkey` console script，`tui`/`web`/`drive`/`installweb` 等 DonkeyDrifter 命令全部消失，裸 `donkey` 从进入 TUI 退化为打印 usage。
+  - 修复：
+    - `donkeydrifter/__init__.py`：导入时探测环境中是否存在名为 `donkeycar` 的发行包（本项目发行名是 donkeydrifter，正常安装不会注册该名），命中即向 stderr 输出醒目警告与恢复指引（`pip uninstall -y donkeycar` 后重装 `donkeydrifter[macos]`/`[pc]`）；元数据异常不阻塞导入。
+    - `README.md`：Quick Start 改为 `pip install "donkeydrifter[pc]"`（引号形式，zsh 安全）；新增"安装 donkeydrifter 而非 donkeycar"醒目警告与冲突恢复命令；新增 Platform extras 小节说明 `pc`/`macos` 差异与 zsh 三种等价写法。
+    - `docs/guide/donkeycar-compatibility.md`：新增"PyPI 包名与 donkey 命令"章节（两个发行包对照表、覆盖症状、恢复步骤）与"关于 `[pc]` vs `\[pc\]`"章节（三种 shell 行为实测结论）。
+  - 测试：新增 `tests/test_upstream_override_warning.py` 3 项——无 donkeycar 发行包时零输出、误装后 stderr 含版本号与恢复指引、元数据异常不破坏导入；全部通过。
+  - 涉及文件：`donkeydrifter/__init__.py`、`tests/test_upstream_override_warning.py`、`README.md`、`docs/guide/donkeycar-compatibility.md`
+
 ## 2026-08-15 (10)
 
 - feat(web_ui): D/DD 切换胶囊外框统一为 DC 粗框语言——border 1px 外圈 + box-shadow inset 1px 内圈（两条相加，视觉 2px），取代与 border 重叠只剩 1px 的 outline 负偏移描边
