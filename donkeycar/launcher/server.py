@@ -706,15 +706,16 @@ MENU_HTML = r"""<!DOCTYPE html>
         .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block}
 
         /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言分段控件，
-           逐值复刻 web_ui/frontend/src/components/ThemeSwitcher.tsx 的
-           Tailwind 类：容器 bg-zinc-800/border-zinc-700/p-1/gap-1，
-           按钮 px-3 py-1 text-xs，激活 bg-cyan-600 text-white；
-           浅色模式下 DD 胶囊保持深色，故无 light 变体） */
-        .langTabs{display:inline-flex;align-items:center;gap:4px;background:#27272a;border:1px solid #3f3f46;border-radius:9999px;padding:4px;box-sizing:border-box}
-        .langTabs button{padding:4px 12px;min-width:0;border:none;border-radius:9999px;background:transparent;color:#a1a1aa;font-size:12px;font-weight:400;line-height:16px;white-space:nowrap;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
-        .langTabs button:hover{color:#e4e4e7}
-        .langTabs button.active{background:#0891b2;color:#fff}
-        .langTabs button.active:hover{background:#0891b2;color:#fff}
+           逐值复刻 DD 实际渲染值——Tailwind 类经 src/themes/theme-mus4.css
+           重映射：容器 bg-zinc-800→#111820、border-zinc-700→#344154 外加
+           1px #2b3441 内描边，p-1/gap-1；按钮 px-3 py-1 text-xs，未激活
+           text-zinc-400→#8fa1b5、hover 仅文字变 #e8edf2，激活
+           bg-cyan-600→#5cc8ff + 近黑 #061019 + 字重 800；
+           浅色变体见下方 html[data-theme="light"] 段（theme-light.css 值）） */
+        .langTabs{display:inline-flex;align-items:center;gap:4px;background:#111820;border:1px solid #344154;outline:1px solid #2b3441;outline-offset:-1px;border-radius:9999px;padding:4px;box-sizing:border-box}
+        .langTabs button{padding:4px 12px;min-width:0;border:none;border-radius:9999px;background:transparent;color:#8fa1b5;font-size:12px;font-weight:400;line-height:16px;white-space:nowrap;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
+        .langTabs button:not(.active):hover{color:#e8edf2}
+        .langTabs button.active{background:#5cc8ff;color:#061019;font-weight:800}
         #themeTabs{margin-left:auto}
         .headerBreak{display:none}
 
@@ -840,6 +841,12 @@ MENU_HTML = r"""<!DOCTYPE html>
         html[data-theme="light"] .reconnectBox{color:#1a2330}
         html[data-theme="light"] .reconnectSpinner{border-color:#d5dce4;border-top-color:#0c9bd6}
         html[data-theme="light"] .reconnectError{color:#e5484d}
+        /* DD theme-light 胶囊变体（theme-light.css 重映射值）：
+           容器 #f4f6f9 + border #ccd5df + 内描边 #d5dce4，文字 #5b6b7d、
+           hover #1a2330；激活态深浅一致（#5cc8ff/#061019/800）无需覆盖 */
+        html[data-theme="light"] .langTabs{background:#f4f6f9;border-color:#ccd5df;outline-color:#d5dce4}
+        html[data-theme="light"] .langTabs button:not(.active){color:#5b6b7d}
+        html[data-theme="light"] .langTabs button:not(.active):hover{color:#1a2330}
         html[data-theme="light"] .langMenu{background:#f4f6f9;border-color:#0c9bd6;box-shadow:0 12px 32px rgba(15,23,42,.16)}
         html[data-theme="light"] .langMenu button{color:#1f3a52}
         html[data-theme="light"] .langMenu button:hover{background:#e8eef5}
