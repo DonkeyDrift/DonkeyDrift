@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-15 (8)
+
+- fix(launcher): 修复 DC/DD/D 三处"打开 Kimi Code Web"全部失效（about:blank / 启动超时）——kimi 0.36.0 起 TUI 不再进 alternate-screen，旧的"PTY 注入 `kimi` → `/web`"自动化永远等不到就绪信号，每次必等满 60s 超时（避让：并行会话已合入 #118 占用 (7)，本条改号为 (8)）
+  - `donkeycar/launcher/kimi_web.py` 重写启动链路（响应契约 `{"status","url"}` 不变，DC/DD/D 前端与 D 侧转发零改动）：
+    - 快路径（复用）：扫描 `~/.kimi-code/server/instances/*.json` 登记（心跳新鲜 + pid 存活 + 带 `~/.kimi-code/server.token` 探测 `/api/v1/meta` 200），命中即返回 `http://<host>:<port>/#token=<token>` 入口 URL，毫秒级；kimi TUI 的内嵌 server 同样可复用。
+    - 慢路径（冷启动）：无存活实例时直接拉起官方子命令 `kimi web --no-open`（0.36 起 `kimi server` 是其废弃别名），从 stdout ready banner 抓 `Local:`/`#token=` URL；二进制优先取 `~/.kimi-code/bin/kimi`（systemd 干净 PATH 下也能找到），实测冷启动 1.8s（原 TUI 链路常态 60s 超时）。失败路径杀净子进程并兜底再试一次复用（覆盖端口被登记滞后实例占用）。
+    - 移除 PTY/TUI 自动化（`_BufferWriter`/`_wait_tui_ready`/`_wait_web_url`/`session_factory`），`extract_web_url`/`strip_ansi` 保留；`server.py` 仅 `launch_kimi_code_web(cwd=)` 一处调用，签名兼容。
+  - `tests/test_launcher_kimi_web.py` 同步重写：保留 ANSI/URL 提取与端点 CORS 用例，新增实例复用过滤（心跳/pid/探测）、复用不起子进程、冷启动抓 URL、cwd 透传、二进制缺失、失败兜底复用、超时杀进程等用例（_FakeProc 真实管道模拟 stdout）。
+  - 验证：`tests/` 全量 76 项通过；本机实测 POST 端点链路——复用路径 0.00s 返回、真实冷启动 1.8s 抓回 `#token=` URL。
+  - 部署注意：合并后需在上位机 `git pull` 并重启 `donkeydrifter-launcher.service` 才生效。
+
 ## 2026-08-15 (7)
 
 - feat(launcher): 终端页把输入行首词 postMessage 给 Drifter Console，用于 Serial 终端标签页改名
