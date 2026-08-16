@@ -1340,10 +1340,9 @@ MENU_HTML = r"""<!DOCTYPE html>
            text-zinc-400→#8fa1b5、hover 仅文字变 #e8edf2，激活
            bg-cyan-600→#5cc8ff + 近黑 #061019 + 字重 800；
            浅色变体见下方 html[data-theme="light"] 段（theme-light.css 值）） */
-        .langTabs{display:inline-flex;align-items:center;gap:4px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;border-radius:9999px;padding:4px;box-sizing:border-box}
-        .langTabs button{padding:4px 12px;min-width:0;border:none;border-radius:9999px;background:transparent;color:#8fa1b5;font-size:12px;font-weight:400;line-height:16px;white-space:nowrap;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
-        .langTabs button:not(.active):hover{color:#e8edf2}
-        .langTabs button.active{background:#5cc8ff;color:#061019;font-weight:800}
+        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#8fa1b5;font-size:13px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
+        .langBtn:hover{color:#e8edf2}
+        .langBtn.active{background:#5cc8ff;color:#061019;font-weight:800}
         #themeTabs{margin-left:auto}
         .headerBreak{display:none}
 
@@ -1352,7 +1351,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         @media (max-width:640px){
             .headerBreak{display:block;width:100%;height:0}
             #themeTabs{margin-left:0}
-            #langTabs{margin-left:auto}
+            #langBtn{margin-left:auto}
         }
 
         /* DC panel */
@@ -1413,18 +1412,10 @@ MENU_HTML = r"""<!DOCTYPE html>
         .fabToggle{position:fixed;right:24px;bottom:24px;width:18px;height:18px;min-width:0;padding:0;border-radius:50%;background:#8bdcff;border:1px solid #8bdcff;z-index:17;box-shadow:0 0 18px #5cc8ff,0 0 36px rgba(92,200,255,.55);cursor:pointer;transition:transform .18s}
         .fabToggle:hover,.fabToggle:focus-visible,.fabToggle:active{background:#8bdcff;border-color:#8bdcff;transform:scale(1.18);box-shadow:0 0 22px #8bdcff,0 0 44px rgba(92,200,255,.72)}
         .fabActions{position:fixed;right:18px;bottom:18px;z-index:17;pointer-events:none}
-        .fabActions .langFab,.fabActions .helpFab{position:absolute;right:0;bottom:0;opacity:0;transform:scale(.55);pointer-events:none;transition:opacity .18s,transform .18s;display:flex;align-items:center;justify-content:center;cursor:pointer}
-        .fabActions.show .langFab{opacity:1;transform:translateY(-56px) scale(1);pointer-events:auto}
+        .fabActions .helpFab{position:absolute;right:0;bottom:0;opacity:0;transform:scale(.55);pointer-events:none;transition:opacity .18s,transform .18s;display:flex;align-items:center;justify-content:center;cursor:pointer}
         .fabActions.show .helpFab{opacity:1;transform:translateX(-56px) scale(1);pointer-events:auto}
         .fabActions .helpFab{width:46px;height:46px;min-width:0;padding:0;border-radius:50%;background:rgba(92,200,255,.62);color:#061019;border:1px solid rgba(92,200,255,.72);font-size:24px;font-weight:900;line-height:1;box-shadow:0 8px 22px rgba(0,0,0,.22);backdrop-filter:blur(4px)}
         .fabActions .helpFab:hover,.fabActions .helpFab:focus-visible{background:#8bdcff;border-color:#8bdcff;box-shadow:0 12px 32px rgba(0,0,0,.35)}
-        .fabActions .langFab{width:46px;height:46px;min-width:0;padding:0;border-radius:50%;background:rgba(37,99,235,.58);color:#eef;border:1px solid rgba(92,200,255,.68);font-size:23px;font-weight:900;line-height:1;box-shadow:0 8px 22px rgba(0,0,0,.22);backdrop-filter:blur(4px)}
-        .fabActions .langFab:hover,.fabActions .langFab:focus-visible{background:#3b82f6;border-color:#5cc8ff;box-shadow:0 12px 32px rgba(0,0,0,.35)}
-        .langMenu{position:fixed;right:72px;bottom:74px;display:none;min-width:132px;background:#111820;border:1px solid #5cc8ff;border-radius:12px;padding:6px;z-index:17;box-shadow:0 12px 32px rgba(0,0,0,.35)}
-        .langMenu.show{display:block}
-        .langMenu button{display:block;width:100%;min-width:0;text-align:left;margin:2px 0;padding:7px 10px;background:transparent;border:none;border-radius:8px;color:#dbeafe;font-size:13px;cursor:pointer}
-        .langMenu button:hover{background:#222b36}
-        .langMenu button.active{background:#5cc8ff;color:#061019;font-weight:800}
 
         /* DC 帮助面板（锚定右下角 FAB 簇上方） */
         .helpOverlay{position:fixed;inset:0;display:none;background:rgba(5,7,10,.45);z-index:18}
@@ -1472,16 +1463,12 @@ MENU_HTML = r"""<!DOCTYPE html>
         /* DD theme-light 胶囊变体（theme-light.css 重映射值）：
            容器 #f4f6f9 + border #ccd5df + 内描边 #d5dce4，文字 #5b6b7d、
            hover #1a2330；激活态深浅一致（#5cc8ff/#061019/800）无需覆盖 */
-        html[data-theme="light"] .langTabs{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4}
-        html[data-theme="light"] .langTabs button:not(.active){color:#5b6b7d}
-        html[data-theme="light"] .langTabs button:not(.active):hover{color:#1a2330}
-        html[data-theme="light"] .langMenu{background:#f4f6f9;border-color:#0c9bd6;box-shadow:0 12px 32px rgba(15,23,42,.16)}
-        html[data-theme="light"] .langMenu button{color:#1f3a52}
-        html[data-theme="light"] .langMenu button:hover{background:#e8eef5}
-        html[data-theme="light"] .langMenu button.active{background:#5cc8ff;color:#061019}
+        html[data-theme="light"] .langBtn{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4}
+        html[data-theme="light"] .langBtn:not(.active){color:#5b6b7d}
+        html[data-theme="light"] .langBtn:not(.active):hover{color:#1a2330}
         html[data-theme="light"] .fabToggle{background:#5cc8ff;border-color:#5cc8ff}
         html[data-theme="light"] .fabToggle:hover,html[data-theme="light"] .fabToggle:focus-visible,html[data-theme="light"] .fabToggle:active{background:#3aa8dd;border-color:#3aa8dd}
-        html[data-theme="light"] .fabActions .langFab,html[data-theme="light"] .fabActions .helpFab{box-shadow:0 8px 22px rgba(15,23,42,.16)}
+        html[data-theme="light"] .fabActions .helpFab{box-shadow:0 8px 22px rgba(15,23,42,.16)}
         html[data-theme="light"] .helpOverlay{background:rgba(15,23,42,.3)}
         html[data-theme="light"] .helpModal{background:linear-gradient(135deg,#fff,#edf1f6);border-color:#0c9bd6;color:#1f3a52;box-shadow:0 18px 60px rgba(15,23,42,.18)}
         html[data-theme="light"] .helpHead h2{color:#1c2733}
@@ -1506,10 +1493,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 <button type="button" data-theme="system" data-i18n="theme.auto">跟随系统</button>
                 <button type="button" data-theme="dark" data-i18n="theme.dark">深色</button>
             </span>
-            <span class="langTabs" id="langTabs" title="语言" data-i18n-title="language.title">
-                <button type="button" data-lang="zh">中文</button>
-                <button type="button" data-lang="en">English</button>
-            </span>
+            <button type="button" id="langBtn" class="langBtn" aria-label="语言" data-i18n-aria="language.title">中</button>
         </div>
 
         <div class="cwdBar">
@@ -1526,12 +1510,7 @@ MENU_HTML = r"""<!DOCTYPE html>
     <!-- DC FAB 帮助小点（发光小点 + 语言球 + 帮助球） -->
     <button id="fabToggle" class="fabToggle" aria-label="快捷入口" data-i18n-aria="fab.quick"></button>
     <div id="fabActions" class="fabActions">
-        <button id="langFab" class="langFab" aria-label="语言" data-i18n-aria="language.title">🌐</button>
         <button id="helpFab" class="helpFab" aria-label="帮助" data-i18n-aria="fab.help">?</button>
-    </div>
-    <div id="langMenu" class="langMenu">
-        <button type="button" data-lang="zh">中文</button>
-        <button type="button" data-lang="en">English</button>
     </div>
 
     <!-- DC 帮助面板 -->
@@ -1674,15 +1653,19 @@ MENU_HTML = r"""<!DOCTYPE html>
             document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
                 el.title = t(el.dataset.i18nTitle);
             });
-            document.querySelectorAll('[data-lang]').forEach(function(b) {
-                b.classList.toggle('active', b.dataset.lang === uiLang);
-            });
+            var langBtn = document.getElementById('langBtn');
+            if (langBtn) {
+                langBtn.textContent = uiLang === 'zh' ? '中' : 'EN';
+                langBtn.classList.toggle('active', uiLang === 'zh');
+            }
             renderMenu();
         }
         function setLanguage(lang) {
             try { localStorage.setItem(LANG_STORAGE_KEY, normalizeLanguage(lang)); } catch (e) {}
             applyLanguage(lang);
-            closeLanguageMenu();
+        }
+        function toggleLanguage() {
+            setLanguage(uiLang === 'zh' ? 'en' : 'zh');
         }
 
         // ── 主题：浅色 / 跟随系统 / 深色（默认跟随系统，选中 system 时经 matchMedia 实时解析并监听） ──
@@ -1729,19 +1712,9 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
         function collapseFabActions() {
             document.getElementById('fabActions').classList.remove('show');
-            closeLanguageMenu();
-        }
-        function toggleLanguageMenu(e) {
-            if (e) e.stopPropagation();
-            document.getElementById('fabActions').classList.add('show');
-            document.getElementById('langMenu').classList.toggle('show');
-        }
-        function closeLanguageMenu() {
-            document.getElementById('langMenu').classList.remove('show');
         }
         function openHelpModal() {
             document.getElementById('fabActions').classList.add('show');
-            closeLanguageMenu();
             document.getElementById('helpOverlay').classList.add('show');
             document.getElementById('helpModal').classList.add('show');
         }
@@ -2359,8 +2332,8 @@ MENU_HTML = r"""<!DOCTYPE html>
         // 控件事件绑定
         document.getElementById('fabToggle')
             .addEventListener('click', toggleFabActions);
-        document.getElementById('langFab')
-            .addEventListener('click', toggleLanguageMenu);
+        document.getElementById('langBtn')
+            .addEventListener('click', toggleLanguage);
         document.getElementById('helpFab')
             .addEventListener('click', function(e) {
                 if (e) e.stopPropagation();
@@ -2370,11 +2343,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             .addEventListener('click', closeHelpModal);
         document.getElementById('helpClose')
             .addEventListener('click', closeHelpModal);
-        document.querySelectorAll('[data-lang]').forEach(function(b) {
-            b.addEventListener('click', function() {
-                setLanguage(b.dataset.lang);
-            });
-        });
         document.querySelectorAll('#themeTabs button[data-theme]')
             .forEach(function(b) {
                 b.addEventListener('click', function() {
