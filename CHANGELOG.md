@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-16 (2)
+
+- fix(complete,actuator): 修复 RC 遥控器手动驾驶（固件 MANUAL 模式）时 tub 录制的 `user/angle`、`user/throttle` 全为 0、Tub Manager 的 Tub Editor 转向/油门曲线贴在 0 轴"不显示"的问题
+  - 根因（实证）：固件 MANUAL 模式下车由 RC 接收机直驱，Web/手柄通道 `user/angle`、`user/throttle` 全程为 0，而 TubWriter 只录这两个键——实测问题 tub（11656 帧、约 10 分钟会话）9942 条有效记录全为 0.0；固件串口 T\<t\>S\<s\> 帧上行的是实际执行的 `car_output`（MANUAL 下即 RC 输入），已由 ArdRc 发布到 `rc/steering`、`rc/throttle`（值域 -1..1）但未进录制通道。
+  - 修复：`donkeycar/parts/actuator.py` 新增 `RcRecordMerge` part——仅 `rc/mode==0`（MANUAL）、非 park 锁定且 rc 值有效时，用 `rc/steering`、`rc/throttle` 覆盖 `user/angle`、`user/throttle` 供 TubWriter 记录；SEMI/FULL AUTO、park 锁定、`rc/mode` 未知（None，仿真等无 ESP32 环境）时原样透传，不改变既有录制行为，亦避免历史上"RC 怠速值覆盖 user/angle"跳 0 问题复发。不新增 tub 字段，既有 tub 的 manifest inputs/types 一致性断言不受影响。
+  - 接线：`donkeycar/templates/complete.py` 在 TubWriter 注册前接入 `RcRecordMerge`（inputs：`user/angle`、`user/throttle`、`rc/steering`、`rc/throttle`、`rc/mode`、`rc/park` → outputs：`user/angle`、`user/throttle`），并在 ARDUINO_CONTROLLER 传动链补齐 ArdRc 块（发布 `rc/*` 键，与 mycar 运行实例对齐）；未入库的运行实例 `mycar/manage.py` 已同步相同接线。
+  - 测试同步：新增 `tests/test_rc_record_merge.py` 8 项——MANUAL 覆盖、int→float 归一、SEMI/FULL 透传、未知模式透传、park 锁定透传、MANUAL 下 RC 值缺失透传、None 原样保留；全部通过。全量回归 `pytest tests donkeycar/tests` 通过。
+  - 注意：修复不回溯历史数据，既有全 0 tub 需重新录制才能看到曲线；SEMI_AUTO（rc/mode==1，油门来自 RC）的录制仍走旧逻辑，如需覆盖再单独评估。
+  - 涉及文件：`donkeycar/parts/actuator.py`、`donkeycar/templates/complete.py`、`tests/test_rc_record_merge.py`
+
 ## 2026-08-16 (1)
 
 - feat(launcher,web-ui): 点击 D/DD 页面左上角 logo 图标，在新标签页打开 https://www.donkeydrift.com

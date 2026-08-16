@@ -1653,3 +1653,39 @@ class ArdRc:
 
     def shutdown(self):
         self.running = False
+
+
+class RcRecordMerge:
+    """
+    RC 手动驾驶（固件 CAR_MODE_MANUAL）时，把车辆实际执行的转向/油门
+    合并进 'user/angle'、'user/throttle'，供 TubWriter 记录真实控制量。
+
+    背景：固件 MANUAL 模式下车辆完全由 RC 接收机驱动，串口 T<t>S<s> 帧
+    上行的是实际执行的 car_output（由 ArdRc 发布为 rc/steering、
+    rc/throttle，值域 -1..1）；此时 Web/手柄通道的 user/angle、
+    user/throttle 恒为 0，tub 录出的转向/油门曲线全部贴在 0 轴上
+    （Tub Editor 表现为"没有曲线"）。本 Part 仅在 rc/mode == 0（MANUAL）
+    且非 park 锁定时用 rc/* 覆盖；SEMI/FULL AUTO 模式、park 锁定、以及
+    rc/mode 未知（None，例如无 ESP32 的仿真环境）时原样透传，不改变
+    既有录制行为，也避免历史上"RC 怠速值覆盖 user/angle"的跳 0 问题。
+
+    注意：必须在发布 user/angle、user/throttle 的 Part（如
+    ArdPWMSteering/ArdPWMThrottle）与 ArdRc 之后、TubWriter 之前注册，
+    保证同周期内覆盖生效且被录制。
+
+    使用方式（complete 模板 / manage.py）：
+        V.add(RcRecordMerge(),
+              inputs=['user/angle', 'user/throttle',
+                      'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'],
+              outputs=['user/angle', 'user/throttle'])
+    """
+
+    RC_MODE_MANUAL = 0
+    PARK_LOCKED = 1
+
+    def run(self, user_angle, user_throttle,
+            rc_steering=None, rc_throttle=None, rc_mode=None, rc_park=None):
+        if (rc_mode == self.RC_MODE_MANUAL and rc_park != self.PARK_LOCKED
+                and rc_steering is not None and rc_throttle is not None):
+            return float(rc_steering), float(rc_throttle)
+        return user_angle, user_throttle
