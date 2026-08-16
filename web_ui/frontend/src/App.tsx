@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { SidePanel } from './components/SidePanel';
 import { TubNavigator } from './components/TubNavigator';
@@ -42,33 +42,43 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 function TubManagerPage() {
   const { t } = useTranslation();
   const { isLoading, error, tubPath, setTub, setLoading, setError } = useStore();
-  const location = useLocation();
+  const loadedTubPath = useStore((state) => state.loadedTubPath);
+  const tubRefreshToken = useStore((state) => state.tubRefreshToken);
 
   useEffect(() => {
-    const shouldRefreshTub = location.pathname === '/' && Boolean(tubPath);
+    // 仅在 tub 首次加载（含刷新页面后恢复持久化 tubPath）或手动刷新时全量拉取；
+    // 顶部导航来回切换不再重新下载整个 tub，避免每次切换都全量重拉导致卡顿（#135）
+    if (!tubPath || tubPath === loadedTubPath) return;
 
-    if (shouldRefreshTub) {
-      const refreshCurrentTub = async () => {
-        setLoading(true);
-        try {
-          const data = await loadTub(tubPath);
-          setTub(
-            data.path,
-            data.records || [],
-            data.fields || [],
-            data.total_physical_records,
-            data.deleted_indexes,
-          );
-        } catch (err: unknown) {
+    let cancelled = false;
+    const loadCurrentTub = async () => {
+      setLoading(true);
+      try {
+        const data = await loadTub(tubPath);
+        if (cancelled) return;
+        setTub(
+          data.path,
+          data.records || [],
+          data.fields || [],
+          data.total_physical_records,
+          data.deleted_indexes,
+        );
+      } catch (err: unknown) {
+        if (!cancelled) {
           setError(getApiErrorMessage(err, t('common.app.failedToRefreshTub')));
-        } finally {
+        }
+      } finally {
+        if (!cancelled) {
           setLoading(false);
         }
-      };
+      }
+    };
 
-      refreshCurrentTub();
-    }
-  }, [location.pathname, tubPath, setTub, setLoading, setError, t]);
+    loadCurrentTub();
+    return () => {
+      cancelled = true;
+    };
+  }, [tubPath, loadedTubPath, tubRefreshToken, setTub, setLoading, setError, t]);
 
   return (
     <>

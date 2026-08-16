@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-16 (8)
+
+- fix(web-ui): 修复 DD 顶部导航（Tub Manager / Trainer / Drive 等）切换非常卡顿的问题（#135）
+  - 根因：`TubManagerPage` 的 effect 以 `location.pathname === '/'` 为条件，每次从其它页切回 Tub Manager 都全量重拉整个 tub（上千条记录时需全量下载 + 整包写 store + TubNavigator/TubEditor 两个重组件全量重渲染，期间还有全屏 loading 遮罩），切换体验即"每次都卡"。
+  - `web_ui/frontend/src/store/useStore.ts`：新增 `loadedTubPath`（当前 store 中已加载完成的 tub 路径标记，`setTub` 时写入）与 `tubRefreshToken`（手动刷新令牌）及 `requestTubRefresh()`（清空已加载标记并递增令牌）；均不参与 persist。
+  - `web_ui/frontend/src/App.tsx`：`TubManagerPage` 改为仅在 `tubPath !== loadedTubPath`（首次加载或 tub 变更，含刷新页面后从持久化恢复 tubPath 的场景）或 `tubRefreshToken` 递增（手动刷新）时拉取数据，并补 `cancelled` 清理避免组件卸载后 setState；顶部导航来回切换不再触发网络请求与全量重渲染。
+  - `web_ui/frontend/src/components/TubNavigator.tsx`：图片缓存增加上限 `MAX_IMAGE_CACHE_ENTRIES = 240` 与 LRU 淘汰（Map 插入序，命中刷新位置、超限淘汰最旧），长会话播放/预取不再让缓存无限增长拖慢切换；播放控制行新增手动"刷新"按钮（调用 `requestTubRefresh`，loading 时旋转禁用），替代原来导航切换隐式重拉的刷新途径。
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`：新增 `tub.refresh` / `tub.refreshAria` / `tub.refreshTitle` 中英文案。
+  - 测试：新增 `web_ui/frontend/src/App.test.tsx`（4 例：首次加载拉取并标记 loadedTubPath、已加载不重拉、requestTubRefresh 触发重拉、无 tubPath 不拉取）与 `web_ui/frontend/src/components/TubNavigator.test.tsx`（1 例：刷新按钮触发 requestTubRefresh 且清空 loadedTubPath）；前端 vitest 全量 83 例（16 文件）通过，`npm run build`（tsc -b + vite）无错误。
+  - 涉及文件：`web_ui/frontend/src/App.tsx`、`web_ui/frontend/src/store/useStore.ts`、`web_ui/frontend/src/components/TubNavigator.tsx`、`web_ui/frontend/src/i18n/messages/tubnav.ts`、`web_ui/frontend/src/App.test.tsx`（新增）、`web_ui/frontend/src/components/TubNavigator.test.tsx`（新增）
+
 ## 2026-08-16 (7)
 
 - feat(web-ui): Tub 页面新增"录制视频库"分区，按 session 列出每次录制的视频并可整条播放/删除（#131）

@@ -5,7 +5,11 @@ import { useStore } from '../store/useStore';
 import { getImageUrl } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
-import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine } from 'lucide-react';
+import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine, RotateCcw } from 'lucide-react';
+
+// 图片缓存上限：TubNavigator 会按播放位置预取后续帧，无上限时长会话内存无限增长、
+// 加重 GC 拖慢页面切换，超限后按 LRU（Map 插入序）淘汰最旧条目（#135）
+const MAX_IMAGE_CACHE_ENTRIES = 240;
 
 interface RecordStatsProps {
   steering: string;
@@ -85,6 +89,8 @@ export const TubNavigator: React.FC = () => {
   const totalRecords = useStore((state) => state.totalRecords);
   const config = useStore((state) => state.config);
   const tubPath = useStore((state) => state.tubPath);
+  const isLoading = useStore((state) => state.isLoading);
+  const requestTubRefresh = useStore((state) => state.requestTubRefresh);
   const isDragging = useStore((state) => state.isDragging);
   const setIsDragging = useStore((state) => state.setIsDragging);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -110,6 +116,18 @@ export const TubNavigator: React.FC = () => {
   const displayIndexRef = useRef(currentIndexRef.current);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // LRU 写入：命中时刷新位置，超限淘汰最旧条目
+  const touchImageCache = useCallback((url: string, img: HTMLImageElement) => {
+    const cache = imageCacheRef.current;
+    if (cache.has(url)) cache.delete(url);
+    cache.set(url, img);
+    while (cache.size > MAX_IMAGE_CACHE_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  }, []);
 
   const lastSyncTimeRef = useRef<number>(0);
 
@@ -390,7 +408,9 @@ export const TubNavigator: React.FC = () => {
       // Removing crossOrigin as it may cause CORS failures on local servers
       // if the backend doesn't explicitly send Access-Control-Allow-Origin headers.
       img.src = imageUrl;
-      imageCacheRef.current.set(imageUrl, img);
+      touchImageCache(imageUrl, img);
+    } else {
+      touchImageCache(imageUrl, img);
     }
 
     if (img.complete) {
@@ -436,10 +456,14 @@ export const TubNavigator: React.FC = () => {
       const nextPath = nextKey && typeof nextRecord?.[nextKey] === 'string' ? nextRecord[nextKey] : null;
       if (!nextPath) continue;
       const url = getImageUrl(nextPath, tubPath);
-      if (imageCacheRef.current.has(url)) continue;
+      const cached = imageCacheRef.current.get(url);
+      if (cached) {
+        touchImageCache(url, cached);
+        continue;
+      }
       const img = new Image();
       img.src = url;
-      imageCacheRef.current.set(url, img);
+      touchImageCache(url, img);
     }
   }, [localIndex, records, tubPath]);
 
@@ -650,6 +674,18 @@ export const TubNavigator: React.FC = () => {
                 className="px-3 h-full"
               >
                 {isLooping ? <Repeat className="w-4 h-4" /> : <ArrowRightToLine className="w-4 h-4" />}
+              </Button>
+
+              <Button
+                size="sm"
+                variant="secondary"
+                className="px-3 h-full"
+                aria-label={t('tub.refreshAria')}
+                title={t('tub.refreshTitle')}
+                disabled={isLoading}
+                onClick={requestTubRefresh}
+              >
+                <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               </Button>
             </div>
           </div>
