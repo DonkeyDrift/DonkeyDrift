@@ -72,7 +72,14 @@ export const TubLibrary: React.FC = () => {
     setError(null);
     try {
       const data = await listTubSessions(path);
-      setSessions(data.sessions || []);
+      const items = data.sessions || [];
+      setSessions(items);
+      // Auto-select the newest recording when nothing (valid) is selected
+      setSelected((prev) =>
+        prev && items.some((s) => s.session_id === prev.session_id)
+          ? prev
+          : items[0] ?? null,
+      );
     } catch (err) {
       setSessions([]);
       setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));

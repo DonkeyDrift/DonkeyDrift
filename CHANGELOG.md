@@ -8,6 +8,10 @@
   - fix(web-ui): 顺手修复 `handleManualLoad` 中硬编码的本机路径 `/home/dkc/projects/mycar/data` 特判——其它机器上曾持久化该 tub 路径时会被误判为“需要保留的旧 tub”，现仅按 `<path>/data` 归一化比较。
   - 测试：后端 `test_config.py` 新增 `last_project` 链路 1 项（无记录 None→load 成功记录→扫描根之外并入→损坏文件回退）；前端 `ConfigLoader.test.tsx` 扩至 6 项（新增：多项目时自动加载上次项目、上次项目不在列表回退手动）。后端全量 pytest 77 项、前端全量 vitest 86 例（16 文件）、`tsc --noEmit` 均通过。
   - 涉及文件：`web_ui/backend/routers/config.py`、`web_ui/backend/tests/test_config.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/ConfigLoader.tsx`、`web_ui/frontend/src/components/ConfigLoader.test.tsx`
+- feat(web-ui): 进入录制视频库后自动选中最新一条录制
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：`refreshSessions` 拉到列表后，若当前无选中（或选中的录制已不存在，如刚被删除）则自动选中 `sessions[0]`（API 已按最新在前排序），进入页面即可直接预览最新录制；已有有效选中时保持不变。
+  - 测试：新增 `web_ui/frontend/src/components/TubLibrary.test.tsx` 2 项——加载后自动请求最新录制的记录并显示帧计数、未加载 tub 时不请求列表；前端 `npm run build` 无错误，`npm test` 18 文件 89 例通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubLibrary.tsx`、`web_ui/frontend/src/components/TubLibrary.test.tsx`（新增）
 
 ## 2026-08-16 (12)
 
