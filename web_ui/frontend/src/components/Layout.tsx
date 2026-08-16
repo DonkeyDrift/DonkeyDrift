@@ -38,7 +38,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           <div className="h-14 flex items-center">
             {/* 标题左侧 logo：样式对齐 Donkey 启动页（8090）headerLogo —— 32×32、rounded-lg(8px)、1px #2b3441 边框、与标题 gap 12px */}
             <div className="font-bold text-xl lg:mr-8 flex items-center gap-3">
-              <img src="/logo.png" alt="DonkeyDrifter" className="w-8 h-8 rounded-lg border border-[#2b3441]" />
+              <a href="https://www.donkeydrift.com" target="_blank" rel="noopener" className="flex items-center"><img src="/logo.png" alt="DonkeyDrifter" className="w-8 h-8 rounded-lg border border-[#2b3441]" /></a>
               DonkeyDrifter
             </div>
             {/* 手机端：GitHub 图标 + 版本号紧跟标题右侧，菜单收起时也可见 */}
