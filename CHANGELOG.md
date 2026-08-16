@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-16 (1)
+
+- feat(launcher,web-ui): 点击 D/DD 页面左上角 logo 图标，在新标签页打开 https://www.donkeydrift.com
+  - `donkeycar/launcher/server.py`（D 页 MENU_HTML）：`.headerLogo` 的 `<img>` 包进 `<a class="logoLink" href="https://www.donkeydrift.com" target="_blank" rel="noopener">`；`.headerLogo` 规则旁新增 `.logoLink{display:inline-flex}`，避免锚点行内基线问题，flex 的 `.headerRow` 视觉布局不变。
+  - `web_ui/frontend/src/components/Layout.tsx`（DD 顶栏）：标题左侧 `<img src="/logo.png">` 包进 `<a href="https://www.donkeydrift.com" target="_blank" rel="noopener" className="flex items-center">`，img 原有 className 原样保留，布局/样式无可见变化。
+  - 测试同步：无已入库测试断言该 logo 标记，无需修改；launcher 相关 pytest（test_launcher_terminal/test_launcher_service_unit/test_launcher_language_autodetect/test_launcher_kimi_web）30 项通过，前端 vitest 78 例（14 文件）通过，`npm run build`（tsc -b + vite）无错误。
+  - 验证：worktree 临时 8190 端口启动 D 页，`curl /` 确认锚点与 CSS 均输出；DD 构建产物 `dist/assets/*.js` 含 donkeydrift.com。
+  - 涉及文件：`donkeycar/launcher/server.py`、`web_ui/frontend/src/components/Layout.tsx`
+
 ## 2026-08-15 (11)
 
 - fix(packaging): 排查并修复 macOS 上 `pip install donkeycar\[pc\]` 后 `donkey` 命令功能与 DonkeyDrifter 不一致的问题
