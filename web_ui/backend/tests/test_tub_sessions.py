@@ -50,6 +50,8 @@ def test_list_sessions_groups_records_by_session(tmp_path):
     # Each Tub instance gets its own session id; both groups must be present
     counts = sorted(s["record_count"] for s in sessions)
     assert counts == [2, 3]
+    # Newest recording (written last, highest first index) must be listed first
+    assert sessions[0]["first_index"] > sessions[1]["first_index"]
     for session in sessions:
         assert session["session_id"]
         assert session["first_index"] <= session["last_index"]

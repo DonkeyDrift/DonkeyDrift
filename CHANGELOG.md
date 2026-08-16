@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-16 (11)
+
+- feat(web-ui): 录制视频库列表改为最新录制排在最上面
+  - `web_ui/backend/routers/tub.py`：`GET /sessions` 返回排序由 `first_index` 升序改为降序（最新一次录制排第一，最旧排最后）；前端 TubLibrary 按返回顺序渲染，无需改动。
+  - 测试：`web_ui/backend/tests/test_tub_sessions.py` 分组测试补充排序断言（最新的 `first_index` 更大、必须排在首位）；4 项通过。
+  - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/backend/tests/test_tub_sessions.py`
+
 ## 2026-08-16 (10)
 
 - revert(tub-editor): 回退 #130 的选区框最小宽度修复，恢复 TubEditor 原有选区绘制与单击判定逻辑（用户要求撤销）

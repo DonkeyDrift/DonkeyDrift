@@ -132,7 +132,7 @@ async def list_sessions(tubPath: str):
 
     Groups the tub's live records by ``_session_id`` so the Video Library can
     show one entry per recording run. Sessions are ordered by their first
-    record's ``_index`` (chronological write order).
+    record's ``_index`` descending (newest recording first).
     """
     path = os.path.expanduser(tubPath)
     if not os.path.exists(path):
@@ -169,7 +169,7 @@ async def list_sessions(tubPath: str):
         finally:
             tub.close()
 
-        items = sorted(sessions.values(), key=lambda s: s['first_index'])
+        items = sorted(sessions.values(), key=lambda s: s['first_index'], reverse=True)
         return {"status": True, "path": path, "sessions": items}
     except Exception as e:
         logger.error(f"Failed to list sessions for tub {path}: {e}")
