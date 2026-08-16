@@ -44,12 +44,12 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrift on GitHub',
     // EnterButtons
-    'common.enterButtons.kimiCodeWeb': '打开 Kimi Code Web',
+    'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': '启动 kimi 并在新标签页打开 Kimi Code Web',
     'common.enterButtons.kimiCodeWebStarting': '启动中…',
     'common.enterButtons.kimiCodeWebFailed': '打开 Kimi Code Web 失败：{message}',
     'common.enterButtons.kimiCodeWebNetworkError': '网络错误或请求超时（kimi 冷启动较慢，可稍后重试）',
-    'common.enterButtons.drifterConsole': '打开 DrifterConsole',
+    'common.enterButtons.drifterConsole': 'DrifterConsole',
     'common.enterButtons.drifterConsoleTitle': '打开 ESP32 Drifter Console',
     'common.enterButtons.scanning': '扫描中…',
     'common.enterButtons.consoleNotFound': '未在局域网中发现 Drifter Console 设备',
@@ -100,12 +100,12 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrift on GitHub',
     // EnterButtons
-    'common.enterButtons.kimiCodeWeb': 'Open Kimi Code Web',
+    'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': 'Start kimi and open Kimi Code Web in a new tab',
     'common.enterButtons.kimiCodeWebStarting': 'Starting…',
     'common.enterButtons.kimiCodeWebFailed': 'Failed to open Kimi Code Web: {message}',
     'common.enterButtons.kimiCodeWebNetworkError': 'Network error or request timed out (kimi starts slowly, please retry)',
-    'common.enterButtons.drifterConsole': 'Open DrifterConsole',
+    'common.enterButtons.drifterConsole': 'DrifterConsole',
     'common.enterButtons.drifterConsoleTitle': 'Open ESP32 Drifter Console',
     'common.enterButtons.scanning': 'Scanning…',
     'common.enterButtons.consoleNotFound': 'No Drifter Console device found on the LAN',

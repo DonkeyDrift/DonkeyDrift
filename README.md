@@ -17,7 +17,7 @@ DonkeyDrifter is an open-source Python platform for small-scale autonomous drivi
 ## Quick Start
 
 ```bash
-pip install donkeydrifter
+pip install "donkeydrifter[pc]"
 donkey createcar --path ~/mycar --template complete
 cd ~/mycar
 python manage.py drive
@@ -26,6 +26,35 @@ python manage.py drive
 The CLI command remains `donkey` for compatibility with the Donkeycar ecosystem and existing vehicle projects.
 
 Requires Python 3.11.
+
+> **Important: install `donkeydrifter`, never `donkeycar`.**
+> The PyPI package `donkeycar` is the upstream Donkeycar project, not DonkeyDrifter.
+> Installing it (for example `pip install donkeycar[pc]`) overwrites the `donkeycar`
+> compatibility package shipped by DonkeyDrifter and takes over the `donkey` command,
+> so DonkeyDrifter commands such as `tui`, `web`, `drive`, and `installweb` disappear.
+> If this happens, restore with:
+>
+> ```bash
+> pip uninstall -y donkeycar
+> pip install "donkeydrifter[macos]"   # macOS
+> pip install "donkeydrifter[pc]"      # other desktop platforms
+> ```
+
+### Platform extras
+
+- `pc` — desktop platforms (TensorFlow, matplotlib, Kivy UI, training stack, Web UI backend).
+- `macos` — same as `pc` plus `tensorflow-metal` for Apple Silicon GPU acceleration.
+
+On macOS the default shell is zsh, which treats bare `[...]` as a glob pattern and fails
+with `no matches found`. Quote the requirement instead of escaping the brackets
+(`pip install donkeycar\[pc\]` and `pip install donkeycar[pc]` install the same thing —
+the brackets must simply survive the shell):
+
+```bash
+pip install "donkeydrifter[macos]"    # zsh (macOS default), quoted form
+pip install donkeydrifter\[macos\]    # zsh, escaped form (equivalent)
+pip install donkeydrifter[macos]      # bash / GitHub Actions
+```
 
 For local development:
 

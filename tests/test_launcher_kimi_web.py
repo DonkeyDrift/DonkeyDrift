@@ -1,19 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Launcher「打开 Kimi Code Web」自动化（kimi_web.py）与端点的单元测试。
+"""Launcher「打开 Kimi Code Web」（kimi_web.py，kimi ≥ 0.36 版）与端点的单元测试。
 
 测试覆盖 donkeycar.launcher.kimi_web：
 - strip_ansi：CSI/OSC/alternate-screen 等 ANSI 转义序列剥离
 - extract_web_url：Session 深链优先、Local/URL/Network 标签次序、
   任意 URL 兜底、尾部句读剥离、无 URL 返回 None
-- launch_kimi_code_web：用 _FakeSession 脚本化喂 PTY 输出，覆盖成功
-  （TUI 就绪→注入 /web→捕获 URL，会话保持存活）、command not found、
-  Trust this folder 拦截、No active session、URL 等待超时、cwd 非法
-  直接报错且不创建会话
+- _live_instance_url：实例登记目录扫描（心跳新鲜度、pid 存活、探测
+  结果三级过滤）与 #token= 入口 URL 组装
+- launch_kimi_code_web：存活实例复用（不起子进程）、冷启动拉起
+  kimi web --no-open（_FakeProc 脚本化管道输出）成功抓 URL 且进程
+  保持存活、cwd 透传、cwd 非法直接报错、未安装 kimi、冷启动失败后
+  兜底复用、banner 超时杀进程、进程提前退出报错
 以及 POST /api/launch/kimi-code-web 端点：路由、参数校验、CORS 头
 （DC 从 ESP32 origin 跨域调用依赖它）。不起真实 kimi。
 """
 
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -24,7 +27,6 @@ import pytest
 
 from donkeycar.launcher import kimi_web
 from donkeycar.launcher.kimi_web import (
-    TerminalSession,
     extract_web_url,
     launch_kimi_code_web,
     strip_ansi,
@@ -35,64 +37,70 @@ from donkeycar.launcher import server as launcher_server
 # ===========================================================================
 # 工具
 # ===========================================================================
-class _FakeSession:
-    """TerminalSession 替身：on_input 按脚本异步向 writer 喂 PTY 输出。
+class _FakeProc:
+    """subprocess.Popen 替身：脚本化 stdout（真实管道，reader 线程行为与
+    真实进程一致）；hold=True 时保持静默不退出（用于超时路径）。"""
 
-    script 形如 {b"kimi\\r": [(延迟秒, 输出字节), ...]}；未匹配的输入忽略。
-    接口对齐 TerminalSession（on_input/on_resize/close/pid）。
-    """
-
-    def __init__(self, writer, cwd=None, script=None):
-        self._writer = writer
-        self.cwd = cwd
-        self._script = script or {}
-        self.closed = False
-        self.resized_to = None
-        self.inputs = []
-
-    @property
-    def pid(self):
-        return 4321
-
-    def on_resize(self, cols, rows):
-        self.resized_to = (cols, rows)
-
-    def on_input(self, data: bytes):
-        self.inputs.append(data)
-        steps = self._script.get(data)
-        if not steps:
-            return
+    def __init__(self, payload=b"", exit_code=0, hold=False):
+        r, w = os.pipe()
+        self.stdout = os.fdopen(r, "r", encoding="utf-8", errors="replace")
+        self._w = w
+        self.returncode = None
+        self.pid = 9876
+        self.killed = False
 
         def _feed():
-            for delay, payload in steps:
-                time.sleep(delay)
-                if self.closed:
-                    return
-                self._writer.send(payload)
+            try:
+                if payload:
+                    os.write(w, payload)
+                if hold:
+                    return  # 管道保持打开、进程"活着"，等 kill
+                self._finish(exit_code)
+            except OSError:
+                pass
 
         threading.Thread(target=_feed, daemon=True).start()
 
-    def close(self):
-        self.closed = True
+    def _finish(self, code):
+        if self.returncode is not None:
+            return
+        self.returncode = code
+        try:
+            os.close(self._w)
+        except OSError:
+            pass
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+        self._finish(-9)
 
 
-def _make_factory(script, sessions):
-    """返回 session_factory：记录每次创建的 _FakeSession 供断言。"""
+def _make_popen(procs):
+    """返回 popen_fn：逐个弹出预置的 _FakeProc 并记录调用参数。"""
 
-    def _factory(writer, cwd=None):
-        session = _FakeSession(writer, cwd=cwd, script=script)
-        sessions.append(session)
-        return session
+    def _popen(args, **kwargs):
+        proc = procs.pop(0)
+        proc.args_seen = args
+        proc.kwargs_seen = kwargs
+        return proc
 
-    return _factory
+    return _popen
 
 
-# TUI 就绪信号：alternate-screen 进入序列 + 首屏文本，之后保持静默
-_TUI_READY = [(0.0, b"\x1b[?1049h\x1b[2J Kimi Code TUI ready\r\n")]
-# /web 就绪 banner：Local 裸入口 + Session 深链（token 在 # 片段里）
-_WEB_BANNER = [(0.0, b"  Local:   http://127.0.0.1:5123/\r\n"
-                     b"  Network: http://192.168.3.41:5123/\r\n"
-                     b"  Session: http://127.0.0.1:5123/#token=abc123\r\n")]
+# kimi web 0.36 ready banner（token 在 # 片段里）
+_WEB_BANNER = (b"\n  Kimi server ready  0.36.0\n\n"
+               b"  Local:    http://127.0.0.1:58627/#token=t0k123\n"
+               b"  Network:  off  use --host to enable\n")
+
+
+@pytest.fixture(autouse=True)
+def _clean_spawned():
+    """每个测试后清掉 _SPAWNED_PROCS，避免跨测试污染。"""
+    yield
+    kimi_web._SPAWNED_PROCS.clear()
 
 
 # ===========================================================================
@@ -136,93 +144,153 @@ class TestExtractWebUrl:
 
 
 # ===========================================================================
+# _live_instance_url（实例复用）
+# ===========================================================================
+def _write_instance(d, pid, port=58627, heartbeat_age_ms=0):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "01TEST.json").write_text(json.dumps({
+        "server_id": "01TEST",
+        "pid": pid,
+        "host": "127.0.0.1",
+        "port": port,
+        "started_at": 1,
+        "heartbeat_at": int(time.time() * 1000) - heartbeat_age_ms,
+        "host_version": "0.36.0",
+    }), encoding="utf-8")
+
+
+class TestLiveInstanceUrl:
+    def test_builds_token_url_for_live_instance(self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        token_file = tmp_path / "server.token"
+        token_file.write_text("tok-xyz\n", encoding="utf-8")
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        url = kimi_web._live_instance_url(inst_dir, token_file)
+        assert url == "http://127.0.0.1:58627/#token=tok-xyz"
+
+    def test_skips_dead_pid(self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        # 找一个确定不存在的 pid
+        dead_pid = 2 ** 22
+        while os.path.exists(f"/proc/{dead_pid}"):
+            dead_pid += 1
+        _write_instance(inst_dir, pid=dead_pid)
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        assert kimi_web._live_instance_url(inst_dir, tmp_path / "tk") is None
+
+    def test_skips_stale_heartbeat(self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid(),
+                        heartbeat_age_ms=int(
+                            (kimi_web.INSTANCE_HEARTBEAT_MAX_AGE_S + 60) * 1000))
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        assert kimi_web._live_instance_url(inst_dir, tmp_path / "tk") is None
+
+    def test_skips_failed_probe(self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: False)
+        assert kimi_web._live_instance_url(inst_dir, tmp_path / "tk") is None
+
+    def test_empty_registry_returns_none(self, tmp_path):
+        assert kimi_web._live_instance_url(
+            tmp_path / "no-such-dir", tmp_path / "tk") is None
+
+
+# ===========================================================================
 # launch_kimi_code_web
 # ===========================================================================
 class TestLaunchKimiCodeWeb:
-    def test_success_captures_session_url_and_keeps_session(self):
-        sessions = []
-        factory = _make_factory(
-            {b"kimi\r": _TUI_READY, b"/web\r": _WEB_BANNER}, sessions)
+    def test_reuses_live_instance_without_spawning(self):
+        spawned = []
         result = launch_kimi_code_web(
-            cwd=None, timeout_s=10.0, ready_silence_s=0.05,
-            session_factory=factory)
-        assert result["status"] == "ok"
-        assert result["url"] == "http://127.0.0.1:5123/#token=abc123"
-        # 成功时会话保持存活（kimi web server 挂在这个 PTY 上）
-        assert sessions[0].closed is False
-        # PTY 加宽（防 URL 折行）+ 两次注入顺序正确
-        assert sessions[0].resized_to == (500, 24)
-        assert sessions[0].inputs == [b"kimi\r", b"/web\r"]
+            cwd=None, timeout_s=5.0,
+            live_url_fn=lambda: "http://127.0.0.1:58627/#token=t0k",
+            popen_fn=_make_popen(spawned))
+        assert result == {"status": "ok",
+                          "url": "http://127.0.0.1:58627/#token=t0k"}
+        assert spawned == []  # 复用路径不起子进程
 
-    def test_passes_cwd_through_to_session(self, tmp_path):
-        sessions = []
-        factory = _make_factory(
-            {b"kimi\r": _TUI_READY, b"/web\r": _WEB_BANNER}, sessions)
+    def test_spawn_success_captures_url_and_keeps_proc(self):
+        proc = _FakeProc(payload=_WEB_BANNER, hold=True)
         result = launch_kimi_code_web(
-            cwd=str(tmp_path), timeout_s=10.0, ready_silence_s=0.05,
-            session_factory=factory)
+            cwd=None, timeout_s=10.0,
+            live_url_fn=lambda: None,
+            resolve_binary_fn=lambda: "/home/u/.kimi-code/bin/kimi",
+            popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
-        assert sessions[0].cwd == str(tmp_path)
+        assert result["url"] == "http://127.0.0.1:58627/#token=t0k123"
+        # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
+        assert proc.killed is False
+        assert proc in kimi_web._SPAWNED_PROCS
+        # 启动命令是官方子命令，且不让它自己开浏览器
+        assert proc.args_seen[-2:] == ["web", "--no-open"]
 
-    def test_invalid_cwd_errors_without_creating_session(self):
-        sessions = []
-        factory = _make_factory({}, sessions)
+    def test_spawn_passes_cwd_through(self, tmp_path):
+        proc = _FakeProc(payload=_WEB_BANNER, hold=True)
+        result = launch_kimi_code_web(
+            cwd=str(tmp_path), timeout_s=10.0,
+            live_url_fn=lambda: None,
+            resolve_binary_fn=lambda: "/x/kimi",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert proc.kwargs_seen["cwd"] == str(tmp_path)
+
+    def test_invalid_cwd_errors_without_spawning(self):
+        spawned = []
         result = launch_kimi_code_web(
             cwd="/nonexistent/definitely-not-a-dir", timeout_s=1.0,
-            session_factory=factory)
+            live_url_fn=lambda: None,
+            popen_fn=_make_popen(spawned))
         assert result["status"] == "error"
         assert "不存在" in result["error"]
-        assert sessions == []
+        assert spawned == []
 
-    def test_kimi_command_not_found(self):
-        sessions = []
-        script = {b"kimi\r": [(0.0, b"bash: kimi: command not found\r\n")]}
-        factory = _make_factory(script, sessions)
+    def test_kimi_binary_missing(self):
         result = launch_kimi_code_web(
-            cwd=None, timeout_s=5.0, ready_silence_s=0.05,
-            session_factory=factory)
+            cwd=None, timeout_s=1.0,
+            live_url_fn=lambda: None,
+            resolve_binary_fn=lambda: None)
         assert result["status"] == "error"
-        assert "command not found" in result["error"]
-        assert sessions[0].closed is True
+        assert "未找到 kimi" in result["error"]
 
-    def test_trust_folder_prompt_blocks(self):
-        sessions = []
-        script = {b"kimi\r": [(0.0, b"Trust this folder? (y/N)\r\n")]}
-        factory = _make_factory(script, sessions)
+    def test_spawn_failure_falls_back_to_reuse(self):
+        # 冷启动失败（进程秒退），第二次复用扫到存活实例（端口占用来源）
+        proc = _FakeProc(payload=b"Failed to start server: EADDRINUSE\r\n",
+                         exit_code=1)
+        live_calls = iter([None, "http://127.0.0.1:58627/#token=t0k"])
         result = launch_kimi_code_web(
-            cwd=None, timeout_s=5.0, ready_silence_s=0.05,
-            session_factory=factory)
-        assert result["status"] == "error"
-        assert "Trust this folder" in result["error"]
-        assert sessions[0].closed is True
+            cwd=None, timeout_s=5.0,
+            live_url_fn=lambda: next(live_calls),
+            resolve_binary_fn=lambda: "/x/kimi",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert result["url"] == "http://127.0.0.1:58627/#token=t0k"
+        assert proc.killed is True  # 失败的子进程被杀净
 
-    def test_no_active_session_after_web(self):
-        sessions = []
-        script = {b"kimi\r": _TUI_READY,
-                  b"/web\r": [(0.0, b"No active session\r\n")]}
-        factory = _make_factory(script, sessions)
+    def test_spawn_banner_timeout_kills_proc(self):
+        proc = _FakeProc(hold=True)  # 一直不出 URL 也不退出
         result = launch_kimi_code_web(
-            cwd=None, timeout_s=5.0, ready_silence_s=0.05,
-            session_factory=factory)
-        assert result["status"] == "error"
-        assert "No active session" in result["error"]
-        assert sessions[0].closed is True
-
-    def test_url_wait_timeout_closes_session(self):
-        sessions = []
-        # TUI 就绪但 /web 之后始终不出 URL
-        factory = _make_factory({b"kimi\r": _TUI_READY}, sessions)
-        result = launch_kimi_code_web(
-            cwd=None, timeout_s=1.5, ready_silence_s=0.05,
-            session_factory=factory)
+            cwd=None, timeout_s=1.5,
+            live_url_fn=lambda: None,
+            resolve_binary_fn=lambda: "/x/kimi",
+            popen_fn=_make_popen([proc]))
         assert result["status"] == "error"
         assert "超时" in result["error"]
-        assert sessions[0].closed is True
+        assert proc.killed is True
 
-    def test_default_session_factory_is_terminal_session(self):
-        import inspect
-        sig = inspect.signature(launch_kimi_code_web)
-        assert sig.parameters["session_factory"].default is TerminalSession
+    def test_spawn_exit_without_url_reports_tail(self):
+        proc = _FakeProc(payload=b"boom: something broke\r\n", exit_code=2)
+        result = launch_kimi_code_web(
+            cwd=None, timeout_s=5.0,
+            live_url_fn=lambda: None,
+            resolve_binary_fn=lambda: "/x/kimi",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "error"
+        assert "提前退出" in result["error"]
+        assert "something broke" in result["error"]
+        assert proc.killed is True
 
 
 # ===========================================================================

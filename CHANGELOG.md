@@ -1,5 +1,88 @@
 # 变更日志
 
+## 2026-08-15 (11)
+
+- fix(packaging): 排查并修复 macOS 上 `pip install donkeycar\[pc\]` 后 `donkey` 命令功能与 DonkeyDrifter 不一致的问题
+  - 根因分析（实证验证）：
+    - `donkeycar[pc]` 与 `donkeycar\[pc\]` 两种写法装出的东西**完全相同**——bash/zsh 会消耗 `\`，pip 收到的需求字符串一致；zsh 下裸 `[pc]` 触发 glob 报 `no matches found`，`\[pc\]` 只是让方括号存活到 pip 的转义写法。
+    - 若反斜杠真的传给 pip（PowerShell/cmd/复制 Markdown 转义源码），新旧 pip（实测 26.1.2 / 23.3.2）均把它当本地目录，安装直接失败，不存在"装出功能不同版本"的路径。
+    - 真正根因：PyPI 上 `donkeycar` 是官方上游包（autorope）。macOS 上执行该命令装的是**官方 donkeycar**——它覆盖 DonkeyDrifter 提供的 `donkeycar` 兼容包并重新生成 `donkey` console script，`tui`/`web`/`drive`/`installweb` 等 DonkeyDrifter 命令全部消失，裸 `donkey` 从进入 TUI 退化为打印 usage。
+  - 修复：
+    - `donkeydrifter/__init__.py`：导入时探测环境中是否存在名为 `donkeycar` 的发行包（本项目发行名是 donkeydrifter，正常安装不会注册该名），命中即向 stderr 输出醒目警告与恢复指引（`pip uninstall -y donkeycar` 后重装 `donkeydrifter[macos]`/`[pc]`）；元数据异常不阻塞导入。
+    - `README.md`：Quick Start 改为 `pip install "donkeydrifter[pc]"`（引号形式，zsh 安全）；新增"安装 donkeydrifter 而非 donkeycar"醒目警告与冲突恢复命令；新增 Platform extras 小节说明 `pc`/`macos` 差异与 zsh 三种等价写法。
+    - `docs/guide/donkeycar-compatibility.md`：新增"PyPI 包名与 donkey 命令"章节（两个发行包对照表、覆盖症状、恢复步骤）与"关于 `[pc]` vs `\[pc\]`"章节（三种 shell 行为实测结论）。
+  - 测试：新增 `tests/test_upstream_override_warning.py` 3 项——无 donkeycar 发行包时零输出、误装后 stderr 含版本号与恢复指引、元数据异常不破坏导入；全部通过。
+  - 涉及文件：`donkeydrifter/__init__.py`、`tests/test_upstream_override_warning.py`、`README.md`、`docs/guide/donkeycar-compatibility.md`
+
+## 2026-08-15 (10)
+
+- feat(web_ui): D/DD 切换胶囊外框统一为 DC 粗框语言——border 1px 外圈 + box-shadow inset 1px 内圈（两条相加，视觉 2px），取代与 border 重叠只剩 1px 的 outline 负偏移描边
+  - `donkeycar/launcher/server.py`（D 页 MENU_HTML；主题 #themeTabs 与语言 #langTabs 两胶囊共用 .langTabs）：
+    - 深色基础：`outline:1px solid #2b3441;outline-offset:-1px` → `box-shadow:inset 0 0 0 1px #2b3441`；浅色变体（`html[data-theme="light"] .langTabs`）：`outline-color:#d5dce4` → `box-shadow:inset 0 0 0 1px #d5dce4`。色值不变，只改描边实现。
+  - `web_ui/frontend/src/themes/theme-mus4.css`、`web_ui/frontend/src/themes/theme-light.css`（DD ThemeSwitcher/LanguageSwitcher）：
+    - 通用 `.bg-zinc-800` outline 规则不动——影响面太大（Button secondary 的 shadow-sm、Input 的 focus ring、多处 h-2 细轨道条都会被 inset 阴影波及）；新增专用选择器 `html.theme-mus4/theme-light div.rounded-full.bg-zinc-800.border{outline:none;box-shadow:inset 0 0 0 1px …}`，只命中两个切换胶囊容器（ModeTabs 容器是 bg-zinc-900，不误伤；DriveModeSelector 等其它控件族不在本次范围）。
+  - 配套：Firmware 仓库同把 DC 的 RGB 开关（.langTabs）升级为同一粗框语言（v1.7.89），三处 D/DD/DC 切换键框体语言完全一致。
+  - 测试同步：无已入库测试断言皮肤 CSS/模板样式，无需修改；全量验证：`tests/` + `web_ui/backend/tests/` pytest 151 项通过，前端 vitest 78 例（14 文件）通过，`npm run build`（tsc -b + vite）无错误。
+  - 验证：D 页（worktree 临时 8091 实例）与 DD（vite preview 构建产物）Playwright 深/浅截图复核，两组胶囊均为 2px 粗框，与 DC 一致。
+  - 部署注意：合并后需在上位机 `git pull` 并重启 `donkeydrifter-launcher.service`（D 页），DD 需重新 `npm run build`。
+  - 涉及文件：`donkeycar/launcher/server.py`、`web_ui/frontend/src/themes/theme-mus4.css`、`web_ui/frontend/src/themes/theme-light.css`
+
+## 2026-08-15 (9)
+
+- feat(web_ui): DD 标题区入口按键文案去掉"打开 "/"Open "前缀——"打开 DrifterConsole"→"DrifterConsole"、"打开 Kimi Code Web"→"Kimi Code Web"（en 同步 "Open DrifterConsole"/"Open Kimi Code Web"→去前缀），中英文保持一致
+  - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 两段各改 `common.enterButtons.drifterConsole`、`common.enterButtons.kimiCodeWeb` 两条；tooltip（`kimiCodeWebTitle`/`drifterConsoleTitle`）、失败提示（`kimiCodeWebFailed`）等其它含"打开/open"的词条一律不动。
+  - `web_ui/frontend/src/components/EnterButtons.tsx` 确认无硬编码兜底文案、无渲染时前缀拼接（按钮直接渲染 i18n key），无需改动；桌面版头部与手机版汉堡菜单共用这两个 key，一处改两处同时生效。
+  - 测试同步：`EnterButtons.test.tsx` 断言的是 i18n key 而非具体文案，无需修改；全量验证：后端 pytest 78 项通过，前端 vitest 78 例（14 文件）通过，`tsc -b --noEmit` 无错误，eslint 0 error（6 个 warning 均为既有、位于本次未触碰文件）。
+  - 涉及文件：`web_ui/frontend/src/i18n/messages/common.ts`
+
+## 2026-08-15 (8)
+
+- fix(launcher): 修复 DC/DD/D 三处"打开 Kimi Code Web"全部失效（about:blank / 启动超时）——kimi 0.36.0 起 TUI 不再进 alternate-screen，旧的"PTY 注入 `kimi` → `/web`"自动化永远等不到就绪信号，每次必等满 60s 超时（避让：并行会话已合入 #118 占用 (7)，本条改号为 (8)）
+  - `donkeycar/launcher/kimi_web.py` 重写启动链路（响应契约 `{"status","url"}` 不变，DC/DD/D 前端与 D 侧转发零改动）：
+    - 快路径（复用）：扫描 `~/.kimi-code/server/instances/*.json` 登记（心跳新鲜 + pid 存活 + 带 `~/.kimi-code/server.token` 探测 `/api/v1/meta` 200），命中即返回 `http://<host>:<port>/#token=<token>` 入口 URL，毫秒级；kimi TUI 的内嵌 server 同样可复用。
+    - 慢路径（冷启动）：无存活实例时直接拉起官方子命令 `kimi web --no-open`（0.36 起 `kimi server` 是其废弃别名），从 stdout ready banner 抓 `Local:`/`#token=` URL；二进制优先取 `~/.kimi-code/bin/kimi`（systemd 干净 PATH 下也能找到），实测冷启动 1.8s（原 TUI 链路常态 60s 超时）。失败路径杀净子进程并兜底再试一次复用（覆盖端口被登记滞后实例占用）。
+    - 移除 PTY/TUI 自动化（`_BufferWriter`/`_wait_tui_ready`/`_wait_web_url`/`session_factory`），`extract_web_url`/`strip_ansi` 保留；`server.py` 仅 `launch_kimi_code_web(cwd=)` 一处调用，签名兼容。
+  - `tests/test_launcher_kimi_web.py` 同步重写：保留 ANSI/URL 提取与端点 CORS 用例，新增实例复用过滤（心跳/pid/探测）、复用不起子进程、冷启动抓 URL、cwd 透传、二进制缺失、失败兜底复用、超时杀进程等用例（_FakeProc 真实管道模拟 stdout）。
+  - 验证：`tests/` 全量 76 项通过；本机实测 POST 端点链路——复用路径 0.00s 返回、真实冷启动 1.8s 抓回 `#token=` URL。
+  - 部署注意：合并后需在上位机 `git pull` 并重启 `donkeydrifter-launcher.service` 才生效。
+
+## 2026-08-15 (7)
+
+- feat(launcher): 终端页把输入行首词 postMessage 给 Drifter Console，用于 Serial 终端标签页改名
+  - `donkeycar/launcher/terminal_static/terminal.html`：
+    - 新增行捕获：`term.onData` 在转发 WebSocket 后追加 `trackLine(d)`——可打印字符入 `lineBuf`，退格 `\x7f`/`\b` 删尾字符，Ctrl+C/ESC 清空缓冲（方向键等转义序列不会拼出假名字），回车 `\r`/`\n` 触发 `commitLine()`。
+    - `commitLine()`：取 trim 后第一个空白前的词（输入 `abc defg hijk` 上报 `abc`），截断 16 字符，非空才 `window.parent.postMessage({type:'donkeydrifter.term.name',name},'*')`（跨源 iframe，父页按 `e.source` 匹配自己的标签）。
+    - TUI 防误改：`scanAltScreen()` 在 PTY 输出流扫描 `ESC[?1049h/l` 维护 `inAlt`，备用屏幕缓冲区期间（kimi/claude/codex 等全屏 TUI）清空并暂停行捕获。
+  - 配套：固件侧（Firmware 仓库）新增 message 监听按 iframe 改名标签，重编号时自定义名优先。
+  - 测试同步：新增 `tests/test_launcher_terminal.py` 静态断言 2 项通过；node --check 校验 script 块通过。
+
+## 2026-08-15 (6)
+
+- fix(launcher): D 页切换胶囊补浅色变体，深浅双色值全部改为 DD 主题重映射后的真实渲染值
+  - 背景：(5) 误把 Tailwind 工具类的原始色值当作 DD 实际效果——DD 的 `src/themes/theme-mus4.css`/`theme-light.css` 会在两套主题下重映射这些工具类（如 `.bg-zinc-800` 深色实为 `#111820`、浅色实为 `#f4f6f9`），导致 (5) 的胶囊在深色下偏亮、浅色下完全保持深色（无浅色变体）。
+  - 深色（theme-mus4 实际渲染值）：胶囊底色 `#27272a→#111820`、边框 `#3f3f46→#344154` 并补 1px `#2b3441` 内描边（outline -1px），未激活文字 `#a1a1aa→#8fa1b5`、hover `#e4e4e7→#e8edf2`，激活 `#0891b2→#5cc8ff` + 文字 `#fff→#061019` + 字重 400→800。
+  - 浅色（theme-light 实际渲染值，新增）：胶囊 `#f4f6f9` + border `#ccd5df` + 内描边 `#d5dce4`，未激活文字 `#5b6b7d`、hover `#1a2330`；激活态深浅一致（`#5cc8ff`/`#061019`/800）。
+  - hover/底色规则均以 `:not(.active)` 排除激活键，杜绝浅色下覆盖激活色（级联 (0,2,2)>(0,2,1) 曾把激活文字冲成 #5b6b7d/#1a2330）。
+  - 测试同步：纯模板内 CSS 改动，无断言涉及；全量 pytest 98 项通过。Playwright 无头对拍：Donkey 胶囊与 DD（vite dev 实跑）在深色/浅色下的计算样式逐项一致（容器底色/边框/内描边/padding/gap/圆角、激活底色/文字色/字重、未激活文字色、字号），含浅色激活键悬停态。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+## 2026-08-15 (5)
+
+- feat(launcher): D 页顶栏主题/语言切换胶囊复刻 DD 样式、整行垂直居中，11 号 Kimi Code Web 设为常用
+  - `donkeycar/launcher/server.py` 菜单数据：11 号 "Kimi Code Web" `favorite: false → true`，菜单卡片显示「常用」标签。
+  - 顶栏切换胶囊（`.langTabs`）逐值复刻 DD 的 `ThemeSwitcher.tsx`/`LanguageSwitcher.tsx` Tailwind 规格：容器 `bg-zinc-800(#27272a)` + 1px `border-zinc-700(#3f3f46)` + `p-1`/`gap-1`（原为 `#171c24` + 内阴影描边、固定高 24px）；按钮 `px-3 py-1`、`text-xs`（12px/16px）、字重 400（原 800），激活 `bg-cyan-600(#0891b2) text-white`（原 `#5cc8ff`），未激活 `text-zinc-400(#a1a1aa)` 且 hover 仅文字变 `zinc-200(#e4e4e7)` 不改背景，加 `transition-colors` 过渡。
+  - 与 DD 行为一致：浅色模式下胶囊保持深色外观——删除 `html[data-theme="light"] .langTabs` 五条例外覆盖（DD 的胶囊为固定 Tailwind 色，无 light 变体）。
+  - 顶栏整行垂直居中：`.headerRow` `align-items:flex-end → center`，删除 `.ghLink`/`.versionBadge` 的 `translateY(-1px)` 补偿与 `.headerLogo` 的 `align-self` 补丁；手机端两行布局不变。
+  - 测试同步：纯模板内 CSS/数据改动，无断言涉及；全量 pytest 98 项通过。Playwright 无头实测：桌面深/浅下整行（图标/标题/GitHub/版本号/两个胶囊）垂直中心均为 29.0px 零偏差，手机端两行各自居中（28px/85px）；胶囊计算样式与 DD 逐项一致（含浅色保持深色）；11 号「常用」标签渲染确认。
+  - 涉及文件：`donkeycar/launcher/server.py`
+
+## 2026-08-15 (4)
+
+- fix(web_ui): 顶栏胶囊与导航文本禁止换行——头部空间不足时"中文"/"跟随系统"竖排两行把切换键撑到 50px、导航 "Tub Manager" 折行
+  - `web_ui/frontend/src/components/LanguageSwitcher.tsx`、`ThemeSwitcher.tsx`：分段按钮加 `whitespace-nowrap`；`Layout.tsx` 导航链接 `linkClass` 加 `whitespace-nowrap`。修后两个切换键恢复 34px，与"打开"按键同高；无头浏览器实测整行（图标/标题/导航/版本号/GitHub 图标/进入按键/切换键）垂直中心偏差全部 0.0px。
+  - 测试同步：纯类名调整，无断言涉及；全量 vitest 78 例通过。
+  - 涉及文件：`web_ui/frontend/src/components/LanguageSwitcher.tsx`、`web_ui/frontend/src/components/ThemeSwitcher.tsx`、`web_ui/frontend/src/components/Layout.tsx`
+
 ## 2026-08-15 (3)
 
 - fix(web_ui): DD 标题区"打开 Drifter Console" / "打开 Kimi Code Web"按键高度由 24px（h-6）提至 34px，与右侧中英文切换键精确同高（LanguageSwitcher 总高 = 内部键 24px + 外壳 p-1×2 + border×2）

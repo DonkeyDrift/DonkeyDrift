@@ -18,7 +18,7 @@ export const LanguageSwitcher: React.FC = () => {
             type="button"
             aria-pressed={active}
             onClick={() => setLanguage(value)}
-            className={`px-3 py-1 rounded-full text-xs transition-colors ${
+            className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
               active
                 ? 'bg-cyan-600 text-white'
                 : 'text-zinc-400 hover:text-zinc-200'
