@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-16 (16)
+
+- feat(web-ui): DD 顶部导航标签顺序调整为 Drive → TM → Trainer → PA → CC（#138）
+  - `web_ui/frontend/src/components/Layout.tsx`：`navItems` 数组重新排序为 Drive（`/drive`）→ Tub Manager（`/`）→ Trainer（`/trainer`）→ Pilot Arena（`/pilot`）→ Car Connector（`/connector`），桌面导航与手机汉堡菜单共用该数组同步生效；路由路径不变，仅改显示顺序。
+  - 前端 `npm run build` 通过。
+
 ## 2026-08-16 (15)
 
 - feat(launcher): D 页（launcher 菜单）1-5、7-10 号菜单项全部接线，点按不再弹"未实现"，与 TUI 各命令行为对齐（#126）
