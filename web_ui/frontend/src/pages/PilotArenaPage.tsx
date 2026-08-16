@@ -170,6 +170,8 @@ export const PilotArenaPage: React.FC = () => {
   const [plotLoading, setPlotLoading] = useState(false);
   const [imageProcessingCollapsed, setImageProcessingCollapsed] = useState(true);
   const [displayRecordIndex, setDisplayRecordIndex] = useState(currentIndex);
+  const autoScanDoneRef = useRef<Set<string>>(new Set());
+  const autoLoadDoneRef = useRef<Set<string>>(new Set());
   const viewersRef = useRef(viewers);
   const predictionRequestRef = useRef<Record<string, number>>({});
   const predictionInFlightRef = useRef<Record<string, boolean>>({});
@@ -605,6 +607,27 @@ export const PilotArenaPage: React.FC = () => {
     }
   }, [clearViewerPredictionState, configPath, currentIndex, refreshPrediction, t, updateViewer]);
 
+  // 自动扫描模型：进入 PA 页面（或有 tub 数据）时自动执行模型扫描
+  useEffect(() => {
+    if (!hasRecords || !configPath) return;
+    viewersRef.current.forEach((viewer) => {
+      if (autoScanDoneRef.current.has(viewer.localId)) return;
+      if (viewer.models.length > 0 || viewer.loading) return;
+      autoScanDoneRef.current.add(viewer.localId);
+      void refreshModels(viewer);
+    });
+  }, [configPath, hasRecords, refreshModels, viewers]);
+
+  // 唯一模型自动加载：扫描结果只有一个模型时自动选中并加载预测
+  useEffect(() => {
+    viewersRef.current.forEach((viewer) => {
+      if (autoLoadDoneRef.current.has(viewer.localId)) return;
+      if (viewer.models.length !== 1 || !viewer.modelPath || viewer.pilot || viewer.loading) return;
+      autoLoadDoneRef.current.add(viewer.localId);
+      void loadViewer(viewer);
+    });
+  }, [loadViewer, viewers]);
+
   const unloadViewer = useCallback(async (viewer: ViewerState) => {
     if (viewer.pilot) {
       try {
@@ -614,6 +637,8 @@ export const PilotArenaPage: React.FC = () => {
       }
     }
     clearViewerPredictionState(viewer.localId);
+    autoScanDoneRef.current.delete(viewer.localId);
+    autoLoadDoneRef.current.delete(viewer.localId);
     imageLoadCallbacksRef.current.forEach((callbacks) => callbacks.delete(viewer.localId));
     delete canvasRefs.current[viewer.localId];
     setViewers((items) => items.filter((item) => item.localId !== viewer.localId));

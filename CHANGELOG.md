@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-16 (18)
+
+- feat(web-ui): Pilot Arena 自动扫描模型，唯一模型时自动选中并加载预测（#136）
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：
+    - 新增 `autoScanDoneRef`/`autoLoadDoneRef` 两个 ref 跟踪每个 viewer 的自动扫描/自动加载状态。
+    - 新增 useEffect：当 `hasRecords` 且 `configPath` 可用时，自动为每个未扫描过的 viewer 调用 `refreshModels`（即自动执行"扫描模型"），无需手动点击。
+    - 新增 useEffect：扫描结果只有一个模型时（`models.length === 1`），自动调用 `loadViewer`（即自动执行"加载并预测"），画面上出现预测转向线。
+    - 多个模型时只自动扫描填充列表，不自动选择/加载，保留现有手动流程。
+    - `unloadViewer` 中同步清理 `autoScanDoneRef`/`autoLoadDoneRef`，移除 viewer 后重建不会残留状态。
+  - 前端 `npm run build` 通过。
+
 ## 2026-08-16 (17)
 
 - feat(web-ui): 完成 Trainer 页面中文翻译（#137）
