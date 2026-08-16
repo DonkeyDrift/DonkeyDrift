@@ -20,11 +20,13 @@ from donkeycar._version import __version__
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import launch_kimi_code_web
 from donkeycar.launcher.terminal import handle_terminal_ws
+from donkeycar.webui_instance import (
+    find_live_instance,
+    write_drive_pids,
+    remove_drive_pid_file,
+    kill_previous_car_processes,
+)
 
-
-# ── PID 文件管理（与 tui.py / base.py 保持一致） ────────────────────────
-
-_DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
 
 # ── 图标静态文件 ────────────────────────────────────────────────────
 
@@ -47,83 +49,6 @@ _TERMINAL_STATIC_FILES = {
     "addon-fit.js": ("addon-fit.js", "text/javascript; charset=utf-8"),
     "LICENSE-xterm.txt": ("LICENSE-xterm.txt", "text/plain; charset=utf-8"),
 }
-
-
-def _read_drive_pid_file():
-    """读取上次 donkey drive 记录的进程 PID 列表。"""
-    if not _DRIVE_PID_FILE.exists():
-        return []
-    try:
-        with open(_DRIVE_PID_FILE, "r") as f:
-            return [int(line.strip()) for line in f if line.strip()]
-    except Exception:
-        return []
-
-
-def _write_drive_pid_file(pids):
-    """将当前 donkey drive 启动的进程 PID 写入记录文件。"""
-    _DRIVE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_DRIVE_PID_FILE, "w") as f:
-        for pid in pids:
-            f.write(f"{pid}\n")
-
-
-def _remove_drive_pid_file():
-    """删除 PID 记录文件。"""
-    try:
-        _DRIVE_PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-def _kill_previous_drive_processes():
-    """读取 PID 文件，精确杀掉上一次 donkey drive 启动的进程。"""
-    pids = _read_drive_pid_file()
-    if not pids:
-        return
-    # 先发送 SIGTERM 优雅终止
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-    # 等待 0.5 秒让进程退出
-    threading.Event().wait(0.5)
-    # 对仍存活的进程发送 SIGKILL 强制终止
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-    _remove_drive_pid_file()
-
-
-def _kill_orphaned_donkey_processes():
-    """通过进程名搜索并杀掉所有 donkey web 和 manage.py drive 进程。
-
-    作为 PID 文件方式的补充，处理未通过正常流程启动的孤儿进程
-    （如用户直接在终端运行 donkey web 而未写入 PID 文件，
-    或多次启动导致旧进程未被追踪）。
-    """
-    for pattern in ["donkey web", "manage.py drive"]:
-        try:
-            subprocess.run(
-                ["pkill", "-f", pattern],
-                capture_output=True, timeout=5,
-            )
-        except Exception:
-            pass
-    # 等待进程退出
-    threading.Event().wait(0.5)
-    # SIGKILL 仍存活的进程
-    for pattern in ["donkey web", "manage.py drive"]:
-        try:
-            subprocess.run(
-                ["pkill", "-9", "-f", pattern],
-                capture_output=True, timeout=5,
-            )
-        except Exception:
-            pass
 
 
 # ── 项目查找与端口选择 ──────────────────────────────────────────────
@@ -190,19 +115,14 @@ _processes = {
 def _launch_drive():
     """启动 donkey web + manage.py drive，返回结果字典。
 
-    每次调用都会先杀掉上一次的 donkey drive 进程（通过 PID 文件追踪），
-    然后启动新的进程。这确保不会出现硬件资源冲突（如摄像头占用）。
+    issue #127：先只杀上一次的车进程（manage.py drive，释放摄像头等
+    硬件），再探测存活的 Web UI 实例（~/.donkeycar/webui.json）——
+    存活则复用、只起新车进程；没有才用默认端口（8000/5188）新起
+    `donkey web`（由其自行登记实例）。不再 pkill 互杀、不再端口漂移。
     """
     with _proc_lock:
-        # 杀掉上一次的进程（通过 PID 文件追踪，包括终端和 Launcher 启动的）
-        _kill_previous_drive_processes()
-        # 兜底：通过进程名搜索杀掉所有 donkey web / manage.py drive 孤儿进程
-        _kill_orphaned_donkey_processes()
-        # 清理 launcher 自己跟踪的进程引用
-        for key in ("web", "car"):
-            _processes[key] = None
-        _processes["backend_port"] = None
-        _processes["frontend_port"] = None
+        # 只杀上一次的车进程；web 前后端进程保留复用
+        kill_previous_car_processes()
 
         # 查找 mycar 项目
         project_path = _find_mycar_project()
@@ -213,19 +133,32 @@ def _launch_drive():
                          "（需包含 manage.py 和 myconfig.py）",
             }
 
-        # 选择可用端口
-        backend_port = _choose_available_backend_port(8100)
-        frontend_port = _choose_available_backend_port(5188)
+        # 探测存活的 Web UI 实例（donkey web / donkey drive 启动时登记）
+        inst = find_live_instance()
 
-        # 获取 Web UI 路径
-        web_ui_path = _get_bundled_web_ui_path()
+        creationflags = (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            if sys.platform == "win32" else 0
+        )
 
-        # 构建 web 命令（不添加 --open，由 launcher 负责重定向浏览器）
-        web_cmd = ["donkey", "web"]
-        if web_ui_path is not None:
-            web_cmd.extend(["--path", str(web_ui_path)])
-        web_cmd.extend(["--backend-port", str(backend_port)])
-        web_cmd.extend(["--frontend-port", str(frontend_port)])
+        if inst:
+            # 复用已有实例：只启动车进程，连回已有后端
+            backend_port = inst["backend_port"]
+            frontend_port = inst["frontend_port"]
+            web_proc = None
+            print(f"[launcher] 复用运行中的 Web UI 实例 "
+                  f"(backend=:{backend_port} frontend=:{frontend_port})")
+        else:
+            # 无实例：用默认端口新起 donkey web（不再从 8100 漂移），
+            # web 进程启动成功后自行登记实例
+            backend_port = _choose_available_backend_port(8000)
+            frontend_port = _choose_available_backend_port(5188)
+            web_ui_path = _get_bundled_web_ui_path()
+            web_cmd = ["donkey", "web"]
+            if web_ui_path is not None:
+                web_cmd.extend(["--path", str(web_ui_path)])
+            web_cmd.extend(["--backend-port", str(backend_port)])
+            web_cmd.extend(["--frontend-port", str(frontend_port)])
 
         # 构建 car 命令
         car_cmd = [sys.executable, "manage.py", "drive"]
@@ -236,17 +169,13 @@ def _launch_drive():
             f"ws://localhost:{backend_port}/api/drive/ws"
 
         # 启动进程
-        creationflags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP
-            if sys.platform == "win32" else 0
-        )
-
         try:
-            web_proc = subprocess.Popen(
-                web_cmd,
-                stdin=subprocess.DEVNULL,
-                creationflags=creationflags,
-            )
+            if inst is None:
+                web_proc = subprocess.Popen(
+                    web_cmd,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
             car_proc = subprocess.Popen(
                 car_cmd,
                 cwd=str(project_path),
@@ -265,8 +194,11 @@ def _launch_drive():
                 "error": f"启动进程失败: {e}",
             }
 
-        # 写入 PID 文件
-        _write_drive_pid_file([web_proc.pid, car_proc.pid])
+        # 写入 PID 文件（复用实例时 web 进程不归本链路管，只记车进程）
+        if web_proc is not None:
+            write_drive_pids([web_proc.pid, car_proc.pid])
+        else:
+            write_drive_pids([car_proc.pid])
 
         # 记录进程信息
         _processes["web"] = web_proc
@@ -286,13 +218,27 @@ def _launch_drive():
 
 
 def _get_status():
-    """获取当前进程状态。"""
+    """获取当前进程状态。
+
+    issue #127：launcher 本次会话未跟踪进程时，优先读实例登记
+    （~/.donkeycar/webui.json）——其它链路（donkey web/drive、TUI）启动
+    的 Web UI 也算 running，避免状态显示"未运行"导致重复拉起。
+    """
     with _proc_lock:
         web_proc = _processes["web"]
         car_proc = _processes["car"]
-        running = web_proc is not None and web_proc.poll() is None
-        frontend_port = _processes["frontend_port"]
         backend_port = _processes["backend_port"]
+        frontend_port = _processes["frontend_port"]
+        running = web_proc is not None and web_proc.poll() is None
+
+        if not running:
+            inst = find_live_instance()
+            if inst:
+                running = True
+                backend_port = inst["backend_port"]
+                frontend_port = inst["frontend_port"]
+                web_proc = None
+
         project = _processes["project"]
         return {
             "running": running,
