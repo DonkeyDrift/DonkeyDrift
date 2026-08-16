@@ -116,6 +116,16 @@ export const browseDirectory = async (path?: string) => {
   return response.data;
 };
 
+export const discoverProjects = async (root?: string): Promise<{
+  status: boolean;
+  root: string;
+  projects: string[];
+  count: number;
+}> => {
+  const response = await api.get('/config/discover_projects', { params: { root } });
+  return response.data;
+};
+
 export const loadTub = async (path: string) => {
   const response = await api.post('/tub/load', { path });
   return response.data;

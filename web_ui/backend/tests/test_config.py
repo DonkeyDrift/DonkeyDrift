@@ -42,3 +42,80 @@ def test_get_version_returns_version_string():
     assert response.status_code == 200
     payload = response.json()
     assert payload["version"] == __version__
+
+
+def _make_car_project(base):
+    car = base / "mycar"
+    car.mkdir(parents=True)
+    (car / "config.py").write_text("IMAGE_H = 120\n")
+    (car / "manage.py").write_text("# manage\n")
+    return car
+
+
+def test_discover_projects_finds_single_project(tmp_path):
+    from routers import config
+
+    app = FastAPI()
+    app.include_router(config.router, prefix="/api/config")
+    client = TestClient(app)
+
+    car = _make_car_project(tmp_path / "projects")
+
+    response = client.get("/api/config/discover_projects", params={"root": str(tmp_path)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["projects"] == [str(car)]
+
+
+def test_discover_projects_multiple_and_none(tmp_path):
+    from routers import config
+
+    app = FastAPI()
+    app.include_router(config.router, prefix="/api/config")
+    client = TestClient(app)
+
+    # 空目录：没有项目
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    response = client.get("/api/config/discover_projects", params={"root": str(empty_root)})
+    assert response.status_code == 200
+    assert response.json()["count"] == 0
+
+    # 多个项目：全部返回
+    first = _make_car_project(tmp_path / "a")
+    second = _make_car_project(tmp_path / "b")
+    response = client.get("/api/config/discover_projects", params={"root": str(tmp_path)})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["projects"] == sorted([str(first), str(second)])
+
+
+def test_find_car_projects_skips_hidden_and_no_descent(tmp_path):
+    from routers.config import find_car_projects
+
+    # 隐藏目录/缓存目录中的项目不扫描
+    hidden = tmp_path / ".cache" / "mycar"
+    hidden.mkdir(parents=True)
+    (hidden / "config.py").write_text("")
+    (hidden / "manage.py").write_text("")
+
+    # 项目目录内部不再下钻（嵌套的“项目”不重复发现）
+    car = tmp_path / "mycar"
+    car.mkdir()
+    (car / "config.py").write_text("")
+    (car / "manage.py").write_text("")
+    nested = car / "inner"
+    nested.mkdir()
+    (nested / "config.py").write_text("")
+    (nested / "manage.py").write_text("")
+
+    # 只有 config.py 没有 manage.py 的目录不算项目
+    partial = tmp_path / "partial"
+    partial.mkdir()
+    (partial / "config.py").write_text("")
+
+    projects = find_car_projects(str(tmp_path))
+    assert projects == [str(car)]

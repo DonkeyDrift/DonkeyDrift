@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, loadTub, getApiErrorMessage } from '../services/api';
+import { loadConfig, loadTub, getApiErrorMessage, discoverProjects } from '../services/api';
 import { FolderCog, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
 import { useTranslation } from '@/i18n';
@@ -89,6 +89,26 @@ export const ConfigLoader: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [config, configPath, handleManualLoad, setError]);
+
+  // 没有 remembered configPath 时，若环境中只有一个 mycar 项目则自动
+  // browse 并加载（issue #129）；多个项目或扫描失败时回退手动 Browse。
+  const autoDiscoverTried = useRef(false);
+  useEffect(() => {
+    if (config || configPath || autoDiscoverTried.current) return;
+    autoDiscoverTried.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await discoverProjects();
+        if (!cancelled && data.count === 1 && data.projects[0]) {
+          await handleBrowserSelect(data.projects[0]);
+        }
+      } catch {
+        // 自动发现失败时保持现状，用户手动 Browse 选择
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [config, configPath, handleBrowserSelect]);
 
   return (
     <Card>

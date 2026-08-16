@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-16 (5)
+
+- feat(web-ui): Loader 自动发现唯一 mycar 项目并自动加载，无需人工 Browse（#129）
+  - 后端 `web_ui/backend/routers/config.py`：新增 `GET /api/config/discover_projects?root=<dir>` 接口与 `find_car_projects()` 扫描函数——BFS 扫描 root 下含 `config.py` + `manage.py` 的目录（默认 root 为用户 home，最多下探 2 层，跳过隐藏目录与 `node_modules`/`venv`/`__pycache__` 等），返回 `{projects, count}`；扫描经 `run_in_threadpool` 不阻塞事件循环。
+  - 前端 `web_ui/frontend/src/services/api.ts`：新增 `discoverProjects()` API 封装。
+  - 前端 `web_ui/frontend/src/components/ConfigLoader.tsx`：新增自动发现 effect——store 无 `config` 且无已记住 `configPath` 时调用 `discoverProjects()`，恰好发现 1 个项目则复用 `handleBrowserSelect` 链路自动加载（config + `<carPath>/data` tub）；多个项目或扫描失败时静默回退现有手动 Browse 流程；`useRef` 防重复触发。
+  - 测试：后端 `web_ui/backend/tests/test_config.py` 新增 3 项（唯一项目发现、多项目/无项目、隐藏目录跳过+项目内不下钻+缺 manage.py 不算项目）；前端新增 `web_ui/frontend/src/components/ConfigLoader.test.tsx` 4 项（唯一项目自动加载 config+tub、多项目不自动加载、发现失败静默回退、已有 configPath 跳过发现）。后端全量 pytest 76 项、前端全量 vitest 82 例（15 文件）、`tsc --noEmit` 均通过。
+  - 涉及文件：`web_ui/backend/routers/config.py`、`web_ui/backend/tests/test_config.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/ConfigLoader.tsx`、`web_ui/frontend/src/components/ConfigLoader.test.tsx`（新增）
+
 ## 2026-08-16 (4)
 
 - fix(tub-editor): 修复框选少量 frame（如两个）时 UI 不显示选区框的问题（#130）

@@ -80,6 +80,65 @@ async def select_directory():
         logger.error(f"Failed to select directory: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# 自动发现 mycar 项目时跳过的目录名（隐藏目录另行按前缀排除）
+PROJECT_SCAN_SKIP_DIRS = {'node_modules', 'venv', '.venv', '__pycache__', 'site-packages'}
+
+# 从扫描根算起向下最多再探几层（root/Projects/mycar 为 2 层）
+PROJECT_SCAN_MAX_DEPTH = 2
+
+
+def find_car_projects(root, max_depth=PROJECT_SCAN_MAX_DEPTH):
+    """广度优先扫描 root 下含 config.py 与 manage.py 的 mycar 项目目录。
+
+    命中的目录不再继续下钻；隐藏目录与 node_modules 等跳过。
+    """
+    projects = []
+    root = os.path.abspath(os.path.expanduser(root))
+    current = [root]
+    for _ in range(max_depth + 1):
+        next_level = []
+        for dir_path in current:
+            if os.path.isfile(os.path.join(dir_path, 'config.py')) and \
+                    os.path.isfile(os.path.join(dir_path, 'manage.py')):
+                projects.append(dir_path)
+                continue
+            try:
+                entries = os.listdir(dir_path)
+            except OSError:
+                continue
+            for name in entries:
+                if name.startswith('.') or name in PROJECT_SCAN_SKIP_DIRS:
+                    continue
+                sub = os.path.join(dir_path, name)
+                if os.path.isdir(sub):
+                    next_level.append(sub)
+        current = next_level
+        if not current:
+            break
+    projects.sort()
+    return projects
+
+
+@router.get("/discover_projects")
+async def discover_projects(root: str = None):
+    """扫描发现 mycar 项目（含 config.py 与 manage.py 的目录）。
+
+    默认从用户 home 目录扫描；前端在恰好发现一个项目时自动加载。
+    """
+    scan_root = root if root else os.path.expanduser("~")
+    try:
+        projects = await run_in_threadpool(find_car_projects, scan_root)
+        return {
+            "status": True,
+            "root": os.path.abspath(os.path.expanduser(scan_root)),
+            "projects": projects,
+            "count": len(projects),
+        }
+    except Exception as e:
+        logger.error(f"Failed to discover car projects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/browser")
 async def list_directories(path: str = None):
     """
