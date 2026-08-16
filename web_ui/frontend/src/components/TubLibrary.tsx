@@ -20,7 +20,6 @@ import {
   Clapperboard,
   Pause,
   Play,
-  Repeat,
   Trash2,
 } from 'lucide-react';
 
@@ -56,7 +55,6 @@ export const TubLibrary: React.FC = () => {
   const [records, setRecords] = useState<TubRecord[]>([]);
   const [frame, setFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isLooping, setIsLooping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TubSession | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -193,14 +191,7 @@ export const TubLibrary: React.FC = () => {
         lastFrameTimeRef.current = time - ((time - lastFrameTimeRef.current) % frameInterval);
         let next = frameRef.current + 1;
         if (next >= records.length) {
-          if (isLooping) {
-            next = 0;
-          } else {
-            frameRef.current = records.length - 1;
-            setFrame(records.length - 1);
-            setIsPlaying(false);
-            return;
-          }
+          next = 0;
         }
         const nextPath = findImagePath(records[next]);
         if (nextPath) {
@@ -222,7 +213,7 @@ export const TubLibrary: React.FC = () => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, isLooping, records, frameInterval]);
+  }, [isPlaying, records, frameInterval]);
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete || !tubPath) return;
@@ -402,17 +393,6 @@ export const TubLibrary: React.FC = () => {
                   {isPlaying
                     ? <><Pause className="w-4 h-4" /> {t('tub.stop')}</>
                     : <><Play className="w-4 h-4" /> {t('tub.play')}</>}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label={isPlaying ? t('tub.loopModeActiveAria') : t('tub.playOnceModeAria')}
-                  title={isLooping ? t('tub.loopPlaybackTitle') : t('tub.playOnceTitle')}
-                  disabled={!hasRecords}
-                  onClick={() => setIsLooping((v) => !v)}
-                  className="px-3"
-                >
-                  <Repeat className={`w-4 h-4 ${isLooping ? 'text-cyan-400' : ''}`} />
                 </Button>
                 <Button
                   size="sm"

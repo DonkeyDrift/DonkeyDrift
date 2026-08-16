@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-16 (9)
+
+- feat(web-ui): 录制视频库移除循环播放按键，改为始终循环播放
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：删除 `isLooping` 状态与播放/暂停旁的循环切换按钮（含 `Repeat` 图标导入），播放到最后一帧后始终回到第 0 帧继续播放，不再播完自动停止；循环相关 i18n 键（`tub.loop*`）为 Tub Navigator 共用，未改动。
+  - 测试：无已入库测试断言该循环按钮；前端 `npm run build`（tsc -b + vite）无错误，`npm test` 18 文件 89 例通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubLibrary.tsx`
+
 ## 2026-08-16 (8)
 
 - fix(web-ui): 修复 DD 顶部导航（Tub Manager / Trainer / Drive 等）切换非常卡顿的问题（#135）
