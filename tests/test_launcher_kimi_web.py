@@ -5,10 +5,13 @@
 - strip_ansi：CSI/OSC/alternate-screen 等 ANSI 转义序列剥离
 - extract_web_url：Session 深链优先、Local/URL/Network 标签次序、
   任意 URL 兜底、尾部句读剥离、无 URL 返回 None
+- _is_loopback_host / _lan_url（issue #125）：回环/通配 host 识别、
+  URL 改写为局域网 IP（保留端口与 #token=）、远程 host 与无局域网
+  IP 时不改写
 - _live_instance_url：实例登记目录扫描（心跳新鲜度、pid 存活、探测
   结果三级过滤）与 #token= 入口 URL 组装
 - launch_kimi_code_web：存活实例复用（不起子进程）、冷启动拉起
-  kimi web --no-open（_FakeProc 脚本化管道输出）成功抓 URL 且进程
+  kimi web --no-open --host（_FakeProc 脚本化管道输出）成功抓 URL 且进程
   保持存活、cwd 透传、cwd 非法直接报错、未安装 kimi、冷启动失败后
   兜底复用、banner 超时杀进程、进程提前退出报错
 以及 POST /api/launch/kimi-code-web 端点：路由、参数校验、CORS 头
@@ -103,6 +106,45 @@ def _clean_spawned():
     kimi_web._SPAWNED_PROCS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _fake_lan_ip(monkeypatch):
+    """固定本机局域网 IP，隔离真实网络探测（issue #125 的 URL 改写）。"""
+    monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+
+
+# ===========================================================================
+# _is_loopback_host / _lan_url（issue #125：URL 必须局域网可达）
+# ===========================================================================
+class TestLanUrl:
+    def test_loopback_hosts_recognized(self):
+        for host in ("localhost", "LOCALHOST", "127.0.0.1", "127.1.2.3",
+                     "[::1]", "0.0.0.0"):
+            assert kimi_web._is_loopback_host(host) is True
+
+    def test_remote_hosts_not_loopback(self):
+        for host in ("192.168.3.10", "example.com", "[::ffff:1.2.3.4]",
+                     None, ""):
+            assert kimi_web._is_loopback_host(host) is False
+
+    def test_rewrites_loopback_host_keeps_port_and_token(self):
+        assert kimi_web._lan_url(
+            "http://127.0.0.1:58627/#token=t0k123") == \
+            "http://192.168.3.10:58627/#token=t0k123"
+
+    def test_rewrites_localhost_without_port(self):
+        assert kimi_web._lan_url("http://localhost/x?a=1") == \
+            "http://192.168.3.10/x?a=1"
+
+    def test_keeps_lan_host_untouched(self):
+        url = "http://192.168.3.41:58627/#token=t0k123"
+        assert kimi_web._lan_url(url) == url
+
+    def test_no_lan_ip_returns_unchanged(self, monkeypatch):
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: None)
+        url = "http://127.0.0.1:58627/#token=t0k123"
+        assert kimi_web._lan_url(url) == url
+
+
 # ===========================================================================
 # strip_ansi / extract_web_url
 # ===========================================================================
@@ -146,12 +188,12 @@ class TestExtractWebUrl:
 # ===========================================================================
 # _live_instance_url（实例复用）
 # ===========================================================================
-def _write_instance(d, pid, port=58627, heartbeat_age_ms=0):
+def _write_instance(d, pid, port=58627, heartbeat_age_ms=0, host="127.0.0.1"):
     d.mkdir(parents=True, exist_ok=True)
     (d / "01TEST.json").write_text(json.dumps({
         "server_id": "01TEST",
         "pid": pid,
-        "host": "127.0.0.1",
+        "host": host,
         "port": port,
         "started_at": 1,
         "heartbeat_at": int(time.time() * 1000) - heartbeat_age_ms,
@@ -167,7 +209,44 @@ class TestLiveInstanceUrl:
         token_file.write_text("tok-xyz\n", encoding="utf-8")
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         url = kimi_web._live_instance_url(inst_dir, token_file)
-        assert url == "http://127.0.0.1:58627/#token=tok-xyz"
+        # 登记的 127.0.0.1 实测监听 0.0.0.0（对局域网 IP 探测通过）时，
+        # 返回局域网 host 的 URL（issue #125）
+        assert url == "http://192.168.3.10:58627/#token=tok-xyz"
+
+    def test_loopback_instance_not_lan_reachable_skipped(
+            self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        probes = []
+        monkeypatch.setattr(
+            kimi_web, "_probe_server",
+            lambda host, port, token: probes.append(host) or False)
+        assert kimi_web._live_instance_url(
+            inst_dir, tmp_path / "tk") is None
+        # 回环实例只对局域网 IP 探测（不对 127.0.0.1 白探）
+        assert probes == ["192.168.3.10"]
+
+    def test_no_lan_ip_skips_loopback_instance(self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: None)
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        assert kimi_web._live_instance_url(
+            inst_dir, tmp_path / "tk") is None
+
+    def test_lan_host_instance_probed_on_registered_host(
+            self, tmp_path, monkeypatch):
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid(), host="192.168.3.41")
+        token_file = tmp_path / "server.token"
+        token_file.write_text("tok-xyz\n", encoding="utf-8")
+        probed = []
+        monkeypatch.setattr(
+            kimi_web, "_probe_server",
+            lambda host, port, token: probed.append(host) or True)
+        url = kimi_web._live_instance_url(inst_dir, token_file)
+        assert url == "http://192.168.3.41:58627/#token=tok-xyz"
+        assert probed == ["192.168.3.41"]
 
     def test_skips_dead_pid(self, tmp_path, monkeypatch):
         inst_dir = tmp_path / "instances"
@@ -209,7 +288,7 @@ class TestLaunchKimiCodeWeb:
             live_url_fn=lambda: "http://127.0.0.1:58627/#token=t0k",
             popen_fn=_make_popen(spawned))
         assert result == {"status": "ok",
-                          "url": "http://127.0.0.1:58627/#token=t0k"}
+                          "url": "http://192.168.3.10:58627/#token=t0k"}
         assert spawned == []  # 复用路径不起子进程
 
     def test_spawn_success_captures_url_and_keeps_proc(self):
@@ -220,12 +299,13 @@ class TestLaunchKimiCodeWeb:
             resolve_binary_fn=lambda: "/home/u/.kimi-code/bin/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
-        assert result["url"] == "http://127.0.0.1:58627/#token=t0k123"
+        # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125）
+        assert result["url"] == "http://192.168.3.10:58627/#token=t0k123"
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in kimi_web._SPAWNED_PROCS
-        # 启动命令是官方子命令，且不让它自己开浏览器
-        assert proc.args_seen[-2:] == ["web", "--no-open"]
+        # 启动命令是官方子命令，绑 0.0.0.0 供局域网访问，且不开浏览器
+        assert proc.args_seen[-3:] == ["web", "--no-open", "--host"]
 
     def test_spawn_passes_cwd_through(self, tmp_path):
         proc = _FakeProc(payload=_WEB_BANNER, hold=True)
@@ -266,7 +346,7 @@ class TestLaunchKimiCodeWeb:
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
-        assert result["url"] == "http://127.0.0.1:58627/#token=t0k"
+        assert result["url"] == "http://192.168.3.10:58627/#token=t0k"
         assert proc.killed is True  # 失败的子进程被杀净
 
     def test_spawn_banner_timeout_kills_proc(self):

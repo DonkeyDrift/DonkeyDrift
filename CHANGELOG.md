@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-16 (3)
+
+- fix(launcher): 修复 DC/DD/D 三处「打开 Kimi Code Web」与 DC 终端手动 `/web` 返回的链接打不开的问题（#125）
+  - 根因：`kimi_web.py` 返回的 URL host 是上位机本机视角的 `localhost`/`127.0.0.1`，消费方是用户电脑/手机上的浏览器，`localhost` 指向浏览器自己自然打不开；且冷启动的 `kimi web` 默认只绑回环（banner `Network: off`），即使改写 host 局域网也访问不到。
+  - `donkeycar/launcher/kimi_web.py`：
+    - 冷启动命令改为 `kimi web --no-open --host`（`--host` 裸传 = 绑 `0.0.0.0`，实测 kimi ≥ 0.36 支持），局域网设备可达。
+    - 新增 `_is_loopback_host`/`_lan_url`：返回前把回环/通配 host（`localhost`/`127.x`/`::1`/`0.0.0.0`）改写为本机局域网 IP（复用配网模块 `detect_lan_ip` 的 VPN/TUN 感知探测），保留端口、路径与 `#token=` 片段；探测不到局域网 IP 或 host 本就远程可达时原样返回。复用、冷启动、失败兜底三条返回路径统一改写。
+    - `_live_instance_url`：登记 host 是回环的实例（如 TUI 内嵌 server）先对局域网 IP 探测 `/api/v1/meta`，通了（实际监听 0.0.0.0 只是登记写了 127.0.0.1）改用局域网 host 返回；不通视为不可复用，由调用方另拉监听 0.0.0.0 的新实例。
+  - `donkeycar/launcher/server.py`：`_handle_launch_kimi_code_web` docstring 同步（移除过时的"注入 /web"描述，注明 URL 已改写为局域网 IP）；端点行为无变化，DC/DD/D 三端消费同一返回值，改 launcher 一处全部修复。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `_fake_lan_ip` autouse fixture 隔离真实网络探测；新增 `TestLanUrl` 6 项（回环/通配 host 识别、改写保留端口与 token、远程 host 不动、无局域网 IP 原样返回）与 `_live_instance_url` 回环实例双探测 3 项；既有断言按局域网改写更新（复用/冷启动/兜底返回 URL、启动命令含 `--host`）；全量 `pytest tests/` 108 项通过。
+  - 端到端实测：本机（192.168.3.x 网段）真实拉起 `kimi web`，返回 `http://192.168.3.57:<port>/#token=...`，局域网 IP 上 HTTP 探测可达（未带 token 的 `/api/v1/meta` 返回 401，证明服务真实监听）。
+  - 涉及文件：`donkeycar/launcher/kimi_web.py`、`donkeycar/launcher/server.py`、`tests/test_launcher_kimi_web.py`
+
 ## 2026-08-16 (2)
 
 - fix(launcher,web,management): Web UI 实例登记与复用，修复 D 页按 6 号（Drive）后 Tub Manager 打不开、需再按 7 号（Web）才可用的问题（#127）

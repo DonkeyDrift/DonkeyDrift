@@ -3,8 +3,9 @@
 """POST /api/launch/kimi-code-web 的实现（适配 kimi ≥ 0.36）：
 
 优先复用已在运行的 kimi web 实例（kimi TUI 的内嵌 server 也算）；
-没有存活实例时才直接拉起 ``kimi web --no-open`` 子进程，从 stdout 的
-ready banner 里抓浏览器入口 URL。
+没有存活实例时才直接拉起 ``kimi web --no-open --host`` 子进程
+（绑 0.0.0.0 供局域网访问），从 stdout 的 ready banner 里抓浏览器
+入口 URL。
 
 背景与机制（0.36.0 起）：
 - TUI 不再进入 alternate-screen（``\\x1b[?1049h``），旧的"PTY 里注入
@@ -18,6 +19,12 @@ ready banner 里抓浏览器入口 URL。
   （token 在 # 片段里，由前端页面读取，不经过网络传输）。
 - 复用判定：登记条目 pid 存活 + 心跳新鲜 + 带 token 探测
   ``/api/v1/meta`` 返回 200。
+- 局域网可达性（issue #125）：消费方是用户电脑/手机上的浏览器，URL 里
+  的 ``localhost``/``127.0.0.1`` 指向浏览器自己当然打不开。因此冷启动
+  一律 ``--host 0.0.0.0`` 监听全部网卡，且两条路径返回前都把回环 host
+  改写为本机局域网 IP（复用配网模块的 ``detect_lan_ip``，保留端口与
+  ``#token=`` 片段）；只绑了回环的存活实例（如 TUI 内嵌 server）对
+  局域网 IP 探测不通时视为不可复用，由调用方另拉监听 0.0.0.0 的实例。
 """
 
 import json
@@ -29,6 +36,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -161,11 +169,51 @@ def _probe_server(host: str, port: int, token, timeout=PROBE_TIMEOUT_S) -> bool:
         return False
 
 
+def _lan_ip():
+    """本机局域网 IPv4（复用配网模块的 VPN/TUN 感知探测）；失败返回 None。"""
+    try:
+        from donkeycar.parts.provisioning import detect_lan_ip
+        return detect_lan_ip()
+    except Exception:
+        return None
+
+
+def _is_loopback_host(host) -> bool:
+    """URL host 是否是上位机本机视角地址（远程浏览器打不开）。
+
+    ``localhost``/``127.x``/``::1`` 是回环；``0.0.0.0`` 是监听通配地址，
+    不是浏览器可打开的主机名，同样需要改写。
+    """
+    if not host:
+        return False
+    host = host.lower().strip("[]")
+    return (host == "localhost" or host == "0.0.0.0" or host == "::1"
+            or host.startswith("127."))
+
+
+def _lan_url(url: str):
+    """把 URL 里的回环/通配 host 改写为本机局域网 IP。
+
+    保留端口、路径与 ``#token=`` 片段（token 在 # 片段里由前端页面读取，
+    不经过网络传输）。探测不到局域网 IP 或 host 本就远程可达时原样返回。
+    """
+    lan = _lan_ip()
+    if not lan:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    if not _is_loopback_host(parts.hostname):
+        return url
+    netloc = f"{lan}:{parts.port}" if parts.port else lan
+    return urllib.parse.urlunsplit(
+        (parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
     """找已在运行的 kimi web 实例，返回带 ``#token=`` 的浏览器入口 URL。
 
     判定链：登记条目心跳新鲜 → pid 存活 → 带持久 token 探测
-    ``/api/v1/meta`` 返回 200。找不到返回 None。
+    ``/api/v1/meta`` 返回 200，且局域网可达（登记 host 是回环时需对
+    本机局域网 IP 探测通过）。找不到返回 None。
     """
     token = _read_token(token_path)
     now_ms = time.time() * 1000
@@ -175,9 +223,18 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
             continue
         if not _pid_alive(inst["pid"]):
             continue
-        if not _probe_server(inst["host"], inst["port"], token):
+        host = inst["host"]
+        if _is_loopback_host(host):
+            # 只绑回环的实例（如 TUI 内嵌 server）远程浏览器访问不到；
+            # 对局域网 IP 再探一次：通了说明实际监听 0.0.0.0 只是登记
+            # 写的 127.0.0.1，改用局域网 host；不通则跳过
+            lan = _lan_ip()
+            if not lan or not _probe_server(lan, inst["port"], token):
+                continue
+            host = lan
+        if not _probe_server(host, inst["port"], token):
             continue
-        url = f"http://{inst['host']}:{inst['port']}/"
+        url = f"http://{host}:{inst['port']}/"
         if token:
             url += f"#token={token}"
         return url
@@ -196,7 +253,8 @@ def _resolve_kimi_binary():
 
 
 def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
-    """拉起 ``kimi web --no-open`` 并等 ready banner 里的 URL。
+    """拉起 ``kimi web --no-open --host``（绑 0.0.0.0）并等 ready banner
+    里的 URL。
 
     返回 ``(proc, url, None)`` 或 ``(None, None, 错误原因)``；
     失败路径一律杀掉子进程，不留孤儿。
@@ -207,7 +265,9 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
     env.setdefault("HOME", str(Path.home()))
     try:
         proc = popen_fn(
-            [binary, "web", "--no-open"],
+            # --host 裸传 = 绑 0.0.0.0：消费方是局域网内用户设备上的
+            # 浏览器（issue #125），只绑回环它们访问不到
+            [binary, "web", "--no-open", "--host"],
             cwd=cwd_str,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -291,7 +351,9 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     Returns:
         成功 {"status": "ok", "url": <带 #token= 的入口 URL>}；
         失败 {"status": "error", "error": <原因>}。
-        成功拉起的子进程保持存活（杀它即关 web 服务）；失败路径杀净。
+        URL 的回环 host 已改写为本机局域网 IP（issue #125，远程浏览器
+        可达）；成功拉起的子进程保持存活（杀它即关 web 服务）；失败路径
+        杀净。
     """
     live_url_fn = live_url_fn or _live_instance_url
     resolve_binary_fn = resolve_binary_fn or _resolve_kimi_binary
@@ -309,6 +371,7 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web）
     url = live_url_fn()
     if url:
+        url = _lan_url(url)
         logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
         return {"status": "ok", "url": url}
 
@@ -325,12 +388,14 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                                           popen_fn=popen_fn)
     if url:
         _SPAWNED_PROCS.append(proc)
+        url = _lan_url(url)
         logger.info("Kimi Code Web 已启动: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
     url = live_url_fn()
     if url:
+        url = _lan_url(url)
         logger.info("冷启动未果，复用到已运行实例: %s", url)
         return {"status": "ok", "url": url}
     logger.warning("启动 Kimi Code Web 失败: %s", error)

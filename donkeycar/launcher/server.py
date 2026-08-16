@@ -399,10 +399,11 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._serve_json({"error": "not found"}, code=404)
 
     def _handle_launch_kimi_code_web(self):
-        """POST /api/launch/kimi-code-web：启动 kimi 并注入 /web，回 URL。
+        """POST /api/launch/kimi-code-web：启动/复用 kimi web，回 URL。
 
         请求体可选 JSON {"cwd": "/abs/path"} 指定 kimi 运行目录，缺省为
         上位机用户主目录；cwd 不存在直接报错，绝不回退到其它目录。
+        返回的 URL 已改写为上位机局域网 IP（issue #125，远程浏览器可达）。
         长请求：kimi 冷启动可达数十秒，服务端整体超时 120s，
         客户端超时必须 ≥120s。所有响应带 CORS 头（DC 跨域调用，
         见 _KIMI_WEB_CORS_HEADERS）。
