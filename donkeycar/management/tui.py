@@ -38,6 +38,12 @@ except Exception:
     rc_handler = None
 
 from donkeycar.launcher.dc_discovery import find_drifter_console
+from donkeycar.webui_instance import (
+    find_live_instance,
+    write_drive_pids,
+    remove_drive_pid_file,
+    kill_previous_car_processes,
+)
 
 # 初始化 Console
 console = Console()
@@ -373,72 +379,6 @@ def _restore_terminal():
         termios.tcsetattr(fd, termios.TCSAFLUSH, attr)
     except Exception:
         pass
-
-
-# -----------------------------------------------------------------------------
-# PID 文件管理（用于 Drive 命令的进程追踪与复用清理）
-# -----------------------------------------------------------------------------
-_DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
-
-
-def _read_drive_pid_file():
-    """读取上次 donkey drive 记录的进程 PID 列表。"""
-    if not _DRIVE_PID_FILE.exists():
-        return []
-    try:
-        with open(_DRIVE_PID_FILE, "r") as f:
-            return [int(line.strip()) for line in f if line.strip()]
-    except Exception:
-        return []
-
-
-def _write_drive_pid_file(pids):
-    """将当前 donkey drive 启动的进程 PID 写入记录文件。"""
-    _DRIVE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_DRIVE_PID_FILE, "w") as f:
-        for pid in pids:
-            f.write(f"{pid}\n")
-
-
-def _remove_drive_pid_file():
-    """删除 PID 记录文件。"""
-    try:
-        _DRIVE_PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-def _kill_previous_drive_processes():
-    """读取 PID 文件，精确杀掉上一次 donkey drive 启动的进程。
-
-    只杀 PID 文件中记录的进程，不会误杀其他程序占用的端口。
-    如果进程已不存在（OSError），则跳过。
-    """
-    pids = _read_drive_pid_file()
-    if not pids:
-        return
-
-    console.print("[yellow]检测到上一次 donkey drive 的进程仍在运行，正在停止...[/yellow]")
-
-    # 先发送 SIGTERM 优雅终止
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-
-    # 等待进程退出
-    time.sleep(0.5)
-
-    # 对仍存活的进程发送 SIGKILL 强制终止
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-    _remove_drive_pid_file()
-    console.print("[green]✓ 上一次的进程已停止[/green]")
 
 
 # -----------------------------------------------------------------------------
@@ -1280,8 +1220,21 @@ class DriveCommand(DonkeyCommand):
 
         current_params = {}
         car_path = Path.cwd()
-        backend_port = self.choose_available_backend_port()
-        web_cmd = self.get_command_line(current_params, backend_port=backend_port)
+
+        # issue #127：探测存活的 Web UI 实例，存活则复用、只起车进程
+        inst = find_live_instance()
+        if inst:
+            backend_port = inst["backend_port"]
+            web_cmd = None
+            console.print(
+                f"[dim]检测到运行中的 Web UI 实例 "
+                f"(backend=:{inst['backend_port']} frontend=:{inst['frontend_port']})，"
+                "将复用已有实例，只启动车辆进程。[/dim]"
+            )
+        else:
+            # 无实例：用默认端口（不再从 8100 漂移），由 donkey web 自行登记实例
+            backend_port = self.choose_available_backend_port(8000)
+            web_cmd = self.get_command_line(current_params, backend_port=backend_port)
         car_cmd = self.get_car_command_line()
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
         cmd_str = self.get_preview_command(web_cmd, car_cmd, drive_api_server_url)
@@ -1316,25 +1269,33 @@ class DriveCommand(DonkeyCommand):
         self.history_mgr.update_last_params(self.name, current_params)
         self.history_mgr.add_command_log(cmd_str)
 
-        # 杀掉上一次 donkey drive 启动的进程，释放硬件资源（摄像头等）
-        _kill_previous_drive_processes()
+        # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
+        kill_previous_car_processes()
 
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")
 
+        # 用户确认后重新探测（确认期间实例状态可能变化）
+        inst = find_live_instance()
         processes = []
         try:
             creation_flags = self.get_creation_flags()
             # 将子进程的 stdin 重定向，避免它们干扰父进程终端（如修改回显、cbreak 等）
-            web_process = subprocess.Popen(
-                web_cmd,
-                stdin=subprocess.DEVNULL,
-                creationflags=creation_flags
-            )
-            processes.append(web_process)
+            web_process = None
+            if inst is None:
+                web_process = subprocess.Popen(
+                    web_cmd,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creation_flags
+                )
+                processes.append(web_process)
+            else:
+                # 复用实例：车端连回已有后端
+                backend_port = inst["backend_port"]
 
             car_env = os.environ.copy()
-            car_env["DRIVE_API_SERVER_URL"] = drive_api_server_url
+            car_env["DRIVE_API_SERVER_URL"] = \
+                self.get_drive_api_server_url(backend_port=backend_port)
             car_process = subprocess.Popen(
                 car_cmd,
                 cwd=car_path,
@@ -1345,7 +1306,7 @@ class DriveCommand(DonkeyCommand):
             processes.append(car_process)
 
             # 记录本次启动的进程 PID，供下次启动时清理
-            _write_drive_pid_file([p.pid for p in processes])
+            write_drive_pids([p.pid for p in processes])
 
             self.monitor_processes(web_process, car_process)
             console.print(f"\n[bold green]✓ 执行结束[/bold green]")
@@ -1356,7 +1317,7 @@ class DriveCommand(DonkeyCommand):
             console.print(f"\n[bold red]✗ 发生异常: {e}[/bold red]")
             self.stop_processes(processes)
         finally:
-            _remove_drive_pid_file()
+            remove_drive_pid_file()
             _restore_terminal()
 
         Prompt.ask("\n按回车键返回菜单...")
@@ -1399,8 +1360,13 @@ class DriveCommand(DonkeyCommand):
 
     def get_preview_command(self, web_cmd, car_cmd, drive_api_server_url=None):
         car_prefix = f"DRIVE_API_SERVER_URL={drive_api_server_url or self.get_drive_api_server_url()}"
+        web_section = (
+            "Web Console（复用已有实例，不重复启动）"
+            if web_cmd is None
+            else "Web Console:\n" + " ".join(web_cmd)
+        )
         return "\n\n".join([
-            "Web Console:\n" + " ".join(web_cmd),
+            web_section,
             "车辆进程:\n" + " ".join([car_prefix] + car_cmd),
         ])
 
@@ -1457,7 +1423,8 @@ class DriveCommand(DonkeyCommand):
 
         car_exit_reported = False
         try:
-            while web_process.poll() is None:
+            # web_process 为 None 表示复用其它链路的 Web UI 实例：循环只靠 ESC/车进程退出
+            while web_process is None or web_process.poll() is None:
                 esc_pressed = is_esc_pressed_win() if sys.platform == "win32" else is_esc_pressed_unix()
                 if esc_pressed:
                     console.print("\n[yellow]检测到 ESC 键，正在停止...[/yellow]")

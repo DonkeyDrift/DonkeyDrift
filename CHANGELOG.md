@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-08-16 (2)
+
+- fix(launcher,web,management): Web UI 实例登记与复用，修复 D 页按 6 号（Drive）后 Tub Manager 打不开、需再按 7 号（Web）才可用的问题（#127）
+  - 根因：launcher `_launch_drive` 启动前 `pkill -f "donkey web"` 与 PID 文件全杀互杀已运行的 Web UI；且各链路动态选端口（backend 从 8100 漂移），与 7 号默认端口（8000/5188）不一致，浏览器/前端代理指向漂移端口导致页面不可用。
+  - 新增 `donkeycar/webui_instance.py` 共享模块（模式参考 `kimi_web.py`）：
+    - 实例登记 `~/.donkeycar/webui.json`（pid/backend_port/frontend_port/started_at，原子写入）：`read_instance`/`write_instance`/`remove_instance(only_pid)`——`only_pid` 仅清除属于自己 pid 的登记，避免误删他人后来覆盖的登记。
+    - `find_live_instance()`：登记 pid 存活 + 后端 `/docs` 与前端 `/` 探测均通才算存活；失效自动清陈旧登记。
+    - 车进程 PID 文件（`~/.donkeycar/drive.pid`）读写与 `kill_previous_car_processes()`：读 `/proc/<pid>/cmdline` 只杀 `manage.py drive` 车进程（释放摄像头等硬件），web 前后端进程保留复用；非 Linux 无 /proc 时退化为按 PID 全杀（与旧行为一致）。
+  - `donkeycar/management/base.py`：
+    - `Web.run`：先 `find_live_instance()`，存活则复用并按 `--route` 打开已有前端端口，不再重复拉起；新起路径等后端端口就绪再登记实例，退出 `finally` 按 `only_pid` 清除。
+    - `Drive.run`：先只杀车进程（web 进程保留），存活实例则复用其 backend_port 注入 `DRIVE_API_SERVER_URL`、只起新车进程（PID 文件只记车进程）；无实例才新起 Web UI 并登记。
+  - `donkeycar/launcher/server.py`：`_launch_drive` 删除 `_kill_orphaned_donkey_processes()`（pkill 互杀元凶）及本地 PID 副本函数，收敛到 `webui_instance`；复用存活实例只起车进程，无实例用默认端口 8000/5188 新起 `donkey web`（不再 8100 漂移）；`_get_status` 未跟踪进程时优先读实例登记，其它链路启动的 Web UI 也算 running。
+  - `donkeycar/management/tui.py`：`DriveCommand.execute()` 同步复用逻辑（删除本地 PID 副本函数，探测存活实例→复用只起车进程→无则默认端口 8000 新起）；`monitor_processes` 兼容复用时无 web 进程；命令预览对复用场景显示"复用已有实例，不重复启动"。
+  - 测试：新增 `tests/test_webui_instance.py` 18 项——登记读写与容错、`only_pid` 条件清除、`find_live_instance` 判定链（pid 不存活/探测失败清陈旧登记）、PID 文件往返、`kill_previous_car_processes` cmdline 过滤只杀车进程与非 Linux 退化全杀、`Web.run`/`Drive.run` 复用路径（mock 后断言不重复 Popen、车端 URL 指向复用后端端口、PID 文件只记车进程）；全量 `pytest tests/` 99 项通过。
+  - 涉及文件：`donkeycar/webui_instance.py`（新增）、`donkeycar/management/base.py`、`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`、`tests/test_webui_instance.py`（新增）
+
 ## 2026-08-16 (1)
 
 - feat(launcher,web-ui): 点击 D/DD 页面左上角 logo 图标，在新标签页打开 https://www.donkeydrift.com
