@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-16 (13)
+
+- feat(web-ui): Loader 多 mycar 项目时自动 Browse 上次用过的项目（#129 增强）
+  - 后端 `web_ui/backend/routers/config.py`：新增 `~/.donkeycar_web_loader.json` 状态文件（命名惯例同 connector 的 `~/.donkeycar_web_connector.json`）——`POST /api/config/load` 加载成功后记录 `last_car_path`；`GET /api/config/discover_projects` 返回 `last_project`（上次项目在扫描根之外但仍含 config.py+manage.py 时一并并入 projects 供前端参考；状态文件损坏/缺失时回退 None 不报错）。
+  - 前端 `web_ui/frontend/src/components/ConfigLoader.tsx`：自动发现逻辑扩展——唯一项目→自动加载；多个项目且 `last_project` 在列表中→自动加载上次项目（与 localStorage 记忆互补，跨浏览器/清缓存后仍有效）；否则回退手动 Browse。`api.ts` 的 `discoverProjects` 返回类型同步补 `last_project`。
+  - fix(web-ui): 顺手修复 `handleManualLoad` 中硬编码的本机路径 `/home/dkc/projects/mycar/data` 特判——其它机器上曾持久化该 tub 路径时会被误判为“需要保留的旧 tub”，现仅按 `<path>/data` 归一化比较。
+  - 测试：后端 `test_config.py` 新增 `last_project` 链路 1 项（无记录 None→load 成功记录→扫描根之外并入→损坏文件回退）；前端 `ConfigLoader.test.tsx` 扩至 6 项（新增：多项目时自动加载上次项目、上次项目不在列表回退手动）。后端全量 pytest 77 项、前端全量 vitest 86 例（16 文件）、`tsc --noEmit` 均通过。
+  - 涉及文件：`web_ui/backend/routers/config.py`、`web_ui/backend/tests/test_config.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/ConfigLoader.tsx`、`web_ui/frontend/src/components/ConfigLoader.test.tsx`
+
 ## 2026-08-16 (12)
 
 - fix(web-ui,templates): 修复 Tub Navigator 播放录制视频卡顿（#128），并让 WEBCAM 接受 CAMERA_FRAMERATE 配置

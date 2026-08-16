@@ -93,6 +93,47 @@ def test_discover_projects_multiple_and_none(tmp_path):
     assert payload["projects"] == sorted([str(first), str(second)])
 
 
+def test_discover_projects_reports_last_project(tmp_path, monkeypatch):
+    from routers import config
+
+    app = FastAPI()
+    app.include_router(config.router, prefix="/api/config")
+    client = TestClient(app)
+
+    car = _make_car_project(tmp_path / "projects")
+    state_file = tmp_path / "loader_state.json"
+    monkeypatch.setattr(config, "_loader_state_path", lambda: str(state_file))
+
+    # 无记录时 last_project 为 None
+    response = client.get("/api/config/discover_projects", params={"root": str(tmp_path)})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["last_project"] is None
+
+    # load 成功后记录该项目
+    response = client.post("/api/config/load", json={"path": str(car)})
+    assert response.status_code == 200
+    response = client.get("/api/config/discover_projects", params={"root": str(tmp_path)})
+    payload = response.json()
+    assert payload["last_project"] == str(car)
+
+    # 上次项目在扫描根之外但仍然有效时，一并返回
+    other_root = tmp_path / "elsewhere"
+    other_root.mkdir()
+    response = client.get("/api/config/discover_projects", params={"root": str(other_root)})
+    payload = response.json()
+    assert payload["last_project"] == str(car)
+    assert payload["projects"] == [str(car)]
+
+    # 状态文件损坏时不报错，回退 None
+    state_file.write_text("{invalid json")
+    response = client.get("/api/config/discover_projects", params={"root": str(other_root)})
+    payload = response.json()
+    assert payload["last_project"] is None
+    assert payload["projects"] == []
+
+
 def test_find_car_projects_skips_hidden_and_no_descent(tmp_path):
     from routers.config import find_car_projects
 

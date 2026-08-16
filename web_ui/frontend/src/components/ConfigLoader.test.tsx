@@ -51,6 +51,7 @@ describe('ConfigLoader auto-discover (issue #129)', () => {
       root: '/home/x',
       projects: ['/home/x/mycar'],
       count: 1,
+      last_project: null,
     });
     mockLoadConfig.mockResolvedValue({ status: true, config: { IMAGE_H: 120 } } as never);
 
@@ -68,6 +69,40 @@ describe('ConfigLoader auto-discover (issue #129)', () => {
       root: '/home/x',
       projects: ['/home/x/mycar', '/home/x/mycar2'],
       count: 2,
+      last_project: null,
+    });
+
+    render(<ConfigLoader />);
+
+    await waitFor(() => { expect(mockDiscover).toHaveBeenCalled(); });
+    expect(mockLoadConfig).not.toHaveBeenCalled();
+    expect(useStore.getState().config).toBeNull();
+  });
+
+  it('auto-loads the last browsed project when multiple projects are discovered', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      root: '/home/x',
+      projects: ['/home/x/mycar', '/home/x/mycar2'],
+      count: 2,
+      last_project: '/home/x/mycar2',
+    });
+    mockLoadConfig.mockResolvedValue({ status: true, config: { IMAGE_H: 120 } } as never);
+
+    render(<ConfigLoader />);
+
+    await waitFor(() => { expect(mockLoadConfig).toHaveBeenCalledWith('/home/x/mycar2'); });
+    await waitFor(() => { expect(mockLoadTub).toHaveBeenCalledWith('/home/x/mycar2/data'); });
+    expect(useStore.getState().configPath).toBe('/home/x/mycar2');
+  });
+
+  it('falls back to manual browse when last project is not in discovered list', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      root: '/home/x',
+      projects: ['/home/x/mycar', '/home/x/mycar2'],
+      count: 2,
+      last_project: '/gone/mycar',
     });
 
     render(<ConfigLoader />);

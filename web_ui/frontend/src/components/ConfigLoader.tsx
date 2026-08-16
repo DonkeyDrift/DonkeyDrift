@@ -41,8 +41,7 @@ export const ConfigLoader: React.FC = () => {
       setConfig(data.config, path);
       
       const currentTubPath = useStore.getState().tubPath;
-      if (currentTubPath && currentTubPath !== '/home/dkc/projects/mycar/data'
-          && currentTubPath !== path + '/data'
+      if (currentTubPath && currentTubPath !== path + '/data'
           && currentTubPath !== path.replace(/\/$/, '') + '/data') {
         try {
           const tubData = await loadTub(currentTubPath);
@@ -90,8 +89,9 @@ export const ConfigLoader: React.FC = () => {
     }
   }, [config, configPath, handleManualLoad, setError]);
 
-  // 没有 remembered configPath 时，若环境中只有一个 mycar 项目则自动
-  // browse 并加载（issue #129）；多个项目或扫描失败时回退手动 Browse。
+  // 没有 remembered configPath 时自动发现 mycar 项目（issue #129）：
+  // 恰好一个项目→自动加载；多个项目→自动选中上次 Browse/加载过的项目；
+  // 上次项目不在发现列表或扫描失败时回退手动 Browse。
   const autoDiscoverTried = useRef(false);
   useEffect(() => {
     if (config || configPath || autoDiscoverTried.current) return;
@@ -100,8 +100,11 @@ export const ConfigLoader: React.FC = () => {
     (async () => {
       try {
         const data = await discoverProjects();
-        if (!cancelled && data.count === 1 && data.projects[0]) {
+        if (cancelled) return;
+        if (data.count === 1 && data.projects[0]) {
           await handleBrowserSelect(data.projects[0]);
+        } else if (data.last_project && data.projects.includes(data.last_project)) {
+          await handleBrowserSelect(data.last_project);
         }
       } catch {
         // 自动发现失败时保持现状，用户手动 Browse 选择

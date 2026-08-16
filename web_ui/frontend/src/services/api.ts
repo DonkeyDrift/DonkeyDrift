@@ -121,6 +121,7 @@ export const discoverProjects = async (root?: string): Promise<{
   root: string;
   projects: string[];
   count: number;
+  last_project: string | null;
 }> => {
   const response = await api.get('/config/discover_projects', { params: { root } });
   return response.data;
