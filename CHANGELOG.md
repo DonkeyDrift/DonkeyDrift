@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-16 (14)
+
+- fix(complete,actuator): RC 手动驾驶时将手柄实际控制量合并进 tub 录制通道（#133）
+  - 根因：固件 MANUAL 模式下车由 RC 接收机直驱，Web/手柄通道 `user/angle`、`user/throttle` 全程为 0，TubWriter 只录这两个键，导致问题 tub（11656 帧）9942 条有效记录全为 0.0、Tub Editor 曲线贴 0 轴；固件串口 T 帧上行的实际控制量已由 ArdRc 发布到 `rc/steering`、`rc/throttle`（-1..1）但未进录制通道。
+  - `donkeycar/parts/actuator.py`：新增 `RcRecordMerge` part——仅 `rc/mode==0`（MANUAL）、非 park 锁定且 rc 值有效（数值、非 bool）时用 `rc/steering`、`rc/throttle` 覆盖 `user/angle`、`user/throttle` 供 TubWriter 记录；SEMI/FULL AUTO、park、`rc/mode` 未知（仿真等）时原样透传，不改变既有录制行为，避免"RC 怠速值覆盖跳 0"问题复发。
+  - `donkeycar/templates/complete.py`：TubWriter 注册前接入 RcRecordMerge（与 mycar 运行实例对齐）；ARDUINO_CONTROLLER 传动链补齐 ArdRc 块（发布 `rc/steering`、`rc/throttle`、`rc/mode`、`rc/park`）。
+  - 不新增 tub 字段，既有 tub manifest inputs/types 一致性断言不受影响；修复不回溯历史数据，既有全 0 tub 需重新录制；SEMI_AUTO（rc/mode==1）录制仍走旧逻辑。
+  - 测试：新增 `tests/test_rc_record_merge.py` 8 项单元测试（MANUAL 合并、SEMI/FULL AUTO/park/未知模式/无效值透传、bool 拒绝、模板接线断言），全部通过；真实 donkeycar Vehicle 循环仿真验证 MANUAL 下合并、SEMI 下透传；回归 `pytest tests` 107 项通过、与改动相关套件（test_actuator/test_template/test_tubwriter/test_vehicle/test_launch）39 过 2 跳、`donkeycar/tests` 排除 test_launch 全过——完整连跑在本机及 origin/Tony 基线均于 test_provisioning 附近忙转挂起，系既有环境问题，与本次改动无关。
+  - 涉及文件：`donkeycar/parts/actuator.py`、`donkeycar/templates/complete.py`、`tests/test_rc_record_merge.py`（新增）
+
 ## 2026-08-16 (13)
 
 - feat(web-ui): Loader 多 mycar 项目时自动 Browse 上次用过的项目（#129 增强）
