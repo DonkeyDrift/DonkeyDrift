@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-16 (6)
+
+- fix(launcher): D 页点 6 打开 Drive 后页面加载不出来——跳转不等前端就绪 + 端口可能被二次改选（#134）
+  - 根因：`_launch_drive` 在 `Popen` 返回后立即报 launched，跳转页重定向到尚未监听的 vite 端口（Vite 冷启动/首次 npm 依赖检查需数秒甚至更久），浏览器连接拒绝/白屏；且 launcher 预选端口与 `donkey web` 内部二次改选后的实际端口可能不一致，跳转到错误端口。
+  - `donkeycar/launcher/server.py`：新增 `_wait_for_web_ready(web_proc, frontend_port, backend_port, timeout=90s)`——等 `donkey web` 就绪写入实例登记（`~/.donkeycar/webui.json`，登记里是 vite/uvicorn 实际监听端口，天然覆盖端口被占二次改选；以 `started_at` 不早于本次调用起点判定为本次启动写入），再 GET 实际 frontend_port 的 `/` 直到可访问才返回；web 进程提前退出或超时不报错，透出 warning 照常跳转。
+  - `_launch_drive`：新起 web 时先等就绪、回读实际端口再返回 launched（跳转页拿到响应时前端已能服务页面）；车进程改在就绪后启动，`DRIVE_API_SERVER_URL` 连接实际后端端口；返回 url/端口均为实际值；复用存活实例路径行为不变（不起 web、不等就绪）。
+  - `donkeycar/webui_instance.py`：新增 `probe_http_ok` 公开别名（原 `_probe_http_ok`），供 launcher 跨模块复用 HTTP 探测。
+  - 测试：新增 `tests/test_launcher_drive_launch.py` 9 项——`_wait_for_web_ready` 新登记回读实际端口、vite 二次改选跟随登记端口、web 提前退出带 warning、登记不出现超时带 warning、早于调用起点的陈旧登记不认；`_launch_drive` 冷启动顺序（先 web 后车、env 连实际后端、url 用实际前端端口）、就绪超时透出 warning、复用实例跳过 web 与等待、无 mycar 项目直接报错；全量 `pytest tests/` 108 项通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/webui_instance.py`、`tests/test_launcher_drive_launch.py`（新增）
+
 ## 2026-08-16 (5)
 
 - feat(web-ui): Loader 自动发现唯一 mycar 项目并自动加载，无需人工 Browse（#129）

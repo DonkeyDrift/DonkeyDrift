@@ -117,6 +117,10 @@ def _probe_http_ok(port, path="/", host="127.0.0.1",
         return False
 
 
+# 公开别名：launcher 等跨模块复用 HTTP 探测（issue #134）
+probe_http_ok = _probe_http_ok
+
+
 def find_live_instance(instance_file=None):
     """找存活的 Web UI 实例，返回登记 dict；没有（或已失效）返回 None。
 

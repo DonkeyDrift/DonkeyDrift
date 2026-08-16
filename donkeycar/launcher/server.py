@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -21,7 +22,9 @@ from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import launch_kimi_code_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 from donkeycar.webui_instance import (
+    probe_http_ok,
     find_live_instance,
+    read_instance,
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
@@ -111,6 +114,53 @@ _processes = {
     "project": None,
 }
 
+# issue #134：donkey web 就绪等待（实例登记 + 前端 HTTP 探测）总超时（秒）。
+# 首次启动可能触发 npm 依赖检查/安装，取宽裕值。
+WEB_READY_TIMEOUT_S = 90.0
+
+
+def _wait_for_web_ready(web_proc, frontend_port, backend_port,
+                        timeout=None):
+    """等 donkey web 就绪，返回 (实际 frontend_port, 实际 backend_port, warning)。
+
+    issue #134：`donkey web` 在后端端口可连后才写实例登记
+    （~/.donkeycar/webui.json），登记里是 vite/uvicorn 实际监听的端口——
+    即使端口被占二次改选，这里也能回读到正确值。两级等待：
+
+    1. 等出现 started_at 不早于本函数调用时刻的新登记（即本次启动写入，
+       覆盖 pid 匹配与并发链路代写两种情况）；
+    2. GET 实际 frontend_port 的 / 直到通（vite 冷启动完成、真正可服务
+       页面）。
+
+    web 进程提前退出（依赖缺失等）或任一级超时：不抛错，带 warning
+    返回入参端口，让跳转照常进行、用户可见提示。
+    """
+    if timeout is None:
+        timeout = WEB_READY_TIMEOUT_S
+    started_after = time.time()
+    deadline = started_after + timeout
+    inst = None
+    while time.time() < deadline:
+        inst = read_instance()
+        if inst and float(inst.get("started_at") or 0.0) >= started_after:
+            break
+        if web_proc.poll() is not None:
+            return (frontend_port, backend_port,
+                    "donkey web 进程提前退出，页面可能加载失败")
+        time.sleep(0.5)
+    else:
+        return (frontend_port, backend_port,
+                f"Web UI 在 {timeout:.0f}s 内未就绪，页面可能仍在启动")
+
+    actual_frontend = int(inst["frontend_port"])
+    actual_backend = int(inst["backend_port"])
+    while time.time() < deadline:
+        if probe_http_ok(actual_frontend, "/"):
+            return (actual_frontend, actual_backend, None)
+        time.sleep(0.5)
+    return (actual_frontend, actual_backend,
+            "前端端口已登记但 HTTP 探测未通过，页面可能仍在启动")
+
 
 def _launch_drive():
     """启动 donkey web + manage.py drive，返回结果字典。
@@ -119,6 +169,11 @@ def _launch_drive():
     硬件），再探测存活的 Web UI 实例（~/.donkeycar/webui.json）——
     存活则复用、只起新车进程；没有才用默认端口（8000/5188）新起
     `donkey web`（由其自行登记实例）。不再 pkill 互杀、不再端口漂移。
+
+    issue #134：新起 web 时等它就绪（实例登记出现 + 前端 HTTP 探测
+    通过）才返回 launched，并回读登记里的实际端口——跳转页重定向的
+    端口一定是 vite 真正监听的端口；车进程也改在就绪后启动，连接
+    实际后端端口。探测超时不报错，返回 warning 提示照常跳转。
     """
     with _proc_lock:
         # 只杀上一次的车进程；web 前后端进程保留复用
@@ -160,15 +215,8 @@ def _launch_drive():
             web_cmd.extend(["--backend-port", str(backend_port)])
             web_cmd.extend(["--frontend-port", str(frontend_port)])
 
-        # 构建 car 命令
-        car_cmd = [sys.executable, "manage.py", "drive"]
-
-        # 设置环境变量
-        car_env = os.environ.copy()
-        car_env["DRIVE_API_SERVER_URL"] = \
-            f"ws://localhost:{backend_port}/api/drive/ws"
-
-        # 启动进程
+        # 启动 web 进程（复用实例时不起）
+        warning = None
         try:
             if inst is None:
                 web_proc = subprocess.Popen(
@@ -176,6 +224,36 @@ def _launch_drive():
                     stdin=subprocess.DEVNULL,
                     creationflags=creationflags,
                 )
+        except FileNotFoundError:
+            return {
+                "status": "error",
+                "error": "未找到 donkey 命令，请确认 donkeycar 已正确安装",
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"启动进程失败: {e}",
+            }
+
+        # issue #134：新起 web 时等它真正就绪再继续——等 donkey web 写入
+        # 实例登记（内含 vite/uvicorn 实际监听的端口，覆盖端口被占二次
+        # 改选的情况），并探测前端 HTTP 可访问；跳转页拿到 launched 时
+        # 前端已能服务页面。车进程也改在就绪后启动，使其连接实际后端。
+        if inst is None:
+            frontend_port, backend_port, warning = _wait_for_web_ready(
+                web_proc, frontend_port, backend_port,
+            )
+
+        # 构建 car 命令（DRIVE_API_SERVER_URL 用实际后端端口）
+        car_cmd = [sys.executable, "manage.py", "drive"]
+
+        # 设置环境变量
+        car_env = os.environ.copy()
+        car_env["DRIVE_API_SERVER_URL"] = \
+            f"ws://localhost:{backend_port}/api/drive/ws"
+
+        # 启动车进程
+        try:
             car_proc = subprocess.Popen(
                 car_cmd,
                 cwd=str(project_path),
@@ -186,7 +264,7 @@ def _launch_drive():
         except FileNotFoundError:
             return {
                 "status": "error",
-                "error": "未找到 donkey 命令，请确认 donkeycar 已正确安装",
+                "error": f"未找到 {sys.executable}，无法启动车进程",
             }
         except Exception as e:
             return {
@@ -213,7 +291,7 @@ def _launch_drive():
             "backend_port": backend_port,
             "frontend_port": frontend_port,
             "project": str(project_path),
-            "warning": None,
+            "warning": warning,
         }
 
 
