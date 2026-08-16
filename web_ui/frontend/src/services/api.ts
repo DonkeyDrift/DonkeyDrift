@@ -146,6 +146,48 @@ export const restoreRecords = async (indexes: number[]) => {
   return response.data;
 };
 
+export interface TubSession {
+  session_id: string;
+  record_count: number;
+  first_index: number;
+  last_index: number;
+  start_time_ms: number | null;
+  end_time_ms: number | null;
+}
+
+export interface TubRecord {
+  [key: string]: unknown;
+  _index?: number;
+  _session_id?: string;
+  _timestamp_ms?: number;
+}
+
+export const listTubSessions = async (tubPath: string) => {
+  const response = await api.get('/tub/sessions', { params: { tubPath } });
+  return response.data as { status: boolean; path: string; sessions: TubSession[] };
+};
+
+export const getSessionRecords = async (tubPath: string, sessionId: string) => {
+  const response = await api.get('/tub/session_records', {
+    params: { tubPath, sessionId },
+  });
+  return response.data as { status: boolean; path: string; records: TubRecord[] };
+};
+
+export const deleteTubSession = async (tubPath: string, sessionId: string) => {
+  const response = await api.post('/tub/delete_session', {
+    tub_path: tubPath,
+    session_id: sessionId,
+  });
+  return response.data as {
+    status: boolean;
+    message: string;
+    deleted_count: number;
+    record_count: number | null;
+    deleted_indexes: number[] | null;
+  };
+};
+
 export const getImageUrl = (path: string, tubPath?: string) => {
   let url = `${API_URL}/tub/image?path=${encodeURIComponent(path)}`;
   if (tubPath) {

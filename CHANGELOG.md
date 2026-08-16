@@ -1,5 +1,22 @@
 # 变更日志
 
+## 2026-08-16 (7)
+
+- feat(web-ui): Tub 页面新增"录制视频库"分区，按 session 列出每次录制的视频并可整条播放/删除（#131）
+  - 需求：Web UI Tub 页面新增录制视频库——左侧列出 mycar 录制的每条视频（同一 Tub 内按 `_session_id` 分组，一次 drive 启动 = 一条录制），右侧播放器逐帧播放该 session 图像，支持整条删除（带确认弹窗），删除后 Navigator/Editor 等其它板块不再显示对应帧。
+  - 后端 `web_ui/backend/routers/tub.py`：
+    - `GET /sessions?tubPath=`：以只读 Tub 迭代 live records 按 `_session_id` 分组，返回每条录制的 `session_id`/`record_count`/`first_index`/`last_index`/`start_time_ms`/`end_time_ms`，按 `first_index` 排序（写入时间序），用完即 `close()`。
+    - `GET /session_records?tubPath=&sessionId=`：返回单条录制全部 live records，供播放器逐帧取图（图片仍走既有 `GET /api/tub/image`，未改动）。
+    - `POST /delete_session`：收集该 session 所有 `_index`（空则 404），用可写 Tub 实例调 `delete_records(indexes)` 做 manifest 软删（与逐帧删除同机制）；若删的是当前已加载 tub，则重建全局 `current_tub`/`current_records`，其它板块数据即刻同步。
+    - 新增 `SessionDeleteRequest`（`tub_path` + `session_id`）Pydantic 模型。
+  - 前端：
+    - `web_ui/frontend/src/services/api.ts`：新增 `TubSession`/`TubRecord` 接口与 `listTubSessions`/`getSessionRecords`/`deleteTubSession` 三个 API 函数。
+    - `web_ui/frontend/src/components/TubLibrary.tsx`（新增）：左列 session 列表（选中高亮、每项带删除图标、显示 `_timestamp_ms` 格式化的开始时间与帧数）+ 右侧 canvas 播放器：预取 30 帧（Navigator 仅 10 帧）、图片未就绪时停在当前帧等待而不跳帧（吸取 #128 播放卡顿教训）、支持播放/暂停/循环/逐帧步进/进度条拖动；底部整条删除按钮触发自绘确认弹窗（fixed 遮罩 + zinc-900 卡片，项目无现成 Modal 组件），确认后调 `delete_session` 并刷新列表 + 重新 `loadTub` 同步全局 store。
+    - `web_ui/frontend/src/i18n/messages/tublibrary.ts`（新增）：zh/en 各 19 条 `tubLibrary.*` 文案；`web_ui/frontend/src/i18n/messages/index.ts` 注册该模块。
+    - `web_ui/frontend/src/App.tsx`：TubManagerPage 中 `<TubNavigator />` 之后插入 `<TubLibrary />`。
+  - 测试：新增 `web_ui/backend/tests/test_tub_sessions.py` 4 项——两次独立 Tub 实例各写 3+2 帧模拟两条录制，验证 sessions 列表分组/排序/时间戳、session_records 过滤、delete_session 软删后 sessions 与全局加载记录均不再包含已删帧（注意同一 Tub 实例不会产生新 session_id，测试须每次新开实例）；4 项通过。前端 `npm run build`（tsc -b + vite）无错误，`npm test` 14 文件 78 例通过。
+  - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/backend/tests/test_tub_sessions.py`（新增）、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/TubLibrary.tsx`（新增）、`web_ui/frontend/src/i18n/messages/tublibrary.ts`（新增）、`web_ui/frontend/src/i18n/messages/index.ts`、`web_ui/frontend/src/App.tsx`
+
 ## 2026-08-16 (6)
 
 - fix(launcher): D 页点 6 打开 Drive 后页面加载不出来——跳转不等前端就绪 + 端口可能被二次改选（#134）

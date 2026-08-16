@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { SidePanel } from './components/SidePanel';
 import { TubNavigator } from './components/TubNavigator';
 import { TubEditor } from './components/TubEditor';
+import { TubLibrary } from './components/TubLibrary';
 import { useStore } from './store/useStore';
 import { getApiErrorMessage, loadTub } from './services/api';
 import { useTranslation, t as translate } from '@/i18n';
@@ -88,6 +89,7 @@ function TubManagerPage() {
 
       <div className="space-y-6">
         <TubNavigator />
+        <TubLibrary />
         <TubEditor />
       </div>
     </>
