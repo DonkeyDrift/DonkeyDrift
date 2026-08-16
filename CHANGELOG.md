@@ -1,5 +1,22 @@
 # 变更日志
 
+## 2026-08-16 (12)
+
+- fix(web-ui,templates): 修复 Tub Navigator 播放录制视频卡顿（#128），并让 WEBCAM 接受 CAMERA_FRAMERATE 配置
+  - 排查结论（issue 内已实测）：录制侧帧间隔均匀（17ms 中位、>25ms 零次）无丢帧；卡顿全部在播放侧——后端每帧全量磁盘读 + 前端帧推进与图片加载解耦导致画面冻结跳帧。
+  - 后端 `web_ui/backend/routers/tub.py`（`GET /api/tub/image`）：
+    - 新增按 `(mtime_ns, size)` 校验的字节级 LRU 缓存（128 MiB 预算），命中直接从内存回图不再碰磁盘；超预算淘汰最旧条目。
+    - 响应加 `ETag` 与 `Cache-Control: private, max-age=86400`，支持 `If-None-Match` 304 协商；重复播放同一 tub 时浏览器 disk cache 参与命中。
+    - 原先两处 `FileResponse` 路径统一收敛为缓存读取逻辑，404 分支不变。
+  - 前端 `web_ui/frontend/src/components/TubNavigator.tsx`：
+    - 预取窗口 10 帧 → 60 帧（PREFETCH_AHEAD，覆盖 ~1s），并用 pump 模式加并发上限（PREFETCH_CONCURRENCY=6，对齐 HTTP/1.1 同源连接数），预取完成一个补位一个，不再几十个请求挤占连接。
+    - 解码位图缓存复用 #135 的 LRU 上限（`touchImageCache`，240 条、命中刷新位置、超限淘汰最旧），预取写入同一缓存，长 tub 播放不再无限吃内存。
+    - FPS 角标改为统计 canvas 实际换帧率（drawImage 时按 URL 去重累计），画面冻结时角标如实下降，可自检卡顿；原先统计 rAF 回调频率（恒 ~60）的问题一并去除。
+    - 绘制路径去掉多余的一层 `requestAnimationFrame` 包裹，未就绪帧的加载回调直接绘制，减少一帧延迟。
+  - 附带修复 `donkeycar/templates/complete.py`、`basic.py`：`Webcam` 创建传入 `framerate=cfg.CAMERA_FRAMERATE`（原先 WEBCAM 用默认 20Hz，60fps 主循环里同一帧被重复记录约 3 次）；顺带修复 complete.py stereo 分支 `Webcam(..., iCam=...)` 传了不存在的参数（一实例化即 TypeError）改为 `camera_index=0/1`，basic.py 用 `getattr(cfg, 'CAMERA_INDEX', 0)` 兜底（cfg_basic 未定义该项）。
+  - 测试：新增 `tests/test_tub_image_cache.py` 5 项（ETag/Cache-Control 头、缓存命中不读磁盘、If-None-Match 304、文件变更失效、LRU 超预算淘汰）与 `tests/test_webcam_framerate.py` 3 项（complete/basic 模板 Webcam 必传 framerate、stereo 分支不得再用 iCam）；rebase 到 #135 后发现其漏更新的 `tests/test_tub_manager_auto_refresh.py` 断言仍指向旧路由刷新逻辑（在 Tony 上即失败），同步改为断言 `loadedTubPath`/`tubRefreshToken` 新逻辑；前端 `tsc -b --noEmit` 通过、vitest 89 例（18 文件）通过、eslint 无告警、后端 `tests/` 125 项全过。
+  - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/frontend/src/components/TubNavigator.tsx`、`donkeycar/templates/complete.py`、`donkeycar/templates/basic.py`、`tests/test_tub_image_cache.py`（新增）、`tests/test_webcam_framerate.py`（新增）、`tests/test_tub_manager_auto_refresh.py`
+
 ## 2026-08-16 (11)
 
 - feat(web-ui): 录制视频库列表改为最新录制排在最上面

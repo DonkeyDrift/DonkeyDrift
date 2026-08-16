@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
+import hashlib
 import os
 import json
+from collections import OrderedDict
 from donkeycar.parts.tub_v2 import Tub
 from donkeycar.pipeline.types import TubRecord
 import logging
@@ -10,6 +12,54 @@ from typing import List, Optional, Any, Dict
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 图像缓存（issue #128）：播放器 60fps 逐帧取图，若每次请求都从磁盘读
+# 原始 JPEG，磁盘/传输稍慢就会击穿前端预取窗口造成卡顿。这里按
+# (mtime, size) 做字节级 LRU 缓存：命中时直接从内存回图，不再碰磁盘。
+# ---------------------------------------------------------------------------
+IMAGE_CACHE_MAX_BYTES = 128 * 1024 * 1024  # 128 MiB
+_image_cache: "OrderedDict[str, tuple[int, int, bytes]]" = OrderedDict()
+_image_cache_bytes = 0
+
+
+def _cache_get(path: str, stat: os.stat_result) -> Optional[bytes]:
+    """命中返回文件字节，否则 None；命中时把条目移到 LRU 最新端。"""
+    entry = _image_cache.get(path)
+    if entry is None:
+        return None
+    mtime_ns, size, data = entry
+    if mtime_ns != stat.st_mtime_ns or size != stat.st_size:
+        # 文件已变化，淘汰旧条目
+        _cache_evict(path)
+        return None
+    _image_cache.move_to_end(path)
+    return data
+
+
+def _cache_evict(path: str) -> None:
+    global _image_cache_bytes
+    entry = _image_cache.pop(path, None)
+    if entry is not None:
+        _image_cache_bytes -= entry[2].__len__()
+
+
+def _cache_put(path: str, stat: os.stat_result, data: bytes) -> None:
+    global _image_cache_bytes
+    if len(data) > IMAGE_CACHE_MAX_BYTES:
+        return  # 单文件超过总预算，不值得缓存
+    _cache_evict(path)
+    _image_cache[path] = (stat.st_mtime_ns, stat.st_size, data)
+    _image_cache_bytes += len(data)
+    while _image_cache_bytes > IMAGE_CACHE_MAX_BYTES and len(_image_cache) > 1:
+        _image_evict_oldest()
+
+
+def _image_evict_oldest() -> None:
+    global _image_cache_bytes
+    path, entry = next(iter(_image_cache.items()))
+    _image_cache.pop(path)
+    _image_cache_bytes -= entry[2].__len__()
 
 # Global state to hold the currently loaded tub
 # In a multi-user environment, this should be session-based or handled differently.
@@ -95,36 +145,53 @@ async def get_records(offset: int = 0, limit: int = 100):
     }
 
 @router.get("/image")
-async def get_image(path: str, tubPath: Optional[str] = None):
+async def get_image(path: str, tubPath: Optional[str] = None, request: Request = None):
     # path is relative to the tub images directory usually, or we assume it's the full path if we constructing it
     # In Tub v2, record contains "cam/image_array": "0_cam_image_array_.jpg"
     # And images are in tub_path/images/
-    
+
     global current_tub_path
     target_tub_path = tubPath if tubPath else current_tub_path
-    
+
     if not target_tub_path:
         raise HTTPException(status_code=400, detail="No tub loaded")
-        
+
     # Security check: ensure path doesn't go outside
     # For a local tool, less critical, but good practice.
-    
+
     # If the path comes from the record, it's just the filename usually
     # But sometimes it might include 'images/' prefix if coming from different sources
     clean_path = path.replace('images/', '').replace('images\\', '')
-    
+
     image_full_path = os.path.join(target_tub_path, 'images', clean_path)
-    
+
     if not os.path.exists(image_full_path):
          # Try without 'images' subdir just in case structure is different
          image_full_path_alt = os.path.join(target_tub_path, clean_path)
          if os.path.exists(image_full_path_alt):
-             return FileResponse(image_full_path_alt)
-             
-         logger.error(f"Image not found: {image_full_path}")
-         raise HTTPException(status_code=404, detail=f"Image not found: {clean_path}")
-         
-    return FileResponse(image_full_path)
+             image_full_path = image_full_path_alt
+         else:
+             logger.error(f"Image not found: {image_full_path}")
+             raise HTTPException(status_code=404, detail=f"Image not found: {clean_path}")
+
+    stat = os.stat(image_full_path)
+    # ETag 基于 (路径, mtime, size)，配合 Cache-Control 让浏览器 disk cache
+    # 也参与：重复播放同一 tub 时大部分帧 304/内存命中，磁盘读趋近于 0。
+    etag = f'"{hashlib.md5(image_full_path.encode("utf-8", "ignore")).hexdigest()}-{stat.st_mtime_ns}-{stat.st_size}"'
+    if request is not None and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, max-age=86400"})
+
+    data = _cache_get(image_full_path, stat)
+    if data is None:
+        with open(image_full_path, "rb") as f:
+            data = f.read()
+        _cache_put(image_full_path, stat, data)
+
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"ETag": etag, "Cache-Control": "private, max-age=86400"},
+    )
 
 @router.get("/sessions")
 async def list_sessions(tubPath: str):
