@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Clapperboard,
   Pause,
+  Pin,
   Play,
   Trash2,
 } from 'lucide-react';
@@ -42,6 +43,27 @@ const findImagePath = (record: TubRecord | undefined) => {
   return key && typeof record[key] === 'string' ? (record[key] as string) : null;
 };
 
+const pinnedKey = (tubPath: string) => `tubLibrary.pinned.${tubPath}`;
+
+const loadPinned = (tubPath: string): string[] => {
+  try {
+    const raw = localStorage.getItem(pinnedKey(tubPath));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePinned = (tubPath: string, ids: string[]) => {
+  try {
+    localStorage.setItem(pinnedKey(tubPath), JSON.stringify(ids));
+  } catch {
+    // localStorage unavailable (private mode etc.): pinning stays session-only
+  }
+};
+
 export const TubLibrary: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
@@ -59,6 +81,7 @@ export const TubLibrary: React.FC = () => {
   const [pendingDelete, setPendingDelete] = useState<TubSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
+  const [pinned, setPinned] = useState<string[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -91,6 +114,7 @@ export const TubLibrary: React.FC = () => {
     setRecords([]);
     setFrame(0);
     setIsPlaying(false);
+    setPinned(tubPath ? loadPinned(tubPath) : []);
     if (tubPath) {
       void refreshSessions(tubPath);
     } else {
@@ -222,8 +246,7 @@ export const TubLibrary: React.FC = () => {
     };
   }, [isPlaying, records, frameInterval]);
 
-  const confirmDelete = useCallback(async () => {
-    if (!pendingDelete || !tubPath) return;
+  const confirmDelete = useCallback(async () => {    if (!pendingDelete || !tubPath) return;
     setDeleting(true);
     setError(null);
     try {
@@ -232,6 +255,13 @@ export const TubLibrary: React.FC = () => {
       if (selected?.session_id === pendingDelete.session_id) {
         setSelected(null);
       }
+      // Drop the deleted clip from the pinned set too
+      setPinned((prev) => {
+        if (!prev.includes(pendingDelete.session_id)) return prev;
+        const next = prev.filter((id) => id !== pendingDelete.session_id);
+        savePinned(tubPath, next);
+        return next;
+      });
       await refreshSessions(tubPath);
       // Keep the global tub in sync so other panels drop the deleted frames too
       try {
@@ -255,6 +285,25 @@ export const TubLibrary: React.FC = () => {
   }, [pendingDelete, tubPath, selected, refreshSessions, setTub, t]);
 
   const hasRecords = records.length > 0;
+
+  // Pinned clips float to the top; both groups keep the API's newest-first order
+  const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
+  const sortedSessions = useMemo(() => {
+    const pinnedItems = sessions.filter((s) => pinnedSet.has(s.session_id));
+    const rest = sessions.filter((s) => !pinnedSet.has(s.session_id));
+    return [...pinnedItems, ...rest];
+  }, [sessions, pinnedSet]);
+
+  const togglePin = (session: TubSession) => {
+    if (!tubPath) return;
+    setPinned((prev) => {
+      const next = prev.includes(session.session_id)
+        ? prev.filter((id) => id !== session.session_id)
+        : [...prev, session.session_id];
+      savePinned(tubPath, next);
+      return next;
+    });
+  };
 
   return (
     <Card>
@@ -291,8 +340,9 @@ export const TubLibrary: React.FC = () => {
                     {t('tubLibrary.noRecordings')}
                   </div>
                 )}
-                {sessions.map((session) => {
+                {sortedSessions.map((session) => {
                   const isSelected = selected?.session_id === session.session_id;
+                  const isPinned = pinnedSet.has(session.session_id);
                   return (
                     <button
                       key={session.session_id}
@@ -316,6 +366,30 @@ export const TubLibrary: React.FC = () => {
                             : ''}
                         </div>
                       </div>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={isPinned ? t('tubLibrary.unpinAria') : t('tubLibrary.pinAria')}
+                        title={isPinned ? t('tubLibrary.unpinAria') : t('tubLibrary.pinAria')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(session);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            togglePin(session);
+                          }
+                        }}
+                        className={`p-1.5 rounded-md shrink-0 cursor-pointer transition-colors ${
+                          isPinned
+                            ? 'text-cyan-400 hover:bg-cyan-500/10'
+                            : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800/60'
+                        }`}
+                      >
+                        <Pin className={`w-4 h-4 ${isPinned ? 'fill-current' : ''}`} />
+                      </span>
                       <span
                         role="button"
                         tabIndex={0}
