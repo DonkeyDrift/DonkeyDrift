@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-16 (19)
+
+- feat(web-ui,launcher): 语言切换改为静音式单按钮，默认跟随浏览器语言（#139）
+  - `web_ui/frontend/src/components/LanguageSwitcher.tsx`：从中文/English 两段式 pill 控件改为单图标按钮——显示当前语言（中文显示"中"、英文显示"EN"），单击在中/英之间切换；`aria-pressed` 反映当前是否中文、`aria-label` 提示切换目标语言；跟随浏览器语言与 localStorage 持久化逻辑由 i18n Provider 已有实现，无需改动。
+  - `web_ui/frontend/src/components/LanguageSwitcher.test.tsx`：测试同步更新为单按钮断言（按钮文字、aria-pressed、单击切换、双击回切、持久化、浏览器语言跟随），6 项通过。
+  - `donkeycar/launcher/server.py`（D 启动页 :8090）：移除桌面端 `langTabs` 分段式语言切换和移动端 `langFab`+`langMenu` 弹出菜单，统一改为 `#langBtn` 单按钮——显示"中"/"EN"，单击调 `toggleLanguage()` 切换；新增 `.langBtn` CSS（深色/浅色变体）、移除 `.langTabs`/`.langFab`/`.langMenu` 全部相关 CSS 与 JS（`toggleLanguageMenu`/`closeLanguageMenu`）；`applyLanguage()` 中更新按钮文字与 active 状态；跟随浏览器语言与 localStorage 持久化逻辑不变。
+  - DD 前端 `npm run build` 通过、`npm test` 93 项通过；D 启动页 `pytest tests/test_launcher_language_autodetect.py` 2 项 + `tests/test_launcher_menu_actions.py` 37 项通过。
+
 ## 2026-08-16 (18)
 
 - feat(web-ui): Pilot Arena 自动扫描模型，唯一模型时自动选中并加载预测（#136）
