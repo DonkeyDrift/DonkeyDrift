@@ -21,9 +21,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }, [location.pathname]);
 
   const navItems = [
+    { path: '/drive', labelKey: 'common.nav.drive' },
     { path: '/', labelKey: 'common.nav.tubManager' },
     { path: '/trainer', labelKey: 'common.nav.trainer' },
-    { path: '/drive', labelKey: 'common.nav.drive' },
     { path: '/pilot', labelKey: 'common.nav.pilotArena' },
     { path: '/connector', labelKey: 'common.nav.carConnector' },
   ];
