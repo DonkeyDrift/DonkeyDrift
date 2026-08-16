@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-16 (17)
+
+- feat(web-ui): 完成 Trainer 页面中文翻译（#137）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：全部 zh 词条（约 65 条）从英文原文翻译为中文，包括标题、标签页、配置项、日志、状态、删除确认弹窗等；带插值参数的词条（`{name}`/`{count}`/`{path}`/`{loss}`/`{message}`）占位符保持不变；状态标签译为 待开始/运行中/已完成/失败/已停止。
+  - 文件头注释更新：原"zh values mirror the current UI strings verbatim"已失效，改为说明 zh 为完整中文翻译。
+  - en 词条保持不变。前端 `npm run build` 通过。
+
 ## 2026-08-16 (16)
 
 - feat(web-ui): DD 顶部导航标签顺序调整为 Drive → TM → Trainer → PA → CC（#138）
