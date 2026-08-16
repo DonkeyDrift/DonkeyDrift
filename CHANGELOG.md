@@ -20,6 +20,12 @@
   - 测试：新增 `tests/test_launcher_menu_actions.py` 37 项——`_launch_web_ui`（复用/新起/PID 登记/缺 donkey 二进制）、`_create_car`（非法名/已存在 409/成功切换项目/命令行与 TUI 一致/失败带 stderr）、`_open_project`（越界/无效/成功）、数据往返（backup→clear→restore 文件回来）、restore 穿越名/损坏归档/data 前缀归档、`_next_train_model` 递增、HTTP 端点（内存 ThreadingHTTPServer 全路由）、前端静态断言（接线函数、I18N 键、terminal.html autoCmd）；fixture 统一打桩 `_save_last_project_path_local` 防止测试写真实 `~/.donkeyrc`。全量 `pytest tests/` 136 项通过。
   - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/terminal_static/terminal.html`、`tests/test_launcher_menu_actions.py`（新增）
 
+- feat(web-ui): 录制视频库支持 Pin 置顶（#131 迭代）
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：每条录制项右侧（删除图标左边）新增 Pin 按钮（lucide `Pin`）——点击置顶到列表最上方，已置顶项图标填充并高亮 cyan 色，再点取消；置顶组与非置顶组内部均保持时间降序（最新在上）。
+  - 置顶状态按 tubPath 存 `localStorage`（key `tubLibrary.pinned.<tubPath>`，存 session_id 数组），纯前端状态、不涉及后端 API；localStorage 不可用（隐私模式等）时置顶仅本次会话内生效，不报错。删除录制时同步从置顶集合移除该 session。
+  - i18n：`tublibrary.ts` 新增 `tubLibrary.pinAria`（置顶这条录制 / Pin this recording to top）、`tubLibrary.unpinAria`（取消置顶 / Unpin this recording）。
+  - 测试：`TubLibrary.test.tsx` 新增置顶用例——点击较旧录制的 Pin 后移到列表首位并写入 localStorage，取消置顶后恢复最新在前顺序；前端 `npm test` 18 文件 92 例、`npm run build` 均通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubLibrary.tsx`、`web_ui/frontend/src/components/TubLibrary.test.tsx`、`web_ui/frontend/src/i18n/messages/tublibrary.ts`
 
 ## 2026-08-16 (14)
 

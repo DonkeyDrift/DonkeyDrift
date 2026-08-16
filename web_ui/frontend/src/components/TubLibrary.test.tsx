@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TubLibrary } from './TubLibrary';
 import { useStore } from '../store/useStore';
 import { getSessionRecords, listTubSessions } from '../services/api';
@@ -36,6 +36,15 @@ const sessions = [
     end_time_ms: Date.parse('2026-08-16T10:00:03Z'),
   },
 ];
+
+// Same formatting as the component (local timezone), so expectations are TZ-agnostic
+const fmt = (ms: number) => {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+const newestLabel = fmt(sessions[0].start_time_ms);
+const oldestLabel = fmt(sessions[1].start_time_ms);
 
 describe('TubLibrary auto-select newest recording', () => {
   beforeEach(() => {
@@ -73,5 +82,61 @@ describe('TubLibrary auto-select newest recording', () => {
     render(<TubLibrary />);
 
     expect(listTubSessions).not.toHaveBeenCalled();
+  });
+});
+
+describe('TubLibrary pin to top', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: [
+        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+      ],
+    });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+    });
+  });
+
+  const listOrder = async () => {
+    const newest = await screen.findAllByText(newestLabel);
+    const oldest = await screen.findAllByText(oldestLabel);
+    // Compare DOM order of the two labels via compareDocumentPosition
+    return newest[0].compareDocumentPosition(oldest[0]) & Node.DOCUMENT_POSITION_FOLLOWING
+      ? [newestLabel, oldestLabel]
+      : [oldestLabel, newestLabel];
+  };
+
+  it('moves an older recording to the top when pinned, and restores it when unpinned', async () => {
+    render(<TubLibrary />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    });
+
+    // Pin buttons appear in list order: first = newest, second = oldest
+    const pinButtons = screen.getAllByRole('button', { name: '置顶这条录制' });
+    expect(pinButtons).toHaveLength(2);
+    fireEvent.click(pinButtons[1]);
+
+    // Pinned (older) recording now renders first
+    let order = await listOrder();
+    expect(order).toEqual([oldestLabel, newestLabel]);
+    // Persisted per tub path
+    expect(localStorage.getItem('tubLibrary.pinned./tmp/tub')).toBe(JSON.stringify(['26-08-16_0']));
+
+    // Unpin restores the newest-first order
+    const unpinButton = await screen.findByRole('button', { name: '取消置顶' });
+    fireEvent.click(unpinButton);
+    order = await listOrder();
+    expect(order).toEqual([newestLabel, oldestLabel]);
+    expect(localStorage.getItem('tubLibrary.pinned./tmp/tub')).toBe(JSON.stringify([]));
   });
 });
