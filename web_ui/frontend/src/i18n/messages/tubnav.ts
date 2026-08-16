@@ -31,6 +31,9 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.playOnceModeAria': 'Play once mode',
     'tub.loopPlaybackTitle': '循环播放 (M)',
     'tub.playOnceTitle': '播放后停止 (M)',
+    'tub.refresh': '刷新',
+    'tub.refreshAria': 'Refresh tub records',
+    'tub.refreshTitle': '重新拉取当前 Tub 数据',
     // TubLoader
     'tub.loaderTitle': 'Tub Loader',
     'tub.loaderSubtitle': 'Select tub directory, typically ./data',
@@ -100,6 +103,9 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.playOnceModeAria': 'Play once mode',
     'tub.loopPlaybackTitle': 'Loop playback (M)',
     'tub.playOnceTitle': 'Stop after playback (M)',
+    'tub.refresh': 'Refresh',
+    'tub.refreshAria': 'Refresh tub records',
+    'tub.refreshTitle': 'Reload current tub data from server',
     // TubLoader
     'tub.loaderTitle': 'Tub Loader',
     'tub.loaderSubtitle': 'Select tub directory, typically ./data',

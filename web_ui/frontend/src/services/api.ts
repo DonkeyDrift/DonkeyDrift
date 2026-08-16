@@ -116,6 +116,17 @@ export const browseDirectory = async (path?: string) => {
   return response.data;
 };
 
+export const discoverProjects = async (root?: string): Promise<{
+  status: boolean;
+  root: string;
+  projects: string[];
+  count: number;
+  last_project: string | null;
+}> => {
+  const response = await api.get('/config/discover_projects', { params: { root } });
+  return response.data;
+};
+
 export const loadTub = async (path: string) => {
   const response = await api.post('/tub/load', { path });
   return response.data;
@@ -134,6 +145,48 @@ export const deleteRecords = async (indexes: number[]) => {
 export const restoreRecords = async (indexes: number[]) => {
   const response = await api.post('/tub/restore', { indexes });
   return response.data;
+};
+
+export interface TubSession {
+  session_id: string;
+  record_count: number;
+  first_index: number;
+  last_index: number;
+  start_time_ms: number | null;
+  end_time_ms: number | null;
+}
+
+export interface TubRecord {
+  [key: string]: unknown;
+  _index?: number;
+  _session_id?: string;
+  _timestamp_ms?: number;
+}
+
+export const listTubSessions = async (tubPath: string) => {
+  const response = await api.get('/tub/sessions', { params: { tubPath } });
+  return response.data as { status: boolean; path: string; sessions: TubSession[] };
+};
+
+export const getSessionRecords = async (tubPath: string, sessionId: string) => {
+  const response = await api.get('/tub/session_records', {
+    params: { tubPath, sessionId },
+  });
+  return response.data as { status: boolean; path: string; records: TubRecord[] };
+};
+
+export const deleteTubSession = async (tubPath: string, sessionId: string) => {
+  const response = await api.post('/tub/delete_session', {
+    tub_path: tubPath,
+    session_id: sessionId,
+  });
+  return response.data as {
+    status: boolean;
+    message: string;
+    deleted_count: number;
+    record_count: number | null;
+    deleted_indexes: number[] | null;
+  };
 };
 
 export const getImageUrl = (path: string, tubPath?: string) => {

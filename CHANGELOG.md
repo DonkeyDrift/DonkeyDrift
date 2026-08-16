@@ -1,5 +1,168 @@
 # 变更日志
 
+## 2026-08-16 (15)
+
+- feat(launcher): D 页（launcher 菜单）1-5、7-10 号菜单项全部接线，点按不再弹"未实现"，与 TUI 各命令行为对齐（#126）
+  - `donkeycar/launcher/server.py` 后端新增（对齐 `donkeycar/management/tui.py` 各 Command，不 import tui 依赖链，按需精简实现）：
+    - 菜单 1 `_create_car`：`donkey createcar --path ~/projects/<folder>`，项目名白名单 `^[A-Za-z0-9_\-]+$`（400）、目录已存在不覆盖（409）、成功后切换当前项目并持久化 `last_project_path`（写 `~/.donkeyrc`，失败静默不阻塞）。
+    - 菜单 2 `_open_project` + `_find_valid_projects_local`：只允许打开 `~/projects` 下一层的有效项目（manage.py+myconfig.py），越界或无效一律 400。
+    - 菜单 3 `_clear_data`：data 不存在/为空返回 skipped；可选 zip 备份到 `data_backups/data_backup_<ts>.zip`；清空走"先 move 到 `.data_trash_<ts>` 再 rmtree"，任一步失败自动回滚（对齐 TUI trash 逻辑）。
+    - 菜单 4 `_backup_data`：tar.gz 备份到 `<project>/data_cache/data-<yymmdd>-<NNN>.tar.gz`（arcname 相对路径不带 `data/` 前缀，序号当日递增）；磁盘剩余 < 数据体积×1.1+1MB 时拒绝（507），失败清理半成品。
+    - 菜单 5 `_restore_data` + `_list_backups`：备份名白名单 `^data-\d{6}-\d{3}\.tar\.gz$`（防穿越）、损坏归档校验（500）、解压前磁盘检查、现有 data 先移 trash 失败回滚；`_is_safe_member_local` 拒绝绝对路径/`..` 穿越；兼容 `tar czf x.tar.gz data/` 带前缀归档（全成员 data/ 前缀则解到上级目录）。与 TUI 恢复的已知差异：不做 DataMigrator 嵌套数据整理（flatten_nested_data，依赖链重），按原样恢复。
+    - 菜单 7 `_launch_web_ui`：与 #127 实例登记打通——`find_live_instance()` 存活直接复用返回 URL；否则默认端口 8000/5188 新起 `donkey web`（捆绑 web_ui --path），PID 写入登记文件供 Drive 链路清理复用。
+    - 菜单 8/9/10 终端命令下发（前端经 terminal `?cmd=` 执行，后端提供支撑端点）：`GET /api/train/next-model` 扫 `<project>/models/pilot_<数字>` 取 max+1 供菜单 9 拼 `donkey train --tub ./data --model ./models/pilot_N --type linear`；菜单 8 为 `cd '<project>' && donkey ui`，菜单 10 为 `python -m donkeycar.management.train_online`。
+    - 新路由：GET `/api/projects`、`/api/data/backups`、`/api/train/next-model`；POST `/api/launch/web`、`/api/createcar`、`/api/projects/open`、`/api/data/clear|backup|restore`；`LauncherHandler._read_json_body()` 统一 JSON 请求体解析（坏 JSON 400）。
+  - `donkeycar/launcher/server.py` 前端（MENU_HTML）：
+    - `selectItem` 全 12 项分发接线（1→createCar、2→openProject、3→clearData、4→backupData、5→restoreData、7→launchWebUI、8→launchDonkeyUI、9→launchTrainLocal、10→launchTrainOnline），删除 `overlay.notImplemented` 分支（I18N 键保留作无害兜底）。
+    - 新增 I18N zh/en 键：`overlay.startingWeb/working/done`、`menu.createcar.prompt/exists`、`menu.open.prompt/none`、`menu.clear.confirm/confirmNoBackup`、`menu.train.openTerminal`、`menu.donkeyui.openTerminal`。
+    - 交互：createCar prompt 项目名+已存在探测询问覆盖；openProject 列表编号选择；clearData 两次确认（含"不备份继续"分支）；restoreData 备份列表选择+确认；launchWebUI 复刻 Drive 的 30×1s 就绪轮询后跳转；8/9/10 经 `window.open('/terminal?cmd='+encodeURIComponent(cmd))` 下发。
+  - `donkeycar/launcher/terminal_static/terminal.html`：支持 `?cmd=` 查询参数（decodeURIComponent + `+`→空格），WebSocket hello 之后自动发送并回显该命令一次，用于菜单 8/9/10 的终端命令自动执行。
+  - 测试：新增 `tests/test_launcher_menu_actions.py` 37 项——`_launch_web_ui`（复用/新起/PID 登记/缺 donkey 二进制）、`_create_car`（非法名/已存在 409/成功切换项目/命令行与 TUI 一致/失败带 stderr）、`_open_project`（越界/无效/成功）、数据往返（backup→clear→restore 文件回来）、restore 穿越名/损坏归档/data 前缀归档、`_next_train_model` 递增、HTTP 端点（内存 ThreadingHTTPServer 全路由）、前端静态断言（接线函数、I18N 键、terminal.html autoCmd）；fixture 统一打桩 `_save_last_project_path_local` 防止测试写真实 `~/.donkeyrc`。全量 `pytest tests/` 136 项通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/terminal_static/terminal.html`、`tests/test_launcher_menu_actions.py`（新增）
+
+- feat(web-ui): 录制视频库支持 Pin 置顶（#131 迭代）
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：每条录制项右侧（删除图标左边）新增 Pin 按钮（lucide `Pin`）——点击置顶到列表最上方，已置顶项图标填充并高亮 cyan 色，再点取消；置顶组与非置顶组内部均保持时间降序（最新在上）。
+  - 置顶状态按 tubPath 存 `localStorage`（key `tubLibrary.pinned.<tubPath>`，存 session_id 数组），纯前端状态、不涉及后端 API；localStorage 不可用（隐私模式等）时置顶仅本次会话内生效，不报错。删除录制时同步从置顶集合移除该 session。
+  - i18n：`tublibrary.ts` 新增 `tubLibrary.pinAria`（置顶这条录制 / Pin this recording to top）、`tubLibrary.unpinAria`（取消置顶 / Unpin this recording）。
+  - 测试：`TubLibrary.test.tsx` 新增置顶用例——点击较旧录制的 Pin 后移到列表首位并写入 localStorage，取消置顶后恢复最新在前顺序；前端 `npm test` 18 文件 92 例、`npm run build` 均通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubLibrary.tsx`、`web_ui/frontend/src/components/TubLibrary.test.tsx`、`web_ui/frontend/src/i18n/messages/tublibrary.ts`
+
+## 2026-08-16 (14)
+
+- fix(complete,actuator): RC 手动驾驶时将手柄实际控制量合并进 tub 录制通道（#133）
+  - 根因：固件 MANUAL 模式下车由 RC 接收机直驱，Web/手柄通道 `user/angle`、`user/throttle` 全程为 0，TubWriter 只录这两个键，导致问题 tub（11656 帧）9942 条有效记录全为 0.0、Tub Editor 曲线贴 0 轴；固件串口 T 帧上行的实际控制量已由 ArdRc 发布到 `rc/steering`、`rc/throttle`（-1..1）但未进录制通道。
+  - `donkeycar/parts/actuator.py`：新增 `RcRecordMerge` part——仅 `rc/mode==0`（MANUAL）、非 park 锁定且 rc 值有效（数值、非 bool）时用 `rc/steering`、`rc/throttle` 覆盖 `user/angle`、`user/throttle` 供 TubWriter 记录；SEMI/FULL AUTO、park、`rc/mode` 未知（仿真等）时原样透传，不改变既有录制行为，避免"RC 怠速值覆盖跳 0"问题复发。
+  - `donkeycar/templates/complete.py`：TubWriter 注册前接入 RcRecordMerge（与 mycar 运行实例对齐）；ARDUINO_CONTROLLER 传动链补齐 ArdRc 块（发布 `rc/steering`、`rc/throttle`、`rc/mode`、`rc/park`）。
+  - 不新增 tub 字段，既有 tub manifest inputs/types 一致性断言不受影响；修复不回溯历史数据，既有全 0 tub 需重新录制；SEMI_AUTO（rc/mode==1）录制仍走旧逻辑。
+  - 测试：新增 `tests/test_rc_record_merge.py` 8 项单元测试（MANUAL 合并、SEMI/FULL AUTO/park/未知模式/无效值透传、bool 拒绝、模板接线断言），全部通过；真实 donkeycar Vehicle 循环仿真验证 MANUAL 下合并、SEMI 下透传；回归 `pytest tests` 107 项通过、与改动相关套件（test_actuator/test_template/test_tubwriter/test_vehicle/test_launch）39 过 2 跳、`donkeycar/tests` 排除 test_launch 全过——完整连跑在本机及 origin/Tony 基线均于 test_provisioning 附近忙转挂起，系既有环境问题，与本次改动无关。
+  - 涉及文件：`donkeycar/parts/actuator.py`、`donkeycar/templates/complete.py`、`tests/test_rc_record_merge.py`（新增）
+
+## 2026-08-16 (13)
+
+- feat(web-ui): Loader 多 mycar 项目时自动 Browse 上次用过的项目（#129 增强）
+  - 后端 `web_ui/backend/routers/config.py`：新增 `~/.donkeycar_web_loader.json` 状态文件（命名惯例同 connector 的 `~/.donkeycar_web_connector.json`）——`POST /api/config/load` 加载成功后记录 `last_car_path`；`GET /api/config/discover_projects` 返回 `last_project`（上次项目在扫描根之外但仍含 config.py+manage.py 时一并并入 projects 供前端参考；状态文件损坏/缺失时回退 None 不报错）。
+  - 前端 `web_ui/frontend/src/components/ConfigLoader.tsx`：自动发现逻辑扩展——唯一项目→自动加载；多个项目且 `last_project` 在列表中→自动加载上次项目（与 localStorage 记忆互补，跨浏览器/清缓存后仍有效）；否则回退手动 Browse。`api.ts` 的 `discoverProjects` 返回类型同步补 `last_project`。
+  - fix(web-ui): 顺手修复 `handleManualLoad` 中硬编码的本机路径 `/home/dkc/projects/mycar/data` 特判——其它机器上曾持久化该 tub 路径时会被误判为“需要保留的旧 tub”，现仅按 `<path>/data` 归一化比较。
+  - 测试：后端 `test_config.py` 新增 `last_project` 链路 1 项（无记录 None→load 成功记录→扫描根之外并入→损坏文件回退）；前端 `ConfigLoader.test.tsx` 扩至 6 项（新增：多项目时自动加载上次项目、上次项目不在列表回退手动）。后端全量 pytest 77 项、前端全量 vitest 86 例（16 文件）、`tsc --noEmit` 均通过。
+  - 涉及文件：`web_ui/backend/routers/config.py`、`web_ui/backend/tests/test_config.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/ConfigLoader.tsx`、`web_ui/frontend/src/components/ConfigLoader.test.tsx`
+- feat(web-ui): 进入录制视频库后自动选中最新一条录制
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：`refreshSessions` 拉到列表后，若当前无选中（或选中的录制已不存在，如刚被删除）则自动选中 `sessions[0]`（API 已按最新在前排序），进入页面即可直接预览最新录制；已有有效选中时保持不变。
+  - 测试：新增 `web_ui/frontend/src/components/TubLibrary.test.tsx` 2 项——加载后自动请求最新录制的记录并显示帧计数、未加载 tub 时不请求列表；前端 `npm run build` 无错误，`npm test` 18 文件 89 例通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubLibrary.tsx`、`web_ui/frontend/src/components/TubLibrary.test.tsx`（新增）
+
+## 2026-08-16 (12)
+
+- fix(web-ui,templates): 修复 Tub Navigator 播放录制视频卡顿（#128），并让 WEBCAM 接受 CAMERA_FRAMERATE 配置
+  - 排查结论（issue 内已实测）：录制侧帧间隔均匀（17ms 中位、>25ms 零次）无丢帧；卡顿全部在播放侧——后端每帧全量磁盘读 + 前端帧推进与图片加载解耦导致画面冻结跳帧。
+  - 后端 `web_ui/backend/routers/tub.py`（`GET /api/tub/image`）：
+    - 新增按 `(mtime_ns, size)` 校验的字节级 LRU 缓存（128 MiB 预算），命中直接从内存回图不再碰磁盘；超预算淘汰最旧条目。
+    - 响应加 `ETag` 与 `Cache-Control: private, max-age=86400`，支持 `If-None-Match` 304 协商；重复播放同一 tub 时浏览器 disk cache 参与命中。
+    - 原先两处 `FileResponse` 路径统一收敛为缓存读取逻辑，404 分支不变。
+  - 前端 `web_ui/frontend/src/components/TubNavigator.tsx`：
+    - 预取窗口 10 帧 → 60 帧（PREFETCH_AHEAD，覆盖 ~1s），并用 pump 模式加并发上限（PREFETCH_CONCURRENCY=6，对齐 HTTP/1.1 同源连接数），预取完成一个补位一个，不再几十个请求挤占连接。
+    - 解码位图缓存复用 #135 的 LRU 上限（`touchImageCache`，240 条、命中刷新位置、超限淘汰最旧），预取写入同一缓存，长 tub 播放不再无限吃内存。
+    - FPS 角标改为统计 canvas 实际换帧率（drawImage 时按 URL 去重累计），画面冻结时角标如实下降，可自检卡顿；原先统计 rAF 回调频率（恒 ~60）的问题一并去除。
+    - 绘制路径去掉多余的一层 `requestAnimationFrame` 包裹，未就绪帧的加载回调直接绘制，减少一帧延迟。
+  - 附带修复 `donkeycar/templates/complete.py`、`basic.py`：`Webcam` 创建传入 `framerate=cfg.CAMERA_FRAMERATE`（原先 WEBCAM 用默认 20Hz，60fps 主循环里同一帧被重复记录约 3 次）；顺带修复 complete.py stereo 分支 `Webcam(..., iCam=...)` 传了不存在的参数（一实例化即 TypeError）改为 `camera_index=0/1`，basic.py 用 `getattr(cfg, 'CAMERA_INDEX', 0)` 兜底（cfg_basic 未定义该项）。
+  - 测试：新增 `tests/test_tub_image_cache.py` 5 项（ETag/Cache-Control 头、缓存命中不读磁盘、If-None-Match 304、文件变更失效、LRU 超预算淘汰）与 `tests/test_webcam_framerate.py` 3 项（complete/basic 模板 Webcam 必传 framerate、stereo 分支不得再用 iCam）；rebase 到 #135 后发现其漏更新的 `tests/test_tub_manager_auto_refresh.py` 断言仍指向旧路由刷新逻辑（在 Tony 上即失败），同步改为断言 `loadedTubPath`/`tubRefreshToken` 新逻辑；前端 `tsc -b --noEmit` 通过、vitest 89 例（18 文件）通过、eslint 无告警、后端 `tests/` 125 项全过。
+  - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/frontend/src/components/TubNavigator.tsx`、`donkeycar/templates/complete.py`、`donkeycar/templates/basic.py`、`tests/test_tub_image_cache.py`（新增）、`tests/test_webcam_framerate.py`（新增）、`tests/test_tub_manager_auto_refresh.py`
+
+## 2026-08-16 (11)
+
+- feat(web-ui): 录制视频库列表改为最新录制排在最上面
+  - `web_ui/backend/routers/tub.py`：`GET /sessions` 返回排序由 `first_index` 升序改为降序（最新一次录制排第一，最旧排最后）；前端 TubLibrary 按返回顺序渲染，无需改动。
+  - 测试：`web_ui/backend/tests/test_tub_sessions.py` 分组测试补充排序断言（最新的 `first_index` 更大、必须排在首位）；4 项通过。
+  - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/backend/tests/test_tub_sessions.py`
+
+## 2026-08-16 (10)
+
+- revert(tub-editor): 回退 #130 的选区框最小宽度修复，恢复 TubEditor 原有选区绘制与单击判定逻辑（用户要求撤销）
+  - `git revert d63fe8e2`：`web_ui/frontend/src/components/TubEditor.tsx` 恢复原始实现（移除 `MIN_SELECTION_BOX_WIDTH` 最小框宽与 `handleMouseUp` 的 `indexDelta === 0` 判定），删除随该修复新增的 `web_ui/frontend/src/components/TubEditor.test.tsx`；同时移除原「2026-08-16 (4)」中对应的日志条目。
+  - 测试：删除测试文件后不影响其它用例，前端 vitest 全量通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubEditor.tsx`、`web_ui/frontend/src/components/TubEditor.test.tsx`（删除）
+
+## 2026-08-16 (9)
+
+- feat(web-ui): 录制视频库移除循环播放按键，改为始终循环播放
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：删除 `isLooping` 状态与播放/暂停旁的循环切换按钮（含 `Repeat` 图标导入），播放到最后一帧后始终回到第 0 帧继续播放，不再播完自动停止；循环相关 i18n 键（`tub.loop*`）为 Tub Navigator 共用，未改动。
+  - 测试：无已入库测试断言该循环按钮；前端 `npm run build`（tsc -b + vite）无错误，`npm test` 18 文件 89 例通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubLibrary.tsx`
+
+## 2026-08-16 (8)
+
+- fix(web-ui): 修复 DD 顶部导航（Tub Manager / Trainer / Drive 等）切换非常卡顿的问题（#135）
+  - 根因：`TubManagerPage` 的 effect 以 `location.pathname === '/'` 为条件，每次从其它页切回 Tub Manager 都全量重拉整个 tub（上千条记录时需全量下载 + 整包写 store + TubNavigator/TubEditor 两个重组件全量重渲染，期间还有全屏 loading 遮罩），切换体验即"每次都卡"。
+  - `web_ui/frontend/src/store/useStore.ts`：新增 `loadedTubPath`（当前 store 中已加载完成的 tub 路径标记，`setTub` 时写入）与 `tubRefreshToken`（手动刷新令牌）及 `requestTubRefresh()`（清空已加载标记并递增令牌）；均不参与 persist。
+  - `web_ui/frontend/src/App.tsx`：`TubManagerPage` 改为仅在 `tubPath !== loadedTubPath`（首次加载或 tub 变更，含刷新页面后从持久化恢复 tubPath 的场景）或 `tubRefreshToken` 递增（手动刷新）时拉取数据，并补 `cancelled` 清理避免组件卸载后 setState；顶部导航来回切换不再触发网络请求与全量重渲染。
+  - `web_ui/frontend/src/components/TubNavigator.tsx`：图片缓存增加上限 `MAX_IMAGE_CACHE_ENTRIES = 240` 与 LRU 淘汰（Map 插入序，命中刷新位置、超限淘汰最旧），长会话播放/预取不再让缓存无限增长拖慢切换；播放控制行新增手动"刷新"按钮（调用 `requestTubRefresh`，loading 时旋转禁用），替代原来导航切换隐式重拉的刷新途径。
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`：新增 `tub.refresh` / `tub.refreshAria` / `tub.refreshTitle` 中英文案。
+  - 测试：新增 `web_ui/frontend/src/App.test.tsx`（4 例：首次加载拉取并标记 loadedTubPath、已加载不重拉、requestTubRefresh 触发重拉、无 tubPath 不拉取）与 `web_ui/frontend/src/components/TubNavigator.test.tsx`（1 例：刷新按钮触发 requestTubRefresh 且清空 loadedTubPath）；前端 vitest 全量 83 例（16 文件）通过，`npm run build`（tsc -b + vite）无错误。
+  - 涉及文件：`web_ui/frontend/src/App.tsx`、`web_ui/frontend/src/store/useStore.ts`、`web_ui/frontend/src/components/TubNavigator.tsx`、`web_ui/frontend/src/i18n/messages/tubnav.ts`、`web_ui/frontend/src/App.test.tsx`（新增）、`web_ui/frontend/src/components/TubNavigator.test.tsx`（新增）
+
+## 2026-08-16 (7)
+
+- feat(web-ui): Tub 页面新增"录制视频库"分区，按 session 列出每次录制的视频并可整条播放/删除（#131）
+  - 需求：Web UI Tub 页面新增录制视频库——左侧列出 mycar 录制的每条视频（同一 Tub 内按 `_session_id` 分组，一次 drive 启动 = 一条录制），右侧播放器逐帧播放该 session 图像，支持整条删除（带确认弹窗），删除后 Navigator/Editor 等其它板块不再显示对应帧。
+  - 后端 `web_ui/backend/routers/tub.py`：
+    - `GET /sessions?tubPath=`：以只读 Tub 迭代 live records 按 `_session_id` 分组，返回每条录制的 `session_id`/`record_count`/`first_index`/`last_index`/`start_time_ms`/`end_time_ms`，按 `first_index` 排序（写入时间序），用完即 `close()`。
+    - `GET /session_records?tubPath=&sessionId=`：返回单条录制全部 live records，供播放器逐帧取图（图片仍走既有 `GET /api/tub/image`，未改动）。
+    - `POST /delete_session`：收集该 session 所有 `_index`（空则 404），用可写 Tub 实例调 `delete_records(indexes)` 做 manifest 软删（与逐帧删除同机制）；若删的是当前已加载 tub，则重建全局 `current_tub`/`current_records`，其它板块数据即刻同步。
+    - 新增 `SessionDeleteRequest`（`tub_path` + `session_id`）Pydantic 模型。
+  - 前端：
+    - `web_ui/frontend/src/services/api.ts`：新增 `TubSession`/`TubRecord` 接口与 `listTubSessions`/`getSessionRecords`/`deleteTubSession` 三个 API 函数。
+    - `web_ui/frontend/src/components/TubLibrary.tsx`（新增）：左列 session 列表（选中高亮、每项带删除图标、显示 `_timestamp_ms` 格式化的开始时间与帧数）+ 右侧 canvas 播放器：预取 30 帧（Navigator 仅 10 帧）、图片未就绪时停在当前帧等待而不跳帧（吸取 #128 播放卡顿教训）、支持播放/暂停/循环/逐帧步进/进度条拖动；底部整条删除按钮触发自绘确认弹窗（fixed 遮罩 + zinc-900 卡片，项目无现成 Modal 组件），确认后调 `delete_session` 并刷新列表 + 重新 `loadTub` 同步全局 store。
+    - `web_ui/frontend/src/i18n/messages/tublibrary.ts`（新增）：zh/en 各 19 条 `tubLibrary.*` 文案；`web_ui/frontend/src/i18n/messages/index.ts` 注册该模块。
+    - `web_ui/frontend/src/App.tsx`：TubManagerPage 中 `<TubNavigator />` 之后插入 `<TubLibrary />`。
+  - 测试：新增 `web_ui/backend/tests/test_tub_sessions.py` 4 项——两次独立 Tub 实例各写 3+2 帧模拟两条录制，验证 sessions 列表分组/排序/时间戳、session_records 过滤、delete_session 软删后 sessions 与全局加载记录均不再包含已删帧（注意同一 Tub 实例不会产生新 session_id，测试须每次新开实例）；4 项通过。前端 `npm run build`（tsc -b + vite）无错误，`npm test` 14 文件 78 例通过。
+  - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/backend/tests/test_tub_sessions.py`（新增）、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/TubLibrary.tsx`（新增）、`web_ui/frontend/src/i18n/messages/tublibrary.ts`（新增）、`web_ui/frontend/src/i18n/messages/index.ts`、`web_ui/frontend/src/App.tsx`
+## 2026-08-16 (6)
+
+- fix(launcher): D 页点 6 打开 Drive 后页面加载不出来——跳转不等前端就绪 + 端口可能被二次改选（#134）
+  - 根因：`_launch_drive` 在 `Popen` 返回后立即报 launched，跳转页重定向到尚未监听的 vite 端口（Vite 冷启动/首次 npm 依赖检查需数秒甚至更久），浏览器连接拒绝/白屏；且 launcher 预选端口与 `donkey web` 内部二次改选后的实际端口可能不一致，跳转到错误端口。
+  - `donkeycar/launcher/server.py`：新增 `_wait_for_web_ready(web_proc, frontend_port, backend_port, timeout=90s)`——等 `donkey web` 就绪写入实例登记（`~/.donkeycar/webui.json`，登记里是 vite/uvicorn 实际监听端口，天然覆盖端口被占二次改选；以 `started_at` 不早于本次调用起点判定为本次启动写入），再 GET 实际 frontend_port 的 `/` 直到可访问才返回；web 进程提前退出或超时不报错，透出 warning 照常跳转。
+  - `_launch_drive`：新起 web 时先等就绪、回读实际端口再返回 launched（跳转页拿到响应时前端已能服务页面）；车进程改在就绪后启动，`DRIVE_API_SERVER_URL` 连接实际后端端口；返回 url/端口均为实际值；复用存活实例路径行为不变（不起 web、不等就绪）。
+  - `donkeycar/webui_instance.py`：新增 `probe_http_ok` 公开别名（原 `_probe_http_ok`），供 launcher 跨模块复用 HTTP 探测。
+  - 测试：新增 `tests/test_launcher_drive_launch.py` 9 项——`_wait_for_web_ready` 新登记回读实际端口、vite 二次改选跟随登记端口、web 提前退出带 warning、登记不出现超时带 warning、早于调用起点的陈旧登记不认；`_launch_drive` 冷启动顺序（先 web 后车、env 连实际后端、url 用实际前端端口）、就绪超时透出 warning、复用实例跳过 web 与等待、无 mycar 项目直接报错；全量 `pytest tests/` 108 项通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/webui_instance.py`、`tests/test_launcher_drive_launch.py`（新增）
+
+## 2026-08-16 (5)
+
+- feat(web-ui): Loader 自动发现唯一 mycar 项目并自动加载，无需人工 Browse（#129）
+  - 后端 `web_ui/backend/routers/config.py`：新增 `GET /api/config/discover_projects?root=<dir>` 接口与 `find_car_projects()` 扫描函数——BFS 扫描 root 下含 `config.py` + `manage.py` 的目录（默认 root 为用户 home，最多下探 2 层，跳过隐藏目录与 `node_modules`/`venv`/`__pycache__` 等），返回 `{projects, count}`；扫描经 `run_in_threadpool` 不阻塞事件循环。
+  - 前端 `web_ui/frontend/src/services/api.ts`：新增 `discoverProjects()` API 封装。
+  - 前端 `web_ui/frontend/src/components/ConfigLoader.tsx`：新增自动发现 effect——store 无 `config` 且无已记住 `configPath` 时调用 `discoverProjects()`，恰好发现 1 个项目则复用 `handleBrowserSelect` 链路自动加载（config + `<carPath>/data` tub）；多个项目或扫描失败时静默回退现有手动 Browse 流程；`useRef` 防重复触发。
+  - 测试：后端 `web_ui/backend/tests/test_config.py` 新增 3 项（唯一项目发现、多项目/无项目、隐藏目录跳过+项目内不下钻+缺 manage.py 不算项目）；前端新增 `web_ui/frontend/src/components/ConfigLoader.test.tsx` 4 项（唯一项目自动加载 config+tub、多项目不自动加载、发现失败静默回退、已有 configPath 跳过发现）。后端全量 pytest 76 项、前端全量 vitest 82 例（15 文件）、`tsc --noEmit` 均通过。
+  - 涉及文件：`web_ui/backend/routers/config.py`、`web_ui/backend/tests/test_config.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/ConfigLoader.tsx`、`web_ui/frontend/src/components/ConfigLoader.test.tsx`（新增）
+
+## 2026-08-16 (3)
+
+- fix(launcher): 修复 DC/DD/D 三处「打开 Kimi Code Web」与 DC 终端手动 `/web` 返回的链接打不开的问题（#125）
+  - 根因：`kimi_web.py` 返回的 URL host 是上位机本机视角的 `localhost`/`127.0.0.1`，消费方是用户电脑/手机上的浏览器，`localhost` 指向浏览器自己自然打不开；且冷启动的 `kimi web` 默认只绑回环（banner `Network: off`），即使改写 host 局域网也访问不到。
+  - `donkeycar/launcher/kimi_web.py`：
+    - 冷启动命令改为 `kimi web --no-open --host`（`--host` 裸传 = 绑 `0.0.0.0`，实测 kimi ≥ 0.36 支持），局域网设备可达。
+    - 新增 `_is_loopback_host`/`_lan_url`：返回前把回环/通配 host（`localhost`/`127.x`/`::1`/`0.0.0.0`）改写为本机局域网 IP（复用配网模块 `detect_lan_ip` 的 VPN/TUN 感知探测），保留端口、路径与 `#token=` 片段；探测不到局域网 IP 或 host 本就远程可达时原样返回。复用、冷启动、失败兜底三条返回路径统一改写。
+    - `_live_instance_url`：登记 host 是回环的实例（如 TUI 内嵌 server）先对局域网 IP 探测 `/api/v1/meta`，通了（实际监听 0.0.0.0 只是登记写了 127.0.0.1）改用局域网 host 返回；不通视为不可复用，由调用方另拉监听 0.0.0.0 的新实例。
+  - `donkeycar/launcher/server.py`：`_handle_launch_kimi_code_web` docstring 同步（移除过时的"注入 /web"描述，注明 URL 已改写为局域网 IP）；端点行为无变化，DC/DD/D 三端消费同一返回值，改 launcher 一处全部修复。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `_fake_lan_ip` autouse fixture 隔离真实网络探测；新增 `TestLanUrl` 6 项（回环/通配 host 识别、改写保留端口与 token、远程 host 不动、无局域网 IP 原样返回）与 `_live_instance_url` 回环实例双探测 3 项；既有断言按局域网改写更新（复用/冷启动/兜底返回 URL、启动命令含 `--host`）；全量 `pytest tests/` 108 项通过。
+  - 端到端实测：本机（192.168.3.x 网段）真实拉起 `kimi web`，返回 `http://192.168.3.57:<port>/#token=...`，局域网 IP 上 HTTP 探测可达（未带 token 的 `/api/v1/meta` 返回 401，证明服务真实监听）。
+  - 涉及文件：`donkeycar/launcher/kimi_web.py`、`donkeycar/launcher/server.py`、`tests/test_launcher_kimi_web.py`
+
+## 2026-08-16 (2)
+
+- fix(launcher,web,management): Web UI 实例登记与复用，修复 D 页按 6 号（Drive）后 Tub Manager 打不开、需再按 7 号（Web）才可用的问题（#127）
+  - 根因：launcher `_launch_drive` 启动前 `pkill -f "donkey web"` 与 PID 文件全杀互杀已运行的 Web UI；且各链路动态选端口（backend 从 8100 漂移），与 7 号默认端口（8000/5188）不一致，浏览器/前端代理指向漂移端口导致页面不可用。
+  - 新增 `donkeycar/webui_instance.py` 共享模块（模式参考 `kimi_web.py`）：
+    - 实例登记 `~/.donkeycar/webui.json`（pid/backend_port/frontend_port/started_at，原子写入）：`read_instance`/`write_instance`/`remove_instance(only_pid)`——`only_pid` 仅清除属于自己 pid 的登记，避免误删他人后来覆盖的登记。
+    - `find_live_instance()`：登记 pid 存活 + 后端 `/docs` 与前端 `/` 探测均通才算存活；失效自动清陈旧登记。
+    - 车进程 PID 文件（`~/.donkeycar/drive.pid`）读写与 `kill_previous_car_processes()`：读 `/proc/<pid>/cmdline` 只杀 `manage.py drive` 车进程（释放摄像头等硬件），web 前后端进程保留复用；非 Linux 无 /proc 时退化为按 PID 全杀（与旧行为一致）。
+  - `donkeycar/management/base.py`：
+    - `Web.run`：先 `find_live_instance()`，存活则复用并按 `--route` 打开已有前端端口，不再重复拉起；新起路径等后端端口就绪再登记实例，退出 `finally` 按 `only_pid` 清除。
+    - `Drive.run`：先只杀车进程（web 进程保留），存活实例则复用其 backend_port 注入 `DRIVE_API_SERVER_URL`、只起新车进程（PID 文件只记车进程）；无实例才新起 Web UI 并登记。
+  - `donkeycar/launcher/server.py`：`_launch_drive` 删除 `_kill_orphaned_donkey_processes()`（pkill 互杀元凶）及本地 PID 副本函数，收敛到 `webui_instance`；复用存活实例只起车进程，无实例用默认端口 8000/5188 新起 `donkey web`（不再 8100 漂移）；`_get_status` 未跟踪进程时优先读实例登记，其它链路启动的 Web UI 也算 running。
+  - `donkeycar/management/tui.py`：`DriveCommand.execute()` 同步复用逻辑（删除本地 PID 副本函数，探测存活实例→复用只起车进程→无则默认端口 8000 新起）；`monitor_processes` 兼容复用时无 web 进程；命令预览对复用场景显示"复用已有实例，不重复启动"。
+  - 测试：新增 `tests/test_webui_instance.py` 18 项——登记读写与容错、`only_pid` 条件清除、`find_live_instance` 判定链（pid 不存活/探测失败清陈旧登记）、PID 文件往返、`kill_previous_car_processes` cmdline 过滤只杀车进程与非 Linux 退化全杀、`Web.run`/`Drive.run` 复用路径（mock 后断言不重复 Popen、车端 URL 指向复用后端端口、PID 文件只记车进程）；全量 `pytest tests/` 99 项通过。
+  - 涉及文件：`donkeycar/webui_instance.py`（新增）、`donkeycar/management/base.py`、`donkeycar/launcher/server.py`、`donkeycar/management/tui.py`、`tests/test_webui_instance.py`（新增）
+
 ## 2026-08-16 (1)
 
 - feat(launcher,web-ui): 点击 D/DD 页面左上角 logo 图标，在新标签页打开 https://www.donkeydrift.com

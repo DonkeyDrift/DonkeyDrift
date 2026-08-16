@@ -5,7 +5,17 @@ import { useStore } from '../store/useStore';
 import { getImageUrl } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
-import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine } from 'lucide-react';
+import { Navigation, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertCircle, Repeat, ArrowRightToLine, RotateCcw } from 'lucide-react';
+
+// 图片缓存上限：TubNavigator 会按播放位置预取后续帧，无上限时长会话内存无限增长、
+// 加重 GC 拖慢页面切换，超限后按 LRU（Map 插入序）淘汰最旧条目（#135）
+const MAX_IMAGE_CACHE_ENTRIES = 240;
+
+// issue #128：60fps 播放时预取窗口需覆盖 ~1s 的帧，10 帧只有 ~167ms，
+// 磁盘/网络稍慢就击穿窗口导致画面冻结跳帧。60 帧给足余量。
+const PREFETCH_AHEAD = 60;
+// HTTP/1.1 同源并发连接约 6 个，预取并发超过它反而会挤占当前帧请求。
+const PREFETCH_CONCURRENCY = 6;
 
 interface RecordStatsProps {
   steering: string;
@@ -85,6 +95,8 @@ export const TubNavigator: React.FC = () => {
   const totalRecords = useStore((state) => state.totalRecords);
   const config = useStore((state) => state.config);
   const tubPath = useStore((state) => state.tubPath);
+  const isLoading = useStore((state) => state.isLoading);
+  const requestTubRefresh = useStore((state) => state.requestTubRefresh);
   const isDragging = useStore((state) => state.isDragging);
   const setIsDragging = useStore((state) => state.setIsDragging);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -105,11 +117,24 @@ export const TubNavigator: React.FC = () => {
     end: useStore.getState().selectionEndIndex,
   });
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const lastDrawnUrlRef = useRef<string | null>(null);
   const fpsStartRef = useRef<number>(0);
   const fpsFramesRef = useRef<number>(0);
   const displayIndexRef = useRef(currentIndexRef.current);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // LRU 写入：命中时刷新位置，超限淘汰最旧条目
+  const touchImageCache = useCallback((url: string, img: HTMLImageElement) => {
+    const cache = imageCacheRef.current;
+    if (cache.has(url)) cache.delete(url);
+    cache.set(url, img);
+    while (cache.size > MAX_IMAGE_CACHE_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  }, []);
 
   const lastSyncTimeRef = useRef<number>(0);
 
@@ -186,10 +211,10 @@ export const TubNavigator: React.FC = () => {
   const animate = useCallback((time: number) => {
     if (!isPlayingRef.current) return;
 
+    // FPS 由 drawImage 实际换帧累计（见绘制 effect），这里只负责出数
     if (fpsStartRef.current === 0) {
       fpsStartRef.current = time;
     }
-    fpsFramesRef.current += 1;
     const fpsElapsed = time - fpsStartRef.current;
     if (fpsElapsed >= 1000) {
       setActualFps(Math.round((fpsFramesRef.current * 1000) / fpsElapsed));
@@ -383,6 +408,12 @@ export const TubNavigator: React.FC = () => {
       // Ensure clear before draw to prevent ghosting
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(imageToDraw, 0, 0);
+      // 统计 canvas 实际换帧（issue #128）：原来统计 rAF 回调频率，
+      // 画面冻结时角标仍显示 ~60，掩盖了卡顿。
+      if (lastDrawnUrlRef.current !== imageUrl) {
+        lastDrawnUrlRef.current = imageUrl;
+        fpsFramesRef.current += 1;
+      }
     };
 
     if (!img) {
@@ -390,20 +421,21 @@ export const TubNavigator: React.FC = () => {
       // Removing crossOrigin as it may cause CORS failures on local servers
       // if the backend doesn't explicitly send Access-Control-Allow-Origin headers.
       img.src = imageUrl;
-      imageCacheRef.current.set(imageUrl, img);
+      touchImageCache(imageUrl, img);
+    } else {
+      touchImageCache(imageUrl, img);
     }
 
     if (img.complete) {
       if (img.naturalWidth === 0) {
         if (isCurrent) handleImageError();
       } else {
-        // Use requestAnimationFrame to ensure the browser has time to paint
-        requestAnimationFrame(() => drawImage(img as HTMLImageElement));
+        drawImage(img);
       }
     } else {
       const handleLoad = () => {
         if (isCurrent) {
-          requestAnimationFrame(() => drawImage(img as HTMLImageElement));
+          drawImage(img);
         }
       };
       const handleError = () => {
@@ -429,18 +461,41 @@ export const TubNavigator: React.FC = () => {
 
   useEffect(() => {
     if (!records.length) return;
-    for (let offset = 1; offset <= 10; offset += 1) { // Preload 10 frames instead of 3
+    // 预取：优先紧邻的下一帧立即发起，其余按窗口排队，受并发上限约束，
+    // 避免一次性几十个请求挤占 HTTP/1.1 的 ~6 个同源连接（issue #128）。
+    const urls: string[] = [];
+    for (let offset = 1; offset <= PREFETCH_AHEAD; offset += 1) {
       const nextRecord = records[localIndex + offset];
       if (!nextRecord) continue;
       const nextKey = Object.keys(nextRecord).find((k) => k.endsWith('image_array'));
       const nextPath = nextKey && typeof nextRecord?.[nextKey] === 'string' ? nextRecord[nextKey] : null;
       if (!nextPath) continue;
       const url = getImageUrl(nextPath, tubPath);
-      if (imageCacheRef.current.has(url)) continue;
-      const img = new Image();
-      img.src = url;
-      imageCacheRef.current.set(url, img);
+      // 已缓存的帧刷新 LRU 位置即可，未缓存的进入 pump 队列限并发预取
+      const cached = imageCacheRef.current.get(url);
+      if (cached) {
+        touchImageCache(url, cached);
+        continue;
+      }
+      urls.push(url);
     }
+    let cursor = 0;
+    let inFlight = 0;
+    const pump = () => {
+      while (inFlight < PREFETCH_CONCURRENCY && cursor < urls.length) {
+        const url = urls[cursor++];
+        const img = new Image();
+        inFlight += 1;
+        // 无论成败都留在缓存：error 的帧后续不再重复请求
+        img.onload = img.onerror = () => {
+          inFlight -= 1;
+          pump();
+        };
+        touchImageCache(url, img);
+        img.src = url;
+      }
+    };
+    pump();
   }, [localIndex, records, tubPath]);
 
   const handleSliderInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -650,6 +705,18 @@ export const TubNavigator: React.FC = () => {
                 className="px-3 h-full"
               >
                 {isLooping ? <Repeat className="w-4 h-4" /> : <ArrowRightToLine className="w-4 h-4" />}
+              </Button>
+
+              <Button
+                size="sm"
+                variant="secondary"
+                className="px-3 h-full"
+                aria-label={t('tub.refreshAria')}
+                title={t('tub.refreshTitle')}
+                disabled={isLoading}
+                onClick={requestTubRefresh}
+              >
+                <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               </Button>
             </div>
           </div>

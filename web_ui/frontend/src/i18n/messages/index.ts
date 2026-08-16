@@ -7,6 +7,7 @@ import { driveviz } from './driveviz';
 import { fab } from './fab';
 import { trainer } from './trainer';
 import { tubeditor } from './tubeditor';
+import { tublibrary } from './tublibrary';
 import { tubnav } from './tubnav';
 
 export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
@@ -20,6 +21,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
     ...fab.zh,
     ...trainer.zh,
     ...tubeditor.zh,
+    ...tublibrary.zh,
     ...tubnav.zh,
   },
   en: {
@@ -32,6 +34,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
     ...fab.en,
     ...trainer.en,
     ...tubeditor.en,
+    ...tublibrary.en,
     ...tubnav.en,
   },
 };

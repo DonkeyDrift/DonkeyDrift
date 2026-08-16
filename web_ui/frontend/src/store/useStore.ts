@@ -65,6 +65,8 @@ interface AppState {
   currentIndex: number;
   fields: string[];
   isLoading: boolean;
+  loadedTubPath: string | null;
+  tubRefreshToken: number;
   isDragging: boolean;
   isPlaying: boolean;
   isLooping: boolean;
@@ -82,6 +84,7 @@ interface AppState {
 
   setConfig: (config: Record<string, unknown>, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
+  requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
   setDeletedIndexes: (deletedIndexes: number[], totalPhysicalRecords?: number) => void;
@@ -125,6 +128,8 @@ export const useStore = create<AppState>()(
       currentIndex: 0,
       fields: [],
       isLoading: false,
+      loadedTubPath: null,
+      tubRefreshToken: 0,
       isDragging: false,
       isPlaying: false,
       isLooping: false,
@@ -167,6 +172,7 @@ export const useStore = create<AppState>()(
       setTub: (path, records, fields, totalPhysicalRecords, deletedIndexes) =>
         set({
           tubPath: path,
+          loadedTubPath: path,
           records,
           originalRecords: records,
           totalRecords: records.length,
@@ -179,6 +185,9 @@ export const useStore = create<AppState>()(
           activeDrawer: null,
           isPlaying: false,
         }),
+      // 手动刷新 Tub：清空已加载标记并递增令牌，让 TubManagerPage 重新全量拉取
+      requestTubRefresh: () =>
+        set((state) => ({ tubRefreshToken: state.tubRefreshToken + 1, loadedTubPath: null })),
       setRecords: (records) => set({ records, totalRecords: records.length }),
       setAllRecords: (records, totalPhysicalRecords, deletedIndexes) =>
         set((state) => ({

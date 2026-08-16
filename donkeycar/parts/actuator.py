@@ -1653,3 +1653,40 @@ class ArdRc:
 
     def shutdown(self):
         self.running = False
+
+
+class RcRecordMerge:
+    """
+    RC 手动驾驶（固件 MANUAL 模式）时的录制通道合并器。
+
+    固件 MANUAL 模式下车由 RC 接收机直驱，Web/手柄通道的 user/angle、
+    user/throttle 全程为 0，而固件串口 T 帧上行的实际控制量已由 ArdRc
+    发布到 rc/steering、rc/throttle。该 Part 在 TubWriter 之前把两者合并：
+    仅 rc/mode==0（MANUAL）、非 park 锁定且 rc 值有效时，用 RC 实际值覆盖
+    user/angle、user/throttle 供录制；SEMI/FULL AUTO、park、rc/mode 未知
+    （仿真等）时原样透传，不改变既有录制行为——避免历史上"RC 怠速值
+    覆盖 user/angle 导致录制数据间歇跳 0"的问题复发。
+
+    使用方式（须在 ArdPWM*/ArdRc 之后、TubWriter 之前注册）：
+        V.add(RcRecordMerge(),
+              inputs=['user/angle', 'user/throttle',
+                      'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'],
+              outputs=['user/angle', 'user/throttle'])
+    """
+
+    RC_MODE_MANUAL = 0
+
+    def run(self, user_angle, user_throttle, rc_steering, rc_throttle,
+            rc_mode, rc_park):
+        """返回合并后的 (user_angle, user_throttle)。
+
+        仅 MANUAL 且非 park、且 rc 值均为有效数值时覆盖；否则原样透传。
+        """
+        if rc_mode == self.RC_MODE_MANUAL and not rc_park \
+                and self._valid(rc_steering) and self._valid(rc_throttle):
+            return rc_steering, rc_throttle
+        return user_angle, user_throttle
+
+    @staticmethod
+    def _valid(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)

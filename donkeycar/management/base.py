@@ -17,12 +17,18 @@ from donkeycar.management.joystick_creator import CreateJoystick
 from pathlib import Path
 
 from donkeycar.utils import normalize_image, load_image, math
+from donkeycar.webui_instance import (
+    find_live_instance,
+    write_instance,
+    remove_instance,
+    kill_previous_car_processes,
+    read_drive_pids,
+    write_drive_pids,
+    remove_drive_pid_file,
+)
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
-
-# PID 文件路径，与 tui.py 保持一致
-_DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
 
 
 def _ensure_display_and_backend():
@@ -81,55 +87,17 @@ def _detect_graphical_display():
 
 def _read_drive_pid_file():
     """读取上次 donkey drive 记录的进程 PID 列表。"""
-    if not _DRIVE_PID_FILE.exists():
-        return []
-    try:
-        with open(_DRIVE_PID_FILE, "r") as f:
-            return [int(line.strip()) for line in f if line.strip()]
-    except Exception:
-        return []
-
-
-def _write_drive_pid_file(pids):
-    """将当前 donkey drive 启动的进程 PID 写入记录文件。"""
-    _DRIVE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_DRIVE_PID_FILE, "w") as f:
-        for pid in pids:
-            f.write(f"{pid}\n")
-
-
-def _remove_drive_pid_file():
-    """删除 PID 记录文件。"""
-    try:
-        _DRIVE_PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
+    return read_drive_pids()
 
 
 def _kill_previous_drive_processes():
-    """读取 PID 文件，精确杀掉上一次 donkey drive 启动的进程。"""
-    pids = _read_drive_pid_file()
-    if not pids:
-        return
+    """杀掉上一次启动的车进程（manage.py drive），web 进程保留复用。
 
-    print("检测到上一次 donkey drive 的进程仍在运行，正在停止...")
+    详见 donkeycar/webui_instance.py（issue #127：多链路复用同一 Web UI
+    实例，不再全杀）。
+    """
+    kill_previous_car_processes()
 
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-
-    time.sleep(0.5)
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-    _remove_drive_pid_file()
-    print("上一次的进程已停止")
 HELP_CONFIG = 'location of config file to use. default: ./config.py'
 logger = logging.getLogger(__name__)
 
@@ -763,8 +731,27 @@ class Web(BaseCommand):
 
     def run(self, args):
         args = self.parse_args(args)
+
+        # 已有存活的 Web UI 实例则直接复用，不再重复拉起（issue #127）
+        inst = find_live_instance()
+        if inst:
+            print(f'检测到运行中的 Web UI 实例 '
+                  f'(backend=:{inst["backend_port"]} frontend=:{inst["frontend_port"]})，'
+                  '复用已有实例，不重复启动')
+            if args.open:
+                reuse_url = self._build_frontend_url(inst['frontend_port'], args.route)
+                self._open_browser_when_frontend_ready(inst['frontend_port'], reuse_url)
+            return
+
         frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
             self._launch_web_ui(args)
+
+        # 等后端就绪再登记，避免其它链路探测到"半启动"实例而误清登记
+        self._wait_for_port_ready(backend_port)
+
+        # 登记实例，供 donkey drive / launcher / TUI 等链路复用
+        my_pid = os.getpid()
+        write_instance(backend_port, frontend_port, pid=my_pid)
 
         if args.open:
             self._open_browser_when_frontend_ready(frontend_port, frontend_url)
@@ -789,6 +776,8 @@ class Web(BaseCommand):
             signal.signal(signal.SIGTERM, prev_sigterm)
             self._terminate_process(frontend_proc)
             self._terminate_process(backend_proc)
+            # 仅当登记仍属于本进程时清除，避免误删他人后来的登记
+            remove_instance(only_pid=my_pid)
 
     def _launch_web_ui(self, args):
         """解析 web_ui 路径、检查依赖、选择端口，并拉起前端+后端子进程。
@@ -1071,18 +1060,34 @@ class Drive(Web):
         args = self.parse_args(args)
         car_path = self._resolve_car_path(args.car)
 
-        # 杀掉上一次 donkey drive 启动的进程，释放硬件资源
+        # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
         _kill_previous_drive_processes()
 
-        frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
-            self._launch_web_ui(args)
+        # 已有存活的 Web UI 实例则复用，只启动车进程
+        inst = find_live_instance()
+        my_pid = os.getpid()
+        owns_instance = False
+        frontend_proc = backend_proc = None
 
-        # 等待后端就绪后再启动车辆，避免车端 WS 先于后端启动导致连接失败重连风暴
-        if not self._wait_for_backend_ready(backend_port):
-            self._terminate_process(frontend_proc)
-            self._terminate_process(backend_proc)
-            _remove_drive_pid_file()
-            raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
+        if inst:
+            frontend_port = inst['frontend_port']
+            backend_port = inst['backend_port']
+            print(f'检测到运行中的 Web UI 实例 '
+                  f'(backend=:{backend_port} frontend=:{frontend_port})，'
+                  '复用已有实例，只启动车辆进程')
+        else:
+            frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
+                self._launch_web_ui(args)
+
+            # 等待后端就绪后再启动车辆，避免车端 WS 先于后端启动导致连接失败重试风暴
+            if not self._wait_for_backend_ready(backend_port):
+                self._terminate_process(frontend_proc)
+                self._terminate_process(backend_proc)
+                raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
+
+            # 登记实例，供 donkey web / launcher / TUI 等链路复用
+            write_instance(backend_port, frontend_port, pid=my_pid)
+            owns_instance = True
 
         car_cmd = self._build_car_command(args)
         car_env = self._build_car_env(backend_port)
@@ -1100,10 +1105,14 @@ class Drive(Web):
             stdin=subprocess.DEVNULL, **popen_kwargs,
         )
 
-        # 记录本次启动的进程 PID，供下次启动时清理
-        _write_drive_pid_file([frontend_proc.pid, backend_proc.pid, car_proc.pid])
+        # 记录进程 PID，供下次启动时清理；复用实例时 web 进程不属于本进程管
+        if frontend_proc is not None:
+            write_drive_pids([frontend_proc.pid, backend_proc.pid, car_proc.pid])
+        else:
+            write_drive_pids([car_proc.pid])
 
         if args.open:
+            frontend_url = self._build_frontend_url(frontend_port, args.route)
             self._open_browser_when_frontend_ready(frontend_port, frontend_url)
         print('按 Ctrl+C 停止前端、后端与车辆进程')
 
@@ -1117,18 +1126,22 @@ class Drive(Web):
         signal.signal(signal.SIGINT, _handle_stop_signal)
         signal.signal(signal.SIGTERM, _handle_stop_signal)
 
+        supervised = [('车辆', car_proc)]
+        if frontend_proc is not None:
+            supervised = [('前端', frontend_proc), ('后端', backend_proc)] + supervised
         try:
-            self._supervise_processes(
-                [('前端', frontend_proc), ('后端', backend_proc), ('车辆', car_proc)],
-                stop_requested,
-            )
+            self._supervise_processes(supervised, stop_requested)
         finally:
             signal.signal(signal.SIGINT, prev_sigint)
             signal.signal(signal.SIGTERM, prev_sigterm)
-            self._terminate_process(frontend_proc)
-            self._terminate_process(backend_proc)
+            if frontend_proc is not None:
+                self._terminate_process(frontend_proc)
+                self._terminate_process(backend_proc)
             self._terminate_process(car_proc)
-            _remove_drive_pid_file()
+            remove_drive_pid_file()
+            if owns_instance:
+                # 仅当登记仍属于本进程时清除，避免误删他人后来的登记
+                remove_instance(only_pid=my_pid)
 
     # ------------------------------------------------------------------
     # 车辆子进程构造（纯逻辑，便于单测）

@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, loadTub, getApiErrorMessage } from '../services/api';
+import { loadConfig, loadTub, getApiErrorMessage, discoverProjects } from '../services/api';
 import { FolderCog, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
 import { useTranslation } from '@/i18n';
@@ -41,8 +41,7 @@ export const ConfigLoader: React.FC = () => {
       setConfig(data.config, path);
       
       const currentTubPath = useStore.getState().tubPath;
-      if (currentTubPath && currentTubPath !== '/home/dkc/projects/mycar/data'
-          && currentTubPath !== path + '/data'
+      if (currentTubPath && currentTubPath !== path + '/data'
           && currentTubPath !== path.replace(/\/$/, '') + '/data') {
         try {
           const tubData = await loadTub(currentTubPath);
@@ -89,6 +88,30 @@ export const ConfigLoader: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [config, configPath, handleManualLoad, setError]);
+
+  // 没有 remembered configPath 时自动发现 mycar 项目（issue #129）：
+  // 恰好一个项目→自动加载；多个项目→自动选中上次 Browse/加载过的项目；
+  // 上次项目不在发现列表或扫描失败时回退手动 Browse。
+  const autoDiscoverTried = useRef(false);
+  useEffect(() => {
+    if (config || configPath || autoDiscoverTried.current) return;
+    autoDiscoverTried.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await discoverProjects();
+        if (cancelled) return;
+        if (data.count === 1 && data.projects[0]) {
+          await handleBrowserSelect(data.projects[0]);
+        } else if (data.last_project && data.projects.includes(data.last_project)) {
+          await handleBrowserSelect(data.last_project);
+        }
+      } catch {
+        // 自动发现失败时保持现状，用户手动 Browse 选择
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [config, configPath, handleBrowserSelect]);
 
   return (
     <Card>
