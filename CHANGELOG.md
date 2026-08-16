@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-16 (4)
+
+- fix(tub-editor): 修复框选少量 frame（如两个）时 UI 不显示选区框的问题（#130）
+  - 根因：数据量大时（如 5000 帧铺在 1000px 宽图表上）框选两个 frame 的选区实际像素宽度不足 1px（约 0.4px），`drawSelectionBox` 与拖动草稿框按实际宽度绘制 + clip 后视觉上完全不可见；另外 `handleMouseUp` 用 `pixelDelta < 3` 判定"点击"，大数据量下框选少量 frame 的像素位移同样小于 3px，选区被坍缩成单帧。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：
+    - 新增 `MIN_SELECTION_BOX_WIDTH = 6`：确认态 `drawSelectionBox` 与拖动草稿框两条绘制路径的框宽均 `Math.max(实际宽度, 6px)`，保证窄选区仍可见（绿色半透明填充 + 虚线边框）；clip 区域从选区自身改为整个 chartArea，放大后的框不会被自身宽度裁掉。
+    - `handleMouseUp` 的单击判定补充 `indexDelta === 0` 条件：像素位移极小但跨了至少一个数据点时按真实范围建选区，不再坍缩成单帧。
+  - 测试：新增 `web_ui/frontend/src/components/TubEditor.test.tsx` 2 项——确认态窄选区（5000 帧、选 2 帧、实际 0.4px 宽）断言 fillRect/strokeRect 宽度 ≥ 6px 且起点正确；拖选（位移 2px 跨约 10 帧）断言 `setSelectionRange` 后选区跨多个 frame；前端 vitest 全量 80 例（15 文件）通过，`tsc -b --noEmit` 与改动文件 eslint 无错误。
+  - 涉及文件：`web_ui/frontend/src/components/TubEditor.tsx`、`web_ui/frontend/src/components/TubEditor.test.tsx`（新增）
+
 ## 2026-08-16 (3)
 
 - fix(launcher): 修复 DC/DD/D 三处「打开 Kimi Code Web」与 DC 终端手动 `/web` 返回的链接打不开的问题（#125）

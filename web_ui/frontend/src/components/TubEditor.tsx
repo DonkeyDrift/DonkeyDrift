@@ -33,6 +33,9 @@ const MAX_ZOOM_PERCENT = 1000;
 const ZOOM_STEP_PERCENT = 100;
 const MAX_UNDO_HISTORY = 10;
 const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
+// 选区框的最小可见宽度(像素)。数据量大时框选少量 frame(如两个)的
+// 实际像素宽度可能不足 1px,导致选区框完全不可见,统一放大到该宽度。
+const MIN_SELECTION_BOX_WIDTH = 6;
 
 type RecordAction = {
   mode: 'delete' | 'restore';
@@ -841,8 +844,11 @@ export const TubEditor: React.FC = () => {
       const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
 
       const pixelDelta = Math.abs(draft.currentX - draft.startX);
+      const indexDelta = Math.abs(draft.currentIndex - draft.startIndex);
       const finalStart = startIndex;
-      const finalEnd = pixelDelta < 3 ? startIndex + 1 : endIndex;
+      // 像素位移极小但跨了至少一个数据点时,仍按真实范围处理,
+      // 避免大数据量下框选少量 frame 被误判成点击 (#130)
+      const finalEnd = pixelDelta < 3 && indexDelta === 0 ? startIndex + 1 : endIndex;
 
       visualSelectionRef.current = { startIndex: finalStart, endIndex: finalEnd };
       setSelectionRange(finalStart, finalEnd);
@@ -1188,15 +1194,19 @@ export const TubEditor: React.FC = () => {
 
             const startX = xAxis.getPixelForValue(startXValue);
             const endX = xAxis.getPixelForValue(endXValue);
-            
+
             if (!isNaN(startX) && !isNaN(endX) && endX > startX) {
+                // 选区实际宽度不足 MIN_SELECTION_BOX_WIDTH 时放大到该宽度,
+                // 保证框选少量 frame 时选区框仍然可见 (#130)
+                const boxWidth = Math.max(endX - startX, MIN_SELECTION_BOX_WIDTH);
+
                 ctx.save();
                 ctx.beginPath();
-                ctx.rect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
-                ctx.clip(); // Clip to ensure we don't draw outside if endX > right
+                ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+                ctx.clip(); // Clip to ensure we don't draw outside the chart area
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
-                
+
                 if (isDraft) {
                     // 拖动过程中也使用绿色，确保用户体验一致
                     ctx.fillStyle = selectionFillColor;
@@ -1206,10 +1216,10 @@ export const TubEditor: React.FC = () => {
                     ctx.strokeStyle = selectionColor;
                 }
 
-                ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+                ctx.fillRect(startX, chartArea.top, boxWidth, chartArea.bottom - chartArea.top);
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
-                ctx.strokeRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+                ctx.strokeRect(startX, chartArea.top, boxWidth, chartArea.bottom - chartArea.top);
                 ctx.restore();
             }
         };
@@ -1223,19 +1233,22 @@ export const TubEditor: React.FC = () => {
             const maxX = Math.max(startX, endX);
 
             if (!isNaN(minX) && !isNaN(maxX) && maxX > minX) {
+                // 同样保证极窄的拖选草稿框可见 (#130)
+                const boxWidth = Math.max(maxX - minX, MIN_SELECTION_BOX_WIDTH);
+
                 ctx.save();
                 ctx.beginPath();
-                ctx.rect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
                 ctx.clip();
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
                 ctx.fillStyle = selectionFillColor;
                 ctx.strokeStyle = selectionColor;
 
-                ctx.fillRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.fillRect(minX, chartArea.top, boxWidth, chartArea.bottom - chartArea.top);
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
-                ctx.strokeRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.strokeRect(minX, chartArea.top, boxWidth, chartArea.bottom - chartArea.top);
                 ctx.restore();
             }
         } else if (visualSelectionRef.current) {
