@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-16 (10)
+
+- revert(tub-editor): 回退 #130 的选区框最小宽度修复，恢复 TubEditor 原有选区绘制与单击判定逻辑（用户要求撤销）
+  - `git revert d63fe8e2`：`web_ui/frontend/src/components/TubEditor.tsx` 恢复原始实现（移除 `MIN_SELECTION_BOX_WIDTH` 最小框宽与 `handleMouseUp` 的 `indexDelta === 0` 判定），删除随该修复新增的 `web_ui/frontend/src/components/TubEditor.test.tsx`；同时移除原「2026-08-16 (4)」中对应的日志条目。
+  - 测试：删除测试文件后不影响其它用例，前端 vitest 全量通过。
+  - 涉及文件：`web_ui/frontend/src/components/TubEditor.tsx`、`web_ui/frontend/src/components/TubEditor.test.tsx`（删除）
+
 ## 2026-08-16 (9)
 
 - feat(web-ui): 录制视频库移除循环播放按键，改为始终循环播放
@@ -53,16 +60,6 @@
   - 前端 `web_ui/frontend/src/components/ConfigLoader.tsx`：新增自动发现 effect——store 无 `config` 且无已记住 `configPath` 时调用 `discoverProjects()`，恰好发现 1 个项目则复用 `handleBrowserSelect` 链路自动加载（config + `<carPath>/data` tub）；多个项目或扫描失败时静默回退现有手动 Browse 流程；`useRef` 防重复触发。
   - 测试：后端 `web_ui/backend/tests/test_config.py` 新增 3 项（唯一项目发现、多项目/无项目、隐藏目录跳过+项目内不下钻+缺 manage.py 不算项目）；前端新增 `web_ui/frontend/src/components/ConfigLoader.test.tsx` 4 项（唯一项目自动加载 config+tub、多项目不自动加载、发现失败静默回退、已有 configPath 跳过发现）。后端全量 pytest 76 项、前端全量 vitest 82 例（15 文件）、`tsc --noEmit` 均通过。
   - 涉及文件：`web_ui/backend/routers/config.py`、`web_ui/backend/tests/test_config.py`、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/ConfigLoader.tsx`、`web_ui/frontend/src/components/ConfigLoader.test.tsx`（新增）
-
-## 2026-08-16 (4)
-
-- fix(tub-editor): 修复框选少量 frame（如两个）时 UI 不显示选区框的问题（#130）
-  - 根因：数据量大时（如 5000 帧铺在 1000px 宽图表上）框选两个 frame 的选区实际像素宽度不足 1px（约 0.4px），`drawSelectionBox` 与拖动草稿框按实际宽度绘制 + clip 后视觉上完全不可见；另外 `handleMouseUp` 用 `pixelDelta < 3` 判定"点击"，大数据量下框选少量 frame 的像素位移同样小于 3px，选区被坍缩成单帧。
-  - `web_ui/frontend/src/components/TubEditor.tsx`：
-    - 新增 `MIN_SELECTION_BOX_WIDTH = 6`：确认态 `drawSelectionBox` 与拖动草稿框两条绘制路径的框宽均 `Math.max(实际宽度, 6px)`，保证窄选区仍可见（绿色半透明填充 + 虚线边框）；clip 区域从选区自身改为整个 chartArea，放大后的框不会被自身宽度裁掉。
-    - `handleMouseUp` 的单击判定补充 `indexDelta === 0` 条件：像素位移极小但跨了至少一个数据点时按真实范围建选区，不再坍缩成单帧。
-  - 测试：新增 `web_ui/frontend/src/components/TubEditor.test.tsx` 2 项——确认态窄选区（5000 帧、选 2 帧、实际 0.4px 宽）断言 fillRect/strokeRect 宽度 ≥ 6px 且起点正确；拖选（位移 2px 跨约 10 帧）断言 `setSelectionRange` 后选区跨多个 frame；前端 vitest 全量 80 例（15 文件）通过，`tsc -b --noEmit` 与改动文件 eslint 无错误。
-  - 涉及文件：`web_ui/frontend/src/components/TubEditor.tsx`、`web_ui/frontend/src/components/TubEditor.test.tsx`（新增）
 
 ## 2026-08-16 (3)
 
