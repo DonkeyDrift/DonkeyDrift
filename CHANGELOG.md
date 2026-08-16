@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-16 (14)
+
+- feat(launcher): D 页菜单 7 号 "Web" 打通——浏览器一键启动/复用 Web UI 并跳转 DD 主页
+  - 背景：D 页（:8090）12 项菜单中，除 0 号 Drifter Console、6 号 Drive、11 号 Kimi Code Web 外均为 notImplemented；7 号 "Web" 是除 6 号外唯一"打开 DD 页面"的入口，本次按 #127/#134 同款链路打通（实例复用、不互杀、不端口漂移、等就绪再跳转），区别是不起车进程（manage.py drive）、跳转到 DD 主页 `/#/`（Tub Manager）。1-5、8-10 号（Create Car/Open/Clear/Backup/Restore/Donkey UI/Train Local/Train Online）仍在浏览器未实现（TUI 侧均有完整实现），按需另行打通。
+  - 后端 `donkeycar/launcher/server.py`：新增 `_launch_web()`——先 `find_live_instance()` 探测存活实例，存活则复用直接返回登记端口（status=already_running）；冷启动用默认端口 8000/5188 起 `donkey web`（含 `--path`/`--backend-port`/`--frontend-port`）并走 `_wait_for_web_ready` 等就绪回读实际端口；不写 drive PID 文件、不碰 `_processes["car"]`（车进程跟踪不受影响）。`do_POST` 新增 `/api/launch/web` 端点（与 `/api/launch/drive` 同款错误码约定）。
+  - 前端（同文件 MENU_HTML）：`selectItem` 的 7 号分支从 notImplemented 改为 `launchWeb()`；新增 `launchWeb()`——POST `/api/launch/web`，与 `launchDrive()` 同款 UX（vite 就绪轮询 30×1s 后跳转、`localhost` 替换为实际主机名、错误透传）。
+  - 测试：新增 `tests/test_launcher_web_launch.py` 7 项——冷启动 Popen+等就绪+URL 指向 `/#/` 且不起车进程、就绪超时带 warning、复用实例不 Popen 不等待且 status=already_running、复用不覆盖车进程跟踪、Popen 失败报 error、MENU_HTML 7 号接线、do_POST 端点接线；仓库全量 pytest 132 项通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`tests/test_launcher_web_launch.py`（新增）
+
 ## 2026-08-16 (13)
 
 - feat(web-ui): Loader 多 mycar 项目时自动 Browse 上次用过的项目（#129 增强）

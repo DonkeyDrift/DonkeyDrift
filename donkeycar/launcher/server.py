@@ -295,6 +295,82 @@ def _launch_drive():
         }
 
 
+def _launch_web():
+    """启动 donkey web（Web UI，D 页菜单 7 号），返回结果字典。
+
+    与 _launch_drive 同模式（issue #127）：探测存活的 Web UI 实例
+    （~/.donkeycar/webui.json）——存活则复用直接返回其 URL；没有才
+    用默认端口（8000/5188）新起 `donkey web` 并等它就绪（issue #134：
+    登记出现 + 前端 HTTP 探测通过，回读实际端口）。不杀任何已有进程、
+    不端口漂移。与 6 号 Drive 的区别：不起车进程（manage.py drive），
+    跳转到 DD 主页（/#/ Tub Manager）。
+    """
+    with _proc_lock:
+        # 探测存活的 Web UI 实例（donkey web / donkey drive 启动时登记）
+        inst = find_live_instance()
+
+        creationflags = (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            if sys.platform == "win32" else 0
+        )
+
+        warning = None
+        web_proc = None
+        if inst:
+            # 复用已有实例：不起 web、不等就绪，直接返回登记端口
+            backend_port = inst["backend_port"]
+            frontend_port = inst["frontend_port"]
+            print(f"[launcher] 复用运行中的 Web UI 实例 "
+                  f"(backend=:{backend_port} frontend=:{frontend_port})")
+        else:
+            # 无实例：用默认端口新起 donkey web（不端口漂移）
+            backend_port = _choose_available_backend_port(8000)
+            frontend_port = _choose_available_backend_port(5188)
+            web_ui_path = _get_bundled_web_ui_path()
+            web_cmd = ["donkey", "web"]
+            if web_ui_path is not None:
+                web_cmd.extend(["--path", str(web_ui_path)])
+            web_cmd.extend(["--backend-port", str(backend_port)])
+            web_cmd.extend(["--frontend-port", str(frontend_port)])
+
+            try:
+                web_proc = subprocess.Popen(
+                    web_cmd,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
+            except FileNotFoundError:
+                return {
+                    "status": "error",
+                    "error": "未找到 donkey 命令，请确认 donkeycar 已正确安装",
+                }
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "error": f"启动进程失败: {e}",
+                }
+
+            # issue #134：等 web 真正就绪（登记 + 前端 HTTP 探测）再返回，
+            # 跳转页拿到响应时前端已能服务页面；超时不报错、带 warning
+            frontend_port, backend_port, warning = _wait_for_web_ready(
+                web_proc, frontend_port, backend_port,
+            )
+
+        # 记录进程信息（不碰 _processes["car"]，车进程跟踪不受影响）
+        _processes["web"] = web_proc
+        _processes["backend_port"] = backend_port
+        _processes["frontend_port"] = frontend_port
+        _processes["project"] = str(_find_mycar_project() or Path.cwd())
+
+        return {
+            "status": "already_running" if inst else "launched",
+            "url": f"http://localhost:{frontend_port}/#/",
+            "backend_port": backend_port,
+            "frontend_port": frontend_port,
+            "warning": warning,
+        }
+
+
 def _get_status():
     """获取当前进程状态。
 
@@ -460,6 +536,14 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             if content_length > 0:
                 self.rfile.read(content_length)
             result = _launch_drive()
+            code = 200 if result.get("status") != "error" else 500
+            self._serve_json(result, code=code)
+        elif path == "/api/launch/web":
+            # 读取并丢弃请求体（如有）
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                self.rfile.read(content_length)
+            result = _launch_web()
             code = 200 if result.get("status") != "error" else 500
             self._serve_json(result, code=code)
         elif path == "/api/launch/dc":
@@ -1195,6 +1279,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                 openDrifterConsole();
             } else if (no === 6) {
                 launchDrive();
+            } else if (no === 7) {
+                launchWeb();
             } else if (no === 11) {
                 launchKimiCodeWeb();
             } else {
@@ -1238,6 +1324,70 @@ MENU_HTML = r"""<!DOCTYPE html>
 
             try {
                 const resp = await fetch('/api/launch/drive', {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+
+                if (data.status === 'launched' ||
+                    data.status === 'already_running') {
+                    const url = data.url.replace(
+                        'localhost', window.location.hostname
+                    );
+                    // 轮询等待前端 vite 就绪后再跳转（最多 30 次 × 1s = 30s）
+                    var ready = false;
+                    for (var i = 0; i < 30; i++) {
+                        try {
+                            await fetch(url, {mode: 'no-cors'});
+                            ready = true;
+                            break;
+                        } catch (e) {
+                            overlayText.textContent =
+                                t('overlay.starting') + ' (' + (i + 1) + '/30)';
+                            await new Promise(function(res) {
+                                setTimeout(res, 1000);
+                            });
+                        }
+                    }
+                    if (ready) {
+                        overlayText.textContent = t('overlay.success');
+                        window.location.href = url;
+                    } else {
+                        overlayText.textContent = t('overlay.slow');
+                        setTimeout(function() {
+                            window.location.href = url;
+                        }, 1000);
+                    }
+                } else if (data.status === 'error') {
+                    overlayText.textContent = t('overlay.failed');
+                    overlayError.textContent =
+                        data.error || t('overlay.unknownError');
+                    setTimeout(function() {
+                        overlay.classList.remove('show');
+                    }, 3000);
+                }
+            } catch (e) {
+                overlayText.textContent = t('overlay.failed');
+                overlayError.textContent =
+                    t('overlay.networkError') + ': ' + e.message;
+                setTimeout(function() {
+                    overlay.classList.remove('show');
+                }, 3000);
+            }
+        }
+
+        // 启动 Web UI（菜单 7 号）：POST /api/launch/web，与 6 号 Drive 同
+        // 模式——服务端先探测存活的 Web UI 实例（复用、不互杀、不端口
+        // 漂移），并在新起时等 vite 就绪才返回；跳转到 DD 主页（/#/）。
+        async function launchWeb() {
+            const overlay = document.getElementById('overlay');
+            const overlayText = document.getElementById('overlay-text');
+            const overlayError = document.getElementById('overlay-error');
+            overlay.classList.add('show');
+            overlayText.textContent = t('overlay.starting');
+            overlayError.textContent = '';
+
+            try {
+                const resp = await fetch('/api/launch/web', {
                     method: 'POST'
                 });
                 const data = await resp.json();
