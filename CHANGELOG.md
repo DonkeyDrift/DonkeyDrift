@@ -1,5 +1,26 @@
 # 变更日志
 
+## 2026-08-16 (15)
+
+- feat(launcher): D 页（launcher 菜单）1-5、7-10 号菜单项全部接线，点按不再弹"未实现"，与 TUI 各命令行为对齐（#126）
+  - `donkeycar/launcher/server.py` 后端新增（对齐 `donkeycar/management/tui.py` 各 Command，不 import tui 依赖链，按需精简实现）：
+    - 菜单 1 `_create_car`：`donkey createcar --path ~/projects/<folder>`，项目名白名单 `^[A-Za-z0-9_\-]+$`（400）、目录已存在不覆盖（409）、成功后切换当前项目并持久化 `last_project_path`（写 `~/.donkeyrc`，失败静默不阻塞）。
+    - 菜单 2 `_open_project` + `_find_valid_projects_local`：只允许打开 `~/projects` 下一层的有效项目（manage.py+myconfig.py），越界或无效一律 400。
+    - 菜单 3 `_clear_data`：data 不存在/为空返回 skipped；可选 zip 备份到 `data_backups/data_backup_<ts>.zip`；清空走"先 move 到 `.data_trash_<ts>` 再 rmtree"，任一步失败自动回滚（对齐 TUI trash 逻辑）。
+    - 菜单 4 `_backup_data`：tar.gz 备份到 `<project>/data_cache/data-<yymmdd>-<NNN>.tar.gz`（arcname 相对路径不带 `data/` 前缀，序号当日递增）；磁盘剩余 < 数据体积×1.1+1MB 时拒绝（507），失败清理半成品。
+    - 菜单 5 `_restore_data` + `_list_backups`：备份名白名单 `^data-\d{6}-\d{3}\.tar\.gz$`（防穿越）、损坏归档校验（500）、解压前磁盘检查、现有 data 先移 trash 失败回滚；`_is_safe_member_local` 拒绝绝对路径/`..` 穿越；兼容 `tar czf x.tar.gz data/` 带前缀归档（全成员 data/ 前缀则解到上级目录）。与 TUI 恢复的已知差异：不做 DataMigrator 嵌套数据整理（flatten_nested_data，依赖链重），按原样恢复。
+    - 菜单 7 `_launch_web_ui`：与 #127 实例登记打通——`find_live_instance()` 存活直接复用返回 URL；否则默认端口 8000/5188 新起 `donkey web`（捆绑 web_ui --path），PID 写入登记文件供 Drive 链路清理复用。
+    - 菜单 8/9/10 终端命令下发（前端经 terminal `?cmd=` 执行，后端提供支撑端点）：`GET /api/train/next-model` 扫 `<project>/models/pilot_<数字>` 取 max+1 供菜单 9 拼 `donkey train --tub ./data --model ./models/pilot_N --type linear`；菜单 8 为 `cd '<project>' && donkey ui`，菜单 10 为 `python -m donkeycar.management.train_online`。
+    - 新路由：GET `/api/projects`、`/api/data/backups`、`/api/train/next-model`；POST `/api/launch/web`、`/api/createcar`、`/api/projects/open`、`/api/data/clear|backup|restore`；`LauncherHandler._read_json_body()` 统一 JSON 请求体解析（坏 JSON 400）。
+  - `donkeycar/launcher/server.py` 前端（MENU_HTML）：
+    - `selectItem` 全 12 项分发接线（1→createCar、2→openProject、3→clearData、4→backupData、5→restoreData、7→launchWebUI、8→launchDonkeyUI、9→launchTrainLocal、10→launchTrainOnline），删除 `overlay.notImplemented` 分支（I18N 键保留作无害兜底）。
+    - 新增 I18N zh/en 键：`overlay.startingWeb/working/done`、`menu.createcar.prompt/exists`、`menu.open.prompt/none`、`menu.clear.confirm/confirmNoBackup`、`menu.train.openTerminal`、`menu.donkeyui.openTerminal`。
+    - 交互：createCar prompt 项目名+已存在探测询问覆盖；openProject 列表编号选择；clearData 两次确认（含"不备份继续"分支）；restoreData 备份列表选择+确认；launchWebUI 复刻 Drive 的 30×1s 就绪轮询后跳转；8/9/10 经 `window.open('/terminal?cmd='+encodeURIComponent(cmd))` 下发。
+  - `donkeycar/launcher/terminal_static/terminal.html`：支持 `?cmd=` 查询参数（decodeURIComponent + `+`→空格），WebSocket hello 之后自动发送并回显该命令一次，用于菜单 8/9/10 的终端命令自动执行。
+  - 测试：新增 `tests/test_launcher_menu_actions.py` 37 项——`_launch_web_ui`（复用/新起/PID 登记/缺 donkey 二进制）、`_create_car`（非法名/已存在 409/成功切换项目/命令行与 TUI 一致/失败带 stderr）、`_open_project`（越界/无效/成功）、数据往返（backup→clear→restore 文件回来）、restore 穿越名/损坏归档/data 前缀归档、`_next_train_model` 递增、HTTP 端点（内存 ThreadingHTTPServer 全路由）、前端静态断言（接线函数、I18N 键、terminal.html autoCmd）；fixture 统一打桩 `_save_last_project_path_local` 防止测试写真实 `~/.donkeyrc`。全量 `pytest tests/` 136 项通过。
+  - 涉及文件：`donkeycar/launcher/server.py`、`donkeycar/launcher/terminal_static/terminal.html`、`tests/test_launcher_menu_actions.py`（新增）
+
+
 ## 2026-08-16 (14)
 
 - fix(complete,actuator): RC 手动驾驶时将手柄实际控制量合并进 tub 录制通道（#133）
@@ -88,7 +109,6 @@
     - `web_ui/frontend/src/App.tsx`：TubManagerPage 中 `<TubNavigator />` 之后插入 `<TubLibrary />`。
   - 测试：新增 `web_ui/backend/tests/test_tub_sessions.py` 4 项——两次独立 Tub 实例各写 3+2 帧模拟两条录制，验证 sessions 列表分组/排序/时间戳、session_records 过滤、delete_session 软删后 sessions 与全局加载记录均不再包含已删帧（注意同一 Tub 实例不会产生新 session_id，测试须每次新开实例）；4 项通过。前端 `npm run build`（tsc -b + vite）无错误，`npm test` 14 文件 78 例通过。
   - 涉及文件：`web_ui/backend/routers/tub.py`、`web_ui/backend/tests/test_tub_sessions.py`（新增）、`web_ui/frontend/src/services/api.ts`、`web_ui/frontend/src/components/TubLibrary.tsx`（新增）、`web_ui/frontend/src/i18n/messages/tublibrary.ts`（新增）、`web_ui/frontend/src/i18n/messages/index.ts`、`web_ui/frontend/src/App.tsx`
-
 ## 2026-08-16 (6)
 
 - fix(launcher): D 页点 6 打开 Drive 后页面加载不出来——跳转不等前端就绪 + 端口可能被二次改选（#134）

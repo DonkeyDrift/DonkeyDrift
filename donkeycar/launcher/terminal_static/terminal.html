@@ -51,6 +51,17 @@ var ws=null;
 var encoder=new TextEncoder();
 function sendCtrl(o){if(ws&&ws.readyState===WebSocket.OPEN){ws.send(JSON.stringify(o));}}
 
+// ?cmd=<...> 自动执行（launcher 菜单 8/9/10 新标签打开时带上的首行命令）：
+// 连上 WebSocket 发完 hello 后，把解码后的命令作为输入发送（含换行触发执行），
+// 并计入标签命名跟踪
+var autoCmd=(function(){
+  try{
+    var m=/[?&]cmd=([^&]*)/.exec(location.search);
+    if(!m)return null;
+    return decodeURIComponent(m[1].replace(/\+/g,' '));
+  }catch(e){return null;}
+})();
+
 // 标签页命名：跟踪当前输入行，回车时把第一个词（空格前内容）postMessage 给父页（Drifter Console）
 // 全屏 TUI（备用屏幕缓冲区 ESC[?1049h/l，如 kimi/claude/codex）内的按键不计入，避免在 TUI 里输入时误改标签名
 var lineBuf='';
@@ -92,6 +103,11 @@ function connect(){
   ws.onopen=function(){
     try{fit.fit();}catch(e){}
     sendCtrl({type:'hello',cols:term.cols,rows:term.rows});
+    if(autoCmd){
+      ws.send(encoder.encode(autoCmd+'\n'));
+      trackLine(autoCmd+'\n');
+      autoCmd=null;
+    }
     hideOverlay();
     term.focus();
   };

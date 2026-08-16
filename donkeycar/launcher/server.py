@@ -8,12 +8,16 @@
 import http.server
 import json
 import os
+import re
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -334,6 +338,507 @@ def _get_status():
         }
 
 
+# ── 菜单动作后端（issue #126：接线 1-5、7-10 号菜单项） ────────────
+# 行为对齐 donkeycar/management/tui.py 的 TUI 版本，但实现独立：
+# launcher 仅依赖标准库，不 import tui（后者顶部连带 rich/prompt_toolkit/
+# paramiko 等重型依赖，会把它们拉进 launcher 进程）。
+
+# 项目根目录（与 TUI CreateCar/Open 一致：~/projects）
+_PROJECTS_ROOT = Path("~/projects").expanduser()
+
+# createcar 项目名白名单（防路径注入：禁止分隔符、.. 等）
+_FOLDER_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+# data_cache 备份文件名规范（与 TUI _get_next_backup_path/_list_backup_archives 一致）
+_BACKUP_NAME_RE = re.compile(r"^data-\d{6}-\d{3}\.tar\.gz$")
+
+
+def _current_project():
+    """当前项目：launcher 已选中的优先，否则复用 mycar 查找逻辑。"""
+    return _processes.get("project") or _find_mycar_project()
+
+
+def _find_valid_projects_local():
+    """扫描 ~/projects 一层子目录中的有效项目（对齐 TUI _find_valid_projects）。"""
+    if not _PROJECTS_ROOT.is_dir():
+        return []
+    return sorted(
+        p for p in _PROJECTS_ROOT.iterdir()
+        if p.is_dir() and _is_valid_project_dir(p)
+    )
+
+
+def _save_last_project_path_local(project_path):
+    """持久化 last_project_path（对齐 TUI _save_last_project_path，失败静默）。"""
+    try:
+        from donkeycar.management.ui.rc_file_handler import rc_handler
+        if rc_handler is None:
+            return
+        rc_handler.data["last_project_path"] = str(project_path)
+        rc_handler.write_file()
+    except Exception as e:
+        print(f"[launcher] 保存上次项目失败: {e}")
+
+
+def _launch_web_ui():
+    """启动 Web UI（菜单 7）：不带动车进程，只起 `donkey web`。
+
+    与 _launch_drive 共用实例登记（~/.donkeycar/webui.json）：已有存活
+    实例直接复用其 URL；没有才新起（默认端口 8000/5188，与 #127 一致）。
+    本链路新起的 web 进程 PID 写入登记文件，供后续 Drive 链路清理复用。
+    """
+    with _proc_lock:
+        inst = find_live_instance()
+        if inst:
+            _processes["backend_port"] = inst["backend_port"]
+            _processes["frontend_port"] = inst["frontend_port"]
+            return {
+                "status": "launched",
+                "url": f"http://localhost:{inst['frontend_port']}/",
+                "frontend_port": inst["frontend_port"],
+            }
+
+        backend_port = _choose_available_backend_port(8000)
+        frontend_port = _choose_available_backend_port(5188)
+        web_cmd = ["donkey", "web"]
+        web_ui_path = _get_bundled_web_ui_path()
+        if web_ui_path is not None:
+            web_cmd.extend(["--path", str(web_ui_path)])
+        web_cmd.extend(["--backend-port", str(backend_port)])
+        web_cmd.extend(["--frontend-port", str(frontend_port)])
+
+        try:
+            web_proc = subprocess.Popen(
+                web_cmd,
+                stdin=subprocess.DEVNULL,
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    if sys.platform == "win32" else 0
+                ),
+            )
+        except FileNotFoundError:
+            return {
+                "status": "error",
+                "error": "未找到 donkey 命令，请确认 donkeycar 已正确安装",
+            }
+        except Exception as e:
+            return {"status": "error", "error": f"启动进程失败: {e}"}
+
+        # web 进程启动后自行登记实例；这里把 PID 也写入登记文件，
+        # 供后续 Drive 链路复用/清理（与 _launch_drive 行为一致）
+        write_drive_pids([web_proc.pid])
+
+        _processes["web"] = web_proc
+        _processes["car"] = None
+        _processes["backend_port"] = backend_port
+        _processes["frontend_port"] = frontend_port
+
+        return {
+            "status": "launched",
+            "url": f"http://localhost:{frontend_port}/",
+            "backend_port": backend_port,
+            "frontend_port": frontend_port,
+        }
+
+
+def _create_car(folder, template=None, overwrite=False):
+    """创建新项目（菜单 1）：donkey createcar --path ~/projects/<folder>。
+
+    对齐 TUI CreateCarCommand；folder 必须是白名单内的简单目录名。
+    """
+    if not isinstance(folder, str) or not _FOLDER_NAME_RE.match(folder):
+        return {
+            "status": "error",
+            "error": "项目名称只能包含字母、数字、下划线和连字符",
+        }, 400
+
+    target = _PROJECTS_ROOT / folder
+    if target.exists() and not overwrite:
+        return {
+            "status": "error",
+            "error": f"目录已存在：{target}（如需覆盖请选择 overwrite）",
+        }, 409
+
+    cmd = ["donkey", "createcar", "--path", str(target)]
+    if template:
+        cmd.extend(["--template", str(template)])
+    if overwrite:
+        cmd.append("--overwrite")
+
+    try:
+        _PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except FileNotFoundError:
+        return {
+            "status": "error",
+            "error": "未找到 donkey 命令，请确认 donkeycar 已正确安装",
+        }, 500
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "error": "createcar 执行超时（>300s）"}, 500
+    except Exception as e:
+        return {"status": "error", "error": f"执行失败: {e}"}, 500
+
+    if proc.returncode != 0:
+        stderr_tail = (proc.stderr or proc.stdout or "").strip()[-500:]
+        return {
+            "status": "error",
+            "error": f"createcar 失败（exit {proc.returncode}）：{stderr_tail}",
+        }, 500
+
+    # 成功后切换当前项目（对齐 TUI on_success）
+    with _proc_lock:
+        _processes["project"] = str(target)
+    _save_last_project_path_local(target)
+    return {"status": "ok", "path": str(target)}, 200
+
+
+def _open_project(path):
+    """打开已有项目（菜单 2）：校验有效后更新当前项目并持久化。"""
+    if not isinstance(path, str) or not path:
+        return {"status": "error", "error": "path 必须是非空字符串"}, 400
+    project = Path(path)
+    # 只允许打开 ~/projects 下的项目（与 TUI Open 的扫描范围一致）
+    try:
+        project.resolve().relative_to(_PROJECTS_ROOT.resolve())
+    except ValueError:
+        return {
+            "status": "error",
+            "error": f"只能打开 {_PROJECTS_ROOT} 下的项目",
+        }, 400
+    if not _is_valid_project_dir(project):
+        return {
+            "status": "error",
+            "error": "不是有效的 DonkeyCar 项目（缺 manage.py 或 myconfig.py）",
+        }, 400
+    with _proc_lock:
+        _processes["project"] = str(project)
+    _save_last_project_path_local(project)
+    return {"status": "ok", "path": str(project)}, 200
+
+
+def _scan_dir_stats(path):
+    """统计目录文件数与总字节数（对齐 TUI _scan_directory）。"""
+    file_count = 0
+    total_size = 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total_size += (Path(root) / name).stat().st_size
+            except OSError:
+                pass
+            file_count += 1
+    return file_count, total_size
+
+
+def _move_dir_contents(src_dir, dst_dir):
+    """把 src_dir 一层内容 move 到 dst_dir（对齐 TUI _move_items_to_trash），
+    返回 (moved, errors)。"""
+    moved, errors = [], []
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for item in src_dir.iterdir():
+        target = dst_dir / item.name
+        try:
+            shutil.move(str(item), str(target))
+            moved.append(target)
+        except Exception as e:
+            errors.append(f"{item}: {e}")
+    return moved, errors
+
+
+def _restore_dir_contents(src_dir, dst_dir):
+    """把 trash 内容移回（对齐 TUI _restore_from_trash），返回 errors。"""
+    errors = []
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for item in src_dir.iterdir():
+        target = dst_dir / item.name
+        try:
+            shutil.move(str(item), str(target))
+        except Exception as e:
+            errors.append(f"{item}: {e}")
+    return errors
+
+
+def _clear_data(backup=False):
+    """清空当前项目 data 目录（菜单 3，对齐 TUI ClearDataCommand）。
+
+    data 不存在/为空 → skipped；可选 zip 备份到 data_backups/；
+    先 move 到 .data_trash_<ts> 再删，失败回滚。
+    """
+    project = _current_project()
+    if project is None:
+        return {"status": "error", "error": "未找到有效的 mycar 项目"}, 400
+    data_dir = Path(project) / "data"
+    if not data_dir.is_dir():
+        return {"status": "skipped", "reason": "data 目录不存在"}
+    if not any(data_dir.iterdir()):
+        return {"status": "skipped", "reason": "data 目录为空"}
+
+    backup_path = None
+    if backup:
+        backup_dir = Path(project) / "data_backups"
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            archive_base = backup_dir / (
+                "data_backup_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+            )
+            backup_path = shutil.make_archive(
+                str(archive_base), "zip", root_dir=data_dir
+            )
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"备份失败，已中止清空：{e}",
+            }, 500
+
+    trash_dir = data_dir.parent / (
+        ".data_trash_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
+    moved, move_errors = _move_dir_contents(data_dir, trash_dir)
+    if move_errors:
+        _restore_dir_contents(trash_dir, data_dir)
+        shutil.rmtree(trash_dir, ignore_errors=True)
+        return {
+            "status": "error",
+            "error": "移动数据失败，已回滚：" + "; ".join(move_errors[:5]),
+        }, 500
+
+    try:
+        shutil.rmtree(trash_dir)
+    except Exception as e:
+        # 删除失败：回滚保护数据
+        _restore_dir_contents(trash_dir, data_dir)
+        shutil.rmtree(trash_dir, ignore_errors=True)
+        return {
+            "status": "error",
+            "error": f"删除数据失败，已回滚：{e}",
+        }, 500
+
+    return {
+        "status": "ok",
+        "files_cleared": len(moved),
+        "backup_path": backup_path,
+    }
+
+
+def _data_cache_dir(project):
+    return Path(project) / "data_cache"
+
+
+def _backup_data():
+    """备份当前项目 data 目录（菜单 4，对齐 TUI BackupDataCommand）。
+
+    tar.gz 到 <project>/data_cache/data-<YYMMDD>-<NNN>.tar.gz，
+    归档成员为 data 内相对路径（不带 data/ 前缀）；磁盘空间不足则拒绝。
+    """
+    project = _current_project()
+    if project is None:
+        return {"status": "error", "error": "未找到有效的 mycar 项目"}, 400
+    data_dir = Path(project) / "data"
+    if not data_dir.is_dir():
+        return {"status": "error", "error": "data 目录不存在，无法备份"}, 400
+
+    cache_dir = _data_cache_dir(project)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return {"status": "error", "error": f"无法创建备份目录：{e}"}, 500
+
+    _, total_size = _scan_dir_stats(data_dir)
+    try:
+        usage = shutil.disk_usage(cache_dir)
+        if usage.free < int(total_size * 1.1) + 1024 * 1024:
+            return {
+                "status": "error",
+                "error": (
+                    f"磁盘空间不足：需要约 {int(total_size * 1.1 / 1048576) + 1} MB，"
+                    f"可用 {usage.free // 1048576} MB"
+                ),
+            }, 507
+    except Exception as e:
+        return {"status": "error", "error": f"无法检查磁盘空间：{e}"}, 500
+
+    date_str = datetime.now().strftime("%y%m%d")
+    max_idx = 0
+    for item in cache_dir.glob(f"data-{date_str}-*.tar.gz"):
+        m = re.match(rf"^data-{date_str}-(\d{{3}})\.tar\.gz$", item.name)
+        if m:
+            max_idx = max(max_idx, int(m.group(1)))
+    archive_path = cache_dir / f"data-{date_str}-{max_idx + 1:03d}.tar.gz"
+
+    try:
+        with tarfile.open(archive_path, "w:gz") as tar:
+            for root, dirs, files in os.walk(data_dir):
+                for name in dirs:
+                    dir_path = Path(root) / name
+                    tar.add(dir_path, arcname=str(
+                        dir_path.relative_to(data_dir)))
+                for name in files:
+                    file_path = Path(root) / name
+                    tar.add(file_path, arcname=str(
+                        file_path.relative_to(data_dir)))
+    except Exception as e:
+        archive_path.unlink(missing_ok=True)
+        return {"status": "error", "error": f"备份失败：{e}"}, 500
+
+    return {
+        "status": "ok",
+        "file": archive_path.name,
+        "size": archive_path.stat().st_size,
+    }
+
+
+def _list_backups():
+    """列出当前项目 data_cache 下的备份（菜单 5 列表）。"""
+    project = _current_project()
+    if project is None:
+        return {"status": "error", "error": "未找到有效的 mycar 项目"}, 400
+    items = []
+    cache_dir = _data_cache_dir(project)
+    if cache_dir.is_dir():
+        for item in sorted(cache_dir.glob("data-??????-???.tar.gz")):
+            if not item.is_file() or not _BACKUP_NAME_RE.match(item.name):
+                continue
+            try:
+                size = item.stat().st_size
+            except OSError:
+                size = 0
+            items.append({
+                "name": item.name,
+                "date": item.name[5:11],
+                "seq": item.name[12:15],
+                "size": size,
+            })
+    return {"status": "ok", "backups": items, "project": str(project)}
+
+
+def _is_valid_archive_local(path):
+    """tar.gz 完整性校验（对齐 TUI _is_valid_archive）。"""
+    try:
+        if not tarfile.is_tarfile(path):
+            return False
+        with tarfile.open(path, "r:gz") as tar:
+            tar.next()
+        return True
+    except Exception:
+        return False
+
+
+def _is_safe_member_local(member):
+    """防路径穿越（对齐 TUI _is_safe_member）。"""
+    member_path = Path(member.name)
+    if member_path.is_absolute() or ".." in member_path.parts:
+        return False
+    return True
+
+
+def _restore_data(name):
+    """从备份恢复 data 目录（菜单 5，对齐 TUI RestoreDataCommand）。
+
+    name 必须是 data_cache 下规范的 data-*.tar.gz 文件名（白名单校验，
+    防路径穿越）；现有 data 先 move 到 .data_restore_trash_<ts>，解压
+    失败回滚。兼容带/不带 data/ 前缀两种归档。
+    """
+    project = _current_project()
+    if project is None:
+        return {"status": "error", "error": "未找到有效的 mycar 项目"}, 400
+    if not isinstance(name, str) or not _BACKUP_NAME_RE.match(name):
+        return {"status": "error", "error": "备份文件名不合法"}, 400
+
+    archive = _data_cache_dir(project) / name
+    if not archive.is_file():
+        return {"status": "error", "error": f"备份不存在：{name}"}, 404
+    if not _is_valid_archive_local(archive):
+        return {"status": "error", "error": f"备份文件损坏或格式无效：{name}"}, 500
+
+    data_dir = Path(project) / "data"
+
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            members = tar.getmembers()
+            total_size = sum(
+                m.size for m in members if m.isfile())
+    except Exception as e:
+        return {"status": "error", "error": f"无法读取备份：{e}"}, 500
+
+    try:
+        usage = shutil.disk_usage(data_dir.parent)
+        if usage.free < int(total_size * 1.1) + 1024 * 1024:
+            return {
+                "status": "error",
+                "error": (
+                    f"磁盘空间不足：需要约 {int(total_size * 1.1 / 1048576) + 1} MB，"
+                    f"可用 {usage.free // 1048576} MB"
+                ),
+            }, 507
+    except Exception as e:
+        return {"status": "error", "error": f"无法检查磁盘空间：{e}"}, 500
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    trash_dir = data_dir.parent / (
+        ".data_restore_trash_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
+    if any(data_dir.iterdir()):
+        _, move_errors = _move_dir_contents(data_dir, trash_dir)
+        if move_errors:
+            _restore_dir_contents(trash_dir, data_dir)
+            shutil.rmtree(trash_dir, ignore_errors=True)
+            return {
+                "status": "error",
+                "error": "移动现有 data 失败，已回滚："
+                         + "; ".join(move_errors[:5]),
+            }, 500
+
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            members = tar.getmembers()
+            has_data_prefix = bool(members) and all(
+                m.name == "data" or m.name.startswith("data/")
+                for m in members
+            )
+            extract_path = data_dir.parent if has_data_prefix else data_dir
+            for member in members:
+                if not _is_safe_member_local(member):
+                    raise RuntimeError(f"归档内含不安全路径：{member.name}")
+                if member.isdir():
+                    (extract_path / member.name).mkdir(
+                        parents=True, exist_ok=True)
+                else:
+                    tar.extract(member, extract_path)
+    except Exception as e:
+        # 解压失败：回滚原有数据
+        if trash_dir.exists():
+            _restore_dir_contents(trash_dir, data_dir)
+            shutil.rmtree(trash_dir, ignore_errors=True)
+        return {"status": "error", "error": f"恢复失败，已回滚：{e}"}, 500
+
+    shutil.rmtree(trash_dir, ignore_errors=True)
+    return {"status": "ok", "restored": name}, 200
+
+
+def _next_train_model():
+    """下一个本地训练模型路径（菜单 9）：./models/pilot_N 自动递增。
+
+    对齐 TUI TrainLocalCommand：扫描 models/ 下 pilot_<数字> 取 max+1。
+    """
+    project = _current_project()
+    if project is None:
+        return {"status": "error", "error": "未找到有效的 mycar 项目"}, 400
+    models_dir = Path(project) / "models"
+    max_idx = 0
+    if models_dir.is_dir():
+        for item in models_dir.iterdir():
+            m = re.match(r"^pilot_(\d+)$", item.name)
+            if m:
+                max_idx = max(max_idx, int(m.group(1)))
+    return {"status": "ok", "model": f"./models/pilot_{max_idx + 1}"}
+
+
 # ── HOSTIP 串口报告（让 ESP32 /api/status 输出 host_ip） ──────────────
 
 # ESP32 配网串口（Serial2）候选设备：车上上位机经 UART 直连为 /dev/ttyS6，
@@ -446,6 +951,20 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             handle_terminal_ws(self)
         elif path == "/api/status":
             self._serve_json(_get_status())
+        elif path == "/api/projects":
+            self._serve_json({
+                "status": "ok",
+                "projects": [str(p) for p in _find_valid_projects_local()],
+                "current": str(_current_project() or ""),
+            })
+        elif path == "/api/data/backups":
+            result = _list_backups()
+            code = 200 if result.get("status") != "error" else 500
+            self._serve_json(result, code=code)
+        elif path == "/api/train/next-model":
+            result = _next_train_model()
+            code = 200 if result.get("status") != "error" else 500
+            self._serve_json(result, code=code)
         else:
             self._serve_json({"error": "not found"}, code=404)
 
@@ -473,8 +992,91 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                 self._serve_json({"status": "not_found"})
         elif path == "/api/launch/kimi-code-web":
             self._handle_launch_kimi_code_web()
+        elif path == "/api/launch/web":
+            result = _launch_web_ui()
+            code = 200 if result.get("status") != "error" else 500
+            self._serve_json(result, code=code)
+        elif path == "/api/createcar":
+            body, err = self._read_json_body()
+            if err is not None:
+                self._serve_json(err[0], code=400)
+                return
+            folder = body.get("folder")
+            template = body.get("template")
+            overwrite = body.get("overwrite", False)
+            if template is not None and not isinstance(template, str):
+                self._serve_json(
+                    {"status": "error", "error": "template 必须是字符串"},
+                    code=400)
+                return
+            if not isinstance(overwrite, bool):
+                self._serve_json(
+                    {"status": "error", "error": "overwrite 必须是布尔值"},
+                    code=400)
+                return
+            result, code = _create_car(
+                folder, template=template, overwrite=overwrite)
+            self._serve_json(result, code=code)
+        elif path == "/api/projects/open":
+            body, err = self._read_json_body()
+            if err is not None:
+                self._serve_json(err[0], code=400)
+                return
+            result, code = _open_project(body.get("path"))
+            self._serve_json(result, code=code)
+        elif path == "/api/data/clear":
+            body, err = self._read_json_body()
+            if err is not None:
+                self._serve_json(err[0], code=400)
+                return
+            backup = body.get("backup", False)
+            if not isinstance(backup, bool):
+                self._serve_json(
+                    {"status": "error", "error": "backup 必须是布尔值"},
+                    code=400)
+                return
+            result = _clear_data(backup=backup)
+            if isinstance(result, tuple):
+                result, code = result
+            else:
+                code = 200
+            self._serve_json(result, code=code)
+        elif path == "/api/data/backup":
+            result = _backup_data()
+            if isinstance(result, tuple):
+                result, code = result
+            else:
+                code = 200
+            self._serve_json(result, code=code)
+        elif path == "/api/data/restore":
+            body, err = self._read_json_body()
+            if err is not None:
+                self._serve_json(err[0], code=400)
+                return
+            result, code = _restore_data(body.get("name"))
+            self._serve_json(result, code=code)
         else:
             self._serve_json({"error": "not found"}, code=404)
+
+    def _read_json_body(self):
+        """读取可选 JSON 请求体。
+
+        返回 (dict, None)；无 body 或 body 为空时返回 ({}, None)；
+        解析失败返回 (None, (错误响应,))，调用方直接以 400 返回。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0:
+            return {}, None
+        raw = self.rfile.read(content_length)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None, ({"status": "error",
+                           "error": "请求体不是合法 JSON"},)
+        if not isinstance(body, dict):
+            return None, ({"status": "error",
+                           "error": "请求体必须是 JSON 对象"},)
+        return body, None
 
     def _handle_launch_kimi_code_web(self):
         """POST /api/launch/kimi-code-web：启动/复用 kimi web，回 URL。
@@ -981,12 +1583,24 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.startingKimiWeb': '正在启动 Kimi Code Web（kimi 启动较慢，请耐心等待）...',
+                'overlay.startingWeb': '正在启动 Web UI...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
                 'overlay.slow': '前端服务启动较慢，正在跳转...',
                 'overlay.networkError': '网络错误',
                 'overlay.unknownError': '未知错误',
                 'overlay.notImplemented': '该功能暂未在浏览器中实现，请使用终端',
+                'overlay.working': '正在处理...',
+                'overlay.done': '操作完成',
+                'overlay.cancelled': '已取消',
+                'menu.createcar.prompt': '项目名称（将在 ~/projects/ 下创建）：',
+                'menu.createcar.exists': '目录已存在，是否覆盖？（覆盖不可恢复）',
+                'menu.open.prompt': '输入要打开的项目编号（0 取消）：\n',
+                'menu.open.none': '~/projects 下未找到有效的 DonkeyCar 项目',
+                'menu.clear.confirm': '即将清空当前项目的 data 目录，删除不可恢复！\n是否先创建 zip 备份（推荐）？\n确定=备份并清空，取消=直接清空',
+                'menu.clear.confirmNoBackup': '即将不备份直接清空 data 目录，删除不可恢复！确认继续？',
+                'menu.train.openTerminal': '正在打开终端并启动训练（可在终端中查看进度与交互）...',
+                'menu.donkeyui.openTerminal': '正在打开终端并启动 Donkey UI...',
             },
             en: {
                 'language.title': 'Language',
@@ -1007,12 +1621,24 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.startingKimiWeb': 'Starting Kimi Code Web (kimi starts slowly, please wait)...',
+                'overlay.startingWeb': 'Starting Web UI...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
                 'overlay.slow': 'Frontend is slow to start, redirecting...',
                 'overlay.networkError': 'Network error',
                 'overlay.unknownError': 'Unknown error',
                 'overlay.notImplemented': 'This feature is not available in the browser yet; please use the terminal',
+                'overlay.working': 'Working...',
+                'overlay.done': 'Done',
+                'overlay.cancelled': 'Cancelled',
+                'menu.createcar.prompt': 'Project name (will be created under ~/projects/):',
+                'menu.createcar.exists': 'Directory already exists. Overwrite? (cannot be undone)',
+                'menu.open.prompt': 'Enter the number of the project to open (0 to cancel):\n',
+                'menu.open.none': 'No valid DonkeyCar projects found under ~/projects',
+                'menu.clear.confirm': 'The data directory of the current project will be cleared and cannot be undone!\nCreate a zip backup first (recommended)?\nOK = backup and clear, Cancel = clear without backup',
+                'menu.clear.confirmNoBackup': 'Clear the data directory WITHOUT backup? This cannot be undone! Continue?',
+                'menu.train.openTerminal': 'Opening a terminal and starting training (watch progress there)...',
+                'menu.donkeyui.openTerminal': 'Opening a terminal and starting Donkey UI...',
             },
         };
 
@@ -1185,7 +1811,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项
+        // 选择菜单项（issue #126：全部菜单项已接线）
         function selectItem(no) {
             highlightRow(no);
             const item = menuItems.find(m => m.no === no);
@@ -1193,12 +1819,28 @@ MENU_HTML = r"""<!DOCTYPE html>
 
             if (no === 0) {
                 openDrifterConsole();
+            } else if (no === 1) {
+                createCar();
+            } else if (no === 2) {
+                openProject();
+            } else if (no === 3) {
+                clearData();
+            } else if (no === 4) {
+                backupData();
+            } else if (no === 5) {
+                restoreData();
             } else if (no === 6) {
                 launchDrive();
+            } else if (no === 7) {
+                launchWebUI();
+            } else if (no === 8) {
+                launchInTerminal('donkey ui', t('menu.donkeyui.openTerminal'));
+            } else if (no === 9) {
+                launchTrainLocal();
+            } else if (no === 10) {
+                launchTrainOnline();
             } else if (no === 11) {
                 launchKimiCodeWeb();
-            } else {
-                showError(t('overlay.notImplemented'));
             }
         }
 
@@ -1328,6 +1970,306 @@ MENU_HTML = r"""<!DOCTYPE html>
                     overlay.classList.remove('show');
                 }, 3000);
             }
+        }
+
+        // ── 菜单 1-5、7-10（issue #126） ──
+
+        // 通用 overlay 工具
+        function showOverlayMsg(msgKey) {
+            document.getElementById('overlay').classList.add('show');
+            document.getElementById('overlay-text').textContent = t(msgKey);
+            document.getElementById('overlay-error').textContent = '';
+        }
+        function hideOverlaySoon(ms) {
+            setTimeout(function() {
+                document.getElementById('overlay')
+                    .classList.remove('show');
+            }, ms);
+        }
+        async function postJson(url, body) {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body || {})
+            });
+            return {resp: resp, data: await resp.json()};
+        }
+        function showResultError(data) {
+            document.getElementById('overlay-text').textContent =
+                t('overlay.failed');
+            document.getElementById('overlay-error').textContent =
+                (data && data.error) || t('overlay.unknownError');
+            hideOverlaySoon(4000);
+        }
+        function showResultDone(msg) {
+            document.getElementById('overlay-text').textContent =
+                msg || t('overlay.done');
+            document.getElementById('overlay-error').textContent = '';
+            hideOverlaySoon(2500);
+        }
+
+        // 菜单 1：创建新项目（folder 必填；已存在时问是否覆盖）
+        async function createCar() {
+            const folder = prompt(t('menu.createcar.prompt'));
+            if (folder === null) return;
+            const name = folder.trim();
+            if (!name) { showError(t('menu.createcar.prompt')); return; }
+            let overwrite = false;
+            try {
+                const probe = await fetch('/api/projects');
+                const pj = await probe.json();
+                if ((pj.projects || []).some(function(p) {
+                    return p.endsWith('/' + name);
+                })) {
+                    if (!confirm(t('menu.createcar.exists'))) return;
+                    overwrite = true;
+                }
+            } catch (e) { /* 探测失败交给服务端校验 */ }
+            showOverlayMsg('overlay.working');
+            try {
+                const r = await postJson('/api/createcar',
+                    {folder: name, overwrite: overwrite});
+                if (r.resp.ok && r.data.status === 'ok') {
+                    showResultDone('✓ ' + r.data.path);
+                    fetchStatus();
+                } else {
+                    showResultError(r.data);
+                }
+            } catch (e) {
+                showResultError({error: t('overlay.networkError') +
+                    ': ' + e.message});
+            }
+        }
+
+        // 菜单 2：打开已有项目（列出 ~/projects 下有效项目，按编号选择）
+        async function openProject() {
+            let projects;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                projects = data.projects || [];
+            } catch (e) {
+                showError(t('overlay.networkError') + ': ' + e.message);
+                return;
+            }
+            if (!projects.length) {
+                showError(t('menu.open.none'));
+                return;
+            }
+            const lines = projects.map(function(p, i) {
+                var slash = p.lastIndexOf('/');
+                return (i + 1) + '. ' +
+                    (slash >= 0 ? p.slice(slash + 1) : p);
+            });
+            const choice = prompt(
+                t('menu.open.prompt') + lines.join('\n'));
+            if (choice === null) return;
+            const idx = parseInt(choice, 10);
+            if (!(idx >= 1 && idx <= projects.length)) return;
+            showOverlayMsg('overlay.working');
+            try {
+                const r = await postJson('/api/projects/open',
+                    {path: projects[idx - 1]});
+                if (r.resp.ok && r.data.status === 'ok') {
+                    showResultDone('✓ ' + r.data.path);
+                    fetchStatus();
+                } else {
+                    showResultError(r.data);
+                }
+            } catch (e) {
+                showResultError({error: t('overlay.networkError') +
+                    ': ' + e.message});
+            }
+        }
+
+        // 菜单 3：清空 data（confirm 二次确认；可选 zip 备份）
+        async function clearData() {
+            const backup = confirm(t('menu.clear.confirm'));
+            if (!backup && !confirm(t('menu.clear.confirmNoBackup'))) {
+                return;
+            }
+            showOverlayMsg('overlay.working');
+            try {
+                const r = await postJson('/api/data/clear',
+                    {backup: backup});
+                if (r.resp.ok && r.data.status === 'ok') {
+                    showResultDone('✓ data');
+                } else if (r.data.status === 'skipped') {
+                    showResultDone(r.data.reason);
+                } else {
+                    showResultError(r.data);
+                }
+            } catch (e) {
+                showResultError({error: t('overlay.networkError') +
+                    ': ' + e.message});
+            }
+        }
+
+        // 菜单 4：备份 data 到 data_cache/data-<日期>-<序号>.tar.gz
+        async function backupData() {
+            showOverlayMsg('overlay.working');
+            try {
+                const r = await postJson('/api/data/backup', {});
+                if (r.resp.ok && r.data.status === 'ok') {
+                    showResultDone('✓ ' + r.data.file + ' (' +
+                        Math.max(1, Math.round(r.data.size / 1048576)) +
+                        ' MB)');
+                } else {
+                    showResultError(r.data);
+                }
+            } catch (e) {
+                showResultError({error: t('overlay.networkError') +
+                    ': ' + e.message});
+            }
+        }
+
+        // 菜单 5：从备份恢复 data（列出备份，按编号选择 + 确认）
+        async function restoreData() {
+            let backups;
+            try {
+                const resp = await fetch('/api/data/backups');
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showError(data.error || t('overlay.unknownError'));
+                    return;
+                }
+                backups = data.backups || [];
+            } catch (e) {
+                showError(t('overlay.networkError') + ': ' + e.message);
+                return;
+            }
+            if (!backups.length) {
+                showError(uiLang === 'en'
+                    ? 'No backups found in data_cache/'
+                    : 'data_cache/ 下没有备份');
+                return;
+            }
+            const lines = backups.map(function(b, i) {
+                return (i + 1) + '. ' + b.name + ' (' +
+                    Math.max(1, Math.round(b.size / 1048576)) + ' MB)';
+            });
+            const choice = prompt(
+                (uiLang === 'en'
+                    ? 'Enter the number of the backup to restore (0 to cancel):\n'
+                    : '输入要恢复的备份编号（0 取消）：\n') +
+                lines.join('\n'));
+            if (choice === null) return;
+            const idx = parseInt(choice, 10);
+            if (!(idx >= 1 && idx <= backups.length)) return;
+            if (!confirm(uiLang === 'en'
+                    ? 'Restore ' + backups[idx - 1].name +
+                      '? Current data will be replaced!'
+                    : '从 ' + backups[idx - 1].name +
+                      ' 恢复？当前 data 将被替换！')) {
+                return;
+            }
+            showOverlayMsg('overlay.working');
+            try {
+                const r = await postJson('/api/data/restore',
+                    {name: backups[idx - 1].name});
+                if (r.resp.ok && r.data.status === 'ok') {
+                    showResultDone('✓ ' + r.data.restored);
+                } else {
+                    showResultError(r.data);
+                }
+            } catch (e) {
+                showResultError({error: t('overlay.networkError') +
+                    ': ' + e.message});
+            }
+        }
+
+        // 菜单 7：启动 Web UI（复用存活实例，否则新起 donkey web），
+        // 轮询前端就绪后跳转（同 launchDrive，但不带 /#/drive）
+        async function launchWebUI() {
+            showOverlayMsg('overlay.startingWeb');
+            try {
+                const resp = await fetch('/api/launch/web', {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+                if (data.status === 'launched') {
+                    const url = data.url.replace(
+                        'localhost', window.location.hostname
+                    );
+                    var ready = false;
+                    for (var i = 0; i < 30; i++) {
+                        try {
+                            await fetch(url, {mode: 'no-cors'});
+                            ready = true;
+                            break;
+                        } catch (e) {
+                            document.getElementById('overlay-text')
+                                .textContent = t('overlay.startingWeb') +
+                                ' (' + (i + 1) + '/30)';
+                            await new Promise(function(res) {
+                                setTimeout(res, 1000);
+                            });
+                        }
+                    }
+                    if (ready) {
+                        document.getElementById('overlay-text')
+                            .textContent = t('overlay.success');
+                        window.location.href = url;
+                    } else {
+                        document.getElementById('overlay-text')
+                            .textContent = t('overlay.slow');
+                        setTimeout(function() {
+                            window.location.href = url;
+                        }, 1000);
+                    }
+                } else {
+                    showResultError(data);
+                }
+            } catch (e) {
+                showResultError({error: t('overlay.networkError') +
+                    ': ' + e.message});
+            }
+        }
+
+        // 在新标签页的终端里自动执行命令（菜单 8/10 及 9 复用）：
+        // /terminal?cmd=<encodeURIComponent(...)>，terminal.html 连上
+        // WebSocket 后把命令作为首行输入发出
+        function launchInTerminal(cmd, msgKey) {
+            showOverlayMsg(msgKey || 'overlay.working');
+            window.open('/terminal?cmd=' + encodeURIComponent(cmd),
+                        '_blank');
+            hideOverlaySoon(1500);
+        }
+
+        // 菜单 8：donkey ui（终端交互式 TUI，需在项目目录下运行）
+        async function launchDonkeyUI() {
+            launchInTerminal(
+                "cd '" + currentProjectPath() + "' && donkey ui",
+                'menu.donkeyui.openTerminal');
+        }
+
+        // 菜单 9：本地训练（pilot_N 由服务端递增分配）
+        async function launchTrainLocal() {
+            let model = './models/pilot_1';
+            try {
+                const resp = await fetch('/api/train/next-model');
+                const data = await resp.json();
+                if (resp.ok && data.model) model = data.model;
+            } catch (e) { /* 用默认值 */ }
+            launchInTerminal(
+                "cd '" + currentProjectPath() +
+                "' && donkey train --tub ./data --model " + model +
+                " --type linear",
+                'menu.train.openTerminal');
+        }
+
+        // 菜单 10：云端训练（train_online.conf）
+        async function launchTrainOnline() {
+            launchInTerminal(
+                "cd '" + currentProjectPath() +
+                "' && python -m donkeycar.management.train_online",
+                'menu.train.openTerminal');
+        }
+
+        // 当前项目路径：fetchStatus 已缓存的 cwd-path，兜底 /home/dkc/projects
+        function currentProjectPath() {
+            const p = document.getElementById('cwd-path').textContent;
+            return (p && p.trim()) || '/home/dkc/projects';
         }
 
         // 显示错误提示
