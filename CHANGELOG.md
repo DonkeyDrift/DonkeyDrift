@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-17 (3)
+
+- fix(web-ui): Tub Library（录制视频库）Pin 按钮与删除按钮间距过大，收拢为右侧相邻按钮组（#131 迭代）
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：列表行原为 `justify-between` 三段布局，中间文本块与 Pin、删除图标分列两端之间，导致 Pin 悬在行中部、与垃圾桶距离过远；现将 Pin 与删除两个 `<span>` 包进同一 `flex items-center gap-1 shrink-0` 容器，两图标固定相邻、整体靠右，行内文本仍占左侧剩余空间。
+  - 测试：前端 vitest 全量 90 项通过、`npm run build` 通过（TubLibrary 置顶/删除既有用例不受影响）。
+
 ## 2026-08-17 (2)
 
 - style(launcher): 三页面（DC/D/DD）语言切换按钮样式统一为 DD 原生样式（#92 后续统一，与 Firmware 侧同批）
