@@ -60,22 +60,22 @@ describe('TelemetryChart', () => {
   it('收到遥测后显示默认 5 条曲线', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry()} />);
 
-    await waitForDataset('Throttle');
-    expect(screen.getByTestId('dataset-Steering')).toBeInTheDocument();
-    expect(screen.getByTestId('dataset-GyroZ')).toBeInTheDocument();
-    expect(screen.getByTestId('dataset-RC Steering')).toBeInTheDocument();
-    expect(screen.getByTestId('dataset-RC Throttle')).toBeInTheDocument();
+    await waitForDataset('油门');
+    expect(screen.getByTestId('dataset-转向')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-陀螺仪 Z')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-RC 转向')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-RC 油门')).toBeInTheDocument();
     // 默认不显示 GyroX
-    expect(screen.queryByTestId('dataset-GyroX')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-陀螺仪 X')).not.toBeInTheDocument();
   });
 
   it('RC 手柄输入写入 RC 曲线', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry({ rc_steering: -0.5, rc_throttle: 0.8 })} />);
 
     await waitFor(() => {
-      expect(datasetValues('RC Steering')).toContain(-0.5);
+      expect(datasetValues('RC 转向')).toContain(-0.5);
     });
-    expect(datasetValues('RC Throttle')).toContain(0.8);
+    expect(datasetValues('RC 油门')).toContain(0.8);
   });
 
   it('gyro/accel 曲线按 scale 缩放后写入缓冲', async () => {
@@ -83,7 +83,7 @@ describe('TelemetryChart', () => {
 
     // gz scale=0.2 -> 0.5*0.2=0.1
     await waitFor(() => {
-      const vals = datasetValues('GyroZ').filter((v): v is number => v !== null);
+      const vals = datasetValues('陀螺仪 Z').filter((v): v is number => v !== null);
       expect(vals.length).toBeGreaterThan(0);
       expect(vals[0]).toBeCloseTo(0.1, 10);
     });
@@ -92,13 +92,13 @@ describe('TelemetryChart', () => {
     const checkboxes = screen.getAllByRole('checkbox');
     const accXCheckbox = checkboxes.find((cb) => {
       const label = cb.parentElement?.querySelector('span');
-      return label?.textContent === 'AccX';
+      return label?.textContent === '加速度 X';
     }) as HTMLInputElement;
     fireEvent.click(accXCheckbox);
 
     // ax scale=1/9.8 -> 4.9/9.8≈0.5
     await waitFor(() => {
-      const vals = datasetValues('AccX').filter((v): v is number => v !== null);
+      const vals = datasetValues('加速度 X').filter((v): v is number => v !== null);
       expect(vals.length).toBeGreaterThan(0);
       expect(vals[0]).toBeCloseTo(0.5, 10);
     });
@@ -107,7 +107,7 @@ describe('TelemetryChart', () => {
   it('暂停后切换为继续按钮', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry()} />);
 
-    await waitForDataset('Throttle');
+    await waitForDataset('油门');
 
     fireEvent.click(screen.getByLabelText('暂停'));
 
@@ -117,7 +117,7 @@ describe('TelemetryChart', () => {
   it('清空后重置等待状态', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry()} />);
 
-    await waitForDataset('Throttle');
+    await waitForDataset('油门');
 
     fireEvent.click(screen.getByLabelText('清空'));
 
@@ -127,20 +127,20 @@ describe('TelemetryChart', () => {
   it('勾选隐藏的曲线后显示对应数据集', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry({ gx: 0.5 })} />);
 
-    await waitForDataset('Throttle');
+    await waitForDataset('油门');
 
     // GyroX 默认不显示
-    expect(screen.queryByTestId('dataset-GyroX')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-陀螺仪 X')).not.toBeInTheDocument();
 
     // 勾选 GyroX 复选框
     const checkboxes = screen.getAllByRole('checkbox');
     const gyroXCheckbox = checkboxes.find((cb) => {
       const label = cb.parentElement?.querySelector('span');
-      return label?.textContent === 'GyroX';
+      return label?.textContent === '陀螺仪 X';
     }) as HTMLInputElement;
     fireEvent.click(gyroXCheckbox);
 
-    await waitForDataset('GyroX');
+    await waitForDataset('陀螺仪 X');
   });
 
   it('缺失字段的曲线仍渲染数据集（NaN 点断开）', async () => {
@@ -149,15 +149,15 @@ describe('TelemetryChart', () => {
     render(<TelemetryChart telemetry={partial} />);
 
     // 三条默认曲线的 dataset 都应渲染（缺失字段写入 NaN，曲线断开但不报错）
-    await waitForDataset('Throttle');
-    expect(screen.getByTestId('dataset-Steering')).toBeInTheDocument();
-    expect(screen.getByTestId('dataset-GyroZ')).toBeInTheDocument();
+    await waitForDataset('油门');
+    expect(screen.getByTestId('dataset-转向')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-陀螺仪 Z')).toBeInTheDocument();
   });
 
   it('全屏按钮切换全屏状态', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry()} />);
 
-    await waitForDataset('Throttle');
+    await waitForDataset('油门');
 
     fireEvent.click(screen.getByLabelText('全屏'));
 

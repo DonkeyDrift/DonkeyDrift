@@ -649,6 +649,14 @@ html.theme-light .language-switcher-btn {
   border-color: #ccd5df;
   box-shadow: inset 0 0 0 1px #d5dce4;
   color: #3f4f63;
+  /* 字体与 DC/D 逐值一致（同 theme-mus4 侧说明） */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 12px;
+  font-weight: 600;
 }
 html.theme-light .theme-switcher-btn:hover,
 html.theme-light .language-switcher-btn:hover {
