@@ -28,7 +28,7 @@ export const ThemeSwitcher: React.FC = () => {
       type="button"
       aria-label={resolved === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
       onClick={handleClick}
-      className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 transition-colors"
+      className="theme-switcher-btn flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 transition-colors"
     >
       {resolved === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
     </button>

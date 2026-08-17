@@ -637,3 +637,17 @@ html.theme-light .bg-black\/60.text-white,
 html.theme-light .bg-black\/70.text-white {
   color: #ffffff;
 }
+
+/* ---------- 主题切换按钮（ThemeSwitcher）：三页面（DC/D/DD）统一渲染值 ---------- */
+/* 显式锁定 DC/D 浅色皮肤：底 #f4f6f9、边框 #ccd5df、inset 内圈 #d5dce4、
+   图标 #3f4f63、hover #1a2330。与 theme-mus4 侧同理压过通用 outline 规则。 */
+html.theme-light .theme-switcher-btn {
+  outline: none;
+  background: #f4f6f9;
+  border-color: #ccd5df;
+  box-shadow: inset 0 0 0 1px #d5dce4;
+  color: #3f4f63;
+}
+html.theme-light .theme-switcher-btn:hover {
+  color: #1a2330;
+}

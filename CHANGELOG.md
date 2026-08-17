@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-17 (7)
+
+- style(web-ui): DD 主题切换按钮显式复刻 DC/D 渲染值，三页面（DC/D/DD）主题按钮逐值一模一样（#140 后续统一收口）
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：按钮追加 `theme-switcher-btn` 钩子类，渲染值不再依赖主题 css 对 Tailwind zinc 类的重映射。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：新增 `.theme-switcher-btn` 显式规则并置于文件末尾——深色 `outline:none;background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `#f4f6f9/#ccd5df/#d5dce4/#3f4f63`、hover `#1a2330`。修复要点：ThemeSwitcher 是 `<button>`，此前不匹配主题 css 的 `div.rounded-full.bg-zinc-800.border` 胶囊规则，漏吃到通用 `.bg-zinc-800` 的 `outline:1px solid` 压边描边而非 DC/D 的 border+inset 内圈双层视觉；显式规则同时压过该 outline，与 DC/D 完全一致（DC：Firmware v1.8.4 `.themeButton`；D：launcher `#themeBtn`，本仓 (6) 条目）。图标不变（lucide Moon/Sun 16px、stroke 2、currentColor，深色显月亮/浅色显太阳）。
+  - 测试：前端 vitest 全量 90 项通过、`tsc -b` 通过、`npm run build` 通过，构建产物 dist/assets/index-*.css 中 `.theme-switcher-btn` 规则逐值核实与 DC/D 一致。语言按钮不受影响（未动 LanguageSwitcher）。
+
 ## 2026-08-17 (6)
 
 - style(launcher): D 启动页主题按钮皮肤与 DD 渲染值逐值统一——三处（DC/D/DD）深浅切换按钮一模一样（#140 后续统一，与 Firmware v1.8.4 同批）
