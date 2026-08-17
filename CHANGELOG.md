@@ -7,6 +7,17 @@
   - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.theme-switcher-btn, .language-switcher-btn` 皮肤规则追加字体锁定——`:root` 完整字体栈 + `font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale` + `font-size:12px;font-weight:600`（主题按钮原为 16px/400，一并统一为 12px/600）。
   - 验证：Playwright 三页面实测（D=127.0.0.1:8090、DD=dev 服务器、DC=车 192.168.3.46 v1.8.5）深浅两主题语言按钮 10 项计算样式（背景/边框/内圈/字色/字体栈/字号/字重/宽/高/圆角）D vs DC、DD vs DC 全部 IDENTICAL；vitest 14 项、pytest 全量 183 项、`npm run build` 通过。Firmware 侧无改动，车上 v1.8.5 即最新，无需 OTA。
 
+
+## 2026-08-17 (13)
+
+- feat(web-ui): 补齐 DD 中文翻译——`common`、`arena`、`driveviz` 三个 i18n 命名空间的 zh 词条全部翻译为中文，顶部导航栏按要求保持英文不译
+  - `web_ui/frontend/src/i18n/messages/common.ts`：zh 从"镜像当前中英混合 UI"改为完整中文——App shell（出错了/刷新 Tub 失败/错误前缀/加载中）、ConfigLoader（配置加载器标题、选择车辆目录、浏览、加载、配置已加载、未加载配置、各类加载失败、路径占位与 aria）、FileBrowserModal（选择目录、返回、未找到目录、取消、选择当前目录）、SidePanel（加载器/连接器）、GitHubLink（`DonkeyDrift GitHub 仓库`）。顶部导航五项（Tub Manager/Trainer/Drive/Pilot Arena/Car Connector）按用户要求保持英文。
+  - `web_ui/frontend/src/i18n/messages/arena.ts`（Pilot Arena）：zh 补译——User/Pilot 标签（用户/Pilot）、Angle/Throttle（角度/油门）、Brightness/Blur（亮度/模糊）、Pre/Post Transformations（前置/后置变换）、Tub Plot（Tub 曲线图）、Record index（记录索引）；`configLabel`/`recordsLabel`/plot 数据集名（user angle 等）等技术术语保留原文。
+  - `web_ui/frontend/src/i18n/messages/driveviz.ts`（Drive 可视化）：zh 补译——Connecting/Disconnected（连接中/已断开）、Camera feed（摄像头画面）、12 条遥测曲线名（油门/转向/陀螺仪 X/Y/Z/加速度 X/Y/Z/RC 转向/RC 油门/Pilot 角度/Pilot 油门）。
+  - en 词条与组件代码均未改动。
+  - 测试同步：`TelemetryChart.test.tsx` 数据集断言（dataset testid、waitForDataset、复选框标签）改用中文曲线名；`VideoStream.test.tsx` alt/aria 断言改 `摄像头画面`/`WebRTC 摄像头画面`；`GitHubLink.test.tsx` 链接名断言改 `DonkeyDrift GitHub 仓库`。前端 vitest 全量 18 文件 90 项通过，`tsc -b` 与 `npm run build` 通过。
+  - 注：本次改动在 `Tony-complete-zh-translations` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。
+
 ## 2026-08-17 (12)
 
 - style(web_ui/trainer): 已训练模型删除按钮改为红色（#148 后续）
