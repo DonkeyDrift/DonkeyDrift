@@ -2,6 +2,14 @@
 
 ## 2026-08-17 (9)
 
+- feat(web-ui): 完成 Tub Manager（TM）页面中文翻译——`tubnav` 与 `tubeditor` 两个 i18n 命名空间的 zh 词条全部翻译为中文（#157）
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`（TubNavigator + TubLoader + SimulatorConfig）：zh 从"镜像当前中英混合 UI"改为完整中文——导航器标题/副标题、未加载记录、转向/油门、时间轴、拖动中、索引标签、无图像/图像加载失败、首条/上一条/下一条/末条及 aria、播放/停止及 aria、循环/单次播放模式 aria、刷新 aria（`刷新 Tub 记录`）；TubLoader 标题/副标题/路径占位/输入框 aria/浏览/加载/请先加载配置/加载成功/未加载 Tub/选择目录/两类加载失败；SimulatorConfig 的 simHost/simMode/discover/save 四个 aria 与 `notAvailable`（`无`）。文件头注释同步改为"zh 为完整中文翻译"。
+  - `web_ui/frontend/src/i18n/messages/tubeditor.ts`（TubEditor）：zh 同上改完整中文——标题/副标题、实时更新、空图表占位/空态、开始/结束索引 aria 与占位、`至`、删除中…/删除、恢复中…/恢复、缩放标签、tooltip 帧/转向/油门、数据集名 转向/油门、六条英文错误提示（范围内无记录/删除失败/恢复失败/范围无效/无可用记录/无有效记录）。文件头注释同步更新。
+  - en 词条与组件代码均未改动。
+  - 测试同步：`web_ui/frontend/src/components/TubNavigator.test.tsx:39` 刷新按钮定位串从 `Refresh tub records` 改为新 zh aria `刷新 Tub 记录`；前端 vitest 全量 18 文件 90 项通过。
+
+## 2026-08-17 (10)
+
 - feat(web_ui/trainer): 已训练模型列表每行最右侧新增删除按钮（Issue #148）
   - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行操作按钮区（Copy 按钮之后）新增 Trash2 图标按钮，样式与现有按钮一致（`p-1 text-zinc-500 hover:text-red-400 transition-colors`），点击 `e.stopPropagation()` 后 `setConfirmDelete(m)` 打开已有删除确认弹窗；lucide-react 导入补 `Trash2`。删除链路此前已完整实现（`deleteModel` API、`deleting`/`confirmDelete` state、`handleDelete`、确认弹窗及中英文 i18n 文案），本次仅补缺失的触发入口。
   - 测试：`npm run build`（tsc -b + vite build）通过；vitest 全量 89/90 通过，唯一失败的 `TubNavigator.test.tsx` 为并行会话在制修改（stash 本改动后复测同样失败），与本改动无关。

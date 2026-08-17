@@ -36,7 +36,7 @@ describe('TubNavigator manual refresh (#135)', () => {
 
   it('renders a refresh button that triggers requestTubRefresh', () => {
     render(<TubNavigator />);
-    const button = screen.getByLabelText('Refresh tub records');
+    const button = screen.getByLabelText('刷新 Tub 记录');
     expect(button).toBeInTheDocument();
 
     fireEvent.click(button);
