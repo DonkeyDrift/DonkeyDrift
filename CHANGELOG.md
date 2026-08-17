@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-17 (12)
+
+- style(web_ui/trainer): 已训练模型删除按钮改为红色（#148 后续）
+  - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行删除按钮配色从 `text-zinc-500 hover:text-red-400` 改为常红 `text-red-400 hover:text-red-300`，与删除语义一致、更醒目。
+  - 测试：`npm run build`（tsc -b + vite build）通过。
+
 ## 2026-08-17 (11)
 
 - fix(launcher): 上位机终端 WebSocket 增加服务端心跳保活与空闲超时判死，长时间空闲不再悄悄断连丢会话（#151）

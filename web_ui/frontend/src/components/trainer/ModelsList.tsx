@@ -221,7 +221,7 @@ export const ModelsList: React.FC = () => {
                     setConfirmDelete(m);
                   }}
                   title={t('trainer.deleteModel')}
-                  className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                  className="p-1 text-red-400 hover:text-red-300 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
