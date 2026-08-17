@@ -1333,18 +1333,15 @@ MENU_HTML = r"""<!DOCTYPE html>
         .ghLink:hover{color:#5cc8ff}
         .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block}
 
-        /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言静音式单按钮，
-           逐值复刻 DD 实际渲染值——32×32 圆形按钮 bg-zinc-800→#27272a、
-           border-zinc-700→#3f3f46、图标/文字 text-zinc-300→#d4d4d8、
-           hover:text-zinc-100→#f4f4f5（DD 原生 Tailwind 值，无内描边/active 态）；
-           浅色变体见下方 html[data-theme="light"] 段（zinc-100/200/500/900）） */
-        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#27272a;border:1px solid #3f3f46;color:#d4d4d8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
-        .langBtn:hover{color:#f4f4f5}
-        /* 主题按钮与 DD ThemeSwitcher 渲染值逐值一致（DD 深色 theme-mus4 /
-           浅色 theme-light 重映射）：深色 #111820 + #344154 + #2b3441 内描边、
-           图标 #b9c5d3 → hover #e8edf2；浅色 #f4f6f9 + #ccd5df + #d5dce4 内描边、
-           图标 #3f4f63 → hover #1a2330。langBtn 基类（原始 zinc 值）对
-           #themeBtn 不适用，此处 ID 覆盖 */
+        /* 主题/语言静音式单按钮（顶栏 32×32 圆形）：配色对齐 DC/D 主题按钮
+           （.themeButton）渲染值——深色 #111820 底 + #344154 边框 + inset 1px
+           #2b3441 内圈、字色 #b9c5d3 → hover #e8edf2；浅色 #f4f6f9 + #ccd5df +
+           #d5dce4 内圈、字色 #3f4f63 → hover #1a2330；字体栈沿用 DD index.css
+           :root（含 font-synthesis/text-rendering/font-smoothing） */
+        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
+        .langBtn:hover{color:#e8edf2}
+        /* 主题按钮：颜色与 .langBtn 基类一致（语言按钮已对齐主题按钮配色，
+           此处 ID 覆盖仅保留布局与图标尺寸） */
         #themeBtn{margin-left:auto;background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3}
         #themeBtn:hover{color:#e8edf2}
         #themeBtn svg{width:16px;height:16px}
@@ -1471,8 +1468,8 @@ MENU_HTML = r"""<!DOCTYPE html>
         /* DD theme-light 胶囊变体（theme-light.css 重映射值）：
            容器 #f4f6f9 + border #ccd5df + 内描边 #d5dce4，文字 #5b6b7d、
            hover #1a2330；激活态深浅一致（#5cc8ff/#061019/800）无需覆盖 */
-        html[data-theme="light"] .langBtn{background:#f4f4f5;border-color:#d4d4d8;color:#52525b}
-        html[data-theme="light"] .langBtn:hover{color:#18181b}
+        html[data-theme="light"] .langBtn{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63}
+        html[data-theme="light"] .langBtn:hover{color:#1a2330}
         /* 主题按钮浅色变体（DD theme-light 渲染值，见上方 #themeBtn 注释） */
         html[data-theme="light"] #themeBtn{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63}
         html[data-theme="light"] #themeBtn:hover{color:#1a2330}
