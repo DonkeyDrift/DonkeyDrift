@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-17 (9)
+
+- feat(web-ui): 完成 Tub Manager（TM）页面中文翻译——`tubnav` 与 `tubeditor` 两个 i18n 命名空间的 zh 词条全部翻译为中文（#157）
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`（TubNavigator + TubLoader + SimulatorConfig）：zh 从"镜像当前中英混合 UI"改为完整中文——导航器标题/副标题、未加载记录、转向/油门、时间轴、拖动中、索引标签、无图像/图像加载失败、首条/上一条/下一条/末条及 aria、播放/停止及 aria、循环/单次播放模式 aria、刷新 aria（`刷新 Tub 记录`）；TubLoader 标题/副标题/路径占位/输入框 aria/浏览/加载/请先加载配置/加载成功/未加载 Tub/选择目录/两类加载失败；SimulatorConfig 的 simHost/simMode/discover/save 四个 aria 与 `notAvailable`（`无`）。文件头注释同步改为"zh 为完整中文翻译"。
+  - `web_ui/frontend/src/i18n/messages/tubeditor.ts`（TubEditor）：zh 同上改完整中文——标题/副标题、实时更新、空图表占位/空态、开始/结束索引 aria 与占位、`至`、删除中…/删除、恢复中…/恢复、缩放标签、tooltip 帧/转向/油门、数据集名 转向/油门、六条英文错误提示（范围内无记录/删除失败/恢复失败/范围无效/无可用记录/无有效记录）。文件头注释同步更新。
+  - en 词条与组件代码均未改动。
+  - 测试同步：`web_ui/frontend/src/components/TubNavigator.test.tsx:39` 刷新按钮定位串从 `Refresh tub records` 改为新 zh aria `刷新 Tub 记录`；前端 vitest 全量 18 文件 90 项通过。
+
 ## 2026-08-17 (8)
 - style(web_ui/launcher): 三页面语言按钮配色统一为 DC/D 主题按钮（深浅切换）样式（#92 后续统一，与 Firmware v1.8.5 同批）
   - `donkeycar/launcher/server.py`（D 启动页）：`.langBtn` 基类（语言 `#langBtn` 与主题 `#themeBtn` 共用）从 DD 原生 zinc 配色（#27272a/#3f3f46/#d4d4d8，浅色 zinc-100/200/500/900）改为主题按钮配色——深色 `background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；32×32 圆形、DD 字体栈、字号/字重不变；`#themeBtn` 的 ID 颜色覆盖与基类重合（保留仅承载布局与图标尺寸），浅色段同步换值。
