@@ -1338,7 +1338,7 @@ MENU_HTML = r"""<!DOCTYPE html>
            border-zinc-700→#3f3f46、图标/文字 text-zinc-300→#d4d4d8、
            hover:text-zinc-100→#f4f4f5（DD 原生 Tailwind 值，无内描边/active 态）；
            浅色变体见下方 html[data-theme="light"] 段（zinc-100/200/500/900）） */
-        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#27272a;border:1px solid #3f3f46;color:#d4d4d8;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
+        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#27272a;border:1px solid #3f3f46;color:#d4d4d8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
         .langBtn:hover{color:#f4f4f5}
         /* 主题按钮与 DD ThemeSwitcher 渲染值逐值一致（DD 深色 theme-mus4 /
            浅色 theme-light 重映射）：深色 #111820 + #344154 + #2b3441 内描边、

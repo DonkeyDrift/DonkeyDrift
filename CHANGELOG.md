@@ -1,10 +1,16 @@
 # 变更日志
 
-## 2026-08-17 (5)
+## 2026-08-17 (6)
 
 - style(launcher): D 启动页主题按钮皮肤与 DD 渲染值逐值统一——三处（DC/D/DD）深浅切换按钮一模一样（#140 后续统一，与 Firmware v1.8.4 同批）
   - `donkeycar/launcher/server.py`：`#themeBtn` 此前复用 `.langBtn` 基类（同批 #149 语言按钮改版后基类变为 DD 原生 zinc 值 #27272a/#3f3f46），主题按钮与 DD 实际渲染脱钩；现改用 ID 覆盖独立锁定 DD 主题按钮渲染值（已核实 DD 构建产物：深色 `theme-mus4` 将 `bg-zinc-800/border-zinc-700/text-zinc-300` 重映射为 #111820/#344154/#b9c5d3，浅色 `theme-light` 为 #f4f6f9/#ccd5df/#3f4f63）：深色 `background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；图标 16px lucide Moon/Sun、深色显月亮/浅色显太阳不变。语言按钮 `.langBtn` 本批不动。
   - 测试同步：`tests/test_launcher_theme_single_button.py` 新增深/浅两套皮肤逐值断言（8 条精确串），pytest 全量 173 项通过。
+
+## 2026-08-17 (5)
+
+- style(launcher): 语言/主题按钮字体逐值复刻 DD（#92 返工：字体栈补齐）
+  - `donkeycar/launcher/server.py`：`.langBtn`（语言 `#langBtn` 与主题 `#themeBtn` 共用）补 DD `web_ui/frontend/src/index.css` :root 完整字体栈（`-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji"`）及 `font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale`，按钮渲染字体与 DD 完全一致，不再继承页面级 `system-ui,sans-serif`（用户实测指出 D 按钮字体与 DD 不同）。
+  - 测试：launcher 相关 42 项通过（无 `.langBtn` 精确串断言，仅 docstring 提及）；D 启动页设备（192.168.3.41:8090）本轮不在线，按源码逐值对齐，最终视觉由用户验收。
 
 ## 2026-08-17 (4)
 
