@@ -100,7 +100,17 @@ term.onData(function(d){
 function connect(){
   ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/terminal/ws');
   ws.binaryType='arraybuffer';
+  // #101：连接加 10s 超时——握手挂起（服务端忙/升级请求被挂起）时 onopen/onclose 都可能
+  // 不触发，overlay 会无限期停在「正在连接」；超时后主动关闭并提示连接失败（点击重连）
+  var connectTimer=setTimeout(function(){
+    if(ws.readyState===WebSocket.CONNECTING){
+      ws.onclose=null;
+      try{ws.close();}catch(e){}
+      showOverlay(t('failed')+' · '+t('reconnect'));
+    }
+  },10000);
   ws.onopen=function(){
+    clearTimeout(connectTimer);
     try{fit.fit();}catch(e){}
     sendCtrl({type:'hello',cols:term.cols,rows:term.rows});
     if(autoCmd){
@@ -122,7 +132,7 @@ function connect(){
   };
   // 链路断开：PTYShell 会话已随连接被服务端回收，明确提示现场丢失，
   // 避免误以为"点击重连"能恢复原会话（issue #151）
-  ws.onclose=function(){showOverlay(t('lost')+' · '+t('newSession'));};
+  ws.onclose=function(){clearTimeout(connectTimer);showOverlay(t('lost')+' · '+t('newSession'));};
   ws.onerror=function(){/* onclose 随后触发，统一在那里处理 */};
 }
 

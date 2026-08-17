@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-17 (16)
+
+- fix(terminal): 上位机终端页 WebSocket 连接加 10s 超时，连接卡死不再无限停在「正在连接上位机终端…」（#101，配合 Firmware v1.8.6 DC 侧探测超时）
+  - `donkeycar/launcher/terminal_static/terminal.html` `connect()`：新增 `connectTimer` 10 秒定时器，超时时若 `ws.readyState===WebSocket.CONNECTING` 则清掉 `onclose`、主动 `ws.close()`，并 `showOverlay(t('failed')+' · '+t('reconnect'))` 提示连接失败可点击重连；`ws.onopen` 首行 `clearTimeout(connectTimer)` 取消定时器；`ws.onclose` 同样先 `clearTimeout` 再提示「连接丢失 · 新会话」。
+  - 文案复用原 T 词典已有的 `failed` / `reconnect` 词条，中英文均无需新增。
+  - 测试同步：`tests/test_launcher_terminal.py` 更新 `onclose` 断言为含 `clearTimeout` 版本；新增 `test_terminal_page_has_connect_timeout()` 断言 connectTimer/CONNECTING/ws.close/showOverlay 及中英文案存在。pytest `tests/test_launcher_terminal.py` 4 项、`donkeycar/tests/test_launcher_terminal.py`+`tests/test_launcher_menu_actions.py` 56 项全部通过。
+
 ## 2026-08-17 (15)
 
 - feat(launcher): 启动器菜单新增「DeepSeek Harness」12 号项（常用），点击拉起/复用 `dsh web` 并跳转；Drifter Console 挪至 kimi 右侧 13 号（Issue #164）
