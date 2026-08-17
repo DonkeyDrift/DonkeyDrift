@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 from donkeycar._version import __version__
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import launch_kimi_code_web
+from donkeycar.launcher.dsh_web import launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 from donkeycar.webui_instance import (
     probe_http_ok,
@@ -992,6 +993,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                 self._serve_json({"status": "not_found"})
         elif path == "/api/launch/kimi-code-web":
             self._handle_launch_kimi_code_web()
+        elif path == "/api/launch/dsh":
+            self._handle_launch_dsh()
         elif path == "/api/launch/web":
             result = _launch_web_ui()
             code = 200 if result.get("status") != "error" else 500
@@ -1114,6 +1117,46 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                 )
                 return
         result = launch_kimi_code_web(cwd=cwd)
+        code = 200 if result.get("status") == "ok" else 500
+        self._serve_json(result, code=code,
+                         extra_headers=_KIMI_WEB_CORS_HEADERS)
+
+    def _handle_launch_dsh(self):
+        """POST /api/launch/dsh：启动/复用 dsh web（DeepSeek Harness），回 URL。
+
+        请求体可选 JSON {"cwd": "/abs/path"} 指定 dsh 运行目录，缺省为
+        上位机用户主目录；cwd 不存在直接报错，绝不回退到其它目录。
+        返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理）。
+        长请求：dsh 冷启动数秒，服务端整体超时 60s，
+        客户端超时必须 ≥60s。响应带 CORS 头（与 kimi-code-web 端点
+        同款，供 DC 页面跨域调用）。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        cwd = None
+        if content_length > 0:
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._serve_json(
+                    {"status": "error", "error": "请求体不是合法 JSON"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+            if not isinstance(body, dict):
+                self._serve_json(
+                    {"status": "error", "error": "请求体必须是 JSON 对象"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+            cwd = body.get("cwd")
+            if cwd is not None and not isinstance(cwd, str):
+                self._serve_json(
+                    {"status": "error", "error": "cwd 必须是字符串"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+        result = launch_dsh_web(cwd=cwd)
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
                          extra_headers=_KIMI_WEB_CORS_HEADERS)
@@ -1529,7 +1572,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 0-11：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 1-13：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -1562,11 +1605,12 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 0-11：选择对应菜单项',
+                'help.keyNumbers': '数字键 1-13：选择对应菜单项',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.startingKimiWeb': '正在启动 Kimi Code Web（kimi 启动较慢，请耐心等待）...',
+                'overlay.startingDshWeb': '正在启动 DeepSeek Harness...',
                 'overlay.startingWeb': '正在启动 Web UI...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
@@ -1599,11 +1643,12 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 0-11: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 1-13: select the corresponding menu item',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.startingKimiWeb': 'Starting Kimi Code Web (kimi starts slowly, please wait)...',
+                'overlay.startingDshWeb': 'Starting DeepSeek Harness...',
                 'overlay.startingWeb': 'Starting Web UI...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
@@ -1735,9 +1780,9 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
 
         // 菜单项数据（条目与 tui.py 保持一致，desc/catLabel 双语；
-        // 网页版 0 号为 Drifter Console 置顶，编号/顺序与 TUI 不同）
+        // issue #164：DC 不再 0 号置顶，改放 kimi 右侧；新增 12 号
+        // DeepSeek Harness（常用）；编号 1-13）
         const menuItems = [
-            {no: 0,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",               descEn: "Open Drifter Console",                           favorite: true},
             {no: 1,  cat: "manage", name: "Create Car",   descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
             {no: 2,  cat: "manage", name: "Open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
@@ -1749,6 +1794,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
             {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                    descEn: "Open Kimi Code Web",                             favorite: true},
+            {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                    favorite: true},
+            {no: 13, cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -1801,9 +1848,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
 
-            if (no === 0) {
-                openDrifterConsole();
-            } else if (no === 1) {
+            if (no === 1) {
                 createCar();
             } else if (no === 2) {
                 openProject();
@@ -1825,6 +1870,10 @@ MENU_HTML = r"""<!DOCTYPE html>
                 launchTrainOnline();
             } else if (no === 11) {
                 launchKimiCodeWeb();
+            } else if (no === 12) {
+                launchDshWeb();
+            } else if (no === 13) {
+                openDrifterConsole();
             }
         }
 
@@ -1956,8 +2005,47 @@ MENU_HTML = r"""<!DOCTYPE html>
             }
         }
 
-        // ── 菜单 1-5、7-10（issue #126） ──
+        // 打开 DeepSeek Harness（菜单 12 号，issue #164）：POST
+        // /api/launch/dsh，cwd 固定 /home/dkc/projects（与 kimi 同目录）。
+        // 服务端整体超时 60s，浏览器 fetch 默认无超时、耐心等待即可；
+        // 拿到 URL 后当前标签页跳转。
+        async function launchDshWeb() {
+            const overlay = document.getElementById('overlay');
+            const overlayText = document.getElementById('overlay-text');
+            const overlayError = document.getElementById('overlay-error');
+            overlay.classList.add('show');
+            overlayText.textContent = t('overlay.startingDshWeb');
+            overlayError.textContent = '';
 
+            try {
+                const resp = await fetch('/api/launch/dsh', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({cwd: '/home/dkc/projects'})
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'ok' && data.url) {
+                    overlayText.textContent = t('overlay.success');
+                    window.location.href = data.url;
+                } else {
+                    overlayText.textContent = t('overlay.failed');
+                    overlayError.textContent =
+                        data.error || t('overlay.unknownError');
+                    setTimeout(function() {
+                        overlay.classList.remove('show');
+                    }, 3000);
+                }
+            } catch (e) {
+                overlayText.textContent = t('overlay.failed');
+                overlayError.textContent =
+                    t('overlay.networkError') + ': ' + e.message;
+                setTimeout(function() {
+                    overlay.classList.remove('show');
+                }, 3000);
+            }
+        }
+
+        // ── 菜单 1-5、7-10（issue #126） ──
         // 通用 overlay 工具
         function showOverlayMsg(msgKey) {
             document.getElementById('overlay').classList.add('show');
@@ -2296,7 +2384,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 return;
             }
 
-            // 处理 "10"/"11" 输入：先按 1，400ms 内按 0 选中 10、再按 1 选中 11
+            // Handle "10"-"13" input: press 1 first, then within 400ms press 0 to select 10, 1 to select 11, 2 to select 12, 3 to select 13
             if (pendingDigit1 !== null) {
                 clearTimeout(pendingDigit1.timer);
                 pendingDigit1 = null;
@@ -2306,6 +2394,14 @@ MENU_HTML = r"""<!DOCTYPE html>
                 }
                 if (key === '1') {
                     selectItem(11);
+                    return;
+                }
+                if (key === '2') {
+                    selectItem(12);
+                    return;
+                }
+                if (key === '3') {
+                    selectItem(13);
                     return;
                 }
             }
@@ -2319,8 +2415,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 };
             } else if (key >= '2' && key <= '9') {
                 selectItem(parseInt(key));
-            } else if (key === '0') {
-                selectItem(0);
             } else if (key === '?') {
                 openHelpModal();
             }
