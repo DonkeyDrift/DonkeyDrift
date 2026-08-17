@@ -52,9 +52,29 @@ def test_terminal_page_disconnect_overlay_warns_session_lost():
     """链路断开的 overlay 必须明确提示会话已丢失（issue #151）。"""
     source = _source()
 
-    # onclose 提示「会话已丢失 · 点击重连（将开启新会话）」，中英双语
-    assert "ws.onclose=function(){showOverlay(t('lost')+' · '+t('newSession'));};" \
+    # onclose 提示「会话已丢失 · 点击重连（将开启新会话）」，中英双语；
+    # #101 起 onclose 先清连接超时定时器（未超时前正常断开不走超时分支）
+    assert "ws.onclose=function(){clearTimeout(connectTimer);showOverlay(t('lost')+' · '+t('newSession'));};" \
         in source
     assert "lost:'连接已断开 · 终端会话已丢失'" in source
     assert "newSession:'点击重连（将开启新会话）'" in source
     assert "lost:'Disconnected · terminal session lost'" in source
+
+
+def test_terminal_page_has_connect_timeout():
+    """WS 连接 10s 未完成必须超时报错，不得无限期停在「正在连接」（issue #101）。"""
+    source = _source()
+
+    # connect() 内建连接超时定时器（10s），超时时仍在 CONNECTING 则主动关闭并提示失败
+    assert "var connectTimer=setTimeout(function(){" in source
+    assert "},10000);" in source
+    assert "ws.readyState===WebSocket.CONNECTING" in source
+    assert "ws.close();" in source
+    assert "showOverlay(t('failed')+' · '+t('reconnect'));" in source
+    # onopen 落定后清掉超时定时器，正常连接不受影响
+    assert "ws.onopen=function(){\n    clearTimeout(connectTimer);" in source
+    # 失败与重连文案（中英双语），复用 overlay 点击 location.reload 重连
+    assert "failed:'连接失败'" in source
+    assert "reconnect:'点击重连'" in source
+    assert "failed:'Connection failed'" in source
+    assert "reconnect:'Tap to reconnect'" in source
