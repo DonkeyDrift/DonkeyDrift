@@ -8,6 +8,12 @@
   - en 词条与组件代码均未改动。
   - 测试同步：`web_ui/frontend/src/components/TubNavigator.test.tsx:39` 刷新按钮定位串从 `Refresh tub records` 改为新 zh aria `刷新 Tub 记录`；前端 vitest 全量 18 文件 90 项通过。
 
+## 2026-08-17 (10)
+
+- feat(web_ui/trainer): 已训练模型列表每行最右侧新增删除按钮（Issue #148）
+  - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行操作按钮区（Copy 按钮之后）新增 Trash2 图标按钮，样式与现有按钮一致（`p-1 text-zinc-500 hover:text-red-400 transition-colors`），点击 `e.stopPropagation()` 后 `setConfirmDelete(m)` 打开已有删除确认弹窗；lucide-react 导入补 `Trash2`。删除链路此前已完整实现（`deleteModel` API、`deleting`/`confirmDelete` state、`handleDelete`、确认弹窗及中英文 i18n 文案），本次仅补缺失的触发入口。
+  - 测试：`npm run build`（tsc -b + vite build）通过；vitest 全量 89/90 通过，唯一失败的 `TubNavigator.test.tsx` 为并行会话在制修改（stash 本改动后复测同样失败），与本改动无关。
+
 ## 2026-08-17 (8)
 - style(web_ui/launcher): 三页面语言按钮配色统一为 DC/D 主题按钮（深浅切换）样式（#92 后续统一，与 Firmware v1.8.5 同批）
   - `donkeycar/launcher/server.py`（D 启动页）：`.langBtn` 基类（语言 `#langBtn` 与主题 `#themeBtn` 共用）从 DD 原生 zinc 配色（#27272a/#3f3f46/#d4d4d8，浅色 zinc-100/200/500/900）改为主题按钮配色——深色 `background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；32×32 圆形、DD 字体栈、字号/字重不变；`#themeBtn` 的 ID 颜色覆盖与基类重合（保留仅承载布局与图标尺寸），浅色段同步换值。
