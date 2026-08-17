@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-17 (5)
+
+- style(launcher): 语言/主题按钮字体逐值复刻 DD（#92 返工：字体栈补齐）
+  - `donkeycar/launcher/server.py`：`.langBtn`（语言 `#langBtn` 与主题 `#themeBtn` 共用）补 DD `web_ui/frontend/src/index.css` :root 完整字体栈（`-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji"`）及 `font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale`，按钮渲染字体与 DD 完全一致，不再继承页面级 `system-ui,sans-serif`（用户实测指出 D 按钮字体与 DD 不同）。
+  - 测试：launcher 相关 42 项通过（无 `.langBtn` 精确串断言，仅 docstring 提及）；D 启动页设备（192.168.3.41:8090）本轮不在线，按源码逐值对齐，最终视觉由用户验收。
+
 ## 2026-08-17 (4)
 
 - fix(launcher): `donkey web` 默认以生产模式启动 Web UI，顶部导航切换从 ~500ms 降到 ~50ms（#135 二轮修复）
