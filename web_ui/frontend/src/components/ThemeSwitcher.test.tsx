@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ThemeSwitcher, THEME_STORAGE_KEY } from './ThemeSwitcher';
 
 type SystemThemeChangeHandler = (event: { matches: boolean }) => void;
@@ -37,7 +37,9 @@ const setSystemDark = (dark: boolean) => {
   systemThemeChangeHandlers.forEach((handler) => handler({ matches: dark }));
 };
 
-describe('ThemeSwitcher', () => {
+const getButton = () => screen.getByRole('button');
+
+describe('ThemeSwitcher（静音式单按钮）', () => {
   beforeEach(() => {
     window.localStorage.clear();
     document.documentElement.classList.remove('theme-mus4', 'theme-light');
@@ -45,92 +47,77 @@ describe('ThemeSwitcher', () => {
     window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
   });
 
-  it('renders 跟随系统, 浅色 and 深色 segments with 跟随系统 active by default', () => {
+  it('renders a single icon button showing the moon in dark mode', () => {
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: '浅色' })).toHaveAttribute('aria-pressed', 'false');
+    const btn = getButton();
+    expect(btn.querySelector('svg.lucide-moon')).not.toBeNull();
+    expect(btn.querySelector('svg.lucide-sun')).toBeNull();
+    expect(btn).toHaveAttribute('aria-label', '切换到浅色主题');
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
   });
 
-  it('switches to 浅色 on click and persists the selection', () => {
+  it('shows the sun icon and light skin when the system prefers light', () => {
+    setSystemDark(false);
     render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '浅色' }));
-    expect(screen.getByRole('button', { name: '浅色' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'false');
+    const btn = getButton();
+    expect(btn.querySelector('svg.lucide-sun')).not.toBeNull();
+    expect(btn).toHaveAttribute('aria-label', '切换到深色主题');
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+  });
+
+  it('toggles to light on click and persists the selection', () => {
+    render(<ThemeSwitcher />);
+    fireEvent.click(getButton());
+    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
   });
 
-  it('switches to 深色 on click and persists the selection', () => {
+  it('toggles back to dark on second click and persists the selection', () => {
     render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '深色' }));
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(getButton()); // → light
+    fireEvent.click(getButton()); // → dark
+    expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
-  });
-
-  it('applies the skin class on <html> for each selection', () => {
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '浅色' }));
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: '深色' }));
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
-  });
-
-  it('resolves 跟随系统 to the dark skin when the system prefers dark', () => {
-    setSystemDark(true);
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
-  });
-
-  it('resolves 跟随系统 to the light skin when the system prefers light', () => {
-    setSystemDark(false);
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-  });
-
-  it('follows system theme changes while 跟随系统 is selected', () => {
-    setSystemDark(true);
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    setSystemDark(false);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-    setSystemDark(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
   });
 
   it('follows system theme changes by default when nothing is stored', () => {
     render(<ThemeSwitcher />);
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    setSystemDark(false);
+    expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
+    act(() => setSystemDark(false));
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
+    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
+    // 跟随系统期间不写入持久化选择,仅手动单击才存储
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+    act(() => setSystemDark(true));
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
   });
 
-  it('applies the persisted skin class on mount', () => {
+  it('stops following the system after a manual click', () => {
+    setSystemDark(false);
+    render(<ThemeSwitcher />);
+    fireEvent.click(getButton()); // light → dark
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    act(() => setSystemDark(false)); // 系统再变也不跟随
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+  });
+
+  it('applies the persisted skin and icon on mount', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
     render(<ThemeSwitcher />);
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
   });
 
-  it('restores the persisted selection on render', () => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
-    render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('falls back to 跟随系统 for unknown stored values', () => {
+  it('falls back to following the system for unknown stored values', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'unknown');
+    setSystemDark(false);
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
   });
 });

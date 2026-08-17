@@ -1333,24 +1333,29 @@ MENU_HTML = r"""<!DOCTYPE html>
         .ghLink:hover{color:#5cc8ff}
         .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block}
 
-        /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言分段控件，
+        /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言静音式单按钮，
            逐值复刻 DD 实际渲染值——Tailwind 类经 src/themes/theme-mus4.css
-           重映射：容器 bg-zinc-800→#111820、border-zinc-700→#344154 外加
-           1px #2b3441 内描边，p-1/gap-1；按钮 px-3 py-1 text-xs，未激活
-           text-zinc-400→#8fa1b5、hover 仅文字变 #e8edf2，激活
-           bg-cyan-600→#5cc8ff + 近黑 #061019 + 字重 800；
+           重映射：32×32 圆形按钮 bg-zinc-800→#111820、border-zinc-700→#344154
+           外加 1px #2b3441 内描边，图标 text-zinc-300→#c3cbd6、hover #e8edf2，
+           主题按钮太阳/月亮 16px（lucide stroke）；
            浅色变体见下方 html[data-theme="light"] 段（theme-light.css 值）） */
         .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#8fa1b5;font-size:13px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
         .langBtn:hover{color:#e8edf2}
         .langBtn.active{background:#5cc8ff;color:#061019;font-weight:800}
-        #themeTabs{margin-left:auto}
+        #themeBtn{margin-left:auto;color:#c3cbd6}
+        #themeBtn:hover{color:#e8edf2}
+        #themeBtn svg{width:16px;height:16px}
+        /* 图标反映当前生效主题：深色显月亮，浅色显太阳 */
+        #themeBtn .icon-sun{display:none}
+        html[data-theme="light"] #themeBtn .icon-sun{display:block}
+        html[data-theme="light"] #themeBtn .icon-moon{display:none}
         .headerBreak{display:none}
 
         /* 手机版顶栏两行：第一行 图标/标题/GitHub/版本号（与电脑版一致），
            第二行 主题切换(最左) + 中英文切换(最右) */
         @media (max-width:640px){
             .headerBreak{display:block;width:100%;height:0}
-            #themeTabs{margin-left:0}
+            #themeBtn{margin-left:0}
             #langBtn{margin-left:auto}
         }
 
@@ -1488,11 +1493,10 @@ MENU_HTML = r"""<!DOCTYPE html>
             </a>
             <span class="versionBadge">v{{VERSION}}</span>
             <div class="headerBreak"></div>
-            <span class="langTabs" id="themeTabs" title="主题" data-i18n-title="theme.title">
-                <button type="button" data-theme="light" data-i18n="theme.light">浅色</button>
-                <button type="button" data-theme="system" data-i18n="theme.auto">跟随系统</button>
-                <button type="button" data-theme="dark" data-i18n="theme.dark">深色</button>
-            </span>
+            <button type="button" id="themeBtn" class="langBtn" aria-label="主题" data-i18n-aria="theme.title" title="主题" data-i18n-title="theme.title">
+                <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            </button>
             <button type="button" id="langBtn" class="langBtn" aria-label="语言" data-i18n-aria="language.title">中</button>
         </div>
 
@@ -1546,9 +1550,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             zh: {
                 'language.title': '语言',
                 'theme.title': '主题',
-                'theme.light': '浅色',
-                'theme.auto': '跟随系统',
-                'theme.dark': '深色',
+                'theme.toggleLight': '切换到浅色主题',
+                'theme.toggleDark': '切换到深色主题',
                 'fab.quick': '快捷入口',
                 'fab.help': '帮助',
                 'cwd.label': '当前工作目录',
@@ -1584,9 +1587,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             en: {
                 'language.title': 'Language',
                 'theme.title': 'Theme',
-                'theme.light': 'Light',
-                'theme.auto': 'Auto',
-                'theme.dark': 'Dark',
+                'theme.toggleLight': 'Switch to light theme',
+                'theme.toggleDark': 'Switch to dark theme',
                 'fab.quick': 'Quick actions',
                 'fab.help': 'Help',
                 'cwd.label': 'Current Working Directory',
@@ -1668,27 +1670,35 @@ MENU_HTML = r"""<!DOCTYPE html>
             setLanguage(uiLang === 'zh' ? 'en' : 'zh');
         }
 
-        // ── 主题：浅色 / 跟随系统 / 深色（默认跟随系统，选中 system 时经 matchMedia 实时解析并监听） ──
+        // ── 主题：静音式单按钮，单击深↔浅互切；未手动切换前跟随浏览器
+        //    prefers-color-scheme（'system' 态经 matchMedia 实时解析并监听），
+        //    手动单击后持久化显式选择，不再跟随（与 DD web_ui 同语义） ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
                     ? 'light' : 'dark';
             } catch (e) { return 'dark'; }
         }
-        function renderThemeTabs() {
-            document.querySelectorAll('#themeTabs button[data-theme]').forEach(function(b) {
-                b.classList.toggle('active', b.dataset.theme === uiTheme);
-            });
+        function renderThemeBtn() {
+            var btn = document.getElementById('themeBtn');
+            if (!btn) return;
+            var effective = document.documentElement.dataset.theme || 'dark';
+            btn.setAttribute('aria-label', t(effective === 'light' ? 'theme.toggleDark' : 'theme.toggleLight'));
+            btn.title = t(effective === 'light' ? 'theme.toggleDark' : 'theme.toggleLight');
         }
         function applyTheme(mode) {
             uiTheme = (mode === 'light' || mode === 'dark') ? mode : 'system';
             document.documentElement.dataset.theme =
                 uiTheme === 'system' ? systemTheme() : uiTheme;
-            renderThemeTabs();
+            renderThemeBtn();
         }
         function setTheme(mode) {
             try { localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (e) {}
             applyTheme(mode);
+        }
+        function toggleTheme() {
+            var effective = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+            setTheme(effective === 'light' ? 'dark' : 'light');
         }
         function initTheme() {
             var stored = 'system';
@@ -2343,12 +2353,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             .addEventListener('click', closeHelpModal);
         document.getElementById('helpClose')
             .addEventListener('click', closeHelpModal);
-        document.querySelectorAll('#themeTabs button[data-theme]')
-            .forEach(function(b) {
-                b.addEventListener('click', function() {
-                    setTheme(b.dataset.theme);
-                });
-            });
+        document.getElementById('themeBtn')
+            .addEventListener('click', toggleTheme);
         document.addEventListener('click', collapseFabActions);
         window.addEventListener('scroll', collapseFabActions, {passive: true});
         window.addEventListener('touchmove', collapseFabActions, {passive: true});
