@@ -1,6 +1,5 @@
-// arena namespace: zh values mirror the current UI strings verbatim (the
-// "Chinese interface" is exactly today's mixed zh/en UI); en values are the
-// full English translation of every entry.
+// arena namespace: zh values are the full Chinese translation; en values are
+// the full English translation of every entry.
 export const arena: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'arena.pageTitle': 'Pilot Arena',
@@ -22,7 +21,7 @@ export const arena: { zh: Record<string, string>; en: Record<string, string> } =
     'arena.lastFrame': '末帧',
     'arena.playbackStats': '播放 {playback}ms / 推理目标 {inference}ms / 并发 {concurrency}',
     'arena.currentSeq': '当前序号: {index}',
-    'arena.recordIndex': 'Record index: {index}',
+    'arena.recordIndex': '记录索引: {index}',
     'arena.loadTubFirst': '请先在 Tub Manager 加载 Tub 数据，再进入 Pilot Arena 做模型对比。',
     'arena.noPilotLoaded': '未加载 Pilot',
     'arena.remove': '移除',
@@ -36,18 +35,18 @@ export const arena: { zh: Record<string, string>; en: Record<string, string> } =
     'arena.playbackLabel': '播放',
     'arena.inferenceLabel': '推理',
     'arena.loadTubToView': '加载 Tub 后显示播放画面',
-    'arena.userLabel': 'User',
+    'arena.userLabel': '用户',
     'arena.pilotLabel': 'Pilot',
-    'arena.angleLabel': 'Angle',
-    'arena.throttleLabel': 'Throttle',
+    'arena.angleLabel': '角度',
+    'arena.throttleLabel': '油门',
     'arena.imageProcessing': '图像处理',
     'arena.expand': '展开',
     'arena.collapse': '折叠',
-    'arena.brightnessLabel': 'Brightness {value}',
-    'arena.blurLabel': 'Blur {value}',
-    'arena.preTransformations': 'Pre Transformations',
-    'arena.postTransformations': 'Post Transformations',
-    'arena.tubPlot': 'Tub Plot',
+    'arena.brightnessLabel': '亮度 {value}',
+    'arena.blurLabel': '模糊 {value}',
+    'arena.preTransformations': '前置变换',
+    'arena.postTransformations': '后置变换',
+    'arena.tubPlot': 'Tub 曲线图',
     'arena.selectLoadedPilot': '选择已加载 Pilot',
     'arena.selectLoadedPilotError': '请选择已加载的 Pilot',
     'arena.generating': '生成中...',

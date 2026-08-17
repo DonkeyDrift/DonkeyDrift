@@ -1,17 +1,16 @@
-// driveviz namespace: zh values mirror the current UI strings verbatim (the
-// "Chinese interface" is exactly today's mixed zh/en UI); en values are the
-// full English translation of every entry.
+// driveviz namespace: zh values are the full Chinese translation; en values are
+// the full English translation of every entry.
 export const driveviz: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     // VideoStream
     'driveViz.transportMjpeg': 'MJPEG',
     'driveViz.transportWebRtc': 'WebRTC',
-    'driveViz.connecting': 'Connecting...',
+    'driveViz.connecting': '连接中...',
     'driveViz.mjpegFallback': 'MJPEG 降级',
-    'driveViz.disconnected': 'Disconnected',
+    'driveViz.disconnected': '已断开',
     'driveViz.non60FpsPath': '非 60FPS 验收路径',
-    'driveViz.cameraFeedAlt': 'Camera feed',
-    'driveViz.webrtcFeedLabel': 'WebRTC camera feed',
+    'driveViz.cameraFeedAlt': '摄像头画面',
+    'driveViz.webrtcFeedLabel': 'WebRTC 摄像头画面',
     'driveViz.carOfflineWaiting': '车端离线：等待 DriveApiBridge 连接到 /api/drive/ws?role=car',
     'driveViz.connectingCamera': '正在连接摄像头...',
     'driveViz.cameraNotConnected': '摄像头未连接',
@@ -24,18 +23,18 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.clear': '清空',
     'driveViz.fullscreen': '全屏',
     'driveViz.exitFullscreen': '退出全屏',
-    'driveViz.curveThrottle': 'Throttle',
-    'driveViz.curveSteering': 'Steering',
-    'driveViz.curveGyroZ': 'GyroZ',
-    'driveViz.curveRcSteering': 'RC Steering',
-    'driveViz.curveRcThrottle': 'RC Throttle',
-    'driveViz.curveGyroX': 'GyroX',
-    'driveViz.curveGyroY': 'GyroY',
-    'driveViz.curveAccX': 'AccX',
-    'driveViz.curveAccY': 'AccY',
-    'driveViz.curveAccZ': 'AccZ',
-    'driveViz.curvePilotAngle': 'Pilot Angle',
-    'driveViz.curvePilotThrottle': 'Pilot Throttle',
+    'driveViz.curveThrottle': '油门',
+    'driveViz.curveSteering': '转向',
+    'driveViz.curveGyroZ': '陀螺仪 Z',
+    'driveViz.curveRcSteering': 'RC 转向',
+    'driveViz.curveRcThrottle': 'RC 油门',
+    'driveViz.curveGyroX': '陀螺仪 X',
+    'driveViz.curveGyroY': '陀螺仪 Y',
+    'driveViz.curveAccX': '加速度 X',
+    'driveViz.curveAccY': '加速度 Y',
+    'driveViz.curveAccZ': '加速度 Z',
+    'driveViz.curvePilotAngle': 'Pilot 角度',
+    'driveViz.curvePilotThrottle': 'Pilot 油门',
     // ParameterPanel
     'driveViz.importSuccess': '参数导入成功',
     'driveViz.importFormatError': '参数文件格式错误',

@@ -1,6 +1,6 @@
-// common namespace: zh values mirror the current UI strings verbatim (the
-// "Chinese interface" is exactly today's mixed zh/en UI); en values are the
-// full English translation of every entry.
+// common namespace: zh values are the full Chinese translation (top navigation
+// items intentionally stay in English per project convention); en values are
+// the full English translation of every entry.
 export const common: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     // Layout top navigation
@@ -11,38 +11,38 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': '菜单',
     // App shell
-    'common.app.somethingWentWrong': 'Something went wrong.',
-    'common.app.failedToRefreshTub': 'Failed to refresh tub',
-    'common.app.errorPrefix': 'Error: {message}',
-    'common.loading': 'Loading',
+    'common.app.somethingWentWrong': '出错了。',
+    'common.app.failedToRefreshTub': '刷新 Tub 失败',
+    'common.app.errorPrefix': '错误：{message}',
+    'common.loading': '加载中',
     // ConfigLoader
-    'common.configLoader.failedToLoad': 'Failed to load config',
-    'common.configLoader.failedToLoadFromDir': 'Failed to load config from selected directory',
-    'common.configLoader.title': 'Config Loader',
-    'common.configLoader.description': 'Select car directory (created via donkey createcar)',
+    'common.configLoader.failedToLoad': '加载配置失败',
+    'common.configLoader.failedToLoadFromDir': '从所选目录加载配置失败',
+    'common.configLoader.title': '配置加载器',
+    'common.configLoader.description': '选择车辆目录（由 donkey createcar 创建）',
     'common.configLoader.apiLabel': 'API: {origin}/api',
-    'common.configLoader.pathPlaceholder': 'Config path, e.g. /home/dkc/projects/mycar',
-    'common.configLoader.pathInputAria': 'Config path input field',
-    'common.configLoader.browse': 'Browse',
-    'common.configLoader.browseAria': 'Browse configuration directory',
-    'common.configLoader.load': 'Load',
-    'common.configLoader.loadAria': 'Load configuration',
-    'common.configLoader.configLoaded': 'Config loaded: {path}',
-    'common.configLoader.noConfig': 'No config loaded',
-    'common.configLoader.selectCarDirectory': 'Select Car Directory',
+    'common.configLoader.pathPlaceholder': '配置路径，例如 /home/dkc/projects/mycar',
+    'common.configLoader.pathInputAria': '配置路径输入框',
+    'common.configLoader.browse': '浏览',
+    'common.configLoader.browseAria': '浏览配置目录',
+    'common.configLoader.load': '加载',
+    'common.configLoader.loadAria': '加载配置',
+    'common.configLoader.configLoaded': '配置已加载：{path}',
+    'common.configLoader.noConfig': '未加载配置',
+    'common.configLoader.selectCarDirectory': '选择车辆目录',
     // FileBrowserModal
-    'common.fileBrowser.selectDirectory': 'Select Directory',
-    'common.fileBrowser.failedToLoad': 'Failed to load directories',
-    'common.fileBrowser.loading': 'Loading...',
-    'common.fileBrowser.goBack': 'Go Back',
-    'common.fileBrowser.noDirectories': 'No directories found',
-    'common.fileBrowser.cancel': 'Cancel',
-    'common.fileBrowser.selectCurrent': 'Select Current Directory',
+    'common.fileBrowser.selectDirectory': '选择目录',
+    'common.fileBrowser.failedToLoad': '加载目录失败',
+    'common.fileBrowser.loading': '加载中...',
+    'common.fileBrowser.goBack': '返回',
+    'common.fileBrowser.noDirectories': '未找到目录',
+    'common.fileBrowser.cancel': '取消',
+    'common.fileBrowser.selectCurrent': '选择当前目录',
     // SidePanel
-    'common.sidePanel.loaders': 'Loaders',
-    'common.sidePanel.connectors': 'Connectors',
+    'common.sidePanel.loaders': '加载器',
+    'common.sidePanel.connectors': '连接器',
     // GitHubLink
-    'common.githubLink.label': 'DonkeyDrift on GitHub',
+    'common.githubLink.label': 'DonkeyDrift GitHub 仓库',
     // EnterButtons
     'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': '启动 kimi 并在新标签页打开 Kimi Code Web',
