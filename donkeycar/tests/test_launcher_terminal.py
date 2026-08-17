@@ -7,6 +7,8 @@
   窗口大小调整（TIOCSWINSZ）、初始工作目录、exit 通知与会话清理
 - handle_terminal_ws：经真实 ThreadingHTTPServer + 原始 socket 客户端的
   端到端握手、binary 输入/输出桥接、close 帧应答
+- 服务端心跳（issue #151）：定期向客户端发 PING；长时间无任何客户端帧
+  时主动 shutdown 断开并清理会话
 """
 
 import json
@@ -321,6 +323,83 @@ def test_terminal_ws_end_to_end():
                 break
         sock.close()
     finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _open_terminal_ws():
+    """启动真实 Launcher 服务器并完成 ws 握手。
+
+    Returns:
+        (server, sock, sock_file)；调用方负责关闭 sock 与 server
+    """
+    from donkeycar.launcher.server import LauncherHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LauncherHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    sock = socket.create_connection(("127.0.0.1", server.server_address[1]),
+                                    timeout=10)
+    key = "dGhlIHNhbXBsZSBub25jZQ=="
+    request = (
+        "GET /terminal/ws HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"
+    )
+    sock.sendall(request.encode("ascii"))
+    sock_file = sock.makefile("rb")
+    status = sock_file.readline().decode("latin-1")
+    assert "101" in status
+    while True:
+        if not sock_file.readline().decode("latin-1").strip():
+            break
+    return server, sock, sock_file
+
+
+def test_terminal_ws_server_sends_heartbeat_ping(monkeypatch):
+    """服务端按 _PING_INTERVAL 周期主动向客户端发 PING 帧（issue #151）。"""
+    monkeypatch.setattr(terminal, "_PING_INTERVAL", 0.2)
+    server, sock, sock_file = _open_terminal_ws()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            opcode, _payload = _recv_server_frame(sock_file)
+            if opcode == OP_PING:
+                return  # 收到服务端心跳
+            # 跳过 shell 提示符等 binary 输出
+        pytest.fail("超时未收到服务端 PING 心跳")
+    finally:
+        sock.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_terminal_ws_idle_timeout_disconnects(monkeypatch):
+    """超过 _PONG_TIMEOUT 未收到任何客户端帧，服务端主动断开（issue #151）。"""
+    monkeypatch.setattr(terminal, "_PING_INTERVAL", 0.1)
+    monkeypatch.setattr(terminal, "_PONG_TIMEOUT", 0.3)
+    server, sock, _sock_file = _open_terminal_ws()
+    try:
+        # 不回任何帧（含 PONG），等服务端判死 shutdown → 读到 EOF
+        sock.settimeout(0.5)
+        deadline = time.monotonic() + 10
+        eof = False
+        while time.monotonic() < deadline:
+            try:
+                data = sock.recv(4096)
+            except socket.timeout:
+                continue
+            if data == b"":
+                eof = True
+                break
+        assert eof, "空闲超时后服务端未主动断开连接"
+    finally:
+        sock.close()
         server.shutdown()
         server.server_close()
 

@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-17 (9)
+
+- fix(launcher): 上位机终端 WebSocket 增加服务端心跳保活与空闲超时判死，长时间空闲不再悄悄断连丢会话（#151）
+  - 根因：`donkeycar/launcher/terminal.py` 的 WebSocket ↔ PTY 桥无任何 keepalive——只在收到客户端 PING 时回 PONG，从不主动发 PING；长时间无数据的空闲连接被 NAT 表项老化/浏览器回收悄悄断开，而协议规定断连即杀 PTY 子进程，原 shell 会话连同现场全部丢失。
+  - `donkeycar/launcher/terminal.py`：新增 `_heartbeat_loop` 心跳线程（`terminal-ws-heartbeat`，随 `handle_terminal_ws` 每连接一条）——每 `_PING_INTERVAL=25s` 向客户端发 WebSocket PING 帧（浏览器协议层自动回 PONG，无需前端配合，周期性帧同时刷新 NAT 表项）；主读循环每收到一帧刷新 `last_rx`，超过 `_PONG_TIMEOUT=60s` 无任何客户端帧则置 `writer.closed` 并 `shutdown(SHUT_RDWR)` 唤醒阻塞的主读循环，走原有 finally 清理 PTY 会话；连接结束时 `stop_hb` 事件退出心跳线程。模块 docstring 帧协议说明同步补心跳帧与保活语义。
+  - `donkeycar/launcher/terminal_static/terminal.html`：断连 overlay 从「连接已断开 · 点击重连」改为明确提示现场丢失——新增 `lost`/`newSession` 双语文案（zh：「连接已断开 · 终端会话已丢失 · 点击重连（将开启新会话）」；en 同义），`ws.onclose` 改用新文案；shell 正常 exit 的 overlay 维持原文案。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增 2 项端到端用例（`_open_terminal_ws` 握手辅助 + 缩短心跳参数后断言收到服务端 PING、空闲超时后服务端主动断开读到 EOF）；`tests/test_launcher_terminal.py` 新增断连 overlay 会话丢失文案静态断言 1 项。相关测试 22 项全部通过。
+
 ## 2026-08-17 (8)
 - style(web_ui/launcher): 三页面语言按钮配色统一为 DC/D 主题按钮（深浅切换）样式（#92 后续统一，与 Firmware v1.8.5 同批）
   - `donkeycar/launcher/server.py`（D 启动页）：`.langBtn` 基类（语言 `#langBtn` 与主题 `#themeBtn` 共用）从 DD 原生 zinc 配色（#27272a/#3f3f46/#d4d4d8，浅色 zinc-100/200/500/900）改为主题按钮配色——深色 `background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；32×32 圆形、DD 字体栈、字号/字重不变；`#themeBtn` 的 ID 颜色覆盖与基类重合（保留仅承载布局与图标尺寸），浅色段同步换值。

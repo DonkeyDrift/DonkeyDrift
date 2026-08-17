@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import pty
+import socket
 import struct
 import subprocess
 import termios
@@ -53,6 +54,12 @@ DEFAULT_ROWS = 24
 MAX_COLS_ROWS = 500
 _MAX_FRAME_PAYLOAD = 1 << 20  # 1 MiB，防御畸形帧耗尽内存
 _READ_CHUNK = 65536
+
+# 服务端心跳（issue #151）：每 _PING_INTERVAL 秒向客户端发一个 WebSocket
+# PING 帧，浏览器会在协议层自动回 PONG；超过 _PONG_TIMEOUT 秒未收到任何
+# 客户端帧（含 PONG）则判定链路死亡，主动断开并清理 PTY 会话
+_PING_INTERVAL = 25.0
+_PONG_TIMEOUT = 60.0
 
 
 class WsProtocolError(Exception):
@@ -303,6 +310,32 @@ class TerminalSession:
         logger.info("终端会话已关闭: pid=%s", proc.pid if proc else None)
 
 
+def _heartbeat_loop(writer, sock, last_rx, stop):
+    """服务端心跳线程：定期发 PING 保活，链路死亡时主动断开（issue #151）。
+
+    Args:
+        writer: _WsWriter，用于发 PING 帧与标记关闭
+        sock: 底层 TCP 套接字，判死后 shutdown 以唤醒阻塞的主读循环
+        last_rx: {"t": monotonic} 字典，主读循环每收到一帧就刷新 t
+        stop: threading.Event，连接结束时由主流程置位以退出本线程
+
+    浏览器收到 PING 会自动回 PONG，无需前端配合；周期性帧同时刷新链路上
+    的 NAT 表项，空闲连接不再被中间设备悄悄断开。
+    """
+    while not stop.wait(_PING_INTERVAL):
+        if writer.closed:
+            return
+        if time.monotonic() - last_rx["t"] > _PONG_TIMEOUT:
+            writer.closed = True
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            return
+        if not writer.send(b"", OP_PING):
+            return
+
+
 def _handle_control_frame(session: TerminalSession, payload: bytes):
     """解析 text 控制帧并执行（hello/resize）。无法解析的帧直接忽略。"""
     try:
@@ -348,9 +381,16 @@ def handle_terminal_ws(handler):
 
     writer = _WsWriter(handler.wfile)
     session = TerminalSession(writer)
+    last_rx = {"t": time.monotonic()}
+    stop_hb = threading.Event()
+    threading.Thread(
+        target=_heartbeat_loop,
+        args=(writer, handler.connection, last_rx, stop_hb),
+        daemon=True, name="terminal-ws-heartbeat").start()
     try:
         while not writer.closed:
             _fin, opcode, payload = read_frame(handler.rfile)
+            last_rx["t"] = time.monotonic()
             if opcode == OP_CLOSE:
                 writer.send(b"", OP_CLOSE)
                 break
@@ -366,4 +406,5 @@ def handle_terminal_ws(handler):
     except (WsProtocolError, BrokenPipeError, ConnectionResetError, OSError):
         pass
     finally:
+        stop_hb.set()
         session.close()

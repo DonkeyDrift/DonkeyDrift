@@ -46,3 +46,15 @@ def test_terminal_page_suspends_tracking_in_alternate_screen():
     assert "inAlt=false" in source
     # 备用屏幕期间清空并暂停行缓冲
     assert "if(inAlt){lineBuf='';return;}" in source
+
+
+def test_terminal_page_disconnect_overlay_warns_session_lost():
+    """链路断开的 overlay 必须明确提示会话已丢失（issue #151）。"""
+    source = _source()
+
+    # onclose 提示「会话已丢失 · 点击重连（将开启新会话）」，中英双语
+    assert "ws.onclose=function(){showOverlay(t('lost')+' · '+t('newSession'));};" \
+        in source
+    assert "lost:'连接已断开 · 终端会话已丢失'" in source
+    assert "newSession:'点击重连（将开启新会话）'" in source
+    assert "lost:'Disconnected · terminal session lost'" in source
