@@ -1,5 +1,19 @@
 # 变更日志
 
+## 2026-08-17 (11)
+
+- fix(launcher): 上位机终端 WebSocket 增加服务端心跳保活与空闲超时判死，长时间空闲不再悄悄断连丢会话（#151）
+  - 根因：`donkeycar/launcher/terminal.py` 的 WebSocket ↔ PTY 桥无任何 keepalive——只在收到客户端 PING 时回 PONG，从不主动发 PING；长时间无数据的空闲连接被 NAT 表项老化/浏览器回收悄悄断开，而协议规定断连即杀 PTY 子进程，原 shell 会话连同现场全部丢失。
+  - `donkeycar/launcher/terminal.py`：新增 `_heartbeat_loop` 心跳线程（`terminal-ws-heartbeat`，随 `handle_terminal_ws` 每连接一条）——每 `_PING_INTERVAL=25s` 向客户端发 WebSocket PING 帧（浏览器协议层自动回 PONG，无需前端配合，周期性帧同时刷新 NAT 表项）；主读循环每收到一帧刷新 `last_rx`，超过 `_PONG_TIMEOUT=60s` 无任何客户端帧则置 `writer.closed` 并 `shutdown(SHUT_RDWR)` 唤醒阻塞的主读循环，走原有 finally 清理 PTY 会话；连接结束时 `stop_hb` 事件退出心跳线程。模块 docstring 帧协议说明同步补心跳帧与保活语义。
+  - `donkeycar/launcher/terminal_static/terminal.html`：断连 overlay 从「连接已断开 · 点击重连」改为明确提示现场丢失——新增 `lost`/`newSession` 双语文案（zh：「连接已断开 · 终端会话已丢失 · 点击重连（将开启新会话）」；en 同义），`ws.onclose` 改用新文案；shell 正常 exit 的 overlay 维持原文案。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增 2 项端到端用例（`_open_terminal_ws` 握手辅助 + 缩短心跳参数后断言收到服务端 PING、空闲超时后服务端主动断开读到 EOF）；`tests/test_launcher_terminal.py` 新增断连 overlay 会话丢失文案静态断言 1 项。相关测试 22 项全部通过。
+
+## 2026-08-17 (10)
+
+- feat(web_ui/trainer): 已训练模型列表每行最右侧新增删除按钮（Issue #148）
+  - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行操作按钮区（Copy 按钮之后）新增 Trash2 图标按钮，样式与现有按钮一致（`p-1 text-zinc-500 hover:text-red-400 transition-colors`），点击 `e.stopPropagation()` 后 `setConfirmDelete(m)` 打开已有删除确认弹窗；lucide-react 导入补 `Trash2`。删除链路此前已完整实现（`deleteModel` API、`deleting`/`confirmDelete` state、`handleDelete`、确认弹窗及中英文 i18n 文案），本次仅补缺失的触发入口。
+  - 测试：`npm run build`（tsc -b + vite build）通过；vitest 全量 89/90 通过，唯一失败的 `TubNavigator.test.tsx` 为并行会话在制修改（stash 本改动后复测同样失败），与本改动无关。
+
 ## 2026-08-17 (9)
 
 - feat(web-ui): 完成 Tub Manager（TM）页面中文翻译——`tubnav` 与 `tubeditor` 两个 i18n 命名空间的 zh 词条全部翻译为中文（#157）
@@ -7,12 +21,6 @@
   - `web_ui/frontend/src/i18n/messages/tubeditor.ts`（TubEditor）：zh 同上改完整中文——标题/副标题、实时更新、空图表占位/空态、开始/结束索引 aria 与占位、`至`、删除中…/删除、恢复中…/恢复、缩放标签、tooltip 帧/转向/油门、数据集名 转向/油门、六条英文错误提示（范围内无记录/删除失败/恢复失败/范围无效/无可用记录/无有效记录）。文件头注释同步更新。
   - en 词条与组件代码均未改动。
   - 测试同步：`web_ui/frontend/src/components/TubNavigator.test.tsx:39` 刷新按钮定位串从 `Refresh tub records` 改为新 zh aria `刷新 Tub 记录`；前端 vitest 全量 18 文件 90 项通过。
-
-## 2026-08-17 (10)
-
-- feat(web_ui/trainer): 已训练模型列表每行最右侧新增删除按钮（Issue #148）
-  - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行操作按钮区（Copy 按钮之后）新增 Trash2 图标按钮，样式与现有按钮一致（`p-1 text-zinc-500 hover:text-red-400 transition-colors`），点击 `e.stopPropagation()` 后 `setConfirmDelete(m)` 打开已有删除确认弹窗；lucide-react 导入补 `Trash2`。删除链路此前已完整实现（`deleteModel` API、`deleting`/`confirmDelete` state、`handleDelete`、确认弹窗及中英文 i18n 文案），本次仅补缺失的触发入口。
-  - 测试：`npm run build`（tsc -b + vite build）通过；vitest 全量 89/90 通过，唯一失败的 `TubNavigator.test.tsx` 为并行会话在制修改（stash 本改动后复测同样失败），与本改动无关。
 
 ## 2026-08-17 (8)
 - style(web_ui/launcher): 三页面语言按钮配色统一为 DC/D 主题按钮（深浅切换）样式（#92 后续统一，与 Firmware v1.8.5 同批）
