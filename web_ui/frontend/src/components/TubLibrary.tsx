@@ -366,50 +366,52 @@ export const TubLibrary: React.FC = () => {
                             : ''}
                         </div>
                       </div>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        aria-label={isPinned ? t('tubLibrary.unpinAria') : t('tubLibrary.pinAria')}
-                        title={isPinned ? t('tubLibrary.unpinAria') : t('tubLibrary.pinAria')}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(session);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isPinned ? t('tubLibrary.unpinAria') : t('tubLibrary.pinAria')}
+                          title={isPinned ? t('tubLibrary.unpinAria') : t('tubLibrary.pinAria')}
+                          onClick={(e) => {
                             e.stopPropagation();
-                            e.preventDefault();
                             togglePin(session);
-                          }
-                        }}
-                        className={`p-1.5 rounded-md shrink-0 cursor-pointer transition-colors ${
-                          isPinned
-                            ? 'text-cyan-400 hover:bg-cyan-500/10'
-                            : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800/60'
-                        }`}
-                      >
-                        <Pin className={`w-4 h-4 ${isPinned ? 'fill-current' : ''}`} />
-                      </span>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        aria-label={t('tubLibrary.deleteAria')}
-                        title={t('tubLibrary.deleteAria')}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDelete(session);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              togglePin(session);
+                            }
+                          }}
+                          className={`p-1.5 rounded-md shrink-0 cursor-pointer transition-colors ${
+                            isPinned
+                              ? 'text-cyan-400 hover:bg-cyan-500/10'
+                              : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800/60'
+                          }`}
+                        >
+                          <Pin className={`w-4 h-4 ${isPinned ? 'fill-current' : ''}`} />
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-label={t('tubLibrary.deleteAria')}
+                          title={t('tubLibrary.deleteAria')}
+                          onClick={(e) => {
                             e.stopPropagation();
-                            e.preventDefault();
                             setPendingDelete(session);
-                          }
-                        }}
-                        className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-500/10 shrink-0 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </span>
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setPendingDelete(session);
+                            }
+                          }}
+                          className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-500/10 shrink-0 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </span>
+                      </div>
                     </button>
                   );
                 })}

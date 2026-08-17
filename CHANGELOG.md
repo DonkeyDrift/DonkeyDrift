@@ -1,10 +1,27 @@
 # 变更日志
 
-## 2026-08-17 (3)
+## 2026-08-17 (5)
 
 - style(launcher): D 启动页主题按钮皮肤与 DD 渲染值逐值统一——三处（DC/D/DD）深浅切换按钮一模一样（#140 后续统一，与 Firmware v1.8.4 同批）
   - `donkeycar/launcher/server.py`：`#themeBtn` 此前复用 `.langBtn` 基类（同批 #149 语言按钮改版后基类变为 DD 原生 zinc 值 #27272a/#3f3f46），主题按钮与 DD 实际渲染脱钩；现改用 ID 覆盖独立锁定 DD 主题按钮渲染值（已核实 DD 构建产物：深色 `theme-mus4` 将 `bg-zinc-800/border-zinc-700/text-zinc-300` 重映射为 #111820/#344154/#b9c5d3，浅色 `theme-light` 为 #f4f6f9/#ccd5df/#3f4f63）：深色 `background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；图标 16px lucide Moon/Sun、深色显月亮/浅色显太阳不变。语言按钮 `.langBtn` 本批不动。
   - 测试同步：`tests/test_launcher_theme_single_button.py` 新增深/浅两套皮肤逐值断言（8 条精确串），pytest 全量 173 项通过。
+
+## 2026-08-17 (4)
+
+- fix(launcher): `donkey web` 默认以生产模式启动 Web UI，顶部导航切换从 ~500ms 降到 ~50ms（#135 二轮修复）
+  - 根因：`donkey web` 此前始终用 `npm run dev` 起 Vite dev 服务器给最终用户，dev 模式跑未优化代码 + React dev 运行时，实测顶部导航切换 400-550ms（Playwright + CPU profile 证实热点在 chart.js option 解析，为生产构建的 10 倍）；首轮修复（commit 30012564，loadedTubPath 守卫）的前端优化仍在但无法抵消 dev 模式开销，issue 被重开。生产构建由后端直接托管 dist 后实测同一 tub 仅 43-63ms（10k 记录大 tub 同样 43-77ms）。
+  - `donkeycar/management/base.py`：
+    - `_launch_web_ui` 重写为默认生产模式——新增 `_frontend_needs_build()`（dist/index.html 缺失或 src/public/配置文件比 dist 新则需重建），需要时先 `npm run build`，随后 uvicorn 不带 `--reload` 单进程同时托管 API 与 dist 静态文件（`frontend_port = backend_port`、`frontend_proc = None`）。
+    - 新增 `--dev` 参数（Web 与 Drive 命令）：显式传入时走原有逻辑（Vite dev 服务器 + uvicorn `--reload`），供前端开发使用；端口选择逻辑同步调整为仅 dev 模式下独立选 frontend_port。
+    - `run()` 的 supervise 进程列表过滤 `None` 前端进程；Drive 命令同步加 `--dev` 防止 `args.dev` AttributeError。
+    - `donkeycar/launcher/server.py` 无需改动：实例登记读 `~/.donkeycar/webui.json`，生产模式下登记的 frontend_port 即 backend_port，`/` 探测依然成立。
+  - 验证：新增 `tests/test_web_production_mode.py` 9 项（默认生产模式 build→单进程/无 --reload/frontend_port==backend_port、dist 新鲜跳过 build、build 失败 SystemExit、--dev 起 Vite、`_frontend_needs_build` 4 例、`--dev` 默认 False）；pytest 全量 182 项通过、前端 vitest 全量 90 项通过；端到端实测（8020 端口直接调 `_launch_web_ui`）：SPA 与 API 同端口正常服务、无前端子进程。用户需重启现有 Web UI 实例后生效。
+
+## 2026-08-17 (3)
+
+- fix(web-ui): Tub Library（录制视频库）Pin 按钮与删除按钮间距过大，收拢为右侧相邻按钮组（#131 迭代）
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：列表行原为 `justify-between` 三段布局，中间文本块与 Pin、删除图标分列两端之间，导致 Pin 悬在行中部、与垃圾桶距离过远；现将 Pin 与删除两个 `<span>` 包进同一 `flex items-center gap-1 shrink-0` 容器，两图标固定相邻、整体靠右，行内文本仍占左侧剩余空间。
+  - 测试：前端 vitest 全量 90 项通过、`npm run build` 通过（TubLibrary 置顶/删除既有用例不受影响）。
 
 ## 2026-08-17 (2)
 
