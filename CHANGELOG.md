@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-17 (1)
+
+- feat(web-ui,launcher): 深浅主题切换改为静音式单按钮，单击深/浅互切，默认跟随浏览器深浅（#140）
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：从"浅色/跟随系统/深色"三段式分段控件改为单图标按钮（与 #139 语言按钮同款 32px 圆形样式）——图标用 lucide-react `Sun`/`Moon` 显示当前生效主题（浅色=太阳、深色=月亮），单击在深/浅间来回切换；`aria-pressed` 反映当前是否深色、`aria-label`/`title` 提示切换目标；默认跟随浏览器 `prefers-color-scheme` 与手动单击后持久化（localStorage 键 `donkeydrifter.ui.theme` 沿用）由 `lib/theme.ts` 既有 `system` 模式 + 系统偏好监听承担，无需改动；组件经 `useResolvedTheme()` 订阅生效主题实时更新图标。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：测试从三段式 11 项重写为单按钮语义 7 项——深/浅图标与 aria-label 反映当前主题、单击切到浅色并持久化、再点切回深色、无存储时实时跟随系统切换（matchMedia change 模拟）、手动点过后不再跟随系统、未知存储值回退跟随系统；`setSystemDark` helper 包 `act()` 使 React 同步重渲。
+  - `donkeycar/launcher/server.py`（D 启动页）：移除 `#themeTabs` 三态按钮组（DOM/CSS/JS/renderThemeTabs/i18n 词条 `theme.light|auto|dark` zh+en），原位改为 `#themeBtn` 单按钮（复用 `.langBtn` 样式，32px 圆形，☀/🌙 文字图标反映当前生效主题，`margin-left:auto` 与手机端媒体查询同步改名）；新增 `toggleTheme()` 单击深/浅互切，`applyTheme()` 改为更新按钮图标；`initTheme()` 与系统偏好 matchMedia 监听保留（未手动点过即实时跟随浏览器）。
+  - DD 前端 `npm run check`（tsc）通过、`npm test` 18 文件 89 项全部通过；D 启动页 `pytest tests/test_launcher_language_autodetect.py tests/test_launcher_menu_actions.py` 39 项通过。
+
 ## 2026-08-16 (19)
 
 - feat(web-ui,launcher): 语言切换改为静音式单按钮，默认跟随浏览器语言（#139）

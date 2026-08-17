@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ThemeSwitcher, THEME_STORAGE_KEY } from './ThemeSwitcher';
 
 type SystemThemeChangeHandler = (event: { matches: boolean }) => void;
@@ -31,10 +31,12 @@ const matchMediaMock = (query: string): MediaQueryList =>
     dispatchEvent: () => false,
   }) as unknown as MediaQueryList;
 
-/** 设置系统深色偏好并触发 change 事件(模拟系统主题切换)。 */
+/** 设置系统深色偏好并触发 change 事件(模拟系统主题切换,act 内触发使订阅方同步重渲)。 */
 const setSystemDark = (dark: boolean) => {
   systemDark = dark;
-  systemThemeChangeHandlers.forEach((handler) => handler({ matches: dark }));
+  act(() => {
+    systemThemeChangeHandlers.forEach((handler) => handler({ matches: dark }));
+  });
 };
 
 describe('ThemeSwitcher', () => {
@@ -45,92 +47,67 @@ describe('ThemeSwitcher', () => {
     window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
   });
 
-  it('renders 跟随系统, 浅色 and 深色 segments with 跟随系统 active by default', () => {
+  it('renders a single toggle button showing the moon icon in dark mode', () => {
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: '浅色' })).toHaveAttribute('aria-pressed', 'false');
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    const button = screen.getByRole('button', { name: '切换到浅色主题' });
+    expect(button).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('switches to 浅色 on click and persists the selection', () => {
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '浅色' }));
-    expect(screen.getByRole('button', { name: '浅色' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'false');
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
-  });
-
-  it('switches to 深色 on click and persists the selection', () => {
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '深色' }));
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'false');
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
-  });
-
-  it('applies the skin class on <html> for each selection', () => {
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '浅色' }));
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: '深色' }));
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
-  });
-
-  it('resolves 跟随系统 to the dark skin when the system prefers dark', () => {
-    setSystemDark(true);
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
-  });
-
-  it('resolves 跟随系统 to the light skin when the system prefers light', () => {
-    setSystemDark(false);
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-  });
-
-  it('follows system theme changes while 跟随系统 is selected', () => {
-    setSystemDark(true);
-    render(<ThemeSwitcher />);
-    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    setSystemDark(false);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-    setSystemDark(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
-  });
-
-  it('follows system theme changes by default when nothing is stored', () => {
-    render(<ThemeSwitcher />);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    setSystemDark(false);
-    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-  });
-
-  it('applies the persisted skin class on mount', () => {
+  it('shows the sun icon when the resolved theme is light', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
     render(<ThemeSwitcher />);
+    expect(screen.getByRole('button', { name: '切换到深色主题' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
   });
 
-  it('restores the persisted selection on render', () => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+  it('click toggles dark to light and persists the selection', () => {
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '切换到浅色主题' }));
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    expect(screen.getByRole('button', { name: '切换到深色主题' })).toBeInTheDocument();
   });
 
-  it('falls back to 跟随系统 for unknown stored values', () => {
+  it('click again toggles back to dark and persists the selection', () => {
+    render(<ThemeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: '切换到浅色主题' }));
+    fireEvent.click(screen.getByRole('button', { name: '切换到深色主题' }));
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    expect(screen.getByRole('button', { name: '切换到浅色主题' })).toBeInTheDocument();
+  });
+
+  it('follows the system theme in real time when nothing is stored', () => {
+    render(<ThemeSwitcher />);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(screen.getByRole('button', { name: '切换到浅色主题' })).toBeInTheDocument();
+    setSystemDark(false);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(screen.getByRole('button', { name: '切换到深色主题' })).toBeInTheDocument();
+    setSystemDark(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(screen.getByRole('button', { name: '切换到浅色主题' })).toBeInTheDocument();
+  });
+
+  it('stops following the system theme after a manual click', () => {
+    render(<ThemeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: '切换到浅色主题' }));
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    setSystemDark(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
+  });
+
+  it('falls back to following the system for unknown stored values', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'unknown');
     render(<ThemeSwitcher />);
-    expect(screen.getByRole('button', { name: '跟随系统' })).toHaveAttribute('aria-pressed', 'true');
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('unknown');
+    setSystemDark(false);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
   });
 });

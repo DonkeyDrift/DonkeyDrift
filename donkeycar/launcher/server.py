@@ -1333,24 +1333,23 @@ MENU_HTML = r"""<!DOCTYPE html>
         .ghLink:hover{color:#5cc8ff}
         .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block}
 
-        /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言分段控件，
+        /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言静音式单按钮，
            逐值复刻 DD 实际渲染值——Tailwind 类经 src/themes/theme-mus4.css
            重映射：容器 bg-zinc-800→#111820、border-zinc-700→#344154 外加
-           1px #2b3441 内描边，p-1/gap-1；按钮 px-3 py-1 text-xs，未激活
-           text-zinc-400→#8fa1b5、hover 仅文字变 #e8edf2，激活
-           bg-cyan-600→#5cc8ff + 近黑 #061019 + 字重 800；
+           1px #2b3441 内描边；未激活 text-zinc-400→#8fa1b5、hover 仅文字变
+           #e8edf2；
            浅色变体见下方 html[data-theme="light"] 段（theme-light.css 值）） */
         .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#8fa1b5;font-size:13px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
         .langBtn:hover{color:#e8edf2}
         .langBtn.active{background:#5cc8ff;color:#061019;font-weight:800}
-        #themeTabs{margin-left:auto}
+        #themeBtn{margin-left:auto;font-size:15px}
         .headerBreak{display:none}
 
         /* 手机版顶栏两行：第一行 图标/标题/GitHub/版本号（与电脑版一致），
            第二行 主题切换(最左) + 中英文切换(最右) */
         @media (max-width:640px){
             .headerBreak{display:block;width:100%;height:0}
-            #themeTabs{margin-left:0}
+            #themeBtn{margin-left:0}
             #langBtn{margin-left:auto}
         }
 
@@ -1488,11 +1487,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             </a>
             <span class="versionBadge">v{{VERSION}}</span>
             <div class="headerBreak"></div>
-            <span class="langTabs" id="themeTabs" title="主题" data-i18n-title="theme.title">
-                <button type="button" data-theme="light" data-i18n="theme.light">浅色</button>
-                <button type="button" data-theme="system" data-i18n="theme.auto">跟随系统</button>
-                <button type="button" data-theme="dark" data-i18n="theme.dark">深色</button>
-            </span>
+            <button type="button" id="themeBtn" class="langBtn" title="主题" data-i18n-title="theme.title" aria-label="主题">☀</button>
             <button type="button" id="langBtn" class="langBtn" aria-label="语言" data-i18n-aria="language.title">中</button>
         </div>
 
@@ -1546,9 +1541,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             zh: {
                 'language.title': '语言',
                 'theme.title': '主题',
-                'theme.light': '浅色',
-                'theme.auto': '跟随系统',
-                'theme.dark': '深色',
                 'fab.quick': '快捷入口',
                 'fab.help': '帮助',
                 'cwd.label': '当前工作目录',
@@ -1584,9 +1576,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             en: {
                 'language.title': 'Language',
                 'theme.title': 'Theme',
-                'theme.light': 'Light',
-                'theme.auto': 'Auto',
-                'theme.dark': 'Dark',
                 'fab.quick': 'Quick actions',
                 'fab.help': 'Help',
                 'cwd.label': 'Current Working Directory',
@@ -1668,27 +1657,27 @@ MENU_HTML = r"""<!DOCTYPE html>
             setLanguage(uiLang === 'zh' ? 'en' : 'zh');
         }
 
-        // ── 主题：浅色 / 跟随系统 / 深色（默认跟随系统，选中 system 时经 matchMedia 实时解析并监听） ──
+        // ── 主题：静音式单按钮，单击深/浅互切（默认跟随浏览器，手动点过才持久化） ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
                     ? 'light' : 'dark';
             } catch (e) { return 'dark'; }
         }
-        function renderThemeTabs() {
-            document.querySelectorAll('#themeTabs button[data-theme]').forEach(function(b) {
-                b.classList.toggle('active', b.dataset.theme === uiTheme);
-            });
-        }
         function applyTheme(mode) {
             uiTheme = (mode === 'light' || mode === 'dark') ? mode : 'system';
             document.documentElement.dataset.theme =
                 uiTheme === 'system' ? systemTheme() : uiTheme;
-            renderThemeTabs();
+            var btn = document.getElementById('themeBtn');
+            if (btn) btn.textContent =
+                document.documentElement.dataset.theme === 'light' ? '☀' : '🌙';
         }
         function setTheme(mode) {
             try { localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (e) {}
             applyTheme(mode);
+        }
+        function toggleTheme() {
+            setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
         }
         function initTheme() {
             var stored = 'system';
@@ -2334,6 +2323,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             .addEventListener('click', toggleFabActions);
         document.getElementById('langBtn')
             .addEventListener('click', toggleLanguage);
+        document.getElementById('themeBtn')
+            .addEventListener('click', toggleTheme);
         document.getElementById('helpFab')
             .addEventListener('click', function(e) {
                 if (e) e.stopPropagation();
@@ -2343,12 +2334,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             .addEventListener('click', closeHelpModal);
         document.getElementById('helpClose')
             .addEventListener('click', closeHelpModal);
-        document.querySelectorAll('#themeTabs button[data-theme]')
-            .forEach(function(b) {
-                b.addEventListener('click', function() {
-                    setTheme(b.dataset.theme);
-                });
-            });
         document.addEventListener('click', collapseFabActions);
         window.addEventListener('scroll', collapseFabActions, {passive: true});
         window.addEventListener('touchmove', collapseFabActions, {passive: true});
