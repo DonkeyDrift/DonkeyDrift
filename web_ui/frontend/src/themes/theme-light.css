@@ -637,3 +637,19 @@ html.theme-light .bg-black\/60.text-white,
 html.theme-light .bg-black\/70.text-white {
   color: #ffffff;
 }
+
+/* ---------- 语言切换按钮（LanguageSwitcher）：三页面（DC/D/DD）统一配色 ---------- */
+/* 对齐 DC/D 深浅切换（themeButton）浅色渲染值：底 #f4f6f9、边框 #ccd5df、
+   inset 1px #d5dce4 内圈、字色 #3f4f63、hover #1a2330。与 theme-mus4 侧
+   同理压过通用 outline 规则。 */
+html.theme-light .language-switcher-btn {
+  outline: none;
+  background: #f4f6f9;
+  border-color: #ccd5df;
+  box-shadow: inset 0 0 0 1px #d5dce4;
+  color: #3f4f63;
+}
+html.theme-light .language-switcher-btn:hover {
+  color: #1a2330;
+}
+

@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-17 (7)
+
+- style(web_ui/launcher): 三页面语言按钮配色统一为 DC/D 主题按钮（深浅切换）样式（#92 后续统一，与 Firmware v1.8.5 同批）
+  - `donkeycar/launcher/server.py`（D 启动页）：`.langBtn` 基类（语言 `#langBtn` 与主题 `#themeBtn` 共用）从 DD 原生 zinc 配色（#27272a/#3f3f46/#d4d4d8，浅色 zinc-100/200/500/900）改为主题按钮配色——深色 `background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；32×32 圆形、DD 字体栈、字号/字重不变；`#themeBtn` 的 ID 颜色覆盖与基类重合（保留仅承载布局与图标尺寸），浅色段同步换值。
+  - `web_ui/frontend/src/components/LanguageSwitcher.tsx`（DD）：按钮加皮肤类 `language-switcher-btn`；`web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css` 末尾新增皮肤规则（与并行主题按钮分支同款模式）——深色 #111820/#344154/#2b3441 内圈/#b9c5d3、hover #e8edf2；浅色 #f4f6f9/#ccd5df/#d5dce4 内圈/#3f4f63、hover #1a2330；`outline:none` 抵消 `.bg-zinc-800` 通用 inset 描边，保证 border+内圈双层视觉与 DC/D 一致。
+  - 测试：pytest 全量 182 项通过（`.langBtn` 无精确串断言）；vitest `LanguageSwitcher.test.tsx` 6 项通过（不锁类名）；`npm run build` 通过。D/DD 页面主机（192.168.3.41:8090）本轮不在线，D/DD 侧按源码逐值对齐 + DD 构建验证，最终视觉由用户验收。
+
 ## 2026-08-17 (6)
 
 - style(launcher): D 启动页主题按钮皮肤与 DD 渲染值逐值统一——三处（DC/D/DD）深浅切换按钮一模一样（#140 后续统一，与 Firmware v1.8.4 同批）

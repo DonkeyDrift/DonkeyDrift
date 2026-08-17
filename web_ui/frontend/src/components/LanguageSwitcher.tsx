@@ -14,7 +14,7 @@ export const LanguageSwitcher: React.FC = () => {
       aria-pressed={lang === 'zh'}
       aria-label={lang === 'zh' ? 'Switch to English' : '切换到中文'}
       onClick={() => setLanguage(next)}
-      className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 text-xs font-semibold text-zinc-300 hover:text-zinc-100 transition-colors"
+      className="language-switcher-btn flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 text-xs font-semibold text-zinc-300 hover:text-zinc-100 transition-colors"
     >
       {lang === 'zh' ? '中' : 'EN'}
     </button>
