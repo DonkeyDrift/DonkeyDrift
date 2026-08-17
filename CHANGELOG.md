@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-17 (15)
+
+- feat(launcher): 启动器菜单新增「DeepSeek Harness」12 号项（常用），点击拉起/复用 `dsh web` 并跳转；Drifter Console 挪至 kimi 右侧 13 号（Issue #164）
+  - `donkeycar/launcher/dsh_web.py`（新文件）：`launch_dsh_web(cwd, timeout_s=60)` 启动/复用 DeepSeek Harness web。dsh CLI 拒绝 `--host 0.0.0.0`（安全限制），用 `--patch` 临时层覆盖 webserver 配置（`host: 0.0.0.0` + `port: !!js ctx.webStartup.port ?? 3080`，port 不能省否则配置校验报缺值）实现局域网可达；`--port 0` 由 OS 分配空闲端口避免与默认 3080 冲突；`--trusted-host <本机局域网 IP>` 放行 dsh `/api` 的浏览器信任栅栏（裸 host 匹配任意端口）。就绪 banner 一行（`dsh web: http://127.0.0.1:<port> (LAN: …)`）抓 URL 后改写为局域网 IP（复用 kimi_web 的 `_lan_url`，issue #125 同款）；复用路径靠本模块 `_SPAWNED` 登记 + GET / 探测（dsh 无实例登记文件），死进程/僵死端口自动剔除后冷启动。`_resolve_dsh_binary` 先 PATH 后当前 Python 解释器同目录（systemd 干净 PATH 回退）。
+  - `donkeycar/launcher/server.py`：do_POST 新增 `/api/launch/dsh` 路由与 `_handle_launch_dsh`（可选 JSON body `cwd`，非法 cwd 直接报错不回退，响应带 `_KIMI_WEB_CORS_HEADERS` 供 DC 跨域）；menuItems 重排为 1-13——1-11 不变，新增 12 号 DeepSeek Harness（`favorite: true`），DC 从 0 号置顶改 13 号（kimi 右侧）；`selectItem` 新增 12→`launchDshWeb()`、13→`openDrifterConsole()`，删除 no===0 分支；键盘两位输入扩展支持 12/13（按 1 后 400ms 内按 2/3），删除 key==='0' 分支；前端新增 `launchDshWeb()`（POST `/api/launch/dsh`，cwd 固定 `/home/dkc/projects`，成功跳转 `data.url`）；i18n `help.keyNumbers` 改「数字键 1-13」（zh/en + HTML data-i18n），新增 `overlay.startingDshWeb`（zh/en）。
+  - 测试同步：新增 `tests/test_launcher_dsh_web.py` 21 项——patch 文件内容、复用不起子进程、冷启动抓 URL 且改写 LAN IP、命令行含 `--patch`/`--port 0`/`--trusted-host`、无局域网 IP 省略 trusted-host、cwd 透传、cwd 非法、binary 缺失、超时杀进程、提前退出报现场、`_SPAWNED` 死条目/僵死探测剔除、端点 200/400/500 与 CORS 头、cwd 透传；`tests/` 全量 201 passed 无回归。
+
 ## 2026-08-17 (14)
 
 - fix(web-ui): DD 语言/主题切换按钮字体逐值对齐 DC/D——三页面按钮完全一致（#92 四轮返工：字体差异收口）
