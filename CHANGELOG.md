@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-17 (1)
+
+- feat(web-ui,launcher): 深浅主题切换改为静音式单按钮，单击深/浅互切，默认跟随浏览器深浅（#140）
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：从"浅色/跟随系统/深色"三段式分段控件改为静音式单图标按钮（与 #139 语言切换同形态：32×32 圆形胶囊）——图标反映当前生效主题（深色显月亮、浅色显太阳，lucide `Moon`/`Sun`），单击在深↔浅之间互切；默认跟随浏览器 `prefers-color-scheme` 与 localStorage 持久化（沿用键 `donkeydrifter.ui.theme`）由 `src/lib/theme.ts` 已有实现承担，未手动单击前不写入存储、实时跟随浏览器切换，手动单击后持久化显式选择且不再跟随；`aria-label` 提示切换目标主题。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：测试重写为单按钮断言 8 例——月亮/太阳图标与 aria-label 反映当前主题、单击切浅色并持久化、双击回深色、默认跟随系统深浅实时变化（跟随期间不写存储）、手动单击后不再跟随系统、挂载恢复持久化皮肤、非法存储值回退跟随系统。
+  - `donkeycar/launcher/server.py`（D 启动页 :8090）：移除 `#themeTabs` 浅色/跟随系统/深色三态菜单及 `renderThemeTabs`、`theme.light/auto/dark` 双语文案，改为 `#themeBtn` 静音式单图标按钮（复用 `.langBtn` 圆形样式，内联 lucide 太阳/月亮 SVG 按 `html[data-theme]` 显隐），单击 `toggleTheme()` 按当前生效主题取反并经 `setTheme` 持久化；`renderThemeBtn()` 同步更新 aria-label/title 为切换目标主题（新增 `theme.toggleLight/toggleDark` 双语文案）；首屏防闪烁与 'system' 态跟随浏览器逻辑不变。
+  - 测试：前端 vitest 全量 90 项通过、`tsc -b` 通过；新增 `tests/test_launcher_theme_single_button.py` 源码断言 3 例（单按钮入口与三态移除、toggle 深浅互切与持久化、默认跟随浏览器/手动后不跟随），pytest 全量 173 项通过。
+
 ## 2026-08-16 (19)
 
 - feat(web-ui,launcher): 语言切换改为静音式单按钮，默认跟随浏览器语言（#139）
