@@ -1572,7 +1572,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 1-13：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 0-12：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -1605,7 +1605,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 1-13：选择对应菜单项',
+                'help.keyNumbers': '数字键 0-12：选择对应菜单项',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
@@ -1643,7 +1643,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 1-13: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 0-12: select the corresponding menu item',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
@@ -1780,9 +1780,10 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
 
         // 菜单项数据（条目与 tui.py 保持一致，desc/catLabel 双语；
-        // issue #164：DC 不再 0 号置顶，改放 kimi 右侧；新增 12 号
-        // DeepSeek Harness（常用）；编号 1-13）
+        // issue #164：新增 12 号 DeepSeek Harness（常用）；DC 恢复 0 号
+        // 置顶（用户后续指示），编号 0-12）
         const menuItems = [
+            {no: 0,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
             {no: 1,  cat: "manage", name: "Create Car",   descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
             {no: 2,  cat: "manage", name: "Open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
@@ -1795,7 +1796,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
             {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                    descEn: "Open Kimi Code Web",                             favorite: true},
             {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                    favorite: true},
-            {no: 13, cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -1848,7 +1848,9 @@ MENU_HTML = r"""<!DOCTYPE html>
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
 
-            if (no === 1) {
+            if (no === 0) {
+                openDrifterConsole();
+            } else if (no === 1) {
                 createCar();
             } else if (no === 2) {
                 openProject();
@@ -1872,8 +1874,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 launchKimiCodeWeb();
             } else if (no === 12) {
                 launchDshWeb();
-            } else if (no === 13) {
-                openDrifterConsole();
             }
         }
 
@@ -2384,7 +2384,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 return;
             }
 
-            // Handle "10"-"13" input: press 1 first, then within 400ms press 0 to select 10, 1 to select 11, 2 to select 12, 3 to select 13
+            // Handle "10"-"12" input: press 1 first, then within 400ms press 0 to select 10, 1 to select 11, 2 to select 12
             if (pendingDigit1 !== null) {
                 clearTimeout(pendingDigit1.timer);
                 pendingDigit1 = null;
@@ -2400,10 +2400,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                     selectItem(12);
                     return;
                 }
-                if (key === '3') {
-                    selectItem(13);
-                    return;
-                }
             }
 
             if (key === '1') {
@@ -2415,6 +2411,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                 };
             } else if (key >= '2' && key <= '9') {
                 selectItem(parseInt(key));
+            } else if (key === '0') {
+                selectItem(0);
             } else if (key === '?') {
                 openHelpModal();
             }
