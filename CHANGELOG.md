@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-17 (2)
+
+- style(launcher): 三页面（DC/D/DD）语言切换按钮样式统一为 DD 原生样式（#92 后续统一，与 Firmware 侧同批）
+  - `donkeycar/launcher/server.py`：`.langBtn` 从主题重映射值（#111820 底、#344154 边框、1px #2b3441 内描边、#c3cbd6 字色、13px、hover #e8edf2、active 高亮态）改为逐值复刻 DD `LanguageSwitcher` 原生渲染——32×32 圆形、#27272a 底、1px #3f3f46 边框、12px/600、#d4d4d8 字色、hover #f4f4f5，无内描边/active 态；JS `applyLanguage` 移除 `classList.toggle('active',…)`；浅色覆盖改用同族 zinc 值（底 #f4f4f5、边框 #d4d4d8、字色 #52525b、hover #18181b）。`.langBtn` 同时被 `#themeBtn` 主题按钮复用，主题按钮样式随之统一；样式块注释同步更新为 DD 原生值说明。
+  - 测试同步：launcher 相关 42 项通过（`test_launcher_language_autodetect.py`/`test_launcher_menu_actions.py`/`test_launcher_theme_single_button.py`，后两者仅 docstring 提及 `.langBtn` 无样式断言）。
+
 ## 2026-08-17 (1)
 
 - feat(web-ui,launcher): 深浅主题切换改为静音式单按钮，单击深/浅互切，默认跟随浏览器深浅（#140）

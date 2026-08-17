@@ -1334,14 +1334,12 @@ MENU_HTML = r"""<!DOCTYPE html>
         .versionBadge{color:#6b7d90;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:inline-block}
 
         /* DD ThemeSwitcher / LanguageSwitcher（顶栏主题/语言静音式单按钮，
-           逐值复刻 DD 实际渲染值——Tailwind 类经 src/themes/theme-mus4.css
-           重映射：32×32 圆形按钮 bg-zinc-800→#111820、border-zinc-700→#344154
-           外加 1px #2b3441 内描边，图标 text-zinc-300→#c3cbd6、hover #e8edf2，
-           主题按钮太阳/月亮 16px（lucide stroke）；
-           浅色变体见下方 html[data-theme="light"] 段（theme-light.css 值）） */
-        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#8fa1b5;font-size:13px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
-        .langBtn:hover{color:#e8edf2}
-        .langBtn.active{background:#5cc8ff;color:#061019;font-weight:800}
+           逐值复刻 DD 实际渲染值——32×32 圆形按钮 bg-zinc-800→#27272a、
+           border-zinc-700→#3f3f46、图标/文字 text-zinc-300→#d4d4d8、
+           hover:text-zinc-100→#f4f4f5（DD 原生 Tailwind 值，无内描边/active 态）；
+           浅色变体见下方 html[data-theme="light"] 段（zinc-100/200/500/900）） */
+        .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#27272a;border:1px solid #3f3f46;color:#d4d4d8;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
+        .langBtn:hover{color:#f4f4f5}
         #themeBtn{margin-left:auto;color:#c3cbd6}
         #themeBtn:hover{color:#e8edf2}
         #themeBtn svg{width:16px;height:16px}
@@ -1468,9 +1466,8 @@ MENU_HTML = r"""<!DOCTYPE html>
         /* DD theme-light 胶囊变体（theme-light.css 重映射值）：
            容器 #f4f6f9 + border #ccd5df + 内描边 #d5dce4，文字 #5b6b7d、
            hover #1a2330；激活态深浅一致（#5cc8ff/#061019/800）无需覆盖 */
-        html[data-theme="light"] .langBtn{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4}
-        html[data-theme="light"] .langBtn:not(.active){color:#5b6b7d}
-        html[data-theme="light"] .langBtn:not(.active):hover{color:#1a2330}
+        html[data-theme="light"] .langBtn{background:#f4f4f5;border-color:#d4d4d8;color:#52525b}
+        html[data-theme="light"] .langBtn:hover{color:#18181b}
         html[data-theme="light"] .fabToggle{background:#5cc8ff;border-color:#5cc8ff}
         html[data-theme="light"] .fabToggle:hover,html[data-theme="light"] .fabToggle:focus-visible,html[data-theme="light"] .fabToggle:active{background:#3aa8dd;border-color:#3aa8dd}
         html[data-theme="light"] .fabActions .helpFab{box-shadow:0 8px 22px rgba(15,23,42,.16)}
@@ -1658,7 +1655,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             var langBtn = document.getElementById('langBtn');
             if (langBtn) {
                 langBtn.textContent = uiLang === 'zh' ? '中' : 'EN';
-                langBtn.classList.toggle('active', uiLang === 'zh');
             }
             renderMenu();
         }
