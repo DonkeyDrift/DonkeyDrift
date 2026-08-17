@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-17 (17)
+
+- fix(launcher): Drifter Console 恢复 0 号置顶（#164 用户后续指示，撤销同日 (15) 条目的 DC 挪位）
+  - `donkeycar/launcher/server.py`：menuItems 恢复 0 号 Drifter Console（`favorite: true`，置顶），DeepSeek Harness 保持 12 号（常用），编号回到 0-12；`selectItem` 恢复 `no===0 → openDrifterConsole()` 分支，删除 13 号分支；键盘恢复 0 键直达（`key==='0' → selectItem(0)`），两位输入只保留 10/11/12（按 1 后 0/1/2），删除 1+3 组合；i18n `help.keyNumbers` 改回「数字键 0-12」（zh/en + HTML data-i18n）。
+  - 测试：`tests/` 全量 202 passed 无回归（菜单 HTML 无针对编号的断言，无需改测试）。
+
 ## 2026-08-17 (16)
 
 - fix(terminal): 上位机终端页 WebSocket 连接加 10s 超时，连接卡死不再无限停在「正在连接上位机终端…」（#101，配合 Firmware v1.8.6 DC 侧探测超时）
