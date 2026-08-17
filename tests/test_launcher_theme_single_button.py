@@ -24,6 +24,14 @@ def test_launcher_menu_theme_is_mute_style_single_button():
     assert 'html[data-theme="light"] #themeBtn .icon-sun{display:block}' in source
     assert 'html[data-theme="light"] #themeBtn .icon-moon{display:none}' in source
 
+    # 皮肤与 DD ThemeSwitcher 渲染值逐值一致（langBtn 基类为原始 zinc 值，
+    # #themeBtn 用 ID 覆盖为 DD theme-mus4/theme-light 重映射值）
+    assert "#themeBtn{margin-left:auto;background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3}" in source
+    assert "#themeBtn:hover{color:#e8edf2}" in source
+    assert '#themeBtn svg{width:16px;height:16px}' in source
+    assert 'html[data-theme="light"] #themeBtn{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63}' in source
+    assert 'html[data-theme="light"] #themeBtn:hover{color:#1a2330}' in source
+
 
 def test_launcher_theme_toggles_between_light_and_dark():
     """单击切换：toggleTheme 按当前生效主题取反（深↔浅），
