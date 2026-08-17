@@ -609,6 +609,15 @@ html.theme-mus4 .language-switcher-btn {
   border-color: #344154;
   box-shadow: inset 0 0 0 1px #2b3441;
   color: #b9c5d3;
+  /* 字体与 DC/D 逐值一致：根布局 .font-sans 被上方重映射为 system-ui 栈，
+     会继承到按钮导致与 DC/D 字体不同，这里显式锁定 :root 字体栈 */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 12px;
+  font-weight: 600;
 }
 html.theme-mus4 .theme-switcher-btn:hover,
 html.theme-mus4 .language-switcher-btn:hover {
