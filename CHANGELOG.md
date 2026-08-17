@@ -7,6 +7,7 @@
   - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.theme-switcher-btn, .language-switcher-btn` 皮肤规则追加字体锁定——`:root` 完整字体栈 + `font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale` + `font-size:12px;font-weight:600`（主题按钮原为 16px/400，一并统一为 12px/600）。
   - 验证：Playwright 三页面实测（D=127.0.0.1:8090、DD=dev 服务器、DC=车 192.168.3.46 v1.8.5）深浅两主题语言按钮 10 项计算样式（背景/边框/内圈/字色/字体栈/字号/字重/宽/高/圆角）D vs DC、DD vs DC 全部 IDENTICAL；vitest 14 项、pytest 全量 183 项、`npm run build` 通过。Firmware 侧无改动，车上 v1.8.5 即最新，无需 OTA。
 
+
 ## 2026-08-17 (13)
 
 - feat(web-ui): 补齐 DD 中文翻译——`common`、`arena`、`driveviz` 三个 i18n 命名空间的 zh 词条全部翻译为中文，顶部导航栏按要求保持英文不译
