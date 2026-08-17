@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-17 (3)
+
+- style(launcher): D 启动页主题按钮皮肤与 DD 渲染值逐值统一——三处（DC/D/DD）深浅切换按钮一模一样（#140 后续统一，与 Firmware v1.8.4 同批）
+  - `donkeycar/launcher/server.py`：`#themeBtn` 此前复用 `.langBtn` 基类（同批 #149 语言按钮改版后基类变为 DD 原生 zinc 值 #27272a/#3f3f46），主题按钮与 DD 实际渲染脱钩；现改用 ID 覆盖独立锁定 DD 主题按钮渲染值（已核实 DD 构建产物：深色 `theme-mus4` 将 `bg-zinc-800/border-zinc-700/text-zinc-300` 重映射为 #111820/#344154/#b9c5d3，浅色 `theme-light` 为 #f4f6f9/#ccd5df/#3f4f63）：深色 `background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；图标 16px lucide Moon/Sun、深色显月亮/浅色显太阳不变。语言按钮 `.langBtn` 本批不动。
+  - 测试同步：`tests/test_launcher_theme_single_button.py` 新增深/浅两套皮肤逐值断言（8 条精确串），pytest 全量 173 项通过。
+
 ## 2026-08-17 (2)
 
 - style(launcher): 三页面（DC/D/DD）语言切换按钮样式统一为 DD 原生样式（#92 后续统一，与 Firmware 侧同批）

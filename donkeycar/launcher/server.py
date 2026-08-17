@@ -1340,7 +1340,12 @@ MENU_HTML = r"""<!DOCTYPE html>
            浅色变体见下方 html[data-theme="light"] 段（zinc-100/200/500/900）） */
         .langBtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:0;padding:0;border-radius:9999px;background:#27272a;border:1px solid #3f3f46;color:#d4d4d8;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:color .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1)}
         .langBtn:hover{color:#f4f4f5}
-        #themeBtn{margin-left:auto;color:#c3cbd6}
+        /* 主题按钮与 DD ThemeSwitcher 渲染值逐值一致（DD 深色 theme-mus4 /
+           浅色 theme-light 重映射）：深色 #111820 + #344154 + #2b3441 内描边、
+           图标 #b9c5d3 → hover #e8edf2；浅色 #f4f6f9 + #ccd5df + #d5dce4 内描边、
+           图标 #3f4f63 → hover #1a2330。langBtn 基类（原始 zinc 值）对
+           #themeBtn 不适用，此处 ID 覆盖 */
+        #themeBtn{margin-left:auto;background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3}
         #themeBtn:hover{color:#e8edf2}
         #themeBtn svg{width:16px;height:16px}
         /* 图标反映当前生效主题：深色显月亮，浅色显太阳 */
@@ -1468,6 +1473,9 @@ MENU_HTML = r"""<!DOCTYPE html>
            hover #1a2330；激活态深浅一致（#5cc8ff/#061019/800）无需覆盖 */
         html[data-theme="light"] .langBtn{background:#f4f4f5;border-color:#d4d4d8;color:#52525b}
         html[data-theme="light"] .langBtn:hover{color:#18181b}
+        /* 主题按钮浅色变体（DD theme-light 渲染值，见上方 #themeBtn 注释） */
+        html[data-theme="light"] #themeBtn{background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63}
+        html[data-theme="light"] #themeBtn:hover{color:#1a2330}
         html[data-theme="light"] .fabToggle{background:#5cc8ff;border-color:#5cc8ff}
         html[data-theme="light"] .fabToggle:hover,html[data-theme="light"] .fabToggle:focus-visible,html[data-theme="light"] .fabToggle:active{background:#3aa8dd;border-color:#3aa8dd}
         html[data-theme="light"] .fabActions .helpFab{box-shadow:0 8px 22px rgba(15,23,42,.16)}
