@@ -36,6 +36,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def apply_cache_headers(response, path: str) -> None:
+    """静态资源缓存策略：带哈希的 assets 可长期不可变缓存，HTML 每次重新校验。
+
+    前端每次构建产物文件名都带内容哈希，但 index.html 本身会被浏览器
+    启发式缓存——没有 Cache-Control 时，用户刷新页面可能仍复用旧的
+    index.html，从而加载旧的 JS bundle，导致"修好了却还在跑旧代码"（#135 收尾）。
+    """
+    content_type = response.headers.get("content-type", "")
+    if path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif "text/html" in content_type:
+        response.headers["Cache-Control"] = "no-cache"
+
+
+@app.middleware("http")
+async def cache_control_middleware(request, call_next):
+    response = await call_next(request)
+    apply_cache_headers(response, request.url.path)
+    return response
+
 # 挂载 API 路由
 app.include_router(config.router, prefix="/api/config", tags=["config"])
 app.include_router(tub.router, prefix="/api/tub", tags=["tub"])
