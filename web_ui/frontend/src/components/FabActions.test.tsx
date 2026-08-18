@@ -37,4 +37,13 @@ describe('FabActions i18n', () => {
     expect(screen.getByText('Keyboard Shortcuts')).toBeInTheDocument();
     expect(screen.getByText('Play / Pause')).toBeInTheDocument();
   });
+
+  // issue #139：语言入口统一为顶栏静音式单按钮，FAB 群不再包含语言按钮/菜单
+  it('does not render any language button or menu in the FAB cluster', () => {
+    renderFab();
+    expect(screen.queryByRole('button', { name: /语言|Language/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('🌐')).not.toBeInTheDocument();
+    expect(screen.queryByText('中文')).not.toBeInTheDocument();
+    expect(screen.queryByText('English')).not.toBeInTheDocument();
+  });
 });
