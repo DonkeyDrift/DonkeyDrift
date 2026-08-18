@@ -119,7 +119,6 @@ export const TubLibrary: React.FC = () => {
   // TM 页在 App 中常驻保活（#135）：据此在切走时停播并屏蔽全局快捷键
   const isTubManagerRoute = useLocation().pathname === '/';
   const setTub = useStore((state) => state.setTub);
-  const fields = useStore((state) => state.fields);
   const config = useStore((state) => state.config);
   const isLoading = useStore((state) => state.isLoading);
   const requestTubRefresh = useStore((state) => state.requestTubRefresh);
@@ -135,6 +134,7 @@ export const TubLibrary: React.FC = () => {
   const [pendingDelete, setPendingDelete] = useState<TubSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
+  const [frameAspect, setFrameAspect] = useState<number | null>(null);
   const [pinned, setPinned] = useState<string[]>([]);
   const [actualFps, setActualFps] = useState(0);
 
@@ -289,6 +289,7 @@ export const TubLibrary: React.FC = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = theme === 'light' ? '#f4f6f9' : '#18181b';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      setFrameAspect(null);
       return;
     }
 
@@ -308,6 +309,7 @@ export const TubLibrary: React.FC = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(image, 0, 0);
       setImageError(false);
+      setFrameAspect(image.width / image.height);
     };
 
     if (img.complete && img.naturalWidth > 0) {
@@ -625,7 +627,10 @@ export const TubLibrary: React.FC = () => {
 
             {/* Right: player */}
             <div className="flex flex-col gap-3">
-              <div className="w-full aspect-video bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
+              <div
+                className="w-full bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
+                style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
+              >
                 <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'} backdrop-blur-md`}>
                   <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
                   <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
