@@ -638,6 +638,19 @@ html.theme-light .bg-black\/70.text-white {
   color: #ffffff;
 }
 
+/* ---------- Drive 控制参数滑块轨道（ParameterPanel ParamSlider） ----------
+   组件把轨道色写在伪元素变体类上（[&::-webkit-slider-runnable-track]:bg-zinc-800 /
+   [&::-moz-range-track]:bg-zinc-800），Tailwind 生成的类名不是字面 .bg-zinc-800，
+   上方通用重映射规则匹配不到，导致浅色下轨道仍是黑色。此处按生成的转义类名
+   精确覆盖（Issue #169），只改颜色不动尺寸；浅色轨道用上方 raised controls
+   档 #e2e8f0（theme-light.css 本就为滑块轨道设计的浅色）。 */
+html.theme-light .\[\&\:\:-webkit-slider-runnable-track\]\:bg-zinc-800::-webkit-slider-runnable-track {
+  background-color: #e2e8f0;
+}
+html.theme-light .\[\&\:\:-moz-range-track\]\:bg-zinc-800::-moz-range-track {
+  background-color: #e2e8f0;
+}
+
 /* ---------- 主题/语言切换按钮（ThemeSwitcher/LanguageSwitcher）：三页面（DC/D/DD）统一渲染值 ---------- */
 /* 显式锁定 DC/D 浅色皮肤：底 #f4f6f9、边框 #ccd5df、inset 内圈 #d5dce4、
    图标/文字 #3f4f63、hover #1a2330。放在文件末尾压过通用 .bg-zinc-800 的
