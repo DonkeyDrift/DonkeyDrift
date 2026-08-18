@@ -19,6 +19,11 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   局域网浏览器打开设置页/模型选择会 403（"正在加载"、"加载提供方目录
   失败"）。修法见 ``_patch_privileged_methods``：启动前对安装文件做
   幂等自愈补丁，把特权方法的信任表放宽为 trustedHosts。
+- 局域网浏览器处于非安全上下文（``http://<局域网 IP>``，非 localhost），
+  ``crypto.randomUUID`` 不可用；dsh-client-connection 铸造 RPC id 时抛
+  ``TypeError``，连接永远到不了 connected、DSH 停在"选择工作区"不会
+  自动进入 Projects。修法见 ``_patch_client_uuid_polyfill``：启动前对
+  client.js 顶部插入 getRandomValues 版 UUID 兜底（幂等自愈）。
 - 就绪 banner 一行：``dsh web: http://127.0.0.1:<port> (LAN: ...)``，
   抓第一个 URL（回环）后改写为局域网 IP（复用 kimi_web 的 _lan_url，
   issue #125 同款问题）。
@@ -76,6 +81,36 @@ _PATCH_FENCE_OLD = ("PRIVILEGED_METHODS.has(method) && "
 _PATCH_FENCE_NEW = ("PRIVILEGED_METHODS.has(method) && "
                     "!isTrustedApiRequest(request, trustedHosts)")
 
+# dsh-client-connection/lib/client.js 顶部（factory 作用域内）CommonJS 桩
+# 的两行锚点。非安全上下文（局域网 http://，非 localhost）里
+# ``crypto.randomUUID`` 为 undefined，mintRpcId() 抛 TypeError 导致连接
+# 永不就绪、DSH 停在"选择工作区"。补丁在两行之间插入 getRandomValues
+# 版 RFC4122 v4 UUID 兜底（幂等自愈，见 _patch_client_uuid_polyfill）。
+_PATCH_UUID_OLD = (
+    "\t\tObject.defineProperty(exports, Symbol.toStringTag, "
+    "{ value: \"Module\" });\n"
+    "\t\t//#region lib/types/client/connection.js\n"
+)
+_PATCH_UUID_NEW = (
+    "\t\tObject.defineProperty(exports, Symbol.toStringTag, "
+    "{ value: \"Module\" });\n"
+    "\n"
+    "\t\t// [donkey-launcher] crypto.randomUUID is unavailable in non-secure\n"
+    "\t\t// contexts (LAN http://, not localhost); polyfill via getRandomValues.\n"
+    "\t\tif (globalThis.crypto && typeof globalThis.crypto.randomUUID !== \"function\") {\n"
+    "\t\t\tglobalThis.crypto.randomUUID = function randomUUID() {\n"
+    "\t\t\t\tconst b = globalThis.crypto.getRandomValues(new Uint8Array(16));\n"
+    "\t\t\t\tb[6] = (b[6] & 0x0f) | 0x40;\n"
+    "\t\t\t\tb[8] = (b[8] & 0x3f) | 0x80;\n"
+    "\t\t\t\tconst h = Array.from(b, (x) => x.toString(16).padStart(2, \"0\"));\n"
+    "\t\t\t\treturn [h.slice(0, 4).join(\"\"), h.slice(4, 6).join(\"\"),\n"
+    "\t\t\t\t\th.slice(6, 8).join(\"\"), h.slice(8, 10).join(\"\"),\n"
+    "\t\t\t\t\th.slice(10).join(\"\")].join(\"-\");\n"
+    "\t\t\t};\n"
+    "\t\t}\n"
+    "\t\t//#region lib/types/client/connection.js\n"
+)
+
 # 补丁锁：launcher 多线程，防并发重打
 _PATCH_LOCK = threading.Lock()
 
@@ -125,6 +160,23 @@ def _connection_index_path(binary: str):
         return None
 
 
+def _connection_client_path(binary: str):
+    """从 dsh 可执行文件定位 dsh-client-connection/lib/client.js。
+
+    与 ``_connection_index_path`` 同布局，只是目标是 client.js（UUID
+    补丁要改的文件）。找不到（如 rc.7 起的 pnpm 布局）返回 None，调用方
+    跳过补丁。
+    """
+    try:
+        bin_real = Path(os.path.realpath(binary))
+        pkg_root = bin_real.parent.parent  # <pkg>/lib/bin.js -> <pkg>
+        candidate = (pkg_root / "node_modules" / "@deepseek-ai"
+                     / "dsh-client-connection" / "lib" / "client.js")
+        return candidate if candidate.is_file() else None
+    except OSError:
+        return None
+
+
 def _patch_privileged_methods(binary: str):
     """对 dsh 安装里的 /api 特权方法栅栏做幂等自愈补丁（issue #164）。
 
@@ -161,6 +213,46 @@ def _patch_privileged_methods(binary: str):
     except OSError as e:
         logger.warning(
             "dsh 栅栏补丁失败（dsh 仍可启动，局域网设置页可能 403）: %s", e)
+
+
+def _patch_client_uuid_polyfill(binary: str):
+    """对 dsh 安装里的 client.js 做 crypto.randomUUID 幂等自愈补丁（issue #164）。
+
+    局域网浏览器（``http://<LAN IP>``）处于非安全上下文，
+    ``crypto.randomUUID`` 为 undefined；dsh-client-connection 铸造 RPC id
+    时抛 TypeError，连接永远到不了 connected、DSH 停在"选择工作区"。
+    这里在 client.js 顶部 CommonJS 桩之后注入 getRandomValues 版
+    RFC4122 v4 UUID 兜底。
+
+    幂等/自愈语义与 ``_patch_privileged_methods`` 一致：已打过的跳过；
+    源码升级未命中旧锚点也跳过；任何失败只告警不抛——dsh 仍可启动，仅
+    局域网自动进入 Projects 可能失效。
+    """
+    target = _connection_client_path(binary)
+    if target is None:
+        logger.warning("dsh UUID 补丁：未找到 dsh-client-connection，跳过")
+        return
+    try:
+        with _PATCH_LOCK:
+            text = target.read_text(encoding="utf-8")
+            if _PATCH_UUID_NEW in text:
+                return  # 已打过（幂等）
+            if _PATCH_UUID_OLD not in text:
+                logger.warning(
+                    "dsh UUID 补丁：目标代码段未命中（dsh 可能已升级改版），"
+                    "跳过: %s", target)
+                return
+            tmp = target.with_name(target.name + ".donkey-patch.tmp")
+            tmp.write_text(
+                text.replace(_PATCH_UUID_OLD, _PATCH_UUID_NEW),
+                encoding="utf-8")
+            os.replace(tmp, target)
+            logger.info("dsh UUID 补丁：已为 client.js 注入 randomUUID 兜底: %s",
+                        target)
+    except OSError as e:
+        logger.warning(
+            "dsh UUID 补丁失败（dsh 仍可启动，局域网自动进入 Projects 可能失效）: %s",
+            e)
 
 
 def _probe_root(host: str, port: int, timeout=PROBE_TIMEOUT_S) -> bool:
@@ -319,6 +411,9 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 冷启动前自愈补丁：放行特权方法的 trusted-host 访问（幂等，失败
     # 只影响局域网设置页，不影响 dsh 启动）
     _patch_privileged_methods(binary)
+    # client.js 注入 crypto.randomUUID 兜底（幂等，失败只影响局域网自动
+    # 进入 Projects，不影响 dsh 启动）
+    _patch_client_uuid_polyfill(binary)
 
     lan_ip = lan_ip_fn()
     deadline = time.monotonic() + timeout_s

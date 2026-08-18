@@ -5,6 +5,8 @@
 - _write_patch_file：webserver 补丁层内容（host=0.0.0.0 + port 表达式）
 - _patch_privileged_methods：特权方法栅栏自愈补丁（/api 的
   PRIVILEGED_METHODS 空信任表放宽为 trustedHosts，见 _PATCH_FENCE_*）
+- _patch_client_uuid_polyfill：client.js 顶部注入 crypto.randomUUID 兜底
+  （非安全上下文下 RFC4122 v4，见 _PATCH_UUID_*）
 - launch_dsh_web：存活实例复用（不起子进程）、冷启动拉起
   ``dsh web --patch … --port 0 --trusted-host …``（_FakeProc 脚本化管道
   输出）成功抓 banner URL 且改写为局域网 IP、cwd 透传、cwd 非法直接
@@ -336,6 +338,94 @@ class TestPatchPrivilegedMethods:
             calls.append(b)
 
         monkeypatch.setattr(dsh_web, "_patch_privileged_methods", fake_patch)
+        proc = _FakeProc(payload=_DSH_BANNER, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: str(binary),
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert calls == [str(binary)]
+
+
+# ===========================================================================
+# _patch_client_uuid_polyfill（client.js crypto.randomUUID 兜底补丁）
+# ===========================================================================
+# rc.6 实测的 client.js 顶部片段（factory 作用域内 CommonJS 桩）：
+_UUID_SNIPPET = (
+    "window.__ModuleLoader__.load({\n"
+    "\tid: \"@deepseek-ai/dsh-client-connection\",\n"
+    "\tfactory: (require) => {\n"
+    "\t\tvar module = { exports: {} };\n"
+    "\t\tvar exports = module.exports;\n"
+    "\t\tObject.defineProperty(exports, Symbol.toStringTag, { value: \"Module\" });\n"
+    "\t\t//#region lib/types/client/connection.js\n"
+    "\t\tconst CONNECTION_DEFAULTS = {}\n"
+    "\t};\n"
+    "});\n"
+)
+
+
+def _make_dsh_client_tree(tmp_path, client_text):
+    """搭假 dsh 安装树：<pkg>/lib/bin.js + dsh-client-connection/client.js。"""
+    pkg = tmp_path / "dsh"
+    (pkg / "lib").mkdir(parents=True)
+    (pkg / "lib" / "bin.js").write_text("#!/usr/bin/env node\n",
+                                        encoding="utf-8")
+    cc = (pkg / "node_modules" / "@deepseek-ai"
+          / "dsh-client-connection" / "lib")
+    cc.mkdir(parents=True)
+    (cc / "client.js").write_text(client_text, encoding="utf-8")
+    return pkg / "lib" / "bin.js"
+
+
+class TestPatchClientUuidPolyfill:
+    def test_patches_random_uuid_polyfill_into_client(self, tmp_path):
+        binary = _make_dsh_client_tree(tmp_path, _UUID_SNIPPET)
+        dsh_web._patch_client_uuid_polyfill(str(binary))
+        text = ((tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                 / "dsh-client-connection" / "lib" / "client.js")
+                .read_text(encoding="utf-8"))
+        assert dsh_web._PATCH_UUID_NEW in text
+        assert dsh_web._PATCH_UUID_OLD not in text
+
+    def test_idempotent_second_call_is_noop(self, tmp_path):
+        binary = _make_dsh_client_tree(tmp_path, _UUID_SNIPPET)
+        dsh_web._patch_client_uuid_polyfill(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-connection" / "lib" / "client.js")
+        patched = target.read_text(encoding="utf-8")
+        dsh_web._patch_client_uuid_polyfill(str(binary))
+        assert target.read_text(encoding="utf-8") == patched
+
+    def test_unexpected_source_skips_silently(self, tmp_path):
+        binary = _make_dsh_client_tree(tmp_path, "const x = 1;\n")
+        dsh_web._patch_client_uuid_polyfill(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-connection" / "lib" / "client.js")
+        assert target.read_text(encoding="utf-8") == "const x = 1;\n"
+
+    def test_missing_connection_package_skips_silently(self, tmp_path):
+        # rc.7 起的 pnpm 布局：dsh 包下没有 node_modules/<cc>
+        pkg = tmp_path / "dsh"
+        (pkg / "lib").mkdir(parents=True)
+        (pkg / "lib" / "bin.js").write_text("", encoding="utf-8")
+        # 不抛异常即通过
+        dsh_web._patch_client_uuid_polyfill(str(pkg / "lib" / "bin.js"))
+
+    def test_launch_patches_uuid_before_spawn(self, tmp_path, monkeypatch):
+        # launch_dsh_web 冷启动路径会先打 UUID 补丁再拉子进程
+        binary = _make_dsh_client_tree(tmp_path, _UUID_SNIPPET)
+        calls = []
+
+        def fake_patch(b):
+            calls.append(b)
+
+        monkeypatch.setattr(dsh_web, "_patch_client_uuid_polyfill", fake_patch)
+        # 该树没有 index.js，真实 _patch_privileged_methods 会跳过；这里置空
+        # 只聚焦验证 UUID 补丁的调用时机
+        monkeypatch.setattr(dsh_web, "_patch_privileged_methods",
+                            lambda b: None)
         proc = _FakeProc(payload=_DSH_BANNER, hold=True)
         result = launch_dsh_web(
             cwd=None, timeout_s=10.0,
