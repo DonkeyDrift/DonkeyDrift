@@ -1,12 +1,80 @@
 # 变更日志
 
-## 2026-08-18 (19)
+## 2026-08-18 (26)
 
 - feat(web-ui): DeepSeek Harness 入口同样改为导航链接样式，放在 Kimi Code Web 右侧（Issue #175 延续）
   - `web_ui/frontend/src/components/EnterButtons.tsx`：删除已无引用的 `DshButton` 胶囊组件与 `useResolvedTheme` 导入，DeepSeek Harness 统一走 `DshEntryLink` 导航链接样式。
   - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行末尾 Kimi Code Web 右侧新增 `DshEntryLink`；右上角胶囊区移除 `DshButton`（现在只保留版本号/GitHub/主题/语言切换）；手机端汉堡菜单高级入口分组顺序不变（Drift Console / Kimi Code Web / DeepSeek Harness）。
   - 测试同步：`EnterButtons.test.tsx` 删除 DSH 胶囊样式断言，DSH 成功/失败路径测试由 `DshButton` 迁至 `DshEntryLink`；vitest 全量 20 文件 99 项、`tsc -b --noEmit` 全部通过。
   - 注：Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (25)
+
+- fix(web-ui): 流程页滚动卡顿收尾补刀——遥测图 60fps 空转、PA 播放循环、Drive UI 50ms 同步与同导航项重复点击滚动（#178 后续）
+  - 背景：#201 已把 Drive 的视频流/WebSocket 按主导 section 门控（滚走即断），但仍有几处后台空转：`TelemetryChart` 的 `requestAnimationFrame` 循环在 section 滚走后仍每帧 `setRenderTick` 重绘（无数据也空转 60fps）；`PilotArenaPage` 播放时滚走仍持续 rAF 推帧与预测轮询；`DrivePage` 的 50ms UI 同步 `setInterval` 未随 `active` 停表；且顶部导航点「与当前 path 相同的项」时 `location.pathname` 不变、滚动 effect 不触发，用户点后无反应。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：新增 `active` prop（默认 true）——`active=false` 时跳过遥测写缓冲与 rAF 重绘循环，滚回后自动恢复。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：50ms UI 同步 `useEffect` 加 `if (!active) return` 并补 `active` 依赖；`<TelemetryChart>` 传入 `active={active}`。
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：播放 rAF 循环与评测调度 `useEffect` 加 `!active` 早退并补 `active` 依赖（播放中滚走即冻结，滚回续播）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：滚动 effect 依赖从 `location.pathname` 改为 `pathname + location.key`——点同一导航项（path 不变但 location.key 变）也能再次 `scrollIntoView`，修复"点了没反应"。
+  - 测试同步：前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit`、`npm run build` 全部通过；eslint 改动文件 0 警告。Playwright headless 实测：点 Trainer 后 Drive 区 video/img 卸载、点同 path 导航项可再次滚回目标 section。
+  - 注：本次在 `Tony-issue178-flow-perf` 分支完成，基于已合入 Tony 的 #201 增量修改，仅动前端。无 Firmware 改动，无需 OTA。
+
+## 2026-08-18 (24)
+
+- fix(launcher): DC 点击进入 DD 报"无法连接服务器"——web 进程启动失败仍报 launched 并重定向死端口，改为报错 + 跳转页就绪轮询（用户口述报障，journalctl 实锤）
+  - 背景：`donkey web` 冷启动时前端生产构建失败（源码在制改动致 `tsc -b && vite build` 报错）直接退出，但 `_wait_for_web_ready` 对"进程提前退出"只带 warning 不报错，`_launch_drive` 仍返回 `launched` + 兜底前端端口 5188；而生产模式（bundled web ui，#135）前端由后端 8000 端口托管、5188 从不监听——跳转页拿到 URL 立即重定向，Safari 报"无法连接服务器"。三个叠加缺陷：进程死了仍报 launched / 兜底端口在生产模式必死 / 跳转页无就绪轮询（2026-08-12 加过的轮询被 c613ce73 菜单页重写吞掉）。
+  - `donkeycar/launcher/server.py` `_launch_drive`：`_wait_for_web_ready` 返回 warning 时区分两种情况——web 进程已退出（`poll()` 非 None）必然失败，改返回 `status:"error"` 并附具体原因与日志查看命令，不再起车进程、不写 PID 文件；进程仍在但超时、且登记未出现时，生产模式兜底前端端口从入参 5188 修正为后端端口（开发模式 vite 确实监听 5188，保持不变）。
+  - `donkeycar/launcher/server.py` `LAUNCH_DRIVE_HTML`：跳转前加就绪轮询（30 次 × 1s，`mode:'no-cors'` fetch 探测目标可连，复用菜单页 launchDrive 既有模式），就绪才重定向；超时不通则停下显示"Web UI 未就绪，未跳转（可稍后重试）"并透出 warning，不盲目跳死端口；i18n 补 `waiting`/`notready` 中英词条。
+  - 测试同步：`tests/test_launcher_drive_launch.py` 新增 3 项——web 进程提前退出报 error 且不起车进程不写 PID、生产模式超时前端端口修正为后端端口、开发模式超时保持入参端口；`tests/test_launcher_language_autodetect.py` 跳转页双语断言同步（新词条、3 处 failed 文案、轮询语句）。本文件 12 项全部通过，launcher/webui 相关 135 passed（terminal 2 项失败为 origin/Tony 基线遗留，与本次无关）；另起临时 launcher 实例实测 `/launch/drive` 页面含轮询逻辑与双语提示。
+  - 注：本次改动在 `Tony-fix-launch-dead-port` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`（合并时 CHANGELOG 与多条会话条目解冲突，最终重编号为 (24)）。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (23)
+
+- fix(launcher): DC 上位机终端"放一会儿仍被断开"根因修复——移除应用层 PING/PONG 判死，改用内核 TCP keepalive 保活与死链检测（Issue #173 后续）
+  - 背景：#173 首轮把 PTY 会话与 WS 连接解耦、断线宽限期 + sid 重连 + 自动退避重连，但服务端仍保留 #151 的"60s 无 PONG 判死"心跳——浏览器标签页冻结 / 手机锁屏时应用层 PONG 会停，服务端照样在 60s 后主动断开，用户视角"放一会儿仍断"依旧存在。
+  - `donkeycar/launcher/terminal.py`：删除 `_heartbeat_loop` 应用层心跳线程与 `_PING_INTERVAL`/`_PONG_TIMEOUT` 判死逻辑；新增 `_enable_tcp_keepalive`，在 WS 连接套接字上启用内核 TCP keepalive（`SO_KEEPALIVE` + Linux `TCP_KEEPIDLE=30`/`TCP_KEEPINTVL=15`/`TCP_KEEPCNT=3`）。keepalive 探测由内核发送、对端内核 ACK，与应用层无关：冻结/锁屏的浏览器内核照常 ACK，不再被误判断线；探测包同时刷新 NAT 表项防空闲断链；只有真正的死链才会在约 75s 后让 socket 报错触发会话 detach。主读循环仍响应客户端 PING（回 PONG），只是不再主动发 PING。
+  - `donkeycar/launcher/terminal_static/terminal.html`：注释同步（断线原因改为"任何原因，含 TCP keepalive 判死"）。
+  - `donkeycar/tests/test_launcher_terminal.py`：删除"服务端心跳 PING"与"空闲超时断开"两个 #151 用例，新增 `test_terminal_ws_idle_keeps_connection`（空闲不判死断连）与 `test_enable_tcp_keepalive_sets_socket_options`（keepalive 参数落地）。
+  - `tests/test_launcher_terminal.py`：静态断言从旧的 `lost`/`failed`/`reconnect` 文案改为新的"断线自动退避重连 + session sid 接回 + 清屏"断言。
+  - 测试同步：两个 terminal 测试文件 26 项通过。
+
+## 2026-08-18 (22)
+
+- fix(launcher): KCW 入口 URL host 用 mDNS 主机名，置顶/模式/语言主题不再随 DHCP 换 IP 被清空（Issue #168 后续）
+  - 背景：Issue #168 已固定端口 58640、缺省 cwd 落到 Projects 工作区，但浏览器把 KCW 的置顶等 UI 偏好存在 localStorage、按 origin（协议+host+端口）隔离；host 用上位机 DHCP 局域网 IP（近期从 .41 漂到 .57）时，IP 一变 origin 就变，置顶聊天仍会"全部消失"。
+  - `donkeycar/launcher/kimi_web.py`：
+    - 新增 `_mdns_hostname()`（`socket.gethostname()` 拼 ``<hostname>.local``，仅当 mDNS 解析到本机局域网 IP 时才采用）与 `_entry_host()`（mDNS 优先、局域网 IP 回退）。
+    - `_lan_url()`：回环/通配 host 与本机局域网 IP 统一改写为稳定入口 host，mDNS 可用时入口 URL 的 host 稳定、不随 IP 漂移。
+    - `_live_instance_url()`：本机实例（登记回环/通配或本机 IP）组装入口 URL 时改用 `_entry_host()`；其它远程 host 不受影响。
+    - 模块 docstring 更新为"三处约束"（cwd 校验 / 固定端口 / mDNS host）。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 4 项 mDNS 优先与 foreign host 不误改断言，autouse fixture 默认钉 `_mdns_hostname` 为 None 保持既有断言稳定；本文件 42 passed、launcher 相关 116 passed。
+  - 注：本次改动在 `Tony-kcw-origin-stable` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (21)
+
+- fix(web-ui): 修复流程页滚出 Drive 后视频流/WebSocket 仍在后台运行，拖慢整页切换（Issue #135 收尾）+ 后端静态资源缓存头
+  - 根因：#178 把 Drive/TM/Trainer/PA 合并为纵向滚动大页后，Drive 区的视频流与 WebSocket 未按 section 可见性门控——用户滚到 TM/Trainer/PA 后，Drive 的 MJPEG 图片流、WebRTC 视频、车端 WebSocket 遥测仍在后台持续收发与 setState 重渲染，持续占主线程，导致无论切到哪个标签都卡顿（#135 用户仍报"非常卡顿"）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：滚动 spy 的 `inView` 判定从「`isIntersecting` 有任何交集即视为可见」改为「可见比例最大的主导 section 才算活跃」——原先 section 之间有 `space-y` 间距与 `scroll-mt` 滚动边距，滚走后仍留 32px 交集使 `active` 永不翻 false；改为主导 section 后，滚到 TM 时 Drive 的 `active` 正确变为 false。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：新增 `enabled` 选项（默认 true）；`enabled=false` 时主动断开 WebSocket、清定时器、`setConnected(false)`、`setCarState.online=false`，不再后台收发；重新 `enabled=true` 时重连。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`useDriveWebsocket({ enabled: active })`；`useGamepadDrive` / `useGyroDrive` 的 `enabled` 追加 `active &&`；`<VideoStream>` 改为 `active` 条件渲染（滚走卸载视频组件、停止 MJPEG/WebRTC 与 1s 统计轮询），非活跃时渲染同宽高比占位符避免布局跳动。
+  - `web_ui/backend/main.py`：新增 `apply_cache_headers` 与 `cache_control_middleware`——`/assets/*` 带内容哈希的静态资源返回 `Cache-Control: public, max-age=31536000, immutable`；`text/html`（index.html/SPA fallback）返回 `Cache-Control: no-cache`，避免浏览器启发式缓存旧 index.html 导致"前端已修复但仍在跑旧 bundle"（#135 用户侧反复卡顿的重要诱因）。
+  - 测试同步：新增 `web_ui/backend/tests/test_cache_headers.py`（3 项：assets immutable / html no-cache / API 不受影响）；`web_ui/frontend/src/hooks/useDriveWebsocket.test.tsx` 新增 `enabled=false 不建立连接`（1 项）。后端 pytest 全量 82 项、前端 vitest 全量 20 文件 102 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 实测（8021 测试实例 + chrome-headless-shell）：滚到 TM 后 Drive 区 `img[src*=drive/video]`/`video` 均卸载、占位符出现（修复前仍挂载）；`useDriveWebsocket` enabled 门控单测确认不建连。无 Firmware 改动，无需 OTA。
+
+## 2026-08-18 (20)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后面板真正缩小——消除 grid 拉伸导致的"内容只剩一行但框未变小"
+  - 背景：控制面板在 `grid grid-cols-1 lg:grid-cols-3` 中作为第三列 grid item，默认 `align-self: stretch` 被拉伸到与左侧摄像头区（视频流 + 遥测图，较高）同高；折叠后内容虽只剩标题一行，但灰色面板框仍保持满高，下方"空出来"的区域实际是面板内部空白，视觉上"没变小"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：控制区外层 div 加 `self-start`，让面板高度随内容收缩——折叠后只剩标题一行、下方真正空出；展开时顶部对齐、高度由内容决定。
+  - 测试同步：前端 vitest 全量 100 项通过，`tsc -b --noEmit` 通过。
+
+## 2026-08-18 (19)
+
+- fix(trainer): Trainer 训练位置三档文案由口语化长名改为正式短名——客户端 / 本机 / 云端（Issue #170 收尾微调）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我这台电脑」→「客户端」、`tabLocal`「当前这台 Linux 电脑」→「本机」、`startMyPcTraining`「开始训练（我这台电脑）」→「开始客户端训练」、`startLocalTraining`「开始本地训练」→「开始本机训练」、`myPcTraining`「在我这台电脑上训练」→「客户端训练」；en 同步 `Client / Local / Start Client Training / Start Local Training / Client Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档文案断言同步为新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (18)
 

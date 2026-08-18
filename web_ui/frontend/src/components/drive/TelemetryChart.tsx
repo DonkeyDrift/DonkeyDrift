@@ -72,6 +72,8 @@ interface TelemetryChartProps {
   /** 最新一帧遥测（由父组件通过 ref 持有，避免高频 setState）。 */
   telemetry: Telemetry | null;
   className?: string;
+  /** 所在 section 是否可见：不可见时停掉 rAF 重绘与写入，避免滚走后空转（#178） */
+  active?: boolean;
 }
 
 /**
@@ -81,7 +83,7 @@ interface TelemetryChartProps {
  * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
  */
-export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '' }) => {
+export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '', active = true }) => {
   const { t } = useTranslation();
   // canvas/图表配色不受皮肤 CSS 控制，订阅主题以重建 chart 配置
   const theme = useResolvedTheme();
@@ -111,7 +113,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
 
   // 收到新遥测帧：写入环形缓冲（暂停时丢弃）
   useEffect(() => {
-    if (!telemetry) return;
+    if (!telemetry || !active) return;
     latestTelemetryRef.current = telemetry;
     if (pausedRef.current) return;
 
@@ -134,10 +136,12 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       filledRef.current = Math.min(filledRef.current + 1, BUFFER_SIZE);
       setHasData(true);
     }
-  }, [telemetry]);
+  }, [telemetry, active]);
 
-  // requestAnimationFrame 节流重绘：合并 100Hz 写入到 60fps 重绘
+  // requestAnimationFrame 节流重绘：合并 100Hz 写入到 60fps 重绘。
+  // section 不可见时停止重绘，避免滚走后仍 60fps 空转（#178）。
   useEffect(() => {
+    if (!active) return;
     const tick = () => {
       setRenderTick((t) => (t + 1) % 1_000_000);
       rafRef.current = requestAnimationFrame(tick);
@@ -148,7 +152,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
         cancelAnimationFrame(rafRef.current);
       }
     };
-  }, []);
+  }, [active]);
 
   const handlePauseToggle = useCallback(() => {
     pausedRef.current = !pausedRef.current;

@@ -52,6 +52,7 @@ function FlowSectionHeader({ step, meta }: { step: number; meta: SectionMeta }) 
  */
 export function FlowPage() {
   const location = useLocation();
+  const { pathname, key: locationKey } = location;
   const setActiveSection = useFlowStore((s) => s.setActiveSection);
   const rootRef = useRef<HTMLDivElement>(null);
   const ratiosRef = useRef<Partial<Record<FlowSectionId, number>>>({});
@@ -70,23 +71,13 @@ export function FlowPage() {
     if (!root || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(
       (entries) => {
-        const nextInView: Partial<Record<FlowSectionId, boolean>> = {};
         for (const entry of entries) {
           const id = entry.target.id as FlowSectionId;
           ratiosRef.current[id] = entry.isIntersecting ? entry.intersectionRatio : 0;
-          nextInView[id] = entry.isIntersecting;
         }
-        setInView((prev) => {
-          const next = { ...prev };
-          let changed = false;
-          for (const [id, visible] of Object.entries(nextInView)) {
-            if (visible !== prev[id as FlowSectionId]) {
-              next[id as FlowSectionId] = visible;
-              changed = true;
-            }
-          }
-          return changed ? next : prev;
-        });
+        // 可见比例最大的 section 才是"当前活跃"分区：只有它才需要激活
+        // 视频流/键盘/手柄等重型副作用。用比例而非 isIntersecting，避免
+        // 滚走后仍留几像素交集导致后台视频流一直跑（#135 收尾）。
         let best: FlowSectionId | null = null;
         for (const meta of SECTIONS) {
           const ratio = ratiosRef.current[meta.id] ?? 0;
@@ -94,7 +85,22 @@ export function FlowPage() {
             best = meta.id;
           }
         }
-        if (best) setActiveSection(best);
+        if (!best) return;
+        setActiveSection(best);
+        setInView((prev) => {
+          const next: Record<FlowSectionId, boolean> = {
+            drive: false,
+            'tub-manager': false,
+            trainer: false,
+            pilot: false,
+          };
+          next[best] = true;
+          let changed = false;
+          for (const meta of SECTIONS) {
+            if (next[meta.id] !== prev[meta.id]) changed = true;
+          }
+          return changed ? next : prev;
+        });
       },
       { threshold: [0, 0.15, 0.3, 0.5, 0.75, 1] },
     );
@@ -107,8 +113,9 @@ export function FlowPage() {
 
   // 深链 / 导航点击：滚动到 path 对应的 section。
   // 懒加载 chunk 未就绪时元素尚不存在，用 rAF 轮询等待（上限 3s）。
+  // 依赖 location.key 而非仅 pathname：点同一导航项（path 不变）也要能再次滚动。
   useEffect(() => {
-    const meta = SECTIONS.find((s) => s.path === location.pathname);
+    const meta = SECTIONS.find((s) => s.path === pathname);
     if (!meta) return;
     const behavior: ScrollBehavior = firstScrollRef.current ? 'auto' : 'smooth';
     firstScrollRef.current = false;
@@ -128,7 +135,7 @@ export function FlowPage() {
     };
     tryScroll();
     return () => cancelAnimationFrame(raf);
-  }, [location.pathname]);
+  }, [pathname, locationKey]);
 
   return (
     <div ref={rootRef} className="space-y-12">

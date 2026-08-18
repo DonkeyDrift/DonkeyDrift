@@ -411,7 +411,7 @@ export const PilotArenaPage: React.FC<PilotArenaPageProps> = ({ active = true })
   }, [cacheImage, records, seriesColors, tubPath]);
 
   useEffect(() => {
-    if (!isPlaying || !hasRecords) return;
+    if (!active || !isPlaying || !hasRecords) return;
 
     const animate = (time: number) => {
       if (!isPlayingRef.current) return;
@@ -459,7 +459,7 @@ export const PilotArenaPage: React.FC<PilotArenaPageProps> = ({ active = true })
         window.cancelAnimationFrame(playbackFrameRef.current);
       }
     };
-  }, [drawViewerFrame, hasRecords, isPlaying, maxIndex, playbackSpeed, records.length, setCurrentIndex, setIsPlaying, updateFps]);
+  }, [active, drawViewerFrame, hasRecords, isPlaying, maxIndex, playbackSpeed, records.length, setCurrentIndex, setIsPlaying, updateFps]);
 
   useEffect(() => {
     if (!hasRecords || isPlaying) return;
@@ -686,7 +686,7 @@ export const PilotArenaPage: React.FC<PilotArenaPageProps> = ({ active = true })
   }, [currentIndex, evaluateLoadedViewers, isPlaying]);
 
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!active || !isPlaying) return;
 
     const scheduleEvaluation = (delay: number) => {
       evaluationTimerRef.current = window.setTimeout(() => {
@@ -705,7 +705,7 @@ export const PilotArenaPage: React.FC<PilotArenaPageProps> = ({ active = true })
         window.clearTimeout(evaluationTimerRef.current);
       }
     };
-  }, [evaluateLoadedViewers, evaluationIntervalMs, isPlaying]);
+  }, [active, evaluateLoadedViewers, evaluationIntervalMs, isPlaying]);
 
   useEffect(() => {
     viewersRef.current.forEach((viewer) => clearViewerPredictionState(viewer.localId));

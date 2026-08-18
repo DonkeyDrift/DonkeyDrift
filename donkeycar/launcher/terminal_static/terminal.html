@@ -155,7 +155,7 @@ function connect(){
     scanAltScreen(bytes);
     term.write(bytes);
   };
-  // 链路断开（含服务端心跳判死）：自动退避重连接回原会话（issue #173），
+  // 链路断开（任何原因，含 TCP keepalive 判死）：自动退避重连接回原会话（issue #173），
   // shell 已退出（exit 帧）时不再重连
   ws.onclose=function(){
     clearTimeout(connectTimer);
