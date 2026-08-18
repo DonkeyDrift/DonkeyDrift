@@ -21,8 +21,9 @@ donkey 等 TUI 程序）。之所以走局域网 WebSocket 而不是 Serial2 串
 
 会话保持与重连（issue #173）：PTY 会话与 WebSocket 连接解耦。连接 URL 可
 带 ?session=<sid>，命中存活会话则接回原 PTY（断线期间的输出从回放缓冲补
-发）；未命中则新开会话。连接断开（任何原因，含心跳判死）后会话保留
-_SESSION_GRACE 秒的宽限期，期间重连均可找回现场，宽限期过后才销毁。
+发）；未命中则新开会话。连接断开（任何原因，含 TCP keepalive 判死）后
+会话保留 _SESSION_GRACE 秒的宽限期，期间重连均可找回现场，宽限期过后才
+销毁。
 
 每个 WebSocket 连接同一时间只挂在一个会话上；shell 自然退出（用户输入
 exit）时会话立即销毁。浏览器对小输入帧不分片，binary 输入按帧直写 PTY
@@ -65,11 +66,15 @@ MAX_COLS_ROWS = 500
 _MAX_FRAME_PAYLOAD = 1 << 20  # 1 MiB，防御畸形帧耗尽内存
 _READ_CHUNK = 65536
 
-# 服务端心跳（issue #151）：每 _PING_INTERVAL 秒向客户端发一个 WebSocket
-# PING 帧，浏览器会在协议层自动回 PONG；超过 _PONG_TIMEOUT 秒未收到任何
-# 客户端帧（含 PONG）则判定链路死亡，主动断开并清理 PTY 会话
-_PING_INTERVAL = 25.0
-_PONG_TIMEOUT = 60.0
+# TCP keepalive（issue #173，替代 issue #151 的应用层 PING 判死）：浏览器
+# 标签页被冻结 / 手机锁屏时应用层 PONG 会停，但内核 TCP 栈仍在；PING 判死
+# 会把"冻结但链路未死"误判为断线。改由内核 TCP keepalive 在链路层保活与判死：
+#   - keepalive 探测包刷新 NAT 表项，空闲连接不再被中间设备悄悄断开；
+#   - 只有对端内核也收不到探测（真正的死链）才会在超时后让 socket 报错，
+#     从而触发会话 detach；冻结的浏览器内核照常 ACK 探测，不会被误断开。
+_TCP_KEEP_IDLE = 30     # 连接空闲 30s 后发首个探测包
+_TCP_KEEP_INTVL = 15    # 之后每 15s 一个探测包
+_TCP_KEEP_CNT = 3       # 连续 3 个探测无 ACK 判死（约 30+45=75s）
 
 # 会话保持（issue #173）：连接断开后 PTY 会话保留的宽限期，期间重连可接回
 # 原会话；宽限期过后销毁（后台低频线程清扫）。断线期间的 PTY 输出缓存在
@@ -433,30 +438,26 @@ def _sessions_sweeper():
         _sweep_once()
 
 
-def _heartbeat_loop(writer, sock, last_rx, stop):
-    """服务端心跳线程：定期发 PING 保活，链路死亡时主动断开（issue #151）。
+def _enable_tcp_keepalive(sock):
+    """在连接套接字上启用内核 TCP keepalive（NAT 保活 + 死链检测，issue #173）。
 
-    Args:
-        writer: _WsWriter，用于发 PING 帧与标记关闭
-        sock: 底层 TCP 套接字，判死后 shutdown 以唤醒阻塞的主读循环
-        last_rx: {"t": monotonic} 字典，主读循环每收到一帧就刷新 t
-        stop: threading.Event，连接结束时由主流程置位以退出本线程
+    keepalive 探测包由内核发送、对端内核 ACK，与应用层无关：浏览器标签页被
+    冻结 / 手机锁屏时内核仍会 ACK，因此不会被误判为断线；只有真正的死链
+    （对端内核也收不到探测）才会在超时后让 socket 报错，触发会话 detach。
 
-    浏览器收到 PING 会自动回 PONG，无需前端配合；周期性帧同时刷新链路上
-    的 NAT 表项，空闲连接不再被中间设备悄悄断开。
+    Linux 专属的 TCP_KEEP* 常量不可用时回退到仅启用 SO_KEEPALIVE（使用系统
+    默认探测参数）。
     """
-    while not stop.wait(_PING_INTERVAL):
-        if writer.closed:
-            return
-        if time.monotonic() - last_rx["t"] > _PONG_TIMEOUT:
-            writer.closed = True
-            try:
-                sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            return
-        if not writer.send(b"", OP_PING):
-            return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        return
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, _TCP_KEEP_IDLE)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, _TCP_KEEP_INTVL)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, _TCP_KEEP_CNT)
+    except (OSError, AttributeError):
+        pass
 
 
 def _handle_control_frame(session: TerminalSession, payload: bytes):
@@ -509,20 +510,14 @@ def handle_terminal_ws(handler):
     qs = parse_qs(urlparse(handler.path).query)
     requested_sid = (qs.get("session") or [""])[0]
     writer = _WsWriter(handler.wfile)
+    _enable_tcp_keepalive(handler.connection)
     session, reattached = _acquire_session(requested_sid)
     session.attach(writer)
     writer.send_json({"type": "session", "id": session.sid,
                       "reattached": reattached})
-    last_rx = {"t": time.monotonic()}
-    stop_hb = threading.Event()
-    threading.Thread(
-        target=_heartbeat_loop,
-        args=(writer, handler.connection, last_rx, stop_hb),
-        daemon=True, name="terminal-ws-heartbeat").start()
     try:
         while not writer.closed:
             _fin, opcode, payload = read_frame(handler.rfile)
-            last_rx["t"] = time.monotonic()
             if opcode == OP_CLOSE:
                 writer.send(b"", OP_CLOSE)
                 break
@@ -538,5 +533,4 @@ def handle_terminal_ws(handler):
     except (WsProtocolError, BrokenPipeError, ConnectionResetError, OSError):
         pass
     finally:
-        stop_hb.set()
         session.detach(writer)

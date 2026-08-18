@@ -48,33 +48,34 @@ def test_terminal_page_suspends_tracking_in_alternate_screen():
     assert "if(inAlt){lineBuf='';return;}" in source
 
 
-def test_terminal_page_disconnect_overlay_warns_session_lost():
-    """链路断开的 overlay 必须明确提示会话已丢失（issue #151）。"""
+def test_terminal_page_auto_reconnects_and_preserves_session():
+    """链路断开后自动退避重连接回原会话，而非只提示"会话已丢失"（issue #173）。"""
     source = _source()
 
-    # onclose 提示「会话已丢失 · 点击重连（将开启新会话）」，中英双语；
-    # #101 起 onclose 先清连接超时定时器（未超时前正常断开不走超时分支）
-    assert "ws.onclose=function(){clearTimeout(connectTimer);showOverlay(t('lost')+' · '+t('newSession'));};" \
+    # onclose 先清连接超时定时器，再走 scheduleReconnect 自动退避重连
+    assert "ws.onclose=function(){\n    clearTimeout(connectTimer);\n    if(exited)return;\n    scheduleReconnect();" \
         in source
-    assert "lost:'连接已断开 · 终端会话已丢失'" in source
-    assert "newSession:'点击重连（将开启新会话）'" in source
-    assert "lost:'Disconnected · terminal session lost'" in source
+    # 服务端 session 帧记录 sid，重连时带上 ?session=<sid> 接回原 PTY
+    assert "lastSid=j.id;" in source
+    assert "if(lastSid)url+='?session='+encodeURIComponent(lastSid);" in source
+    # 重连失败接回（会话已过期被销毁）时清屏，避免新旧 shell 输出混在一起
+    assert "if(lastSid!==null&&!j.reattached){term.reset();}" in source
+    # 会话保持文案（中英双语）：不再使用旧的 lost 文案
+    assert "closed:'连接已断开'" in source
+    assert "reconnecting:'正在重新连接会话…'" in source
+    assert "closed:'Disconnected'" in source
+    assert "reconnecting:'Reconnecting session…'" in source
 
 
 def test_terminal_page_has_connect_timeout():
     """WS 连接 10s 未完成必须超时报错，不得无限期停在「正在连接」（issue #101）。"""
     source = _source()
 
-    # connect() 内建连接超时定时器（10s），超时时仍在 CONNECTING 则主动关闭并提示失败
+    # connect() 内建连接超时定时器（10s），超时时仍在 CONNECTING 则主动关闭；
+    # 关闭后走 onclose → scheduleReconnect 统一退避重连（不再单独弹失败文案）
     assert "var connectTimer=setTimeout(function(){" in source
     assert "},10000);" in source
     assert "ws.readyState===WebSocket.CONNECTING" in source
-    assert "ws.close();" in source
-    assert "showOverlay(t('failed')+' · '+t('reconnect'));" in source
+    assert "try{ws.close();}catch(e){}" in source
     # onopen 落定后清掉超时定时器，正常连接不受影响
     assert "ws.onopen=function(){\n    clearTimeout(connectTimer);" in source
-    # 失败与重连文案（中英双语），复用 overlay 点击 location.reload 重连
-    assert "failed:'连接失败'" in source
-    assert "reconnect:'点击重连'" in source
-    assert "failed:'Connection failed'" in source
-    assert "reconnect:'Tap to reconnect'" in source
