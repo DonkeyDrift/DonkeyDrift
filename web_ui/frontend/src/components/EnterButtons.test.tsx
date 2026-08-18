@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink, DshButton } from './EnterButtons';
+import { DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
@@ -77,18 +77,12 @@ describe('KimiCodeWebEntryLink', () => {
   });
 });
 
-describe('DshButton', () => {
-  it('renders the pill-styled DeepSeek Harness button', () => {
-    render(<DshButton />);
-    const btn = screen.getByText('common.enterButtons.dsh').closest('button');
-    expect(btn).toBeInTheDocument();
-    expect(btn?.className).toContain('rounded-full');
-  });
+describe('DshEntryLink', () => {
   it('opens DeepSeek Harness URL in the pre-opened tab on success', async () => {
     const fakeWin = { location: { href: '' }, close: vi.fn() };
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
     mockLaunchDsh.mockResolvedValue({ status: 'ok', url: 'http://192.168.3.57:43749' });
-    render(<DshButton />);
+    render(<DshEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.dsh'));
     expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
     await waitFor(() => { expect(fakeWin.location.href).toBe('http://192.168.3.57:43749'); });
@@ -99,7 +93,7 @@ describe('DshButton', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     mockLaunchDsh.mockResolvedValue({ status: 'error', error: 'boom' });
-    render(<DshButton />);
+    render(<DshEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.dsh'));
     await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
     expect(fakeWin.close).toHaveBeenCalled();
