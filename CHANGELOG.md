@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (28)
+## 2026-08-18 (30)
 
 - perf(web-ui): 流程页导航切换仍卡顿——四个 section 常驻挂载导致整页每次滚动都重算/重绘 + 父组件重渲染连坐所有子页面，加 `content-visibility` 与 `React.memo` 隔离（Issue #135 五轮）
   - 背景：#201/#204 已把 Drive 视频流/WS/遥测图/PA 循环按主导 section 门控，但四个 section（Drive/TM/Trainer/PA）仍常驻挂载在同一个滚动页里，且 `FlowPage` 的 `inView` 每次变化会触发父组件重渲染、默认连带所有子页面一起重渲染——切导航平滑滚动时既有视口外 section 的布局/绘制开销，又有 TM/Trainer 等重页面的无效重渲染。Playwright CPU 4x 实测：切换 PA→Drive 单次 longtask 峰值 836ms。
@@ -9,6 +9,22 @@
   - 效果：Playwright CPU 4x 实测导航切换 longtask 峰值从 836ms 降至约 170ms；视频流滚出卸载回归通过（Drive 滚到 TM 后 `img[src*=drive/video]`/`video` 卸载、占位符出现）；nav href 正确（`#/drive`/`#/tub`/`#/trainer`/`#/pilot`）。
   - 测试同步：前端 vitest 全量 20 文件 100 项、`tsc -b --noEmit`、`npm run build` 全部通过。
   - 注：本次在 `Tony-issue135-nav-lag-round5` 功能分支（worktree 作业，基于最新 origin/Tony）完成，仅动前端。Firmware 无改动，无需 OTA。已部署到 8000（从该 worktree 起后端），用户需硬刷新浏览器。
+
+## 2026-08-18 (29)
+
+- fix(web-ui): 修复 DD 前端深链（`/connector`、`/drive` 等）刷新/直达返回 404——根静态文件挂载改为 SPA fallback 兜底
+  - 根因：`main.py` 用 `app.mount("/", StaticFiles(html=True))` 服务根目录静态文件，它注册在 `@app.get("/{full_path:path}")` SPA fallback 之前，拦截了所有路径——前端深链（无扩展名、非真实文件）被 StaticFiles 判为 404，fallback 永远轮不到，导致用户在 `/connector` 等页面刷新或直接访问时得到 `{"detail":"Not Found"}`（Issue #177 收尾时用户反馈"看不到改动/无法连接服务器"暴露）。
+  - `web_ui/backend/main.py`：去掉根目录 `StaticFiles` 挂载，`spa_fallback` 改为——① 真实存在的根目录静态文件（favicon、robots.txt 等）经 `realpath` 越界校验后直接 `FileResponse`；② 不存在的 API 路径（`api`/`api/*`）保持 404；③ 其余一律回退到 `index.html` 交给前端路由。`/assets/*` 仍由独立 mount 服务，不受影响。
+  - 测试同步：后端 pytest 全量 82 项通过；手动验证 `/connector`、`/drive`、`/` 返回 200、`/assets/*.js` 200、`/api/provisioning/status` 404、`/api/connector/config` 200。
+
+## 2026-08-18 (28)
+
+- fix(trainer): Trainer 三档标签改为「本机 / 车载电脑 / 云端」，让「本机」明确指用户自己的电脑、「车载电脑」指跑 DD 后端的 Linux 机器（Issue #170 收尾）
+  - 背景：上一轮「我的电脑 / Linux 电脑」仍不够直观——「我的电脑」与「本机」语义易混，且「Linux 电脑」过于技术化、普通用户难以和"本机"区分。改为「本机」（用户浏览器/SSH 客户端所在机）、「车载电脑」（跑 DD 后端的机器）、「云端」（远端服务器）三档。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我的电脑」→「本机」、`tabLocal`「Linux 电脑」→「车载电脑」、`startMyPcTraining`→「在本机上训练」、`startLocalTraining`→「在车载电脑上训练」、`myPcTraining`→「本机训练」；en 同步 `This Computer / Car Computer / Train on This Computer / Train on Car Computer / This Computer Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档渲染与点击断言同步新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming3` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (27)
 
@@ -160,7 +176,8 @@
 - feat(web-ui): Trainer「高级选项」折叠行文案精简为「高级」（Issue #183 后续微调）
   - `web_ui/frontend/src/i18n/messages/trainer.ts`：`trainer.advancedOptions` 值 zh「高级选项」→「高级」、en「Advanced Options」→「Advanced」，词条 key 不变。
   - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：折叠行注释同步（Advanced Options → Advanced）。
-  - 测试同步：仅文案变更，无测试引用旧文案；`tsc -b --noEmit` 通过。
+  - 后续微调（同分支，PR #207）：高级折叠行改薄——去掉 `py-2` 纵向内边距、方向箭头 `w-4 h-4`→`w-3.5 h-3.5`、加 `transition-colors`，对齐 Drive 页虚拟摇杆折叠头薄款样式。
+  - 测试同步：仅文案/样式变更，无测试引用旧文案；`tsc -b --noEmit` 通过。
   - 注：本次改动在 `Tony-trainer-advanced-label` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (13)
