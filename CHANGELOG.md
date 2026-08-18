@@ -1,12 +1,21 @@
 # 变更日志
 
-## 2026-08-18 (10)
+## 2026-08-18 (11)
 
 - fix(web-ui): DD FAB 浮球群残留的菜单式语言入口移除，语言入口统一为顶栏静音式单按钮（Issue #139 遗留）
   - 背景：Issue #139 修复（PR #146）把 DD 顶栏 `LanguageSwitcher` 与 D 启动页语言入口改成了静音式单按钮，但 DD 右下角 FAB 浮球群（`FabActions.tsx`，镜像自 DC）里仍残留 🌐 语言球 + 弹出式 langMenu（中文/English 两项菜单），违反验收要点"移除原菜单式语言切换入口，不残留死代码"；DC 侧同源 FAB 群在 Firmware 侧修复时已彻底移除语言球只留 helpFab，DD 侧对齐。
   - `web_ui/frontend/src/components/FabActions.tsx`：删除 langFab（🌐 语言球）、langMenu 弹出菜单、`LANG_SEGMENTS`、`langMenuOpen` 状态与 `toggleLangMenu`/`chooseLanguage`，FAB 群只剩 fabToggle（发光圆点）+ helpFab（?）；`collapse` 外点收起逻辑同步简化。组件头注释更新为 `.fabToggle + .fabActions (.helpFab) + .helpModal`，注明语言入口在顶栏 LanguageSwitcher。
   - `web_ui/frontend/src/i18n/messages/fab.ts`：删除已无引用的 `fab.language` 词条（zh/en 各一条），头注释同步。
   - 测试同步：`FabActions.test.tsx` 新增 1 项"FAB 群不渲染任何语言按钮/菜单"（queryByRole 语言 + queryByText 🌐/中文/English 全空）；vitest 全量 19 文件 98 项通过，`npm run build` 通过。
+
+## 2026-08-18 (10)
+
+- feat(web-ui): Trainer 本地训练「高级选项」由勾选框改为点击展开的折叠面板（Issue #183）
+  - 需求：Trainer 页本地训练配置的「高级选项」原为 checkbox 勾选形态，改为下拉折叠面板——点击整行在下方展开高级字段，再点收起，不再有勾选框。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：勾选框替换为与 Drive 页「控制参数」面板（`ParameterPanel.tsx`）同款的整行按钮 + 右侧 ChevronDown/ChevronUp 方向箭头（lucide-react），点击切换 `advancedEnabled`，带 `aria-expanded` 无障碍标注；样式用 ParameterPanel 同款 `text-zinc-400 hover:text-zinc-200` 类名，深浅主题经 theme-light.css 类名级重映射自动适配。
+  - 语义保持：`advancedEnabled` 仍是"高级覆盖生效"开关（展开=启用、收起=不启用），持久化（useStore）、`TrainerPage.tsx` 按 myconfig.py 覆盖自动置 true（面板默认展开）与训练时写 myconfig 的联动全部不动；收起时已填值保留不重置。i18n 沿用 `trainer.advancedOptions`，无新增词条。
+  - 测试同步：无 LocalConfigForm 专属测试，无需新增；前端 vitest 全量 19 文件 97 项、`tsc -b --noEmit`、eslint（改动文件）、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-trainer-advanced-collapse` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (9)
 
@@ -15,6 +24,17 @@
   - `web_ui/frontend/src/themes/theme-light.css`：组件级微调区新增两条覆盖规则——`html.theme-light .\[\&\:\:-webkit-slider-runnable-track\]\:bg-zinc-800::-webkit-slider-runnable-track` 与对应的 `::-moz-range-track`，颜色 `#e2e8f0`（文件中 raised controls 档，本就为滑块轨道设计的浅色）；只覆盖颜色不动尺寸，thumb（24×16px 纯白椭圆）与轨道高度（6px）均未改。
   - 测试同步：无 ParameterPanel 专属测试，无需新增；已核验产物 CSS 中 Tailwind 生成的转义类名与覆盖选择器逐字匹配、规则排序在后优先级压过原规则；vitest drive 组件 + ThemeSwitcher 6 文件 42 项、`npm run build` 全部通过。
   - 注：本次改动在 `Tony-issue169-drive-slider-track-light` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (10)
+
+- refactor(web-ui): 清理 CC 页与 DC 重复的配置/选项——删除「扫描局域网找车」与无 UI 消费的 `/api/provisioning/*` 配网路由（Issue #177）
+  - 背景：车端 IP 的发现/配网职责归 DC（Drifter Console，Wi-Fi 配网 + Network 卡片展示 AP/STA IP），CC（Car Connector）页另起一套「host + 局域网扫描找车」流程与之重复；DD 后端还挂了一套前端从未调用过的 `/api/provisioning/*` 配网路由，同为重复入口。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：「连接配置」卡删除「扫描局域网」按钮、候选 IP 列表与相关状态/回调（`foundCars`/`discovering`/`handleDiscoverCars`），host 改为纯手填；SSH 凭据、检查连接等 CC 独有职责保留。
+  - `web_ui/frontend/src/services/api.ts`：删除 `discoverConnectorCars`（POST `/connector/discover`）；`discoverConnectorConsoles`（`/connector/discover_console`，launcher 页入口按钮）保留——它是"打开 DC"的入口而非配网配置。
+  - `web_ui/backend/routers/connector.py`：删除 `POST /api/connector/discover`（扫 22 端口找 SSH 主机）端点。
+  - `web_ui/backend/main.py` + 删除 `web_ui/backend/routers/provisioning.py`：整组 `/api/provisioning/*`（status/connect/scan/serial/scan）配网路由下线——Wi-Fi 配网由 DC 单一入口承担；`donkeycar/parts/provisioning.py`（WifiManager/ProvisioningPart 车端部件）不受影响。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：zh/en 各删除 6 条只服务于扫描找车的词条（`connector.scanning`/`scanLan`/`foundHosts`/`carIpSelected`/`discoverFound`/`scanFailed`）。
+  - 测试同步：`web_ui/backend/tests/test_connector.py` 删除 `/api/connector/discover` 路由断言与 2 个 discover 端点测试；`web_ui/backend/tests/test_provisioning.py` 随路由整体删除；后端 pytest 全量 76 项通过，前端 vitest 19 文件 97 项通过，`tsc --noEmit` 通过。
 
 ## 2026-08-18 (8)
 
