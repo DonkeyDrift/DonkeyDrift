@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-18 (33)
+
+- fix(launcher): KCW 入口 URL 用 mDNS 主机名后被 kimi 的 DNS-rebinding 栅栏 403 拦截——冷启动加 `--allowed-host` 放行入口 host，复用前重探入口 host 跳过未放行的旧实例（Issue #168 后续）
+  - 根因：上一轮把 KCW 入口 URL 的 host 从 DHCP 局域网 IP 改为稳定 mDNS 主机名 `tony007.local` 以稳定 origin；但 `kimi web --host`（绑 0.0.0.0）只自动放行本机接口 IP（`192.168.3.57` 返回 200），mDNS 主机名是主机名而非接口 IP、不会被自动放行——浏览器用 `Host: tony007.local` 访问即被 40301（Invalid Host header）拦下。实测 `127.0.0.1:58640` 与 `192.168.3.57:58640` 均 200、`tony007.local:58640` 403 复现。
+  - `donkeycar/launcher/kimi_web.py`：
+    - `_mdns_hostname()` 主机名统一小写化（`hostname.split('.')[0].lower()`），让 URL / 浏览器 Host 头 / `--allowed-host` 三者保持同一小写形式（浏览器本就把 host 小写化放进 Host 头，origin 的 host 也按小写归一，不影响 localStorage 归属）；
+    - 新增 `_allowed_host_values()` 收集入口 host（mDNS 主机名）与局域网 IP（mDNS 解析不到时的回退 host），去重；
+    - `_spawn_and_capture()` 冷启动命令逐项追加 `--allowed-host <host>`，放行 mDNS 主机名与局域网 IP；
+    - `_live_instance_url()` 复用本机实例、把 host 改写为入口 host 后，若入口 host 与已探测 host 不同则再对入口 host 探一次——老实例（没带 `--allowed-host`）对局域网 IP 通、对 mDNS 403，直接跳过而不是返回打不开的 URL。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMdnsHostnameAndAllowedHosts`（小写化 + allowed-host 三种组合 4 项）、`test_entry_host_must_pass_rebind_gate`（复用重探跳过 403 实例）、`test_spawn_passes_mdns_and_lan_allowed_hosts`；更新 `test_spawn_success_captures_url_and_keeps_proc` 的启动命令断言。本文件 48 项、launcher 相关 86 项全部通过。
+  - 验证：手动以 `kimi web --no-open --host --port 58646 --allowed-host tony007.local --allowed-host 192.168.3.57` 起测试实例，`curl http://tony007.local:58646/api/v1/meta`（小写）与 `http://TONY007.local:58646/...`（大写）均 200，修复生效。
+  - 注：本次在 `Tony-kcw-allowed-host` 功能分支（worktree 作业）上完成。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (32)
 
 - fix(launcher): DSH 局域网非安全上下文 `crypto.randomUUID` 缺失导致连接永不就绪、不自动进 Projects——client.js 注入 UUID 兜底（Issue #164 收尾）

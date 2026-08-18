@@ -41,6 +41,12 @@ from donkeycar.launcher.kimi_web import (
 from donkeycar.launcher import server as launcher_server
 
 
+# 原始 _mdns_hostname 函数引用：autouse fixture（_fake_lan_ip）会把它
+# monkeypatch 成 None；需要直接验证其真实逻辑（主机名小写化）时用它调用，
+# 绕开 autouse 的覆盖（只 patch socket 与 _lan_ip，函数体内其余逻辑仍真实执行）。
+_ORIGINAL_MDNS_HOSTNAME = kimi_web._mdns_hostname
+
+
 # ===========================================================================
 # 工具
 # ===========================================================================
@@ -175,6 +181,37 @@ class TestLanUrl:
 
 
 # ===========================================================================
+# _mdns_hostname / _allowed_host_values（issue #168 后续：DNS-rebinding 栅栏）
+# ===========================================================================
+class TestMdnsHostnameAndAllowedHosts:
+    def test_mdns_hostname_lowercases(self, monkeypatch):
+        # 浏览器把 URL host 小写化后放进 Host 头；mDNS 名小写化后 URL、
+        # Host 头与 --allowed-host 三者一致，避免大小写不一致被 40301 拦下
+        monkeypatch.setattr(kimi_web.socket, "gethostname", lambda: "TONY007")
+        monkeypatch.setattr(
+            kimi_web.socket, "getaddrinfo",
+            lambda *a, **k: [(2, 1, 6, "", ("192.168.3.10", 0))])
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+        assert _ORIGINAL_MDNS_HOSTNAME() == "tony007.local"
+
+    def test_allowed_host_values_mdns_plus_lan(self, monkeypatch):
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+        assert kimi_web._allowed_host_values() == [
+            "tony007.local", "192.168.3.10"]
+
+    def test_allowed_host_values_lan_only_when_no_mdns(self, monkeypatch):
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+        assert kimi_web._allowed_host_values() == ["192.168.3.10"]
+
+    def test_allowed_host_values_empty(self, monkeypatch):
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: None)
+        assert kimi_web._allowed_host_values() == []
+
+
+# ===========================================================================
 # strip_ansi / extract_web_url
 # ===========================================================================
 class TestStripAnsi:
@@ -266,6 +303,20 @@ class TestLiveInstanceUrl:
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         url = kimi_web._live_instance_url(inst_dir, token_file)
         assert url == "http://TONY007.local:58627/#token=tok-xyz"
+
+    def test_entry_host_must_pass_rebind_gate(self, tmp_path, monkeypatch):
+        # issue #168 后续：入口 host 改用 mDNS 后，复用前要对它再探一次；
+        # 老实例（没带 --allowed-host）对局域网 IP 通、对 mDNS host 403，
+        # 必须跳过而不是返回一个浏览器一打开就 403 的 URL
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        token_file = tmp_path / "server.token"
+        token_file.write_text("tok-xyz\n", encoding="utf-8")
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
+        monkeypatch.setattr(
+            kimi_web, "_probe_server",
+            lambda host, port, token: host != "tony007.local")
+        assert kimi_web._live_instance_url(inst_dir, token_file) is None
 
     def test_cwd_mismatching_instance_skipped(self, tmp_path, monkeypatch):
         # 实例跑在别的目录（如 mycar 里的 TUI 内嵌 server）时不复用，
@@ -388,9 +439,29 @@ class TestLaunchKimiCodeWeb:
         assert proc.killed is False
         assert proc in kimi_web._SPAWNED_PROCS
         # 启动命令是官方子命令，绑 0.0.0.0 供局域网访问，不开浏览器，
-        # 且绑固定专属端口（origin 稳定，issue #168）
-        assert proc.args_seen[-4:] == ["--no-open", "--host",
-                                       "--port", str(kimi_web.KIMI_WEB_PORT)]
+        # 且绑固定专属端口（origin 稳定，issue #168）；并带 --allowed-host
+        # 放行局域网 IP（autouse 把 mDNS 钉为 None，回退 IP）
+        args = proc.args_seen
+        assert args[:2] == ["/home/u/.kimi-code/bin/kimi", "web"]
+        assert "--no-open" in args and "--host" in args
+        assert args[args.index("--port") + 1] == str(kimi_web.KIMI_WEB_PORT)
+        assert "--allowed-host" in args
+        assert args[args.index("--allowed-host") + 1] == "192.168.3.10"
+
+    def test_spawn_passes_mdns_and_lan_allowed_hosts(self, monkeypatch):
+        # issue #168 后续：mDNS 可用时，--allowed-host 同时放行 mDNS 主机名
+        # 与局域网 IP（后者是 mDNS 解析不到时 URL 的回退入口）
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
+        proc = _FakeProc(payload=_WEB_BANNER, hold=True)
+        result = launch_kimi_code_web(
+            cwd=None, timeout_s=10.0,
+            live_url_fn=lambda cwd=None: None,
+            resolve_binary_fn=lambda: "/home/u/.kimi-code/bin/kimi",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        args = proc.args_seen
+        assert args[args.index("--allowed-host") + 1] == "tony007.local"
+        assert "192.168.3.10" in args
 
     def test_spawn_passes_cwd_through(self, tmp_path):
         proc = _FakeProc(payload=_WEB_BANNER, hold=True)
