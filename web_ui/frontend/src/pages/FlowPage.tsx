@@ -70,23 +70,13 @@ export function FlowPage() {
     if (!root || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(
       (entries) => {
-        const nextInView: Partial<Record<FlowSectionId, boolean>> = {};
         for (const entry of entries) {
           const id = entry.target.id as FlowSectionId;
           ratiosRef.current[id] = entry.isIntersecting ? entry.intersectionRatio : 0;
-          nextInView[id] = entry.isIntersecting;
         }
-        setInView((prev) => {
-          const next = { ...prev };
-          let changed = false;
-          for (const [id, visible] of Object.entries(nextInView)) {
-            if (visible !== prev[id as FlowSectionId]) {
-              next[id as FlowSectionId] = visible;
-              changed = true;
-            }
-          }
-          return changed ? next : prev;
-        });
+        // 可见比例最大的 section 才是"当前活跃"分区：只有它才需要激活
+        // 视频流/键盘/手柄等重型副作用。用比例而非 isIntersecting，避免
+        // 滚走后仍留几像素交集导致后台视频流一直跑（#135 收尾）。
         let best: FlowSectionId | null = null;
         for (const meta of SECTIONS) {
           const ratio = ratiosRef.current[meta.id] ?? 0;
@@ -94,7 +84,22 @@ export function FlowPage() {
             best = meta.id;
           }
         }
-        if (best) setActiveSection(best);
+        if (!best) return;
+        setActiveSection(best);
+        setInView((prev) => {
+          const next: Record<FlowSectionId, boolean> = {
+            drive: false,
+            'tub-manager': false,
+            trainer: false,
+            pilot: false,
+          };
+          next[best] = true;
+          let changed = false;
+          for (const meta of SECTIONS) {
+            if (next[meta.id] !== prev[meta.id]) changed = true;
+          }
+          return changed ? next : prev;
+        });
       },
       { threshold: [0, 0.15, 0.3, 0.5, 0.75, 1] },
     );
