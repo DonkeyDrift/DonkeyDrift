@@ -45,13 +45,24 @@ def _post_to_launcher(path: str, body: bytes) -> tuple[int, bytes]:
 @router.post("/kimi-code-web")
 async def launch_kimi_code_web(request: Request):
     """转发 POST /api/launch/kimi-code-web 到 launcher 并回传其 JSON 响应。"""
+    return await _forward_launch(request, "/api/launch/kimi-code-web")
+
+
+@router.post("/dsh")
+async def launch_dsh(request: Request):
+    """转发 POST /api/launch/dsh（DeepSeek Harness）到 launcher 并回传其 JSON 响应。"""
+    return await _forward_launch(request, "/api/launch/dsh")
+
+
+async def _forward_launch(request: Request, launcher_path: str) -> JSONResponse:
+    """把 DD 前端的 launch 请求原样转发给 launcher 并回传其 JSON 响应。"""
     body = await request.body()
     try:
         status, payload = await asyncio.to_thread(
-            _post_to_launcher, "/api/launch/kimi-code-web", body
+            _post_to_launcher, launcher_path, body
         )
     except Exception as e:
-        logger.error("转发 launcher /api/launch/kimi-code-web 失败: %s", e)
+        logger.error("转发 launcher %s 失败: %s", launcher_path, e)
         return JSONResponse(
             status_code=502,
             content={

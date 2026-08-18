@@ -1125,7 +1125,9 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         """POST /api/launch/dsh：启动/复用 dsh web（DeepSeek Harness），回 URL。
 
         请求体可选 JSON {"cwd": "/abs/path"} 指定 dsh 运行目录，缺省为
-        上位机用户主目录；cwd 不存在直接报错，绝不回退到其它目录。
+        /home/dkc/projects（与 kimi-code-web 同目录；dsh 以进程 cwd 作为
+        新会话/工作区默认目录，见 dsh-host-apiproxy 的 process.cwd()）；
+        cwd 不存在直接报错，绝不回退到其它目录。
         返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理）。
         长请求：dsh 冷启动数秒，服务端整体超时 60s，
         客户端超时必须 ≥60s。响应带 CORS 头（与 kimi-code-web 端点
@@ -1156,6 +1158,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                     code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
                 )
                 return
+        if cwd is None:
+            # 缺省与 kimi-code-web 同目录；dsh 以进程 cwd 作为新会话/
+            # 工作区默认目录（dsh-host-apiproxy 的 process.cwd()）
+            cwd = "/home/dkc/projects"
         result = launch_dsh_web(cwd=cwd)
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
