@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-18 (37)
+
+- fix(tm): 摄像头画面与边框贴合——容器 aspect-ratio 跟随当前帧实际宽高比，消除画面与边框空隙（Issue #220）
+  - 根因：TM 摄像头预览容器固定 `aspect-video`（16:9），而摄像头帧实际比例（如 640×240=8:3）不同，canvas `object-contain` 等比缩放后在边框内留黑边。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：
+    - 新增 `frameAspect` 状态，`draw()` 内用 `image.width / image.height` 更新；无图/加载态回落 16:9（`setFrameAspect(null)`）；
+    - 容器由 `aspect-video` class 改为内联 `style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}`，保留边框/圆角/FPS 角标样式；
+    - 顺带移除未使用的 `fields` 变量（修复既有 lint 报错）。
+  - 验证：`npm run check`（tsc）通过；`npm run lint` 0 error（7 个既有 warning 与本次无关）；`npm run test` 100/100 通过。Firmware 无改动、无需 OTA。
+  - 注：本次在 `Tony-fix-issue-220-tm-camera-fit` 功能分支（worktree 作业）上完成，PR #224 合入 `Tony`。
+
 ## 2026-08-18 (36)
 
 - feat(trainer): 「我这台电脑」训练模式开箱即用——新增一键环境检测（SSH/平台/Python/donkeycar）与 Windows/Mac 适配引导（Issue #218）
