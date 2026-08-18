@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-18 (13)
+
+- feat(ui): DD/D 两个页面标题文字可点击跳转官网，效果与点击 logo 图标一致（Issue #179，跨仓库功能：DD/DC/D 三页面标题可点）
+  - `web_ui/frontend/src/components/Layout.tsx`：顶栏「DonkeyDrifter」标题文字与 logo 合并进同一个 `<a href="https://www.donkeydrift.com" target="_blank" rel="noopener">`（logo `<img>` 与文字之间以 `gap-3` 保持原 12px 间距）；链接在 `font-bold text-xl` 容器内，文字继承深浅主题标题色，Tailwind reset 下无下划线/变色，仅新增指针手势。
+  - `donkeycar/launcher/server.py`（Donkey 启动页）：`MENU_HTML` 中 `<h1>Donkey</h1>` 改为 `<h1><a class="titleLink" href="https://www.donkeydrift.com" target="_blank" rel="noopener">Donkey</a></h1>`；CSS 新增 `.titleLink{color:inherit;text-decoration:none}`——颜色继承 h1、无下划线，行为对齐 logoLink。
+  - 测试同步：无标题专属测试需新增；验证 `tsc -b --noEmit` 通过、vitest App/components 14 文件 78 项通过、launcher `tests/test_launcher_menu_actions.py` 37 项通过。
+  - DC（Drifter Console，ESP32 Web Console）侧同类改动在 Firmware 仓库同步提交（v1.8.9，已 OTA 上车）。
+
 ## 2026-08-18 (12)
 
 - feat(launcher): 菜单 6/7 两项打通 DD 的入口合并为 6 号「Donkey Drifter」，7 号位置灰占位、其余序号一律不变（Issue #181）
