@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-18 (32)
+
+- fix(launcher): DSH 局域网非安全上下文 `crypto.randomUUID` 缺失导致连接永不就绪、不自动进 Projects——client.js 注入 UUID 兜底（Issue #164 收尾）
+  - 根因：DSH 客户端 `dsh-client-connection/lib/client.js` 用 `crypto.randomUUID()` 铸造 RPC id（`AbstractApiClient.mintRpcId()`），但浏览器经局域网 IP（`http://192.168.3.x:<port>`）访问时处于非安全上下文，`crypto.randomUUID` 为 undefined，调用抛 `TypeError` → `ConnectionController.loop()` 的 `host.describe` 被 reject → 连接永远到不了 connected → `workspaces.startInitialSelection()` 不触发 → 停在"选择工作区"不自动进 Projects（回环 `127.0.0.1` 是 secure context，正常）。
+  - `donkeycar/launcher/dsh_web.py`：
+    - 新增 `_connection_client_path()`（定位 client.js，与 `_connection_index_path` 同布局）；
+    - 新增 `_PATCH_UUID_OLD`/`_PATCH_UUID_NEW` 锚点与 `_patch_client_uuid_polyfill()`——启动前在 client.js 顶部 CommonJS 桩之后注入 `getRandomValues` 版 RFC4122 v4 UUID 兜底，幂等自愈（已打过的跳过、源码升级未命中旧锚点也跳过、失败只告警）；
+    - `launch_dsh_web()` 冷启动前在 `_patch_privileged_methods()` 之后调用 `_patch_client_uuid_polyfill()`。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 `TestPatchClientUuidPolyfill`（补丁注入/幂等/未命中跳过/缺包跳过/launch 调用时机 5 项），文件 29 项全部通过。
+  - 验证：headless Chromium 打开 `http://192.168.3.57:36600/`，`isSecureContext=False` 但 `typeof crypto.randomUUID=function`（polyfill 生效）、页面自动进入 `projects`、不再显示"选择工作区"，console 无错误；回环 `127.0.0.1` 行为一致。
+  - 注：本次在 `Tony-issue164-dsh-auto-enter-projects` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。此前错误的 `sec-fetch-site` 放宽补丁已一并删除（实测浏览器发 WebSocket 不带该头，与真实根因无关）。
+
 ## 2026-08-18 (31)
 
 - feat(launcher): D 启动菜单 0 号「Drifter Console」移到 7 号、删 0 号位，6 号改名 DonkeyDrifter（小字「打开 DonkeyDrifter」）
