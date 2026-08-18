@@ -455,17 +455,6 @@ export const getConnectorLocalIps = async () => {
   return response.data as { ips: { ip: string; interface: string; priority: number }[]; count: number };
 };
 
-export const discoverConnectorCars = async () => {
-  const response = await api.post('/connector/discover');
-  return response.data as {
-    status: boolean;
-    found: { ip: string; port: number; latency_ms: number; reachable: boolean }[];
-    count: number;
-    scanned: number;
-    message: string;
-  };
-};
-
 export const discoverConnectorConsoles = async () => {
   const response = await api.post('/connector/discover_console');
   return response.data as {

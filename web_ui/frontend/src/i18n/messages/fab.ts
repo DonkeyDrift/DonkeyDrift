@@ -1,8 +1,7 @@
-// fab namespace: language switcher + FAB cluster (language menu, help modal).
+// fab namespace: FAB cluster (help modal).
 export const fab: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'fab.quickActions': '快捷入口',
-    'fab.language': '语言',
     'fab.help': '功能说明',
     'fab.helpTitle': '快捷键说明',
     'fab.closeHelp': '关闭快捷键说明',
@@ -26,7 +25,6 @@ export const fab: { zh: Record<string, string>; en: Record<string, string> } = {
   },
   en: {
     'fab.quickActions': 'Quick actions',
-    'fab.language': 'Language',
     'fab.help': 'Feature guide',
     'fab.helpTitle': 'Keyboard Shortcuts',
     'fab.closeHelp': 'Close keyboard shortcuts',

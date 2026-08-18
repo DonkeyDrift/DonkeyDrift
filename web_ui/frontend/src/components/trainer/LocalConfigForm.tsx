@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useStore, type TrainerLocalConfig } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 import type { TrainerTub } from '../../services/api';
@@ -103,20 +104,20 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
         />
       </div>
 
-      {/* Advanced Options */}
+      {/* Advanced: collapsible row (expanded = advanced overrides active, same semantics as the old checkbox) */}
       <div className="pt-2 border-t border-zinc-800">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.advancedEnabled}
-            onChange={(e) => onConfigChange({ advancedEnabled: e.target.checked })}
-            className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-600 focus:ring-cyan-600"
-          />
-          <span className="text-sm font-medium text-zinc-300">{t('trainer.advancedOptions')}</span>
-        </label>
+        <button
+          type="button"
+          onClick={() => onConfigChange({ advancedEnabled: !config.advancedEnabled })}
+          aria-expanded={config.advancedEnabled}
+          className="w-full py-2 flex items-center justify-between text-sm text-zinc-400 hover:text-zinc-200"
+        >
+          <span className="font-medium">{t('trainer.advancedOptions')}</span>
+          {config.advancedEnabled ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
 
         {config.advancedEnabled && (
-          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs text-zinc-500">{t('trainer.batchSize')}</label>
               <input
