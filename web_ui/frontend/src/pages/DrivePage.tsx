@@ -19,7 +19,7 @@ import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } f
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
-import { Circle } from 'lucide-react';
+import { Circle, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const DrivePage: React.FC = () => {
   const { t } = useTranslation();
@@ -49,6 +49,7 @@ export const DrivePage: React.FC = () => {
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
+  const [joystickOpen, setJoystickOpen] = useState(true);
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
 
@@ -237,12 +238,6 @@ export const DrivePage: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-zinc-200">{t('drive.title')}</h2>
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-          <InputSourceSelector
-            value={inputSource}
-            onChange={setInputSource}
-            gamepadConnected={gamepadConnected}
-            gyroAvailable={permissionState !== 'unsupported'}
-          />
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
           <ModelSelector
             value={currentModel}
@@ -301,24 +296,39 @@ export const DrivePage: React.FC = () => {
 
         {/* 控制区 */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col">
-          <div className="text-sm text-zinc-400 mb-4 flex items-center justify-between">
-            <span>{t('drive.virtualJoystick')}</span>
-            <span className="text-[10px] text-zinc-500">{t('drive.mouseTouchSupport')}</span>
+          {/* 标题栏：虚拟摇杆折叠开关 + 输入源选择 */}
+          <div className="text-sm text-zinc-400 mb-4 flex items-center justify-between gap-2">
+            <button
+              onClick={() => setJoystickOpen(!joystickOpen)}
+              className="flex items-center gap-1 hover:text-zinc-200 transition-colors"
+              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
+            >
+              <span className="font-medium">{t('drive.virtualJoystick')}</span>
+              {joystickOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            <InputSourceSelector
+              value={inputSource}
+              onChange={setInputSource}
+              gamepadConnected={gamepadConnected}
+              gyroAvailable={permissionState !== 'unsupported'}
+            />
           </div>
           <div className="flex-1 flex flex-col items-center gap-4">
-            <div className="grid grid-cols-[auto_220px] gap-6">
-              <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
-              <div className="flex flex-col items-center gap-2 w-[220px]">
-                <VirtualJoystick
-                  onChange={(a, t) => {
-                    joystickRef.current = { angle: a, throttle: t };
-                    lastInputType.current = 'joystick';
-                  }}
-                  size={220}
-                />
-                <ControlBars angle={angle} className="w-full" />
+            {joystickOpen && (
+              <div className="grid grid-cols-[auto_220px] gap-6">
+                <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+                <div className="flex flex-col items-center gap-2 w-[220px]">
+                  <VirtualJoystick
+                    onChange={(a, t) => {
+                      joystickRef.current = { angle: a, throttle: t };
+                      lastInputType.current = 'joystick';
+                    }}
+                    size={220}
+                  />
+                  <ControlBars angle={angle} className="w-full" />
+                </div>
               </div>
-            </div>
+            )}
             <ProgrammableButtons className="w-full max-w-[240px]" />
             <ParameterPanel className="w-full max-w-[360px]" />
             <div className="text-[10px] text-zinc-500 text-center">
