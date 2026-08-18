@@ -159,7 +159,8 @@
 - feat(web-ui): Trainer「高级选项」折叠行文案精简为「高级」（Issue #183 后续微调）
   - `web_ui/frontend/src/i18n/messages/trainer.ts`：`trainer.advancedOptions` 值 zh「高级选项」→「高级」、en「Advanced Options」→「Advanced」，词条 key 不变。
   - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：折叠行注释同步（Advanced Options → Advanced）。
-  - 测试同步：仅文案变更，无测试引用旧文案；`tsc -b --noEmit` 通过。
+  - 后续微调（同分支，PR #207）：高级折叠行改薄——去掉 `py-2` 纵向内边距、方向箭头 `w-4 h-4`→`w-3.5 h-3.5`、加 `transition-colors`，对齐 Drive 页虚拟摇杆折叠头薄款样式。
+  - 测试同步：仅文案/样式变更，无测试引用旧文案；`tsc -b --noEmit` 通过。
   - 注：本次改动在 `Tony-trainer-advanced-label` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (13)
