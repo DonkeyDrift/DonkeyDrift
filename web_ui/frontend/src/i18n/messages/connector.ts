@@ -3,7 +3,6 @@
 // full English translation of every entry.
 export const connector: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
-    'connector.pageTitle': 'Car Connector',
     'connector.configTitle': '连接配置',
     'connector.hostLabel': '主机地址',
     'connector.scanning': '扫描中…',
@@ -61,7 +60,6 @@ export const connector: { zh: Record<string, string>; en: Record<string, string>
     'connector.jobStartFailed': '启动失败: {message}',
   },
   en: {
-    'connector.pageTitle': 'Car Connector',
     'connector.configTitle': 'Connection Config',
     'connector.hostLabel': 'Host Address',
     'connector.scanning': 'Scanning…',

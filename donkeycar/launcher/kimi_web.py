@@ -25,6 +25,15 @@
   改写为本机局域网 IP（复用配网模块的 ``detect_lan_ip``，保留端口与
   ``#token=`` 片段）；只绑了回环的存活实例（如 TUI 内嵌 server）对
   局域网 IP 探测不通时视为不可复用，由调用方另拉监听 0.0.0.0 的实例。
+
+issue #168（打开后是"全新状态"）的两处约束：
+- 复用路径校验实例运行目录：登记条目不带 cwd，改读 ``/proc/<pid>/cwd``
+  与请求的 cwd 比对；不是同一目录的实例（如在 mycar 里跑的 TUI 内嵌
+  server）不复用，另起目标目录的实例，KCW 才会进对工作区。
+- 冷启动绑固定端口：浏览器把置顶/模式/语言主题等 UI 偏好存在
+  localStorage，按 origin（含端口）隔离；复用路径可能挑到不同端口的
+  实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
+  首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
 """
 
 import json
@@ -53,6 +62,11 @@ _POLL_S = 0.2
 INSTANCE_HEARTBEAT_MAX_AGE_S = 180.0
 # 复用探测（/api/v1/meta）的超时（秒）
 PROBE_TIMEOUT_S = 3.0
+# 冷启动绑定的固定端口（issue #168）：浏览器 localStorage 按 origin
+# （host+端口）隔离，端口漂移会让 KCW 每次像首次使用（置顶/模式/语言
+# 主题全丢）。不用 kimi 默认的 58627——TUI 内嵌 server 默认占它，撞上
+# 后 kimi 会自动顺延端口反而漂移；58640 是本 launcher 专属端口
+KIMI_WEB_PORT = 58640
 
 # kimi 用户目录下的固定位置
 KIMI_HOME = Path.home() / ".kimi-code"
@@ -208,13 +222,28 @@ def _lan_url(url: str):
         (parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
-def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
+def _proc_cwd(pid: int):
+    """实例进程的运行目录（``/proc/<pid>/cwd`` 的真实路径）。
+
+    实例登记条目不带 cwd 字段，复用前用它校验实例跑在请求的目录里
+    （issue #168）；进程消失/无权限返回 None（视为不匹配，跳过）。
+    """
+    try:
+        return os.path.realpath(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
+                       cwd=None):
     """找已在运行的 kimi web 实例，返回带 ``#token=`` 的浏览器入口 URL。
 
-    判定链：登记条目心跳新鲜 → pid 存活 → 带持久 token 探测
-    ``/api/v1/meta`` 返回 200，且局域网可达（登记 host 是回环时需对
-    本机局域网 IP 探测通过）。找不到返回 None。
+    判定链：登记条目心跳新鲜 → pid 存活 → 运行目录匹配（cwd 给定时比对
+    ``/proc/<pid>/cwd``，issue #168）→ 带持久 token 探测 ``/api/v1/meta``
+    返回 200，且局域网可达（登记 host 是回环时需对本机局域网 IP 探测
+    通过）。找不到返回 None。
     """
+    cwd_real = os.path.realpath(cwd) if cwd else None
     token = _read_token(token_path)
     now_ms = time.time() * 1000
     max_age_ms = INSTANCE_HEARTBEAT_MAX_AGE_S * 1000
@@ -222,6 +251,8 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
         if now_ms - inst.get("heartbeat_at", 0) > max_age_ms:
             continue
         if not _pid_alive(inst["pid"]):
+            continue
+        if cwd_real is not None and _proc_cwd(inst["pid"]) != cwd_real:
             continue
         host = inst["host"]
         if _is_loopback_host(host):
@@ -267,7 +298,10 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
         proc = popen_fn(
             # --host 裸传 = 绑 0.0.0.0：消费方是局域网内用户设备上的
             # 浏览器（issue #125），只绑回环它们访问不到
-            [binary, "web", "--no-open", "--host"],
+            # --port 固定专属端口：origin 稳定，KCW 的 localStorage 偏好
+            # （置顶/模式/语言主题）不再因端口漂移被清空（issue #168）
+            [binary, "web", "--no-open", "--host",
+             "--port", str(KIMI_WEB_PORT)],
             cwd=cwd_str,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -341,12 +375,14 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
 
     Args:
         cwd: kimi 运行目录（绝对路径）；None 表示上位机用户主目录。
-            目录不存在直接报错，绝不回退到其它目录。
+            目录不存在直接报错，绝不回退到其它目录。复用路径只复用
+            运行目录与之匹配的存活实例（issue #168）。
         timeout_s: 整体超时（秒），默认 120；调用方客户端超时应 ≥120s。
             复用路径毫秒级返回，仅冷启动路径可能用满。
         live_url_fn / resolve_binary_fn / popen_fn: 测试钩子，默认
             ``_live_instance_url`` / ``_resolve_kimi_binary`` /
-            ``subprocess.Popen``。
+            ``subprocess.Popen``；live_url_fn 以 cwd（规范化后，None
+            表示不限定）为参调用。
 
     Returns:
         成功 {"status": "ok", "url": <带 #token= 的入口 URL>}；
@@ -368,8 +404,10 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             }
         cwd_str = str(cwd_path)
 
-    # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web）
-    url = live_url_fn()
+    # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web），
+    # 且运行目录与请求一致（cwd=None 不限定，issue #168）；注意必须
+    # 关键字传参——_live_instance_url 首参是 instances_dir
+    url = live_url_fn(cwd=cwd_str)
     if url:
         url = _lan_url(url)
         logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
@@ -393,7 +431,7 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
-    url = live_url_fn()
+    url = live_url_fn(cwd=cwd_str)
     if url:
         url = _lan_url(url)
         logger.info("冷启动未果，复用到已运行实例: %s", url)

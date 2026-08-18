@@ -304,6 +304,17 @@ export const listBackups = async (workingDir?: string) => {
   return response.data;
 };
 
+export interface TrainerTub {
+  name: string;
+  relative_path: string;
+  absolute_path: string;
+}
+
+export const listTrainerTubs = async (workingDir?: string): Promise<{ tubs: TrainerTub[]; current_tub_path: string }> => {
+  const response = await api.get('/trainer/tubs', { params: workingDir ? { working_dir: workingDir } : {} });
+  return response.data as { tubs: TrainerTub[]; current_tub_path: string };
+};
+
 export const startLocalTrain = async (params: {
   tub: string;
   model: string;
