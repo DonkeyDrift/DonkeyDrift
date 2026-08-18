@@ -52,6 +52,7 @@ function FlowSectionHeader({ step, meta }: { step: number; meta: SectionMeta }) 
  */
 export function FlowPage() {
   const location = useLocation();
+  const { pathname, key: locationKey } = location;
   const setActiveSection = useFlowStore((s) => s.setActiveSection);
   const rootRef = useRef<HTMLDivElement>(null);
   const ratiosRef = useRef<Partial<Record<FlowSectionId, number>>>({});
@@ -112,8 +113,9 @@ export function FlowPage() {
 
   // 深链 / 导航点击：滚动到 path 对应的 section。
   // 懒加载 chunk 未就绪时元素尚不存在，用 rAF 轮询等待（上限 3s）。
+  // 依赖 location.key 而非仅 pathname：点同一导航项（path 不变）也要能再次滚动。
   useEffect(() => {
-    const meta = SECTIONS.find((s) => s.path === location.pathname);
+    const meta = SECTIONS.find((s) => s.path === pathname);
     if (!meta) return;
     const behavior: ScrollBehavior = firstScrollRef.current ? 'auto' : 'smooth';
     firstScrollRef.current = false;
@@ -133,7 +135,7 @@ export function FlowPage() {
     };
     tryScroll();
     return () => cancelAnimationFrame(raf);
-  }, [location.pathname]);
+  }, [pathname, locationKey]);
 
   return (
     <div ref={rootRef} className="space-y-12">

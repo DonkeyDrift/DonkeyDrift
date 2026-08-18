@@ -146,15 +146,16 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
     getControl: getCurrentControl,
   });
 
-  // UI 显示无需驱动控制发送，按较低频率同步即可。
+  // UI 显示无需驱动控制发送，按较低频率同步即可；section 滚走后停表（#178）。
   useEffect(() => {
+    if (!active) return;
     const timer = setInterval(() => {
       const control = getCurrentControl();
       setAngle(control.angle);
       setThrottle(control.throttle);
     }, 50);
     return () => clearInterval(timer);
-  }, [getCurrentControl]);
+  }, [getCurrentControl, active]);
 
   // 录制时长计时器
   useEffect(() => {
@@ -301,7 +302,7 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
               )}
             </div>
           )}
-          <TelemetryChart telemetry={telemetry} className="mt-4" />
+          <TelemetryChart telemetry={telemetry} className="mt-4" active={active} />
         </div>
 
         {/* 控制区 */}
