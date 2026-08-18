@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (2)
+## 2026-08-18 (4)
 
 - feat(web-ui): Trainer 页面 Tub 路径自动填充——进入页面自动定位正确 tub，无需每次手填
   - 背景：Trainer 本地训练的 Tub 路径输入框默认值硬编码 `./data`，与 Tub Manager / Tub Navigator 当前加载的 tub 脱节，用户每次训练前要手工复制路径。
@@ -10,6 +10,33 @@
   - `web_ui/frontend/src/services/api.ts`：新增 `listTrainerTubs()` 与 `TrainerTub` 类型；`web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.tubPathManual` / `trainer.tubLoaded`（zh/en）。
   - 测试同步：新增 `web_ui/backend/tests/test_trainer_tubs.py` 4 项（data 目录与子 tub、无 data 为空、跳过非 tub 目录并识别 data* 兄弟、报告已加载 tub）；pytest 后端全量 85 项、前端 vitest 全量 20 文件 95 项、`tsc -b --noEmit`、eslint、`npm run build` 全部通过。
   - 注：本次改动在 `Tony-trainer-tub-autofill` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (3)
+
+- feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：集成原 Tub 导航器全部能力——
+    - FPS 角标：播放中按实际换帧数每秒统计（#128 同款逻辑），画面冻结时角标跟随下降，暂停清零；
+    - 转向/油门数值面板：读当前帧 `user/angle`（回退 `pilot/angle`）与 `user/throttle`（回退 `pilot/throttle`），无值显示「无」；
+    - 帧控制排：首条/上一帧/播放/下一帧/末帧 + 刷新（`requestTubRefresh` 全量重拉，#135 手动刷新）+ 删除；
+    - 标题 hover 展开「浏览 Tub 记录」副标题（`tub.subtitle`）；
+    - 空格键播放/暂停快捷键（输入框聚焦时不触发）；
+    - 全局图表联动（原 TN 核心职责）：换帧/播放把当前帧绝对索引 `_index` 写入全局 `currentIndex`（播放中 ~30ms 节流），Tub Editor 图表红线跟随；反向订阅 store，图表点选帧落在当前场次范围内时跳转预览（播放中不打断）；
+    - 性能沉淀迁移：图片 LRU 缓存 240 条上限（#135）、预取 60 帧窗口 + 6 并发（#128）；
+    - 播放行为改为单次播放（播放到末帧即停），按用户指示不迁移「播放后停止/循环播放」切换键与 M 键快捷键。
+  - `web_ui/frontend/src/components/TubNavigator.tsx` / `TubNavigator.test.tsx`：删除（功能已由 TubLibrary 承接）。
+  - `web_ui/frontend/src/App.tsx`：TubManagerPage 移除 `<TubNavigator />`，只渲染 TubLibrary + TubEditor。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock` 从 TubNavigator 换成 TubLibrary 桩组件。
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`：删除纯 TN 键（`tub.title`/`tub.noRecordsLoaded`/`tub.timeline`/`tub.dragging`/`tub.indexLabel`/`tub.noImage*`/`tub.loop*`/`tub.playOnce*` 等 20 键 zh+en），保留 TubLibrary 在用的 `tub.subtitle`/`tub.steering`/`tub.throttle`/帧控制与刷新键、TubLoader/SimulatorConfig 全部键。
+  - `web_ui/frontend/src/themes/theme-light.css`：注释里 TubNavigator index badge 措辞更新为 TubLibrary FPS badge。
+  - 测试同步：`TubLibrary.test.tsx` 原有 2 项（自动选最新、pin 置顶）保持不变且通过；vitest 全量 17 文件 89 项通过，`npm run build`（tsc -b + vite build）通过。
+
+## 2026-08-18 (2)
+
+- fix(launcher): DC 打开 Kimi Code Web 后进入"全新状态"——复用路径不看运行目录、入口 URL origin 漂移导致 localStorage 偏好清空、缺省 cwd 落用户主目录（Issue #168）
+  - `donkeycar/launcher/kimi_web.py`：①复用路径校验实例运行目录——实例登记条目无 cwd 字段，新增 `_proc_cwd(pid)` 读 `/proc/<pid>/cwd` 真实路径，`_live_instance_url` 新增 `cwd` 参数，给定 cwd 时逐一比对（`os.path.realpath` 规范化），不匹配（如在 mycar 里跑的 TUI 内嵌 server）或读不到（进程消失/无权限）都跳过不误复用，由调用方在目标目录另起；②冷启动固定专属端口——新增常量 `KIMI_WEB_PORT = 58640`，拉起命令追加 `--port 58640`（避开 kimi 默认 58627：TUI 内嵌 server 默认占它，撞上后 kimi 自动顺延端口反而漂移），入口 URL origin 固定 `http://<LAN IP>:58640`，KCW 存在 localStorage 的置顶/自主模式/语言主题等偏好不再"被清空"；③`launch_kimi_code_web` 快路径与冷启动失败兜底均以 `cwd=` 关键字调用 `live_url_fn`（首参是 instances_dir，位置传参会把 cwd 误绑到实例目录上导致复用永远失败——真实环境联调发现并已修）。
+  - `donkeycar/launcher/server.py`：`_handle_launch_kimi_code_web` 缺省 cwd 从用户主目录改为 Projects 工作区 `/home/dkc/projects`（DC 按钮空体 POST 不带 cwd，此前落到主目录导致 KCW 进的是工作区列表而非 Projects；DD 菜单显式传同一目录不受影响）；显式传 cwd 仍优先；docstring 同步。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 更新与新增——`_live_instance_url` cwd 匹配复用/不匹配跳过/`/proc` 读不到视为不匹配 3 项；冷启动命令含 `--port <KIMI_WEB_PORT>` 断言；复用钩子改为只收关键字参数（抓位置传参回归）；端点测试 fixture 记录收到的 cwd，新增空体 POST 与显式 cwd 两项断言缺省值为 `/home/dkc/projects`。pytest `tests/test_launcher_kimi_web.py` 38 项、launcher 相关全量 113 项通过。
+  - 真实环境验证：重启 launcher 服务后 DC 同款空体 POST 连发 3 次均返回 `http://192.168.3.57:58640/#token=…`（第 1 次冷启动、后 2 次日志确认复用同端口同实例），新实例 `/proc/<pid>/cwd` 确认为 `/home/dkc/projects`；固件侧无需改动（DC 按钮 JS 与 CORS 逻辑不变）。
 
 ## 2026-08-18 (1)
 
