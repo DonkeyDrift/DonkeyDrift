@@ -359,7 +359,8 @@ def _get_status():
         }
 
 
-# ── 菜单动作后端（issue #126：接线 1-5、7-10 号菜单项） ────────────
+# ── 菜单动作后端（issue #126：接线 1-5、8-10 号菜单项；7 号 DC 见
+#    /api/launch/dc 端点） ───────────────────────────────────────────
 # 行为对齐 donkeycar/management/tui.py 的 TUI 版本，但实现独立：
 # launcher 仅依赖标准库，不 import tui（后者顶部连带 rich/prompt_toolkit/
 # paramiko 等重型依赖，会把它们拉进 launcher 进程）。
@@ -1436,14 +1437,6 @@ MENU_HTML = r"""<!DOCTYPE html>
         .menuName .favorite{color:#d96bff;font-size:11px;margin-left:4px}
         .menuDesc{font-size:12px;color:#8fa1b5;margin-top:2px}
 
-        /* 占位行（issue #181：原 7 号 Web 已并入 6 号）：置灰、不可点击、
-           无 hover/选中效果，样式明显区别于可用项 */
-        .menuItem.placeholder{cursor:default;opacity:.45;border-style:dashed}
-        .menuItem.placeholder:hover{border-color:#344154;background:linear-gradient(135deg,#1c2430,#121821)}
-        .menuItem.placeholder .menuNo{color:#8fa1b5}
-        html[data-theme="light"] .menuItem.placeholder:hover{border-color:#ccd5df;background:linear-gradient(135deg,#fff,#edf1f6)}
-        html[data-theme="light"] .menuItem.placeholder .menuNo{color:#7c8da0}
-
         /* DC reconnect overlay */
         .reconnectOverlay{position:fixed;inset:0;background:rgba(16,19,24,.88);display:none;align-items:center;justify-content:center;z-index:100}
         .reconnectOverlay.show{display:flex}
@@ -1569,7 +1562,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 0-12：选择对应菜单项（7 号已并入 6 号）</li>
+                <li data-i18n="help.keyNumbers">数字键 1-12：选择对应菜单项</li>
             </ul>
         </section>
     </div>
@@ -1602,7 +1595,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 0-12：选择对应菜单项（7 号已并入 6 号）',
+                'help.keyNumbers': '数字键 1-12：选择对应菜单项',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
@@ -1639,7 +1632,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 0-12: select the corresponding menu item (#7 merged into #6)',
+                'help.keyNumbers': 'Number keys 1-12: select the corresponding menu item',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
@@ -1775,19 +1768,17 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
 
         // 菜单项数据（条目与 tui.py 保持一致，desc/catLabel 双语；
-        // issue #164：新增 12 号 DeepSeek Harness（常用）；DC 恢复 0 号
-        // 置顶（用户后续指示），编号 0-12；
-        // issue #181：6/7 两项已打通 DD Web UI，合并为 6 号「Donkey Drifter」
-        // （进 DD Drive 页面），7 号位 placeholder 占位，8-12 序号不变不递补
+        // issue #164：新增 12 号 DeepSeek Harness（常用）；
+        // 用户指示：原 0 号「Drifter Console」移到 7 号、删掉 0 号位；
+        // 6 号改名 DonkeyDrifter（小字「打开 DonkeyDrifter」），编号 1-12
         const menuItems = [
-            {no: 0,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
             {no: 1,  cat: "manage", name: "Create Car",   descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
             {no: 2,  cat: "manage", name: "Open",         descZh: "打开已有 DonkeyCar 项目",                descEn: "Open an existing DonkeyCar project",             favorite: false},
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
             {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
-            {no: 6,  cat: "drive",  name: "Donkey Drifter", descZh: "进入 DonkeyDrift（Drive 页面）",      descEn: "Enter DonkeyDrift (Drive page)",                 favorite: true},
-            {no: 7,  cat: null,     name: "—",           descZh: "已合并至 6 号「Donkey Drifter」",       descEn: "Merged into #6 Donkey Drifter",                 favorite: false, placeholder: true},
+            {no: 6,  cat: "drive",  name: "DonkeyDrifter", descZh: "打开 DonkeyDrifter",                    descEn: "Open DonkeyDrifter",                            favorite: true},
+            {no: 7,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
@@ -1811,24 +1802,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             grid.innerHTML = '';
             menuItems.forEach(item => {
                 const div = document.createElement('div');
-                div.className = item.placeholder
-                    ? 'menuItem placeholder' : 'menuItem';
+                div.className = 'menuItem';
                 div.dataset.no = item.no;
-                if (item.placeholder) {
-                    // 占位行（issue #181：原 7 号 Web 已并入 6 号）：
-                    // 不可点击、无 favorite 标、无分类 pill、样式置灰
-                    div.onclick = null;
-                    div.innerHTML =
-                        '<div class="menuNo">' + item.no + '</div>' +
-                        '<div class="menuContent">' +
-                            '<div class="menuName">' + item.name + '</div>' +
-                            '<div class="menuDesc">' +
-                                (uiLang === 'en' ? item.descEn : item.descZh) +
-                            '</div>' +
-                        '</div>';
-                    grid.appendChild(div);
-                    return;
-                }
                 div.onclick = () => selectItem(item.no);
                 const favMark = item.favorite
                     ? ' <span class="favorite">' + t('menu.favorite') + '</span>' : '';
@@ -1855,20 +1830,13 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项（issue #126：全部菜单项已接线；issue #181：原 7 号
-        // Web 并入 6 号，7 号为占位——数字键/点击只给轻提示，不触发动作）
+        // 选择菜单项（issue #126：全部菜单项已接线）
         function selectItem(no) {
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
-            if (item.placeholder) {
-                showError(uiLang === 'en' ? item.descEn : item.descZh);
-                return;
-            }
             highlightRow(no);
 
-            if (no === 0) {
-                openDrifterConsole();
-            } else if (no === 1) {
+            if (no === 1) {
                 createCar();
             } else if (no === 2) {
                 openProject();
@@ -1880,6 +1848,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                 restoreData();
             } else if (no === 6) {
                 launchDrive();
+            } else if (no === 7) {
+                openDrifterConsole();
             } else if (no === 8) {
                 launchInTerminal('donkey ui', t('menu.donkeyui.openTerminal'));
             } else if (no === 9) {
@@ -2061,7 +2031,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             }
         }
 
-        // ── 菜单 1-5、7-10（issue #126） ──
+        // ── 菜单 1-5、8-10（issue #126；7 号 DC 由 openDrifterConsole 处理） ──
         // 通用 overlay 工具
         function showOverlayMsg(msgKey) {
             document.getElementById('overlay').classList.add('show');
@@ -2379,8 +2349,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 };
             } else if (key >= '2' && key <= '9') {
                 selectItem(parseInt(key));
-            } else if (key === '0') {
-                selectItem(0);
             } else if (key === '?') {
                 openHelpModal();
             }
