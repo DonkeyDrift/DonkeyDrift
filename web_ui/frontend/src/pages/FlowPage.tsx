@@ -25,6 +25,16 @@ const SECTIONS: SectionMeta[] = [
   { id: 'pilot', path: '/pilot', titleKey: 'common.nav.pilotArena', descKey: 'flow.pilotArena.desc' },
 ];
 
+/**
+ * 四个 section 常驻挂载但未必都在视口内；用 content-visibility:auto 让浏览器
+ * 跳过视口外 section 的布局/绘制（DOM 仍在、状态保留），只按 contain-intrinsic-size
+ * 占位。这样切导航平滑滚动时不用每一帧重算/重绘整页，是 #135 滚动卡顿的关键一刀。
+ */
+const SECTION_STYLE: React.CSSProperties = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 640px',
+};
+
 function SectionFallback() {
   const { t } = useTranslation();
   return <div className="py-12 text-sm text-zinc-400">{t('common.loading')}</div>;
@@ -139,25 +149,25 @@ export function FlowPage() {
 
   return (
     <div ref={rootRef} className="space-y-12">
-      <section id="drive" className="scroll-mt-40 lg:scroll-mt-20 space-y-4">
+      <section id="drive" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4">
         <FlowSectionHeader step={1} meta={SECTIONS[0]} />
         <React.Suspense fallback={<SectionFallback />}>
           <DrivePage active={inView.drive} />        </React.Suspense>
       </section>
 
-      <section id="tub-manager" className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
+      <section id="tub-manager" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
         <FlowSectionHeader step={2} meta={SECTIONS[1]} />
         <TubManagerPage />
       </section>
 
-      <section id="trainer" className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
+      <section id="trainer" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
         <FlowSectionHeader step={3} meta={SECTIONS[2]} />
         <React.Suspense fallback={<SectionFallback />}>
           <TrainerPage />
         </React.Suspense>
       </section>
 
-      <section id="pilot" className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
+      <section id="pilot" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
         <FlowSectionHeader step={4} meta={SECTIONS[3]} />
         <React.Suspense fallback={<SectionFallback />}>
           <PilotArenaPage active={inView.pilot} />
