@@ -9,13 +9,17 @@
   URL 改写为局域网 IP（保留端口与 #token=）、远程 host 与无局域网
   IP 时不改写
 - _live_instance_url：实例登记目录扫描（心跳新鲜度、pid 存活、探测
-  结果三级过滤）与 #token= 入口 URL 组装
-- launch_kimi_code_web：存活实例复用（不起子进程）、冷启动拉起
-  kimi web --no-open --host（_FakeProc 脚本化管道输出）成功抓 URL 且进程
-  保持存活、cwd 透传、cwd 非法直接报错、未安装 kimi、冷启动失败后
-  兜底复用、banner 超时杀进程、进程提前退出报错
-以及 POST /api/launch/kimi-code-web 端点：路由、参数校验、CORS 头
-（DC 从 ESP32 origin 跨域调用依赖它）。不起真实 kimi。
+  结果三级过滤）与 #token= 入口 URL 组装；cwd 给定时按
+  /proc/<pid>/cwd 校验实例运行目录（issue #168：匹配复用、不匹配跳过、
+  读不到视为不匹配）
+- launch_kimi_code_web：存活实例复用（不起子进程、复用探测带 cwd）、
+  冷启动拉起 kimi web --no-open --host --port <固定端口>（_FakeProc
+  脚本化管道输出）成功抓 URL 且进程保持存活、cwd 透传、cwd 非法直接
+  报错、未安装 kimi、冷启动失败后兜底复用、banner 超时杀进程、进程
+  提前退出报错
+以及 POST /api/launch/kimi-code-web 端点：路由、参数校验、缺省 cwd
+  为 Projects 工作区（issue #168）、CORS 头（DC 从 ESP32 origin 跨域
+  调用依赖它）。不起真实 kimi。
 """
 
 import json
@@ -213,6 +217,37 @@ class TestLiveInstanceUrl:
         # 返回局域网 host 的 URL（issue #125）
         assert url == "http://192.168.3.10:58627/#token=tok-xyz"
 
+    def test_cwd_matching_instance_reused(self, tmp_path, monkeypatch):
+        # issue #168：cwd 给定时只复用运行目录一致的实例
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        token_file = tmp_path / "server.token"
+        token_file.write_text("tok-xyz\n", encoding="utf-8")
+        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/dkc/projects")
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        url = kimi_web._live_instance_url(inst_dir, token_file,
+                                          cwd="/home/dkc/projects")
+        assert url == "http://192.168.3.10:58627/#token=tok-xyz"
+
+    def test_cwd_mismatching_instance_skipped(self, tmp_path, monkeypatch):
+        # 实例跑在别的目录（如 mycar 里的 TUI 内嵌 server）时不复用，
+        # 由调用方在目标目录另起（issue #168）
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/dkc/projects/mycar")
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        assert kimi_web._live_instance_url(
+            inst_dir, tmp_path / "tk", cwd="/home/dkc/projects") is None
+
+    def test_cwd_proc_gone_treated_as_mismatch(self, tmp_path, monkeypatch):
+        # /proc 读不到（进程刚消失/无权限）时按不匹配处理，不误复用
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: None)
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        assert kimi_web._live_instance_url(
+            inst_dir, tmp_path / "tk", cwd="/home/dkc/projects") is None
+
     def test_loopback_instance_not_lan_reachable_skipped(
             self, tmp_path, monkeypatch):
         inst_dir = tmp_path / "instances"
@@ -283,19 +318,29 @@ class TestLiveInstanceUrl:
 class TestLaunchKimiCodeWeb:
     def test_reuses_live_instance_without_spawning(self):
         spawned = []
+        seen = {}
+
+        def _live(**kw):
+            # 只收关键字参数：live_url_fn 若按位置传参会 TypeError，
+            # 防止 cwd 被误绑到 _live_instance_url 的 instances_dir 上
+            seen.update(kw)
+            return "http://127.0.0.1:58627/#token=t0k"
+
         result = launch_kimi_code_web(
-            cwd=None, timeout_s=5.0,
-            live_url_fn=lambda: "http://127.0.0.1:58627/#token=t0k",
+            cwd="/home/dkc/projects", timeout_s=5.0,
+            live_url_fn=_live,
             popen_fn=_make_popen(spawned))
         assert result == {"status": "ok",
                           "url": "http://192.168.3.10:58627/#token=t0k"}
         assert spawned == []  # 复用路径不起子进程
+        # 复用探测带上了请求的 cwd（issue #168）
+        assert seen["cwd"] == "/home/dkc/projects"
 
     def test_spawn_success_captures_url_and_keeps_proc(self):
         proc = _FakeProc(payload=_WEB_BANNER, hold=True)
         result = launch_kimi_code_web(
             cwd=None, timeout_s=10.0,
-            live_url_fn=lambda: None,
+            live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/home/u/.kimi-code/bin/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
@@ -304,14 +349,16 @@ class TestLaunchKimiCodeWeb:
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in kimi_web._SPAWNED_PROCS
-        # 启动命令是官方子命令，绑 0.0.0.0 供局域网访问，且不开浏览器
-        assert proc.args_seen[-3:] == ["web", "--no-open", "--host"]
+        # 启动命令是官方子命令，绑 0.0.0.0 供局域网访问，不开浏览器，
+        # 且绑固定专属端口（origin 稳定，issue #168）
+        assert proc.args_seen[-4:] == ["--no-open", "--host",
+                                       "--port", str(kimi_web.KIMI_WEB_PORT)]
 
     def test_spawn_passes_cwd_through(self, tmp_path):
         proc = _FakeProc(payload=_WEB_BANNER, hold=True)
         result = launch_kimi_code_web(
             cwd=str(tmp_path), timeout_s=10.0,
-            live_url_fn=lambda: None,
+            live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
@@ -321,7 +368,7 @@ class TestLaunchKimiCodeWeb:
         spawned = []
         result = launch_kimi_code_web(
             cwd="/nonexistent/definitely-not-a-dir", timeout_s=1.0,
-            live_url_fn=lambda: None,
+            live_url_fn=lambda cwd=None: None,
             popen_fn=_make_popen(spawned))
         assert result["status"] == "error"
         assert "不存在" in result["error"]
@@ -330,7 +377,7 @@ class TestLaunchKimiCodeWeb:
     def test_kimi_binary_missing(self):
         result = launch_kimi_code_web(
             cwd=None, timeout_s=1.0,
-            live_url_fn=lambda: None,
+            live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: None)
         assert result["status"] == "error"
         assert "未找到 kimi" in result["error"]
@@ -342,7 +389,7 @@ class TestLaunchKimiCodeWeb:
         live_calls = iter([None, "http://127.0.0.1:58627/#token=t0k"])
         result = launch_kimi_code_web(
             cwd=None, timeout_s=5.0,
-            live_url_fn=lambda: next(live_calls),
+            live_url_fn=lambda cwd=None: next(live_calls),
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
@@ -353,7 +400,7 @@ class TestLaunchKimiCodeWeb:
         proc = _FakeProc(hold=True)  # 一直不出 URL 也不退出
         result = launch_kimi_code_web(
             cwd=None, timeout_s=1.5,
-            live_url_fn=lambda: None,
+            live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "error"
@@ -364,7 +411,7 @@ class TestLaunchKimiCodeWeb:
         proc = _FakeProc(payload=b"boom: something broke\r\n", exit_code=2)
         result = launch_kimi_code_web(
             cwd=None, timeout_s=5.0,
-            live_url_fn=lambda: None,
+            live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "error"
@@ -378,12 +425,17 @@ class TestLaunchKimiCodeWeb:
 # ===========================================================================
 @pytest.fixture()
 def http_server(monkeypatch):
-    fake = lambda cwd=None: {"status": "ok", "url": "https://kimi.example/w"}
+    state = {"cwd": "unset"}
+
+    def fake(cwd=None):
+        state["cwd"] = cwd
+        return {"status": "ok", "url": "https://kimi.example/w"}
+
     monkeypatch.setattr(launcher_server, "launch_kimi_code_web", fake)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), launcher_server.LauncherHandler)
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    yield f"http://127.0.0.1:{srv.server_address[1]}", state
     srv.shutdown()
     thread.join(timeout=2)
 
@@ -398,37 +450,61 @@ def _post(url, body: bytes):
 
 
 def test_endpoint_ok_with_cors_header(http_server):
+    base, state = http_server
     code, headers, payload = _post(
-        http_server + "/api/launch/kimi-code-web", b"{}")
+        base + "/api/launch/kimi-code-web", b"{}")
     assert code == 200
     assert json.loads(payload) == {"status": "ok",
                                    "url": "https://kimi.example/w"}
     # DC（ESP32 origin）跨域 fetch 依赖这个头
     assert headers.get("Access-Control-Allow-Origin") == "*"
+    # 缺省 cwd 是 Projects 工作区，不再落用户主目录（issue #168）
+    assert state["cwd"] == "/home/dkc/projects"
+
+
+def test_endpoint_explicit_cwd_wins(http_server):
+    base, state = http_server
+    code, _headers, _payload = _post(
+        base + "/api/launch/kimi-code-web",
+        json.dumps({"cwd": "/tmp"}).encode())
+    assert code == 200
+    assert state["cwd"] == "/tmp"
+
+
+def test_endpoint_empty_body_uses_projects_default(http_server):
+    base, state = http_server
+    code, _headers, _payload = _post(
+        base + "/api/launch/kimi-code-web", b"")
+    # DC 按钮的空体 POST（Content-Length=0）也落到 Projects（issue #168）
+    assert code == 200
+    assert state["cwd"] == "/home/dkc/projects"
 
 
 def test_endpoint_rejects_non_json_with_cors(http_server):
+    base, _state = http_server
     code, headers, payload = _post(
-        http_server + "/api/launch/kimi-code-web", b"not-json")
+        base + "/api/launch/kimi-code-web", b"not-json")
     assert code == 400
     assert json.loads(payload)["status"] == "error"
     assert headers.get("Access-Control-Allow-Origin") == "*"
 
 
 def test_endpoint_rejects_non_string_cwd(http_server):
+    base, _state = http_server
     code, _headers, payload = _post(
-        http_server + "/api/launch/kimi-code-web",
+        base + "/api/launch/kimi-code-web",
         json.dumps({"cwd": 123}).encode())
     assert code == 400
     assert "cwd" in json.loads(payload)["error"]
 
 
 def test_endpoint_error_from_automation_is_500(http_server, monkeypatch):
+    base, _state = http_server
     monkeypatch.setattr(
         launcher_server, "launch_kimi_code_web",
         lambda cwd=None: {"status": "error", "error": "boom"})
     code, headers, payload = _post(
-        http_server + "/api/launch/kimi-code-web", b"{}")
+        base + "/api/launch/kimi-code-web", b"{}")
     assert code == 500
     assert json.loads(payload)["error"] == "boom"
     assert headers.get("Access-Control-Allow-Origin") == "*"

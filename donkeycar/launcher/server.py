@@ -1085,7 +1085,12 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         """POST /api/launch/kimi-code-web：启动/复用 kimi web，回 URL。
 
         请求体可选 JSON {"cwd": "/abs/path"} 指定 kimi 运行目录，缺省为
-        上位机用户主目录；cwd 不存在直接报错，绝不回退到其它目录。
+        Projects 工作区 ``/home/dkc/projects``（issue #168：DC 按钮空体
+        POST 不带 cwd，之前落到用户主目录，打开的 KCW 进的是工作区列表
+        而非 Projects；DD 菜单显式传同一目录，不受影响）；cwd 不存在
+        直接报错，绝不回退到其它目录。复用路径只复用运行目录匹配的
+        存活实例，冷启动绑固定端口（origin 稳定，localStorage 偏好不
+        丢），详见 kimi_web.py。
         返回的 URL 已改写为上位机局域网 IP（issue #125，远程浏览器可达）。
         长请求：kimi 冷启动可达数十秒，服务端整体超时 120s，
         客户端超时必须 ≥120s。所有响应带 CORS 头（DC 跨域调用，
@@ -1116,6 +1121,9 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                     code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
                 )
                 return
+        # 缺省 cwd：Projects 工作区（issue #168），不落回用户主目录
+        if cwd is None:
+            cwd = "/home/dkc/projects"
         result = launch_kimi_code_web(cwd=cwd)
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,

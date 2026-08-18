@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (1)
+## 2026-08-18 (3)
 
 - feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除
   - `web_ui/frontend/src/components/TubLibrary.tsx`：集成原 Tub 导航器全部能力——
@@ -18,6 +18,23 @@
   - `web_ui/frontend/src/i18n/messages/tubnav.ts`：删除纯 TN 键（`tub.title`/`tub.noRecordsLoaded`/`tub.timeline`/`tub.dragging`/`tub.indexLabel`/`tub.noImage*`/`tub.loop*`/`tub.playOnce*` 等 20 键 zh+en），保留 TubLibrary 在用的 `tub.subtitle`/`tub.steering`/`tub.throttle`/帧控制与刷新键、TubLoader/SimulatorConfig 全部键。
   - `web_ui/frontend/src/themes/theme-light.css`：注释里 TubNavigator index badge 措辞更新为 TubLibrary FPS badge。
   - 测试同步：`TubLibrary.test.tsx` 原有 2 项（自动选最新、pin 置顶）保持不变且通过；vitest 全量 17 文件 89 项通过，`npm run build`（tsc -b + vite build）通过。
+
+## 2026-08-18 (2)
+
+- fix(launcher): DC 打开 Kimi Code Web 后进入"全新状态"——复用路径不看运行目录、入口 URL origin 漂移导致 localStorage 偏好清空、缺省 cwd 落用户主目录（Issue #168）
+  - `donkeycar/launcher/kimi_web.py`：①复用路径校验实例运行目录——实例登记条目无 cwd 字段，新增 `_proc_cwd(pid)` 读 `/proc/<pid>/cwd` 真实路径，`_live_instance_url` 新增 `cwd` 参数，给定 cwd 时逐一比对（`os.path.realpath` 规范化），不匹配（如在 mycar 里跑的 TUI 内嵌 server）或读不到（进程消失/无权限）都跳过不误复用，由调用方在目标目录另起；②冷启动固定专属端口——新增常量 `KIMI_WEB_PORT = 58640`，拉起命令追加 `--port 58640`（避开 kimi 默认 58627：TUI 内嵌 server 默认占它，撞上后 kimi 自动顺延端口反而漂移），入口 URL origin 固定 `http://<LAN IP>:58640`，KCW 存在 localStorage 的置顶/自主模式/语言主题等偏好不再"被清空"；③`launch_kimi_code_web` 快路径与冷启动失败兜底均以 `cwd=` 关键字调用 `live_url_fn`（首参是 instances_dir，位置传参会把 cwd 误绑到实例目录上导致复用永远失败——真实环境联调发现并已修）。
+  - `donkeycar/launcher/server.py`：`_handle_launch_kimi_code_web` 缺省 cwd 从用户主目录改为 Projects 工作区 `/home/dkc/projects`（DC 按钮空体 POST 不带 cwd，此前落到主目录导致 KCW 进的是工作区列表而非 Projects；DD 菜单显式传同一目录不受影响）；显式传 cwd 仍优先；docstring 同步。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 更新与新增——`_live_instance_url` cwd 匹配复用/不匹配跳过/`/proc` 读不到视为不匹配 3 项；冷启动命令含 `--port <KIMI_WEB_PORT>` 断言；复用钩子改为只收关键字参数（抓位置传参回归）；端点测试 fixture 记录收到的 cwd，新增空体 POST 与显式 cwd 两项断言缺省值为 `/home/dkc/projects`。pytest `tests/test_launcher_kimi_web.py` 38 项、launcher 相关全量 113 项通过。
+  - 真实环境验证：重启 launcher 服务后 DC 同款空体 POST 连发 3 次均返回 `http://192.168.3.57:58640/#token=…`（第 1 次冷启动、后 2 次日志确认复用同端口同实例），新实例 `/proc/<pid>/cwd` 确认为 `/home/dkc/projects`；固件侧无需改动（DC 按钮 JS 与 CORS 逻辑不变）。
+
+## 2026-08-18 (1)
+
+- fix(web-ui): DD 驾驶页输入源切换器「手柄/陀螺仪」永远灰色不可选——连接/支持检测被 `enabled` 门控形成先有鸡还是先有蛋的死锁
+  - 根因：`InputSourceSelector` 中手柄项需 `gamepadConnected`、陀螺仪项需 `permissionState !== 'unsupported'` 才可点，但 `DrivePage` 传入的 `useGamepadDrive({ enabled: inputSource === 'gamepad' })` 与 `useGyroDrive({ enabled: inputSource === 'gyro' })` 都在 `!enabled` 时直接 return——未选中该输入源时检测逻辑根本不运行，状态停在初始值（`connected=false` / `permissionState='unsupported'`），按钮永远灰着点不了，形成死锁。
+  - `web_ui/frontend/src/hooks/useGamepadDrive.ts`：`gamepadconnected`/`gamepaddisconnected` 监听拆为独立 effect，组件挂载即注册（不受 `enabled` 门控），选中手柄前插手柄即可点亮可选项；控制轮询 RAF 循环仍只在 `enabled` 时运行。
+  - `web_ui/frontend/src/hooks/useGyroDrive.ts`：新增挂载即执行的支持性检测 effect（不受 `enabled` 门控）：无 `DeviceOrientationEvent` → `unsupported`；存在 `requestPermission`（iOS 13+）→ `prompt`；其余（Android/桌面）→ `granted`。原 `enabled` 门控的 orientation 监听 + RAF 循环不变。
+  - 测试同步：新增 `web_ui/frontend/src/hooks/useGamepadDrive.test.tsx`（2 项：未 enabled 时连接检测仍运行、全部断开后复位）、`useGyroDrive.test.tsx`（3 项：非 iOS 挂载即 granted、iOS 初始 prompt、不支持时 unsupported）。前端 vitest 全量 20 文件 95 项通过，`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-fix-input-source-disabled` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。
 
 ## 2026-08-17 (17)
 
