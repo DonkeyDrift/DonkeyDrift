@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (39)
+## 2026-08-18 (40)
 
 - fix(trainer): 训练器 SSH 凭据不再明文落盘/入库，my-PC 默认配置不再指向云服务器（Issue #219）
   - 根因：`train_my_pc.conf` 与 `train_online.conf` 明文存 `password = dkc@2026`，且 my-PC 配置直接复制云服务器 `haowenpi.com`/`ubuntu`；`donkeycar/management/train_online.py` 的 `_load_config()` 在配置缺失时硬编码生成云服务器默认值，是 my-PC 被污染的来源。
@@ -16,6 +16,19 @@
   - 配置与 gitignore：`web_ui/backend/train_online.conf` 移除密码并取消 git 跟踪；新增 `web_ui/backend/train_my_pc.conf.example` 空模板；`.gitignore` 忽略两个 `.conf`。
   - 测试同步：`tests/test_trainer_mypc.py` 新增/更新——ssh 凭据透传、config 不写密码、get 返回空密码、自动创建的默认配置不含明文密码；trainer 相关 17 项通过；前端 `tsc -b --noEmit` 通过。
   - 注：历史已提交过该明文密码（`train_online.conf`、前端构建产物、`train_online.py`、`useStore.ts` 等多处），建议轮换该密码；历史清洗（filter-repo + 强推）属破坏性/共享操作，需用户另行授权后处理，本次未动历史。本次在 `Tony-issue219-trainer-ssh-credentials` 分支（worktree 作业）完成。
+
+## 2026-08-18 (39)
+
+- feat(drive): Drive 模式选择器与车端模式双向同步，删除「固件模式」徽标并上移 Park 徽标（Issue #223）
+  - 需求：驾驶页模式选择器（user/local_angle/local）与车端实际运行模式双向同步；删除顶部只读「固件模式」徽标，Park 锁定徽标上移到模式选择器旁。
+  - 协议契约（下行 Pi→ESP32，仅定义契约 + 落地 DD 侧；Firmware 侧 #111 尚未实现，端到端打通需等 Firmware）：Serial1 `Arduino.ard_device` 写 `C<m>\n`，m∈{0,1,2}（0=手动/1=半自动/2=全自动），加 `ard_lock`，非法值忽略并 warning。
+  - `donkeycar/parts/drive_api_bridge.py`：新增粘滞 `car_mode`（非 latch，避免主循环漏读单次值）；`_handle_message` 收到 `car_mode` 校验 0/1/2 后存值，非法值 warning；`run_threaded` 输出元组追加第 7 元素 `car/mode_cmd`。
+  - `donkeycar/parts/actuator.py`：`Arduino` 新增 `set_car_mode()`（校验 0/1/2 + `ard_lock` + `write(f"C{mode}\n")`）；新增 `ArdModeCmd` Part（变化去重后调 `controller.set_car_mode`，缺 controller 抛 ValueError）。
+  - `donkeycar/templates/complete.py`：`DriveApiBridge` outputs 追加 `'car/mode_cmd'`；`ARDUINO_CONTROLLER` 分支在 `ArdRc` 后新增 `ArdModeCmd` 接线（`inputs=['car/mode_cmd']`）。
+  - `web_ui/backend/routers/drive.py`：`control_fields` 追加 `car_mode`，前端 `car_mode` 透传到 bridge。
+  - 前端：`DriveModeSelector.tsx` 新增 `driveModeToRcMode`/`rcModeToDriveMode` 映射（user↔0、local_angle↔1、local↔2）；`DrivePage.tsx` 发送时附带 `car_mode`、新增 effect 按 `telemetry.rc_mode` 反向同步本地模式；删除「固件模式」徽标区、Park 徽标上移到模式选择器旁；`i18n/messages/drive.ts` 删除 `drive.firmwareMode`/`drive.unknownMode`（保留 `drive.parkLocked`）。
+  - 测试同步：`test_drive_api_bridge.py` 输出元组断言更新为 7 元素；`test_drive_api_bridge_telemetry.py` 新增 car_mode 粘滞返回与非法值拒绝；`test_actuator.py` 新增 `set_car_mode` 写 `C2\n`/非法不写、`ArdModeCmd` 去重、缺 controller 抛错；`web_ui/backend/tests/test_drive.py` 新增 car_mode 转发；`DriveModeSelector.test.tsx` 新增两组映射测试。已验证：`test_drive_api_bridge.py`+`test_drive_api_bridge_telemetry.py`+`test_actuator.py` 共 83 passed/2 skipped、`test_drive.py`+`test_drive_telemetry_forward.py` 共 24 passed、`test_template_drive_api_bridge.py` 5 passed；前端 vitest 20 文件 102 passed、`npm run check`/`npm run build` 通过。
+  - 注：本次在 `Tony-issue223-drive-mode-sync` 功能分支（worktree `.worktrees/issue223-drive-mode-sync` 作业）完成，PR 合并前 rebase 到最新 `origin/Tony` 解 CHANGELOG 冲突（条目重编号为 (39)）。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (38)
 

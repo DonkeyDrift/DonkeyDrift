@@ -116,7 +116,7 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
 
     outputs = bridge.run_threaded(img_arr="rgb-image", num_records=7, mode="user", recording=False)
 
-    assert outputs == (0.0, 0.0, "user", False, {}, False)
+    assert outputs == (0.0, 0.0, "user", False, {}, False, None)
     assert encoded_images == ["converted-rgb-image-4"]
     assert [p for p in sent_payloads if p.get("type") == "frame"] == [{
         "type": "frame",
@@ -829,9 +829,10 @@ def test_drive_api_bridge_handles_reconnect_simulator():
     assert bridge.reconnect_simulator is True
 
     outputs = bridge.run_threaded(img_arr=None, num_records=0, mode="user", recording=False)
-    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator
-    assert len(outputs) == 6, f"expected 6 outputs, got {len(outputs)}: {outputs}"
-    assert outputs[-1] is True
+    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator, car_mode_cmd
+    assert len(outputs) == 7, f"expected 7 outputs, got {len(outputs)}: {outputs}"
+    assert outputs[5] is True
+    assert outputs[6] is None
     assert bridge.reconnect_simulator is False
 
 

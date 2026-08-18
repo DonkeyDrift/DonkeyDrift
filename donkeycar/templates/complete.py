@@ -789,7 +789,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
                   'steering', 'throttle', 'pilot/angle', 'pilot/throttle']
     V.add(ctr,
           inputs=ctr_inputs,
-          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons'],
+          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'car/mode_cmd'],
           threaded=True)
 
     #
@@ -1269,6 +1269,12 @@ def add_drivetrain(V, cfg):
             from donkeydrifter.parts.actuator import ArdRc
             rc_input = ArdRc(controller=arduino_controller)
             V.add(rc_input, outputs=['rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'])
+
+            # web UI 下发的车控模式命令（car/mode_cmd）经 Serial1 下行到 ESP32，
+            # 与遥控器 CH_MODE 双向同步（Issue #223 / Firmware#111）。去重写串口。
+            from donkeydrifter.parts.actuator import ArdModeCmd
+            mode_cmd = ArdModeCmd(controller=arduino_controller)
+            V.add(mode_cmd, inputs=['car/mode_cmd'])
 
             # 当启用 IMU 时，从 ESP32 串口读取 IMU 数据（ArdImu 共享 arduino_controller 的串口连接）
             if cfg.HAVE_IMU:

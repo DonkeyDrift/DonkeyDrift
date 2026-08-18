@@ -621,7 +621,7 @@ async def drive_ws(
                     continue
 
                 # 客户端发来的控制指令，转发给车端
-                control_fields = ["angle", "throttle", "drive_mode", "recording", "buttons"]
+                control_fields = ["angle", "throttle", "drive_mode", "recording", "buttons", "car_mode"]
                 if any(k in msg for k in control_fields):
                     if "angle" in msg:
                         drive_state.angle = float(msg["angle"])
