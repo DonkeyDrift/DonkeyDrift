@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-18 (10)
+
+- feat(web-ui): Trainer 本地训练「高级选项」由勾选框改为点击展开的折叠面板（Issue #183）
+  - 需求：Trainer 页本地训练配置的「高级选项」原为 checkbox 勾选形态，改为下拉折叠面板——点击整行在下方展开高级字段，再点收起，不再有勾选框。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：勾选框替换为与 Drive 页「控制参数」面板（`ParameterPanel.tsx`）同款的整行按钮 + 右侧 ChevronDown/ChevronUp 方向箭头（lucide-react），点击切换 `advancedEnabled`，带 `aria-expanded` 无障碍标注；样式用 ParameterPanel 同款 `text-zinc-400 hover:text-zinc-200` 类名，深浅主题经 theme-light.css 类名级重映射自动适配。
+  - 语义保持：`advancedEnabled` 仍是"高级覆盖生效"开关（展开=启用、收起=不启用），持久化（useStore）、`TrainerPage.tsx` 按 myconfig.py 覆盖自动置 true（面板默认展开）与训练时写 myconfig 的联动全部不动；收起时已填值保留不重置。i18n 沿用 `trainer.advancedOptions`，无新增词条。
+  - 测试同步：无 LocalConfigForm 专属测试，无需新增；前端 vitest 全量 19 文件 97 项、`tsc -b --noEmit`、eslint（改动文件）、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-trainer-advanced-collapse` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (9)
 
 - fix(web-ui): Drive 页控制参数滑块轨道浅色模式下仍为黑色——theme-light 增补伪元素变体类名覆盖（Issue #169）
