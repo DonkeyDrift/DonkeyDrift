@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-18 (35)
+
+- feat(web-ui): 虚拟摇杆面板默认折叠——每次进入/刷新 Drive 页都折叠为「虚拟摇杆」标题一行
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`joystickOpen` 初始状态由 `useState(true)` 改为 `useState(false)`；点击标题行展开/收起交互不变。
+  - 验证：`npm run build`（含 `tsc -b`）通过；无 Firmware 改动、无需 OTA。
+  - 注：主工作区有并行会话在制改动，本次在 worktree（`.worktrees/joystick-default-collapsed`）基于最新 `origin/Tony` 重做（cherry-pick 原提交），分支 `Tony-joystick-default-collapsed-v2`。
+
 ## 2026-08-18 (34)
 
 - fix(launcher): KCW 入口 URL 用 mDNS 主机名后被 kimi 的 DNS-rebinding 栅栏 403 拦截——冷启动加 `--allowed-host` 放行入口 host，复用前重探入口 host 跳过未放行的旧实例（Issue #168 后续）
