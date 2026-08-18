@@ -1,13 +1,20 @@
 # 变更日志
 
-## 2026-08-18 (17)
+## 2026-08-18 (18)
 
 - fix(launcher): DC 点击进入 DD 报"无法连接服务器"——web 进程启动失败仍报 launched 并重定向死端口，改为报错 + 跳转页就绪轮询（用户口述报障，journalctl 实锤）
   - 背景：`donkey web` 冷启动时前端生产构建失败（源码在制改动致 `tsc -b && vite build` 报错）直接退出，但 `_wait_for_web_ready` 对"进程提前退出"只带 warning 不报错，`_launch_drive` 仍返回 `launched` + 兜底前端端口 5188；而生产模式（bundled web ui，#135）前端由后端 8000 端口托管、5188 从不监听——跳转页拿到 URL 立即重定向，Safari 报"无法连接服务器"。三个叠加缺陷：进程死了仍报 launched / 兜底端口在生产模式必死 / 跳转页无就绪轮询（2026-08-12 加过的轮询被 c613ce73 菜单页重写吞掉）。
   - `donkeycar/launcher/server.py` `_launch_drive`：`_wait_for_web_ready` 返回 warning 时区分两种情况——web 进程已退出（`poll()` 非 None）必然失败，改返回 `status:"error"` 并附具体原因与日志查看命令，不再起车进程、不写 PID 文件；进程仍在但超时、且登记未出现时，生产模式兜底前端端口从入参 5188 修正为后端端口（开发模式 vite 确实监听 5188，保持不变）。
   - `donkeycar/launcher/server.py` `LAUNCH_DRIVE_HTML`：跳转前加就绪轮询（30 次 × 1s，`mode:'no-cors'` fetch 探测目标可连，复用菜单页 launchDrive 既有模式），就绪才重定向；超时不通则停下显示"Web UI 未就绪，未跳转（可稍后重试）"并透出 warning，不盲目跳死端口；i18n 补 `waiting`/`notready` 中英词条。
   - 测试同步：`tests/test_launcher_drive_launch.py` 新增 3 项——web 进程提前退出报 error 且不起车进程不写 PID、生产模式超时前端端口修正为后端端口、开发模式超时保持入参端口；`tests/test_launcher_language_autodetect.py` 跳转页双语断言同步（新词条、3 处 failed 文案、轮询语句）。本文件 12 项全部通过，launcher/webui 相关 135 passed（terminal 2 项失败为 origin/Tony 基线遗留，与本次无关）；另起临时 launcher 实例实测 `/launch/drive` 页面含轮询逻辑与双语提示。
-  - 注：本次改动在 `Tony-fix-launch-dead-port` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+  - 注：本次改动在 `Tony-fix-launch-dead-port` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`（合并时 CHANGELOG 与虚拟摇杆条目解冲突，重编号为 (18)）。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (17)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后只留标题一行——选择框随折叠一起收起，展开时恢复
+  - 背景：上一轮把输入源选择框挪进摇杆面板标题栏并让摇杆区可折叠后，折叠态标题栏右侧仍常驻输入源选择框，且面板内「可编程按键 / 控制参数 / 快捷键说明」也仍在显示，折叠后并非用户期望的"只剩一行"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：标题栏的 `InputSourceSelector` 包进 `joystickOpen` 条件渲染（展开才显示）；原先只包摇杆圆盘区的条件渲染扩大为包住整个面板主体（竖向油门条 + 摇杆圆盘 + 控制参数条 + 可编程按键 + 参数面板 + 快捷键说明），折叠态只保留"虚拟摇杆"标题 + 展开/收起箭头一行；标题栏 `mb-4` 改为折叠时 `mb-0`，避免底部留白。
+  - 测试同步：前端 vitest 全量 19 文件 98 项通过，`tsc -b --noEmit` 通过；Playwright 实测折叠态面板文本仅剩「虚拟摇杆」，展开态选择框/油门/控制参数/快捷键说明全部恢复。
 
 ## 2026-08-18 (16)
 
@@ -24,6 +31,22 @@
   - `web_ui/frontend/src/i18n/messages/trainer.ts`：新增/更新 mypc 相关词条（`tabMyPc`/`tabLocal`/`tabCloud`/`startMyPcTraining`/`myPcTraining`，zh/en）。
   - 测试同步：新增 `web_ui/backend/tests/test_trainer_mypc.py`（3 项：mypc 路由建 job、缺省参数、stop 触发 stop_event）+ `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`（3 项：三档渲染/选中高亮/点击回调）。后端 pytest 全量 79 项、前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit` 全部通过。
   - 注：本次改动在 `Tony-issue170-trainer-3mode` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (17)
+
+- feat(web-ui): Drive/TM/Trainer/PA 合并为纵向滚动大页面，点导航锚点平滑滚动到对应区域（Issue #178）
+  - 需求：DD 四个页面（Drive/TM/Trainer/PA）原为独立路由（`/`、`/drive`、`/trainer`、`/pilot`），改为一个纵向连续滚动的大页面，顺序自上而下 Drive→TM→Trainer→PA，点顶部导航滑到对应 section，形成「开车采数据→管数据→训练→评测」的流程引导；Car Connector 保持独立路由、不在合并范围。
+  - `web_ui/frontend/src/App.tsx`：删除 Home 占位页与 KeepAliveTubManager；路由改为「`/connector` → CarConnectorPage」+「`/*` → FlowPage」兜底——同一兜底路由保证 `#/drive`、`#/tub`、`#/trainer`、`#/pilot` 四个 hash 深链导航切换时只改 pathname、不重挂载 FlowPage（保住 #135 常驻保活）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`（新增）：四 section 固定顺序堆叠，每段带编号徽标 + 标题 + 流程描述 + 分隔线；IntersectionObserver 滚动联动（scroll spy，可见比例最大者为 activeSection）；按 pathname 平滑 scrollIntoView 到对应 section（懒加载 chunk 未就绪时 rAF 轮询等待；jsdom 无 scrollIntoView 时跳过）。
+  - `web_ui/frontend/src/store/useFlowStore.ts`（新增）：zustand 存 activeSection，供 Layout 高亮当前导航。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx`（新增）：TubManagerPage 从 App.tsx 迁出，作为流程页 TM section，自身逻辑不变。
+  - `web_ui/frontend/src/components/Layout.tsx`：四项导航改为锚点（`/drive`、`/tub`、`/trainer`、`/pilot`），激活态随滚动联动；CC 仍是独立路由高亮；手机菜单点击即收起（含同 path 重复点击）。#179 的标题链接改动保持不变。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `active` prop，`useDriveHotkeys`/`useKeyboardDrive` 仅在 drive section 可见时启用，避免同页常驻后 R/M/U/S/A/I/J/K/L 在其它区域误触；移除页内 `drive.title` 标题（上移到 section 头）。
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：新增 `active` prop，空格播放/暂停仅在 pilot section 可见时启用；移除页内 `arena.pageTitle`/`arena.pageDescription` 标题块（上移到 section 头）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：移除页内 `trainer.title` 标题行，ModeTabs 右对齐保留。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：新增 flow.drive/tubManager/trainer/pilotArena.desc 四条流程描述（zh/en）。
+  - 测试同步：`App.test.tsx` 的 keep-alive 回归测试改为断言「TM 在流程页各 section 间常驻、切 /connector 卸载、回切因已加载不重拉 tub」；vitest 全量 19 文件 98 项、`tsc -b --noEmit`、eslint（改动文件）、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-issue178-unified-flow-page` 功能分支完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (15)
 

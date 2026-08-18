@@ -21,7 +21,12 @@ import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
 import { Circle, ChevronDown, ChevronUp } from 'lucide-react';
 
-export const DrivePage: React.FC = () => {
+type DrivePageProps = {
+  /** 该 section 是否在视口内：滚走后停用全局快捷键/键盘驾驶，避免误触（#178） */
+  active?: boolean;
+};
+
+export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
   const { t } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
@@ -79,7 +84,7 @@ export const DrivePage: React.FC = () => {
   }, [configPath]);
 
   useKeyboardDrive({
-    enabled: inputSource === 'keyboard',
+    enabled: active && inputSource === 'keyboard',
     params,
     onChange: (a, t) => {
       keyboardRef.current = { angle: a, throttle: t };
@@ -217,8 +222,9 @@ export const DrivePage: React.FC = () => {
     }
   }, [recording, send]);
 
-  // 快捷键
+  // 快捷键（仅在 drive section 可见时启用，避免流程页其它区域误触 #178）
   useDriveHotkeys({
+    enabled: active,
     onToggleRecording: toggleRecording,
     onCycleMode: cycleMode,
     onSetModeUser: () => handleModeChange('user'),
@@ -234,9 +240,8 @@ export const DrivePage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* 顶部工具栏：窄屏允许换行，避免一排溢出 */}
+      {/* 顶部工具栏：窄屏允许换行，避免一排溢出（页内标题已上移到 section 头 #178） */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-zinc-200">{t('drive.title')}</h2>
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
           <ModelSelector
@@ -296,8 +301,12 @@ export const DrivePage: React.FC = () => {
 
         {/* 控制区 */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col">
-          {/* 标题栏：虚拟摇杆折叠开关 + 输入源选择 */}
-          <div className="text-sm text-zinc-400 mb-4 flex items-center justify-between gap-2">
+          {/* 标题栏：虚拟摇杆折叠开关（展开时右显输入源选择，折叠后仅剩标题一行） */}
+          <div
+            className={`text-sm text-zinc-400 flex items-center justify-between gap-2 ${
+              joystickOpen ? 'mb-4' : 'mb-0'
+            }`}
+          >
             <button
               onClick={() => setJoystickOpen(!joystickOpen)}
               className="flex items-center gap-1 hover:text-zinc-200 transition-colors"
@@ -306,29 +315,30 @@ export const DrivePage: React.FC = () => {
               <span className="font-medium">{t('drive.virtualJoystick')}</span>
               {joystickOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
-            <InputSourceSelector
-              value={inputSource}
-              onChange={setInputSource}
-              gamepadConnected={gamepadConnected}
-              gyroAvailable={permissionState !== 'unsupported'}
-            />
-          </div>
-          <div className="flex-1 flex flex-col items-center gap-4">
             {joystickOpen && (
-              <div className="grid grid-cols-[auto_220px] gap-6">
-                <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
-                <div className="flex flex-col items-center gap-2 w-[220px]">
-                  <VirtualJoystick
-                    onChange={(a, t) => {
-                      joystickRef.current = { angle: a, throttle: t };
-                      lastInputType.current = 'joystick';
-                    }}
-                    size={220}
-                  />
-                  <ControlBars angle={angle} className="w-full" />
-                </div>
-              </div>
+              <InputSourceSelector
+                value={inputSource}
+                onChange={setInputSource}
+                gamepadConnected={gamepadConnected}
+                gyroAvailable={permissionState !== 'unsupported'}
+              />
             )}
+          </div>
+          {joystickOpen && (
+          <div className="flex-1 flex flex-col items-center gap-4">
+            <div className="grid grid-cols-[auto_220px] gap-6">
+              <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+              <div className="flex flex-col items-center gap-2 w-[220px]">
+                <VirtualJoystick
+                  onChange={(a, t) => {
+                    joystickRef.current = { angle: a, throttle: t };
+                    lastInputType.current = 'joystick';
+                  }}
+                  size={220}
+                />
+                <ControlBars angle={angle} className="w-full" />
+              </div>
+            </div>
             <ProgrammableButtons className="w-full max-w-[240px]" />
             <ParameterPanel className="w-full max-w-[360px]" />
             <div className="text-[10px] text-zinc-500 text-center">
@@ -336,6 +346,7 @@ export const DrivePage: React.FC = () => {
               {t('drive.hotkeysLine2')}
             </div>
           </div>
+          )}
         </div>
       </div>
 
