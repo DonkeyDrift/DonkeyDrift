@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-18 (29)
+
+- fix(web-ui): 修复 DD 前端深链（`/connector`、`/drive` 等）刷新/直达返回 404——根静态文件挂载改为 SPA fallback 兜底
+  - 根因：`main.py` 用 `app.mount("/", StaticFiles(html=True))` 服务根目录静态文件，它注册在 `@app.get("/{full_path:path}")` SPA fallback 之前，拦截了所有路径——前端深链（无扩展名、非真实文件）被 StaticFiles 判为 404，fallback 永远轮不到，导致用户在 `/connector` 等页面刷新或直接访问时得到 `{"detail":"Not Found"}`（Issue #177 收尾时用户反馈"看不到改动/无法连接服务器"暴露）。
+  - `web_ui/backend/main.py`：去掉根目录 `StaticFiles` 挂载，`spa_fallback` 改为——① 真实存在的根目录静态文件（favicon、robots.txt 等）经 `realpath` 越界校验后直接 `FileResponse`；② 不存在的 API 路径（`api`/`api/*`）保持 404；③ 其余一律回退到 `index.html` 交给前端路由。`/assets/*` 仍由独立 mount 服务，不受影响。
+  - 测试同步：后端 pytest 全量 82 项通过；手动验证 `/connector`、`/drive`、`/` 返回 200、`/assets/*.js` 200、`/api/provisioning/status` 404、`/api/connector/config` 200。
+
 ## 2026-08-18 (28)
 
 - fix(trainer): Trainer 三档标签改为「本机 / 车载电脑 / 云端」，让「本机」明确指用户自己的电脑、「车载电脑」指跑 DD 后端的 Linux 机器（Issue #170 收尾）
