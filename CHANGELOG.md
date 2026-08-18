@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-18 (19)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后面板真正缩小——消除 grid 拉伸导致的"内容只剩一行但框未变小"
+  - 背景：控制面板在 `grid grid-cols-1 lg:grid-cols-3` 中作为第三列 grid item，默认 `align-self: stretch` 被拉伸到与左侧摄像头区（视频流 + 遥测图，较高）同高；折叠后内容虽只剩标题一行，但灰色面板框仍保持满高，下方"空出来"的区域实际是面板内部空白，视觉上"没变小"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：控制区外层 div 加 `self-start`，让面板高度随内容收缩——折叠后只剩标题一行、下方真正空出；展开时顶部对齐、高度由内容决定。
+  - 测试同步：前端 vitest 全量 100 项通过，`tsc -b --noEmit` 通过。
+
 ## 2026-08-18 (18)
 
 - feat(web-ui): 顶栏高级入口改为导航链接样式——Drift Console 移到品牌右侧/Drive 左侧、Kimi Code Web 移到 Car Connector 右侧，弱化处理一眼可辨为高级选项（Issue #175）
