@@ -1,5 +1,22 @@
 # 变更日志
 
+## 2026-08-18 (40)
+
+- fix(trainer): 训练器 SSH 凭据不再明文落盘/入库，my-PC 默认配置不再指向云服务器（Issue #219）
+  - 根因：`train_my_pc.conf` 与 `train_online.conf` 明文存 `password = dkc@2026`，且 my-PC 配置直接复制云服务器 `haowenpi.com`/`ubuntu`；`donkeycar/management/train_online.py` 的 `_load_config()` 在配置缺失时硬编码生成云服务器默认值，是 my-PC 被污染的来源。
+  - 后端：
+    - `donkeycar/management/train_online.py`：`_load_config()` 默认 host/user/password 全部置空，去掉硬编码云服务器与密码；`connect_ssh(credentials=None)` 支持调用方传入会话内凭据（host/user/password/key_filename），空密码改走默认 SSH 密钥认证。
+    - `web_ui/backend/web_online_trainer.py`、`web_ui/backend/trainer_engine.py`：新增 `ssh_credentials` 参数并透传到 `connect_ssh`，凭据仅内存传递、不落盘。
+    - `web_ui/backend/routers/trainer.py`：新增 `SSHCredentials` 模型；`OnlineTrainRequest`/`MyPcTrainRequest` 增加 `ssh` 字段；`GET /trainer/config` 不再返回真实密码（固定 `""`）；`POST /trainer/config` 不再写 `password`；训练启动把 `ssh` 凭据透传给引擎。
+  - 前端：
+    - `store/useStore.ts`：`trainerOnlineConfig` 默认去掉明文密码与云服务器（改空）；`trainerMyPcConfig` 保持空默认。
+    - `services/api.ts`：`TrainerConfig` 去掉 `password`、新增 `SSHCredentials`；`startOnlineTrain`/`startMyPcTrain` 增加 `ssh` 参数。
+    - `hooks/useTrainingJob.ts`：非敏感项仍写 conf，密码改随训练请求 `ssh` 会话内传递。
+    - `components/trainer/RemoteConfigForm.tsx`、`pages/TrainerPage.tsx`、`i18n/messages/trainer.ts`：my-PC 首次使用显示填写引导提示。
+  - 配置与 gitignore：`web_ui/backend/train_online.conf` 移除密码并取消 git 跟踪；新增 `web_ui/backend/train_my_pc.conf.example` 空模板；`.gitignore` 忽略两个 `.conf`。
+  - 测试同步：`tests/test_trainer_mypc.py` 新增/更新——ssh 凭据透传、config 不写密码、get 返回空密码、自动创建的默认配置不含明文密码；trainer 相关 17 项通过；前端 `tsc -b --noEmit` 通过。
+  - 注：历史已提交过该明文密码（`train_online.conf`、前端构建产物、`train_online.py`、`useStore.ts` 等多处），建议轮换该密码；历史清洗（filter-repo + 强推）属破坏性/共享操作，需用户另行授权后处理，本次未动历史。本次在 `Tony-issue219-trainer-ssh-credentials` 分支（worktree 作业）完成。
+
 ## 2026-08-18 (39)
 
 - feat(drive): Drive 模式选择器与车端模式双向同步，删除「固件模式」徽标并上移 Park 徽标（Issue #223）

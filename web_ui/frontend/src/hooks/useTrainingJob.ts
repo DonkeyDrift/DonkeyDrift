@@ -114,11 +114,10 @@ export function useTrainingJob() {
       return;
     }
 
-    // Save config first
+    // 非敏感设置持久化到 conf；密码只在会话内随请求传递，不落盘。
     await setTrainerConfig({
       host: cfg.host,
       user: cfg.user,
-      password: cfg.password,
       remote_dir_base: cfg.remoteDirBase,
       model_name: cfg.modelName,
       python_path: cfg.pythonPath,
@@ -127,6 +126,11 @@ export function useTrainingJob() {
     const { job_id } = await start({
       config_file: configFile,
       working_dir: configPath,
+      ssh: {
+        host: cfg.host,
+        user: cfg.user,
+        password: cfg.password,
+      },
     });
 
     const job: TrainingJob = {

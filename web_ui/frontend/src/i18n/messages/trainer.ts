@@ -69,6 +69,8 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.host': '主机',
     'trainer.user': '用户名',
     'trainer.password': '密码',
+    'trainer.myPcFirstUseHint':
+      '填写这台电脑的 SSH 连接信息（主机 / 用户名 / 密码）。密码仅本次会话使用，不会保存到磁盘。',
     'trainer.remoteDirBase': '远程目录基路径',
     'trainer.pythonPath': 'Python 路径',
     'trainer.myPcProbe': '环境检测',
@@ -150,6 +152,8 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.host': 'Host',
     'trainer.user': 'User',
     'trainer.password': 'Password',
+    'trainer.myPcFirstUseHint':
+      "Enter this computer's SSH connection details (host / user / password). The password is used only for this session and is not saved to disk.",
     'trainer.remoteDirBase': 'Remote Dir Base',
     'trainer.pythonPath': 'Python Path',
     'trainer.myPcProbe': 'Environment Check',

@@ -150,9 +150,9 @@ export const useStore = create<AppState>()(
       // Trainer defaults
       trainingJob: null,
       trainerOnlineConfig: {
-        host: 'haowenpi.com',
-        user: 'ubuntu',
-        password: 'dkc@2026',
+        host: '',
+        user: '',
+        password: '',
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',

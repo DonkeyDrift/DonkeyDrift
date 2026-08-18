@@ -203,10 +203,16 @@ export const getImageUrl = (path: string, tubPath?: string) => {
 export interface TrainerConfig {
   host: string;
   user: string;
-  password: string;
   remote_dir_base: string;
   model_name: string;
   python_path: string;
+}
+
+export interface SSHCredentials {
+  host?: string;
+  user?: string;
+  password?: string;
+  key_filename?: string;
 }
 
 export const getTrainerConfig = async (configFile = 'train_online.conf') => {
@@ -357,6 +363,7 @@ export const startLocalTrain = async (params: {
 export const startOnlineTrain = async (params: {
   config_file?: string;
   working_dir?: string;
+  ssh?: SSHCredentials;
 }) => {
   const response = await api.post('/trainer/train/online', params);
   return response.data;
@@ -365,6 +372,7 @@ export const startOnlineTrain = async (params: {
 export const startMyPcTrain = async (params: {
   config_file?: string;
   working_dir?: string;
+  ssh?: SSHCredentials;
 }) => {
   const response = await api.post('/trainer/train/mypc', params);
   return response.data;

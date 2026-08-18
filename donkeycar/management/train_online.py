@@ -160,10 +160,9 @@ class OnlineTrainer:
         if not os.path.exists(self.config_file):
             current_dir_name = os.path.basename(os.getcwd())
             config["Remote"] = {
-                "host": "haowenpi.com",
-                "user": "ubuntu",
-                "password": "dkc@2026",
-                "remote_dir_base": "~/projects",  # 修改为父级目录
+                "host": "",
+                "user": "",
+                "remote_dir_base": "~/projects",
                 "model_name": "model",
                 "python_path": "~/miniconda3/envs/donkey/bin/python"
             }
@@ -241,18 +240,36 @@ class OnlineTrainer:
         self._log(f"Packaged data to {filepath}, size={size}")
         return filepath, size
 
-    def connect_ssh(self):
-        host = self.get_config_value("host")
-        user = self.get_config_value("user")
-        password = self.get_config_value("password")
-        
+    def connect_ssh(self, credentials=None):
+        # 优先使用调用方传入的内存凭据（会话内传递、不落盘）；否则回退读配置。
+        if credentials:
+            host = credentials.get("host") or self.get_config_value("host")
+            user = credentials.get("user") or self.get_config_value("user")
+            password = credentials.get("password")
+            key_filename = credentials.get("key_filename")
+        else:
+            host = self.get_config_value("host")
+            user = self.get_config_value("user")
+            password = self.get_config_value("password")
+            key_filename = None
+
+        # 空密码/空 key 不作为明文空串传给 paramiko，改走默认 SSH 密钥认证。
+        password = password or None
+        key_filename = key_filename or None
+
         self.ssh_client = paramiko.SSHClient()
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        
+
         retries = 3
         for attempt in range(retries):
             try:
-                self.ssh_client.connect(host, username=user, password=password, timeout=10)
+                self.ssh_client.connect(
+                    host,
+                    username=user,
+                    password=password,
+                    key_filename=key_filename,
+                    timeout=10,
+                )
                 console.print(f"[bold green][OK] SSH 连接到 {host}:22 成功[/bold green]")
                 self._log(f"SSH connected to {host}")
                 self.sftp_client = self.ssh_client.open_sftp()
@@ -260,7 +277,7 @@ class OnlineTrainer:
             except Exception as e:
                 console.print(f"[yellow]连接尝试 {attempt+1}/{retries} 失败: {e}[/yellow]")
                 time.sleep(1)
-        
+
         self._log("SSH connection failed after retries", success=False)
         raise ConnectionError(f"Failed to connect to {host} after {retries} attempts")
 

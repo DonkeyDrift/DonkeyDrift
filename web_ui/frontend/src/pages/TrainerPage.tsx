@@ -254,6 +254,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
             <>
               <RemoteConfigForm
                 titleKey="trainer.myPcTraining"
+                hintKey="trainer.myPcFirstUseHint"
                 host={myPcForm.host}
                 onHostChange={(v) => setMyPcForm((f) => ({ ...f, host: v }))}
                 user={myPcForm.user}

@@ -210,7 +210,8 @@ class TrainingJobManager:
     # Online training
     # ------------------------------------------------------------------
     async def run_online(self, job: TrainingJob, config_file: str = "train_online.conf",
-                         working_dir: Optional[str] = None):
+                         working_dir: Optional[str] = None,
+                         ssh_credentials: Optional[dict] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
 
@@ -222,7 +223,8 @@ class TrainingJobManager:
                 trainer = WebOnlineTrainer(
                     config_file=config_file,
                     log_queue=thread_queue,
-                    working_dir=cwd
+                    working_dir=cwd,
+                    ssh_credentials=ssh_credentials
                 )
                 trainer.run(no_interactive=True)
             except Exception as e:
@@ -274,14 +276,16 @@ class TrainingJobManager:
     # My-PC training (SSH callback to the user's own computer)
     # ------------------------------------------------------------------
     async def run_mypc(self, job: TrainingJob, config_file: str = "train_my_pc.conf",
-                       working_dir: Optional[str] = None):
+                       working_dir: Optional[str] = None,
+                       ssh_credentials: Optional[dict] = None):
         """Train on the user's own computer (the machine running the browser).
 
         Same SSH pipeline as online training, but driven by a separate config
         file (train_my_pc.conf) pointing at the user's machine instead of a
         cloud server.
         """
-        await self.run_online(job, config_file=config_file, working_dir=working_dir)
+        await self.run_online(job, config_file=config_file, working_dir=working_dir,
+                              ssh_credentials=ssh_credentials)
 
     # ------------------------------------------------------------------
     # Shared parsing
