@@ -1,11 +1,67 @@
 # 变更日志
 
-## 2026-08-18 (12)
+## 2026-08-18 (17)
 
 - fix(web-ui): DD 驾驶页虚拟摇杆折叠后只留标题一行——选择框随折叠一起收起，展开时恢复
   - 背景：上一轮把输入源选择框挪进摇杆面板标题栏并让摇杆区可折叠后，折叠态标题栏右侧仍常驻输入源选择框，且面板内「可编程按键 / 控制参数 / 快捷键说明」也仍在显示，折叠后并非用户期望的"只剩一行"。
   - `web_ui/frontend/src/pages/DrivePage.tsx`：标题栏的 `InputSourceSelector` 包进 `joystickOpen` 条件渲染（展开才显示）；原先只包摇杆圆盘区的条件渲染扩大为包住整个面板主体（竖向油门条 + 摇杆圆盘 + 控制参数条 + 可编程按键 + 参数面板 + 快捷键说明），折叠态只保留"虚拟摇杆"标题 + 展开/收起箭头一行；标题栏 `mb-4` 改为折叠时 `mb-0`，避免底部留白。
   - 测试同步：前端 vitest 全量 19 文件 98 项通过，`tsc -b --noEmit` 通过；Playwright 实测折叠态面板文本仅剩「虚拟摇杆」，展开态选择框/油门/控制参数/快捷键说明全部恢复。
+
+## 2026-08-18 (16)
+
+- feat(trainer): Trainer 页训练位置从「本地/云端」两档扩为三档——我这台电脑 / 当前这台 Linux 电脑 / 云端（Issue #170）
+  - 背景：旧「本地」档 = 在 DD 后端所在 Linux 机器上训练；旧「云端」档 = SSH 到 `train_online.conf` 配置的远端训练；缺少"在用户自己这台电脑（SSH 客户端/浏览器所在机）上训练"的选项。方案：「我这台电脑」档复用云端 SSH 管线，但方向相反——后端 SSH 回访用户电脑，用独立配置 `train_my_pc.conf`。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.tsx`：两档扩为三档（`mypc` 我这台电脑 / `local` 当前这台 Linux 电脑 / `online` 云端），导出 `TrainerMode` 类型。
+  - `web_ui/backend/routers/trainer.py`：新增 `MyPcTrainRequest` 与 `POST /train/mypc`（缺省 `config_file=train_my_pc.conf`）。
+  - `web_ui/backend/trainer_engine.py`：`TrainingJob.mode` 与 `create_job` 支持 `mypc`；`stop_job` 对 `mypc` 走 `stop_event`（同 online）；新增 `run_mypc` 复用 `run_online` 的 SSH 管线。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：抽出 `startSshTraining` 共用 SSH 启动逻辑，新增 `startMyPc`（写 `train_my_pc.conf`）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：`mode` 三档；online/mypc 各一套独立表单状态，mount 时分别加载 `train_online.conf` / `train_my_pc.conf`；启动按钮按档位显示文案。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：新增 `titleKey` prop（云端/我这台电脑标题复用）。
+  - `web_ui/frontend/src/store/useStore.ts`：新增 `trainerMyPcConfig` + `setTrainerMyPcConfig` 并持久化。
+  - `web_ui/frontend/src/services/api.ts`：新增 `startMyPcTrain`。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：新增/更新 mypc 相关词条（`tabMyPc`/`tabLocal`/`tabCloud`/`startMyPcTraining`/`myPcTraining`，zh/en）。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_mypc.py`（3 项：mypc 路由建 job、缺省参数、stop 触发 stop_event）+ `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`（3 项：三档渲染/选中高亮/点击回调）。后端 pytest 全量 79 项、前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit` 全部通过。
+  - 注：本次改动在 `Tony-issue170-trainer-3mode` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (15)
+
+- fix(launcher): DC 终端长时间无交互断线丢会话——PTY 会话与 WS 连接解耦，断线宽限期 + 按 sid 重连接回 + 断线输出回放补发 + 前端自动退避重连（Issue #173）
+  - 背景：DC（Drifter Console）Web 终端的 PTY 会话与 WebSocket 连接一一绑定，浏览器闲置/休眠/网络抖动导致 WS 断开后服务端直接关闭 PTY，重新打开终端只能开新会话，现场输出与运行中进程全部丢失。
+  - `donkeycar/launcher/terminal.py`：
+    - `TerminalSession` 与连接解耦：不再持有固定 writer，新增 `attach(writer)`（接入新连接并补发回放缓冲）/ `detach(writer=None)`（定向解除，只 detach 属于本次连接的 writer，防旧连接收尾误清新 writer 的竞态）；断线期间子进程输出经 `_stash()` 存入回放缓冲（`_REPLAY_CAP` 1MiB 环形上限）。
+    - 新增模块级 `_sessions` 注册表（sid→session，`_sessions_lock` 保护）、`_acquire_session(requested_sid)`（按 sid 复用存活会话或新建）、惰性启动的 `_ensure_sweeper()` 后台清扫线程（30s 周期调用 `_sweep_once()`）与 `_sweep_once(now)`（可单测的清扫单批）——断线后宽限期 `_SESSION_GRACE=900s` 内可重连接回，超时且无 writer 的会话才销毁回收。
+    - `handle_terminal_ws` 解析查询参数 `?session=<sid>`，建连后首帧下发 `{"type":"session","id":..,"reattached":..}`；WS 断开只 `detach` 不 `close`，PTY 进程与输出缓冲保留；会话真正 `close()` 时从注册表注销。
+  - `donkeycar/launcher/terminal_static/terminal.html`：记录服务端下发的会话 ID（`lastSid`），重连 URL 带 `?session=` 请求接回；断线后自动退避重连（500ms 起指数退避 ×2 封顶 10s，`visibilitychange`/`online` 事件立即重试）；收到 exit 帧置 `exited=true` 不再自动重连；重连未接回（新会话）时 `term.reset()` 清屏避免新旧输出混杂；断线 overlay 点击改为触发 `connect()` 而非整页 `location.reload()`；i18n 删 lost/failed 词条、新增 reconnecting。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` fixture 适配新构造签名（`TerminalSession()` 手动注册 + attach），`_open_terminal_ws` 支持 `session_id` 参数，新增 `_read_json_control` 助手与 3 个 #173 测试——建连 session 帧下发、断线重连 reattach 保现场并补发回放缓冲、宽限期后 `_sweep_once` 销毁回收。本文件 22 项全部通过，launcher/server/terminal 相关 43 passed 2 skipped。
+  - 注：本次改动在 `Tony-terminal-reattach` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (14)
+
+- feat(web-ui): Trainer「高级选项」折叠行文案精简为「高级」（Issue #183 后续微调）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`trainer.advancedOptions` 值 zh「高级选项」→「高级」、en「Advanced Options」→「Advanced」，词条 key 不变。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：折叠行注释同步（Advanced Options → Advanced）。
+  - 测试同步：仅文案变更，无测试引用旧文案；`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-trainer-advanced-label` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (13)
+
+- feat(ui): DD/D 两个页面标题文字可点击跳转官网，效果与点击 logo 图标一致（Issue #179，跨仓库功能：DD/DC/D 三页面标题可点）
+  - `web_ui/frontend/src/components/Layout.tsx`：顶栏「DonkeyDrifter」标题文字与 logo 合并进同一个 `<a href="https://www.donkeydrift.com" target="_blank" rel="noopener">`（logo `<img>` 与文字之间以 `gap-3` 保持原 12px 间距）；链接在 `font-bold text-xl` 容器内，文字继承深浅主题标题色，Tailwind reset 下无下划线/变色，仅新增指针手势。
+  - `donkeycar/launcher/server.py`（Donkey 启动页）：`MENU_HTML` 中 `<h1>Donkey</h1>` 改为 `<h1><a class="titleLink" href="https://www.donkeydrift.com" target="_blank" rel="noopener">Donkey</a></h1>`；CSS 新增 `.titleLink{color:inherit;text-decoration:none}`——颜色继承 h1、无下划线，行为对齐 logoLink。
+  - 测试同步：无标题专属测试需新增；验证 `tsc -b --noEmit` 通过、vitest App/components 14 文件 78 项通过、launcher `tests/test_launcher_menu_actions.py` 37 项通过。
+  - DC（Drifter Console，ESP32 Web Console）侧同类改动在 Firmware 仓库同步提交（v1.8.9，已 OTA 上车）。
+## 2026-08-18 (12)
+
+- feat(launcher): 菜单 6/7 两项打通 DD 的入口合并为 6 号「Donkey Drifter」，7 号位置灰占位、其余序号一律不变（Issue #181）
+  - 背景：launcher 菜单（`menuItems`，编号 0–12）中 6「Drive」与 7「Web」最终都进入同一 DD 应用（6 走 `/api/launch/drive` 进 Drive 页，7 走 `/api/launch/web` 起 DD 前后端跳首页）；用户要求合并为一个「Donkey Drifter」入口（进 DD Drive 页面），7 号位空出占位，8–12 序号保持原位不递补。
+  - `donkeycar/launcher/server.py`（MENU_HTML）：
+    - `menuItems`：6 号改名「Donkey Drifter」（cat 保持 drive、favorite 保持常用），desc 改为「进入 DonkeyDrift（Drive 页面）/ Enter DonkeyDrift (Drive page)」；7 号改为 `placeholder: true` 占位行（name "—"、无分类、无 favorite、desc「已合并至 6 号『Donkey Drifter』/ Merged into #6 Donkey Drifter」）；8–12 条目原样未动。
+    - `renderMenu()`：占位行渲染分支——不可点击（无 onclick）、无分类 pill、无 favorite 标、`.menuItem.placeholder` 样式（置灰 opacity .45、虚线边框、无 hover/选中效果，深浅两主题各配覆盖）。
+    - `selectItem()`：占位项只弹「已合并至 6」轻提示（复用 showError），不触发任何动作；删除原 `no === 7 → launchWebUI()` 分支（数字键 7 经同一入口，行为同步）。
+    - 删除前端 `launchWebUI()` 函数与 `overlay.startingWeb` i18n 词条（zh/en）；帮助文案 `help.keyNumbers` 双语更新为「（7 号已并入 6 号）」。
+    - 服务端：删除 `POST /api/launch/web` 路由与 `_launch_web_ui()`（排查确认无其它消费方——DD 前端/DC 均未调用，仅菜单自身与测试）；`/api/launch/drive` 与 `GET /launch/drive`（DC 入口）不动。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 删除 `TestLaunchWebUI`（3 项）及 `_fake_subprocess`/`_FakePopen` 助手、`_launch_web_ui` 导入；端点测试改为下线后 404 断言；前端断言类新增 `test_menu_6_7_merged_placeholder`（改名、占位标记、Web 链路不残留、8 号仍在原位）。pytest 全量 209 passed（`test_tub_manager_auto_refresh` 1 项既有失败在干净 origin/Tony 上同样失败，与本改动无关）；MENU_HTML 内嵌 JS 逐块 `node --check` 通过；临时实例实测 `/` 返回新菜单、`POST /api/launch/web` 404。
+
 
 ## 2026-08-18 (11)
 
@@ -50,7 +106,6 @@
   - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏删除 `InputSourceSelector`；右侧控制面板标题栏改为左侧可点标题按钮（"虚拟摇杆" + ChevronUp/ChevronDown 图标，点击切换 `joystickOpen`，默认展开），右侧放 `InputSourceSelector`——折叠后选择框仍可见可切换；摇杆主体区（`VerticalThrottleBar` + `VirtualJoystick` + `ControlBars`）包在 `joystickOpen` 条件渲染内，折叠时整块收起只留标题栏。原标题栏"支持鼠标/触屏"小字随之移除（i18n 词条 `drive.mouseTouchSupport` 保留未删）。
   - `web_ui/frontend/src/i18n/messages/drive.ts`：zh/en 各新增 `drive.collapseJoystick`（折叠虚拟摇杆/Collapse virtual joystick）、`drive.expandJoystick`（展开虚拟摇杆/Expand virtual joystick），用作折叠按钮的 aria-label/title。
   - 测试同步：前端 vitest 全量 20 文件 95 项通过，`tsc -b --noEmit` 通过；Playwright 截图验证展开/折叠两态布局正常（选择框始终在标题栏右侧、折叠后摇杆圆盘收起）。
-
 ## 2026-08-18 (7)
 
 - fix(web-ui): 顶部导航切换 Tub Manager 严重卡顿三轮修复——TM 页常驻保活 + 懒加载 chunk 空闲预取 + 后台快捷键/播放守卫（Issue #135，二轮 dev→生产模式后用户仍报卡顿）

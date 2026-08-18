@@ -104,7 +104,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
         />
       </div>
 
-      {/* Advanced Options: collapsible row (expanded = advanced overrides active, same semantics as the old checkbox) */}
+      {/* Advanced: collapsible row (expanded = advanced overrides active, same semantics as the old checkbox) */}
       <div className="pt-2 border-t border-zinc-800">
         <button
           type="button"

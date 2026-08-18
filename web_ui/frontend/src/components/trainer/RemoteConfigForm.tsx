@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 
 interface RemoteConfigFormProps {
+  titleKey?: string;
   host: string;
   onHostChange: (v: string) => void;
   user: string;
@@ -18,6 +19,7 @@ interface RemoteConfigFormProps {
 }
 
 export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
+  titleKey = 'trainer.cloudTraining',
   host,
   onHostChange,
   user,
@@ -36,7 +38,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.cloudTraining')}</h3>
+      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t(titleKey)}</h3>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="space-y-1">
