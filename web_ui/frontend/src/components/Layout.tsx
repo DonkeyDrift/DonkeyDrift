@@ -8,11 +8,23 @@ import { VersionBadge } from './VersionBadge';
 import { DshButton, DshEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink } from './EnterButtons';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
+import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
+
+/** 统一流程大页面（#178）中四个导航锚点：点击滚动到对应 section，
+ *  激活态随滚动位置联动（scroll spy，见 FlowPage 的 IntersectionObserver） */
+const FLOW_NAV_ITEMS: { path: string; section: FlowSectionId; labelKey: string }[] = [
+  { path: '/drive', section: 'drive', labelKey: 'common.nav.drive' },
+  { path: '/tub', section: 'tub-manager', labelKey: 'common.nav.tubManager' },
+  { path: '/trainer', section: 'trainer', labelKey: 'common.nav.trainer' },
+  { path: '/pilot', section: 'pilot', labelKey: 'common.nav.pilotArena' },
+];
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t } = useTranslation();
   const location = useLocation();
-  const isActive = (path: string) => location.pathname === path;
+  const activeSection = useFlowStore((s) => s.activeSection);
+  // Car Connector 是独立路由，只在 /connector 上高亮
+  const isConnector = location.pathname === '/connector';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // 切换路由后收起手机菜单
@@ -20,16 +32,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
-  const navItems = [
-    { path: '/drive', labelKey: 'common.nav.drive' },
-    { path: '/', labelKey: 'common.nav.tubManager' },
-    { path: '/trainer', labelKey: 'common.nav.trainer' },
-    { path: '/pilot', labelKey: 'common.nav.pilotArena' },
-    { path: '/connector', labelKey: 'common.nav.carConnector' },
-  ];
-
-  const linkClass = (path: string) =>
-    `transition-colors hover:text-cyan-400 whitespace-nowrap ${isActive(path) ? 'text-cyan-500' : 'text-zinc-400'}`;
+  const flowClass = (section: FlowSectionId) =>
+    `transition-colors hover:text-cyan-400 whitespace-nowrap ${
+      !isConnector && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
+    }`;
+  const linkClass = (active: boolean) =>
+    `transition-colors hover:text-cyan-400 whitespace-nowrap ${active ? 'text-cyan-500' : 'text-zinc-400'}`;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
@@ -46,15 +54,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <GitHubLink />
               <VersionBadge />
             </div>
-            {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。高级入口（Drift Console /
+            {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。
+                前四项是流程页锚点（#178），CC 仍是独立路由；高级入口（Drift Console /
                 Kimi Code Web）融入导航行但弱化样式，见 EnterButtons.tsx（Issue #175） */}
             <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14">
               <DrifterConsoleEntryLink />
-              {navItems.map((item) => (
-                <Link key={item.path} to={item.path} className={linkClass(item.path)}>
+              {FLOW_NAV_ITEMS.map((item) => (
+                <Link key={item.path} to={item.path} className={flowClass(item.section)}>
                   {t(item.labelKey)}
                 </Link>
               ))}
+              <Link to="/connector" className={linkClass(isConnector)}>
+                {t('common.nav.carConnector')}
+              </Link>
               <KimiCodeWebEntryLink />
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
@@ -88,11 +100,23 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-zinc-800 bg-zinc-900">
             <nav className="container mx-auto px-4 py-2 flex flex-col text-sm font-medium">
-              {navItems.map((item) => (
-                <Link key={item.path} to={item.path} className={`py-2.5 ${linkClass(item.path)}`}>
+              {FLOW_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`py-2.5 ${flowClass(item.section)}`}
+                >
                   {t(item.labelKey)}
                 </Link>
               ))}
+              <Link
+                to="/connector"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`py-2.5 ${linkClass(isConnector)}`}
+              >
+                {t('common.nav.carConnector')}
+              </Link>
               <div className="mt-1 border-t border-zinc-800/60">
                 <DrifterConsoleEntryLink />
                 <KimiCodeWebEntryLink />
