@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Launcher 菜单动作（issue #126：接线 1-5、7-10 号菜单项）的单元测试。
+"""Launcher 菜单动作（issue #126：接线 1-5、8-10 号菜单项）的单元测试。
 
 覆盖 donkeycar.launcher.server 新增后端：
 - _create_car：项目名白名单、目录已存在、成功后切换当前项目
@@ -9,10 +9,10 @@
   备份文件名白名单（防路径穿越）、data 不存在/为空的 skip 分支
 - _next_train_model：models/ 下 pilot_N 自动递增
 - HTTP 端点：GET /api/projects、/api/data/backups、/api/train/next-model；
-  POST /api/launch/web（issue #181 随 7 号菜单下线，应 404）、
+  POST /api/launch/web（issue #181 随 Web 菜单下线，应 404）、
   /api/createcar（非法项目名 400）、/api/data/*
-- 前端静态断言：MENU_HTML 各菜单动作接线（issue #181：6/7 合并为
-  「Donkey Drifter」、7 号占位）、terminal.html ?cmd= 自动执行
+- 前端静态断言：MENU_HTML 各菜单动作接线（0 号 DC 移到 7 号、
+  6 号改名 DonkeyDrifter）、terminal.html ?cmd= 自动执行
 
 不启动真实 donkey / 子进程，全部替身。
 """
@@ -398,21 +398,28 @@ class TestFrontendWiring:
         # 所有菜单项接线后不再有 notImplemented 分支
         assert "showError(t('overlay.notImplemented'))" not in MENU_HTML
 
-    def test_menu_6_7_merged_placeholder(self):
-        # issue #181：6/7 合并为 6 号「Donkey Drifter」（走 launchDrive），
-        # 7 号位占位、原 Web 链路整体下线，8-12 序号不变不递补
-        assert "name: \"Donkey Drifter\"" in MENU_HTML
+    def test_menu_6_renamed_and_dc_moved_to_7(self):
+        # 用户指示：0 号「Drifter Console」移到 7 号、删 0 号位；
+        # 6 号改名 DonkeyDrifter，小字「打开 DonkeyDrifter」
+        assert 'name: "DonkeyDrifter"' in MENU_HTML
+        assert 'descZh: "打开 DonkeyDrifter"' in MENU_HTML
+        assert 'descEn: "Open DonkeyDrifter"' in MENU_HTML
+        # 7 号现在是 Drifter Console（DC），走 openDrifterConsole → /api/launch/dc
+        assert 'name: "Drifter Console"' in MENU_HTML
+        assert "openDrifterConsole()" in MENU_HTML
+        assert "/api/launch/dc" in MENU_HTML
+        # 0 号位已删除、占位行已移除
+        assert "no: 0" not in MENU_HTML
+        assert "placeholder" not in MENU_HTML
+        assert "已合并至 6" not in MENU_HTML
+        assert "Merged into #6" not in MENU_HTML
+        # 6 号仍走 launchDrive 启动 DD
         assert "launchDrive()" in MENU_HTML
-        # 7 号占位行：placeholder 标记 + 「已合并至 6」双语描述
-        assert "placeholder: true" in MENU_HTML
-        assert "已合并至 6" in MENU_HTML
-        assert "Merged into #6" in MENU_HTML
-        assert "'menuItem placeholder'" in MENU_HTML
-        # 原 7 号 Web 链路不再存在
+        # 原 7 号 Web 链路仍不存在
         assert "launchWebUI" not in MENU_HTML
         assert "/api/launch/web" not in MENU_HTML
         assert "overlay.startingWeb" not in MENU_HTML
-        # 8 号 Donkey UI 仍在原位（序号不变）
+        # 8 号 Donkey UI 仍在原位
         assert "no: 8" in MENU_HTML
 
     def test_new_i18n_keys_bilingual(self):

@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-18 (31)
+
+- feat(launcher): D 启动菜单 0 号「Drifter Console」移到 7 号、删 0 号位，6 号改名 DonkeyDrifter（小字「打开 DonkeyDrifter」）
+  - 需求：D 启动页菜单中 0 号「Drifter Console」（打开 DC）移到 7 号位置、删掉 0 号位；6 号「Donkey Drifter」改名「DonkeyDrifter」，小字（desc）改为「打开 DonkeyDrifter」。
+  - `donkeycar/launcher/server.py`（MENU_HTML）：
+    - `menuItems`：删除 0 号「Drifter Console」条目；6 号 name「Donkey Drifter」→「DonkeyDrifter」、descZh/descEn「打开 DonkeyDrifter」/「Open DonkeyDrifter」；7 号由占位行改为「Drifter Console」（cat drive、favorite true）；编号 1-12。
+    - `selectItem()`：删除 `no === 0 → openDrifterConsole()` 分支，新增 `no === 7 → openDrifterConsole()`；移除占位行轻提示分支。
+    - `renderMenu()`：移除占位行渲染分支与 `.menuItem.placeholder` CSS（占位概念随 7 号恢复为真实 DC 项而移除）。
+    - 键盘：数字键 `0` 不再触发 `selectItem(0)`（0 号位已删）；`2-9` 仍直选对应项，`1`+`0/1/2` 仍组合选 10/11/12。
+    - 帮助文案：`数字键 0-12：选择对应菜单项（7 号已并入 6 号）` → `数字键 1-12：选择对应菜单项`（zh/en 同步）。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 删除 `test_menu_6_7_merged_placeholder`，新增 `test_menu_6_renamed_and_dc_moved_to_7`；模块 docstring 与注释同步。launcher 相关测试 155 项全部通过，MENU_HTML 内嵌 JS `node --check` 通过。
+  - 注：本次在 `Tony-menu-reorder-dc-7` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (30)
 
 - perf(web-ui): 流程页导航切换仍卡顿——四个 section 常驻挂载导致整页每次滚动都重算/重绘 + 父组件重渲染连坐所有子页面，加 `content-visibility` 与 `React.memo` 隔离（Issue #135 五轮）
