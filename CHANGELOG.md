@@ -16,6 +16,22 @@
   - 测试同步：新增 `web_ui/backend/tests/test_trainer_mypc.py`（3 项：mypc 路由建 job、缺省参数、stop 触发 stop_event）+ `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`（3 项：三档渲染/选中高亮/点击回调）。后端 pytest 全量 79 项、前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit` 全部通过。
   - 注：本次改动在 `Tony-issue170-trainer-3mode` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
+## 2026-08-18 (17)
+
+- feat(web-ui): Drive/TM/Trainer/PA 合并为纵向滚动大页面，点导航锚点平滑滚动到对应区域（Issue #178）
+  - 需求：DD 四个页面（Drive/TM/Trainer/PA）原为独立路由（`/`、`/drive`、`/trainer`、`/pilot`），改为一个纵向连续滚动的大页面，顺序自上而下 Drive→TM→Trainer→PA，点顶部导航滑到对应 section，形成「开车采数据→管数据→训练→评测」的流程引导；Car Connector 保持独立路由、不在合并范围。
+  - `web_ui/frontend/src/App.tsx`：删除 Home 占位页与 KeepAliveTubManager；路由改为「`/connector` → CarConnectorPage」+「`/*` → FlowPage」兜底——同一兜底路由保证 `#/drive`、`#/tub`、`#/trainer`、`#/pilot` 四个 hash 深链导航切换时只改 pathname、不重挂载 FlowPage（保住 #135 常驻保活）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`（新增）：四 section 固定顺序堆叠，每段带编号徽标 + 标题 + 流程描述 + 分隔线；IntersectionObserver 滚动联动（scroll spy，可见比例最大者为 activeSection）；按 pathname 平滑 scrollIntoView 到对应 section（懒加载 chunk 未就绪时 rAF 轮询等待；jsdom 无 scrollIntoView 时跳过）。
+  - `web_ui/frontend/src/store/useFlowStore.ts`（新增）：zustand 存 activeSection，供 Layout 高亮当前导航。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx`（新增）：TubManagerPage 从 App.tsx 迁出，作为流程页 TM section，自身逻辑不变。
+  - `web_ui/frontend/src/components/Layout.tsx`：四项导航改为锚点（`/drive`、`/tub`、`/trainer`、`/pilot`），激活态随滚动联动；CC 仍是独立路由高亮；手机菜单点击即收起（含同 path 重复点击）。#179 的标题链接改动保持不变。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `active` prop，`useDriveHotkeys`/`useKeyboardDrive` 仅在 drive section 可见时启用，避免同页常驻后 R/M/U/S/A/I/J/K/L 在其它区域误触；移除页内 `drive.title` 标题（上移到 section 头）。
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：新增 `active` prop，空格播放/暂停仅在 pilot section 可见时启用；移除页内 `arena.pageTitle`/`arena.pageDescription` 标题块（上移到 section 头）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：移除页内 `trainer.title` 标题行，ModeTabs 右对齐保留。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：新增 flow.drive/tubManager/trainer/pilotArena.desc 四条流程描述（zh/en）。
+  - 测试同步：`App.test.tsx` 的 keep-alive 回归测试改为断言「TM 在流程页各 section 间常驻、切 /connector 卸载、回切因已加载不重拉 tub」；vitest 全量 19 文件 98 项、`tsc -b --noEmit`、eslint（改动文件）、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-issue178-unified-flow-page` 功能分支完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (15)
 
 - fix(launcher): DC 终端长时间无交互断线丢会话——PTY 会话与 WS 连接解耦，断线宽限期 + 按 sid 重连接回 + 断线输出回放补发 + 前端自动退避重连（Issue #173）
