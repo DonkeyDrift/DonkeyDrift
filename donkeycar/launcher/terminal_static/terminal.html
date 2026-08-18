@@ -24,8 +24,8 @@ html,body{margin:0;height:100%;background:#101318;overflow:hidden}
 // 语言：与 Launcher 菜单页一致——显式存储优先，否则跟随浏览器语言
 var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
 var T={
-  zh:{connecting:'正在连接上位机终端…',closed:'连接已断开',reconnect:'点击重连',failed:'连接失败',lost:'连接已断开 · 终端会话已丢失',newSession:'点击重连（将开启新会话）'},
-  en:{connecting:'Connecting to host terminal…',closed:'Disconnected',reconnect:'Tap to reconnect',failed:'Connection failed',lost:'Disconnected · terminal session lost',newSession:'Tap to reconnect (starts a new session)'}
+  zh:{connecting:'正在连接上位机终端…',closed:'连接已断开',reconnecting:'正在重新连接会话…',newSession:'点击重连（将开启新会话）'},
+  en:{connecting:'Connecting to host terminal…',closed:'Disconnected',reconnecting:'Reconnecting session…',newSession:'Tap to reconnect (starts a new session)'}
 };
 function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
 document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
@@ -33,7 +33,12 @@ document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
 var overlay=document.getElementById('overlay');
 function showOverlay(msg){overlay.textContent=msg;overlay.hidden=false;}
 function hideOverlay(){overlay.hidden=true;}
-overlay.addEventListener('click',function(){location.reload();});
+overlay.addEventListener('click',function(){
+  // 手动重连：立即触发一次重连尝试（清掉排队中的退避定时器）
+  if(reconnectTimer!==null){clearTimeout(reconnectTimer);reconnectTimer=null;}
+  retries=0;
+  connect();
+});
 overlay.textContent=t('connecting');
 overlay.hidden=false;
 
@@ -50,6 +55,14 @@ term.open(document.getElementById('term'));
 var ws=null;
 var encoder=new TextEncoder();
 function sendCtrl(o){if(ws&&ws.readyState===WebSocket.OPEN){ws.send(JSON.stringify(o));}}
+
+// 会话保持与重连（issue #173）：服务端建连后下发 session 帧告知会话 sid，
+// 断线后带着 ?session=<sid> 自动退避重连，服务端接回原 PTY 并补发断线期间
+// 的输出，现场不丢；只有 shell 退出（exit 帧）才停止自动重连
+var lastSid=null;
+var retries=0;
+var reconnectTimer=null;
+var exited=false;
 
 // ?cmd=<...> 自动执行（launcher 菜单 8/9/10 新标签打开时带上的首行命令）：
 // 连上 WebSocket 发完 hello 后，把解码后的命令作为输入发送（含换行触发执行），
@@ -98,15 +111,15 @@ term.onData(function(d){
 });
 
 function connect(){
-  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/terminal/ws');
+  var url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/terminal/ws';
+  if(lastSid)url+='?session='+encodeURIComponent(lastSid);
+  ws=new WebSocket(url);
   ws.binaryType='arraybuffer';
   // #101：连接加 10s 超时——握手挂起（服务端忙/升级请求被挂起）时 onopen/onclose 都可能
-  // 不触发，overlay 会无限期停在「正在连接」；超时后主动关闭并提示连接失败（点击重连）
+  // 不触发，overlay 会无限期停在「正在连接」；超时后主动关闭走 onclose 统一退避重连
   var connectTimer=setTimeout(function(){
     if(ws.readyState===WebSocket.CONNECTING){
-      ws.onclose=null;
       try{ws.close();}catch(e){}
-      showOverlay(t('failed')+' · '+t('reconnect'));
     }
   },10000);
   ws.onopen=function(){
@@ -118,23 +131,57 @@ function connect(){
       trackLine(autoCmd+'\n');
       autoCmd=null;
     }
+    retries=0;
     hideOverlay();
     term.focus();
   };
   ws.onmessage=function(e){
     if(typeof e.data==='string'){
-      try{var j=JSON.parse(e.data);if(j&&j.type==='exit'){showOverlay(t('closed')+' (exit '+j.code+') · '+t('reconnect'));}}catch(_){/* 忽略非 JSON 文本帧 */}
+      try{
+        var j=JSON.parse(e.data);
+        if(j&&j.type==='session'){
+          // 重连失败接回（会话已过期被销毁）时清屏，避免新旧两个 shell 的
+          // 输出混在同一个滚动缓冲里
+          if(lastSid!==null&&!j.reattached){term.reset();}
+          lastSid=j.id;
+        }else if(j&&j.type==='exit'){
+          exited=true;
+          showOverlay(t('closed')+' (exit '+j.code+') · '+t('newSession'));
+        }
+      }catch(_){/* 忽略非 JSON 文本帧 */}
       return;
     }
     var bytes=new Uint8Array(e.data);
     scanAltScreen(bytes);
     term.write(bytes);
   };
-  // 链路断开：PTYShell 会话已随连接被服务端回收，明确提示现场丢失，
-  // 避免误以为"点击重连"能恢复原会话（issue #151）
-  ws.onclose=function(){clearTimeout(connectTimer);showOverlay(t('lost')+' · '+t('newSession'));};
+  // 链路断开（含服务端心跳判死）：自动退避重连接回原会话（issue #173），
+  // shell 已退出（exit 帧）时不再重连
+  ws.onclose=function(){
+    clearTimeout(connectTimer);
+    if(exited)return;
+    scheduleReconnect();
+  };
   ws.onerror=function(){/* onclose 随后触发，统一在那里处理 */};
 }
+
+function scheduleReconnect(){
+  showOverlay(t('reconnecting'));
+  var delay=Math.min(10000,500*Math.pow(2,retries));
+  retries++;
+  reconnectTimer=setTimeout(function(){
+    reconnectTimer=null;
+    connect();
+  },delay);
+}
+
+// 标签页从后台冻结中恢复 / 网络恢复时，立即重试，不等退避定时器到点
+function retryNow(){
+  if(ws&&ws.readyState===WebSocket.OPEN)return;
+  if(reconnectTimer!==null){clearTimeout(reconnectTimer);reconnectTimer=null;connect();}
+}
+document.addEventListener('visibilitychange',function(){if(!document.hidden)retryNow();});
+window.addEventListener('online',retryNow);
 
 // 尺寸变化：iframe 尺寸变化会触发 window resize；ResizeObserver 更稳
 var pendingResize=false;
