@@ -2,23 +2,14 @@
 // the full English translation of every entry.
 export const tubnav: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
-    // TubNavigator
-    'tub.title': 'Tub 导航器',
+    // TubLibrary（原 TubNavigator 功能已合入 TubLibrary）
     'tub.subtitle': '浏览 Tub 记录',
-    'tub.noRecordsLoaded': '未加载记录',
     'tub.steering': '转向',
     'tub.throttle': '油门',
-    'tub.timeline': '时间轴',
-    'tub.dragging': '（拖动中…）',
-    'tub.indexLabel': '索引 {index} / {total}',
-    'tub.noImageAvailable': '无可用图像',
-    'tub.noImage': '无图像',
     'tub.imageLoadError': '图像加载失败',
     'tub.first': '首条',
     'tub.firstRecordAria': '第一条记录',
-    'tub.prev': '上一条',
     'tub.prevRecordAria': '上一条记录',
-    'tub.next': '下一条',
     'tub.nextRecordAria': '下一条记录',
     'tub.last': '末条',
     'tub.lastRecordAria': '最后一条记录',
@@ -26,11 +17,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.stop': '停止',
     'tub.startPlaybackAria': '开始播放',
     'tub.stopPlaybackAria': '停止播放',
-    'tub.loopModeActiveAria': '循环播放模式已开启',
-    'tub.playOnceModeAria': '单次播放模式',
-    'tub.loopPlaybackTitle': '循环播放 (M)',
-    'tub.playOnceTitle': '播放后停止 (M)',
-    'tub.refresh': '刷新',
     'tub.refreshAria': '刷新 Tub 记录',
     'tub.refreshTitle': '重新拉取当前 Tub 数据',
     // TubLoader
@@ -74,23 +60,14 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.notAvailable': '无',
   },
   en: {
-    // TubNavigator
-    'tub.title': 'Tub Navigator',
+    // TubLibrary (features of the former TubNavigator merged into TubLibrary)
     'tub.subtitle': 'Navigate through tub records',
-    'tub.noRecordsLoaded': 'No records loaded',
     'tub.steering': 'STEERING',
     'tub.throttle': 'Throttle',
-    'tub.timeline': 'Timeline',
-    'tub.dragging': '(Dragging...)',
-    'tub.indexLabel': 'Index {index} / {total}',
-    'tub.noImageAvailable': 'No Image Available',
-    'tub.noImage': 'No Image',
     'tub.imageLoadError': 'Image Load Error',
     'tub.first': 'First',
     'tub.firstRecordAria': 'First record',
-    'tub.prev': 'Prev',
     'tub.prevRecordAria': 'Previous record',
-    'tub.next': 'Next',
     'tub.nextRecordAria': 'Next record',
     'tub.last': 'Last',
     'tub.lastRecordAria': 'Last record',
@@ -98,11 +75,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.stop': 'Stop',
     'tub.startPlaybackAria': 'Start playback',
     'tub.stopPlaybackAria': 'Stop playback',
-    'tub.loopModeActiveAria': 'Loop mode active',
-    'tub.playOnceModeAria': 'Play once mode',
-    'tub.loopPlaybackTitle': 'Loop playback (M)',
-    'tub.playOnceTitle': 'Stop after playback (M)',
-    'tub.refresh': 'Refresh',
     'tub.refreshAria': 'Refresh tub records',
     'tub.refreshTitle': 'Reload current tub data from server',
     // TubLoader

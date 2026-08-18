@@ -1,6 +1,13 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { getTrainerConfig, loadConfig, loadMyconfig, saveTrainingConfig } from '../services/api';
+import {
+  getTrainerConfig,
+  loadConfig,
+  loadMyconfig,
+  saveTrainingConfig,
+  listTrainerTubs,
+  type TrainerTub,
+} from '../services/api';
 import { ModeTabs } from '../components/trainer/ModeTabs';
 import { LocalConfigForm } from '../components/trainer/LocalConfigForm';
 import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
@@ -28,7 +35,13 @@ export const TrainerPage: React.FC = () => {
   const { t } = useTranslation();
   const [mode, setMode] = React.useState<TrainerMode>('local');
   const { job, startLocal, startOnline, stopJob, isRunning } = useTrainingJob();
-  const { configPath, trainerOnlineConfig, setTrainerOnlineConfig, trainerLocalConfig, setTrainerLocalConfig } = useStore();
+  const { configPath, trainerOnlineConfig, setTrainerOnlineConfig, trainerLocalConfig, setTrainerLocalConfig, tubPath } = useStore();
+
+  // Tub candidates for local training (fetched from /trainer/tubs)
+  const [tubCandidates, setTubCandidates] = React.useState<TrainerTub[]>([]);
+  const [currentTubPath, setCurrentTubPath] = React.useState('');
+  // Don't re-autofill after the user has manually edited the tub path
+  const tubManuallyEdited = useRef(false);
 
   // Remote form state
   const [host, setHost] = React.useState(trainerOnlineConfig.host);
@@ -61,6 +74,56 @@ export const TrainerPage: React.FC = () => {
         // use defaults if file doesn't exist yet
       });
   }, [setTrainerOnlineConfig]);
+
+  // Load tub candidates and auto-select the right tub on mount / when paths change
+  useEffect(() => {
+    let cancelled = false;
+
+    listTrainerTubs(configPath || undefined)
+      .then((data) => {
+        if (cancelled) return;
+        const tubs = data.tubs || [];
+        setTubCandidates(tubs);
+        setCurrentTubPath(data.current_tub_path || '');
+
+        if (tubManuallyEdited.current) return;
+
+        const candidates = tubs.map((c) => c.relative_path);
+        let next: string | null = null;
+
+        // Prefer the tub currently loaded in Tub Manager / Tub Navigator
+        const loaded = tubPath || data.current_tub_path;
+        if (loaded) {
+          const match = tubs.find(
+            (c) => c.absolute_path === loaded || c.relative_path === loaded
+          );
+          if (match) {
+            next = match.relative_path;
+          }
+        }
+        // Otherwise pick ./data if it is a tub, or the sole candidate
+        if (next === null) {
+          if (candidates.includes('./data')) {
+            next = './data';
+          } else if (candidates.length === 1) {
+            next = candidates[0];
+          }
+        }
+
+        if (next !== null && next !== trainerLocalConfig.tub) {
+          setTrainerLocalConfig({ tub: next });
+        }
+      })
+      .catch(() => {
+        // Keep current value; tub path stays manually editable
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // trainerLocalConfig.tub intentionally omitted: only auto-fill, never fight user edits
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configPath, tubPath, setTrainerLocalConfig]);
 
   // Load training config from myconfig.py on mount / when configPath changes
   useEffect(() => {
@@ -164,7 +227,14 @@ export const TrainerPage: React.FC = () => {
           {mode === 'local' ? (
             <LocalConfigForm
               config={trainerLocalConfig}
-              onConfigChange={setTrainerLocalConfig}
+              onConfigChange={(patch) => {
+                if (patch.tub !== undefined) {
+                  tubManuallyEdited.current = true;
+                }
+                setTrainerLocalConfig(patch);
+              }}
+              tubCandidates={tubCandidates}
+              currentTubPath={currentTubPath}
             />
           ) : (
             <RemoteConfigForm

@@ -13,6 +13,12 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
 - ``/api`` 有浏览器信任栅栏：Host 非回环必须在 ``--trusted-host`` 里
   声明才放行（裸 host 匹配任意端口）。传入本机局域网 IP，局域网
   浏览器才能正常调用 API。
+- 但 dsh-client-connection 还有一层 ``PRIVILEGED_METHODS``（settings.**/
+  credentials.**/llm.discoverModels 等特权方法）硬编码空信任表=仅回环，
+  ``--trusted-host`` 对其无效（rc.6/rc.7 同款设计，2026-08-18 确认）。
+  局域网浏览器打开设置页/模型选择会 403（"正在加载"、"加载提供方目录
+  失败"）。修法见 ``_patch_privileged_methods``：启动前对安装文件做
+  幂等自愈补丁，把特权方法的信任表放宽为 trustedHosts。
 - 就绪 banner 一行：``dsh web: http://127.0.0.1:<port> (LAN: ...)``，
   抓第一个 URL（回环）后改写为局域网 IP（复用 kimi_web 的 _lan_url，
   issue #125 同款问题）。
@@ -59,6 +65,20 @@ _PATCH_YAML = (
     "    port: !!js ctx.webStartup.port ?? 3080\n"
 )
 
+# dsh-client-connection 的 /api 栅栏源码（lib/index.js）里，特权方法
+# （PRIVILEGED_METHODS：settings.**/credentials.**/llm.discoverModels 等）
+# 用空信任表判定，只放行回环 Host——--trusted-host 对其无效。局域网
+# 浏览器因此打不开设置页/模型选择（403）。补丁把这一处的信任表放宽
+# 为同函数内已有的 trustedHosts（apply() 的局部变量，闭包可见），
+# 让 --trusted-host 声明的局域网 authority 同样可用：
+_PATCH_FENCE_OLD = ("PRIVILEGED_METHODS.has(method) && "
+                    "!isTrustedApiRequest(request, [])")
+_PATCH_FENCE_NEW = ("PRIVILEGED_METHODS.has(method) && "
+                    "!isTrustedApiRequest(request, trustedHosts)")
+
+# 补丁锁：launcher 多线程，防并发重打
+_PATCH_LOCK = threading.Lock()
+
 # 本模块拉起的 dsh web 子进程登记：[{proc, host, port}]，保住引用不被
 # GC，生命周期同 launcher（杀掉子进程即关掉对应 web 服务）
 _SPAWNED = []
@@ -85,6 +105,62 @@ def _write_patch_file():
     path = Path(tempfile.gettempdir()) / "donkey-launcher-dsh-lan.yml"
     path.write_text(_PATCH_YAML, encoding="utf-8")
     return str(path)
+
+
+def _connection_index_path(binary: str):
+    """从 dsh 可执行文件定位 dsh-client-connection/lib/index.js。
+
+    dsh bin 是指向 ``<dsh 包>/lib/bin.js`` 的符号链接（含相对链接），
+    realpath 后取包根，再走 npm 安装布局
+    ``<dsh 包>/node_modules/@deepseek-ai/dsh-client-connection/``；
+    找不到（如 rc.7 起的 pnpm 布局）返回 None，调用方跳过补丁。
+    """
+    try:
+        bin_real = Path(os.path.realpath(binary))
+        pkg_root = bin_real.parent.parent  # <pkg>/lib/bin.js -> <pkg>
+        candidate = (pkg_root / "node_modules" / "@deepseek-ai"
+                     / "dsh-client-connection" / "lib" / "index.js")
+        return candidate if candidate.is_file() else None
+    except OSError:
+        return None
+
+
+def _patch_privileged_methods(binary: str):
+    """对 dsh 安装里的 /api 特权方法栅栏做幂等自愈补丁（issue #164）。
+
+    特权方法（settings/credentials/llm.discoverModels）被上游硬编码为
+    仅回环可访问，局域网浏览器打开设置页会 403。这里把栅栏源码中特权
+    方法的空信任表 ``[]`` 替换为 ``trustedHosts``，与普通方法一致地
+    接受 ``--trusted-host`` 声明的 authority。
+
+    幂等：已打过的文件（新代码段在）直接返回；源码升级后未命中旧代码
+    段也跳过（dsh 升级会还原文件，下次启动若代码段仍在会自动重打）。
+    任何失败只告警不抛——dsh 本身仍可启动，仅设置页在局域网不可用。
+    """
+    target = _connection_index_path(binary)
+    if target is None:
+        logger.warning("dsh 栅栏补丁：未找到 dsh-client-connection，跳过")
+        return
+    try:
+        with _PATCH_LOCK:
+            text = target.read_text(encoding="utf-8")
+            if _PATCH_FENCE_NEW in text:
+                return  # 已打过（幂等）
+            if _PATCH_FENCE_OLD not in text:
+                logger.warning(
+                    "dsh 栅栏补丁：目标代码段未命中（dsh 可能已升级改版），"
+                    "跳过: %s", target)
+                return
+            tmp = target.with_name(target.name + ".donkey-patch.tmp")
+            tmp.write_text(
+                text.replace(_PATCH_FENCE_OLD, _PATCH_FENCE_NEW),
+                encoding="utf-8")
+            os.replace(tmp, target)
+            logger.info("dsh 栅栏补丁：特权方法已放行 trusted-host 访问: %s",
+                        target)
+    except OSError as e:
+        logger.warning(
+            "dsh 栅栏补丁失败（dsh 仍可启动，局域网设置页可能 403）: %s", e)
 
 
 def _probe_root(host: str, port: int, timeout=PROBE_TIMEOUT_S) -> bool:
@@ -239,6 +315,10 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             "error": "未找到 dsh 可执行文件（PATH 与当前 Python 环境的 "
                      "bin 目录均无），请确认 DeepSeek Harness 已安装",
         }
+
+    # 冷启动前自愈补丁：放行特权方法的 trusted-host 访问（幂等，失败
+    # 只影响局域网设置页，不影响 dsh 启动）
+    _patch_privileged_methods(binary)
 
     lan_ip = lan_ip_fn()
     deadline = time.monotonic() + timeout_s

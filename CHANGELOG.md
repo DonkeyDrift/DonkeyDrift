@@ -1,12 +1,74 @@
 # 变更日志
 
-## 2026-08-18 (3)
+## 2026-08-18 (8)
 
 - feat(web-ui): DD 驾驶页输入源选择框移入虚拟摇杆面板标题栏，摇杆区域支持折叠/展开
   - 背景：`InputSourceSelector`（摇杆/键盘/手柄/陀螺仪输入源切换）原挂在顶部工具栏（DriveModeSelector 前），与右侧虚拟摇杆面板分离——用户希望选择框与虚拟摇杆放在一起，且摇杆区域可折叠以腾出屏幕空间。
   - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏删除 `InputSourceSelector`；右侧控制面板标题栏改为左侧可点标题按钮（"虚拟摇杆" + ChevronUp/ChevronDown 图标，点击切换 `joystickOpen`，默认展开），右侧放 `InputSourceSelector`——折叠后选择框仍可见可切换；摇杆主体区（`VerticalThrottleBar` + `VirtualJoystick` + `ControlBars`）包在 `joystickOpen` 条件渲染内，折叠时整块收起只留标题栏。原标题栏"支持鼠标/触屏"小字随之移除（i18n 词条 `drive.mouseTouchSupport` 保留未删）。
   - `web_ui/frontend/src/i18n/messages/drive.ts`：zh/en 各新增 `drive.collapseJoystick`（折叠虚拟摇杆/Collapse virtual joystick）、`drive.expandJoystick`（展开虚拟摇杆/Expand virtual joystick），用作折叠按钮的 aria-label/title。
   - 测试同步：前端 vitest 全量 20 文件 95 项通过，`tsc -b --noEmit` 通过；Playwright 截图验证展开/折叠两态布局正常（选择框始终在标题栏右侧、折叠后摇杆圆盘收起）。
+
+## 2026-08-18 (7)
+
+- fix(web-ui): 顶部导航切换 Tub Manager 严重卡顿三轮修复——TM 页常驻保活 + 懒加载 chunk 空闲预取 + 后台快捷键/播放守卫（Issue #135，二轮 dev→生产模式后用户仍报卡顿）
+  - 根因（Playwright + PerformanceObserver(longtask) 对用户 8000 生产实例实测确认）：react-router 每次导航到 `/` 都完整卸载重挂载 TubManagerPage——TubLibrary（2282 条记录列表 + 图片 LRU）与 TubEditor（chart-vendor 图表）整树重建，每次切换产生 77-99ms 主线程 longtask，其余页面 0ms；用户真实浏览器（更多扩展、非无头）放大到数百 ms 体感卡顿。
+  - `web_ui/frontend/src/App.tsx`：新增 `KeepAliveTubManager` 组件挂在 Routes 之外（Layout main 内、Suspense 外，ErrorBoundary 仍包住）——TubManagerPage 首次进入后常驻不卸载，用 `location.pathname === '/'` 切换 `hidden` class（面板挂 `<div data-tub-manager>` 且切走时 hidden，DOM 保留、状态不丢）；原 `<Route path="/">` 改为 `element={null}`；新增 `useIdlePrefetch` hook 空闲时（requestIdleCallback）预取 Drive/Trainer/Pilot/Connector 4 个懒加载 chunk，消除冷切换时的脚本解析卡顿。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：新增 `isTubManagerRoute = useLocation().pathname === '/'` 守卫——空格键播放/暂停监听仅在 TM 页生效（切走不串页）；新增切走自动停播 effect（`isPlayingRef.current = false` + `setIsPlaying(false)`，防止后台页面持续预取图片耗资源）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：全局键盘监听同样加 `isTubManagerRoute` 守卫。
+  - 测试同步：`web_ui/frontend/src/App.test.tsx` 新增 keep-alive describe（mock 4 个懒加载页面组件）——TM 面板切走仍挂载且 hidden、切回恢复可见、不重拉 tub；`web_ui/frontend/src/components/TubLibrary.test.tsx` render 包 `MemoryRouter` 适配新 `useLocation` 依赖。vitest 全量 19 文件 95 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 实测（8021 测试实例 + chrome-headless-shell，tub=/home/dkc/projects/mycar/data，2282 帧）：修复前 TM 每次切换 longtask 77-99ms；修复后热切换全部归零（R2 及 Drive↔TM 来回 x3 全 0ms），仅首轮冷加载一次性 70-84ms；功能抽查确认切走面板 hidden 仍挂载、切回立即可见、2282 帧数据完整保留不重拉。
+
+## 2026-08-18 (6)
+
+- feat(launcher/web-ui): DC 与 DD 页面新增「DeepSeek Harness」入口按钮；DSH 启动端点缺省进入 Projects 工作区；修复 DSH 设置页 Agents 预设/提供方目录 403（Issue #164 后续）
+  - **DSH 启动端点与设置页 403 修复**：
+    - `donkeycar/launcher/dsh_web.py`：新增幂等自愈补丁 `_patch_privileged_methods()`——dsh（rc.6/rc.7 相同）的 `dsh-client-connection/lib/index.js` 把 `settings.*`/`credentials.*`/`llm.discoverModels`/`agentPreset.read` 等特权方法硬编码 `isTrustedApiRequest(request, [])`（空信任表，`--trusted-host` 对其无效，上游有意设计），导致 LAN Host 访问 DSH 设置页时「正在加载/权限不可用」「加载提供方目录失败」。补丁在启动前把安装文件中的 `PRIVILEGED_METHODS.has(method) && !isTrustedApiRequest(request, [])` 替换为 `...trustedHosts)`（同函数闭包变量，即沿用 `--trusted-host` 信任表）；幂等（新代码段已存在则跳过）、dsh 升级还原文件后自动重打（未命中旧代码段则跳过仅告警）；`_connection_index_path()` 从 dsh bin realpath 定位 `<pkg>/node_modules/@deepseek-ai/dsh-client-connection/lib/index.js`，找不到返回 None 安全跳过。实机验证：打补丁重启后 LAN Host（192.168.3.57:3987）下 `settings.describe` 返回 200；伪造 Host（evil.example.com）仍 403；回环 200，安全性保持。
+    - `donkeycar/launcher/server.py`：`_handle_launch_dsh` 未指定 cwd 时缺省 `/home/dkc/projects`——DSH 新会话默认工作区即 Projects（dsh-host-apiproxy 用 `process.cwd()` 作为新会话默认目录，已验证 workspace.list 返回 `/home/dkc/projects`），打开 DSH 后自动进入 Projects 工作区。
+  - **DD 页面（DonkeyDrifter Web UI）新增 DSH 按钮**：
+    - `web_ui/backend/routers/launch.py`：抽出 `_forward_launch(request, launcher_path)` 共用转发逻辑，新增 `@router.post("/dsh")` 转发 launcher `/api/launch/dsh`。
+    - `web_ui/frontend/src/services/api.ts`：新增 `launchDsh`（复用 `LaunchKimiCodeWebResult`）。
+    - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `dshLaunching` 状态与 `enterDsh`（about:blank 句柄 + 65s AbortController，交互与 Kimi Code Web 按钮同款）；按钮顺序 kimi → dsh → console（consoleFirst 时 console → kimi → dsh）。
+    - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 各加 5 条 `common.enterButtons.dsh*` 词条。
+    - 测试同步：`EnterButtons.test.tsx` 三按钮顺序断言更新 + 新增 dsh 启动成功/失败 2 项；`tests/test_launcher_dsh_web.py` 新增 TestPatchPrivilegedMethods（5 项：定位 index.js、命中替换、幂等、未命中跳过、锁保护）+ `test_endpoint_defaults_cwd_to_projects`。launcher 侧 24 passed，前端 vitest 全量 97 passed，`npm run build` 通过。
+  - DC（ESP32 Web Console）侧同款按钮见 Firmware v1.8.7（`#openDshBtn`，POST `/api/launch/dsh`）。
+## 2026-08-18 (5)
+
+- fix(web-ui): Car Connector 页面删除顶部大标题——进入 CC 页不再显示重复的 "Car Connector" 标题
+  - 背景：顶部导航已有 Car Connector 入口，页面内再显示同名大标题属于冗余信息，用户要求删掉。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：删除页面顶部 `<h1>{t('connector.pageTitle')}</h1>` 大标题，页面直接从「连接配置」卡片开始。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：删除已无引用的 `connector.pageTitle` 词条（zh/en 各一处）。
+  - 测试同步：无测试引用 `connector.pageTitle`，无需改动；vitest 全量 19 文件 94 项、`tsc -b`、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-cc-remove-title` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (4)
+
+- feat(web-ui): Trainer 页面 Tub 路径自动填充——进入页面自动定位正确 tub，无需每次手填
+  - 背景：Trainer 本地训练的 Tub 路径输入框默认值硬编码 `./data`，与 Tub Manager / Tub Navigator 当前加载的 tub 脱节，用户每次训练前要手工复制路径。
+  - `web_ui/backend/routers/trainer.py`：新增 `GET /tubs?working_dir=<dir>`——扫描 `<working_dir>/data` 本体、`data` 下每个含 `manifest.json` 的子目录（覆盖解压后的 `data/tub_xxx` 形式）及 `<working_dir>/data*` 兄弟目录，返回候选列表（`relative_path` ./data 风格 + `absolute_path`）与当前已加载的 `current_tub_path`（复用 `routers/tub.py` 全局状态）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mount / `configPath` / `tubPath` 变化时拉取候选并自动选中，优先级：当前加载的 tub（`store.tubPath` > 后端 `current_tub_path`，匹配后转为相对路径显示）> `./data`（若为合法 tub）> 唯一候选；用户手动编辑过（ref 标记 dirty）后不再自动覆盖。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：Tub 路径改为「下拉选候选 + 文本框可手改任意路径」，当前已加载的 tub 在下拉中标注「当前已加载」。
+  - `web_ui/frontend/src/services/api.ts`：新增 `listTrainerTubs()` 与 `TrainerTub` 类型；`web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.tubPathManual` / `trainer.tubLoaded`（zh/en）。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_tubs.py` 4 项（data 目录与子 tub、无 data 为空、跳过非 tub 目录并识别 data* 兄弟、报告已加载 tub）；pytest 后端全量 85 项、前端 vitest 全量 20 文件 95 项、`tsc -b --noEmit`、eslint、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-trainer-tub-autofill` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (3)
+
+- feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：集成原 Tub 导航器全部能力——
+    - FPS 角标：播放中按实际换帧数每秒统计（#128 同款逻辑），画面冻结时角标跟随下降，暂停清零；
+    - 转向/油门数值面板：读当前帧 `user/angle`（回退 `pilot/angle`）与 `user/throttle`（回退 `pilot/throttle`），无值显示「无」；
+    - 帧控制排：首条/上一帧/播放/下一帧/末帧 + 刷新（`requestTubRefresh` 全量重拉，#135 手动刷新）+ 删除；
+    - 标题 hover 展开「浏览 Tub 记录」副标题（`tub.subtitle`）；
+    - 空格键播放/暂停快捷键（输入框聚焦时不触发）；
+    - 全局图表联动（原 TN 核心职责）：换帧/播放把当前帧绝对索引 `_index` 写入全局 `currentIndex`（播放中 ~30ms 节流），Tub Editor 图表红线跟随；反向订阅 store，图表点选帧落在当前场次范围内时跳转预览（播放中不打断）；
+    - 性能沉淀迁移：图片 LRU 缓存 240 条上限（#135）、预取 60 帧窗口 + 6 并发（#128）；
+    - 播放行为改为单次播放（播放到末帧即停），按用户指示不迁移「播放后停止/循环播放」切换键与 M 键快捷键。
+  - `web_ui/frontend/src/components/TubNavigator.tsx` / `TubNavigator.test.tsx`：删除（功能已由 TubLibrary 承接）。
+  - `web_ui/frontend/src/App.tsx`：TubManagerPage 移除 `<TubNavigator />`，只渲染 TubLibrary + TubEditor。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock` 从 TubNavigator 换成 TubLibrary 桩组件。
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`：删除纯 TN 键（`tub.title`/`tub.noRecordsLoaded`/`tub.timeline`/`tub.dragging`/`tub.indexLabel`/`tub.noImage*`/`tub.loop*`/`tub.playOnce*` 等 20 键 zh+en），保留 TubLibrary 在用的 `tub.subtitle`/`tub.steering`/`tub.throttle`/帧控制与刷新键、TubLoader/SimulatorConfig 全部键。
+  - `web_ui/frontend/src/themes/theme-light.css`：注释里 TubNavigator index badge 措辞更新为 TubLibrary FPS badge。
+  - 测试同步：`TubLibrary.test.tsx` 原有 2 项（自动选最新、pin 置顶）保持不变且通过；vitest 全量 17 文件 89 项通过，`npm run build`（tsc -b + vite build）通过。
 
 ## 2026-08-18 (2)
 

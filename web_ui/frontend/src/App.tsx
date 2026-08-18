@@ -1,8 +1,7 @@
 import React, { useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { SidePanel } from './components/SidePanel';
-import { TubNavigator } from './components/TubNavigator';
 import { TubEditor } from './components/TubEditor';
 import { TubLibrary } from './components/TubLibrary';
 import { useStore } from './store/useStore';
@@ -98,7 +97,6 @@ function TubManagerPage() {
       )}
 
       <div className="space-y-6">
-        <TubNavigator />
         <TubLibrary />
         <TubEditor />
       </div>
@@ -106,15 +104,63 @@ function TubManagerPage() {
   );
 }
 
+/**
+ * 常驻保活的 Tub Manager 视图：切走时仅隐藏（display:none）不卸载，
+ * 切回时零重挂载成本。TubEditor 图表与 TubLibrary 会话列表都保持原状态，
+ * 顶部导航来回切换不再卡顿（#135 三轮）。
+ */
+function KeepAliveTubManager() {
+  const location = useLocation();
+  const active = location.pathname === '/';
+  return (
+    <div data-tub-manager hidden={!active} aria-hidden={!active} className={active ? 'block' : 'hidden'}>
+      <TubManagerPage />
+    </div>
+  );
+}
+
+/** 空闲时预取懒加载页面 chunk，首次点击导航也不必现场下载+解析 */
+function useIdlePrefetch() {
+  useEffect(() => {
+    let cancelled = false;
+    const prefetch = () => {
+      if (cancelled) return;
+      void import('./pages/TrainerPage');
+      void import('./pages/DrivePage');
+      void import('./pages/PilotArenaPage');
+      void import('./pages/CarConnectorPage');
+    };
+    if ('requestIdleCallback' in window) {
+      const idle = window as Window & {
+        requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+        cancelIdleCallback: (id: number) => void;
+      };
+      const id = idle.requestIdleCallback(prefetch, { timeout: 3000 });
+      return () => {
+        cancelled = true;
+        idle.cancelIdleCallback(id);
+      };
+    }
+    const timer = globalThis.setTimeout(prefetch, 2000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+}
+
 function AppShell() {
   const { t } = useTranslation();
+  useIdlePrefetch();
   return (
     <ErrorBoundary>
       <SidePanel />
       <Layout>
+        {/* Tub Manager 常驻保活：任何路由下都保持挂载，仅本路由可见 */}
+        <KeepAliveTubManager />
         <React.Suspense fallback={<div className="text-sm text-zinc-400">{t('common.loading')}</div>}>
           <Routes>
-            <Route path="/" element={<TubManagerPage />} />
+            <Route path="/" element={null} />
             <Route path="/trainer" element={<TrainerPage />} />
             <Route path="/drive" element={<DrivePage />} />
             <Route path="/pilot" element={<PilotArenaPage />} />
