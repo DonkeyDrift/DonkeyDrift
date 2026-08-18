@@ -230,8 +230,8 @@ export const TrainerPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-zinc-100">{t('trainer.title')}</h1>
+      {/* 页内标题已上移到统一流程页的 section 头（#178），此处只保留模式切换 */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <ModeTabs mode={mode} onChange={setMode} />
       </div>
 

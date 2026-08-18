@@ -10,6 +10,11 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.pilotArena': 'Pilot Arena',
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': '菜单',
+    // 统一流程大页面 section 描述（#178）：开车采数据 → 管数据 → 训练 → 评测
+    'flow.drive.desc': '驾驶并采集训练数据',
+    'flow.tubManager.desc': '浏览与管理采集的数据',
+    'flow.trainer.desc': '用数据训练出模型',
+    'flow.pilotArena.desc': '加载模型进行评测与对比',
     // App shell
     'common.app.somethingWentWrong': '出错了。',
     'common.app.failedToRefreshTub': '刷新 Tub 失败',
@@ -71,6 +76,11 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.pilotArena': 'Pilot Arena',
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': 'Menu',
+    // Unified flow page section descriptions (#178)
+    'flow.drive.desc': 'Drive and record training data',
+    'flow.tubManager.desc': 'Browse and manage collected data',
+    'flow.trainer.desc': 'Train a model from your data',
+    'flow.pilotArena.desc': 'Load models to evaluate and compare',
     // App shell
     'common.app.somethingWentWrong': 'Something went wrong.',
     'common.app.failedToRefreshTub': 'Failed to refresh tub',
