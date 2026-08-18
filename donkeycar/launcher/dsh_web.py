@@ -11,8 +11,10 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   表达式跟随 ``--port`` 参数。
 - ``--port 0`` 由 OS 分配空闲端口，避免与默认 3080 冲突。
 - ``/api`` 有浏览器信任栅栏：Host 非回环必须在 ``--trusted-host`` 里
-  声明才放行（裸 host 匹配任意端口）。传入本机局域网 IP，局域网
-  浏览器才能正常调用 API。
+  声明才放行（裸 host 匹配任意端口）。入口 URL 的 host 会被改写为
+  mDNS 主机名优先（``TONY007.local``，见 ``_lan_url``），所以
+  ``--trusted-host`` 同时传入本机局域网 IP 与 mDNS 主机名，否则浏览器
+  以 mDNS 名访问时会被 403 拦下（issue #164）。
 - 但 dsh-client-connection 还有一层 ``PRIVILEGED_METHODS``（settings.**/
   credentials.**/llm.discoverModels 等特权方法）硬编码空信任表=仅回环，
   ``--trusted-host`` 对其无效（rc.6/rc.7 同款设计，2026-08-18 确认）。
@@ -44,6 +46,7 @@ from pathlib import Path
 # 复用 kimi_web 的通用机制（同包内私有工具，见各引用处注释）
 from donkeycar.launcher.kimi_web import (
     _lan_ip,
+    _mdns_hostname,
     _lan_url,
     extract_web_url,
     strip_ansi,
@@ -282,22 +285,22 @@ def _live_spawned_url():
     return None
 
 
-def _spawn_and_capture(binary: str, cwd_str, lan_ip, deadline: float,
+def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
                        popen_fn=None):
     """拉起 ``dsh web``（0.0.0.0 + 随机端口 + 可选 trusted-host）并等
     ready banner 里的 URL。
 
-    返回 ``(proc, url, None)`` 或 ``(None, None, 错误原因)``；
-    失败路径一律杀掉子进程，不留孤儿。
+    ``trusted_hosts`` 是 /api 信任栅栏要放行的 authority 列表（裸 host
+    匹配任意端口，适配 ``--port 0`` 的随机端口），逐项追加到
+    ``--trusted-host``。返回 ``(proc, url, None)`` 或
+    ``(None, None, 错误原因)``；失败路径一律杀掉子进程，不留孤儿。
     """
     popen_fn = popen_fn or subprocess.Popen
     cmd = [binary, "web",
            "--patch", _write_patch_file(),
            "--port", "0"]
-    if lan_ip:
-        # /api 信任栅栏：局域网 Host 必须显式声明才放行（裸 host 匹配
-        # 任意端口，适配 --port 0 的随机端口）
-        cmd += ["--trusted-host", lan_ip]
+    for host in trusted_hosts:
+        cmd += ["--trusted-host", host]
     try:
         proc = popen_fn(
             cmd,
@@ -365,24 +368,28 @@ def _spawn_and_capture(binary: str, cwd_str, lan_ip, deadline: float,
 
 
 def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
-                   resolve_binary_fn=None, lan_ip_fn=None, popen_fn=None):
+                   resolve_binary_fn=None, lan_ip_fn=None, mdns_fn=None,
+                   popen_fn=None):
     """打开 DeepSeek Harness web：优先复用存活实例，否则拉起 ``dsh web``。
 
     Args:
         cwd: dsh 运行目录（绝对路径）；None 表示上位机用户主目录。
             目录不存在直接报错，绝不回退到其它目录。
         timeout_s: 整体超时（秒），默认 60。
-        resolve_binary_fn / lan_ip_fn / popen_fn: 测试钩子，默认
-            ``_resolve_dsh_binary`` / ``_lan_ip`` / ``subprocess.Popen``。
+        resolve_binary_fn / lan_ip_fn / mdns_fn / popen_fn: 测试钩子，默认
+            ``_resolve_dsh_binary`` / ``_lan_ip`` / ``_mdns_hostname`` /
+            ``subprocess.Popen``。
 
     Returns:
         成功 {"status": "ok", "url": <入口 URL>}；
         失败 {"status": "error", "error": <原因>}。
-        URL 的回环 host 已改写为本机局域网 IP（远程浏览器可达）；
-        成功拉起的子进程保持存活（杀它即关 web 服务）；失败路径杀净。
+        URL 的回环 host 已改写为局域网可达入口（mDNS 主机名优先，其次
+        局域网 IP）；成功拉起的子进程保持存活（杀它即关 web 服务）；
+        失败路径杀净。
     """
     resolve_binary_fn = resolve_binary_fn or _resolve_dsh_binary
     lan_ip_fn = lan_ip_fn or _lan_ip
+    mdns_fn = mdns_fn or _mdns_hostname
 
     cwd_str = None
     if cwd is not None:
@@ -416,9 +423,15 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     _patch_client_uuid_polyfill(binary)
 
     lan_ip = lan_ip_fn()
+    mdns = mdns_fn()
+    trusted_hosts = []
+    if lan_ip:
+        trusted_hosts.append(lan_ip)
+    if mdns and mdns not in trusted_hosts:
+        trusted_hosts.append(mdns)
     deadline = time.monotonic() + timeout_s
     proc, url, error = _spawn_and_capture(
-        binary, cwd_str, lan_ip, deadline, popen_fn=popen_fn)
+        binary, cwd_str, trusted_hosts, deadline, popen_fn=popen_fn)
     if url:
         _SPAWNED.append({"proc": proc, "port": _url_port(url)})
         url = _lan_url(url)
