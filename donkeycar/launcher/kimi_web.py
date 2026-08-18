@@ -197,18 +197,24 @@ def _lan_ip():
 
 
 def _mdns_hostname():
-    """本机稳定 mDNS 主机名（如 ``TONY007.local``），origin 不随 IP 漂移。
+    """本机稳定 mDNS 主机名（如 ``tony007.local``），origin 不随 IP 漂移。
 
     浏览器把 KCW 的置顶/模式/语言主题等 UI 偏好存 localStorage、按 origin
     （协议+host+端口）隔离；host 用 DHCP 局域网 IP 时，IP 一变 origin 就
     变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，作为
     入口 host 优先使用。仅当 mDNS 名能解析到本机局域网 IP 时返回，否则
     None（回退局域网 IP，保持原有可达性）。
+
+    主机名统一小写化：浏览器会把 URL 里的 host 小写化后放进 Host 头，
+    kimi 的 DNS-rebinding 栅栏按 Host 头比对 ``--allowed-host``，三者
+    （URL / Host 头 / allowed-host）保持同一小写形式才不会被 40301 拦下。
+    mDNS 名大小写不敏感、origin 的 host 也按小写归一，小写化不影响可达性
+    与 localStorage 的 origin 归属。
     """
     hostname = socket.gethostname()
     if not hostname:
         return None
-    fqdn = f"{hostname.split('.')[0]}.local"
+    fqdn = f"{hostname.split('.')[0].lower()}.local"
     lan = _lan_ip()
     if not lan:
         return None
@@ -223,6 +229,26 @@ def _mdns_hostname():
 def _entry_host():
     """KCW 入口 URL 的稳定 host：mDNS 主机名优先，其次局域网 IP。"""
     return _mdns_hostname() or _lan_ip()
+
+
+def _allowed_host_values():
+    """kimi web 需要放行的 Host 值（DNS-rebinding 栅栏，issue #168 后续）。
+
+    ``kimi web --host`` 绑定 0.0.0.0 时，浏览器用非回环 Host 访问会被
+    kimi 的 DNS-rebinding 检查拦下（40301 Invalid Host header）。本机接口
+    IP 会被 kimi 自动放行，但 mDNS 主机名是主机名而非接口 IP，不会被自动
+    放行——必须显式写进 ``--allowed-host``。这里收集入口 host 与局域网 IP
+    （后者是 mDNS 解析不到时 URL 回退的 host），去重后返回，供冷启动命令
+    使用。
+    """
+    hosts = []
+    fqdn = _mdns_hostname()
+    if fqdn and fqdn not in hosts:
+        hosts.append(fqdn)
+    lan = _lan_ip()
+    if lan and lan not in hosts:
+        hosts.append(lan)
+    return hosts
 
 
 def _is_loopback_host(host) -> bool:
@@ -308,7 +334,15 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
         if not _probe_server(host, inst["port"], token):
             continue
         if is_local:
-            host = _entry_host() or host
+            entry = _entry_host() or host
+            # 复用前必须确认入口 host 真能过 kimi 的 DNS-rebinding 栅栏
+            # （issue #168 后续）：老实例可能没带 --allowed-host，对局域网
+            # IP 探测通、但对 mDNS 主机名 403，返回这种 URL 浏览器一打开就
+            # 报 Invalid Host header。入口 host 与已探测的 host 不同时再对
+            # 入口 host 探一次，不通则跳过该实例。
+            if entry != host and not _probe_server(entry, inst["port"], token):
+                continue
+            host = entry
         url = f"http://{host}:{inst['port']}/"
         if token:
             url += f"#token={token}"
@@ -339,13 +373,19 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
     env["PATH"] = str(KIMI_BIN.parent) + os.pathsep + env.get("PATH", "")
     env.setdefault("HOME", str(Path.home()))
     try:
+        cmd = [binary, "web", "--no-open", "--host",
+               "--port", str(KIMI_WEB_PORT)]
+        # --allowed-host：绑定 0.0.0.0 后，浏览器用 mDNS 主机名/局域网 IP
+        # 访问会被 kimi 的 DNS-rebinding 栅栏 403 拦下（40301 Invalid Host
+        # header，issue #168 后续）；显式放行入口 host 与局域网 IP。
+        for allowed_host in _allowed_host_values():
+            cmd += ["--allowed-host", allowed_host]
         proc = popen_fn(
             # --host 裸传 = 绑 0.0.0.0：消费方是局域网内用户设备上的
             # 浏览器（issue #125），只绑回环它们访问不到
             # --port 固定专属端口：origin 稳定，KCW 的 localStorage 偏好
             # （置顶/模式/语言主题）不再因端口漂移被清空（issue #168）
-            [binary, "web", "--no-open", "--host",
-             "--port", str(KIMI_WEB_PORT)],
+            cmd,
             cwd=cwd_str,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
