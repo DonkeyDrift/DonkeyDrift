@@ -105,8 +105,11 @@ def _fake_lan_ip(monkeypatch):
 
     _lan_url 定义在 kimi_web 里、运行时查 kimi_web 自己的 _lan_ip，
     所以这里必须 patch kimi_web 命名空间（不是 dsh_web 的重导出名）。
+    dsh_web 默认用 ``_mdns_hostname`` 派生 trusted-host，测试里默认关掉
+    mDNS（返回 None），需要覆盖时由用例显式传 ``mdns_fn=``。
     """
     monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+    monkeypatch.setattr(dsh_web, "_mdns_hostname", lambda: None)
 
 
 # ===========================================================================
@@ -170,6 +173,24 @@ class TestLaunchDshWeb:
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
         assert "--trusted-host" not in proc.args_seen
+
+    def test_spawn_adds_mdns_host_to_trusted_host(self):
+        # 入口 URL 用 mDNS 主机名（_lan_url 优先），--trusted-host 必须
+        # 同时声明局域网 IP 与 mDNS 名，否则浏览器以 mDNS 名访问时会被
+        # /api 通用信任栅栏 403（issue #164）。
+        proc = _FakeProc(payload=_DSH_BANNER, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/home/u/env/bin/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            mdns_fn=lambda: "TONY007.local",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        args = proc.args_seen
+        idx = args.index("--trusted-host")
+        assert args[idx + 1] == "192.168.3.10"
+        assert args[idx + 2] == "--trusted-host"
+        assert args[idx + 3] == "TONY007.local"
 
     def test_spawn_passes_cwd_through(self, tmp_path):
         proc = _FakeProc(payload=_DSH_BANNER, hold=True)
