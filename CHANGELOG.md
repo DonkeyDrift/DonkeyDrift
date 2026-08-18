@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-18 (18)
+
+- fix(trainer): Trainer 训练位置三档文案由口语化长名改为正式短名——客户端 / 本机 / 云端（Issue #170 收尾微调）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我这台电脑」→「客户端」、`tabLocal`「当前这台 Linux 电脑」→「本机」、`startMyPcTraining`「开始训练（我这台电脑）」→「开始客户端训练」、`startLocalTraining`「开始本地训练」→「开始本机训练」、`myPcTraining`「在我这台电脑上训练」→「客户端训练」；en 同步 `Client / Local / Start Client Training / Start Local Training / Client Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档文案断言同步为新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (17)
 
 - fix(web-ui): DD 驾驶页虚拟摇杆折叠后只留标题一行——选择框随折叠一起收起，展开时恢复
