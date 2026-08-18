@@ -68,6 +68,39 @@ def test_mypc_route_defaults():
     assert captured["ssh_credentials"] is None
 
 
+def test_mypc_probe_route():
+    from mypc_probe import ProbeCheck, ProbeResult
+
+    def fake_probe(host, user, password, remote_dir_base="~/projects",
+                   python_path="", port=22):
+        return ProbeResult(
+            ok=True,
+            platform="linux",
+            shell="posix",
+            checks=[ProbeCheck(name="ssh", status="ok", message="connected")],
+            python_path="/usr/bin/python3",
+            suggestions=["环境就绪，可以开始本机训练。"],
+        )
+
+    with _build_client() as client, \
+         patch("routers.trainer.probe_mypc_environment", side_effect=fake_probe):
+        resp = client.post("/api/trainer/mypc/probe", json={
+            "host": "192.168.1.10",
+            "user": "u",
+            "password": "p",
+            "remote_dir_base": "~/projects",
+            "python_path": "",
+        })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["platform"] == "linux"
+    assert body["python_path"] == "/usr/bin/python3"
+    assert body["checks"][0]["name"] == "ssh"
+    assert body["suggestions"]
+
+
 def test_stop_mypc_job_sets_stop_event():
     import asyncio
     import threading

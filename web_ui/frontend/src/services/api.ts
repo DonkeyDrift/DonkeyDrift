@@ -225,6 +225,34 @@ export const setTrainerConfig = async (cfg: TrainerConfig, configFile = 'train_o
   return response.data;
 };
 
+export interface MyPcProbeCheck {
+  name: string;
+  status: 'ok' | 'warn' | 'fail' | 'info';
+  message: string;
+  hint: string;
+}
+
+export interface MyPcProbeResult {
+  ok: boolean;
+  platform: string;
+  shell: string;
+  python_path: string;
+  checks: MyPcProbeCheck[];
+  suggestions: string[];
+}
+
+export const probeMyPc = async (cfg: {
+  host: string;
+  user: string;
+  password: string;
+  port?: number;
+  remote_dir_base?: string;
+  python_path?: string;
+}): Promise<MyPcProbeResult> => {
+  const response = await api.post('/trainer/mypc/probe', cfg);
+  return response.data;
+};
+
 export const listModels = async (workingDir?: string) => {
   const response = await api.get('/trainer/models', { params: workingDir ? { working_dir: workingDir } : {} });
   return response.data;
