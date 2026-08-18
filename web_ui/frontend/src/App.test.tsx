@@ -13,6 +13,10 @@ vi.mock('./services/api', () => ({
   getVersion: vi.fn(() => Promise.resolve('test')),
   getApiErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getImageUrl: vi.fn(),
+  // 顶栏高级入口（EnterButtons）渲染期会取这些引用（Issue #175）
+  discoverConnectorConsoles: vi.fn(),
+  launchKimiCodeWeb: vi.fn(),
+  launchDsh: vi.fn(),
 }));
 
 vi.mock('./components/SidePanel', () => ({

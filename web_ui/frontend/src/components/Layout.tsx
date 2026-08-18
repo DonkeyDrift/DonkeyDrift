@@ -5,7 +5,7 @@ import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
 import { VersionBadge } from './VersionBadge';
-import { EnterButtons } from './EnterButtons';
+import { DshButton, DshEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink } from './EnterButtons';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
 import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
@@ -55,8 +55,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <VersionBadge />
             </div>
             {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。
-                前四项是流程页锚点（#178），CC 仍是独立路由 */}
+                前四项是流程页锚点（#178），CC 仍是独立路由；高级入口（Drift Console /
+                Kimi Code Web）融入导航行但弱化样式，见 EnterButtons.tsx（Issue #175） */}
             <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14">
+              <DrifterConsoleEntryLink />
               {FLOW_NAV_ITEMS.map((item) => (
                 <Link key={item.path} to={item.path} className={flowClass(item.section)}>
                   {t(item.labelKey)}
@@ -65,11 +67,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <Link to="/connector" className={linkClass(isConnector)}>
                 {t('common.nav.carConnector')}
               </Link>
+              <KimiCodeWebEntryLink />
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
               <VersionBadge />
               <GitHubLink />
-              <EnterButtons />
+              <DshButton />
               <ThemeSwitcher />
               <LanguageSwitcher />
             </div>
@@ -86,17 +89,14 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </button>
             </div>
           </div>
-          {/* 手机端标题区第二行：进入按钮（DrifterConsole 在左，Kimi Code Web 在右） */}
-          <div className="flex items-center pb-2 lg:hidden">
-            <EnterButtons consoleFirst />
-          </div>
-          {/* 手机端标题区第三行：左边主题切换，右边语言切换 */}
+          {/* 手机端标题区第二行：左边主题切换，右边语言切换 */}
           <div className="flex items-center gap-3 pb-3 lg:hidden">
             <ThemeSwitcher />
             <LanguageSwitcher />
           </div>
         </div>
-        {/* 手机菜单面板：仅导航项（进入按钮/主题/语言/版本号已移至标题区） */}
+        {/* 手机菜单面板：导航项 + 高级入口（Drifter Console / Kimi Code Web /
+            DeepSeek Harness，弱化样式与桌面一致）；主题/语言/版本号已移至标题区 */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-zinc-800 bg-zinc-900">
             <nav className="container mx-auto px-4 py-2 flex flex-col text-sm font-medium">
@@ -117,6 +117,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               >
                 {t('common.nav.carConnector')}
               </Link>
+              <div className="mt-1 border-t border-zinc-800/60">
+                <DrifterConsoleEntryLink />
+                <KimiCodeWebEntryLink />
+                <DshEntryLink />
+              </div>
             </nav>
           </div>
         )}
