@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-18 (28)
+
+- fix(trainer): Trainer 三档标签改为「本机 / 车载电脑 / 云端」，让「本机」明确指用户自己的电脑、「车载电脑」指跑 DD 后端的 Linux 机器（Issue #170 收尾）
+  - 背景：上一轮「我的电脑 / Linux 电脑」仍不够直观——「我的电脑」与「本机」语义易混，且「Linux 电脑」过于技术化、普通用户难以和"本机"区分。改为「本机」（用户浏览器/SSH 客户端所在机）、「车载电脑」（跑 DD 后端的机器）、「云端」（远端服务器）三档。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我的电脑」→「本机」、`tabLocal`「Linux 电脑」→「车载电脑」、`startMyPcTraining`→「在本机上训练」、`startLocalTraining`→「在车载电脑上训练」、`myPcTraining`→「本机训练」；en 同步 `This Computer / Car Computer / Train on This Computer / Train on Car Computer / This Computer Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档渲染与点击断言同步新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming3` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (27)
 
 - fix(trainer): Trainer 三档标签由「客户端/本机/云端」改为「我的电脑 / Linux 电脑 / 云端」，消除用户对前后两档语义的混淆（Issue #170 收尾）
