@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { FlaskConical, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 import { discoverConnectorConsoles, launchDsh, launchKimiCodeWeb } from '@/services/api';
-import { useResolvedTheme } from '@/lib/theme';
 
 // 扫描车端并打开第一个可达的 Drifter Console
 const useDrifterConsoleEntry = () => {
@@ -128,34 +127,6 @@ export const DshEntryLink: React.FC = () => {
       className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
     >
       <FlaskConical className="w-3.5 h-3.5 shrink-0" />
-      {launching ? t('common.enterButtons.dshStarting') : t('common.enterButtons.dsh')}
-    </button>
-  );
-};
-
-// DeepSeek Harness 胶囊按钮（Issue #175：仍留在顶栏右侧；填充色跟随 ESP32
-// 填充语言，仅 hover 填充按主题分流）
-export const DshButton: React.FC = () => {
-  const { t } = useTranslation();
-  const isLight = useResolvedTheme() === 'light';
-  const { launching, enter } = useLauncherEntry(launchDsh, {
-    startingKey: 'common.enterButtons.dshStarting',
-    failedKey: 'common.enterButtons.dshFailed',
-    networkKey: 'common.enterButtons.dshNetworkError',
-    timeoutMs: 65000,
-  });
-  // h-[34px] 与 LanguageSwitcher 整体高度一致（内部键 24px + 外壳 p-1×2 + border×2）
-  const cls = `flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-[34px] rounded-full leading-none transition-colors ${
-    isLight ? 'hover:bg-[#3eb6f0]' : 'hover:bg-[#8bdcff]'
-  } cursor-pointer whitespace-nowrap`;
-  return (
-    <button
-      type="button"
-      onClick={enter}
-      disabled={launching}
-      title={t('common.enterButtons.dshTitle')}
-      className={launching ? `${cls} opacity-60 cursor-wait` : cls}
-    >
       {launching ? t('common.enterButtons.dshStarting') : t('common.enterButtons.dsh')}
     </button>
   );

@@ -5,7 +5,7 @@ import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
 import { VersionBadge } from './VersionBadge';
-import { DshButton, DshEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink } from './EnterButtons';
+import { DshEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink } from './EnterButtons';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
 import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
@@ -56,7 +56,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
             {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。
                 前四项是流程页锚点（#178），CC 仍是独立路由；高级入口（Drift Console /
-                Kimi Code Web）融入导航行但弱化样式，见 EnterButtons.tsx（Issue #175） */}
+                Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，见 EnterButtons.tsx（Issue #175） */}
             <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14">
               <DrifterConsoleEntryLink />
               {FLOW_NAV_ITEMS.map((item) => (
@@ -68,11 +68,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 {t('common.nav.carConnector')}
               </Link>
               <KimiCodeWebEntryLink />
+              <DshEntryLink />
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
               <VersionBadge />
               <GitHubLink />
-              <DshButton />
               <ThemeSwitcher />
               <LanguageSwitcher />
             </div>

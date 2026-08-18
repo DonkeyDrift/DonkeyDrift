@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-18 (26)
+
+- feat(web-ui): DeepSeek Harness 入口同样改为导航链接样式，放在 Kimi Code Web 右侧（Issue #175 延续）
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：删除已无引用的 `DshButton` 胶囊组件与 `useResolvedTheme` 导入，DeepSeek Harness 统一走 `DshEntryLink` 导航链接样式。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行末尾 Kimi Code Web 右侧新增 `DshEntryLink`；右上角胶囊区移除 `DshButton`（现在只保留版本号/GitHub/主题/语言切换）；手机端汉堡菜单高级入口分组顺序不变（Drift Console / Kimi Code Web / DeepSeek Harness）。
+  - 测试同步：`EnterButtons.test.tsx` 删除 DSH 胶囊样式断言，DSH 成功/失败路径测试由 `DshButton` 迁至 `DshEntryLink`；vitest 全量 20 文件 99 项、`tsc -b --noEmit` 全部通过。
+  - 注：Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (25)
 
 - fix(web-ui): 流程页滚动卡顿收尾补刀——遥测图 60fps 空转、PA 播放循环、Drive UI 50ms 同步与同导航项重复点击滚动（#178 后续）
