@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-18 (25)
+
+- fix(web-ui): 流程页滚动卡顿收尾补刀——遥测图 60fps 空转、PA 播放循环、Drive UI 50ms 同步与同导航项重复点击滚动（#178 后续）
+  - 背景：#201 已把 Drive 的视频流/WebSocket 按主导 section 门控（滚走即断），但仍有几处后台空转：`TelemetryChart` 的 `requestAnimationFrame` 循环在 section 滚走后仍每帧 `setRenderTick` 重绘（无数据也空转 60fps）；`PilotArenaPage` 播放时滚走仍持续 rAF 推帧与预测轮询；`DrivePage` 的 50ms UI 同步 `setInterval` 未随 `active` 停表；且顶部导航点「与当前 path 相同的项」时 `location.pathname` 不变、滚动 effect 不触发，用户点后无反应。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：新增 `active` prop（默认 true）——`active=false` 时跳过遥测写缓冲与 rAF 重绘循环，滚回后自动恢复。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：50ms UI 同步 `useEffect` 加 `if (!active) return` 并补 `active` 依赖；`<TelemetryChart>` 传入 `active={active}`。
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：播放 rAF 循环与评测调度 `useEffect` 加 `!active` 早退并补 `active` 依赖（播放中滚走即冻结，滚回续播）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：滚动 effect 依赖从 `location.pathname` 改为 `pathname + location.key`——点同一导航项（path 不变但 location.key 变）也能再次 `scrollIntoView`，修复"点了没反应"。
+  - 测试同步：前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit`、`npm run build` 全部通过；eslint 改动文件 0 警告。Playwright headless 实测：点 Trainer 后 Drive 区 video/img 卸载、点同 path 导航项可再次滚回目标 section。
+  - 注：本次在 `Tony-issue178-flow-perf` 分支完成，基于已合入 Tony 的 #201 增量修改，仅动前端。无 Firmware 改动，无需 OTA。
+
 ## 2026-08-18 (24)
 
 - fix(launcher): DC 点击进入 DD 报"无法连接服务器"——web 进程启动失败仍报 launched 并重定向死端口，改为报错 + 跳转页就绪轮询（用户口述报障，journalctl 实锤）
