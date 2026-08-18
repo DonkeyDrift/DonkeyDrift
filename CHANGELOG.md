@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-18 (5)
+
+- fix(web-ui): Car Connector 页面删除顶部大标题——进入 CC 页不再显示重复的 "Car Connector" 标题
+  - 背景：顶部导航已有 Car Connector 入口，页面内再显示同名大标题属于冗余信息，用户要求删掉。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：删除页面顶部 `<h1>{t('connector.pageTitle')}</h1>` 大标题，页面直接从「连接配置」卡片开始。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：删除已无引用的 `connector.pageTitle` 词条（zh/en 各一处）。
+  - 测试同步：无测试引用 `connector.pageTitle`，无需改动；vitest 全量 19 文件 94 项、`tsc -b`、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-cc-remove-title` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (4)
 
 - feat(web-ui): Trainer 页面 Tub 路径自动填充——进入页面自动定位正确 tub，无需每次手填
