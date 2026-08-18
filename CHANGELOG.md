@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-18 (4)
+
+- feat(web-ui): Trainer 页面 Tub 路径自动填充——进入页面自动定位正确 tub，无需每次手填
+  - 背景：Trainer 本地训练的 Tub 路径输入框默认值硬编码 `./data`，与 Tub Manager / Tub Navigator 当前加载的 tub 脱节，用户每次训练前要手工复制路径。
+  - `web_ui/backend/routers/trainer.py`：新增 `GET /tubs?working_dir=<dir>`——扫描 `<working_dir>/data` 本体、`data` 下每个含 `manifest.json` 的子目录（覆盖解压后的 `data/tub_xxx` 形式）及 `<working_dir>/data*` 兄弟目录，返回候选列表（`relative_path` ./data 风格 + `absolute_path`）与当前已加载的 `current_tub_path`（复用 `routers/tub.py` 全局状态）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mount / `configPath` / `tubPath` 变化时拉取候选并自动选中，优先级：当前加载的 tub（`store.tubPath` > 后端 `current_tub_path`，匹配后转为相对路径显示）> `./data`（若为合法 tub）> 唯一候选；用户手动编辑过（ref 标记 dirty）后不再自动覆盖。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：Tub 路径改为「下拉选候选 + 文本框可手改任意路径」，当前已加载的 tub 在下拉中标注「当前已加载」。
+  - `web_ui/frontend/src/services/api.ts`：新增 `listTrainerTubs()` 与 `TrainerTub` 类型；`web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.tubPathManual` / `trainer.tubLoaded`（zh/en）。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_tubs.py` 4 项（data 目录与子 tub、无 data 为空、跳过非 tub 目录并识别 data* 兄弟、报告已加载 tub）；pytest 后端全量 85 项、前端 vitest 全量 20 文件 95 项、`tsc -b --noEmit`、eslint、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-trainer-tub-autofill` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (3)
 
 - feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除
