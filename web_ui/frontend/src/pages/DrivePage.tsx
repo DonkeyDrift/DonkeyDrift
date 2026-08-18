@@ -300,7 +300,7 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
         </div>
 
         {/* 控制区 */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col self-start">
           {/* 标题栏：虚拟摇杆折叠开关（展开时右显输入源选择，折叠后仅剩标题一行） */}
           <div
             className={`text-sm text-zinc-400 flex items-center justify-between gap-2 ${

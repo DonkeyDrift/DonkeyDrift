@@ -1,13 +1,37 @@
 # 变更日志
 
-## 2026-08-18 (18)
+## 2026-08-18 (21)
 
 - fix(launcher): DC 点击进入 DD 报"无法连接服务器"——web 进程启动失败仍报 launched 并重定向死端口，改为报错 + 跳转页就绪轮询（用户口述报障，journalctl 实锤）
   - 背景：`donkey web` 冷启动时前端生产构建失败（源码在制改动致 `tsc -b && vite build` 报错）直接退出，但 `_wait_for_web_ready` 对"进程提前退出"只带 warning 不报错，`_launch_drive` 仍返回 `launched` + 兜底前端端口 5188；而生产模式（bundled web ui，#135）前端由后端 8000 端口托管、5188 从不监听——跳转页拿到 URL 立即重定向，Safari 报"无法连接服务器"。三个叠加缺陷：进程死了仍报 launched / 兜底端口在生产模式必死 / 跳转页无就绪轮询（2026-08-12 加过的轮询被 c613ce73 菜单页重写吞掉）。
   - `donkeycar/launcher/server.py` `_launch_drive`：`_wait_for_web_ready` 返回 warning 时区分两种情况——web 进程已退出（`poll()` 非 None）必然失败，改返回 `status:"error"` 并附具体原因与日志查看命令，不再起车进程、不写 PID 文件；进程仍在但超时、且登记未出现时，生产模式兜底前端端口从入参 5188 修正为后端端口（开发模式 vite 确实监听 5188，保持不变）。
   - `donkeycar/launcher/server.py` `LAUNCH_DRIVE_HTML`：跳转前加就绪轮询（30 次 × 1s，`mode:'no-cors'` fetch 探测目标可连，复用菜单页 launchDrive 既有模式），就绪才重定向；超时不通则停下显示"Web UI 未就绪，未跳转（可稍后重试）"并透出 warning，不盲目跳死端口；i18n 补 `waiting`/`notready` 中英词条。
   - 测试同步：`tests/test_launcher_drive_launch.py` 新增 3 项——web 进程提前退出报 error 且不起车进程不写 PID、生产模式超时前端端口修正为后端端口、开发模式超时保持入参端口；`tests/test_launcher_language_autodetect.py` 跳转页双语断言同步（新词条、3 处 failed 文案、轮询语句）。本文件 12 项全部通过，launcher/webui 相关 135 passed（terminal 2 项失败为 origin/Tony 基线遗留，与本次无关）；另起临时 launcher 实例实测 `/launch/drive` 页面含轮询逻辑与双语提示。
-  - 注：本次改动在 `Tony-fix-launch-dead-port` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`（合并时 CHANGELOG 与虚拟摇杆条目解冲突，重编号为 (18)）。Firmware 无改动，无需 OTA。
+  - 注：本次改动在 `Tony-fix-launch-dead-port` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`（合并时 CHANGELOG 与多条会话条目解冲突，最终重编号为 (21)）。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (20)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后面板真正缩小——消除 grid 拉伸导致的"内容只剩一行但框未变小"
+  - 背景：控制面板在 `grid grid-cols-1 lg:grid-cols-3` 中作为第三列 grid item，默认 `align-self: stretch` 被拉伸到与左侧摄像头区（视频流 + 遥测图，较高）同高；折叠后内容虽只剩标题一行，但灰色面板框仍保持满高，下方"空出来"的区域实际是面板内部空白，视觉上"没变小"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：控制区外层 div 加 `self-start`，让面板高度随内容收缩——折叠后只剩标题一行、下方真正空出；展开时顶部对齐、高度由内容决定。
+  - 测试同步：前端 vitest 全量 100 项通过，`tsc -b --noEmit` 通过。
+
+## 2026-08-18 (19)
+
+- fix(trainer): Trainer 训练位置三档文案由口语化长名改为正式短名——客户端 / 本机 / 云端（Issue #170 收尾微调）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我这台电脑」→「客户端」、`tabLocal`「当前这台 Linux 电脑」→「本机」、`startMyPcTraining`「开始训练（我这台电脑）」→「开始客户端训练」、`startLocalTraining`「开始本地训练」→「开始本机训练」、`myPcTraining`「在我这台电脑上训练」→「客户端训练」；en 同步 `Client / Local / Start Client Training / Start Local Training / Client Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档文案断言同步为新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (18)
+
+- feat(web-ui): 顶栏高级入口改为导航链接样式——Drift Console 移到品牌右侧/Drive 左侧、Kimi Code Web 移到 Car Connector 右侧，弱化处理一眼可辨为高级选项（Issue #175）
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：重写——原 `EnterButtons` 三合一胶囊组件拆分为 `DrifterConsoleEntryLink` / `KimiCodeWebEntryLink` / `DshEntryLink`（导航链接样式：`text-xs` 小字号 + `text-zinc-500` 淡色 + 图标 `SquareTerminal`/`Sparkles`/`FlaskConical`，无胶囊外壳、不做路由激活态）与 `DshButton`（DeepSeek Harness 胶囊按钮，保留在顶栏右侧，样式不变）；点击逻辑（扫描车端/launcher 启动/空白页句柄防弹窗拦截）与 loading 态原样保留，公共启动流程抽为 `useLauncherEntry` hook，console 扫描抽为 `useDrifterConsoleEntry` hook。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行顺序改为 品牌 → DrifterConsole → Drive → TM → Trainer → PA → CC → KimiCodeWeb，右侧区只留 `DshButton`；手机端原第二行 EnterButtons 删除，三个高级入口以分隔线分组的弱化链接收进汉堡菜单。
+  - `web_ui/frontend/src/App.test.tsx`：`services/api` mock 补 `discoverConnectorConsoles` / `launchKimiCodeWeb` / `launchDsh`（新入口组件渲染期取这些引用，mock 缺导出会抛错进 ErrorBoundary）。
+  - 测试同步：`EnterButtons.test.tsx` 重写为按新组件覆盖（弱化样式断言、DSH 胶囊样式断言、成功/失败路径 8 项）；vitest 全量 19 文件 96 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-issue175-webui-nav-links` 功能分支（独立 worktree）上完成。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (17)
 
