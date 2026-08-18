@@ -17,12 +17,25 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Clapperboard,
   Pause,
   Pin,
   Play,
+  RotateCcw,
   Trash2,
 } from 'lucide-react';
+
+// 图片缓存上限：按播放位置预取后续帧，无上限时长会话内存无限增长、
+// 加重 GC 拖慢页面切换，超限后按 LRU（Map 插入序）淘汰最旧条目（#135）
+const MAX_IMAGE_CACHE_ENTRIES = 240;
+
+// 60fps 播放时预取窗口需覆盖 ~1s 的帧，10 帧只有 ~167ms，
+// 磁盘/网络稍慢就击穿窗口导致画面冻结跳帧。60 帧给足余量（#128）。
+const PREFETCH_AHEAD = 60;
+// HTTP/1.1 同源并发连接约 6 个，预取并发超过它反而会挤占当前帧请求。
+const PREFETCH_CONCURRENCY = 6;
 
 const formatDateTime = (ms: number | null) => {
   if (ms === null || ms === undefined) return null;
@@ -41,6 +54,19 @@ const findImagePath = (record: TubRecord | undefined) => {
   if (!record) return null;
   const key = Object.keys(record).find((k) => k.endsWith('image_array'));
   return key && typeof record[key] === 'string' ? (record[key] as string) : null;
+};
+
+const formatStatValue = (value: unknown, notAvailable: string) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toFixed(2);
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed.toFixed(2);
+    }
+  }
+  return notAvailable;
 };
 
 const pinnedKey = (tubPath: string) => `tubLibrary.pinned.${tubPath}`;
@@ -64,13 +90,38 @@ const savePinned = (tubPath: string, ids: string[]) => {
   }
 };
 
+interface RecordStatsProps {
+  steering: string;
+  throttle: string;
+}
+
+const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex gap-4 text-left">
+      <div className="bg-zinc-800 rounded-md flex h-[60px] w-[88px] flex-col items-start justify-center px-3 pt-[10px] pb-[10px] text-left">
+        <div className="text-xs text-zinc-400 uppercase">{t('tub.steering')}</div>
+        <div className="text-lg font-mono text-cyan-400">{steering}</div>
+      </div>
+      <div className="bg-zinc-800 rounded-md flex h-[60px] w-[88px] flex-col items-start justify-center px-3 pt-[10px] pb-[10px] text-left">
+        <div className="text-xs text-zinc-400 uppercase">{t('tub.throttle')}</div>
+        <div className="text-lg font-mono text-cyan-400">{throttle}</div>
+      </div>
+    </div>
+  );
+});
+
 export const TubLibrary: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const tubPath = useStore((state) => state.tubPath);
   const setTub = useStore((state) => state.setTub);
   const fields = useStore((state) => state.fields);
-  const driveLoopHz = useStore((state) => Number(state.config?.DRIVE_LOOP_HZ) || 60);
+  const config = useStore((state) => state.config);
+  const isLoading = useStore((state) => state.isLoading);
+  const requestTubRefresh = useStore((state) => state.requestTubRefresh);
+  const setCurrentIndex = useStore((state) => state.setCurrentIndex);
+  const driveLoopHz = Number(config?.DRIVE_LOOP_HZ) || 60;
 
   const [sessions, setSessions] = useState<TubSession[]>([]);
   const [selected, setSelected] = useState<TubSession | null>(null);
@@ -82,14 +133,32 @@ export const TubLibrary: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
   const [pinned, setPinned] = useState<string[]>([]);
+  const [actualFps, setActualFps] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const rafRef = useRef<number>();
   const lastFrameTimeRef = useRef<number>(0);
   const frameRef = useRef(0);
+  const isPlayingRef = useRef(false);
+  const recordsRef = useRef(records);
+  const fpsStartRef = useRef<number>(0);
+  const fpsFramesRef = useRef<number>(0);
+  const lastIndexSyncRef = useRef<number>(0);
 
   const frameInterval = 1000 / Math.max(1, driveLoopHz);
+
+  // LRU 写入：命中时刷新位置，超限淘汰最旧条目（#135）
+  const touchImageCache = useCallback((url: string, img: HTMLImageElement) => {
+    const cache = imageCacheRef.current;
+    if (cache.has(url)) cache.delete(url);
+    cache.set(url, img);
+    while (cache.size > MAX_IMAGE_CACHE_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  }, []);
 
   const refreshSessions = useCallback(async (path: string) => {
     setError(null);
@@ -110,11 +179,26 @@ export const TubLibrary: React.FC = () => {
   }, [t]);
 
   useEffect(() => {
+    recordsRef.current = records;
+  }, [records]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+    if (!isPlaying) {
+      setActualFps(0);
+      fpsStartRef.current = 0;
+      fpsFramesRef.current = 0;
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
     setSelected(null);
     setRecords([]);
     setFrame(0);
+    frameRef.current = 0;
     setIsPlaying(false);
     setPinned(tubPath ? loadPinned(tubPath) : []);
+    imageCacheRef.current.clear();
     if (tubPath) {
       void refreshSessions(tubPath);
     } else {
@@ -149,7 +233,48 @@ export const TubLibrary: React.FC = () => {
     };
   }, [selected, tubPath, t]);
 
-  const currentImagePath = useMemo(() => findImagePath(records[frame]), [records, frame]);
+  // 全局图表联动（原 Tub 导航器职责）：库内换帧/播放时把绝对索引写入全局
+  // currentIndex，让 Tub Editor 的 Data Graph 红色竖线跟随；播放期间按 ~30fps
+  // 节流写回，避免 60fps 全局 re-render。
+  useEffect(() => {
+    const rec = records[frame];
+    if (!rec || typeof rec._index !== 'number') return;
+    const now = performance.now();
+    if (isPlayingRef.current && now - lastIndexSyncRef.current < 30) return;
+    lastIndexSyncRef.current = now;
+    if (useStore.getState().currentIndex !== rec._index) {
+      setCurrentIndex(rec._index);
+    }
+  }, [frame, records, setCurrentIndex]);
+
+  // 反向联动：在 Tub Editor 图表上点选帧（全局 currentIndex 变化）时，若该帧
+  // 属于当前场次则跳转预览画面（播放中不打断）。
+  useEffect(() => {
+    const unsubscribe = useStore.subscribe((state) => {
+      if (isPlayingRef.current) return;
+      const recs = recordsRef.current;
+      if (!recs.length) return;
+      const first = recs[0]._index;
+      const last = recs[recs.length - 1]._index;
+      if (typeof state.currentIndex !== 'number') return;
+      if (state.currentIndex < first || state.currentIndex > last) return;
+      const target = recs.findIndex((r) => r._index === state.currentIndex);
+      if (target >= 0 && target !== frameRef.current) {
+        frameRef.current = target;
+        setFrame(target);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  const currentRecord = records[frame];
+  const currentImagePath = useMemo(() => findImagePath(currentRecord), [currentRecord]);
+
+  const statValue = (key: string, altKey?: string) =>
+    formatStatValue(
+      currentRecord?.[key] ?? (altKey ? currentRecord?.[altKey] : undefined),
+      t('tub.notAvailable'),
+    );
 
   // Draw the current frame whenever it changes
   useEffect(() => {
@@ -169,8 +294,8 @@ export const TubLibrary: React.FC = () => {
     if (!img) {
       img = new Image();
       img.src = url;
-      imageCacheRef.current.set(url, img);
     }
+    touchImageCache(url, img);
 
     const draw = (image: HTMLImageElement) => {
       if (canvas.width !== image.width || canvas.height !== image.height) {
@@ -194,35 +319,61 @@ export const TubLibrary: React.FC = () => {
         img?.removeEventListener('error', onError);
       };
     }
-  }, [currentImagePath, tubPath, theme]);
+  }, [currentImagePath, tubPath, theme, touchImageCache]);
 
-  // Prefetch upcoming frames so playback does not stall on image fetches
+  // 预取：优先紧邻的下一帧立即发起，其余按窗口排队，受并发上限约束，
+  // 避免一次性几十个请求挤占 HTTP/1.1 的 ~6 个同源连接（#128）。
   useEffect(() => {
     if (!records.length) return;
-    for (let offset = 1; offset <= 30; offset += 1) {
+    const urls: string[] = [];
+    for (let offset = 1; offset <= PREFETCH_AHEAD; offset += 1) {
       const nextPath = findImagePath(records[frame + offset]);
       if (!nextPath) continue;
       const url = getImageUrl(nextPath, tubPath);
-      if (imageCacheRef.current.has(url)) continue;
-      const img = new Image();
-      img.src = url;
-      imageCacheRef.current.set(url, img);
+      const cached = imageCacheRef.current.get(url);
+      if (cached) {
+        touchImageCache(url, cached);
+        continue;
+      }
+      urls.push(url);
     }
-  }, [frame, records, tubPath]);
+    let cursor = 0;
+    let inFlight = 0;
+    const pump = () => {
+      while (inFlight < PREFETCH_CONCURRENCY && cursor < urls.length) {
+        const url = urls[cursor++];
+        const img = new Image();
+        inFlight += 1;
+        // 无论成败都留在缓存：error 的帧后续不再重复请求
+        img.onload = img.onerror = () => {
+          inFlight -= 1;
+          pump();
+        };
+        touchImageCache(url, img);
+        img.src = url;
+      }
+    };
+    pump();
+  }, [frame, records, tubPath, touchImageCache]);
 
-  // Playback loop: advance frames at DRIVE_LOOP_HZ, only when cached to avoid stalls
+  // Playback loop: advance frames at DRIVE_LOOP_HZ, only when cached to avoid
+  // stalls; plays once and stops at the last frame (原 Tub 导航器单次播放行为).
   useEffect(() => {
     if (!isPlaying || !records.length) return;
 
     const step = (time: number) => {
+      if (!isPlayingRef.current) return;
       if (lastFrameTimeRef.current === 0) {
         lastFrameTimeRef.current = time;
+        fpsStartRef.current = time;
       }
       if (time - lastFrameTimeRef.current >= frameInterval) {
         lastFrameTimeRef.current = time - ((time - lastFrameTimeRef.current) % frameInterval);
-        let next = frameRef.current + 1;
+        const next = frameRef.current + 1;
         if (next >= records.length) {
-          next = 0;
+          // 末帧后停止播放
+          setIsPlaying(false);
+          return;
         }
         const nextPath = findImagePath(records[next]);
         if (nextPath) {
@@ -235,6 +386,13 @@ export const TubLibrary: React.FC = () => {
         }
         frameRef.current = next;
         setFrame(next);
+        // FPS 按实际换帧数累计（#128），画面冻结时角标跟随下降
+        fpsFramesRef.current += 1;
+        if (time - fpsStartRef.current >= 1000) {
+          setActualFps(Math.round((fpsFramesRef.current * 1000) / (time - fpsStartRef.current)));
+          fpsStartRef.current = time;
+          fpsFramesRef.current = 0;
+        }
       }
       rafRef.current = requestAnimationFrame(step);
     };
@@ -242,11 +400,41 @@ export const TubLibrary: React.FC = () => {
     lastFrameTimeRef.current = 0;
     rafRef.current = requestAnimationFrame(step);
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, records, frameInterval]);
+  }, [isPlaying, records, frameInterval, tubPath]);
 
-  const confirmDelete = useCallback(async () => {    if (!pendingDelete || !tubPath) return;
+  // 空格键播放/暂停（原 Tub 导航器快捷键；输入框内不触发）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLInputElement &&
+          !['range', 'checkbox', 'radio', 'button', 'submit'].includes(active.type))
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setIsPlaying((v) => !v);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const jumpToFrame = useCallback((idx: number) => {
+    setIsPlaying(false);
+    frameRef.current = idx;
+    setFrame(idx);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete || !tubPath) return;
     setDeleting(true);
     setError(null);
     try {
@@ -308,9 +496,14 @@ export const TubLibrary: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Clapperboard className="w-5 h-5" />
-          {t('tubLibrary.title')}
+        <CardTitle className="flex items-center w-fit group cursor-default">
+          <div className="flex items-center gap-2">
+            <Clapperboard className="w-5 h-5" />
+            <span>{t('tubLibrary.title')}</span>
+          </div>
+          <span className="text-sm text-zinc-400 font-normal max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3">
+            {t('tub.subtitle')}
+          </span>
         </CardTitle>
         <p className="text-sm text-zinc-400">{t('tubLibrary.subtitle')}</p>
       </CardHeader>
@@ -421,6 +614,10 @@ export const TubLibrary: React.FC = () => {
             {/* Right: player */}
             <div className="flex flex-col gap-3">
               <div className="w-full aspect-video bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative">
+                <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'} backdrop-blur-md`}>
+                  <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
+                  <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
+                </div>
                 {imageError ? (
                   <div className="flex flex-col items-center justify-center text-zinc-600 gap-2">
                     <AlertCircle className="w-8 h-8 text-red-500" />
@@ -435,18 +632,28 @@ export const TubLibrary: React.FC = () => {
                 )}
               </div>
 
+              <div className="flex items-center justify-between gap-4">
+                <RecordStats
+                  steering={statValue('user/angle', 'pilot/angle')}
+                  throttle={statValue('user/throttle', 'pilot/throttle')}
+                />
+                <div className="text-xs text-zinc-500">
+                  {selected
+                    ? t('tubLibrary.frameLabel', {
+                        index: hasRecords ? frame + 1 : 0,
+                        total: records.length,
+                      })
+                    : t('tubLibrary.selectHint')}
+                </div>
+              </div>
+
               <input
                 type="range"
                 min={0}
                 max={Math.max(0, records.length - 1)}
                 value={frame}
                 disabled={!hasRecords}
-                onChange={(e) => {
-                  const idx = parseInt(e.target.value);
-                  setIsPlaying(false);
-                  frameRef.current = idx;
-                  setFrame(idx);
-                }}
+                onChange={(e) => jumpToFrame(parseInt(e.target.value))}
                 aria-label={t('tubLibrary.progressAria')}
                 className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-40"
               />
@@ -455,13 +662,19 @@ export const TubLibrary: React.FC = () => {
                 <Button
                   size="sm"
                   variant="secondary"
+                  aria-label={t('tub.firstRecordAria')}
+                  disabled={!hasRecords || isPlaying}
+                  onClick={() => jumpToFrame(0)}
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                  <span className="ml-1 text-xs">{t('tub.first')}</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   aria-label={t('tub.prevRecordAria')}
                   disabled={!hasRecords || isPlaying}
-                  onClick={() => {
-                    const idx = Math.max(0, frameRef.current - 1);
-                    frameRef.current = idx;
-                    setFrame(idx);
-                  }}
+                  onClick={() => jumpToFrame(Math.max(0, frameRef.current - 1))}
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
@@ -482,13 +695,29 @@ export const TubLibrary: React.FC = () => {
                   variant="secondary"
                   aria-label={t('tub.nextRecordAria')}
                   disabled={!hasRecords || isPlaying}
-                  onClick={() => {
-                    const idx = Math.min(records.length - 1, frameRef.current + 1);
-                    frameRef.current = idx;
-                    setFrame(idx);
-                  }}
+                  onClick={() => jumpToFrame(Math.min(records.length - 1, frameRef.current + 1))}
                 >
                   <ChevronRight className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label={t('tub.lastRecordAria')}
+                  disabled={!hasRecords || isPlaying}
+                  onClick={() => jumpToFrame(Math.max(0, records.length - 1))}
+                >
+                  <span className="mr-1 text-xs">{t('tub.last')}</span>
+                  <ChevronsRight className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label={t('tub.refreshAria')}
+                  title={t('tub.refreshTitle')}
+                  disabled={isLoading}
+                  onClick={requestTubRefresh}
+                >
+                  <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                 </Button>
                 <Button
                   size="sm"
@@ -500,15 +729,6 @@ export const TubLibrary: React.FC = () => {
                   <Trash2 className="w-4 h-4" />
                   <span className="ml-1 text-xs">{t('tubLibrary.delete')}</span>
                 </Button>
-              </div>
-
-              <div className="text-xs text-zinc-500">
-                {selected
-                  ? t('tubLibrary.frameLabel', {
-                      index: hasRecords ? frame + 1 : 0,
-                      total: records.length,
-                    })
-                  : t('tubLibrary.selectHint')}
               </div>
             </div>
           </div>

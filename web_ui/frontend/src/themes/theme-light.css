@@ -631,7 +631,7 @@ html.theme-light .hover\:text-slate-200:hover {
   color: #1a2330;
 }
 
-/* ---------- Text on dark scrims/badges stays white (TubNavigator index badge) ---------- */
+/* ---------- Text on dark scrims/badges stays white (TubLibrary FPS badge) ---------- */
 html.theme-light .bg-black\/50.text-white,
 html.theme-light .bg-black\/60.text-white,
 html.theme-light .bg-black\/70.text-white {

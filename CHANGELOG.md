@@ -1,5 +1,24 @@
 # 变更日志
 
+## 2026-08-18 (1)
+
+- feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：集成原 Tub 导航器全部能力——
+    - FPS 角标：播放中按实际换帧数每秒统计（#128 同款逻辑），画面冻结时角标跟随下降，暂停清零；
+    - 转向/油门数值面板：读当前帧 `user/angle`（回退 `pilot/angle`）与 `user/throttle`（回退 `pilot/throttle`），无值显示「无」；
+    - 帧控制排：首条/上一帧/播放/下一帧/末帧 + 刷新（`requestTubRefresh` 全量重拉，#135 手动刷新）+ 删除；
+    - 标题 hover 展开「浏览 Tub 记录」副标题（`tub.subtitle`）；
+    - 空格键播放/暂停快捷键（输入框聚焦时不触发）；
+    - 全局图表联动（原 TN 核心职责）：换帧/播放把当前帧绝对索引 `_index` 写入全局 `currentIndex`（播放中 ~30ms 节流），Tub Editor 图表红线跟随；反向订阅 store，图表点选帧落在当前场次范围内时跳转预览（播放中不打断）；
+    - 性能沉淀迁移：图片 LRU 缓存 240 条上限（#135）、预取 60 帧窗口 + 6 并发（#128）；
+    - 播放行为改为单次播放（播放到末帧即停），按用户指示不迁移「播放后停止/循环播放」切换键与 M 键快捷键。
+  - `web_ui/frontend/src/components/TubNavigator.tsx` / `TubNavigator.test.tsx`：删除（功能已由 TubLibrary 承接）。
+  - `web_ui/frontend/src/App.tsx`：TubManagerPage 移除 `<TubNavigator />`，只渲染 TubLibrary + TubEditor。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock` 从 TubNavigator 换成 TubLibrary 桩组件。
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`：删除纯 TN 键（`tub.title`/`tub.noRecordsLoaded`/`tub.timeline`/`tub.dragging`/`tub.indexLabel`/`tub.noImage*`/`tub.loop*`/`tub.playOnce*` 等 20 键 zh+en），保留 TubLibrary 在用的 `tub.subtitle`/`tub.steering`/`tub.throttle`/帧控制与刷新键、TubLoader/SimulatorConfig 全部键。
+  - `web_ui/frontend/src/themes/theme-light.css`：注释里 TubNavigator index badge 措辞更新为 TubLibrary FPS badge。
+  - 测试同步：`TubLibrary.test.tsx` 原有 2 项（自动选最新、pin 置顶）保持不变且通过；vitest 全量 17 文件 89 项通过，`npm run build`（tsc -b + vite build）通过。
+
 ## 2026-08-17 (17)
 
 - fix(launcher): Drifter Console 恢复 0 号置顶（#164 用户后续指示，撤销同日 (15) 条目的 DC 挪位）
