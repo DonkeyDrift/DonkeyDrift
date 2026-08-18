@@ -112,8 +112,13 @@ def _clean_spawned():
 
 @pytest.fixture(autouse=True)
 def _fake_lan_ip(monkeypatch):
-    """固定本机局域网 IP，隔离真实网络探测（issue #125 的 URL 改写）。"""
+    """固定本机局域网 IP，隔离真实网络探测（issue #125 的 URL 改写）。
+
+    同时把 mDNS 主机名探测钉为 None——默认走 IP 回退路径，保持既有断言
+    稳定；mDNS 优先路径由专门测试用 monkeypatch 覆盖验证。
+    """
     monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+    monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
 
 
 # ===========================================================================
@@ -146,6 +151,26 @@ class TestLanUrl:
     def test_no_lan_ip_returns_unchanged(self, monkeypatch):
         monkeypatch.setattr(kimi_web, "_lan_ip", lambda: None)
         url = "http://127.0.0.1:58627/#token=t0k123"
+        assert kimi_web._lan_url(url) == url
+
+    def test_mdns_hostname_preferred_over_loopback(self, monkeypatch):
+        # issue #168 后续：host 用 mDNS 主机名，origin 不随 DHCP 换 IP 漂移
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
+        assert kimi_web._lan_url(
+            "http://127.0.0.1:58627/#token=t0k123") == \
+            "http://TONY007.local:58627/#token=t0k123"
+
+    def test_mdns_hostname_preferred_over_lan_ip(self, monkeypatch):
+        # banner 的 Network 行给的是本机局域网 IP，也改写为 mDNS 稳定 origin
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
+        assert kimi_web._lan_url(
+            "http://192.168.3.10:58627/#token=t0k123") == \
+            "http://TONY007.local:58627/#token=t0k123"
+
+    def test_mdns_hostname_keeps_foreign_host(self, monkeypatch):
+        # 其它远程 host（非本机 IP）不受 mDNS 改写影响
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
+        url = "http://192.168.3.41:58627/#token=t0k123"
         assert kimi_web._lan_url(url) == url
 
 
@@ -228,6 +253,19 @@ class TestLiveInstanceUrl:
         url = kimi_web._live_instance_url(inst_dir, token_file,
                                           cwd="/home/dkc/projects")
         assert url == "http://192.168.3.10:58627/#token=tok-xyz"
+
+    def test_mdns_hostname_preferred_for_local_instance(
+            self, tmp_path, monkeypatch):
+        # issue #168 后续：本机实例（登记 0.0.0.0/回环）复用后入口 host 用
+        # mDNS 主机名，origin 不随 DHCP 换 IP 漂移
+        inst_dir = tmp_path / "instances"
+        _write_instance(inst_dir, pid=os.getpid())
+        token_file = tmp_path / "server.token"
+        token_file.write_text("tok-xyz\n", encoding="utf-8")
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
+        monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
+        url = kimi_web._live_instance_url(inst_dir, token_file)
+        assert url == "http://TONY007.local:58627/#token=tok-xyz"
 
     def test_cwd_mismatching_instance_skipped(self, tmp_path, monkeypatch):
         # 实例跑在别的目录（如 mycar 里的 TUI 内嵌 server）时不复用，
