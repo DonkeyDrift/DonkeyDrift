@@ -48,20 +48,25 @@ export const useGyroDrive = ({
     }
   }, []);
 
+  // 支持性检测在挂载时即执行（不受 enabled 门控），
+  // 否则未选中陀螺仪时 permissionState 停留在初始值 'unsupported'，切换菜单里永远灰着
   useEffect(() => {
-    if (!enabled) return;
-
-    // iOS 需要用户主动触发请求权限，这里先检测支持情况
     if (typeof DeviceOrientationEvent === 'undefined') {
       setPermissionState('unsupported');
       return;
     }
-
-    // 非 iOS 设备默认有权限
     const OrientationEvent = DeviceOrientationEvent as DeviceOrientationEventWithPermission;
-    if (typeof OrientationEvent.requestPermission !== 'function') {
+    // iOS 13+ 需要用户手势触发 requestPermission，先标为 prompt
+    if (typeof OrientationEvent.requestPermission === 'function') {
+      setPermissionState('prompt');
+    } else {
+      // 非 iOS 设备默认有权限
       setPermissionState('granted');
     }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
 
     const handleOrientation = (e: DeviceOrientationEvent) => {
       if (e.beta !== null && e.gamma !== null) {
