@@ -22,10 +22,17 @@ router = APIRouter()
 class TrainerConfig(BaseModel):
     host: str
     user: str
-    password: str
     remote_dir_base: str
     model_name: str
     python_path: str
+
+
+class SSHCredentials(BaseModel):
+    """SSH 连接凭据，仅在训练请求会话内传递，不落盘、不入库。"""
+    host: Optional[str] = None
+    user: Optional[str] = None
+    password: Optional[str] = None
+    key_filename: Optional[str] = None
 
 
 class LocalTrainRequest(BaseModel):
@@ -39,11 +46,13 @@ class LocalTrainRequest(BaseModel):
 class OnlineTrainRequest(BaseModel):
     config_file: str = "train_online.conf"
     working_dir: Optional[str] = None
+    ssh: Optional[SSHCredentials] = None
 
 
 class MyPcTrainRequest(BaseModel):
     config_file: str = "train_my_pc.conf"
     working_dir: Optional[str] = None
+    ssh: Optional[SSHCredentials] = None
 
 
 class StopRequest(BaseModel):
@@ -72,7 +81,8 @@ async def get_trainer_config(config_file: str = "train_online.conf"):
         "path": path,
         "host": config["Remote"].get("host", ""),
         "user": config["Remote"].get("user", ""),
-        "password": config["Remote"].get("password", ""),
+        # 密码不再返回给前端：凭据仅会话内传递，不落盘、不入库。
+        "password": "",
         "remote_dir_base": config["Remote"].get("remote_dir_base", "~/projects"),
         "model_name": config["Remote"].get("model_name", "model"),
         "python_path": config["Remote"].get("python_path", "~/miniconda3/envs/donkey/bin/python"),
@@ -91,7 +101,6 @@ async def set_trainer_config(cfg: TrainerConfig, config_file: str = "train_onlin
 
     config.set("Remote", "host", cfg.host)
     config.set("Remote", "user", cfg.user)
-    config.set("Remote", "password", cfg.password)
     config.set("Remote", "remote_dir_base", cfg.remote_dir_base)
     config.set("Remote", "model_name", cfg.model_name)
     config.set("Remote", "python_path", cfg.python_path)
@@ -330,6 +339,7 @@ async def start_online_train(request: OnlineTrainRequest):
             job,
             config_file=request.config_file,
             working_dir=request.working_dir,
+            ssh_credentials=request.ssh.model_dump() if request.ssh else None,
         )
     )
     return {"job_id": job.id, "status": job.status}
@@ -344,6 +354,7 @@ async def start_mypc_train(request: MyPcTrainRequest):
             job,
             config_file=request.config_file,
             working_dir=request.working_dir,
+            ssh_credentials=request.ssh.model_dump() if request.ssh else None,
         )
     )
     return {"job_id": job.id, "status": job.status}

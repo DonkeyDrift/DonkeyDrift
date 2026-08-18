@@ -25,9 +25,11 @@ class WebOnlineTrainer(OnlineTrainer):
 
     def __init__(self, config_file="train_online.conf",
                  log_queue: Optional[queue.Queue] = None,
-                 working_dir: Optional[str] = None):
+                 working_dir: Optional[str] = None,
+                 ssh_credentials: Optional[dict] = None):
         self._log_queue = log_queue
         self._working_dir = working_dir or os.getcwd()
+        self._ssh_credentials = ssh_credentials
         # Ensure CWD-sensitive operations use the correct directory
         old_cwd = os.getcwd()
         try:
@@ -94,7 +96,7 @@ class WebOnlineTrainer(OnlineTrainer):
         old = os.getcwd()
         try:
             os.chdir(self._working_dir)
-            super().connect_ssh()
+            super().connect_ssh(self._ssh_credentials)
             self._emit("SSH connection established")
         finally:
             os.chdir(old)

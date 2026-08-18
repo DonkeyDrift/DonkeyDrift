@@ -4,6 +4,7 @@ import { useTranslation } from '@/i18n';
 
 interface RemoteConfigFormProps {
   titleKey?: string;
+  hintKey?: string;
   host: string;
   onHostChange: (v: string) => void;
   user: string;
@@ -20,6 +21,7 @@ interface RemoteConfigFormProps {
 
 export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
   titleKey = 'trainer.cloudTraining',
+  hintKey,
   host,
   onHostChange,
   user,
@@ -39,6 +41,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
       <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t(titleKey)}</h3>
+      {hintKey && <p className="text-xs text-zinc-500">{t(hintKey)}</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="space-y-1">

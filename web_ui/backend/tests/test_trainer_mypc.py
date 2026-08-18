@@ -23,16 +23,18 @@ def test_mypc_route_creates_mypc_job():
 
     captured = {}
 
-    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None):
+    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None, ssh_credentials=None):
         captured["job"] = job
         captured["config_file"] = config_file
         captured["working_dir"] = working_dir
+        captured["ssh_credentials"] = ssh_credentials
 
     with _build_client() as client, \
          patch("trainer_engine.job_manager.run_mypc", side_effect=fake_run_mypc):
         resp = client.post("/api/trainer/train/mypc", json={
             "config_file": "train_my_pc.conf",
             "working_dir": "/tmp/mycar",
+            "ssh": {"host": "192.168.1.10", "user": "me", "password": "secret"},
         })
 
     assert resp.status_code == 200
@@ -43,14 +45,18 @@ def test_mypc_route_creates_mypc_job():
     assert job.mode == "mypc"
     assert captured["config_file"] == "train_my_pc.conf"
     assert captured["working_dir"] == "/tmp/mycar"
+    assert captured["ssh_credentials"]["host"] == "192.168.1.10"
+    assert captured["ssh_credentials"]["user"] == "me"
+    assert captured["ssh_credentials"]["password"] == "secret"
 
 
 def test_mypc_route_defaults():
     captured = {}
 
-    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None):
+    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None, ssh_credentials=None):
         captured["config_file"] = config_file
         captured["working_dir"] = working_dir
+        captured["ssh_credentials"] = ssh_credentials
 
     with _build_client() as client, \
          patch("trainer_engine.job_manager.run_mypc", side_effect=fake_run_mypc):
@@ -59,6 +65,7 @@ def test_mypc_route_defaults():
     assert resp.status_code == 200
     assert captured["config_file"] == "train_my_pc.conf"
     assert captured["working_dir"] is None
+    assert captured["ssh_credentials"] is None
 
 
 def test_stop_mypc_job_sets_stop_event():
@@ -79,3 +86,59 @@ def test_stop_mypc_job_sets_stop_event():
 
     assert job.status == "stopped"
     assert job.stop_event.is_set()
+
+
+def test_config_endpoint_does_not_write_password(tmp_path):
+    import configparser
+
+    conf = tmp_path / "train.conf"
+
+    with _build_client() as client:
+        resp = client.post(
+            "/api/trainer/config",
+            json={
+                "host": "example.com",
+                "user": "ubuntu",
+                "remote_dir_base": "~/projects",
+                "model_name": "model",
+                "python_path": "python",
+            },
+            params={"config_file": str(conf)},
+        )
+
+    assert resp.status_code == 200
+    parser = configparser.ConfigParser()
+    parser.read(str(conf))
+    assert "password" not in parser["Remote"]
+    assert "dkc@2026" not in conf.read_text()
+
+
+def test_get_config_returns_empty_password(tmp_path):
+    import configparser
+
+    conf = tmp_path / "train.conf"
+    parser = configparser.ConfigParser()
+    parser["Remote"] = {"host": "example.com", "user": "ubuntu"}
+    with open(conf, "w") as f:
+        parser.write(f)
+
+    with _build_client() as client:
+        resp = client.get("/api/trainer/config", params={"config_file": str(conf)})
+
+    assert resp.status_code == 200
+    assert resp.json()["password"] == ""
+
+
+def test_get_config_auto_creates_without_plaintext_credentials(tmp_path):
+    conf = tmp_path / "train_new.conf"
+
+    with _build_client() as client:
+        resp = client.get("/api/trainer/config", params={"config_file": str(conf)})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["password"] == ""
+    assert body["host"] == ""
+    content = conf.read_text()
+    assert "dkc@2026" not in content
+    assert "haowenpi.com" not in content

@@ -1,0 +1,9 @@
+# 「我这台电脑」训练模式的 SSH 连接配置模板。
+# 复制本文件为 train_my_pc.conf，并填写你电脑的 host / user。
+# 密码通过网页表单在会话内传递，不写入本文件、不入库。
+[Remote]
+host =
+user =
+remote_dir_base = ~/projects
+model_name = model
+python_path = ~/miniconda3/envs/donkey/bin/python
