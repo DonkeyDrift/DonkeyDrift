@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-18 (1)
+
+- fix(web-ui): DD 驾驶页输入源切换器「手柄/陀螺仪」永远灰色不可选——连接/支持检测被 `enabled` 门控形成先有鸡还是先有蛋的死锁
+  - 根因：`InputSourceSelector` 中手柄项需 `gamepadConnected`、陀螺仪项需 `permissionState !== 'unsupported'` 才可点，但 `DrivePage` 传入的 `useGamepadDrive({ enabled: inputSource === 'gamepad' })` 与 `useGyroDrive({ enabled: inputSource === 'gyro' })` 都在 `!enabled` 时直接 return——未选中该输入源时检测逻辑根本不运行，状态停在初始值（`connected=false` / `permissionState='unsupported'`），按钮永远灰着点不了，形成死锁。
+  - `web_ui/frontend/src/hooks/useGamepadDrive.ts`：`gamepadconnected`/`gamepaddisconnected` 监听拆为独立 effect，组件挂载即注册（不受 `enabled` 门控），选中手柄前插手柄即可点亮可选项；控制轮询 RAF 循环仍只在 `enabled` 时运行。
+  - `web_ui/frontend/src/hooks/useGyroDrive.ts`：新增挂载即执行的支持性检测 effect（不受 `enabled` 门控）：无 `DeviceOrientationEvent` → `unsupported`；存在 `requestPermission`（iOS 13+）→ `prompt`；其余（Android/桌面）→ `granted`。原 `enabled` 门控的 orientation 监听 + RAF 循环不变。
+  - 测试同步：新增 `web_ui/frontend/src/hooks/useGamepadDrive.test.tsx`（2 项：未 enabled 时连接检测仍运行、全部断开后复位）、`useGyroDrive.test.tsx`（3 项：非 iOS 挂载即 granted、iOS 初始 prompt、不支持时 unsupported）。前端 vitest 全量 20 文件 95 项通过，`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-fix-input-source-disabled` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。
+
 ## 2026-08-17 (17)
 
 - fix(launcher): Drifter Console 恢复 0 号置顶（#164 用户后续指示，撤销同日 (15) 条目的 DC 挪位）
