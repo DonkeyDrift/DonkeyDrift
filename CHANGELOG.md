@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-18 (23)
+
+- fix(launcher): DC 上位机终端"放一会儿仍被断开"根因修复——移除应用层 PING/PONG 判死，改用内核 TCP keepalive 保活与死链检测（Issue #173 后续）
+  - 背景：#173 首轮把 PTY 会话与 WS 连接解耦、断线宽限期 + sid 重连 + 自动退避重连，但服务端仍保留 #151 的"60s 无 PONG 判死"心跳——浏览器标签页冻结 / 手机锁屏时应用层 PONG 会停，服务端照样在 60s 后主动断开，用户视角"放一会儿仍断"依旧存在。
+  - `donkeycar/launcher/terminal.py`：删除 `_heartbeat_loop` 应用层心跳线程与 `_PING_INTERVAL`/`_PONG_TIMEOUT` 判死逻辑；新增 `_enable_tcp_keepalive`，在 WS 连接套接字上启用内核 TCP keepalive（`SO_KEEPALIVE` + Linux `TCP_KEEPIDLE=30`/`TCP_KEEPINTVL=15`/`TCP_KEEPCNT=3`）。keepalive 探测由内核发送、对端内核 ACK，与应用层无关：冻结/锁屏的浏览器内核照常 ACK，不再被误判断线；探测包同时刷新 NAT 表项防空闲断链；只有真正的死链才会在约 75s 后让 socket 报错触发会话 detach。主读循环仍响应客户端 PING（回 PONG），只是不再主动发 PING。
+  - `donkeycar/launcher/terminal_static/terminal.html`：注释同步（断线原因改为"任何原因，含 TCP keepalive 判死"）。
+  - `donkeycar/tests/test_launcher_terminal.py`：删除"服务端心跳 PING"与"空闲超时断开"两个 #151 用例，新增 `test_terminal_ws_idle_keeps_connection`（空闲不判死断连）与 `test_enable_tcp_keepalive_sets_socket_options`（keepalive 参数落地）。
+  - `tests/test_launcher_terminal.py`：静态断言从旧的 `lost`/`failed`/`reconnect` 文案改为新的"断线自动退避重连 + session sid 接回 + 清屏"断言。
+  - 测试同步：两个 terminal 测试文件 26 项通过。
+
 ## 2026-08-18 (22)
 
 - fix(launcher): KCW 入口 URL host 用 mDNS 主机名，置顶/模式/语言主题不再随 DHCP 换 IP 被清空（Issue #168 后续）

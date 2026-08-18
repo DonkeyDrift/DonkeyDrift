@@ -7,8 +7,9 @@
   窗口大小调整（TIOCSWINSZ）、初始工作目录、exit 通知与会话清理
 - handle_terminal_ws：经真实 ThreadingHTTPServer + 原始 socket 客户端的
   端到端握手、binary 输入/输出桥接、close 帧应答
-- 服务端心跳（issue #151）：定期向客户端发 PING；长时间无任何客户端帧
-  时主动 shutdown 断开
+- 内核 TCP keepalive（issue #173）：连接套接字启用 SO_KEEPALIVE + Linux
+  TCP_KEEP* 参数，NAT 保活与死链检测不再误伤"浏览器冻结但链路未死"；
+  空闲期间不主动 shutdown 断开
 - 会话保持与重连（issue #173）：连接断开后 PTY 会话进入宽限期不销毁，
   ?session=<sid> 重连接回原会话并补发断线期间的输出；宽限期耗尽后由
   清扫线程销毁
@@ -382,47 +383,47 @@ def _read_json_control(sock_file, timeout=10.0):
     pytest.fail("超时未收到 text 控制帧")
 
 
-def test_terminal_ws_server_sends_heartbeat_ping(monkeypatch):
-    """服务端按 _PING_INTERVAL 周期主动向客户端发 PING 帧（issue #151）。"""
-    monkeypatch.setattr(terminal, "_PING_INTERVAL", 0.2)
+def test_terminal_ws_idle_keeps_connection():
+    """空闲（无任何客户端帧，含 PONG）不再判死断连（issue #173）。
+
+    旧实现（issue #151）用应用层 PONG 超时判死，会把"浏览器冻结但链路
+    未死"误判为断线；改为内核 TCP keepalive 后，服务端空闲期间不主动
+    shutdown，命令仍能正常往返。
+    """
     server, sock, sock_file = _open_terminal_ws()
     try:
+        _read_json_control(sock_file)  # 收掉 session 帧
+        # 静默一段时间，不发送任何客户端帧（含 PONG）
+        time.sleep(0.5)
+        # 连接仍应存活：发一条命令能正常得到输出
+        sock.sendall(_masked_client_frame(b"echo alive-$((6*7))\n", OP_BINARY))
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            opcode, _payload = _recv_server_frame(sock_file)
-            if opcode == OP_PING:
-                return  # 收到服务端心跳
-            # 跳过 shell 提示符等 binary 输出
-        pytest.fail("超时未收到服务端 PING 心跳")
+        output = b""
+        while time.monotonic() < deadline and b"alive-42" not in output:
+            opcode, payload = _recv_server_frame(sock_file)
+            if opcode == OP_BINARY:
+                output += payload
+        assert b"alive-42" in output, "空闲后连接被断开，命令无响应"
     finally:
         sock.close()
         server.shutdown()
         server.server_close()
 
 
-def test_terminal_ws_idle_timeout_disconnects(monkeypatch):
-    """超过 _PONG_TIMEOUT 未收到任何客户端帧，服务端主动断开（issue #151）。"""
-    monkeypatch.setattr(terminal, "_PING_INTERVAL", 0.1)
-    monkeypatch.setattr(terminal, "_PONG_TIMEOUT", 0.3)
-    server, sock, _sock_file = _open_terminal_ws()
+def test_enable_tcp_keepalive_sets_socket_options():
+    """_enable_tcp_keepalive 启用 SO_KEEPALIVE 并设置 Linux TCP_KEEP* 参数。"""
+    s = socket.socket()
     try:
-        # 不回任何帧（含 PONG），等服务端判死 shutdown → 读到 EOF
-        sock.settimeout(0.5)
-        deadline = time.monotonic() + 10
-        eof = False
-        while time.monotonic() < deadline:
-            try:
-                data = sock.recv(4096)
-            except socket.timeout:
-                continue
-            if data == b"":
-                eof = True
-                break
-        assert eof, "空闲超时后服务端未主动断开连接"
+        terminal._enable_tcp_keepalive(s)
+        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        try:
+            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == terminal._TCP_KEEP_IDLE
+            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == terminal._TCP_KEEP_INTVL
+            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == terminal._TCP_KEEP_CNT
+        except (OSError, AttributeError):
+            pass  # 非 Linux 或常量不可用，仅验证 SO_KEEPALIVE 已启用
     finally:
-        sock.close()
-        server.shutdown()
-        server.server_close()
+        s.close()
 
 
 def test_terminal_ws_rejects_bad_handshake():
