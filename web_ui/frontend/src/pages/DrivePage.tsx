@@ -26,7 +26,7 @@ type DrivePageProps = {
   active?: boolean;
 };
 
-export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
+export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
   const { t } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
@@ -358,4 +358,4 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
 
     </div>
   );
-};
+});

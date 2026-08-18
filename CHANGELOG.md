@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (29)
+## 2026-08-18 (31)
 
 - feat(launcher): D 启动菜单 0 号「Drifter Console」移到 7 号、删 0 号位，6 号改名 DonkeyDrifter（小字「打开 DonkeyDrifter」）
   - 需求：D 启动页菜单中 0 号「Drifter Console」（打开 DC）移到 7 号位置、删掉 0 号位；6 号「Donkey Drifter」改名「DonkeyDrifter」，小字（desc）改为「打开 DonkeyDrifter」。
@@ -12,6 +12,23 @@
     - 帮助文案：`数字键 0-12：选择对应菜单项（7 号已并入 6 号）` → `数字键 1-12：选择对应菜单项`（zh/en 同步）。
   - 测试同步：`tests/test_launcher_menu_actions.py` 删除 `test_menu_6_7_merged_placeholder`，新增 `test_menu_6_renamed_and_dc_moved_to_7`；模块 docstring 与注释同步。launcher 相关测试 155 项全部通过，MENU_HTML 内嵌 JS `node --check` 通过。
   - 注：本次在 `Tony-menu-reorder-dc-7` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (30)
+
+- perf(web-ui): 流程页导航切换仍卡顿——四个 section 常驻挂载导致整页每次滚动都重算/重绘 + 父组件重渲染连坐所有子页面，加 `content-visibility` 与 `React.memo` 隔离（Issue #135 五轮）
+  - 背景：#201/#204 已把 Drive 视频流/WS/遥测图/PA 循环按主导 section 门控，但四个 section（Drive/TM/Trainer/PA）仍常驻挂载在同一个滚动页里，且 `FlowPage` 的 `inView` 每次变化会触发父组件重渲染、默认连带所有子页面一起重渲染——切导航平滑滚动时既有视口外 section 的布局/绘制开销，又有 TM/Trainer 等重页面的无效重渲染。Playwright CPU 4x 实测：切换 PA→Drive 单次 longtask 峰值 836ms。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：新增 `SECTION_STYLE`（`content-visibility: auto` + `contain-intrinsic-size: auto 640px`）应用到四个 `<section>`——DOM 与组件状态保留（保住 #135 常驻保活），但浏览器跳过视口外 section 的布局/绘制，只按占位尺寸撑开滚动高度。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx` / `TrainerPage.tsx` / `DrivePage.tsx` / `PilotArenaPage.tsx`：四个页面组件用 `React.memo` 包裹（无 props 的 TM/Trainer 永不随父组件重渲染；带 `active` 的 Drive/PA 仅在 `active` 变化时重渲染）。
+  - 效果：Playwright CPU 4x 实测导航切换 longtask 峰值从 836ms 降至约 170ms；视频流滚出卸载回归通过（Drive 滚到 TM 后 `img[src*=drive/video]`/`video` 卸载、占位符出现）；nav href 正确（`#/drive`/`#/tub`/`#/trainer`/`#/pilot`）。
+  - 测试同步：前端 vitest 全量 20 文件 100 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次在 `Tony-issue135-nav-lag-round5` 功能分支（worktree 作业，基于最新 origin/Tony）完成，仅动前端。Firmware 无改动，无需 OTA。已部署到 8000（从该 worktree 起后端），用户需硬刷新浏览器。
+
+## 2026-08-18 (29)
+
+- fix(web-ui): 修复 DD 前端深链（`/connector`、`/drive` 等）刷新/直达返回 404——根静态文件挂载改为 SPA fallback 兜底
+  - 根因：`main.py` 用 `app.mount("/", StaticFiles(html=True))` 服务根目录静态文件，它注册在 `@app.get("/{full_path:path}")` SPA fallback 之前，拦截了所有路径——前端深链（无扩展名、非真实文件）被 StaticFiles 判为 404，fallback 永远轮不到，导致用户在 `/connector` 等页面刷新或直接访问时得到 `{"detail":"Not Found"}`（Issue #177 收尾时用户反馈"看不到改动/无法连接服务器"暴露）。
+  - `web_ui/backend/main.py`：去掉根目录 `StaticFiles` 挂载，`spa_fallback` 改为——① 真实存在的根目录静态文件（favicon、robots.txt 等）经 `realpath` 越界校验后直接 `FileResponse`；② 不存在的 API 路径（`api`/`api/*`）保持 404；③ 其余一律回退到 `index.html` 交给前端路由。`/assets/*` 仍由独立 mount 服务，不受影响。
+  - 测试同步：后端 pytest 全量 82 项通过；手动验证 `/connector`、`/drive`、`/` 返回 200、`/assets/*.js` 200、`/api/provisioning/status` 404、`/api/connector/config` 200。
 
 ## 2026-08-18 (28)
 
