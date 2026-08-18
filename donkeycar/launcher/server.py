@@ -381,67 +381,6 @@ def _save_last_project_path_local(project_path):
         print(f"[launcher] 保存上次项目失败: {e}")
 
 
-def _launch_web_ui():
-    """启动 Web UI（菜单 7）：不带动车进程，只起 `donkey web`。
-
-    与 _launch_drive 共用实例登记（~/.donkeycar/webui.json）：已有存活
-    实例直接复用其 URL；没有才新起（默认端口 8000/5188，与 #127 一致）。
-    本链路新起的 web 进程 PID 写入登记文件，供后续 Drive 链路清理复用。
-    """
-    with _proc_lock:
-        inst = find_live_instance()
-        if inst:
-            _processes["backend_port"] = inst["backend_port"]
-            _processes["frontend_port"] = inst["frontend_port"]
-            return {
-                "status": "launched",
-                "url": f"http://localhost:{inst['frontend_port']}/",
-                "frontend_port": inst["frontend_port"],
-            }
-
-        backend_port = _choose_available_backend_port(8000)
-        frontend_port = _choose_available_backend_port(5188)
-        web_cmd = ["donkey", "web"]
-        web_ui_path = _get_bundled_web_ui_path()
-        if web_ui_path is not None:
-            web_cmd.extend(["--path", str(web_ui_path)])
-        web_cmd.extend(["--backend-port", str(backend_port)])
-        web_cmd.extend(["--frontend-port", str(frontend_port)])
-
-        try:
-            web_proc = subprocess.Popen(
-                web_cmd,
-                stdin=subprocess.DEVNULL,
-                creationflags=(
-                    subprocess.CREATE_NEW_PROCESS_GROUP
-                    if sys.platform == "win32" else 0
-                ),
-            )
-        except FileNotFoundError:
-            return {
-                "status": "error",
-                "error": "未找到 donkey 命令，请确认 donkeycar 已正确安装",
-            }
-        except Exception as e:
-            return {"status": "error", "error": f"启动进程失败: {e}"}
-
-        # web 进程启动后自行登记实例；这里把 PID 也写入登记文件，
-        # 供后续 Drive 链路复用/清理（与 _launch_drive 行为一致）
-        write_drive_pids([web_proc.pid])
-
-        _processes["web"] = web_proc
-        _processes["car"] = None
-        _processes["backend_port"] = backend_port
-        _processes["frontend_port"] = frontend_port
-
-        return {
-            "status": "launched",
-            "url": f"http://localhost:{frontend_port}/",
-            "backend_port": backend_port,
-            "frontend_port": frontend_port,
-        }
-
-
 def _create_car(folder, template=None, overwrite=False):
     """创建新项目（菜单 1）：donkey createcar --path ~/projects/<folder>。
 
@@ -995,10 +934,6 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._handle_launch_kimi_code_web()
         elif path == "/api/launch/dsh":
             self._handle_launch_dsh()
-        elif path == "/api/launch/web":
-            result = _launch_web_ui()
-            code = 200 if result.get("status") != "error" else 500
-            self._serve_json(result, code=code)
         elif path == "/api/createcar":
             body, err = self._read_json_body()
             if err is not None:
@@ -1461,6 +1396,14 @@ MENU_HTML = r"""<!DOCTYPE html>
         .menuName .favorite{color:#d96bff;font-size:11px;margin-left:4px}
         .menuDesc{font-size:12px;color:#8fa1b5;margin-top:2px}
 
+        /* 占位行（issue #181：原 7 号 Web 已并入 6 号）：置灰、不可点击、
+           无 hover/选中效果，样式明显区别于可用项 */
+        .menuItem.placeholder{cursor:default;opacity:.45;border-style:dashed}
+        .menuItem.placeholder:hover{border-color:#344154;background:linear-gradient(135deg,#1c2430,#121821)}
+        .menuItem.placeholder .menuNo{color:#8fa1b5}
+        html[data-theme="light"] .menuItem.placeholder:hover{border-color:#ccd5df;background:linear-gradient(135deg,#fff,#edf1f6)}
+        html[data-theme="light"] .menuItem.placeholder .menuNo{color:#7c8da0}
+
         /* DC reconnect overlay */
         .reconnectOverlay{position:fixed;inset:0;background:rgba(16,19,24,.88);display:none;align-items:center;justify-content:center;z-index:100}
         .reconnectOverlay.show{display:flex}
@@ -1586,7 +1529,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 0-12：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 0-12：选择对应菜单项（7 号已并入 6 号）</li>
             </ul>
         </section>
     </div>
@@ -1619,13 +1562,12 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 0-12：选择对应菜单项',
+                'help.keyNumbers': '数字键 0-12：选择对应菜单项（7 号已并入 6 号）',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
                 'overlay.startingKimiWeb': '正在启动 Kimi Code Web（kimi 启动较慢，请耐心等待）...',
                 'overlay.startingDshWeb': '正在启动 DeepSeek Harness...',
-                'overlay.startingWeb': '正在启动 Web UI...',
                 'overlay.failed': '启动失败',
                 'overlay.success': '启动成功！正在跳转...',
                 'overlay.slow': '前端服务启动较慢，正在跳转...',
@@ -1657,13 +1599,12 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 0-12: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 0-12: select the corresponding menu item (#7 merged into #6)',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
                 'overlay.startingKimiWeb': 'Starting Kimi Code Web (kimi starts slowly, please wait)...',
                 'overlay.startingDshWeb': 'Starting DeepSeek Harness...',
-                'overlay.startingWeb': 'Starting Web UI...',
                 'overlay.failed': 'Launch failed',
                 'overlay.success': 'Started! Redirecting...',
                 'overlay.slow': 'Frontend is slow to start, redirecting...',
@@ -1795,7 +1736,9 @@ MENU_HTML = r"""<!DOCTYPE html>
 
         // 菜单项数据（条目与 tui.py 保持一致，desc/catLabel 双语；
         // issue #164：新增 12 号 DeepSeek Harness（常用）；DC 恢复 0 号
-        // 置顶（用户后续指示），编号 0-12）
+        // 置顶（用户后续指示），编号 0-12；
+        // issue #181：6/7 两项已打通 DD Web UI，合并为 6 号「Donkey Drifter」
+        // （进 DD Drive 页面），7 号位 placeholder 占位，8-12 序号不变不递补
         const menuItems = [
             {no: 0,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
             {no: 1,  cat: "manage", name: "Create Car",   descZh: "创建新的 DonkeyCar 项目",                descEn: "Create a new DonkeyCar project",                 favorite: false},
@@ -1803,8 +1746,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
             {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
-            {no: 6,  cat: "drive",  name: "Drive",        descZh: "打开 Web Console 驾驶控制台",            descEn: "Open the Web Console driving console",           favorite: true},
-            {no: 7,  cat: "filter", name: "Web",          descZh: "启动 Web UI（前后端）",                  descEn: "Start the Web UI (frontend + backend)",          favorite: true},
+            {no: 6,  cat: "drive",  name: "Donkey Drifter", descZh: "进入 DonkeyDrift（Drive 页面）",      descEn: "Enter DonkeyDrift (Drive page)",                 favorite: true},
+            {no: 7,  cat: null,     name: "—",           descZh: "已合并至 6 号「Donkey Drifter」",       descEn: "Merged into #6 Donkey Drifter",                 favorite: false, placeholder: true},
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
@@ -1828,8 +1771,24 @@ MENU_HTML = r"""<!DOCTYPE html>
             grid.innerHTML = '';
             menuItems.forEach(item => {
                 const div = document.createElement('div');
-                div.className = 'menuItem';
+                div.className = item.placeholder
+                    ? 'menuItem placeholder' : 'menuItem';
                 div.dataset.no = item.no;
+                if (item.placeholder) {
+                    // 占位行（issue #181：原 7 号 Web 已并入 6 号）：
+                    // 不可点击、无 favorite 标、无分类 pill、样式置灰
+                    div.onclick = null;
+                    div.innerHTML =
+                        '<div class="menuNo">' + item.no + '</div>' +
+                        '<div class="menuContent">' +
+                            '<div class="menuName">' + item.name + '</div>' +
+                            '<div class="menuDesc">' +
+                                (uiLang === 'en' ? item.descEn : item.descZh) +
+                            '</div>' +
+                        '</div>';
+                    grid.appendChild(div);
+                    return;
+                }
                 div.onclick = () => selectItem(item.no);
                 const favMark = item.favorite
                     ? ' <span class="favorite">' + t('menu.favorite') + '</span>' : '';
@@ -1856,11 +1815,16 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项（issue #126：全部菜单项已接线）
+        // 选择菜单项（issue #126：全部菜单项已接线；issue #181：原 7 号
+        // Web 并入 6 号，7 号为占位——数字键/点击只给轻提示，不触发动作）
         function selectItem(no) {
-            highlightRow(no);
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
+            if (item.placeholder) {
+                showError(uiLang === 'en' ? item.descEn : item.descZh);
+                return;
+            }
+            highlightRow(no);
 
             if (no === 0) {
                 openDrifterConsole();
@@ -1876,8 +1840,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                 restoreData();
             } else if (no === 6) {
                 launchDrive();
-            } else if (no === 7) {
-                launchWebUI();
             } else if (no === 8) {
                 launchInTerminal('donkey ui', t('menu.donkeyui.openTerminal'));
             } else if (no === 9) {
@@ -2257,54 +2219,6 @@ MENU_HTML = r"""<!DOCTYPE html>
                     showResultDone('✓ ' + r.data.restored);
                 } else {
                     showResultError(r.data);
-                }
-            } catch (e) {
-                showResultError({error: t('overlay.networkError') +
-                    ': ' + e.message});
-            }
-        }
-
-        // 菜单 7：启动 Web UI（复用存活实例，否则新起 donkey web），
-        // 轮询前端就绪后跳转（同 launchDrive，但不带 /#/drive）
-        async function launchWebUI() {
-            showOverlayMsg('overlay.startingWeb');
-            try {
-                const resp = await fetch('/api/launch/web', {
-                    method: 'POST'
-                });
-                const data = await resp.json();
-                if (data.status === 'launched') {
-                    const url = data.url.replace(
-                        'localhost', window.location.hostname
-                    );
-                    var ready = false;
-                    for (var i = 0; i < 30; i++) {
-                        try {
-                            await fetch(url, {mode: 'no-cors'});
-                            ready = true;
-                            break;
-                        } catch (e) {
-                            document.getElementById('overlay-text')
-                                .textContent = t('overlay.startingWeb') +
-                                ' (' + (i + 1) + '/30)';
-                            await new Promise(function(res) {
-                                setTimeout(res, 1000);
-                            });
-                        }
-                    }
-                    if (ready) {
-                        document.getElementById('overlay-text')
-                            .textContent = t('overlay.success');
-                        window.location.href = url;
-                    } else {
-                        document.getElementById('overlay-text')
-                            .textContent = t('overlay.slow');
-                        setTimeout(function() {
-                            window.location.href = url;
-                        }, 1000);
-                    }
-                } else {
-                    showResultError(data);
                 }
             } catch (e) {
                 showResultError({error: t('overlay.networkError') +
