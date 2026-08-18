@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (20)
+## 2026-08-18 (22)
 
 - fix(launcher): KCW 入口 URL host 用 mDNS 主机名，置顶/模式/语言主题不再随 DHCP 换 IP 被清空（Issue #168 后续）
   - 背景：Issue #168 已固定端口 58640、缺省 cwd 落到 Projects 工作区，但浏览器把 KCW 的置顶等 UI 偏好存在 localStorage、按 origin（协议+host+端口）隔离；host 用上位机 DHCP 局域网 IP（近期从 .41 漂到 .57）时，IP 一变 origin 就变，置顶聊天仍会"全部消失"。
@@ -11,6 +11,24 @@
     - 模块 docstring 更新为"三处约束"（cwd 校验 / 固定端口 / mDNS host）。
   - 测试同步：`tests/test_launcher_kimi_web.py` 新增 4 项 mDNS 优先与 foreign host 不误改断言，autouse fixture 默认钉 `_mdns_hostname` 为 None 保持既有断言稳定；本文件 42 passed、launcher 相关 116 passed。
   - 注：本次改动在 `Tony-kcw-origin-stable` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (21)
+
+- fix(web-ui): 修复流程页滚出 Drive 后视频流/WebSocket 仍在后台运行，拖慢整页切换（Issue #135 收尾）+ 后端静态资源缓存头
+  - 根因：#178 把 Drive/TM/Trainer/PA 合并为纵向滚动大页后，Drive 区的视频流与 WebSocket 未按 section 可见性门控——用户滚到 TM/Trainer/PA 后，Drive 的 MJPEG 图片流、WebRTC 视频、车端 WebSocket 遥测仍在后台持续收发与 setState 重渲染，持续占主线程，导致无论切到哪个标签都卡顿（#135 用户仍报"非常卡顿"）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：滚动 spy 的 `inView` 判定从「`isIntersecting` 有任何交集即视为可见」改为「可见比例最大的主导 section 才算活跃」——原先 section 之间有 `space-y` 间距与 `scroll-mt` 滚动边距，滚走后仍留 32px 交集使 `active` 永不翻 false；改为主导 section 后，滚到 TM 时 Drive 的 `active` 正确变为 false。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：新增 `enabled` 选项（默认 true）；`enabled=false` 时主动断开 WebSocket、清定时器、`setConnected(false)`、`setCarState.online=false`，不再后台收发；重新 `enabled=true` 时重连。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`useDriveWebsocket({ enabled: active })`；`useGamepadDrive` / `useGyroDrive` 的 `enabled` 追加 `active &&`；`<VideoStream>` 改为 `active` 条件渲染（滚走卸载视频组件、停止 MJPEG/WebRTC 与 1s 统计轮询），非活跃时渲染同宽高比占位符避免布局跳动。
+  - `web_ui/backend/main.py`：新增 `apply_cache_headers` 与 `cache_control_middleware`——`/assets/*` 带内容哈希的静态资源返回 `Cache-Control: public, max-age=31536000, immutable`；`text/html`（index.html/SPA fallback）返回 `Cache-Control: no-cache`，避免浏览器启发式缓存旧 index.html 导致"前端已修复但仍在跑旧 bundle"（#135 用户侧反复卡顿的重要诱因）。
+  - 测试同步：新增 `web_ui/backend/tests/test_cache_headers.py`（3 项：assets immutable / html no-cache / API 不受影响）；`web_ui/frontend/src/hooks/useDriveWebsocket.test.tsx` 新增 `enabled=false 不建立连接`（1 项）。后端 pytest 全量 82 项、前端 vitest 全量 20 文件 102 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 实测（8021 测试实例 + chrome-headless-shell）：滚到 TM 后 Drive 区 `img[src*=drive/video]`/`video` 均卸载、占位符出现（修复前仍挂载）；`useDriveWebsocket` enabled 门控单测确认不建连。无 Firmware 改动，无需 OTA。
+
+## 2026-08-18 (20)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后面板真正缩小——消除 grid 拉伸导致的"内容只剩一行但框未变小"
+  - 背景：控制面板在 `grid grid-cols-1 lg:grid-cols-3` 中作为第三列 grid item，默认 `align-self: stretch` 被拉伸到与左侧摄像头区（视频流 + 遥测图，较高）同高；折叠后内容虽只剩标题一行，但灰色面板框仍保持满高，下方"空出来"的区域实际是面板内部空白，视觉上"没变小"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：控制区外层 div 加 `self-start`，让面板高度随内容收缩——折叠后只剩标题一行、下方真正空出；展开时顶部对齐、高度由内容决定。
+  - 测试同步：前端 vitest 全量 100 项通过，`tsc -b --noEmit` 通过。
 
 ## 2026-08-18 (19)
 

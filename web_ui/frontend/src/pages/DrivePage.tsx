@@ -32,6 +32,7 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const clientIdRef = useRef(createDriveClientId());
   const { connected, carState, send } = useDriveWebsocket({
+    enabled: active,
     onWebRtcSignal: setWebRtcSignal,
     onTelemetry: setTelemetry,
     clientId: clientIdRef.current,
@@ -93,7 +94,7 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
   });
 
   const { connected: gamepadConnected } = useGamepadDrive({
-    enabled: inputSource === 'gamepad',
+    enabled: active && inputSource === 'gamepad',
     onChange: (a, t) => {
       gamepadRef.current = { angle: a, throttle: t };
       lastInputType.current = 'gamepad';
@@ -101,7 +102,7 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
   });
 
   const { permissionState, requestPermission } = useGyroDrive({
-    enabled: inputSource === 'gyro',
+    enabled: active && inputSource === 'gyro',
     onChange: (a, t) => {
       gyroRef.current = { angle: a, throttle: t };
       lastInputType.current = 'gyro';
@@ -277,7 +278,11 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 摄像头回传区 */}
         <div className="lg:col-span-2">
-          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          {active ? (
+            <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          ) : (
+            <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
+          )}
           {/* 固件模式 / Park 状态徽标（来自 ESP32 M<m>:P<p> 帧遥测） */}
           {(telemetry?.rc_mode !== undefined || telemetry?.rc_park !== undefined) && (
             <div className="mt-2 flex items-center gap-2 text-xs">
@@ -300,7 +305,7 @@ export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
         </div>
 
         {/* 控制区 */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col self-start">
           {/* 标题栏：虚拟摇杆折叠开关（展开时右显输入源选择，折叠后仅剩标题一行） */}
           <div
             className={`text-sm text-zinc-400 flex items-center justify-between gap-2 ${

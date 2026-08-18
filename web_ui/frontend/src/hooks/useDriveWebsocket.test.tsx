@@ -27,8 +27,8 @@ class FakeWebSocket {
   }
 }
 
-const HookProbe: React.FC<{ onSignal: (signal: WebRtcSignal) => void }> = ({ onSignal }) => {
-  useDriveWebsocket({ autoReconnect: false, onWebRtcSignal: onSignal });
+const HookProbe: React.FC<{ onSignal: (signal: WebRtcSignal) => void; enabled?: boolean }> = ({ onSignal, enabled = true }) => {
+  useDriveWebsocket({ autoReconnect: false, onWebRtcSignal: onSignal, enabled });
   return null;
 };
 
@@ -65,6 +65,19 @@ describe('useDriveWebsocket', () => {
       sdp: 'answer-sdp',
       description_type: 'answer',
     });
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('enabled=false 时不建立 WebSocket 连接（滚出视口停后台收发）', () => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const onSignal = vi.fn();
+
+    render(<HookProbe onSignal={onSignal} enabled={false} />);
+
+    expect(FakeWebSocket.instances).toHaveLength(0);
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
