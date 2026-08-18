@@ -4,7 +4,7 @@ import { TelemetryChart } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
-import { DriveModeSelector, DriveMode } from '../components/drive/DriveModeSelector';
+import { DriveModeSelector, DriveMode, driveModeToRcMode, rcModeToDriveMode } from '../components/drive/DriveModeSelector';
 import { useDriveWebsocket, type WebRtcSignal, type Telemetry } from '../hooks/useDriveWebsocket';
 import { useDriveControlLoop } from '../hooks/useDriveControlLoop';
 import { useKeyboardDrive } from '../hooks/useKeyboardDrive';
@@ -184,9 +184,20 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     }
   }, [carState.driveMode, carState.recording, recordStartTime]);
 
+  // 车端真实模式（ESP32 rc_mode）变化时，选择器跟随（遥控器/DC 端切换）。
+  // 仅接受 0/1/2；无遥测时由上面的 carState.driveMode 兜底。
+  useEffect(() => {
+    if (typeof telemetry?.rc_mode === 'number') {
+      const rcMode = telemetry.rc_mode;
+      if (rcMode === 0 || rcMode === 1 || rcMode === 2) {
+        setMode(rcModeToDriveMode(rcMode));
+      }
+    }
+  }, [telemetry?.rc_mode]);
+
   const handleModeChange = useCallback((newMode: DriveMode) => {
     setMode(newMode);
-    send({ drive_mode: newMode });
+    send({ drive_mode: newMode, car_mode: driveModeToRcMode(newMode) });
   }, [send]);
 
   const handleModelChange = useCallback((modelName: string) => {
@@ -246,6 +257,11 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
+          {telemetry?.rc_park === 1 && (
+            <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium text-xs whitespace-nowrap">
+              {t('drive.parkLocked')}
+            </span>
+          )}
           <ModelSelector
             value={currentModel}
             options={models}
@@ -283,24 +299,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
           ) : (
             <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
-          )}
-          {/* 固件模式 / Park 状态徽标（来自 ESP32 M<m>:P<p> 帧遥测） */}
-          {(telemetry?.rc_mode !== undefined || telemetry?.rc_park !== undefined) && (
-            <div className="mt-2 flex items-center gap-2 text-xs">
-              {telemetry?.rc_mode !== undefined && (
-                <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400" data-rc-mode={telemetry.rc_mode}>
-                  {t('drive.firmwareMode', {
-                    mode: [t('drive.modeUser'), t('drive.modeSemiAuto'), t('drive.modeFullAuto')][telemetry.rc_mode]
-                      ?? t('drive.unknownMode', { code: telemetry.rc_mode }),
-                  })}
-                </span>
-              )}
-              {telemetry?.rc_park === 1 && (
-                <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
-                  {t('drive.parkLocked')}
-                </span>
-              )}
-            </div>
           )}
           <TelemetryChart telemetry={telemetry} className="mt-4" active={active} />
         </div>
