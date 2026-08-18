@@ -3,6 +3,8 @@
 
 测试覆盖 donkeycar.launcher.dsh_web：
 - _write_patch_file：webserver 补丁层内容（host=0.0.0.0 + port 表达式）
+- _patch_privileged_methods：特权方法栅栏自愈补丁（/api 的
+  PRIVILEGED_METHODS 空信任表放宽为 trustedHosts，见 _PATCH_FENCE_*）
 - launch_dsh_web：存活实例复用（不起子进程）、冷启动拉起
   ``dsh web --patch … --port 0 --trusted-host …``（_FakeProc 脚本化管道
   输出）成功抓 banner URL 且改写为局域网 IP、cwd 透传、cwd 非法直接
@@ -264,6 +266,87 @@ class TestSpawnedRegistry:
 
 
 # ===========================================================================
+# _patch_privileged_methods（特权方法栅栏自愈补丁）
+# ===========================================================================
+# rc.6 实测的栅栏源码片段（dsh-client-connection/lib/index.js）：
+_FENCE_SNIPPET = (
+    "function apply(ctx, config) {\n"
+    "\tconst trustedHosts = config?.trustedHosts ?? [];\n"
+    "\tif (method !== void 0 && PRIVILEGED_METHODS.has(method) && "
+    "!isTrustedApiRequest(request, [])) return new Response(\"forbidden\", "
+    "{ status: 403 });\n"
+    "}\n"
+)
+
+
+def _make_dsh_tree(tmp_path, fence_text):
+    """搭假 dsh 安装树：<pkg>/lib/bin.js + dsh-client-connection，返回 bin 路径。"""
+    pkg = tmp_path / "dsh"
+    (pkg / "lib").mkdir(parents=True)
+    (pkg / "lib" / "bin.js").write_text("#!/usr/bin/env node\n",
+                                        encoding="utf-8")
+    cc = (pkg / "node_modules" / "@deepseek-ai"
+          / "dsh-client-connection" / "lib")
+    cc.mkdir(parents=True)
+    (cc / "index.js").write_text(fence_text, encoding="utf-8")
+    return pkg / "lib" / "bin.js"
+
+
+class TestPatchPrivilegedMethods:
+    def test_patches_empty_trust_list_to_trusted_hosts(self, tmp_path):
+        binary = _make_dsh_tree(tmp_path, _FENCE_SNIPPET)
+        dsh_web._patch_privileged_methods(str(binary))
+        text = ((tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                 / "dsh-client-connection" / "lib" / "index.js")
+                .read_text(encoding="utf-8"))
+        assert dsh_web._PATCH_FENCE_NEW in text
+        assert dsh_web._PATCH_FENCE_OLD not in text
+
+    def test_idempotent_second_call_is_noop(self, tmp_path):
+        binary = _make_dsh_tree(tmp_path, _FENCE_SNIPPET)
+        dsh_web._patch_privileged_methods(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-connection" / "lib" / "index.js")
+        patched = target.read_text(encoding="utf-8")
+        dsh_web._patch_privileged_methods(str(binary))
+        assert target.read_text(encoding="utf-8") == patched
+
+    def test_unexpected_source_skips_silently(self, tmp_path):
+        # dsh 升级后代码段变了：不命中就不动文件
+        binary = _make_dsh_tree(tmp_path, "const x = 1;\n")
+        dsh_web._patch_privileged_methods(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-connection" / "lib" / "index.js")
+        assert target.read_text(encoding="utf-8") == "const x = 1;\n"
+
+    def test_missing_connection_package_skips_silently(self, tmp_path):
+        # rc.7 起的 pnpm 布局：dsh 包下没有 node_modules/<cc>
+        pkg = tmp_path / "dsh"
+        (pkg / "lib").mkdir(parents=True)
+        (pkg / "lib" / "bin.js").write_text("", encoding="utf-8")
+        # 不抛异常即通过
+        dsh_web._patch_privileged_methods(str(pkg / "lib" / "bin.js"))
+
+    def test_launch_patches_before_spawn(self, tmp_path, monkeypatch):
+        # launch_dsh_web 冷启动路径会先打栅栏补丁再拉子进程
+        binary = _make_dsh_tree(tmp_path, _FENCE_SNIPPET)
+        calls = []
+
+        def fake_patch(b):
+            calls.append(b)
+
+        monkeypatch.setattr(dsh_web, "_patch_privileged_methods", fake_patch)
+        proc = _FakeProc(payload=_DSH_BANNER, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: str(binary),
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert calls == [str(binary)]
+
+
+# ===========================================================================
 # POST /api/launch/dsh 端点（内存 HTTP 服务器）
 # ===========================================================================
 @pytest.fixture()
@@ -306,6 +389,21 @@ def test_endpoint_passes_cwd_through(http_server, monkeypatch):
     monkeypatch.setattr(launcher_server, "launch_dsh_web", fake)
     _post(http_server + "/api/launch/dsh",
           json.dumps({"cwd": "/home/dkc/projects"}).encode())
+    assert seen == ["/home/dkc/projects"]
+
+
+def test_endpoint_defaults_cwd_to_projects(http_server, monkeypatch):
+    # 请求不带 cwd：缺省 /home/dkc/projects（与 kimi-code-web 同目录，
+    # dsh 以进程 cwd 作为新会话/工作区默认目录）
+    seen = []
+
+    def fake(cwd=None):
+        seen.append(cwd)
+        return {"status": "ok", "url": "http://dsh.example/w"}
+
+    monkeypatch.setattr(launcher_server, "launch_dsh_web", fake)
+    code, _headers, _payload = _post(http_server + "/api/launch/dsh", b"{}")
+    assert code == 200
     assert seen == ["/home/dkc/projects"]
 
 

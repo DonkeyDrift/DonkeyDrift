@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-18 (6)
+
+- feat(launcher/web-ui): DC 与 DD 页面新增「DeepSeek Harness」入口按钮；DSH 启动端点缺省进入 Projects 工作区；修复 DSH 设置页 Agents 预设/提供方目录 403（Issue #164 后续）
+  - **DSH 启动端点与设置页 403 修复**：
+    - `donkeycar/launcher/dsh_web.py`：新增幂等自愈补丁 `_patch_privileged_methods()`——dsh（rc.6/rc.7 相同）的 `dsh-client-connection/lib/index.js` 把 `settings.*`/`credentials.*`/`llm.discoverModels`/`agentPreset.read` 等特权方法硬编码 `isTrustedApiRequest(request, [])`（空信任表，`--trusted-host` 对其无效，上游有意设计），导致 LAN Host 访问 DSH 设置页时「正在加载/权限不可用」「加载提供方目录失败」。补丁在启动前把安装文件中的 `PRIVILEGED_METHODS.has(method) && !isTrustedApiRequest(request, [])` 替换为 `...trustedHosts)`（同函数闭包变量，即沿用 `--trusted-host` 信任表）；幂等（新代码段已存在则跳过）、dsh 升级还原文件后自动重打（未命中旧代码段则跳过仅告警）；`_connection_index_path()` 从 dsh bin realpath 定位 `<pkg>/node_modules/@deepseek-ai/dsh-client-connection/lib/index.js`，找不到返回 None 安全跳过。实机验证：打补丁重启后 LAN Host（192.168.3.57:3987）下 `settings.describe` 返回 200；伪造 Host（evil.example.com）仍 403；回环 200，安全性保持。
+    - `donkeycar/launcher/server.py`：`_handle_launch_dsh` 未指定 cwd 时缺省 `/home/dkc/projects`——DSH 新会话默认工作区即 Projects（dsh-host-apiproxy 用 `process.cwd()` 作为新会话默认目录，已验证 workspace.list 返回 `/home/dkc/projects`），打开 DSH 后自动进入 Projects 工作区。
+  - **DD 页面（DonkeyDrifter Web UI）新增 DSH 按钮**：
+    - `web_ui/backend/routers/launch.py`：抽出 `_forward_launch(request, launcher_path)` 共用转发逻辑，新增 `@router.post("/dsh")` 转发 launcher `/api/launch/dsh`。
+    - `web_ui/frontend/src/services/api.ts`：新增 `launchDsh`（复用 `LaunchKimiCodeWebResult`）。
+    - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `dshLaunching` 状态与 `enterDsh`（about:blank 句柄 + 65s AbortController，交互与 Kimi Code Web 按钮同款）；按钮顺序 kimi → dsh → console（consoleFirst 时 console → kimi → dsh）。
+    - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 各加 5 条 `common.enterButtons.dsh*` 词条。
+    - 测试同步：`EnterButtons.test.tsx` 三按钮顺序断言更新 + 新增 dsh 启动成功/失败 2 项；`tests/test_launcher_dsh_web.py` 新增 TestPatchPrivilegedMethods（5 项：定位 index.js、命中替换、幂等、未命中跳过、锁保护）+ `test_endpoint_defaults_cwd_to_projects`。launcher 侧 24 passed，前端 vitest 全量 97 passed，`npm run build` 通过。
+  - DC（ESP32 Web Console）侧同款按钮见 Firmware v1.8.7（`#openDshBtn`，POST `/api/launch/dsh`）。
 ## 2026-08-18 (5)
 
 - fix(web-ui): Car Connector 页面删除顶部大标题——进入 CC 页不再显示重复的 "Car Connector" 标题

@@ -495,6 +495,16 @@ export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKim
   return response.data as LaunchKimiCodeWebResult;
 };
 
+export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
+  // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。
+  const response = await api.post('/launch/dsh', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
 // ------------------------------------------------------------------
 // Pilot Arena APIs
 // ------------------------------------------------------------------
