@@ -11,6 +11,7 @@ import {
 import { ModeTabs } from '../components/trainer/ModeTabs';
 import { LocalConfigForm } from '../components/trainer/LocalConfigForm';
 import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
+import { MyPcProbePanel } from '../components/trainer/MyPcProbePanel';
 import { ProgressPanel } from '../components/trainer/ProgressPanel';
 import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
@@ -250,21 +251,31 @@ export const TrainerPage = React.memo(function TrainerPage() {
               currentTubPath={currentTubPath}
             />
           ) : mode === 'mypc' ? (
-            <RemoteConfigForm
-              titleKey="trainer.myPcTraining"
-              host={myPcForm.host}
-              onHostChange={(v) => setMyPcForm((f) => ({ ...f, host: v }))}
-              user={myPcForm.user}
-              onUserChange={(v) => setMyPcForm((f) => ({ ...f, user: v }))}
-              password={myPcForm.password}
-              onPasswordChange={(v) => setMyPcForm((f) => ({ ...f, password: v }))}
-              remoteDirBase={myPcForm.remoteDirBase}
-              onRemoteDirBaseChange={(v) => setMyPcForm((f) => ({ ...f, remoteDirBase: v }))}
-              modelName={myPcForm.modelName}
-              onModelNameChange={(v) => setMyPcForm((f) => ({ ...f, modelName: v }))}
-              pythonPath={myPcForm.pythonPath}
-              onPythonPathChange={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
-            />
+            <>
+              <RemoteConfigForm
+                titleKey="trainer.myPcTraining"
+                host={myPcForm.host}
+                onHostChange={(v) => setMyPcForm((f) => ({ ...f, host: v }))}
+                user={myPcForm.user}
+                onUserChange={(v) => setMyPcForm((f) => ({ ...f, user: v }))}
+                password={myPcForm.password}
+                onPasswordChange={(v) => setMyPcForm((f) => ({ ...f, password: v }))}
+                remoteDirBase={myPcForm.remoteDirBase}
+                onRemoteDirBaseChange={(v) => setMyPcForm((f) => ({ ...f, remoteDirBase: v }))}
+                modelName={myPcForm.modelName}
+                onModelNameChange={(v) => setMyPcForm((f) => ({ ...f, modelName: v }))}
+                pythonPath={myPcForm.pythonPath}
+                onPythonPathChange={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+              />
+              <MyPcProbePanel
+                host={myPcForm.host}
+                user={myPcForm.user}
+                password={myPcForm.password}
+                remoteDirBase={myPcForm.remoteDirBase}
+                pythonPath={myPcForm.pythonPath}
+                onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+              />
+            </>
           ) : (
             <RemoteConfigForm
               host={onlineForm.host}

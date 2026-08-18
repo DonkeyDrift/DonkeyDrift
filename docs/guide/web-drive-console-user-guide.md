@@ -247,6 +247,40 @@ Web UI 已不再提供校准页面；舵机与电调 PWM 校准统一在 ESP32 �
 
 ---
 
+## 本机训练（This Computer）
+
+Trainer 页面的「本机」模式把你自己的电脑（运行浏览器的机器）当作训练机：后端通过 SSH 回连到这台电脑，上传 tub 数据、执行训练、再下载回模型。首次使用前需要做一次准备，页面上的「环境检测」按钮会帮你一键诊断。
+
+### 首次使用准备
+
+1. 在目标电脑上安装并启动 SSH 服务，并确认防火墙放行 22 端口。
+   - **macOS**：系统设置 → 通用 → 共享 → 远程登录
+   - **Linux**：安装并启动 `openssh-server`
+   - **Windows**：设置 → 应用 → 可选功能 → 安装「OpenSSH 服务器」
+2. 在目标电脑上安装 Python 3 与 donkeycar 训练环境（`pip install donkeycar`）。
+3. 在 Trainer 页面填写该电脑的 `host / user / password`，点击「检测环境」。
+
+检测项包括 SSH 连通性、操作系统、Python 解释器、`donkeycar` 包与 `donkey` 命令。任何一项失败，页面都会给出对应的修复提示；检测到的 Python 路径可一键回填到表单。
+
+### 平台说明
+
+| 平台 | 支持方式 | 说明 |
+|------|---------|------|
+| **Linux** | 原生 SSH | 开箱即用 |
+| **macOS** | 原生 SSH | 自动探测 Python，常见路径如 `/opt/homebrew/bin/python3`、`/usr/local/bin/python3` |
+| **Windows** | 推荐 WSL | 训练管线使用 POSIX 命令（`tar` / `cd` / bash），原生 cmd 下不兼容；请在 WSL 内安装 donkeycar 并开启 WSL 的 SSH |
+
+`python_path` 留空时，「环境检测」会按 `python3`、`python`、`~/miniconda3/envs/donkey/bin/python`、`/opt/homebrew/bin/python3` 等常见顺序自动探测；也可以手动填写绝对路径。
+
+### 连接失败 / 缺依赖时
+
+不要只看训练 job 失败——先点「环境检测」拿到可操作的提示。最常见的两类问题是：
+
+- **SSH 连不上**：目标电脑 SSH 未开启、端口被防火墙拦截，或 `host/user/password` 填错。
+- **Python 可用但缺 donkeycar**：在目标电脑执行 `pip install donkeycar` 后重试。
+
+---
+
 ## API 接口一览
 
 所有驾驶相关接口挂载在 `/api/drive` 前缀下：

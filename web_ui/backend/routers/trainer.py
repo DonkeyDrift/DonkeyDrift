@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from trainer_engine import job_manager
+from mypc_probe import probe_mypc_environment
 
 router = APIRouter()
 
@@ -44,6 +45,15 @@ class OnlineTrainRequest(BaseModel):
 class MyPcTrainRequest(BaseModel):
     config_file: str = "train_my_pc.conf"
     working_dir: Optional[str] = None
+
+
+class MyPcProbeRequest(BaseModel):
+    host: str
+    user: str
+    password: str = ""
+    port: int = 22
+    remote_dir_base: str = "~/projects"
+    python_path: str = ""
 
 
 class StopRequest(BaseModel):
@@ -100,6 +110,42 @@ async def set_trainer_config(cfg: TrainerConfig, config_file: str = "train_onlin
         config.write(f)
 
     return {"status": True, "path": path}
+
+
+@router.post("/mypc/probe")
+async def probe_mypc(request: MyPcProbeRequest):
+    """Pre-flight check for 'This Computer' (mypc) training.
+
+    Connects to the user's computer over SSH and reports whether the target
+    OS, Python interpreter, and donkeycar environment are ready, returning
+    actionable fix hints for anything that is missing or misconfigured.
+    Runs in a worker thread because Paramiko is blocking.
+    """
+    result = await asyncio.to_thread(
+        probe_mypc_environment,
+        host=request.host,
+        user=request.user,
+        password=request.password,
+        remote_dir_base=request.remote_dir_base,
+        python_path=request.python_path,
+        port=request.port,
+    )
+    return {
+        "ok": result.ok,
+        "platform": result.platform,
+        "shell": result.shell,
+        "python_path": result.python_path,
+        "checks": [
+            {
+                "name": c.name,
+                "status": c.status,
+                "message": c.message,
+                "hint": c.hint,
+            }
+            for c in result.checks
+        ],
+        "suggestions": result.suggestions,
+    }
 
 
 # ------------------------------------------------------------------
