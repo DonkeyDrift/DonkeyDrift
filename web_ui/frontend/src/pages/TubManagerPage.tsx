@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { TubEditor } from '../components/TubEditor';
 import { TubLibrary } from '../components/TubLibrary';
 import { useStore } from '../store/useStore';
@@ -6,7 +6,7 @@ import { getApiErrorMessage, loadTub } from '../services/api';
 import { useTranslation } from '@/i18n';
 
 /** Tub Manager 页面本体（TubLibrary + TubEditor），从 App.tsx 迁出（#178） */
-export function TubManagerPage() {
+export const TubManagerPage = memo(function TubManagerPage() {
   const { t } = useTranslation();
   const { isLoading, error, tubPath, setTub, setLoading, setError } = useStore();
   const loadedTubPath = useStore((state) => state.loadedTubPath);
@@ -70,4 +70,4 @@ export function TubManagerPage() {
       </div>
     </>
   );
-}
+});

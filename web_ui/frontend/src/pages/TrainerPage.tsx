@@ -30,7 +30,7 @@ const TRAINING_KEYS = [
   'PRUNE_VAL_LOSS_DEGRADATION_LIMIT',
 ];
 
-export const TrainerPage: React.FC = () => {
+export const TrainerPage = React.memo(function TrainerPage() {
   const { t } = useTranslation();
   const [mode, setMode] = React.useState<TrainerMode>('local');
   const { job, startLocal, startOnline, startMyPc, stopJob, isRunning } = useTrainingJob();
@@ -310,4 +310,4 @@ export const TrainerPage: React.FC = () => {
       </div>
     </div>
   );
-};
+});

@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-18 (30)
+
+- perf(web-ui): 流程页导航切换仍卡顿——四个 section 常驻挂载导致整页每次滚动都重算/重绘 + 父组件重渲染连坐所有子页面，加 `content-visibility` 与 `React.memo` 隔离（Issue #135 五轮）
+  - 背景：#201/#204 已把 Drive 视频流/WS/遥测图/PA 循环按主导 section 门控，但四个 section（Drive/TM/Trainer/PA）仍常驻挂载在同一个滚动页里，且 `FlowPage` 的 `inView` 每次变化会触发父组件重渲染、默认连带所有子页面一起重渲染——切导航平滑滚动时既有视口外 section 的布局/绘制开销，又有 TM/Trainer 等重页面的无效重渲染。Playwright CPU 4x 实测：切换 PA→Drive 单次 longtask 峰值 836ms。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：新增 `SECTION_STYLE`（`content-visibility: auto` + `contain-intrinsic-size: auto 640px`）应用到四个 `<section>`——DOM 与组件状态保留（保住 #135 常驻保活），但浏览器跳过视口外 section 的布局/绘制，只按占位尺寸撑开滚动高度。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx` / `TrainerPage.tsx` / `DrivePage.tsx` / `PilotArenaPage.tsx`：四个页面组件用 `React.memo` 包裹（无 props 的 TM/Trainer 永不随父组件重渲染；带 `active` 的 Drive/PA 仅在 `active` 变化时重渲染）。
+  - 效果：Playwright CPU 4x 实测导航切换 longtask 峰值从 836ms 降至约 170ms；视频流滚出卸载回归通过（Drive 滚到 TM 后 `img[src*=drive/video]`/`video` 卸载、占位符出现）；nav href 正确（`#/drive`/`#/tub`/`#/trainer`/`#/pilot`）。
+  - 测试同步：前端 vitest 全量 20 文件 100 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次在 `Tony-issue135-nav-lag-round5` 功能分支（worktree 作业，基于最新 origin/Tony）完成，仅动前端。Firmware 无改动，无需 OTA。已部署到 8000（从该 worktree 起后端），用户需硬刷新浏览器。
+
 ## 2026-08-18 (29)
 
 - fix(web-ui): 修复 DD 前端深链（`/connector`、`/drive` 等）刷新/直达返回 404——根静态文件挂载改为 SPA fallback 兜底

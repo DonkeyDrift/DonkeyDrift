@@ -143,7 +143,7 @@ type PilotArenaPageProps = {
   active?: boolean;
 };
 
-export const PilotArenaPage: React.FC<PilotArenaPageProps> = ({ active = true }) => {
+export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true }: PilotArenaPageProps) {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const seriesColors = ARENA_SERIES_COLORS[theme];
@@ -1096,4 +1096,4 @@ export const PilotArenaPage: React.FC<PilotArenaPageProps> = ({ active = true })
       </Card>
     </div>
   );
-};
+});
