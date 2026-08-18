@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (16)
+## 2026-08-18 (17)
 
 - feat(web-ui): 顶栏高级入口改为导航链接样式——Drift Console 移到品牌右侧/Drive 左侧、Kimi Code Web 移到 Car Connector 右侧，弱化处理一眼可辨为高级选项（Issue #175）
   - `web_ui/frontend/src/components/EnterButtons.tsx`：重写——原 `EnterButtons` 三合一胶囊组件拆分为 `DrifterConsoleEntryLink` / `KimiCodeWebEntryLink` / `DshEntryLink`（导航链接样式：`text-xs` 小字号 + `text-zinc-500` 淡色 + 图标 `SquareTerminal`/`Sparkles`/`FlaskConical`，无胶囊外壳、不做路由激活态）与 `DshButton`（DeepSeek Harness 胶囊按钮，保留在顶栏右侧，样式不变）；点击逻辑（扫描车端/launcher 启动/空白页句柄防弹窗拦截）与 loading 态原样保留，公共启动流程抽为 `useLauncherEntry` hook，console 扫描抽为 `useDrifterConsoleEntry` hook。
@@ -8,6 +8,23 @@
   - `web_ui/frontend/src/App.test.tsx`：`services/api` mock 补 `discoverConnectorConsoles` / `launchKimiCodeWeb` / `launchDsh`（新入口组件渲染期取这些引用，mock 缺导出会抛错进 ErrorBoundary）。
   - 测试同步：`EnterButtons.test.tsx` 重写为按新组件覆盖（弱化样式断言、DSH 胶囊样式断言、成功/失败路径 8 项）；vitest 全量 19 文件 96 项、`tsc -b --noEmit`、`npm run build` 全部通过。
   - 注：本次改动在 `Tony-issue175-webui-nav-links` 功能分支（独立 worktree）上完成。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (16)
+
+- feat(trainer): Trainer 页训练位置从「本地/云端」两档扩为三档——我这台电脑 / 当前这台 Linux 电脑 / 云端（Issue #170）
+  - 背景：旧「本地」档 = 在 DD 后端所在 Linux 机器上训练；旧「云端」档 = SSH 到 `train_online.conf` 配置的远端训练；缺少"在用户自己这台电脑（SSH 客户端/浏览器所在机）上训练"的选项。方案：「我这台电脑」档复用云端 SSH 管线，但方向相反——后端 SSH 回访用户电脑，用独立配置 `train_my_pc.conf`。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.tsx`：两档扩为三档（`mypc` 我这台电脑 / `local` 当前这台 Linux 电脑 / `online` 云端），导出 `TrainerMode` 类型。
+  - `web_ui/backend/routers/trainer.py`：新增 `MyPcTrainRequest` 与 `POST /train/mypc`（缺省 `config_file=train_my_pc.conf`）。
+  - `web_ui/backend/trainer_engine.py`：`TrainingJob.mode` 与 `create_job` 支持 `mypc`；`stop_job` 对 `mypc` 走 `stop_event`（同 online）；新增 `run_mypc` 复用 `run_online` 的 SSH 管线。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：抽出 `startSshTraining` 共用 SSH 启动逻辑，新增 `startMyPc`（写 `train_my_pc.conf`）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：`mode` 三档；online/mypc 各一套独立表单状态，mount 时分别加载 `train_online.conf` / `train_my_pc.conf`；启动按钮按档位显示文案。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：新增 `titleKey` prop（云端/我这台电脑标题复用）。
+  - `web_ui/frontend/src/store/useStore.ts`：新增 `trainerMyPcConfig` + `setTrainerMyPcConfig` 并持久化。
+  - `web_ui/frontend/src/services/api.ts`：新增 `startMyPcTrain`。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：新增/更新 mypc 相关词条（`tabMyPc`/`tabLocal`/`tabCloud`/`startMyPcTraining`/`myPcTraining`，zh/en）。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_mypc.py`（3 项：mypc 路由建 job、缺省参数、stop 触发 stop_event）+ `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`（3 项：三档渲染/选中高亮/点击回调）。后端 pytest 全量 79 项、前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit` 全部通过。
+  - 注：本次改动在 `Tony-issue170-trainer-3mode` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (15)
 
 - fix(launcher): DC 终端长时间无交互断线丢会话——PTY 会话与 WS 连接解耦，断线宽限期 + 按 sid 重连接回 + 断线输出回放补发 + 前端自动退避重连（Issue #173）

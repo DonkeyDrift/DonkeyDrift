@@ -334,6 +334,14 @@ export const startOnlineTrain = async (params: {
   return response.data;
 };
 
+export const startMyPcTrain = async (params: {
+  config_file?: string;
+  working_dir?: string;
+}) => {
+  const response = await api.post('/trainer/train/mypc', params);
+  return response.data;
+};
+
 export const stopTrain = async (jobId: string) => {
   const response = await api.post(`/trainer/train/${jobId}/stop`);
   return response.data;

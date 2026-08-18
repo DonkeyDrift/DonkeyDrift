@@ -41,6 +41,11 @@ class OnlineTrainRequest(BaseModel):
     working_dir: Optional[str] = None
 
 
+class MyPcTrainRequest(BaseModel):
+    config_file: str = "train_my_pc.conf"
+    working_dir: Optional[str] = None
+
+
 class StopRequest(BaseModel):
     pass
 
@@ -322,6 +327,20 @@ async def start_online_train(request: OnlineTrainRequest):
     job = job_manager.create_job("online")
     asyncio.create_task(
         job_manager.run_online(
+            job,
+            config_file=request.config_file,
+            working_dir=request.working_dir,
+        )
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/train/mypc")
+async def start_mypc_train(request: MyPcTrainRequest):
+    """Train on the user's own computer via SSH callback (train_my_pc.conf)."""
+    job = job_manager.create_job("mypc")
+    asyncio.create_task(
+        job_manager.run_mypc(
             job,
             config_file=request.config_file,
             working_dir=request.working_dir,

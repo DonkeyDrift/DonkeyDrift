@@ -11,7 +11,7 @@ interface TubRecord {
 
 export interface TrainingJob {
   id: string;
-  mode: 'local' | 'online';
+  mode: 'local' | 'mypc' | 'online';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
   progress: {
     currentEpoch: number;
@@ -34,6 +34,10 @@ export interface TrainerOnlineConfig {
   modelName: string;
   pythonPath: string;
 }
+
+// Connection settings for training on the user's own computer (SSH callback
+// from the backend to the machine running the browser, config train_my_pc.conf).
+export type TrainerMyPcConfig = TrainerOnlineConfig;
 
 export interface TrainerLocalConfig {
   tub: string;
@@ -80,6 +84,7 @@ interface AppState {
   // Trainer state
   trainingJob: TrainingJob | null;
   trainerOnlineConfig: TrainerOnlineConfig;
+  trainerMyPcConfig: TrainerMyPcConfig;
   trainerLocalConfig: TrainerLocalConfig;
 
   setConfig: (config: Record<string, unknown>, path: string) => void;
@@ -110,6 +115,7 @@ interface AppState {
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
   finishTrainingJob: (status: 'completed' | 'failed' | 'stopped') => void;
   setTrainerOnlineConfig: (cfg: Partial<TrainerOnlineConfig>) => void;
+  setTrainerMyPcConfig: (cfg: Partial<TrainerMyPcConfig>) => void;
   setTrainerLocalConfig: (cfg: Partial<TrainerLocalConfig>) => void;
 }
 
@@ -150,6 +156,14 @@ export const useStore = create<AppState>()(
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',
+      },
+      trainerMyPcConfig: {
+        host: '',
+        user: '',
+        password: '',
+        remoteDirBase: '~/projects',
+        modelName: 'model',
+        pythonPath: '',
       },
       trainerLocalConfig: {
         tub: './data',
@@ -330,6 +344,10 @@ export const useStore = create<AppState>()(
         set((state) => ({
           trainerOnlineConfig: { ...state.trainerOnlineConfig, ...cfg },
         })),
+      setTrainerMyPcConfig: (cfg) =>
+        set((state) => ({
+          trainerMyPcConfig: { ...state.trainerMyPcConfig, ...cfg },
+        })),
       setTrainerLocalConfig: (cfg) =>
         set((state) => ({
           trainerLocalConfig: { ...state.trainerLocalConfig, ...cfg },
@@ -342,6 +360,7 @@ export const useStore = create<AppState>()(
         tubPath: state.tubPath,
         isLooping: state.isLooping,
         trainerOnlineConfig: state.trainerOnlineConfig,
+        trainerMyPcConfig: state.trainerMyPcConfig,
         trainerLocalConfig: state.trainerLocalConfig,
       }),
     }
