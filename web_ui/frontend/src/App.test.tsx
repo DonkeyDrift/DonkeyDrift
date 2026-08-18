@@ -125,32 +125,41 @@ describe('TubManager keep-alive navigation (#135 round 3)', () => {
     });
   };
 
-  it('keeps Tub Manager mounted (hidden) while on other routes and reshow it when back', async () => {
+  // #178 起 TM 并入统一流程大页面，任何流程页 path 下都保持常驻挂载；
+  // 只有切到独立路由 /connector 才会卸载，且回切后因已加载而不重新拉取 tub。
+  it('keeps Tub Manager mounted across flow sections and avoids refetch', async () => {
     resetStore({ tubPath: '/tmp/tub', loadedTubPath: null });
     const { container } = render(<App />);
     await waitFor(() => {
       expect(loadTub).toHaveBeenCalledTimes(1);
     });
 
-    const tmPanel = container.querySelector('[data-tub-manager]') as HTMLElement | null;
-    expect(tmPanel).not.toBeNull();
-    expect(tmPanel!.className).not.toContain('hidden');
+    const library = container.querySelector('[data-testid="tub-library"]') as HTMLElement;
+    const editor = container.querySelector('[data-testid="tub-editor"]') as HTMLElement;
+    expect(library).not.toBeNull();
+    expect(editor).not.toBeNull();
 
-    // 切到 Drive：TM 面板仍挂载但隐藏
-    go('#/drive');
+    // 切到 Drive / Trainer / Pilot：TM 仍挂载、未重新拉取
+    for (const hash of ['#/drive', '#/trainer', '#/pilot', '#/tub']) {
+      go(hash);
+      await waitFor(() => {
+        expect(container.querySelector('[data-testid="tub-library"]')).not.toBeNull();
+        expect(container.querySelector('[data-testid="tub-editor"]')).not.toBeNull();
+      });
+    }
+    expect(loadTub).toHaveBeenCalledTimes(1);
+
+    // 切到独立路由 Car Connector：流程页卸载，TM 随之卸载
+    go('#/connector');
     await waitFor(() => {
-      const panel = container.querySelector('[data-tub-manager]') as HTMLElement;
-      expect(panel.className).toContain('hidden');
-      expect(panel).toBeInTheDocument(); // 未卸载
+      expect(container.querySelector('[data-testid="tub-library"]')).toBeNull();
     });
 
-    // 切回 TM：同一 DOM 节点恢复可见（未重挂载）
+    // 回切流程页：TM 重新挂载，但因 tub 已加载不重新拉取
     go('#/');
     await waitFor(() => {
-      const panel = container.querySelector('[data-tub-manager]') as HTMLElement;
-      expect(panel.className).not.toContain('hidden');
+      expect(container.querySelector('[data-testid="tub-library"]')).not.toBeNull();
     });
-    // 保活期间未重新拉取 tub
     expect(loadTub).toHaveBeenCalledTimes(1);
   });
 });

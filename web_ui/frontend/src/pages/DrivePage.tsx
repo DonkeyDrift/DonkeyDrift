@@ -21,7 +21,12 @@ import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
 import { Circle, ChevronDown, ChevronUp } from 'lucide-react';
 
-export const DrivePage: React.FC = () => {
+type DrivePageProps = {
+  /** 该 section 是否在视口内：滚走后停用全局快捷键/键盘驾驶，避免误触（#178） */
+  active?: boolean;
+};
+
+export const DrivePage: React.FC<DrivePageProps> = ({ active = true }) => {
   const { t } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
@@ -79,7 +84,7 @@ export const DrivePage: React.FC = () => {
   }, [configPath]);
 
   useKeyboardDrive({
-    enabled: inputSource === 'keyboard',
+    enabled: active && inputSource === 'keyboard',
     params,
     onChange: (a, t) => {
       keyboardRef.current = { angle: a, throttle: t };
@@ -217,8 +222,9 @@ export const DrivePage: React.FC = () => {
     }
   }, [recording, send]);
 
-  // 快捷键
+  // 快捷键（仅在 drive section 可见时启用，避免流程页其它区域误触 #178）
   useDriveHotkeys({
+    enabled: active,
     onToggleRecording: toggleRecording,
     onCycleMode: cycleMode,
     onSetModeUser: () => handleModeChange('user'),
@@ -234,9 +240,8 @@ export const DrivePage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* 顶部工具栏：窄屏允许换行，避免一排溢出 */}
+      {/* 顶部工具栏：窄屏允许换行，避免一排溢出（页内标题已上移到 section 头 #178） */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-zinc-200">{t('drive.title')}</h2>
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
           <ModelSelector
