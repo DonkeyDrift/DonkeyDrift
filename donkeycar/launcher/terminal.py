@@ -14,11 +14,19 @@ donkey 等 TUI 程序）。之所以走局域网 WebSocket 而不是 Serial2 串
         {"type":"hello","cols":C,"rows":R}  建连后首帧，设定初始窗口大小
         {"type":"resize","cols":C,"rows":R} 窗口尺寸变化（TIOCSWINSZ）
     服务端 → 客户端 binary(0x2)：PTY 原始输出字节流（xterm.js term.write）
-    服务端 → 客户端 text(0x1)  ：{"type":"exit","code":N} shell 退出
+    服务端 → 客户端 text(0x1)  ：JSON 控制帧
+        {"type":"session","id":"<sid>","reattached":bool} 建连后告知会话标识
+            与是否接回了既有会话
+        {"type":"exit","code":N} shell 退出
 
-每个 WebSocket 连接对应一个独立的 bash 会话；连接断开（任何方向）即杀掉
-对应子进程。浏览器对小输入帧不分片，binary 输入按帧直写 PTY（字节流语义，
-分片也安全）；text 控制帧极小，不会被分片。
+会话保持与重连（issue #173）：PTY 会话与 WebSocket 连接解耦。连接 URL 可
+带 ?session=<sid>，命中存活会话则接回原 PTY（断线期间的输出从回放缓冲补
+发）；未命中则新开会话。连接断开（任何原因，含心跳判死）后会话保留
+_SESSION_GRACE 秒的宽限期，期间重连均可找回现场，宽限期过后才销毁。
+
+每个 WebSocket 连接同一时间只挂在一个会话上；shell 自然退出（用户输入
+exit）时会话立即销毁。浏览器对小输入帧不分片，binary 输入按帧直写 PTY
+（字节流语义，分片也安全）；text 控制帧极小，不会被分片。
 
 安全说明：本服务无认证（与整车免密策略一致，2026-08-14 用户决策）。Launcher
 监听 0.0.0.0:8090，任何能访问该局域网端口的设备都可获得本机 dkc 用户的
@@ -38,6 +46,8 @@ import subprocess
 import termios
 import threading
 import time
+import uuid
+from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +70,15 @@ _READ_CHUNK = 65536
 # 客户端帧（含 PONG）则判定链路死亡，主动断开并清理 PTY 会话
 _PING_INTERVAL = 25.0
 _PONG_TIMEOUT = 60.0
+
+# 会话保持（issue #173）：连接断开后 PTY 会话保留的宽限期，期间重连可接回
+# 原会话；宽限期过后销毁（后台低频线程清扫）。断线期间的 PTY 输出缓存在
+# 回放缓冲里，重连时补发，现场不丢。
+_SESSION_GRACE = 900.0  # 15 分钟
+_REPLAY_CAP = 1 << 20  # 回放缓冲上限 1 MiB，防止长期 TUI 输出无限膨胀
+
+_sessions = {}  # sid -> TerminalSession
+_sessions_lock = threading.Lock()
 
 
 class WsProtocolError(Exception):
@@ -164,20 +183,27 @@ def _default_cwd() -> str:
 
 
 class TerminalSession:
-    """一个 WebSocket 连接对应的 bash PTY 会话。
+    """一个 bash PTY 会话（与 WebSocket 连接解耦，issue #173）。
 
     生命周期：
         创建      — openpty + 起 bash login shell（ctty 正确设置，支持
-                    任务控制与 Ctrl-C）
+                    任务控制与 Ctrl-C），注册进 _sessions
+        attach    — 挂上一个 WS 连接：补发断线期间的回放缓冲
         on_input  — 客户端输入字节直写 PTY master
         on_resize — TIOCSWINSZ 调整窗口大小
-        close     — 杀子进程、关 master，幂等
+        detach    — 连接断开（任何原因）时解除挂载，会话进入宽限期，
+                    期间 PTY 输出继续累积进回放缓冲，等待重连接回
+        close     — 杀子进程、关 master、从 _sessions 注销，幂等
     子进程自然退出（用户输入 exit）时由 waiter 线程通知客户端并 close。
+    宽限期耗尽仍无人重连的会话由 _sessions_sweeper 后台线程清扫。
     """
 
-    def __init__(self, writer: _WsWriter, shell=("/bin/bash", "-l"),
-                 cwd=None, env=None):
-        self._writer = writer
+    def __init__(self, shell=("/bin/bash", "-l"), cwd=None, env=None):
+        self.sid = uuid.uuid4().hex[:12]
+        self._writer = None
+        self._detached_at = None
+        self._replay = bytearray()
+        self._replay_lock = threading.Lock()
         self._master = None
         self._proc = None
         self._closed = False
@@ -247,47 +273,86 @@ class TerminalSession:
         return self._proc.pid if self._proc else None
 
     # ------------------------------------------------------------------
+    def attach(self, writer: _WsWriter):
+        """挂上 WS 连接并补发断线期间缓存的输出（issue #173 重连接回）。"""
+        with self._replay_lock:
+            replay = bytes(self._replay)
+        self._detached_at = None
+        self._writer = writer
+        if replay:
+            writer.send(replay, OP_BINARY)
+        logger.info("终端会话已挂载: sid=%s pid=%d 补发 %d 字节",
+                    self.sid, self.pid or -1, len(replay))
+
+    def detach(self, writer=None):
+        """解除 WS 连接挂载：会话进入宽限期，等待重连接回。
+
+        Args:
+            writer: 调用方自己持有的 writer。传入时仅当会话当前挂载的
+                正是它才解除——旧连接线程的收尾 detach 可能在新连接
+                attach 之后才执行，不带判断会误清新 writer（竞态）。
+                不传（None）则无条件强制解除（重连抢占时用）。
+
+        幂等；由主读循环 finally、reader 发送失败时调用。
+        """
+        if writer is not None and self._writer is not writer:
+            return  # 过期的收尾 detach，当前已挂上别的连接，忽略
+        w, self._writer = self._writer, None
+        if w is not None and self._detached_at is None:
+            self._detached_at = time.monotonic()
+            logger.info("终端会话进入宽限期: sid=%s", self.sid)
+
+    def _stash(self, data: bytes):
+        """断线期间的 PTY 输出累积进回放缓冲（有界，超出截旧留新）。"""
+        with self._replay_lock:
+            self._replay += data
+            if len(self._replay) > _REPLAY_CAP:
+                del self._replay[:len(self._replay) - _REPLAY_CAP]
+
+    # ------------------------------------------------------------------
     def _reader_loop(self):
-        """读 PTY 输出并转发为 ws binary 帧，直到 EOF/断开。
+        """读 PTY 输出并转发：已挂载则发 WS binary 帧，未挂载则入回放缓冲。
 
         正常退出（bash exit → slave 关闭 → EIO）时的通知与清理由 waiter
-        线程统一负责（它握有退出码）；只有当浏览器侧断开（writer 关闭）
-        而 shell 还活着时，reader 才主动 close() 杀掉会话。
+        线程统一负责（它握有退出码）；发送失败（链路断开）时只解除挂载，
+        会话留给宽限期，不销毁。
         """
         try:
             while not self._closed:
                 data = os.read(self._master, _READ_CHUNK)
                 if not data:
                     break
-                if not self._writer.send(data, OP_BINARY):
-                    break
+                writer = self._writer
+                if writer is None:
+                    self._stash(data)
+                elif not writer.send(data, OP_BINARY):
+                    self.detach(writer)
+                    self._stash(data)
         except OSError:
             # EIO：slave 侧全部关闭（子进程退出）；EBADF：close() 关了 master
             pass
-        finally:
-            if self._writer.closed:
-                self.close()
 
     def _waiter_loop(self):
-        """等子进程退出；退出后通知客户端并收尾。
-
-        子进程退出但孙进程仍持有 slave（如 shell 里 nohup 的后台任务）时
-        reader 不会收到 EIO，因此必须靠 waiter 主动 close() 收掉会话。
-        """
+        """等子进程退出；退出后通知客户端并收尾。"""
         code = self._proc.wait()
         if not self._closed:
             # 给 reader 一个短窗口把残留输出尽量发完
             time.sleep(0.3)
-            self._writer.send_json({"type": "exit", "code": code})
+            writer = self._writer
+            if writer is not None and not writer.closed:
+                writer.send_json({"type": "exit", "code": code})
         self.close()
 
     # ------------------------------------------------------------------
     def close(self):
-        """关闭会话：杀子进程、关 master。幂等。"""
+        """关闭会话：杀子进程、关 master、注销。幂等。"""
         with self._close_lock:
             if self._closed:
                 return
             self._closed = True
+        with _sessions_lock:
+            if _sessions.get(self.sid) is self:
+                del _sessions[self.sid]
         proc = self._proc
         if proc is not None and proc.poll() is None:
             try:
@@ -307,7 +372,65 @@ class TerminalSession:
             except OSError:
                 pass
             self._master = None
-        logger.info("终端会话已关闭: pid=%s", proc.pid if proc else None)
+        logger.info("终端会话已销毁: sid=%s pid=%s", self.sid,
+                    proc.pid if proc else None)
+
+
+# ---------------------------------------------------------------------------
+# 会话注册表：按 sid 获取/新建会话，后台清扫宽限期耗尽的会话（issue #173）
+# ---------------------------------------------------------------------------
+_SWEEP_INTERVAL = 30.0
+_sweeper_started = False
+
+
+def _acquire_session(requested_sid: str):
+    """按 sid 接回存活会话；未提供或已失效则新开会话。
+
+    Returns:
+        (session, reattached) 元组，reattached 表示是否接回了既有会话
+    """
+    _ensure_sweeper()
+    with _sessions_lock:
+        sess = _sessions.get(requested_sid) if requested_sid else None
+        if sess is not None and not sess._closed:
+            # 极端情况：旧链路判死前新连接先到——先踢掉旧 writer，避免双写
+            sess.detach()
+            reattached = True
+        else:
+            sess = TerminalSession()
+            _sessions[sess.sid] = sess
+            reattached = False
+    return sess, reattached
+
+
+def _ensure_sweeper():
+    """惰性启动会话清扫线程（首次建立会话时起，daemon，进程退出不阻拦）。"""
+    global _sweeper_started
+    with _sessions_lock:
+        if _sweeper_started:
+            return
+        _sweeper_started = True
+    threading.Thread(target=_sessions_sweeper, daemon=True,
+                     name="terminal-session-sweeper").start()
+
+
+def _sweep_once(now=None):
+    """销毁一批宽限期耗尽仍无人重连的会话（有挂载连接的不动）。"""
+    if now is None:
+        now = time.monotonic()
+    with _sessions_lock:
+        doomed = [s for s in _sessions.values()
+                  if s._writer is None and s._detached_at is not None
+                  and now - s._detached_at > _SESSION_GRACE]
+    for s in doomed:
+        s.close()
+
+
+def _sessions_sweeper():
+    """周期性清扫（线程体）：每 _SWEEP_INTERVAL 秒跑一批 _sweep_once。"""
+    while True:
+        time.sleep(_SWEEP_INTERVAL)
+        _sweep_once()
 
 
 def _heartbeat_loop(writer, sock, last_rx, stop):
@@ -356,6 +479,10 @@ def handle_terminal_ws(handler):
         handler: donkeycar.launcher.server.LauncherHandler 实例（其 rfile/
             wfile/headers 被直接接管；返回后连接不再参与 HTTP keep-alive）
 
+    连接 URL 可带 ?session=<sid>：命中存活会话则接回原 PTY（补发断线期间
+    的输出），否则新开会话；建连后向客户端发 {"type":"session",...} 告知
+    sid 与是否接回（issue #173）。连接断开只会话进入宽限期，不销毁。
+
     本函数直到 WebSocket 断开才返回（ThreadingHTTPServer 每连接一线程，
     阻塞是预期行为）。
     """
@@ -379,8 +506,13 @@ def handle_terminal_ws(handler):
     handler.wfile.flush()
     handler.close_connection = True  # 连接被 ws 接管
 
+    qs = parse_qs(urlparse(handler.path).query)
+    requested_sid = (qs.get("session") or [""])[0]
     writer = _WsWriter(handler.wfile)
-    session = TerminalSession(writer)
+    session, reattached = _acquire_session(requested_sid)
+    session.attach(writer)
+    writer.send_json({"type": "session", "id": session.sid,
+                      "reattached": reattached})
     last_rx = {"t": time.monotonic()}
     stop_hb = threading.Event()
     threading.Thread(
@@ -407,4 +539,4 @@ def handle_terminal_ws(handler):
         pass
     finally:
         stop_hb.set()
-        session.close()
+        session.detach(writer)
