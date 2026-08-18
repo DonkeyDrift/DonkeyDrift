@@ -41,6 +41,11 @@ class OnlineTrainRequest(BaseModel):
     working_dir: Optional[str] = None
 
 
+class MyPcTrainRequest(BaseModel):
+    config_file: str = "train_my_pc.conf"
+    working_dir: Optional[str] = None
+
+
 class StopRequest(BaseModel):
     pass
 
@@ -109,6 +114,67 @@ def _get_dir_size(path: str) -> int:
             if os.path.isfile(fp):
                 total += os.path.getsize(fp)
     return total
+
+
+@router.get("/tubs")
+async def list_tubs(working_dir: Optional[str] = None):
+    """List candidate tub directories for local training.
+
+    Scans <working_dir>/data itself plus every subdirectory of it that has a
+    manifest.json (covers data/tub_xxx unpacked archives), and sibling
+    <working_dir>/data* directories. Returns relative (./data style) and
+    absolute paths plus the currently loaded tub path, so the Trainer page
+    can pre-select the right tub automatically.
+    """
+    cwd = working_dir or os.getcwd()
+    tubs: List[dict] = []
+
+    def _add_tub(full_path: str):
+        rel = os.path.relpath(full_path, cwd)
+        display = "./" + rel if not rel.startswith(".") else rel
+        tubs.append({
+            "name": os.path.basename(full_path) or full_path,
+            "relative_path": display,
+            "absolute_path": os.path.abspath(full_path),
+        })
+
+    def _is_tub(path: str) -> bool:
+        return os.path.isfile(os.path.join(path, "manifest.json"))
+
+    candidates: List[str] = []
+    data_dir = os.path.join(cwd, "data")
+    if os.path.isdir(data_dir):
+        candidates.append(data_dir)
+        try:
+            for name in sorted(os.listdir(data_dir)):
+                sub = os.path.join(data_dir, name)
+                if os.path.isdir(sub):
+                    candidates.append(sub)
+        except OSError:
+            pass
+    if os.path.isdir(cwd):
+        try:
+            for name in sorted(os.listdir(cwd)):
+                full = os.path.join(cwd, name)
+                if name != "data" and name.startswith("data") and os.path.isdir(full):
+                    candidates.append(full)
+        except OSError:
+            pass
+
+    seen = set()
+    for path in candidates:
+        if _is_tub(path):
+            key = os.path.abspath(path)
+            if key not in seen:
+                seen.add(key)
+                _add_tub(path)
+
+    from routers.tub import current_tub_path
+
+    return {
+        "tubs": tubs,
+        "current_tub_path": current_tub_path,
+    }
 
 
 @router.get("/models")
@@ -261,6 +327,20 @@ async def start_online_train(request: OnlineTrainRequest):
     job = job_manager.create_job("online")
     asyncio.create_task(
         job_manager.run_online(
+            job,
+            config_file=request.config_file,
+            working_dir=request.working_dir,
+        )
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/train/mypc")
+async def start_mypc_train(request: MyPcTrainRequest):
+    """Train on the user's own computer via SSH callback (train_my_pc.conf)."""
+    job = job_manager.create_job("mypc")
+    asyncio.create_task(
+        job_manager.run_mypc(
             job,
             config_file=request.config_file,
             working_dir=request.working_dir,

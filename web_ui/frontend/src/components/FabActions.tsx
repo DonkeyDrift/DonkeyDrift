@@ -1,29 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { useTranslation, type UiLanguage } from '@/i18n';
+import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
 
 // FAB cluster mirrored 1:1 from the ESP32 Drifter Console
 // (Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h):
-// .fabToggle (glowing dot) + .fabActions (.langFab/.helpFab) + .langMenu + .helpModal.
+// .fabToggle (glowing dot) + .fabActions (.helpFab) + .helpModal.
 // Only the help modal's shortcut list content differs (DonkeyDrifter shortcuts).
-const LANG_SEGMENTS: ReadonlyArray<{ value: UiLanguage; label: string }> = [
-  { value: 'zh', label: '中文' },
-  { value: 'en', label: 'English' },
-];
-
+// 语言入口不在此处：顶栏 LanguageSwitcher 为静音式单按钮（issue #139）。
 export const FabActions: React.FC = () => {
-  const { lang, setLanguage, t } = useTranslation();
+  const { t } = useTranslation();
   const [fabOpen, setFabOpen] = useState(false);
-  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
   // ESP: document.addEventListener('click', collapseFabActions) — any outside
-  // click collapses the FAB cluster and closes the language menu. Inner buttons
-  // stopPropagation so they don't immediately retrigger this.
+  // click collapses the FAB cluster. Inner buttons stopPropagation so they
+  // don't immediately retrigger this.
   useEffect(() => {
     const collapse = () => {
       setFabOpen(false);
-      setLangMenuOpen(false);
     };
     document.addEventListener('click', collapse);
     return () => document.removeEventListener('click', collapse);
@@ -34,22 +28,10 @@ export const FabActions: React.FC = () => {
     setFabOpen((v) => !v);
   };
 
-  const toggleLangMenu = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFabOpen(true);
-    setLangMenuOpen((v) => !v);
-  };
-
   const openHelp = (e: React.MouseEvent) => {
     e.stopPropagation();
     setFabOpen(true);
-    setLangMenuOpen(false);
     setHelpOpen(true);
-  };
-
-  const chooseLanguage = (value: UiLanguage) => {
-    setLanguage(value);
-    setLangMenuOpen(false);
   };
 
   // Skin CSS (themes/theme-light.css) only remaps standard Tailwind utilities;
@@ -70,18 +52,9 @@ export const FabActions: React.FC = () => {
   const fabToggleColors = isLight
     ? 'border-[#5cc8ff] bg-[#5cc8ff] shadow-[0_0_18px_rgba(12,155,214,0.45),0_0_36px_rgba(12,155,214,0.3)] hover:shadow-[0_0_22px_rgba(12,155,214,0.5),0_0_44px_rgba(12,155,214,0.4)] focus-visible:shadow-[0_0_22px_rgba(12,155,214,0.5),0_0_44px_rgba(12,155,214,0.4)]'
     : 'border-[#8bdcff] bg-[#8bdcff] shadow-[0_0_18px_#5cc8ff,0_0_36px_rgba(92,200,255,0.55)] hover:shadow-[0_0_22px_#8bdcff,0_0_44px_rgba(92,200,255,0.72)] focus-visible:shadow-[0_0_22px_#8bdcff,0_0_44px_rgba(92,200,255,0.72)]';
-  const langFabColors = isLight
-    ? 'border-[#5cc8ff] bg-[#0c9bd6] hover:border-[#5cc8ff] hover:bg-[#0a6f9e] hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] focus-visible:border-[#5cc8ff] focus-visible:bg-[#0a6f9e]'
-    : 'border-[rgba(92,200,255,0.68)] bg-[rgba(37,99,235,0.58)] hover:border-[#5cc8ff] hover:bg-[#3b82f6] hover:shadow-[0_12px_32px_rgba(0,0,0,0.35)] focus-visible:border-[#5cc8ff] focus-visible:bg-[#3b82f6]';
   const helpFabColors = isLight
     ? 'border-[#5cc8ff] bg-[#5cc8ff] hover:border-[#3eb6f0] hover:bg-[#3eb6f0] hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] focus-visible:border-[#3eb6f0] focus-visible:bg-[#3eb6f0]'
     : 'border-[rgba(92,200,255,0.72)] bg-[rgba(92,200,255,0.62)] hover:border-[#8bdcff] hover:bg-[#8bdcff] hover:shadow-[0_12px_32px_rgba(0,0,0,0.35)] focus-visible:border-[#8bdcff] focus-visible:bg-[#8bdcff]';
-  const langMenuColors = isLight
-    ? 'border-[#0c9bd6] bg-[#f4f6f9] shadow-[0_12px_32px_rgba(15,23,42,0.18)]'
-    : 'border-[#5cc8ff] bg-[#111820] shadow-[0_12px_32px_rgba(0,0,0,0.35)]';
-  const langItemIdleColors = isLight
-    ? 'font-bold text-[#1c2733] hover:bg-[#dfe6ef]'
-    : 'font-bold text-[#dbeafe] hover:bg-[#222b36]';
   const helpModalColors = isLight
     ? 'border-[#0c9bd6] bg-[linear-gradient(135deg,#ffffff,#edf1f6)] shadow-[0_18px_60px_rgba(15,23,42,0.24)]'
     : 'border-[#5cc8ff] bg-[linear-gradient(135deg,#1c2430,#121821)] shadow-[0_18px_60px_rgba(0,0,0,0.45)]';
@@ -104,17 +77,8 @@ export const FabActions: React.FC = () => {
         className={`fixed bottom-[24px] right-[24px] z-50 h-[18px] w-[18px] min-w-0 rounded-full border ${fabToggleColors} p-0 hover:scale-[1.18] focus-visible:scale-[1.18] active:scale-[1.18]`}
       />
 
-      {/* .fabActions: anchor point; balls fly out up (lang) and left (help) */}
+      {/* .fabActions: anchor point; ball flies out left (help) */}
       <div className="pointer-events-none fixed bottom-[18px] right-[18px] z-50">
-        {/* .langFab */}
-        <button
-          type="button"
-          onClick={toggleLangMenu}
-          aria-label={t('fab.language')}
-          className={`${fabBallBase} ${langFabColors} text-[23px] text-[#eef] ${fabBallVisibility} ${fabOpen ? '-translate-y-[56px]' : ''}`}
-        >
-          🌐
-        </button>
         {/* .helpFab */}
         <button
           type="button"
@@ -125,30 +89,6 @@ export const FabActions: React.FC = () => {
           ?
         </button>
       </div>
-
-      {/* .langMenu */}
-      {langMenuOpen && (
-        <div className={`fixed bottom-[74px] right-[72px] z-50 min-w-[132px] rounded-[12px] border ${langMenuColors} p-[6px]`}>
-          {LANG_SEGMENTS.map(({ value, label }) => {
-            const active = value === lang;
-            return (
-              <button
-                key={value}
-                type="button"
-                data-lang={value}
-                onClick={() => chooseLanguage(value)}
-                className={`my-[2px] block w-full min-w-0 rounded-[8px] px-[10px] py-[7px] text-left text-[13px] ${
-                  active
-                    ? 'bg-[#5cc8ff] font-extrabold text-[#061019]'
-                    : langItemIdleColors
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {/* Help modal chrome: mirrors ESP32 .helpOverlay/.helpModal 1:1; only the shortcut list content differs */}
       {helpOpen && (

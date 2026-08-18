@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { EnterButtons } from './EnterButtons';
+import { DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
@@ -12,58 +12,32 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/services/api', () => ({
   discoverConnectorConsoles: vi.fn(),
   launchKimiCodeWeb: vi.fn(),
+  launchDsh: vi.fn(),
 }));
-import { discoverConnectorConsoles, launchKimiCodeWeb } from '@/services/api';
+import { discoverConnectorConsoles, launchDsh, launchKimiCodeWeb } from '@/services/api';
 const mockDiscover = vi.mocked(discoverConnectorConsoles);
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
+const mockLaunchDsh = vi.mocked(launchDsh);
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('EnterButtons', () => {
-  it('renders Kimi Code Web and DrifterConsole buttons', () => {
-    render(<EnterButtons />);
-    expect(screen.getByText('common.enterButtons.kimiCodeWeb')).toBeInTheDocument();
-    expect(screen.getByText('common.enterButtons.drifterConsole')).toBeInTheDocument();
+describe('entry link components (Issue #175 nav-link style)', () => {
+  it('renders each entry with the de-emphasized advanced link style', () => {
+    render(<><DrifterConsoleEntryLink /><KimiCodeWebEntryLink /><DshEntryLink /></>);
+    for (const label of ['common.enterButtons.drifterConsole', 'common.enterButtons.kimiCodeWeb', 'common.enterButtons.dsh']) {
+      const btn = screen.getByText(label).closest('button');
+      expect(btn).toBeInTheDocument();
+      // 弱化处理：更小字号 + 更淡颜色，一眼可辨为高级选项
+      expect(btn?.className).toContain('text-xs');
+      expect(btn?.className).toContain('text-zinc-500');
+    }
   });
-  it('renders Kimi Code Web left of DrifterConsole by default (desktop)', () => {
-    render(<EnterButtons />);
-    const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(2);
-    expect(buttons[0]).toHaveTextContent('common.enterButtons.kimiCodeWeb');
-    expect(buttons[1]).toHaveTextContent('common.enterButtons.drifterConsole');
-  });
-  it('renders DrifterConsole left of Kimi Code Web when consoleFirst (mobile)', () => {
-    render(<EnterButtons consoleFirst />);
-    const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(2);
-    expect(buttons[0]).toHaveTextContent('common.enterButtons.drifterConsole');
-    expect(buttons[1]).toHaveTextContent('common.enterButtons.kimiCodeWeb');
-  });
-  it('opens Kimi Code Web URL in the pre-opened tab on success', async () => {
-    const fakeWin = { location: { href: '' }, close: vi.fn() };
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
-    mockLaunchKimi.mockResolvedValue({ status: 'ok', url: 'https://kimi.example/web#token=x' });
-    render(<EnterButtons />);
-    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
-    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
-    await waitFor(() => { expect(fakeWin.location.href).toBe('https://kimi.example/web#token=x'); });
-    openSpy.mockRestore();
-  });
-  it('closes the tab and alerts on Kimi Code Web failure', async () => {
-    const fakeWin = { location: { href: '' }, close: vi.fn() };
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    mockLaunchKimi.mockResolvedValue({ status: 'error', error: 'boom' });
-    render(<EnterButtons />);
-    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
-    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
-    expect(fakeWin.close).toHaveBeenCalled();
-    openSpy.mockRestore();
-    alertSpy.mockRestore();
-  });
+});
+
+describe('DrifterConsoleEntryLink', () => {
   it('opens Drifter Console on success', async () => {
     mockDiscover.mockResolvedValue({ status: true, found: [{ ip: '192.168.3.46', port: 80, reachable: true }], count: 1, scanned: 256, message: '' });
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-    render(<EnterButtons />);
+    render(<DrifterConsoleEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.drifterConsole'));
     await waitFor(() => { expect(openSpy).toHaveBeenCalledWith('http://192.168.3.46/', '_blank', 'noopener,noreferrer'); });
     openSpy.mockRestore();
@@ -71,9 +45,59 @@ describe('EnterButtons', () => {
   it('alerts on no console', async () => {
     mockDiscover.mockResolvedValue({ status: true, found: [], count: 0, scanned: 256, message: '' });
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    render(<EnterButtons />);
+    render(<DrifterConsoleEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.drifterConsole'));
     await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    alertSpy.mockRestore();
+  });
+});
+
+describe('KimiCodeWebEntryLink', () => {
+  it('opens Kimi Code Web URL in the pre-opened tab on success', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    mockLaunchKimi.mockResolvedValue({ status: 'ok', url: 'https://kimi.example/web#token=x' });
+    render(<KimiCodeWebEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    await waitFor(() => { expect(fakeWin.location.href).toBe('https://kimi.example/web#token=x'); });
+    openSpy.mockRestore();
+  });
+  it('closes the tab and alerts on failure', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mockLaunchKimi.mockResolvedValue({ status: 'error', error: 'boom' });
+    render(<KimiCodeWebEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
+    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    expect(fakeWin.close).toHaveBeenCalled();
+    openSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+});
+
+describe('DshEntryLink', () => {
+  it('opens DeepSeek Harness URL in the pre-opened tab on success', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    mockLaunchDsh.mockResolvedValue({ status: 'ok', url: 'http://192.168.3.57:43749' });
+    render(<DshEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.dsh'));
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    await waitFor(() => { expect(fakeWin.location.href).toBe('http://192.168.3.57:43749'); });
+    openSpy.mockRestore();
+  });
+  it('closes the tab and alerts on failure', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mockLaunchDsh.mockResolvedValue({ status: 'error', error: 'boom' });
+    render(<DshEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.dsh'));
+    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    expect(fakeWin.close).toHaveBeenCalled();
+    openSpy.mockRestore();
     alertSpy.mockRestore();
   });
 });

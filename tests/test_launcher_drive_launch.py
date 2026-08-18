@@ -15,6 +15,13 @@ D 页面点 6 打开 Drive 后页面加载不出来，两个根因：
   超时带 warning；started_at 早于本次调用起点（并发链路代写）时不认
 - _launch_drive：冷启动先 Popen web → 等就绪 → 再 Popen 车（env 用
   实际后端端口），url 用实际前端端口；复用存活实例时不起 web、不等待
+
+DC 点击进入 DD 报"无法连接服务器"（2026-08-18）的补测：
+- web 进程提前退出时 _launch_drive 不再报 launched + 死端口，改报
+  error（跳转页显示原因而非重定向到从未监听的端口）；
+- 就绪超时但进程仍在（生产模式 bundled web ui）时，兜底前端端口修正
+  为后端端口（#135 生产模式前端由后端托管，5188 从不监听）；开发模式
+  （--path 缺省）保持原入参端口。
 """
 
 import time
@@ -200,6 +207,74 @@ class TestLaunchDrive:
                 result = launcher_server._launch_drive()
         assert result["status"] == "launched"
         assert "未就绪" in result["warning"]
+
+    def test_web_proc_exited_early_returns_error(self):
+        """web 进程提前退出（前端构建失败等）：报 error 而非 launched，
+        不起车进程、不写 PID 文件——避免跳转页重定向到死端口。"""
+        web_proc = _FakeProc(returncode=1)
+        car_proc = _FakeProc()
+        procs = [web_proc, car_proc]
+        patches = self._patch_common(
+            inst=None,
+            ready=(5188, 8000, "donkey web 进程提前退出，页面可能加载失败"),
+        )
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: procs.pop(0),
+        ) as popen:
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"] as pids:
+                result = launcher_server._launch_drive()
+        assert result["status"] == "error"
+        assert "提前退出" in result["error"]
+        # 只起了 web（随后退出），车进程未起
+        assert popen.call_count == 1
+        assert popen.call_args_list[0].args[0][0] == "donkey"
+        pids.assert_not_called()
+
+    def test_timeout_production_mode_corrects_frontend_port(self):
+        """生产模式（bundled web ui）就绪超时且登记未出现：兜底前端端口
+        从入参 5188 修正为后端端口（#135 前端由后端托管，5188 从不监听）。"""
+        procs = [_FakeProc(), _FakeProc()]
+        patches = self._patch_common(
+            inst=None, ready=(5188, 8000, "Web UI 在 90s 内未就绪"),
+        )
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: procs.pop(0),
+        ), mock.patch.object(
+            launcher_server, "_get_bundled_web_ui_path",
+            return_value="/fake/webui",
+        ), mock.patch.object(
+            launcher_server, "read_instance", return_value=None,
+        ):
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"]:
+                result = launcher_server._launch_drive()
+        assert result["status"] == "launched"
+        assert result["frontend_port"] == 8000
+        assert result["url"] == "http://localhost:8000/#/drive"
+        assert "未就绪" in result["warning"]
+
+    def test_timeout_dev_mode_keeps_input_frontend_port(self):
+        """开发模式（无 bundled --path）就绪超时：保持入参前端端口 5188
+        （vite dev server 确实监听 5188，无需修正）。"""
+        procs = [_FakeProc(), _FakeProc()]
+        patches = self._patch_common(
+            inst=None, ready=(5188, 8000, "Web UI 在 90s 内未就绪"),
+        )
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: procs.pop(0),
+        ), mock.patch.object(
+            launcher_server, "_get_bundled_web_ui_path", return_value=None,
+        ):
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"]:
+                result = launcher_server._launch_drive()
+        assert result["status"] == "launched"
+        assert result["frontend_port"] == 5188
+        assert result["url"] == "http://localhost:5188/#/drive"
 
     def test_reuse_instance_skips_web_popen_and_wait(self):
         """复用存活实例：不起 web、不等就绪，车进程直连登记端口。"""

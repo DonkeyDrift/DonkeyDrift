@@ -138,7 +138,12 @@ const getRecordUserControl = (record: Record<string, unknown> | undefined) => {
   };
 };
 
-export const PilotArenaPage: React.FC = () => {
+type PilotArenaPageProps = {
+  /** 该 section 是否在视口内：滚走后停用空格播放/暂停，避免误触（#178） */
+  active?: boolean;
+};
+
+export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true }: PilotArenaPageProps) {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const seriesColors = ARENA_SERIES_COLORS[theme];
@@ -170,6 +175,8 @@ export const PilotArenaPage: React.FC = () => {
   const [plotLoading, setPlotLoading] = useState(false);
   const [imageProcessingCollapsed, setImageProcessingCollapsed] = useState(true);
   const [displayRecordIndex, setDisplayRecordIndex] = useState(currentIndex);
+  const autoScanDoneRef = useRef<Set<string>>(new Set());
+  const autoLoadDoneRef = useRef<Set<string>>(new Set());
   const viewersRef = useRef(viewers);
   const predictionRequestRef = useRef<Record<string, number>>({});
   const predictionInFlightRef = useRef<Record<string, boolean>>({});
@@ -404,7 +411,7 @@ export const PilotArenaPage: React.FC = () => {
   }, [cacheImage, records, seriesColors, tubPath]);
 
   useEffect(() => {
-    if (!isPlaying || !hasRecords) return;
+    if (!active || !isPlaying || !hasRecords) return;
 
     const animate = (time: number) => {
       if (!isPlayingRef.current) return;
@@ -452,7 +459,7 @@ export const PilotArenaPage: React.FC = () => {
         window.cancelAnimationFrame(playbackFrameRef.current);
       }
     };
-  }, [drawViewerFrame, hasRecords, isPlaying, maxIndex, playbackSpeed, records.length, setCurrentIndex, setIsPlaying, updateFps]);
+  }, [active, drawViewerFrame, hasRecords, isPlaying, maxIndex, playbackSpeed, records.length, setCurrentIndex, setIsPlaying, updateFps]);
 
   useEffect(() => {
     if (!hasRecords || isPlaying) return;
@@ -605,6 +612,27 @@ export const PilotArenaPage: React.FC = () => {
     }
   }, [clearViewerPredictionState, configPath, currentIndex, refreshPrediction, t, updateViewer]);
 
+  // 自动扫描模型：进入 PA 页面（或有 tub 数据）时自动执行模型扫描
+  useEffect(() => {
+    if (!hasRecords || !configPath) return;
+    viewersRef.current.forEach((viewer) => {
+      if (autoScanDoneRef.current.has(viewer.localId)) return;
+      if (viewer.models.length > 0 || viewer.loading) return;
+      autoScanDoneRef.current.add(viewer.localId);
+      void refreshModels(viewer);
+    });
+  }, [configPath, hasRecords, refreshModels, viewers]);
+
+  // 唯一模型自动加载：扫描结果只有一个模型时自动选中并加载预测
+  useEffect(() => {
+    viewersRef.current.forEach((viewer) => {
+      if (autoLoadDoneRef.current.has(viewer.localId)) return;
+      if (viewer.models.length !== 1 || !viewer.modelPath || viewer.pilot || viewer.loading) return;
+      autoLoadDoneRef.current.add(viewer.localId);
+      void loadViewer(viewer);
+    });
+  }, [loadViewer, viewers]);
+
   const unloadViewer = useCallback(async (viewer: ViewerState) => {
     if (viewer.pilot) {
       try {
@@ -614,6 +642,8 @@ export const PilotArenaPage: React.FC = () => {
       }
     }
     clearViewerPredictionState(viewer.localId);
+    autoScanDoneRef.current.delete(viewer.localId);
+    autoLoadDoneRef.current.delete(viewer.localId);
     imageLoadCallbacksRef.current.forEach((callbacks) => callbacks.delete(viewer.localId));
     delete canvasRefs.current[viewer.localId];
     setViewers((items) => items.filter((item) => item.localId !== viewer.localId));
@@ -656,7 +686,7 @@ export const PilotArenaPage: React.FC = () => {
   }, [currentIndex, evaluateLoadedViewers, isPlaying]);
 
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!active || !isPlaying) return;
 
     const scheduleEvaluation = (delay: number) => {
       evaluationTimerRef.current = window.setTimeout(() => {
@@ -675,7 +705,7 @@ export const PilotArenaPage: React.FC = () => {
         window.clearTimeout(evaluationTimerRef.current);
       }
     };
-  }, [evaluateLoadedViewers, evaluationIntervalMs, isPlaying]);
+  }, [active, evaluateLoadedViewers, evaluationIntervalMs, isPlaying]);
 
   useEffect(() => {
     viewersRef.current.forEach((viewer) => clearViewerPredictionState(viewer.localId));
@@ -702,6 +732,7 @@ export const PilotArenaPage: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!active) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest('input, textarea, select, button, [contenteditable="true"]')) return;
       if (event.code !== 'Space') return;
@@ -711,7 +742,7 @@ export const PilotArenaPage: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlayback]);
+  }, [active, togglePlayback]);
 
   const loadedPilots = viewers.filter((viewer) => viewer.pilot);
 
@@ -772,25 +803,18 @@ export const PilotArenaPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">{t('arena.pageTitle')}</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            {t('arena.pageDescription')}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={columns}
-            onChange={(event) => setColumns(Number(event.target.value) as 1 | 2 | 3 | 4)}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-          >
-            {[1, 2, 3, 4].map((value) => (
-              <option key={value} value={value}>{t('arena.columnCount', { value })}</option>
-            ))}
-          </select>
-          <Button onClick={() => setViewers((items) => [...items, defaultViewer()])}>{t('arena.addPilot')}</Button>
-        </div>
+      {/* 页内标题/描述已上移到统一流程页的 section 头（#178），此处只保留工具栏 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={columns}
+          onChange={(event) => setColumns(Number(event.target.value) as 1 | 2 | 3 | 4)}
+          className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+        >
+          {[1, 2, 3, 4].map((value) => (
+            <option key={value} value={value}>{t('arena.columnCount', { value })}</option>
+          ))}
+        </select>
+        <Button onClick={() => setViewers((items) => [...items, defaultViewer()])}>{t('arena.addPilot')}</Button>
       </div>
 
       {pageError && (
@@ -1072,4 +1096,4 @@ export const PilotArenaPage: React.FC = () => {
       </Card>
     </div>
   );
-};
+});

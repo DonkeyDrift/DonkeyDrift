@@ -25,6 +25,18 @@
   改写为本机局域网 IP（复用配网模块的 ``detect_lan_ip``，保留端口与
   ``#token=`` 片段）；只绑了回环的存活实例（如 TUI 内嵌 server）对
   局域网 IP 探测不通时视为不可复用，由调用方另拉监听 0.0.0.0 的实例。
+
+issue #168（打开后是"全新状态"）的三处约束：
+- 复用路径校验实例运行目录：登记条目不带 cwd，改读 ``/proc/<pid>/cwd``
+  与请求的 cwd 比对；不是同一目录的实例（如在 mycar 里跑的 TUI 内嵌
+  server）不复用，另起目标目录的实例，KCW 才会进对工作区。
+- 冷启动绑固定端口：浏览器把置顶/模式/语言主题等 UI 偏好存在
+  localStorage，按 origin（含端口）隔离；复用路径可能挑到不同端口的
+  实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
+  首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
+- 入口 host 用 mDNS 主机名（``<hostname>.local``）：origin 还含 host，
+  上位机 DHCP 换 IP 同样会让 origin 漂移、置顶再次"被清空"；mDNS 主机
+  名不随 IP 变化，作为入口 host 优先使用，解析不到才回退局域网 IP。
 """
 
 import json
@@ -32,6 +44,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -53,6 +66,11 @@ _POLL_S = 0.2
 INSTANCE_HEARTBEAT_MAX_AGE_S = 180.0
 # 复用探测（/api/v1/meta）的超时（秒）
 PROBE_TIMEOUT_S = 3.0
+# 冷启动绑定的固定端口（issue #168）：浏览器 localStorage 按 origin
+# （host+端口）隔离，端口漂移会让 KCW 每次像首次使用（置顶/模式/语言
+# 主题全丢）。不用 kimi 默认的 58627——TUI 内嵌 server 默认占它，撞上
+# 后 kimi 会自动顺延端口反而漂移；58640 是本 launcher 专属端口
+KIMI_WEB_PORT = 58640
 
 # kimi 用户目录下的固定位置
 KIMI_HOME = Path.home() / ".kimi-code"
@@ -178,6 +196,61 @@ def _lan_ip():
         return None
 
 
+def _mdns_hostname():
+    """本机稳定 mDNS 主机名（如 ``tony007.local``），origin 不随 IP 漂移。
+
+    浏览器把 KCW 的置顶/模式/语言主题等 UI 偏好存 localStorage、按 origin
+    （协议+host+端口）隔离；host 用 DHCP 局域网 IP 时，IP 一变 origin 就
+    变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，作为
+    入口 host 优先使用。仅当 mDNS 名能解析到本机局域网 IP 时返回，否则
+    None（回退局域网 IP，保持原有可达性）。
+
+    主机名统一小写化：浏览器会把 URL 里的 host 小写化后放进 Host 头，
+    kimi 的 DNS-rebinding 栅栏按 Host 头比对 ``--allowed-host``，三者
+    （URL / Host 头 / allowed-host）保持同一小写形式才不会被 40301 拦下。
+    mDNS 名大小写不敏感、origin 的 host 也按小写归一，小写化不影响可达性
+    与 localStorage 的 origin 归属。
+    """
+    hostname = socket.gethostname()
+    if not hostname:
+        return None
+    fqdn = f"{hostname.split('.')[0].lower()}.local"
+    lan = _lan_ip()
+    if not lan:
+        return None
+    try:
+        infos = socket.getaddrinfo(fqdn, None, socket.AF_INET)
+    except (socket.gaierror, OSError):
+        return None
+    addrs = {info[4][0] for info in infos}
+    return fqdn if lan in addrs else None
+
+
+def _entry_host():
+    """KCW 入口 URL 的稳定 host：mDNS 主机名优先，其次局域网 IP。"""
+    return _mdns_hostname() or _lan_ip()
+
+
+def _allowed_host_values():
+    """kimi web 需要放行的 Host 值（DNS-rebinding 栅栏，issue #168 后续）。
+
+    ``kimi web --host`` 绑定 0.0.0.0 时，浏览器用非回环 Host 访问会被
+    kimi 的 DNS-rebinding 检查拦下（40301 Invalid Host header）。本机接口
+    IP 会被 kimi 自动放行，但 mDNS 主机名是主机名而非接口 IP，不会被自动
+    放行——必须显式写进 ``--allowed-host``。这里收集入口 host 与局域网 IP
+    （后者是 mDNS 解析不到时 URL 回退的 host），去重后返回，供冷启动命令
+    使用。
+    """
+    hosts = []
+    fqdn = _mdns_hostname()
+    if fqdn and fqdn not in hosts:
+        hosts.append(fqdn)
+    lan = _lan_ip()
+    if lan and lan not in hosts:
+        hosts.append(lan)
+    return hosts
+
+
 def _is_loopback_host(host) -> bool:
     """URL host 是否是上位机本机视角地址（远程浏览器打不开）。
 
@@ -192,29 +265,49 @@ def _is_loopback_host(host) -> bool:
 
 
 def _lan_url(url: str):
-    """把 URL 里的回环/通配 host 改写为本机局域网 IP。
+    """把 URL 的 host 改写为稳定入口 host（mDNS 主机名优先，其次局域网 IP）。
 
-    保留端口、路径与 ``#token=`` 片段（token 在 # 片段里由前端页面读取，
-    不经过网络传输）。探测不到局域网 IP 或 host 本就远程可达时原样返回。
+    回环/通配 host（``localhost``/``127.x``/``0.0.0.0``）必须改写为远程
+    浏览器可达的地址（issue #125）；本机局域网 IP 也一并改写为 mDNS 主机
+    名，让 origin 不随 DHCP 换 IP 漂移（issue #168 后续）。保留端口、路径
+    与 ``#token=`` 片段；探测不到局域网 IP 或 host 是其它远程地址时原样
+    返回。
     """
-    lan = _lan_ip()
-    if not lan:
+    entry = _entry_host()
+    if not entry:
         return url
     parts = urllib.parse.urlsplit(url)
-    if not _is_loopback_host(parts.hostname):
+    host = (parts.hostname or "").lower().strip("[]")
+    lan = _lan_ip()
+    if not (_is_loopback_host(host) or (lan and host == lan)):
         return url
-    netloc = f"{lan}:{parts.port}" if parts.port else lan
+    netloc = f"{entry}:{parts.port}" if parts.port else entry
     return urllib.parse.urlunsplit(
         (parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
-def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
+def _proc_cwd(pid: int):
+    """实例进程的运行目录（``/proc/<pid>/cwd`` 的真实路径）。
+
+    实例登记条目不带 cwd 字段，复用前用它校验实例跑在请求的目录里
+    （issue #168）；进程消失/无权限返回 None（视为不匹配，跳过）。
+    """
+    try:
+        return os.path.realpath(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
+                       cwd=None):
     """找已在运行的 kimi web 实例，返回带 ``#token=`` 的浏览器入口 URL。
 
-    判定链：登记条目心跳新鲜 → pid 存活 → 带持久 token 探测
-    ``/api/v1/meta`` 返回 200，且局域网可达（登记 host 是回环时需对
-    本机局域网 IP 探测通过）。找不到返回 None。
+    判定链：登记条目心跳新鲜 → pid 存活 → 运行目录匹配（cwd 给定时比对
+    ``/proc/<pid>/cwd``，issue #168）→ 带持久 token 探测 ``/api/v1/meta``
+    返回 200，且局域网可达（登记 host 是回环时需对本机局域网 IP 探测
+    通过）。找不到返回 None。
     """
+    cwd_real = os.path.realpath(cwd) if cwd else None
     token = _read_token(token_path)
     now_ms = time.time() * 1000
     max_age_ms = INSTANCE_HEARTBEAT_MAX_AGE_S * 1000
@@ -223,7 +316,13 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
             continue
         if not _pid_alive(inst["pid"]):
             continue
+        if cwd_real is not None and _proc_cwd(inst["pid"]) != cwd_real:
+            continue
         host = inst["host"]
+        # 实例是否本机视角（回环/通配，或登记的就是本机局域网 IP）；
+        # 只有本机实例才值得改用 mDNS 稳定 origin（issue #168 后续）
+        is_local = _is_loopback_host(host) or (
+            _lan_ip() is not None and host == _lan_ip())
         if _is_loopback_host(host):
             # 只绑回环的实例（如 TUI 内嵌 server）远程浏览器访问不到；
             # 对局域网 IP 再探一次：通了说明实际监听 0.0.0.0 只是登记
@@ -234,6 +333,16 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
             host = lan
         if not _probe_server(host, inst["port"], token):
             continue
+        if is_local:
+            entry = _entry_host() or host
+            # 复用前必须确认入口 host 真能过 kimi 的 DNS-rebinding 栅栏
+            # （issue #168 后续）：老实例可能没带 --allowed-host，对局域网
+            # IP 探测通、但对 mDNS 主机名 403，返回这种 URL 浏览器一打开就
+            # 报 Invalid Host header。入口 host 与已探测的 host 不同时再对
+            # 入口 host 探一次，不通则跳过该实例。
+            if entry != host and not _probe_server(entry, inst["port"], token):
+                continue
+            host = entry
         url = f"http://{host}:{inst['port']}/"
         if token:
             url += f"#token={token}"
@@ -264,10 +373,19 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
     env["PATH"] = str(KIMI_BIN.parent) + os.pathsep + env.get("PATH", "")
     env.setdefault("HOME", str(Path.home()))
     try:
+        cmd = [binary, "web", "--no-open", "--host",
+               "--port", str(KIMI_WEB_PORT)]
+        # --allowed-host：绑定 0.0.0.0 后，浏览器用 mDNS 主机名/局域网 IP
+        # 访问会被 kimi 的 DNS-rebinding 栅栏 403 拦下（40301 Invalid Host
+        # header，issue #168 后续）；显式放行入口 host 与局域网 IP。
+        for allowed_host in _allowed_host_values():
+            cmd += ["--allowed-host", allowed_host]
         proc = popen_fn(
             # --host 裸传 = 绑 0.0.0.0：消费方是局域网内用户设备上的
             # 浏览器（issue #125），只绑回环它们访问不到
-            [binary, "web", "--no-open", "--host"],
+            # --port 固定专属端口：origin 稳定，KCW 的 localStorage 偏好
+            # （置顶/模式/语言主题）不再因端口漂移被清空（issue #168）
+            cmd,
             cwd=cwd_str,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -341,12 +459,14 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
 
     Args:
         cwd: kimi 运行目录（绝对路径）；None 表示上位机用户主目录。
-            目录不存在直接报错，绝不回退到其它目录。
+            目录不存在直接报错，绝不回退到其它目录。复用路径只复用
+            运行目录与之匹配的存活实例（issue #168）。
         timeout_s: 整体超时（秒），默认 120；调用方客户端超时应 ≥120s。
             复用路径毫秒级返回，仅冷启动路径可能用满。
         live_url_fn / resolve_binary_fn / popen_fn: 测试钩子，默认
             ``_live_instance_url`` / ``_resolve_kimi_binary`` /
-            ``subprocess.Popen``。
+            ``subprocess.Popen``；live_url_fn 以 cwd（规范化后，None
+            表示不限定）为参调用。
 
     Returns:
         成功 {"status": "ok", "url": <带 #token= 的入口 URL>}；
@@ -368,8 +488,10 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             }
         cwd_str = str(cwd_path)
 
-    # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web）
-    url = live_url_fn()
+    # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web），
+    # 且运行目录与请求一致（cwd=None 不限定，issue #168）；注意必须
+    # 关键字传参——_live_instance_url 首参是 instances_dir
+    url = live_url_fn(cwd=cwd_str)
     if url:
         url = _lan_url(url)
         logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
@@ -393,7 +515,7 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
-    url = live_url_fn()
+    url = live_url_fn(cwd=cwd_str)
     if url:
         url = _lan_url(url)
         logger.info("冷启动未果，复用到已运行实例: %s", url)

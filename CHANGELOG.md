@@ -1,5 +1,538 @@
 # 变更日志
 
+## 2026-08-18 (35)
+
+- feat(web-ui): 虚拟摇杆面板默认折叠——每次进入/刷新 Drive 页都折叠为「虚拟摇杆」标题一行
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`joystickOpen` 初始状态由 `useState(true)` 改为 `useState(false)`；点击标题行展开/收起交互不变。
+  - 验证：`npm run build`（含 `tsc -b`）通过；无 Firmware 改动、无需 OTA。
+  - 注：主工作区有并行会话在制改动，本次在 worktree（`.worktrees/joystick-default-collapsed`）基于最新 `origin/Tony` 重做（cherry-pick 原提交），分支 `Tony-joystick-default-collapsed-v2`。
+
+## 2026-08-18 (34)
+
+- fix(launcher): KCW 入口 URL 用 mDNS 主机名后被 kimi 的 DNS-rebinding 栅栏 403 拦截——冷启动加 `--allowed-host` 放行入口 host，复用前重探入口 host 跳过未放行的旧实例（Issue #168 后续）
+  - 根因：上一轮把 KCW 入口 URL 的 host 从 DHCP 局域网 IP 改为稳定 mDNS 主机名 `tony007.local` 以稳定 origin；但 `kimi web --host`（绑 0.0.0.0）只自动放行本机接口 IP（`192.168.3.57` 返回 200），mDNS 主机名是主机名而非接口 IP、不会被自动放行——浏览器用 `Host: tony007.local` 访问即被 40301（Invalid Host header）拦下。实测 `127.0.0.1:58640` 与 `192.168.3.57:58640` 均 200、`tony007.local:58640` 403 复现。
+  - `donkeycar/launcher/kimi_web.py`：
+    - `_mdns_hostname()` 主机名统一小写化（`hostname.split('.')[0].lower()`），让 URL / 浏览器 Host 头 / `--allowed-host` 三者保持同一小写形式（浏览器本就把 host 小写化放进 Host 头，origin 的 host 也按小写归一，不影响 localStorage 归属）；
+    - 新增 `_allowed_host_values()` 收集入口 host（mDNS 主机名）与局域网 IP（mDNS 解析不到时的回退 host），去重；
+    - `_spawn_and_capture()` 冷启动命令逐项追加 `--allowed-host <host>`，放行 mDNS 主机名与局域网 IP；
+    - `_live_instance_url()` 复用本机实例、把 host 改写为入口 host 后，若入口 host 与已探测 host 不同则再对入口 host 探一次——老实例（没带 `--allowed-host`）对局域网 IP 通、对 mDNS 403，直接跳过而不是返回打不开的 URL。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMdnsHostnameAndAllowedHosts`（小写化 + allowed-host 三种组合 4 项）、`test_entry_host_must_pass_rebind_gate`（复用重探跳过 403 实例）、`test_spawn_passes_mdns_and_lan_allowed_hosts`；更新 `test_spawn_success_captures_url_and_keeps_proc` 的启动命令断言。本文件 48 项、launcher 相关 86 项全部通过。
+  - 验证：手动以 `kimi web --no-open --host --port 58646 --allowed-host tony007.local --allowed-host 192.168.3.57` 起测试实例，`curl http://tony007.local:58646/api/v1/meta`（小写）与 `http://TONY007.local:58646/...`（大写）均 200，修复生效。
+  - 注：本次在 `Tony-kcw-allowed-host` 功能分支（worktree 作业）上完成。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (33)
+
+- fix(launcher): DSH 局域网 mDNS 主机名入口被 `/api` 通用信任栅栏 403——`--trusted-host` 同时声明局域网 IP 与 mDNS 主机名（Issue #164 追加）
+  - 根因：`_lan_url()` 把 dsh web 入口 URL 的 host 从回环/局域网 IP 改写为 mDNS 主机名 `TONY007.local`（`_entry_host()` mDNS 优先，issue #168 稳定 origin 设计）；但 `--trusted-host` 之前只传了局域网 IP（`_lan_ip()`）。浏览器打开 `http://TONY007.local:<port>` 时 `Host` 头是 `tony007.local:<port>`，dsh-client-connection 的 `/api` 通用信任栅栏（`isTrustedApiRequest(req, trustedHosts)`，`trustedHosts` 由 `webserver.host=0.0.0.0` 自动派生的局域网 IP + `--trusted-host` 组成）里没有 `TONY007.local` → 所有 `/api/*` 请求 403（`host.listDirectory` 只是第一个暴露的症状，随后设置页/其他功能同样不可用）。
+  - `donkeycar/launcher/dsh_web.py`：
+    - 从 `kimi_web` 引入 `_mdns_hostname`；
+    - `_spawn_and_capture()` 参数由 `lan_ip` 改为 `trusted_hosts`（authority 列表），逐项追加 `--trusted-host`；
+    - `launch_dsh_web()` 新增 `mdns_fn` 测试钩子（默认 `_mdns_hostname`），构造 `trusted_hosts = [lan_ip, mdns]`（去空、去重）后传给 `_spawn_and_capture`；
+    - 模块 docstring 的 `--trusted-host` 说明同步更新。
+  - 测试同步：`tests/test_launcher_dsh_web.py` `_fake_lan_ip` fixture 默认 patch `dsh_web._mdns_hostname` 返回 None（隔离真实 mDNS 探测）；新增 `test_spawn_adds_mdns_host_to_trusted_host`（断言 `--trusted-host 192.168.3.10 --trusted-host TONY007.local`）；文件 30 项全部通过。
+  - 验证：本地复现——仅 `--trusted-host 192.168.3.57` 时，`Host: TONY007.local` 的 `/api/host.listDirectory` 返回 403、`Host: 192.168.3.57` 返回 200；补上 `--trusted-host TONY007.local` 后 mDNS host 返回 200（修复生效）。
+  - 注：本次在 `Tony-issue164-dsh-auto-enter-projects` 功能分支（worktree 作业）追加提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。此前 (32) 的 UUID polyfill 与本次 mDNS trusted-host 是 issue #164 的两个独立根因，均需线上 launcher 更新部署后生效。
+
+## 2026-08-18 (32)
+
+- fix(launcher): DSH 局域网非安全上下文 `crypto.randomUUID` 缺失导致连接永不就绪、不自动进 Projects——client.js 注入 UUID 兜底（Issue #164 收尾）
+  - 根因：DSH 客户端 `dsh-client-connection/lib/client.js` 用 `crypto.randomUUID()` 铸造 RPC id（`AbstractApiClient.mintRpcId()`），但浏览器经局域网 IP（`http://192.168.3.x:<port>`）访问时处于非安全上下文，`crypto.randomUUID` 为 undefined，调用抛 `TypeError` → `ConnectionController.loop()` 的 `host.describe` 被 reject → 连接永远到不了 connected → `workspaces.startInitialSelection()` 不触发 → 停在"选择工作区"不自动进 Projects（回环 `127.0.0.1` 是 secure context，正常）。
+  - `donkeycar/launcher/dsh_web.py`：
+    - 新增 `_connection_client_path()`（定位 client.js，与 `_connection_index_path` 同布局）；
+    - 新增 `_PATCH_UUID_OLD`/`_PATCH_UUID_NEW` 锚点与 `_patch_client_uuid_polyfill()`——启动前在 client.js 顶部 CommonJS 桩之后注入 `getRandomValues` 版 RFC4122 v4 UUID 兜底，幂等自愈（已打过的跳过、源码升级未命中旧锚点也跳过、失败只告警）；
+    - `launch_dsh_web()` 冷启动前在 `_patch_privileged_methods()` 之后调用 `_patch_client_uuid_polyfill()`。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 `TestPatchClientUuidPolyfill`（补丁注入/幂等/未命中跳过/缺包跳过/launch 调用时机 5 项），文件 29 项全部通过。
+  - 验证：headless Chromium 打开 `http://192.168.3.57:36600/`，`isSecureContext=False` 但 `typeof crypto.randomUUID=function`（polyfill 生效）、页面自动进入 `projects`、不再显示"选择工作区"，console 无错误；回环 `127.0.0.1` 行为一致。
+  - 注：本次在 `Tony-issue164-dsh-auto-enter-projects` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。此前错误的 `sec-fetch-site` 放宽补丁已一并删除（实测浏览器发 WebSocket 不带该头，与真实根因无关）。
+
+## 2026-08-18 (31)
+
+- feat(launcher): D 启动菜单 0 号「Drifter Console」移到 7 号、删 0 号位，6 号改名 DonkeyDrifter（小字「打开 DonkeyDrifter」）
+  - 需求：D 启动页菜单中 0 号「Drifter Console」（打开 DC）移到 7 号位置、删掉 0 号位；6 号「Donkey Drifter」改名「DonkeyDrifter」，小字（desc）改为「打开 DonkeyDrifter」。
+  - `donkeycar/launcher/server.py`（MENU_HTML）：
+    - `menuItems`：删除 0 号「Drifter Console」条目；6 号 name「Donkey Drifter」→「DonkeyDrifter」、descZh/descEn「打开 DonkeyDrifter」/「Open DonkeyDrifter」；7 号由占位行改为「Drifter Console」（cat drive、favorite true）；编号 1-12。
+    - `selectItem()`：删除 `no === 0 → openDrifterConsole()` 分支，新增 `no === 7 → openDrifterConsole()`；移除占位行轻提示分支。
+    - `renderMenu()`：移除占位行渲染分支与 `.menuItem.placeholder` CSS（占位概念随 7 号恢复为真实 DC 项而移除）。
+    - 键盘：数字键 `0` 不再触发 `selectItem(0)`（0 号位已删）；`2-9` 仍直选对应项，`1`+`0/1/2` 仍组合选 10/11/12。
+    - 帮助文案：`数字键 0-12：选择对应菜单项（7 号已并入 6 号）` → `数字键 1-12：选择对应菜单项`（zh/en 同步）。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 删除 `test_menu_6_7_merged_placeholder`，新增 `test_menu_6_renamed_and_dc_moved_to_7`；模块 docstring 与注释同步。launcher 相关测试 155 项全部通过，MENU_HTML 内嵌 JS `node --check` 通过。
+  - 注：本次在 `Tony-menu-reorder-dc-7` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (30)
+
+- perf(web-ui): 流程页导航切换仍卡顿——四个 section 常驻挂载导致整页每次滚动都重算/重绘 + 父组件重渲染连坐所有子页面，加 `content-visibility` 与 `React.memo` 隔离（Issue #135 五轮）
+  - 背景：#201/#204 已把 Drive 视频流/WS/遥测图/PA 循环按主导 section 门控，但四个 section（Drive/TM/Trainer/PA）仍常驻挂载在同一个滚动页里，且 `FlowPage` 的 `inView` 每次变化会触发父组件重渲染、默认连带所有子页面一起重渲染——切导航平滑滚动时既有视口外 section 的布局/绘制开销，又有 TM/Trainer 等重页面的无效重渲染。Playwright CPU 4x 实测：切换 PA→Drive 单次 longtask 峰值 836ms。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：新增 `SECTION_STYLE`（`content-visibility: auto` + `contain-intrinsic-size: auto 640px`）应用到四个 `<section>`——DOM 与组件状态保留（保住 #135 常驻保活），但浏览器跳过视口外 section 的布局/绘制，只按占位尺寸撑开滚动高度。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx` / `TrainerPage.tsx` / `DrivePage.tsx` / `PilotArenaPage.tsx`：四个页面组件用 `React.memo` 包裹（无 props 的 TM/Trainer 永不随父组件重渲染；带 `active` 的 Drive/PA 仅在 `active` 变化时重渲染）。
+  - 效果：Playwright CPU 4x 实测导航切换 longtask 峰值从 836ms 降至约 170ms；视频流滚出卸载回归通过（Drive 滚到 TM 后 `img[src*=drive/video]`/`video` 卸载、占位符出现）；nav href 正确（`#/drive`/`#/tub`/`#/trainer`/`#/pilot`）。
+  - 测试同步：前端 vitest 全量 20 文件 100 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次在 `Tony-issue135-nav-lag-round5` 功能分支（worktree 作业，基于最新 origin/Tony）完成，仅动前端。Firmware 无改动，无需 OTA。已部署到 8000（从该 worktree 起后端），用户需硬刷新浏览器。
+
+## 2026-08-18 (29)
+
+- fix(web-ui): 修复 DD 前端深链（`/connector`、`/drive` 等）刷新/直达返回 404——根静态文件挂载改为 SPA fallback 兜底
+  - 根因：`main.py` 用 `app.mount("/", StaticFiles(html=True))` 服务根目录静态文件，它注册在 `@app.get("/{full_path:path}")` SPA fallback 之前，拦截了所有路径——前端深链（无扩展名、非真实文件）被 StaticFiles 判为 404，fallback 永远轮不到，导致用户在 `/connector` 等页面刷新或直接访问时得到 `{"detail":"Not Found"}`（Issue #177 收尾时用户反馈"看不到改动/无法连接服务器"暴露）。
+  - `web_ui/backend/main.py`：去掉根目录 `StaticFiles` 挂载，`spa_fallback` 改为——① 真实存在的根目录静态文件（favicon、robots.txt 等）经 `realpath` 越界校验后直接 `FileResponse`；② 不存在的 API 路径（`api`/`api/*`）保持 404；③ 其余一律回退到 `index.html` 交给前端路由。`/assets/*` 仍由独立 mount 服务，不受影响。
+  - 测试同步：后端 pytest 全量 82 项通过；手动验证 `/connector`、`/drive`、`/` 返回 200、`/assets/*.js` 200、`/api/provisioning/status` 404、`/api/connector/config` 200。
+
+## 2026-08-18 (28)
+
+- fix(trainer): Trainer 三档标签改为「本机 / 车载电脑 / 云端」，让「本机」明确指用户自己的电脑、「车载电脑」指跑 DD 后端的 Linux 机器（Issue #170 收尾）
+  - 背景：上一轮「我的电脑 / Linux 电脑」仍不够直观——「我的电脑」与「本机」语义易混，且「Linux 电脑」过于技术化、普通用户难以和"本机"区分。改为「本机」（用户浏览器/SSH 客户端所在机）、「车载电脑」（跑 DD 后端的机器）、「云端」（远端服务器）三档。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我的电脑」→「本机」、`tabLocal`「Linux 电脑」→「车载电脑」、`startMyPcTraining`→「在本机上训练」、`startLocalTraining`→「在车载电脑上训练」、`myPcTraining`→「本机训练」；en 同步 `This Computer / Car Computer / Train on This Computer / Train on Car Computer / This Computer Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档渲染与点击断言同步新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming3` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (27)
+
+- fix(trainer): Trainer 三档标签由「客户端/本机/云端」改为「我的电脑 / Linux 电脑 / 云端」，消除用户对前后两档语义的混淆（Issue #170 收尾）
+  - 背景：上一轮「客户端/本机」对普通用户不够直观——「本机」在用户自己电脑上操作时易被误读为"我的电脑"，与「客户端」难以区分。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「客户端」→「我的电脑」、`tabLocal`「本机」→「Linux 电脑」、`startMyPcTraining`→「在我的电脑上训练」、`startLocalTraining`→「在 Linux 电脑上训练」、`startCloudTraining`→「在云端训练」、`myPcTraining`→「我的电脑训练」；en 同步 `My Computer / Linux PC / Train on My Computer / Train on This Linux PC / Train on Cloud / My Computer Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档渲染与点击断言同步新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming2` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (26)
+
+- feat(web-ui): DeepSeek Harness 入口同样改为导航链接样式，放在 Kimi Code Web 右侧（Issue #175 延续）
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：删除已无引用的 `DshButton` 胶囊组件与 `useResolvedTheme` 导入，DeepSeek Harness 统一走 `DshEntryLink` 导航链接样式。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行末尾 Kimi Code Web 右侧新增 `DshEntryLink`；右上角胶囊区移除 `DshButton`（现在只保留版本号/GitHub/主题/语言切换）；手机端汉堡菜单高级入口分组顺序不变（Drift Console / Kimi Code Web / DeepSeek Harness）。
+  - 测试同步：`EnterButtons.test.tsx` 删除 DSH 胶囊样式断言，DSH 成功/失败路径测试由 `DshButton` 迁至 `DshEntryLink`；vitest 全量 20 文件 99 项、`tsc -b --noEmit` 全部通过。
+  - 注：Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (25)
+
+- fix(web-ui): 流程页滚动卡顿收尾补刀——遥测图 60fps 空转、PA 播放循环、Drive UI 50ms 同步与同导航项重复点击滚动（#178 后续）
+  - 背景：#201 已把 Drive 的视频流/WebSocket 按主导 section 门控（滚走即断），但仍有几处后台空转：`TelemetryChart` 的 `requestAnimationFrame` 循环在 section 滚走后仍每帧 `setRenderTick` 重绘（无数据也空转 60fps）；`PilotArenaPage` 播放时滚走仍持续 rAF 推帧与预测轮询；`DrivePage` 的 50ms UI 同步 `setInterval` 未随 `active` 停表；且顶部导航点「与当前 path 相同的项」时 `location.pathname` 不变、滚动 effect 不触发，用户点后无反应。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：新增 `active` prop（默认 true）——`active=false` 时跳过遥测写缓冲与 rAF 重绘循环，滚回后自动恢复。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：50ms UI 同步 `useEffect` 加 `if (!active) return` 并补 `active` 依赖；`<TelemetryChart>` 传入 `active={active}`。
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：播放 rAF 循环与评测调度 `useEffect` 加 `!active` 早退并补 `active` 依赖（播放中滚走即冻结，滚回续播）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：滚动 effect 依赖从 `location.pathname` 改为 `pathname + location.key`——点同一导航项（path 不变但 location.key 变）也能再次 `scrollIntoView`，修复"点了没反应"。
+  - 测试同步：前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit`、`npm run build` 全部通过；eslint 改动文件 0 警告。Playwright headless 实测：点 Trainer 后 Drive 区 video/img 卸载、点同 path 导航项可再次滚回目标 section。
+  - 注：本次在 `Tony-issue178-flow-perf` 分支完成，基于已合入 Tony 的 #201 增量修改，仅动前端。无 Firmware 改动，无需 OTA。
+
+## 2026-08-18 (24)
+
+- fix(launcher): DC 点击进入 DD 报"无法连接服务器"——web 进程启动失败仍报 launched 并重定向死端口，改为报错 + 跳转页就绪轮询（用户口述报障，journalctl 实锤）
+  - 背景：`donkey web` 冷启动时前端生产构建失败（源码在制改动致 `tsc -b && vite build` 报错）直接退出，但 `_wait_for_web_ready` 对"进程提前退出"只带 warning 不报错，`_launch_drive` 仍返回 `launched` + 兜底前端端口 5188；而生产模式（bundled web ui，#135）前端由后端 8000 端口托管、5188 从不监听——跳转页拿到 URL 立即重定向，Safari 报"无法连接服务器"。三个叠加缺陷：进程死了仍报 launched / 兜底端口在生产模式必死 / 跳转页无就绪轮询（2026-08-12 加过的轮询被 c613ce73 菜单页重写吞掉）。
+  - `donkeycar/launcher/server.py` `_launch_drive`：`_wait_for_web_ready` 返回 warning 时区分两种情况——web 进程已退出（`poll()` 非 None）必然失败，改返回 `status:"error"` 并附具体原因与日志查看命令，不再起车进程、不写 PID 文件；进程仍在但超时、且登记未出现时，生产模式兜底前端端口从入参 5188 修正为后端端口（开发模式 vite 确实监听 5188，保持不变）。
+  - `donkeycar/launcher/server.py` `LAUNCH_DRIVE_HTML`：跳转前加就绪轮询（30 次 × 1s，`mode:'no-cors'` fetch 探测目标可连，复用菜单页 launchDrive 既有模式），就绪才重定向；超时不通则停下显示"Web UI 未就绪，未跳转（可稍后重试）"并透出 warning，不盲目跳死端口；i18n 补 `waiting`/`notready` 中英词条。
+  - 测试同步：`tests/test_launcher_drive_launch.py` 新增 3 项——web 进程提前退出报 error 且不起车进程不写 PID、生产模式超时前端端口修正为后端端口、开发模式超时保持入参端口；`tests/test_launcher_language_autodetect.py` 跳转页双语断言同步（新词条、3 处 failed 文案、轮询语句）。本文件 12 项全部通过，launcher/webui 相关 135 passed（terminal 2 项失败为 origin/Tony 基线遗留，与本次无关）；另起临时 launcher 实例实测 `/launch/drive` 页面含轮询逻辑与双语提示。
+  - 注：本次改动在 `Tony-fix-launch-dead-port` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`（合并时 CHANGELOG 与多条会话条目解冲突，最终重编号为 (24)）。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (23)
+
+- fix(launcher): DC 上位机终端"放一会儿仍被断开"根因修复——移除应用层 PING/PONG 判死，改用内核 TCP keepalive 保活与死链检测（Issue #173 后续）
+  - 背景：#173 首轮把 PTY 会话与 WS 连接解耦、断线宽限期 + sid 重连 + 自动退避重连，但服务端仍保留 #151 的"60s 无 PONG 判死"心跳——浏览器标签页冻结 / 手机锁屏时应用层 PONG 会停，服务端照样在 60s 后主动断开，用户视角"放一会儿仍断"依旧存在。
+  - `donkeycar/launcher/terminal.py`：删除 `_heartbeat_loop` 应用层心跳线程与 `_PING_INTERVAL`/`_PONG_TIMEOUT` 判死逻辑；新增 `_enable_tcp_keepalive`，在 WS 连接套接字上启用内核 TCP keepalive（`SO_KEEPALIVE` + Linux `TCP_KEEPIDLE=30`/`TCP_KEEPINTVL=15`/`TCP_KEEPCNT=3`）。keepalive 探测由内核发送、对端内核 ACK，与应用层无关：冻结/锁屏的浏览器内核照常 ACK，不再被误判断线；探测包同时刷新 NAT 表项防空闲断链；只有真正的死链才会在约 75s 后让 socket 报错触发会话 detach。主读循环仍响应客户端 PING（回 PONG），只是不再主动发 PING。
+  - `donkeycar/launcher/terminal_static/terminal.html`：注释同步（断线原因改为"任何原因，含 TCP keepalive 判死"）。
+  - `donkeycar/tests/test_launcher_terminal.py`：删除"服务端心跳 PING"与"空闲超时断开"两个 #151 用例，新增 `test_terminal_ws_idle_keeps_connection`（空闲不判死断连）与 `test_enable_tcp_keepalive_sets_socket_options`（keepalive 参数落地）。
+  - `tests/test_launcher_terminal.py`：静态断言从旧的 `lost`/`failed`/`reconnect` 文案改为新的"断线自动退避重连 + session sid 接回 + 清屏"断言。
+  - 测试同步：两个 terminal 测试文件 26 项通过。
+
+## 2026-08-18 (22)
+
+- fix(launcher): KCW 入口 URL host 用 mDNS 主机名，置顶/模式/语言主题不再随 DHCP 换 IP 被清空（Issue #168 后续）
+  - 背景：Issue #168 已固定端口 58640、缺省 cwd 落到 Projects 工作区，但浏览器把 KCW 的置顶等 UI 偏好存在 localStorage、按 origin（协议+host+端口）隔离；host 用上位机 DHCP 局域网 IP（近期从 .41 漂到 .57）时，IP 一变 origin 就变，置顶聊天仍会"全部消失"。
+  - `donkeycar/launcher/kimi_web.py`：
+    - 新增 `_mdns_hostname()`（`socket.gethostname()` 拼 ``<hostname>.local``，仅当 mDNS 解析到本机局域网 IP 时才采用）与 `_entry_host()`（mDNS 优先、局域网 IP 回退）。
+    - `_lan_url()`：回环/通配 host 与本机局域网 IP 统一改写为稳定入口 host，mDNS 可用时入口 URL 的 host 稳定、不随 IP 漂移。
+    - `_live_instance_url()`：本机实例（登记回环/通配或本机 IP）组装入口 URL 时改用 `_entry_host()`；其它远程 host 不受影响。
+    - 模块 docstring 更新为"三处约束"（cwd 校验 / 固定端口 / mDNS host）。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 4 项 mDNS 优先与 foreign host 不误改断言，autouse fixture 默认钉 `_mdns_hostname` 为 None 保持既有断言稳定；本文件 42 passed、launcher 相关 116 passed。
+  - 注：本次改动在 `Tony-kcw-origin-stable` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (21)
+
+- fix(web-ui): 修复流程页滚出 Drive 后视频流/WebSocket 仍在后台运行，拖慢整页切换（Issue #135 收尾）+ 后端静态资源缓存头
+  - 根因：#178 把 Drive/TM/Trainer/PA 合并为纵向滚动大页后，Drive 区的视频流与 WebSocket 未按 section 可见性门控——用户滚到 TM/Trainer/PA 后，Drive 的 MJPEG 图片流、WebRTC 视频、车端 WebSocket 遥测仍在后台持续收发与 setState 重渲染，持续占主线程，导致无论切到哪个标签都卡顿（#135 用户仍报"非常卡顿"）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：滚动 spy 的 `inView` 判定从「`isIntersecting` 有任何交集即视为可见」改为「可见比例最大的主导 section 才算活跃」——原先 section 之间有 `space-y` 间距与 `scroll-mt` 滚动边距，滚走后仍留 32px 交集使 `active` 永不翻 false；改为主导 section 后，滚到 TM 时 Drive 的 `active` 正确变为 false。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：新增 `enabled` 选项（默认 true）；`enabled=false` 时主动断开 WebSocket、清定时器、`setConnected(false)`、`setCarState.online=false`，不再后台收发；重新 `enabled=true` 时重连。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`useDriveWebsocket({ enabled: active })`；`useGamepadDrive` / `useGyroDrive` 的 `enabled` 追加 `active &&`；`<VideoStream>` 改为 `active` 条件渲染（滚走卸载视频组件、停止 MJPEG/WebRTC 与 1s 统计轮询），非活跃时渲染同宽高比占位符避免布局跳动。
+  - `web_ui/backend/main.py`：新增 `apply_cache_headers` 与 `cache_control_middleware`——`/assets/*` 带内容哈希的静态资源返回 `Cache-Control: public, max-age=31536000, immutable`；`text/html`（index.html/SPA fallback）返回 `Cache-Control: no-cache`，避免浏览器启发式缓存旧 index.html 导致"前端已修复但仍在跑旧 bundle"（#135 用户侧反复卡顿的重要诱因）。
+  - 测试同步：新增 `web_ui/backend/tests/test_cache_headers.py`（3 项：assets immutable / html no-cache / API 不受影响）；`web_ui/frontend/src/hooks/useDriveWebsocket.test.tsx` 新增 `enabled=false 不建立连接`（1 项）。后端 pytest 全量 82 项、前端 vitest 全量 20 文件 102 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 实测（8021 测试实例 + chrome-headless-shell）：滚到 TM 后 Drive 区 `img[src*=drive/video]`/`video` 均卸载、占位符出现（修复前仍挂载）；`useDriveWebsocket` enabled 门控单测确认不建连。无 Firmware 改动，无需 OTA。
+
+## 2026-08-18 (20)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后面板真正缩小——消除 grid 拉伸导致的"内容只剩一行但框未变小"
+  - 背景：控制面板在 `grid grid-cols-1 lg:grid-cols-3` 中作为第三列 grid item，默认 `align-self: stretch` 被拉伸到与左侧摄像头区（视频流 + 遥测图，较高）同高；折叠后内容虽只剩标题一行，但灰色面板框仍保持满高，下方"空出来"的区域实际是面板内部空白，视觉上"没变小"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：控制区外层 div 加 `self-start`，让面板高度随内容收缩——折叠后只剩标题一行、下方真正空出；展开时顶部对齐、高度由内容决定。
+  - 测试同步：前端 vitest 全量 100 项通过，`tsc -b --noEmit` 通过。
+
+## 2026-08-18 (19)
+
+- fix(trainer): Trainer 训练位置三档文案由口语化长名改为正式短名——客户端 / 本机 / 云端（Issue #170 收尾微调）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「我这台电脑」→「客户端」、`tabLocal`「当前这台 Linux 电脑」→「本机」、`startMyPcTraining`「开始训练（我这台电脑）」→「开始客户端训练」、`startLocalTraining`「开始本地训练」→「开始本机训练」、`myPcTraining`「在我这台电脑上训练」→「客户端训练」；en 同步 `Client / Local / Start Client Training / Start Local Training / Client Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档文案断言同步为新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (18)
+
+- feat(web-ui): 顶栏高级入口改为导航链接样式——Drift Console 移到品牌右侧/Drive 左侧、Kimi Code Web 移到 Car Connector 右侧，弱化处理一眼可辨为高级选项（Issue #175）
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：重写——原 `EnterButtons` 三合一胶囊组件拆分为 `DrifterConsoleEntryLink` / `KimiCodeWebEntryLink` / `DshEntryLink`（导航链接样式：`text-xs` 小字号 + `text-zinc-500` 淡色 + 图标 `SquareTerminal`/`Sparkles`/`FlaskConical`，无胶囊外壳、不做路由激活态）与 `DshButton`（DeepSeek Harness 胶囊按钮，保留在顶栏右侧，样式不变）；点击逻辑（扫描车端/launcher 启动/空白页句柄防弹窗拦截）与 loading 态原样保留，公共启动流程抽为 `useLauncherEntry` hook，console 扫描抽为 `useDrifterConsoleEntry` hook。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行顺序改为 品牌 → DrifterConsole → Drive → TM → Trainer → PA → CC → KimiCodeWeb，右侧区只留 `DshButton`；手机端原第二行 EnterButtons 删除，三个高级入口以分隔线分组的弱化链接收进汉堡菜单。
+  - `web_ui/frontend/src/App.test.tsx`：`services/api` mock 补 `discoverConnectorConsoles` / `launchKimiCodeWeb` / `launchDsh`（新入口组件渲染期取这些引用，mock 缺导出会抛错进 ErrorBoundary）。
+  - 测试同步：`EnterButtons.test.tsx` 重写为按新组件覆盖（弱化样式断言、DSH 胶囊样式断言、成功/失败路径 8 项）；vitest 全量 19 文件 96 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-issue175-webui-nav-links` 功能分支（独立 worktree）上完成。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (17)
+
+- fix(web-ui): DD 驾驶页虚拟摇杆折叠后只留标题一行——选择框随折叠一起收起，展开时恢复
+  - 背景：上一轮把输入源选择框挪进摇杆面板标题栏并让摇杆区可折叠后，折叠态标题栏右侧仍常驻输入源选择框，且面板内「可编程按键 / 控制参数 / 快捷键说明」也仍在显示，折叠后并非用户期望的"只剩一行"。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：标题栏的 `InputSourceSelector` 包进 `joystickOpen` 条件渲染（展开才显示）；原先只包摇杆圆盘区的条件渲染扩大为包住整个面板主体（竖向油门条 + 摇杆圆盘 + 控制参数条 + 可编程按键 + 参数面板 + 快捷键说明），折叠态只保留"虚拟摇杆"标题 + 展开/收起箭头一行；标题栏 `mb-4` 改为折叠时 `mb-0`，避免底部留白。
+  - 测试同步：前端 vitest 全量 19 文件 98 项通过，`tsc -b --noEmit` 通过；Playwright 实测折叠态面板文本仅剩「虚拟摇杆」，展开态选择框/油门/控制参数/快捷键说明全部恢复。
+
+## 2026-08-18 (16)
+
+- feat(trainer): Trainer 页训练位置从「本地/云端」两档扩为三档——我这台电脑 / 当前这台 Linux 电脑 / 云端（Issue #170）
+  - 背景：旧「本地」档 = 在 DD 后端所在 Linux 机器上训练；旧「云端」档 = SSH 到 `train_online.conf` 配置的远端训练；缺少"在用户自己这台电脑（SSH 客户端/浏览器所在机）上训练"的选项。方案：「我这台电脑」档复用云端 SSH 管线，但方向相反——后端 SSH 回访用户电脑，用独立配置 `train_my_pc.conf`。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.tsx`：两档扩为三档（`mypc` 我这台电脑 / `local` 当前这台 Linux 电脑 / `online` 云端），导出 `TrainerMode` 类型。
+  - `web_ui/backend/routers/trainer.py`：新增 `MyPcTrainRequest` 与 `POST /train/mypc`（缺省 `config_file=train_my_pc.conf`）。
+  - `web_ui/backend/trainer_engine.py`：`TrainingJob.mode` 与 `create_job` 支持 `mypc`；`stop_job` 对 `mypc` 走 `stop_event`（同 online）；新增 `run_mypc` 复用 `run_online` 的 SSH 管线。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：抽出 `startSshTraining` 共用 SSH 启动逻辑，新增 `startMyPc`（写 `train_my_pc.conf`）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：`mode` 三档；online/mypc 各一套独立表单状态，mount 时分别加载 `train_online.conf` / `train_my_pc.conf`；启动按钮按档位显示文案。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：新增 `titleKey` prop（云端/我这台电脑标题复用）。
+  - `web_ui/frontend/src/store/useStore.ts`：新增 `trainerMyPcConfig` + `setTrainerMyPcConfig` 并持久化。
+  - `web_ui/frontend/src/services/api.ts`：新增 `startMyPcTrain`。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：新增/更新 mypc 相关词条（`tabMyPc`/`tabLocal`/`tabCloud`/`startMyPcTraining`/`myPcTraining`，zh/en）。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_mypc.py`（3 项：mypc 路由建 job、缺省参数、stop 触发 stop_event）+ `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`（3 项：三档渲染/选中高亮/点击回调）。后端 pytest 全量 79 项、前端 vitest 全量 20 文件 101 项、`tsc -b --noEmit` 全部通过。
+  - 注：本次改动在 `Tony-issue170-trainer-3mode` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (17)
+
+- feat(web-ui): Drive/TM/Trainer/PA 合并为纵向滚动大页面，点导航锚点平滑滚动到对应区域（Issue #178）
+  - 需求：DD 四个页面（Drive/TM/Trainer/PA）原为独立路由（`/`、`/drive`、`/trainer`、`/pilot`），改为一个纵向连续滚动的大页面，顺序自上而下 Drive→TM→Trainer→PA，点顶部导航滑到对应 section，形成「开车采数据→管数据→训练→评测」的流程引导；Car Connector 保持独立路由、不在合并范围。
+  - `web_ui/frontend/src/App.tsx`：删除 Home 占位页与 KeepAliveTubManager；路由改为「`/connector` → CarConnectorPage」+「`/*` → FlowPage」兜底——同一兜底路由保证 `#/drive`、`#/tub`、`#/trainer`、`#/pilot` 四个 hash 深链导航切换时只改 pathname、不重挂载 FlowPage（保住 #135 常驻保活）。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`（新增）：四 section 固定顺序堆叠，每段带编号徽标 + 标题 + 流程描述 + 分隔线；IntersectionObserver 滚动联动（scroll spy，可见比例最大者为 activeSection）；按 pathname 平滑 scrollIntoView 到对应 section（懒加载 chunk 未就绪时 rAF 轮询等待；jsdom 无 scrollIntoView 时跳过）。
+  - `web_ui/frontend/src/store/useFlowStore.ts`（新增）：zustand 存 activeSection，供 Layout 高亮当前导航。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx`（新增）：TubManagerPage 从 App.tsx 迁出，作为流程页 TM section，自身逻辑不变。
+  - `web_ui/frontend/src/components/Layout.tsx`：四项导航改为锚点（`/drive`、`/tub`、`/trainer`、`/pilot`），激活态随滚动联动；CC 仍是独立路由高亮；手机菜单点击即收起（含同 path 重复点击）。#179 的标题链接改动保持不变。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `active` prop，`useDriveHotkeys`/`useKeyboardDrive` 仅在 drive section 可见时启用，避免同页常驻后 R/M/U/S/A/I/J/K/L 在其它区域误触；移除页内 `drive.title` 标题（上移到 section 头）。
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：新增 `active` prop，空格播放/暂停仅在 pilot section 可见时启用；移除页内 `arena.pageTitle`/`arena.pageDescription` 标题块（上移到 section 头）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：移除页内 `trainer.title` 标题行，ModeTabs 右对齐保留。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：新增 flow.drive/tubManager/trainer/pilotArena.desc 四条流程描述（zh/en）。
+  - 测试同步：`App.test.tsx` 的 keep-alive 回归测试改为断言「TM 在流程页各 section 间常驻、切 /connector 卸载、回切因已加载不重拉 tub」；vitest 全量 19 文件 98 项、`tsc -b --noEmit`、eslint（改动文件）、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-issue178-unified-flow-page` 功能分支完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (15)
+
+- fix(launcher): DC 终端长时间无交互断线丢会话——PTY 会话与 WS 连接解耦，断线宽限期 + 按 sid 重连接回 + 断线输出回放补发 + 前端自动退避重连（Issue #173）
+  - 背景：DC（Drifter Console）Web 终端的 PTY 会话与 WebSocket 连接一一绑定，浏览器闲置/休眠/网络抖动导致 WS 断开后服务端直接关闭 PTY，重新打开终端只能开新会话，现场输出与运行中进程全部丢失。
+  - `donkeycar/launcher/terminal.py`：
+    - `TerminalSession` 与连接解耦：不再持有固定 writer，新增 `attach(writer)`（接入新连接并补发回放缓冲）/ `detach(writer=None)`（定向解除，只 detach 属于本次连接的 writer，防旧连接收尾误清新 writer 的竞态）；断线期间子进程输出经 `_stash()` 存入回放缓冲（`_REPLAY_CAP` 1MiB 环形上限）。
+    - 新增模块级 `_sessions` 注册表（sid→session，`_sessions_lock` 保护）、`_acquire_session(requested_sid)`（按 sid 复用存活会话或新建）、惰性启动的 `_ensure_sweeper()` 后台清扫线程（30s 周期调用 `_sweep_once()`）与 `_sweep_once(now)`（可单测的清扫单批）——断线后宽限期 `_SESSION_GRACE=900s` 内可重连接回，超时且无 writer 的会话才销毁回收。
+    - `handle_terminal_ws` 解析查询参数 `?session=<sid>`，建连后首帧下发 `{"type":"session","id":..,"reattached":..}`；WS 断开只 `detach` 不 `close`，PTY 进程与输出缓冲保留；会话真正 `close()` 时从注册表注销。
+  - `donkeycar/launcher/terminal_static/terminal.html`：记录服务端下发的会话 ID（`lastSid`），重连 URL 带 `?session=` 请求接回；断线后自动退避重连（500ms 起指数退避 ×2 封顶 10s，`visibilitychange`/`online` 事件立即重试）；收到 exit 帧置 `exited=true` 不再自动重连；重连未接回（新会话）时 `term.reset()` 清屏避免新旧输出混杂；断线 overlay 点击改为触发 `connect()` 而非整页 `location.reload()`；i18n 删 lost/failed 词条、新增 reconnecting。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` fixture 适配新构造签名（`TerminalSession()` 手动注册 + attach），`_open_terminal_ws` 支持 `session_id` 参数，新增 `_read_json_control` 助手与 3 个 #173 测试——建连 session 帧下发、断线重连 reattach 保现场并补发回放缓冲、宽限期后 `_sweep_once` 销毁回收。本文件 22 项全部通过，launcher/server/terminal 相关 43 passed 2 skipped。
+  - 注：本次改动在 `Tony-terminal-reattach` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (14)
+
+- feat(web-ui): Trainer「高级选项」折叠行文案精简为「高级」（Issue #183 后续微调）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`trainer.advancedOptions` 值 zh「高级选项」→「高级」、en「Advanced Options」→「Advanced」，词条 key 不变。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：折叠行注释同步（Advanced Options → Advanced）。
+  - 后续微调（同分支，PR #207）：高级折叠行改薄——去掉 `py-2` 纵向内边距、方向箭头 `w-4 h-4`→`w-3.5 h-3.5`、加 `transition-colors`，对齐 Drive 页虚拟摇杆折叠头薄款样式。
+  - 测试同步：仅文案/样式变更，无测试引用旧文案；`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-trainer-advanced-label` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (13)
+
+- feat(ui): DD/D 两个页面标题文字可点击跳转官网，效果与点击 logo 图标一致（Issue #179，跨仓库功能：DD/DC/D 三页面标题可点）
+  - `web_ui/frontend/src/components/Layout.tsx`：顶栏「DonkeyDrifter」标题文字与 logo 合并进同一个 `<a href="https://www.donkeydrift.com" target="_blank" rel="noopener">`（logo `<img>` 与文字之间以 `gap-3` 保持原 12px 间距）；链接在 `font-bold text-xl` 容器内，文字继承深浅主题标题色，Tailwind reset 下无下划线/变色，仅新增指针手势。
+  - `donkeycar/launcher/server.py`（Donkey 启动页）：`MENU_HTML` 中 `<h1>Donkey</h1>` 改为 `<h1><a class="titleLink" href="https://www.donkeydrift.com" target="_blank" rel="noopener">Donkey</a></h1>`；CSS 新增 `.titleLink{color:inherit;text-decoration:none}`——颜色继承 h1、无下划线，行为对齐 logoLink。
+  - 测试同步：无标题专属测试需新增；验证 `tsc -b --noEmit` 通过、vitest App/components 14 文件 78 项通过、launcher `tests/test_launcher_menu_actions.py` 37 项通过。
+  - DC（Drifter Console，ESP32 Web Console）侧同类改动在 Firmware 仓库同步提交（v1.8.9，已 OTA 上车）。
+## 2026-08-18 (12)
+
+- feat(launcher): 菜单 6/7 两项打通 DD 的入口合并为 6 号「Donkey Drifter」，7 号位置灰占位、其余序号一律不变（Issue #181）
+  - 背景：launcher 菜单（`menuItems`，编号 0–12）中 6「Drive」与 7「Web」最终都进入同一 DD 应用（6 走 `/api/launch/drive` 进 Drive 页，7 走 `/api/launch/web` 起 DD 前后端跳首页）；用户要求合并为一个「Donkey Drifter」入口（进 DD Drive 页面），7 号位空出占位，8–12 序号保持原位不递补。
+  - `donkeycar/launcher/server.py`（MENU_HTML）：
+    - `menuItems`：6 号改名「Donkey Drifter」（cat 保持 drive、favorite 保持常用），desc 改为「进入 DonkeyDrift（Drive 页面）/ Enter DonkeyDrift (Drive page)」；7 号改为 `placeholder: true` 占位行（name "—"、无分类、无 favorite、desc「已合并至 6 号『Donkey Drifter』/ Merged into #6 Donkey Drifter」）；8–12 条目原样未动。
+    - `renderMenu()`：占位行渲染分支——不可点击（无 onclick）、无分类 pill、无 favorite 标、`.menuItem.placeholder` 样式（置灰 opacity .45、虚线边框、无 hover/选中效果，深浅两主题各配覆盖）。
+    - `selectItem()`：占位项只弹「已合并至 6」轻提示（复用 showError），不触发任何动作；删除原 `no === 7 → launchWebUI()` 分支（数字键 7 经同一入口，行为同步）。
+    - 删除前端 `launchWebUI()` 函数与 `overlay.startingWeb` i18n 词条（zh/en）；帮助文案 `help.keyNumbers` 双语更新为「（7 号已并入 6 号）」。
+    - 服务端：删除 `POST /api/launch/web` 路由与 `_launch_web_ui()`（排查确认无其它消费方——DD 前端/DC 均未调用，仅菜单自身与测试）；`/api/launch/drive` 与 `GET /launch/drive`（DC 入口）不动。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 删除 `TestLaunchWebUI`（3 项）及 `_fake_subprocess`/`_FakePopen` 助手、`_launch_web_ui` 导入；端点测试改为下线后 404 断言；前端断言类新增 `test_menu_6_7_merged_placeholder`（改名、占位标记、Web 链路不残留、8 号仍在原位）。pytest 全量 209 passed（`test_tub_manager_auto_refresh` 1 项既有失败在干净 origin/Tony 上同样失败，与本改动无关）；MENU_HTML 内嵌 JS 逐块 `node --check` 通过；临时实例实测 `/` 返回新菜单、`POST /api/launch/web` 404。
+
+
+## 2026-08-18 (11)
+
+- fix(web-ui): DD FAB 浮球群残留的菜单式语言入口移除，语言入口统一为顶栏静音式单按钮（Issue #139 遗留）
+  - 背景：Issue #139 修复（PR #146）把 DD 顶栏 `LanguageSwitcher` 与 D 启动页语言入口改成了静音式单按钮，但 DD 右下角 FAB 浮球群（`FabActions.tsx`，镜像自 DC）里仍残留 🌐 语言球 + 弹出式 langMenu（中文/English 两项菜单），违反验收要点"移除原菜单式语言切换入口，不残留死代码"；DC 侧同源 FAB 群在 Firmware 侧修复时已彻底移除语言球只留 helpFab，DD 侧对齐。
+  - `web_ui/frontend/src/components/FabActions.tsx`：删除 langFab（🌐 语言球）、langMenu 弹出菜单、`LANG_SEGMENTS`、`langMenuOpen` 状态与 `toggleLangMenu`/`chooseLanguage`，FAB 群只剩 fabToggle（发光圆点）+ helpFab（?）；`collapse` 外点收起逻辑同步简化。组件头注释更新为 `.fabToggle + .fabActions (.helpFab) + .helpModal`，注明语言入口在顶栏 LanguageSwitcher。
+  - `web_ui/frontend/src/i18n/messages/fab.ts`：删除已无引用的 `fab.language` 词条（zh/en 各一条），头注释同步。
+  - 测试同步：`FabActions.test.tsx` 新增 1 项"FAB 群不渲染任何语言按钮/菜单"（queryByRole 语言 + queryByText 🌐/中文/English 全空）；vitest 全量 19 文件 98 项通过，`npm run build` 通过。
+
+## 2026-08-18 (10)
+
+- feat(web-ui): Trainer 本地训练「高级选项」由勾选框改为点击展开的折叠面板（Issue #183）
+  - 需求：Trainer 页本地训练配置的「高级选项」原为 checkbox 勾选形态，改为下拉折叠面板——点击整行在下方展开高级字段，再点收起，不再有勾选框。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：勾选框替换为与 Drive 页「控制参数」面板（`ParameterPanel.tsx`）同款的整行按钮 + 右侧 ChevronDown/ChevronUp 方向箭头（lucide-react），点击切换 `advancedEnabled`，带 `aria-expanded` 无障碍标注；样式用 ParameterPanel 同款 `text-zinc-400 hover:text-zinc-200` 类名，深浅主题经 theme-light.css 类名级重映射自动适配。
+  - 语义保持：`advancedEnabled` 仍是"高级覆盖生效"开关（展开=启用、收起=不启用），持久化（useStore）、`TrainerPage.tsx` 按 myconfig.py 覆盖自动置 true（面板默认展开）与训练时写 myconfig 的联动全部不动；收起时已填值保留不重置。i18n 沿用 `trainer.advancedOptions`，无新增词条。
+  - 测试同步：无 LocalConfigForm 专属测试，无需新增；前端 vitest 全量 19 文件 97 项、`tsc -b --noEmit`、eslint（改动文件）、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-trainer-advanced-collapse` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (9)
+
+- fix(web-ui): Drive 页控制参数滑块轨道浅色模式下仍为黑色——theme-light 增补伪元素变体类名覆盖（Issue #169）
+  - 根因：`ParameterPanel` 的 `ParamSlider` 把轨道色写在伪元素变体类上（`[&::-webkit-slider-runnable-track]:bg-zinc-800` / `[&::-moz-range-track]:bg-zinc-800`），Tailwind 生成的类名不是字面 `.bg-zinc-800`，`theme-light.css` 的类名级重映射（`html.theme-light .bg-zinc-800`）匹配不到，轨道在任何主题下都吃硬编码 zinc-800 黑色。
+  - `web_ui/frontend/src/themes/theme-light.css`：组件级微调区新增两条覆盖规则——`html.theme-light .\[\&\:\:-webkit-slider-runnable-track\]\:bg-zinc-800::-webkit-slider-runnable-track` 与对应的 `::-moz-range-track`，颜色 `#e2e8f0`（文件中 raised controls 档，本就为滑块轨道设计的浅色）；只覆盖颜色不动尺寸，thumb（24×16px 纯白椭圆）与轨道高度（6px）均未改。
+  - 测试同步：无 ParameterPanel 专属测试，无需新增；已核验产物 CSS 中 Tailwind 生成的转义类名与覆盖选择器逐字匹配、规则排序在后优先级压过原规则；vitest drive 组件 + ThemeSwitcher 6 文件 42 项、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-issue169-drive-slider-track-light` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (10)
+
+- refactor(web-ui): 清理 CC 页与 DC 重复的配置/选项——删除「扫描局域网找车」与无 UI 消费的 `/api/provisioning/*` 配网路由（Issue #177）
+  - 背景：车端 IP 的发现/配网职责归 DC（Drifter Console，Wi-Fi 配网 + Network 卡片展示 AP/STA IP），CC（Car Connector）页另起一套「host + 局域网扫描找车」流程与之重复；DD 后端还挂了一套前端从未调用过的 `/api/provisioning/*` 配网路由，同为重复入口。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：「连接配置」卡删除「扫描局域网」按钮、候选 IP 列表与相关状态/回调（`foundCars`/`discovering`/`handleDiscoverCars`），host 改为纯手填；SSH 凭据、检查连接等 CC 独有职责保留。
+  - `web_ui/frontend/src/services/api.ts`：删除 `discoverConnectorCars`（POST `/connector/discover`）；`discoverConnectorConsoles`（`/connector/discover_console`，launcher 页入口按钮）保留——它是"打开 DC"的入口而非配网配置。
+  - `web_ui/backend/routers/connector.py`：删除 `POST /api/connector/discover`（扫 22 端口找 SSH 主机）端点。
+  - `web_ui/backend/main.py` + 删除 `web_ui/backend/routers/provisioning.py`：整组 `/api/provisioning/*`（status/connect/scan/serial/scan）配网路由下线——Wi-Fi 配网由 DC 单一入口承担；`donkeycar/parts/provisioning.py`（WifiManager/ProvisioningPart 车端部件）不受影响。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：zh/en 各删除 6 条只服务于扫描找车的词条（`connector.scanning`/`scanLan`/`foundHosts`/`carIpSelected`/`discoverFound`/`scanFailed`）。
+  - 测试同步：`web_ui/backend/tests/test_connector.py` 删除 `/api/connector/discover` 路由断言与 2 个 discover 端点测试；`web_ui/backend/tests/test_provisioning.py` 随路由整体删除；后端 pytest 全量 76 项通过，前端 vitest 19 文件 97 项通过，`tsc --noEmit` 通过。
+
+## 2026-08-18 (8)
+
+- feat(web-ui): DD 驾驶页输入源选择框移入虚拟摇杆面板标题栏，摇杆区域支持折叠/展开
+  - 背景：`InputSourceSelector`（摇杆/键盘/手柄/陀螺仪输入源切换）原挂在顶部工具栏（DriveModeSelector 前），与右侧虚拟摇杆面板分离——用户希望选择框与虚拟摇杆放在一起，且摇杆区域可折叠以腾出屏幕空间。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏删除 `InputSourceSelector`；右侧控制面板标题栏改为左侧可点标题按钮（"虚拟摇杆" + ChevronUp/ChevronDown 图标，点击切换 `joystickOpen`，默认展开），右侧放 `InputSourceSelector`——折叠后选择框仍可见可切换；摇杆主体区（`VerticalThrottleBar` + `VirtualJoystick` + `ControlBars`）包在 `joystickOpen` 条件渲染内，折叠时整块收起只留标题栏。原标题栏"支持鼠标/触屏"小字随之移除（i18n 词条 `drive.mouseTouchSupport` 保留未删）。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：zh/en 各新增 `drive.collapseJoystick`（折叠虚拟摇杆/Collapse virtual joystick）、`drive.expandJoystick`（展开虚拟摇杆/Expand virtual joystick），用作折叠按钮的 aria-label/title。
+  - 测试同步：前端 vitest 全量 20 文件 95 项通过，`tsc -b --noEmit` 通过；Playwright 截图验证展开/折叠两态布局正常（选择框始终在标题栏右侧、折叠后摇杆圆盘收起）。
+## 2026-08-18 (7)
+
+- fix(web-ui): 顶部导航切换 Tub Manager 严重卡顿三轮修复——TM 页常驻保活 + 懒加载 chunk 空闲预取 + 后台快捷键/播放守卫（Issue #135，二轮 dev→生产模式后用户仍报卡顿）
+  - 根因（Playwright + PerformanceObserver(longtask) 对用户 8000 生产实例实测确认）：react-router 每次导航到 `/` 都完整卸载重挂载 TubManagerPage——TubLibrary（2282 条记录列表 + 图片 LRU）与 TubEditor（chart-vendor 图表）整树重建，每次切换产生 77-99ms 主线程 longtask，其余页面 0ms；用户真实浏览器（更多扩展、非无头）放大到数百 ms 体感卡顿。
+  - `web_ui/frontend/src/App.tsx`：新增 `KeepAliveTubManager` 组件挂在 Routes 之外（Layout main 内、Suspense 外，ErrorBoundary 仍包住）——TubManagerPage 首次进入后常驻不卸载，用 `location.pathname === '/'` 切换 `hidden` class（面板挂 `<div data-tub-manager>` 且切走时 hidden，DOM 保留、状态不丢）；原 `<Route path="/">` 改为 `element={null}`；新增 `useIdlePrefetch` hook 空闲时（requestIdleCallback）预取 Drive/Trainer/Pilot/Connector 4 个懒加载 chunk，消除冷切换时的脚本解析卡顿。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：新增 `isTubManagerRoute = useLocation().pathname === '/'` 守卫——空格键播放/暂停监听仅在 TM 页生效（切走不串页）；新增切走自动停播 effect（`isPlayingRef.current = false` + `setIsPlaying(false)`，防止后台页面持续预取图片耗资源）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：全局键盘监听同样加 `isTubManagerRoute` 守卫。
+  - 测试同步：`web_ui/frontend/src/App.test.tsx` 新增 keep-alive describe（mock 4 个懒加载页面组件）——TM 面板切走仍挂载且 hidden、切回恢复可见、不重拉 tub；`web_ui/frontend/src/components/TubLibrary.test.tsx` render 包 `MemoryRouter` 适配新 `useLocation` 依赖。vitest 全量 19 文件 95 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 实测（8021 测试实例 + chrome-headless-shell，tub=/home/dkc/projects/mycar/data，2282 帧）：修复前 TM 每次切换 longtask 77-99ms；修复后热切换全部归零（R2 及 Drive↔TM 来回 x3 全 0ms），仅首轮冷加载一次性 70-84ms；功能抽查确认切走面板 hidden 仍挂载、切回立即可见、2282 帧数据完整保留不重拉。
+
+## 2026-08-18 (6)
+
+- feat(launcher/web-ui): DC 与 DD 页面新增「DeepSeek Harness」入口按钮；DSH 启动端点缺省进入 Projects 工作区；修复 DSH 设置页 Agents 预设/提供方目录 403（Issue #164 后续）
+  - **DSH 启动端点与设置页 403 修复**：
+    - `donkeycar/launcher/dsh_web.py`：新增幂等自愈补丁 `_patch_privileged_methods()`——dsh（rc.6/rc.7 相同）的 `dsh-client-connection/lib/index.js` 把 `settings.*`/`credentials.*`/`llm.discoverModels`/`agentPreset.read` 等特权方法硬编码 `isTrustedApiRequest(request, [])`（空信任表，`--trusted-host` 对其无效，上游有意设计），导致 LAN Host 访问 DSH 设置页时「正在加载/权限不可用」「加载提供方目录失败」。补丁在启动前把安装文件中的 `PRIVILEGED_METHODS.has(method) && !isTrustedApiRequest(request, [])` 替换为 `...trustedHosts)`（同函数闭包变量，即沿用 `--trusted-host` 信任表）；幂等（新代码段已存在则跳过）、dsh 升级还原文件后自动重打（未命中旧代码段则跳过仅告警）；`_connection_index_path()` 从 dsh bin realpath 定位 `<pkg>/node_modules/@deepseek-ai/dsh-client-connection/lib/index.js`，找不到返回 None 安全跳过。实机验证：打补丁重启后 LAN Host（192.168.3.57:3987）下 `settings.describe` 返回 200；伪造 Host（evil.example.com）仍 403；回环 200，安全性保持。
+    - `donkeycar/launcher/server.py`：`_handle_launch_dsh` 未指定 cwd 时缺省 `/home/dkc/projects`——DSH 新会话默认工作区即 Projects（dsh-host-apiproxy 用 `process.cwd()` 作为新会话默认目录，已验证 workspace.list 返回 `/home/dkc/projects`），打开 DSH 后自动进入 Projects 工作区。
+  - **DD 页面（DonkeyDrifter Web UI）新增 DSH 按钮**：
+    - `web_ui/backend/routers/launch.py`：抽出 `_forward_launch(request, launcher_path)` 共用转发逻辑，新增 `@router.post("/dsh")` 转发 launcher `/api/launch/dsh`。
+    - `web_ui/frontend/src/services/api.ts`：新增 `launchDsh`（复用 `LaunchKimiCodeWebResult`）。
+    - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `dshLaunching` 状态与 `enterDsh`（about:blank 句柄 + 65s AbortController，交互与 Kimi Code Web 按钮同款）；按钮顺序 kimi → dsh → console（consoleFirst 时 console → kimi → dsh）。
+    - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 各加 5 条 `common.enterButtons.dsh*` 词条。
+    - 测试同步：`EnterButtons.test.tsx` 三按钮顺序断言更新 + 新增 dsh 启动成功/失败 2 项；`tests/test_launcher_dsh_web.py` 新增 TestPatchPrivilegedMethods（5 项：定位 index.js、命中替换、幂等、未命中跳过、锁保护）+ `test_endpoint_defaults_cwd_to_projects`。launcher 侧 24 passed，前端 vitest 全量 97 passed，`npm run build` 通过。
+  - DC（ESP32 Web Console）侧同款按钮见 Firmware v1.8.7（`#openDshBtn`，POST `/api/launch/dsh`）。
+## 2026-08-18 (5)
+
+- fix(web-ui): Car Connector 页面删除顶部大标题——进入 CC 页不再显示重复的 "Car Connector" 标题
+  - 背景：顶部导航已有 Car Connector 入口，页面内再显示同名大标题属于冗余信息，用户要求删掉。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：删除页面顶部 `<h1>{t('connector.pageTitle')}</h1>` 大标题，页面直接从「连接配置」卡片开始。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：删除已无引用的 `connector.pageTitle` 词条（zh/en 各一处）。
+  - 测试同步：无测试引用 `connector.pageTitle`，无需改动；vitest 全量 19 文件 94 项、`tsc -b`、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-cc-remove-title` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (4)
+
+- feat(web-ui): Trainer 页面 Tub 路径自动填充——进入页面自动定位正确 tub，无需每次手填
+  - 背景：Trainer 本地训练的 Tub 路径输入框默认值硬编码 `./data`，与 Tub Manager / Tub Navigator 当前加载的 tub 脱节，用户每次训练前要手工复制路径。
+  - `web_ui/backend/routers/trainer.py`：新增 `GET /tubs?working_dir=<dir>`——扫描 `<working_dir>/data` 本体、`data` 下每个含 `manifest.json` 的子目录（覆盖解压后的 `data/tub_xxx` 形式）及 `<working_dir>/data*` 兄弟目录，返回候选列表（`relative_path` ./data 风格 + `absolute_path`）与当前已加载的 `current_tub_path`（复用 `routers/tub.py` 全局状态）。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mount / `configPath` / `tubPath` 变化时拉取候选并自动选中，优先级：当前加载的 tub（`store.tubPath` > 后端 `current_tub_path`，匹配后转为相对路径显示）> `./data`（若为合法 tub）> 唯一候选；用户手动编辑过（ref 标记 dirty）后不再自动覆盖。
+  - `web_ui/frontend/src/components/trainer/LocalConfigForm.tsx`：Tub 路径改为「下拉选候选 + 文本框可手改任意路径」，当前已加载的 tub 在下拉中标注「当前已加载」。
+  - `web_ui/frontend/src/services/api.ts`：新增 `listTrainerTubs()` 与 `TrainerTub` 类型；`web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.tubPathManual` / `trainer.tubLoaded`（zh/en）。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_tubs.py` 4 项（data 目录与子 tub、无 data 为空、跳过非 tub 目录并识别 data* 兄弟、报告已加载 tub）；pytest 后端全量 85 项、前端 vitest 全量 20 文件 95 项、`tsc -b --noEmit`、eslint、`npm run build` 全部通过。
+  - 注：本次改动在 `Tony-trainer-tub-autofill` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (3)
+
+- feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：集成原 Tub 导航器全部能力——
+    - FPS 角标：播放中按实际换帧数每秒统计（#128 同款逻辑），画面冻结时角标跟随下降，暂停清零；
+    - 转向/油门数值面板：读当前帧 `user/angle`（回退 `pilot/angle`）与 `user/throttle`（回退 `pilot/throttle`），无值显示「无」；
+    - 帧控制排：首条/上一帧/播放/下一帧/末帧 + 刷新（`requestTubRefresh` 全量重拉，#135 手动刷新）+ 删除；
+    - 标题 hover 展开「浏览 Tub 记录」副标题（`tub.subtitle`）；
+    - 空格键播放/暂停快捷键（输入框聚焦时不触发）；
+    - 全局图表联动（原 TN 核心职责）：换帧/播放把当前帧绝对索引 `_index` 写入全局 `currentIndex`（播放中 ~30ms 节流），Tub Editor 图表红线跟随；反向订阅 store，图表点选帧落在当前场次范围内时跳转预览（播放中不打断）；
+    - 性能沉淀迁移：图片 LRU 缓存 240 条上限（#135）、预取 60 帧窗口 + 6 并发（#128）；
+    - 播放行为改为单次播放（播放到末帧即停），按用户指示不迁移「播放后停止/循环播放」切换键与 M 键快捷键。
+  - `web_ui/frontend/src/components/TubNavigator.tsx` / `TubNavigator.test.tsx`：删除（功能已由 TubLibrary 承接）。
+  - `web_ui/frontend/src/App.tsx`：TubManagerPage 移除 `<TubNavigator />`，只渲染 TubLibrary + TubEditor。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock` 从 TubNavigator 换成 TubLibrary 桩组件。
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`：删除纯 TN 键（`tub.title`/`tub.noRecordsLoaded`/`tub.timeline`/`tub.dragging`/`tub.indexLabel`/`tub.noImage*`/`tub.loop*`/`tub.playOnce*` 等 20 键 zh+en），保留 TubLibrary 在用的 `tub.subtitle`/`tub.steering`/`tub.throttle`/帧控制与刷新键、TubLoader/SimulatorConfig 全部键。
+  - `web_ui/frontend/src/themes/theme-light.css`：注释里 TubNavigator index badge 措辞更新为 TubLibrary FPS badge。
+  - 测试同步：`TubLibrary.test.tsx` 原有 2 项（自动选最新、pin 置顶）保持不变且通过；vitest 全量 17 文件 89 项通过，`npm run build`（tsc -b + vite build）通过。
+
+## 2026-08-18 (2)
+
+- fix(launcher): DC 打开 Kimi Code Web 后进入"全新状态"——复用路径不看运行目录、入口 URL origin 漂移导致 localStorage 偏好清空、缺省 cwd 落用户主目录（Issue #168）
+  - `donkeycar/launcher/kimi_web.py`：①复用路径校验实例运行目录——实例登记条目无 cwd 字段，新增 `_proc_cwd(pid)` 读 `/proc/<pid>/cwd` 真实路径，`_live_instance_url` 新增 `cwd` 参数，给定 cwd 时逐一比对（`os.path.realpath` 规范化），不匹配（如在 mycar 里跑的 TUI 内嵌 server）或读不到（进程消失/无权限）都跳过不误复用，由调用方在目标目录另起；②冷启动固定专属端口——新增常量 `KIMI_WEB_PORT = 58640`，拉起命令追加 `--port 58640`（避开 kimi 默认 58627：TUI 内嵌 server 默认占它，撞上后 kimi 自动顺延端口反而漂移），入口 URL origin 固定 `http://<LAN IP>:58640`，KCW 存在 localStorage 的置顶/自主模式/语言主题等偏好不再"被清空"；③`launch_kimi_code_web` 快路径与冷启动失败兜底均以 `cwd=` 关键字调用 `live_url_fn`（首参是 instances_dir，位置传参会把 cwd 误绑到实例目录上导致复用永远失败——真实环境联调发现并已修）。
+  - `donkeycar/launcher/server.py`：`_handle_launch_kimi_code_web` 缺省 cwd 从用户主目录改为 Projects 工作区 `/home/dkc/projects`（DC 按钮空体 POST 不带 cwd，此前落到主目录导致 KCW 进的是工作区列表而非 Projects；DD 菜单显式传同一目录不受影响）；显式传 cwd 仍优先；docstring 同步。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 更新与新增——`_live_instance_url` cwd 匹配复用/不匹配跳过/`/proc` 读不到视为不匹配 3 项；冷启动命令含 `--port <KIMI_WEB_PORT>` 断言；复用钩子改为只收关键字参数（抓位置传参回归）；端点测试 fixture 记录收到的 cwd，新增空体 POST 与显式 cwd 两项断言缺省值为 `/home/dkc/projects`。pytest `tests/test_launcher_kimi_web.py` 38 项、launcher 相关全量 113 项通过。
+  - 真实环境验证：重启 launcher 服务后 DC 同款空体 POST 连发 3 次均返回 `http://192.168.3.57:58640/#token=…`（第 1 次冷启动、后 2 次日志确认复用同端口同实例），新实例 `/proc/<pid>/cwd` 确认为 `/home/dkc/projects`；固件侧无需改动（DC 按钮 JS 与 CORS 逻辑不变）。
+
+## 2026-08-18 (1)
+
+- fix(web-ui): DD 驾驶页输入源切换器「手柄/陀螺仪」永远灰色不可选——连接/支持检测被 `enabled` 门控形成先有鸡还是先有蛋的死锁
+  - 根因：`InputSourceSelector` 中手柄项需 `gamepadConnected`、陀螺仪项需 `permissionState !== 'unsupported'` 才可点，但 `DrivePage` 传入的 `useGamepadDrive({ enabled: inputSource === 'gamepad' })` 与 `useGyroDrive({ enabled: inputSource === 'gyro' })` 都在 `!enabled` 时直接 return——未选中该输入源时检测逻辑根本不运行，状态停在初始值（`connected=false` / `permissionState='unsupported'`），按钮永远灰着点不了，形成死锁。
+  - `web_ui/frontend/src/hooks/useGamepadDrive.ts`：`gamepadconnected`/`gamepaddisconnected` 监听拆为独立 effect，组件挂载即注册（不受 `enabled` 门控），选中手柄前插手柄即可点亮可选项；控制轮询 RAF 循环仍只在 `enabled` 时运行。
+  - `web_ui/frontend/src/hooks/useGyroDrive.ts`：新增挂载即执行的支持性检测 effect（不受 `enabled` 门控）：无 `DeviceOrientationEvent` → `unsupported`；存在 `requestPermission`（iOS 13+）→ `prompt`；其余（Android/桌面）→ `granted`。原 `enabled` 门控的 orientation 监听 + RAF 循环不变。
+  - 测试同步：新增 `web_ui/frontend/src/hooks/useGamepadDrive.test.tsx`（2 项：未 enabled 时连接检测仍运行、全部断开后复位）、`useGyroDrive.test.tsx`（3 项：非 iOS 挂载即 granted、iOS 初始 prompt、不支持时 unsupported）。前端 vitest 全量 20 文件 95 项通过，`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-fix-input-source-disabled` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。
+
+## 2026-08-17 (17)
+
+- fix(launcher): Drifter Console 恢复 0 号置顶（#164 用户后续指示，撤销同日 (15) 条目的 DC 挪位）
+  - `donkeycar/launcher/server.py`：menuItems 恢复 0 号 Drifter Console（`favorite: true`，置顶），DeepSeek Harness 保持 12 号（常用），编号回到 0-12；`selectItem` 恢复 `no===0 → openDrifterConsole()` 分支，删除 13 号分支；键盘恢复 0 键直达（`key==='0' → selectItem(0)`），两位输入只保留 10/11/12（按 1 后 0/1/2），删除 1+3 组合；i18n `help.keyNumbers` 改回「数字键 0-12」（zh/en + HTML data-i18n）。
+  - 测试：`tests/` 全量 202 passed 无回归（菜单 HTML 无针对编号的断言，无需改测试）。
+
+## 2026-08-17 (16)
+
+- fix(terminal): 上位机终端页 WebSocket 连接加 10s 超时，连接卡死不再无限停在「正在连接上位机终端…」（#101，配合 Firmware v1.8.6 DC 侧探测超时）
+  - `donkeycar/launcher/terminal_static/terminal.html` `connect()`：新增 `connectTimer` 10 秒定时器，超时时若 `ws.readyState===WebSocket.CONNECTING` 则清掉 `onclose`、主动 `ws.close()`，并 `showOverlay(t('failed')+' · '+t('reconnect'))` 提示连接失败可点击重连；`ws.onopen` 首行 `clearTimeout(connectTimer)` 取消定时器；`ws.onclose` 同样先 `clearTimeout` 再提示「连接丢失 · 新会话」。
+  - 文案复用原 T 词典已有的 `failed` / `reconnect` 词条，中英文均无需新增。
+  - 测试同步：`tests/test_launcher_terminal.py` 更新 `onclose` 断言为含 `clearTimeout` 版本；新增 `test_terminal_page_has_connect_timeout()` 断言 connectTimer/CONNECTING/ws.close/showOverlay 及中英文案存在。pytest `tests/test_launcher_terminal.py` 4 项、`donkeycar/tests/test_launcher_terminal.py`+`tests/test_launcher_menu_actions.py` 56 项全部通过。
+
+## 2026-08-17 (15)
+
+- feat(launcher): 启动器菜单新增「DeepSeek Harness」12 号项（常用），点击拉起/复用 `dsh web` 并跳转；Drifter Console 挪至 kimi 右侧 13 号（Issue #164）
+  - `donkeycar/launcher/dsh_web.py`（新文件）：`launch_dsh_web(cwd, timeout_s=60)` 启动/复用 DeepSeek Harness web。dsh CLI 拒绝 `--host 0.0.0.0`（安全限制），用 `--patch` 临时层覆盖 webserver 配置（`host: 0.0.0.0` + `port: !!js ctx.webStartup.port ?? 3080`，port 不能省否则配置校验报缺值）实现局域网可达；`--port 0` 由 OS 分配空闲端口避免与默认 3080 冲突；`--trusted-host <本机局域网 IP>` 放行 dsh `/api` 的浏览器信任栅栏（裸 host 匹配任意端口）。就绪 banner 一行（`dsh web: http://127.0.0.1:<port> (LAN: …)`）抓 URL 后改写为局域网 IP（复用 kimi_web 的 `_lan_url`，issue #125 同款）；复用路径靠本模块 `_SPAWNED` 登记 + GET / 探测（dsh 无实例登记文件），死进程/僵死端口自动剔除后冷启动。`_resolve_dsh_binary` 先 PATH 后当前 Python 解释器同目录（systemd 干净 PATH 回退）。
+  - `donkeycar/launcher/server.py`：do_POST 新增 `/api/launch/dsh` 路由与 `_handle_launch_dsh`（可选 JSON body `cwd`，非法 cwd 直接报错不回退，响应带 `_KIMI_WEB_CORS_HEADERS` 供 DC 跨域）；menuItems 重排为 1-13——1-11 不变，新增 12 号 DeepSeek Harness（`favorite: true`），DC 从 0 号置顶改 13 号（kimi 右侧）；`selectItem` 新增 12→`launchDshWeb()`、13→`openDrifterConsole()`，删除 no===0 分支；键盘两位输入扩展支持 12/13（按 1 后 400ms 内按 2/3），删除 key==='0' 分支；前端新增 `launchDshWeb()`（POST `/api/launch/dsh`，cwd 固定 `/home/dkc/projects`，成功跳转 `data.url`）；i18n `help.keyNumbers` 改「数字键 1-13」（zh/en + HTML data-i18n），新增 `overlay.startingDshWeb`（zh/en）。
+  - 测试同步：新增 `tests/test_launcher_dsh_web.py` 21 项——patch 文件内容、复用不起子进程、冷启动抓 URL 且改写 LAN IP、命令行含 `--patch`/`--port 0`/`--trusted-host`、无局域网 IP 省略 trusted-host、cwd 透传、cwd 非法、binary 缺失、超时杀进程、提前退出报现场、`_SPAWNED` 死条目/僵死探测剔除、端点 200/400/500 与 CORS 头、cwd 透传；`tests/` 全量 201 passed 无回归。
+
+## 2026-08-17 (14)
+
+- fix(web-ui): DD 语言/主题切换按钮字体逐值对齐 DC/D——三页面按钮完全一致（#92 四轮返工：字体差异收口）
+  - 根因（两处）：其一，D 页面（本机 8090）launcher 为改版前启动的旧进程，内存仍是旧 zinc 配色（#27272a），仓库源码已正确，重启进程即恢复，无需改码；其二，DD 根布局 `div.font-sans` 被主题 css 的 `.font-sans` 规则重映射为 `system-ui` 前置栈，语言/主题按钮经 preflight `font:inherit` 继承该栈，与 D/DC 显式锁定的 `:root` 栈（`-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",…,"Apple Color Emoji","Segoe UI Emoji"`）不同，用户实测字体不一致。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.theme-switcher-btn, .language-switcher-btn` 皮肤规则追加字体锁定——`:root` 完整字体栈 + `font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale` + `font-size:12px;font-weight:600`（主题按钮原为 16px/400，一并统一为 12px/600）。
+  - 验证：Playwright 三页面实测（D=127.0.0.1:8090、DD=dev 服务器、DC=车 192.168.3.46 v1.8.5）深浅两主题语言按钮 10 项计算样式（背景/边框/内圈/字色/字体栈/字号/字重/宽/高/圆角）D vs DC、DD vs DC 全部 IDENTICAL；vitest 14 项、pytest 全量 183 项、`npm run build` 通过。Firmware 侧无改动，车上 v1.8.5 即最新，无需 OTA。
+
+
+## 2026-08-17 (13)
+
+- feat(web-ui): 补齐 DD 中文翻译——`common`、`arena`、`driveviz` 三个 i18n 命名空间的 zh 词条全部翻译为中文，顶部导航栏按要求保持英文不译
+  - `web_ui/frontend/src/i18n/messages/common.ts`：zh 从"镜像当前中英混合 UI"改为完整中文——App shell（出错了/刷新 Tub 失败/错误前缀/加载中）、ConfigLoader（配置加载器标题、选择车辆目录、浏览、加载、配置已加载、未加载配置、各类加载失败、路径占位与 aria）、FileBrowserModal（选择目录、返回、未找到目录、取消、选择当前目录）、SidePanel（加载器/连接器）、GitHubLink（`DonkeyDrift GitHub 仓库`）。顶部导航五项（Tub Manager/Trainer/Drive/Pilot Arena/Car Connector）按用户要求保持英文。
+  - `web_ui/frontend/src/i18n/messages/arena.ts`（Pilot Arena）：zh 补译——User/Pilot 标签（用户/Pilot）、Angle/Throttle（角度/油门）、Brightness/Blur（亮度/模糊）、Pre/Post Transformations（前置/后置变换）、Tub Plot（Tub 曲线图）、Record index（记录索引）；`configLabel`/`recordsLabel`/plot 数据集名（user angle 等）等技术术语保留原文。
+  - `web_ui/frontend/src/i18n/messages/driveviz.ts`（Drive 可视化）：zh 补译——Connecting/Disconnected（连接中/已断开）、Camera feed（摄像头画面）、12 条遥测曲线名（油门/转向/陀螺仪 X/Y/Z/加速度 X/Y/Z/RC 转向/RC 油门/Pilot 角度/Pilot 油门）。
+  - en 词条与组件代码均未改动。
+  - 测试同步：`TelemetryChart.test.tsx` 数据集断言（dataset testid、waitForDataset、复选框标签）改用中文曲线名；`VideoStream.test.tsx` alt/aria 断言改 `摄像头画面`/`WebRTC 摄像头画面`；`GitHubLink.test.tsx` 链接名断言改 `DonkeyDrift GitHub 仓库`。前端 vitest 全量 18 文件 90 项通过，`tsc -b` 与 `npm run build` 通过。
+  - 注：本次改动在 `Tony-complete-zh-translations` 功能分支上完成并按分支流程提交、PR 合入 `Tony`。
+
+## 2026-08-17 (12)
+
+- style(web_ui/trainer): 已训练模型删除按钮改为红色（#148 后续）
+  - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行删除按钮配色从 `text-zinc-500 hover:text-red-400` 改为常红 `text-red-400 hover:text-red-300`，与删除语义一致、更醒目。
+  - 测试：`npm run build`（tsc -b + vite build）通过。
+
+## 2026-08-17 (11)
+
+- fix(launcher): 上位机终端 WebSocket 增加服务端心跳保活与空闲超时判死，长时间空闲不再悄悄断连丢会话（#151）
+  - 根因：`donkeycar/launcher/terminal.py` 的 WebSocket ↔ PTY 桥无任何 keepalive——只在收到客户端 PING 时回 PONG，从不主动发 PING；长时间无数据的空闲连接被 NAT 表项老化/浏览器回收悄悄断开，而协议规定断连即杀 PTY 子进程，原 shell 会话连同现场全部丢失。
+  - `donkeycar/launcher/terminal.py`：新增 `_heartbeat_loop` 心跳线程（`terminal-ws-heartbeat`，随 `handle_terminal_ws` 每连接一条）——每 `_PING_INTERVAL=25s` 向客户端发 WebSocket PING 帧（浏览器协议层自动回 PONG，无需前端配合，周期性帧同时刷新 NAT 表项）；主读循环每收到一帧刷新 `last_rx`，超过 `_PONG_TIMEOUT=60s` 无任何客户端帧则置 `writer.closed` 并 `shutdown(SHUT_RDWR)` 唤醒阻塞的主读循环，走原有 finally 清理 PTY 会话；连接结束时 `stop_hb` 事件退出心跳线程。模块 docstring 帧协议说明同步补心跳帧与保活语义。
+  - `donkeycar/launcher/terminal_static/terminal.html`：断连 overlay 从「连接已断开 · 点击重连」改为明确提示现场丢失——新增 `lost`/`newSession` 双语文案（zh：「连接已断开 · 终端会话已丢失 · 点击重连（将开启新会话）」；en 同义），`ws.onclose` 改用新文案；shell 正常 exit 的 overlay 维持原文案。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增 2 项端到端用例（`_open_terminal_ws` 握手辅助 + 缩短心跳参数后断言收到服务端 PING、空闲超时后服务端主动断开读到 EOF）；`tests/test_launcher_terminal.py` 新增断连 overlay 会话丢失文案静态断言 1 项。相关测试 22 项全部通过。
+
+## 2026-08-17 (10)
+
+- feat(web_ui/trainer): 已训练模型列表每行最右侧新增删除按钮（Issue #148）
+  - `web_ui/frontend/src/components/trainer/ModelsList.tsx`：模型行操作按钮区（Copy 按钮之后）新增 Trash2 图标按钮，样式与现有按钮一致（`p-1 text-zinc-500 hover:text-red-400 transition-colors`），点击 `e.stopPropagation()` 后 `setConfirmDelete(m)` 打开已有删除确认弹窗；lucide-react 导入补 `Trash2`。删除链路此前已完整实现（`deleteModel` API、`deleting`/`confirmDelete` state、`handleDelete`、确认弹窗及中英文 i18n 文案），本次仅补缺失的触发入口。
+  - 测试：`npm run build`（tsc -b + vite build）通过；vitest 全量 89/90 通过，唯一失败的 `TubNavigator.test.tsx` 为并行会话在制修改（stash 本改动后复测同样失败），与本改动无关。
+
+## 2026-08-17 (9)
+
+- feat(web-ui): 完成 Tub Manager（TM）页面中文翻译——`tubnav` 与 `tubeditor` 两个 i18n 命名空间的 zh 词条全部翻译为中文（#157）
+  - `web_ui/frontend/src/i18n/messages/tubnav.ts`（TubNavigator + TubLoader + SimulatorConfig）：zh 从"镜像当前中英混合 UI"改为完整中文——导航器标题/副标题、未加载记录、转向/油门、时间轴、拖动中、索引标签、无图像/图像加载失败、首条/上一条/下一条/末条及 aria、播放/停止及 aria、循环/单次播放模式 aria、刷新 aria（`刷新 Tub 记录`）；TubLoader 标题/副标题/路径占位/输入框 aria/浏览/加载/请先加载配置/加载成功/未加载 Tub/选择目录/两类加载失败；SimulatorConfig 的 simHost/simMode/discover/save 四个 aria 与 `notAvailable`（`无`）。文件头注释同步改为"zh 为完整中文翻译"。
+  - `web_ui/frontend/src/i18n/messages/tubeditor.ts`（TubEditor）：zh 同上改完整中文——标题/副标题、实时更新、空图表占位/空态、开始/结束索引 aria 与占位、`至`、删除中…/删除、恢复中…/恢复、缩放标签、tooltip 帧/转向/油门、数据集名 转向/油门、六条英文错误提示（范围内无记录/删除失败/恢复失败/范围无效/无可用记录/无有效记录）。文件头注释同步更新。
+  - en 词条与组件代码均未改动。
+  - 测试同步：`web_ui/frontend/src/components/TubNavigator.test.tsx:39` 刷新按钮定位串从 `Refresh tub records` 改为新 zh aria `刷新 Tub 记录`；前端 vitest 全量 18 文件 90 项通过。
+
+## 2026-08-17 (8)
+- style(web_ui/launcher): 三页面语言按钮配色统一为 DC/D 主题按钮（深浅切换）样式（#92 后续统一，与 Firmware v1.8.5 同批）
+  - `donkeycar/launcher/server.py`（D 启动页）：`.langBtn` 基类（语言 `#langBtn` 与主题 `#themeBtn` 共用）从 DD 原生 zinc 配色（#27272a/#3f3f46/#d4d4d8，浅色 zinc-100/200/500/900）改为主题按钮配色——深色 `background:#111820;border:1px solid #344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；32×32 圆形、DD 字体栈、字号/字重不变；`#themeBtn` 的 ID 颜色覆盖与基类重合（保留仅承载布局与图标尺寸），浅色段同步换值。
+  - `web_ui/frontend/src/components/LanguageSwitcher.tsx`（DD）：按钮加皮肤类 `language-switcher-btn`；`web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css` 末尾新增皮肤规则（与并行主题按钮分支同款模式）——深色 #111820/#344154/#2b3441 内圈/#b9c5d3、hover #e8edf2；浅色 #f4f6f9/#ccd5df/#d5dce4 内圈/#3f4f63、hover #1a2330；`outline:none` 抵消 `.bg-zinc-800` 通用 inset 描边，保证 border+内圈双层视觉与 DC/D 一致。
+  - 测试：pytest 全量 182 项通过（`.langBtn` 无精确串断言）；vitest `LanguageSwitcher.test.tsx` 6 项通过（不锁类名）；`npm run build` 通过。D/DD 页面主机（192.168.3.41:8090）本轮不在线，D/DD 侧按源码逐值对齐 + DD 构建验证，最终视觉由用户验收。
+## 2026-08-17 (7)
+
+- style(web-ui): DD 主题切换按钮显式复刻 DC/D 渲染值，三页面（DC/D/DD）主题按钮逐值一模一样（#140 后续统一收口）
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：按钮追加 `theme-switcher-btn` 钩子类，渲染值不再依赖主题 css 对 Tailwind zinc 类的重映射。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：新增 `.theme-switcher-btn` 显式规则并置于文件末尾——深色 `outline:none;background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `#f4f6f9/#ccd5df/#d5dce4/#3f4f63`、hover `#1a2330`。修复要点：ThemeSwitcher 是 `<button>`，此前不匹配主题 css 的 `div.rounded-full.bg-zinc-800.border` 胶囊规则，漏吃到通用 `.bg-zinc-800` 的 `outline:1px solid` 压边描边而非 DC/D 的 border+inset 内圈双层视觉；显式规则同时压过该 outline，与 DC/D 完全一致（DC：Firmware v1.8.4 `.themeButton`；D：launcher `#themeBtn`，本仓 (6) 条目）。图标不变（lucide Moon/Sun 16px、stroke 2、currentColor，深色显月亮/浅色显太阳）。
+  - 测试：前端 vitest 全量 90 项通过、`tsc -b` 通过、`npm run build` 通过，构建产物 dist/assets/index-*.css 中 `.theme-switcher-btn` 规则逐值核实与 DC/D 一致。语言按钮不受影响（未动 LanguageSwitcher）。
+
+## 2026-08-17 (6)
+
+- style(launcher): D 启动页主题按钮皮肤与 DD 渲染值逐值统一——三处（DC/D/DD）深浅切换按钮一模一样（#140 后续统一，与 Firmware v1.8.4 同批）
+  - `donkeycar/launcher/server.py`：`#themeBtn` 此前复用 `.langBtn` 基类（同批 #149 语言按钮改版后基类变为 DD 原生 zinc 值 #27272a/#3f3f46），主题按钮与 DD 实际渲染脱钩；现改用 ID 覆盖独立锁定 DD 主题按钮渲染值（已核实 DD 构建产物：深色 `theme-mus4` 将 `bg-zinc-800/border-zinc-700/text-zinc-300` 重映射为 #111820/#344154/#b9c5d3，浅色 `theme-light` 为 #f4f6f9/#ccd5df/#3f4f63）：深色 `background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3`、hover `#e8edf2`；浅色 `background:#f4f6f9;border-color:#ccd5df;box-shadow:inset 0 0 0 1px #d5dce4;color:#3f4f63`、hover `#1a2330`；图标 16px lucide Moon/Sun、深色显月亮/浅色显太阳不变。语言按钮 `.langBtn` 本批不动。
+  - 测试同步：`tests/test_launcher_theme_single_button.py` 新增深/浅两套皮肤逐值断言（8 条精确串），pytest 全量 173 项通过。
+
+## 2026-08-17 (5)
+
+- style(launcher): 语言/主题按钮字体逐值复刻 DD（#92 返工：字体栈补齐）
+  - `donkeycar/launcher/server.py`：`.langBtn`（语言 `#langBtn` 与主题 `#themeBtn` 共用）补 DD `web_ui/frontend/src/index.css` :root 完整字体栈（`-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji"`）及 `font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale`，按钮渲染字体与 DD 完全一致，不再继承页面级 `system-ui,sans-serif`（用户实测指出 D 按钮字体与 DD 不同）。
+  - 测试：launcher 相关 42 项通过（无 `.langBtn` 精确串断言，仅 docstring 提及）；D 启动页设备（192.168.3.41:8090）本轮不在线，按源码逐值对齐，最终视觉由用户验收。
+
+## 2026-08-17 (4)
+
+- fix(launcher): `donkey web` 默认以生产模式启动 Web UI，顶部导航切换从 ~500ms 降到 ~50ms（#135 二轮修复）
+  - 根因：`donkey web` 此前始终用 `npm run dev` 起 Vite dev 服务器给最终用户，dev 模式跑未优化代码 + React dev 运行时，实测顶部导航切换 400-550ms（Playwright + CPU profile 证实热点在 chart.js option 解析，为生产构建的 10 倍）；首轮修复（commit 30012564，loadedTubPath 守卫）的前端优化仍在但无法抵消 dev 模式开销，issue 被重开。生产构建由后端直接托管 dist 后实测同一 tub 仅 43-63ms（10k 记录大 tub 同样 43-77ms）。
+  - `donkeycar/management/base.py`：
+    - `_launch_web_ui` 重写为默认生产模式——新增 `_frontend_needs_build()`（dist/index.html 缺失或 src/public/配置文件比 dist 新则需重建），需要时先 `npm run build`，随后 uvicorn 不带 `--reload` 单进程同时托管 API 与 dist 静态文件（`frontend_port = backend_port`、`frontend_proc = None`）。
+    - 新增 `--dev` 参数（Web 与 Drive 命令）：显式传入时走原有逻辑（Vite dev 服务器 + uvicorn `--reload`），供前端开发使用；端口选择逻辑同步调整为仅 dev 模式下独立选 frontend_port。
+    - `run()` 的 supervise 进程列表过滤 `None` 前端进程；Drive 命令同步加 `--dev` 防止 `args.dev` AttributeError。
+    - `donkeycar/launcher/server.py` 无需改动：实例登记读 `~/.donkeycar/webui.json`，生产模式下登记的 frontend_port 即 backend_port，`/` 探测依然成立。
+  - 验证：新增 `tests/test_web_production_mode.py` 9 项（默认生产模式 build→单进程/无 --reload/frontend_port==backend_port、dist 新鲜跳过 build、build 失败 SystemExit、--dev 起 Vite、`_frontend_needs_build` 4 例、`--dev` 默认 False）；pytest 全量 182 项通过、前端 vitest 全量 90 项通过；端到端实测（8020 端口直接调 `_launch_web_ui`）：SPA 与 API 同端口正常服务、无前端子进程。用户需重启现有 Web UI 实例后生效。
+
+## 2026-08-17 (3)
+
+- fix(web-ui): Tub Library（录制视频库）Pin 按钮与删除按钮间距过大，收拢为右侧相邻按钮组（#131 迭代）
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：列表行原为 `justify-between` 三段布局，中间文本块与 Pin、删除图标分列两端之间，导致 Pin 悬在行中部、与垃圾桶距离过远；现将 Pin 与删除两个 `<span>` 包进同一 `flex items-center gap-1 shrink-0` 容器，两图标固定相邻、整体靠右，行内文本仍占左侧剩余空间。
+  - 测试：前端 vitest 全量 90 项通过、`npm run build` 通过（TubLibrary 置顶/删除既有用例不受影响）。
+
+## 2026-08-17 (2)
+
+- style(launcher): 三页面（DC/D/DD）语言切换按钮样式统一为 DD 原生样式（#92 后续统一，与 Firmware 侧同批）
+  - `donkeycar/launcher/server.py`：`.langBtn` 从主题重映射值（#111820 底、#344154 边框、1px #2b3441 内描边、#c3cbd6 字色、13px、hover #e8edf2、active 高亮态）改为逐值复刻 DD `LanguageSwitcher` 原生渲染——32×32 圆形、#27272a 底、1px #3f3f46 边框、12px/600、#d4d4d8 字色、hover #f4f4f5，无内描边/active 态；JS `applyLanguage` 移除 `classList.toggle('active',…)`；浅色覆盖改用同族 zinc 值（底 #f4f4f5、边框 #d4d4d8、字色 #52525b、hover #18181b）。`.langBtn` 同时被 `#themeBtn` 主题按钮复用，主题按钮样式随之统一；样式块注释同步更新为 DD 原生值说明。
+  - 测试同步：launcher 相关 42 项通过（`test_launcher_language_autodetect.py`/`test_launcher_menu_actions.py`/`test_launcher_theme_single_button.py`，后两者仅 docstring 提及 `.langBtn` 无样式断言）。
+
+## 2026-08-17 (1)
+
+- feat(web-ui,launcher): 深浅主题切换改为静音式单按钮，单击深/浅互切，默认跟随浏览器深浅（#140）
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：从"浅色/跟随系统/深色"三段式分段控件改为静音式单图标按钮（与 #139 语言切换同形态：32×32 圆形胶囊）——图标反映当前生效主题（深色显月亮、浅色显太阳，lucide `Moon`/`Sun`），单击在深↔浅之间互切；默认跟随浏览器 `prefers-color-scheme` 与 localStorage 持久化（沿用键 `donkeydrifter.ui.theme`）由 `src/lib/theme.ts` 已有实现承担，未手动单击前不写入存储、实时跟随浏览器切换，手动单击后持久化显式选择且不再跟随；`aria-label` 提示切换目标主题。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：测试重写为单按钮断言 8 例——月亮/太阳图标与 aria-label 反映当前主题、单击切浅色并持久化、双击回深色、默认跟随系统深浅实时变化（跟随期间不写存储）、手动单击后不再跟随系统、挂载恢复持久化皮肤、非法存储值回退跟随系统。
+  - `donkeycar/launcher/server.py`（D 启动页 :8090）：移除 `#themeTabs` 浅色/跟随系统/深色三态菜单及 `renderThemeTabs`、`theme.light/auto/dark` 双语文案，改为 `#themeBtn` 静音式单图标按钮（复用 `.langBtn` 圆形样式，内联 lucide 太阳/月亮 SVG 按 `html[data-theme]` 显隐），单击 `toggleTheme()` 按当前生效主题取反并经 `setTheme` 持久化；`renderThemeBtn()` 同步更新 aria-label/title 为切换目标主题（新增 `theme.toggleLight/toggleDark` 双语文案）；首屏防闪烁与 'system' 态跟随浏览器逻辑不变。
+  - 测试：前端 vitest 全量 90 项通过、`tsc -b` 通过；新增 `tests/test_launcher_theme_single_button.py` 源码断言 3 例（单按钮入口与三态移除、toggle 深浅互切与持久化、默认跟随浏览器/手动后不跟随），pytest 全量 173 项通过。
+
+## 2026-08-16 (19)
+
+- feat(web-ui,launcher): 语言切换改为静音式单按钮，默认跟随浏览器语言（#139）
+  - `web_ui/frontend/src/components/LanguageSwitcher.tsx`：从中文/English 两段式 pill 控件改为单图标按钮——显示当前语言（中文显示"中"、英文显示"EN"），单击在中/英之间切换；`aria-pressed` 反映当前是否中文、`aria-label` 提示切换目标语言；跟随浏览器语言与 localStorage 持久化逻辑由 i18n Provider 已有实现，无需改动。
+  - `web_ui/frontend/src/components/LanguageSwitcher.test.tsx`：测试同步更新为单按钮断言（按钮文字、aria-pressed、单击切换、双击回切、持久化、浏览器语言跟随），6 项通过。
+  - `donkeycar/launcher/server.py`（D 启动页 :8090）：移除桌面端 `langTabs` 分段式语言切换和移动端 `langFab`+`langMenu` 弹出菜单，统一改为 `#langBtn` 单按钮——显示"中"/"EN"，单击调 `toggleLanguage()` 切换；新增 `.langBtn` CSS（深色/浅色变体）、移除 `.langTabs`/`.langFab`/`.langMenu` 全部相关 CSS 与 JS（`toggleLanguageMenu`/`closeLanguageMenu`）；`applyLanguage()` 中更新按钮文字与 active 状态；跟随浏览器语言与 localStorage 持久化逻辑不变。
+  - DD 前端 `npm run build` 通过、`npm test` 93 项通过；D 启动页 `pytest tests/test_launcher_language_autodetect.py` 2 项 + `tests/test_launcher_menu_actions.py` 37 项通过。
+
+## 2026-08-16 (18)
+
+- feat(web-ui): Pilot Arena 自动扫描模型，唯一模型时自动选中并加载预测（#136）
+  - `web_ui/frontend/src/pages/PilotArenaPage.tsx`：
+    - 新增 `autoScanDoneRef`/`autoLoadDoneRef` 两个 ref 跟踪每个 viewer 的自动扫描/自动加载状态。
+    - 新增 useEffect：当 `hasRecords` 且 `configPath` 可用时，自动为每个未扫描过的 viewer 调用 `refreshModels`（即自动执行"扫描模型"），无需手动点击。
+    - 新增 useEffect：扫描结果只有一个模型时（`models.length === 1`），自动调用 `loadViewer`（即自动执行"加载并预测"），画面上出现预测转向线。
+    - 多个模型时只自动扫描填充列表，不自动选择/加载，保留现有手动流程。
+    - `unloadViewer` 中同步清理 `autoScanDoneRef`/`autoLoadDoneRef`，移除 viewer 后重建不会残留状态。
+  - 前端 `npm run build` 通过。
+
+## 2026-08-16 (17)
+
+- feat(web-ui): 完成 Trainer 页面中文翻译（#137）
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：全部 zh 词条（约 65 条）从英文原文翻译为中文，包括标题、标签页、配置项、日志、状态、删除确认弹窗等；带插值参数的词条（`{name}`/`{count}`/`{path}`/`{loss}`/`{message}`）占位符保持不变；状态标签译为 待开始/运行中/已完成/失败/已停止。
+  - 文件头注释更新：原"zh values mirror the current UI strings verbatim"已失效，改为说明 zh 为完整中文翻译。
+  - en 词条保持不变。前端 `npm run build` 通过。
+
+## 2026-08-16 (16)
+
+- feat(web-ui): DD 顶部导航标签顺序调整为 Drive → TM → Trainer → PA → CC（#138）
+  - `web_ui/frontend/src/components/Layout.tsx`：`navItems` 数组重新排序为 Drive（`/drive`）→ Tub Manager（`/`）→ Trainer（`/trainer`）→ Pilot Arena（`/pilot`）→ Car Connector（`/connector`），桌面导航与手机汉堡菜单共用该数组同步生效；路由路径不变，仅改显示顺序。
+  - 前端 `npm run build` 通过。
+
 ## 2026-08-16 (15)
 
 - feat(launcher): D 页（launcher 菜单）1-5、7-10 号菜单项全部接线，点按不再弹"未实现"，与 TUI 各命令行为对齐（#126）

@@ -48,10 +48,12 @@ interface UseDriveWebsocketOptions {
   onWebRtcSignal?: (signal: WebRtcSignal) => void;
   onTelemetry?: (t: Telemetry) => void;
   clientId?: string;
+  /** 是否启用连接（如 Drive section 滚出视口时传 false 断开，停止后台收发） */
+  enabled?: boolean;
 }
 
 export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
-  const { autoReconnect = true, reconnectInterval = 3000, onWebRtcSignal, onTelemetry, clientId } = options;
+  const { autoReconnect = true, reconnectInterval = 3000, onWebRtcSignal, onTelemetry, clientId, enabled = true } = options;
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -165,6 +167,29 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      // 不可见（如 Drive section 滚出视口）时主动断开：停止遥测/信令收发，
+      // 避免后台持续 setState 重渲染拖慢整页（#135 收尾修复）。
+      mountedRef.current = false;
+      closingRef.current = true;
+      clearTimers();
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        // 连接尚未建立时直接 close() 会让 Chrome 报
+        // "WebSocket is closed before the connection is established"，
+        // 等 onopen 后再关即可避免（StrictMode 双挂载时常见）。
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => ws.close();
+        } else {
+          ws.close();
+        }
+      }
+      setConnected(false);
+      setCarState((prev) => ({ ...prev, online: false }));
+      return undefined;
+    }
+
     mountedRef.current = true;
     closingRef.current = false;
     connect();
@@ -192,7 +217,7 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
         }
       }
     };
-  }, [connect]);
+  }, [connect, enabled]);
 
   return {
     connected,

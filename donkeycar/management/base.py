@@ -725,6 +725,9 @@ class Web(BaseCommand):
                             help='启动后自动打开浏览器')
         parser.add_argument('--route', default='/',
                             help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')
+        parser.add_argument('--dev', action='store_true',
+                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
+                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
         parser.add_argument('--debug', action='store_true',
                             help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
         return parser.parse_args(args)
@@ -768,7 +771,8 @@ class Web(BaseCommand):
 
         try:
             self._supervise_processes(
-                [('前端', frontend_proc), ('后端', backend_proc)],
+                [(name, proc) for name, proc in
+                 [('前端', frontend_proc), ('后端', backend_proc)] if proc is not None],
                 stop_requested,
             )
         finally:
@@ -799,14 +803,18 @@ class Web(BaseCommand):
         else:
             self._check_dependencies_or_warn(frontend_path)
 
-        frontend_bind_host = '0.0.0.0'
-        frontend_port = self._choose_available_port(frontend_bind_host, args.frontend_port)
         backend_port = self._choose_available_port(args.backend_host, args.backend_port)
-
-        if frontend_port != args.frontend_port:
-            print(f'前端端口 {args.frontend_port} 已被占用，已切换到 {frontend_port}')
         if backend_port != args.backend_port:
             print(f'后端端口 {args.backend_port} 已被占用，已切换到 {backend_port}')
+
+        # 前端端口仅开发模式需要（Vite 独立监听）；生产模式由后端托管 SPA，
+        # frontend_port 即 backend_port，无需单独选择（#135）。
+        frontend_port = args.frontend_port
+        if args.dev:
+            frontend_bind_host = '0.0.0.0'
+            frontend_port = self._choose_available_port(frontend_bind_host, args.frontend_port)
+            if frontend_port != args.frontend_port:
+                print(f'前端端口 {args.frontend_port} 已被占用，已切换到 {frontend_port}')
 
         npm_exe = shutil.which('npm')
         if not npm_exe:
@@ -819,26 +827,6 @@ class Web(BaseCommand):
                 '安装完成后运行: donkey installweb --path "{}"\n'
                 '然后再启动: donkey web'.format(web_ui_path)
             )
-        frontend_cmd = [npm_exe, 'run', 'dev', '--', '--host', '--port', str(frontend_port)]
-        backend_cmd = [
-            sys.executable, '-m', 'uvicorn', 'main:app',
-            '--host', str(args.backend_host),
-            '--port', str(backend_port),
-            '--reload',
-            '--log-level', 'debug' if args.debug else 'warning',
-        ]
-
-        print(f'Web UI 路径: {web_ui_path}')
-        # 开发模式下前端 SPA 由 Vite 提供（frontend_port），8000 仅在 npm run build 后才托管 dist。
-        # 因此自动打开的 URL 用 frontend_port，确保用户能直接看到页面。
-        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
-
-        print(f'Web UI:  http://localhost:{backend_port}/')
-        print(f'API 文档: http://localhost:{backend_port}/docs')
-        print(f'开发模式: http://localhost:{frontend_port}/ (Vite HMR 热更新)')
-        if args.open:
-            print(f'将打开: {frontend_url}')
-        print('按 Ctrl+C 停止前后端')
 
         popen_kwargs = {}
         if os.name == 'nt':
@@ -848,20 +836,109 @@ class Web(BaseCommand):
         else:
             popen_kwargs['start_new_session'] = True
 
-        frontend_env = os.environ.copy()
-        # 前端使用相对路径 /api，由 Vite 代理转发到后端。
-        # 必须显式指向 --backend-port 选定的端口，否则 Vite 用默认的 8000，
-        # 当后端不在 8000 时浏览器 /api 请求会 ECONNREFUSED。
-        frontend_env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{backend_port}'
-
         backend_env = os.environ.copy()
         if args.debug:
             backend_env["DRIVE_WEB_DEBUG"] = "1"
 
+        if args.dev:
+            # 开发模式：Vite dev 服务器提供前端（HMR 热更新），后端仅作 API。
+            # dev 模式跑的是未优化代码 + React dev 运行时，页面切换明显慢，
+            # 只适合前端开发调试，不适合日常使用（#135）。
+            frontend_cmd = [npm_exe, 'run', 'dev', '--', '--host', '--port', str(frontend_port)]
+            backend_cmd = [
+                sys.executable, '-m', 'uvicorn', 'main:app',
+                '--host', str(args.backend_host),
+                '--port', str(backend_port),
+                '--reload',
+                '--log-level', 'debug' if args.debug else 'warning',
+            ]
+
+            print(f'Web UI 路径: {web_ui_path}')
+            frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+            print(f'Web UI:  http://localhost:{backend_port}/')
+            print(f'API 文档: http://localhost:{backend_port}/docs')
+            print(f'开发模式: http://localhost:{frontend_port}/ (Vite HMR 热更新)')
+            if args.open:
+                print(f'将打开: {frontend_url}')
+            print('按 Ctrl+C 停止前后端')
+
+            frontend_env = os.environ.copy()
+            # 前端使用相对路径 /api，由 Vite 代理转发到后端。
+            # 必须显式指向 --backend-port 选定的端口，否则 Vite 用默认的 8000，
+            # 当后端不在 8000 时浏览器 /api 请求会 ECONNREFUSED。
+            frontend_env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{backend_port}'
+
+            backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
+            frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
+            return frontend_proc, backend_proc, frontend_port, backend_port, frontend_url
+
+        # 生产模式（默认）：前端构建为 dist 静态文件，由后端 uvicorn 直接托管，
+        # 不再起 Vite dev 服务器。前端与 API 同源（同一端口），导航切换速度
+        # 是 dev 模式的约 10 倍（实测 dev ~400-550ms vs 生产 ~43-63ms，#135）。
+        if self._frontend_needs_build(frontend_path):
+            print('正在构建前端生产包（首次启动或源码已更新，约 10-60 秒）...')
+            build_result = subprocess.run(
+                [npm_exe, 'run', 'build'],
+                cwd=frontend_path,
+                env=os.environ.copy(),
+            )
+            if build_result.returncode != 0 or not os.path.isfile(
+                os.path.join(frontend_path, 'dist', 'index.html')
+            ):
+                raise SystemExit('前端生产构建失败，无法启动生产模式 Web UI')
+
+        backend_cmd = [
+            sys.executable, '-m', 'uvicorn', 'main:app',
+            '--host', str(args.backend_host),
+            '--port', str(backend_port),
+            '--log-level', 'debug' if args.debug else 'warning',
+        ]
+
+        # SPA 由后端托管：前端端口即后端端口（launcher/TUI 跳转与实例登记
+        # 均以 frontend_port 为准，保持复用链路兼容）。
+        frontend_port = backend_port
+        frontend_proc = None
+        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+
+        print(f'Web UI 路径: {web_ui_path}')
+        print(f'Web UI:  http://localhost:{backend_port}/')
+        print(f'API 文档: http://localhost:{backend_port}/docs')
+        if args.open:
+            print(f'将打开: {frontend_url}')
+        print('按 Ctrl+C 停止')
+
         backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
-        frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
 
         return frontend_proc, backend_proc, frontend_port, backend_port, frontend_url
+
+    def _frontend_needs_build(self, frontend_path):
+        """判断前端是否需要重新构建：dist 缺失，或源码比 dist/index.html 新。"""
+        dist_index = os.path.join(frontend_path, 'dist', 'index.html')
+        if not os.path.isfile(dist_index):
+            return True
+        dist_mtime = os.path.getmtime(dist_index)
+        checked_roots = ['src', 'public']
+        checked_files = [
+            'index.html', 'vite.config.ts', 'package.json', 'tsconfig.json',
+            'tsconfig.app.json', 'tsconfig.node.json', 'tailwind.config.js',
+            'postcss.config.js',
+        ]
+        for name in checked_files:
+            p = os.path.join(frontend_path, name)
+            if os.path.isfile(p) and os.path.getmtime(p) > dist_mtime:
+                return True
+        for root_name in checked_roots:
+            root = os.path.join(frontend_path, root_name)
+            if not os.path.isdir(root):
+                continue
+            for dirpath, _dirnames, filenames in os.walk(root):
+                if 'node_modules' in dirpath:
+                    continue
+                for filename in filenames:
+                    p = os.path.join(dirpath, filename)
+                    if os.path.getmtime(p) > dist_mtime:
+                        return True
+        return False
 
     def _supervise_processes(self, named_procs, stop_requested):
         """监督子进程：收到停止信号或任一进程退出时，终止全部并以 SystemExit 退出。
@@ -1052,6 +1129,9 @@ class Drive(Web):
                             help='启动后自动打开浏览器')
         parser.add_argument('--route', default='/drive',
                             help='自动打开的前端路由 (默认: /drive)')
+        parser.add_argument('--dev', action='store_true',
+                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
+                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
         parser.add_argument('--debug', action='store_true',
                             help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
         return parser.parse_args(args)

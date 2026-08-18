@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -10,7 +10,7 @@ import logging
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, provisioning, launch
+from routers import config, tub, trainer, drive, arena, connector, launch
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -36,6 +36,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def apply_cache_headers(response, path: str) -> None:
+    """静态资源缓存策略：带哈希的 assets 可长期不可变缓存，HTML 每次重新校验。
+
+    前端每次构建产物文件名都带内容哈希，但 index.html 本身会被浏览器
+    启发式缓存——没有 Cache-Control 时，用户刷新页面可能仍复用旧的
+    index.html，从而加载旧的 JS bundle，导致"修好了却还在跑旧代码"（#135 收尾）。
+    """
+    content_type = response.headers.get("content-type", "")
+    if path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif "text/html" in content_type:
+        response.headers["Cache-Control"] = "no-cache"
+
+
+@app.middleware("http")
+async def cache_control_middleware(request, call_next):
+    response = await call_next(request)
+    apply_cache_headers(response, request.url.path)
+    return response
+
 # 挂载 API 路由
 app.include_router(config.router, prefix="/api/config", tags=["config"])
 app.include_router(tub.router, prefix="/api/tub", tags=["tub"])
@@ -43,7 +64,6 @@ app.include_router(trainer.router, prefix="/api/trainer", tags=["trainer"])
 app.include_router(drive.router, prefix="/api/drive", tags=["drive"])
 app.include_router(arena.router, prefix="/api/arena", tags=["arena"])
 app.include_router(connector.router, prefix="/api/connector", tags=["connector"])
-app.include_router(provisioning.router, prefix="/api/provisioning", tags=["provisioning"])
 app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
 
 # 前端静态文件目录（生产构建输出）
@@ -56,12 +76,23 @@ if os.path.isdir(FRONTEND_DIST):
     # 静态资源（JS/CSS/图片等）
     if os.path.isdir(FRONTEND_ASSETS):
         app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS), name="assets")
-    # favicon 等根目录静态文件与 SPA fallback
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
-        """SPA fallback：所有非 API/非静态文件路径返回 index.html"""
+        """根目录静态文件 + SPA fallback。
+
+        不能再用 app.mount("/", StaticFiles(html=True)) 处理根目录：它会拦截所有
+        路径，导致 /connector、/drive 等前端深链（无扩展名、非真实文件）被
+        StaticFiles 判为 404，刷新/直达时无法回退到 index.html。
+        这里改为：真实存在的根目录静态文件（favicon、robots.txt 等）直接返回，
+        其余一律回退到 index.html，交给前端路由处理；不存在的 API 路径保持 404。
+        """
+        if full_path:
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not Found")
+            candidate = os.path.realpath(os.path.join(FRONTEND_DIST, full_path))
+            if candidate.startswith(FRONTEND_DIST + os.sep) and os.path.isfile(candidate):
+                return FileResponse(candidate)
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)

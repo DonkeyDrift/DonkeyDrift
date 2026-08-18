@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Launcher 菜单动作（issue #126：接线 1-5、7-10 号菜单项）的单元测试。
+"""Launcher 菜单动作（issue #126：接线 1-5、8-10 号菜单项）的单元测试。
 
 覆盖 donkeycar.launcher.server 新增后端：
-- _launch_web_ui：存活实例复用 / 新起 donkey web（PID 登记）
 - _create_car：项目名白名单、目录已存在、成功后切换当前项目
 - _open_project：只允许 ~/projects 下有效项目
 - 数据三件套：_backup_data / _clear_data / _restore_data 往返
@@ -10,8 +9,10 @@
   备份文件名白名单（防路径穿越）、data 不存在/为空的 skip 分支
 - _next_train_model：models/ 下 pilot_N 自动递增
 - HTTP 端点：GET /api/projects、/api/data/backups、/api/train/next-model；
-  POST /api/launch/web、/api/createcar（非法项目名 400）、/api/data/*
-- 前端静态断言：MENU_HTML 各菜单动作接线、terminal.html ?cmd= 自动执行
+  POST /api/launch/web（issue #181 随 Web 菜单下线，应 404）、
+  /api/createcar（非法项目名 400）、/api/data/*
+- 前端静态断言：MENU_HTML 各菜单动作接线（0 号 DC 移到 7 号、
+  6 号改名 DonkeyDrifter）、terminal.html ?cmd= 自动执行
 
 不启动真实 donkey / 子进程，全部替身。
 """
@@ -31,7 +32,6 @@ from donkeycar.launcher.server import (
     _backup_data,
     _clear_data,
     _create_car,
-    _launch_web_ui,
     _list_backups,
     _next_train_model,
     _open_project,
@@ -74,87 +74,6 @@ def fake_project(tmp_path, monkeypatch):
 def _fake_completed(returncode=0, stderr="", stdout=""):
     return SimpleNamespace(returncode=returncode, stderr=stderr,
                            stdout=stdout)
-
-
-def _fake_subprocess(popen):
-    """带 DEVNULL 等常量的 subprocess 替身（Popen 参数求值要用到）。"""
-    return SimpleNamespace(
-        Popen=popen,
-        run=lambda *a, **k: _fake_completed(),
-        DEVNULL=-3,
-        CREATE_NEW_PROCESS_GROUP=512,
-    )
-
-
-class _FakePopen:
-    def __init__(self, pid=4321):
-        self.pid = pid
-
-    def poll(self):
-        return None
-
-
-# ===========================================================================
-# _launch_web_ui（菜单 7）
-# ===========================================================================
-class TestLaunchWebUI:
-    def test_reuses_live_instance_without_spawning(self, monkeypatch):
-        monkeypatch.setattr(launcher_server, "find_live_instance",
-                            lambda: {"backend_port": 8000,
-                                     "frontend_port": 5188})
-        spawned = []
-
-        def _no_popen(*a, **k):
-            spawned.append(a)
-            raise AssertionError("复用路径不应起进程")
-
-        monkeypatch.setattr(launcher_server, "subprocess",
-                            _fake_subprocess(_no_popen))
-        result = _launch_web_ui()
-        assert result["status"] == "launched"
-        assert result["url"] == "http://localhost:5188/"
-        assert spawned == []
-
-    def test_spawns_donkey_web_and_registers_pid(self, monkeypatch):
-        monkeypatch.setattr(launcher_server, "find_live_instance",
-                            lambda: None)
-        monkeypatch.setattr(launcher_server,
-                            "_choose_available_backend_port",
-                            lambda preferred=8100: preferred)
-        registered = []
-        monkeypatch.setattr(launcher_server, "write_drive_pids",
-                            registered.append)
-        seen = {}
-
-        def _popen(args, **kwargs):
-            seen["args"] = args
-            return _FakePopen()
-
-        monkeypatch.setattr(launcher_server, "subprocess",
-                            _fake_subprocess(_popen))
-        result = _launch_web_ui()
-        assert result["status"] == "launched"
-        assert result["url"] == "http://localhost:5188/"
-        # 命令形态与 _launch_drive 的 web 进程一致
-        assert seen["args"][0:2] == ["donkey", "web"]
-        assert seen["args"][-4:] == ["--backend-port", "8000",
-                                     "--frontend-port", "5188"]
-        # 本链路起的 web 进程 PID 写入登记文件（供 Drive 链路清理复用）
-        assert registered == [[4321]]
-        assert launcher_server._processes["frontend_port"] == 5188
-
-    def test_missing_donkey_binary(self, monkeypatch):
-        monkeypatch.setattr(launcher_server, "find_live_instance",
-                            lambda: None)
-
-        def _popen(args, **kwargs):
-            raise FileNotFoundError("donkey")
-
-        monkeypatch.setattr(launcher_server, "subprocess",
-                            _fake_subprocess(_popen))
-        result = _launch_web_ui()
-        assert result["status"] == "error"
-        assert "donkey" in result["error"]
 
 
 # ===========================================================================
@@ -412,13 +331,11 @@ class TestEndpoints:
         assert code == 200
         assert data["model"] == "./models/pilot_1"
 
-    def test_post_launch_web(self, http_server, monkeypatch):
-        monkeypatch.setattr(launcher_server, "_launch_web_ui",
-                            lambda: {"status": "launched",
-                                     "url": "http://localhost:5188/"})
-        code, data = _post(http_server + "/api/launch/web", {})
-        assert code == 200
-        assert data["url"] == "http://localhost:5188/"
+    def test_post_launch_web_removed(self, http_server):
+        # issue #181：原 7 号 Web 菜单并入 6 号「Donkey Drifter」，
+        # /api/launch/web 端点随之下线，应返回 404
+        code, _ = _post(http_server + "/api/launch/web", {})
+        assert code == 404
 
     def test_post_createcar_rejects_bad_folder(self, http_server):
         code, data = _post(http_server + "/api/createcar",
@@ -474,16 +391,36 @@ class TestEndpoints:
 class TestFrontendWiring:
     def test_all_menu_actions_wired(self):
         for fn in ("createCar()", "openProject()", "clearData()",
-                   "backupData()", "restoreData()", "launchWebUI()",
+                   "backupData()", "restoreData()",
                    "launchDonkeyUI()", "launchTrainLocal()",
                    "launchTrainOnline()"):
             assert fn in MENU_HTML, fn
         # 所有菜单项接线后不再有 notImplemented 分支
         assert "showError(t('overlay.notImplemented'))" not in MENU_HTML
 
-    def test_web_ui_endpoint_in_frontend(self):
-        assert "/api/launch/web" in MENU_HTML
-        assert "overlay.startingWeb" in MENU_HTML
+    def test_menu_6_renamed_and_dc_moved_to_7(self):
+        # 用户指示：0 号「Drifter Console」移到 7 号、删 0 号位；
+        # 6 号改名 DonkeyDrifter，小字「打开 DonkeyDrifter」
+        assert 'name: "DonkeyDrifter"' in MENU_HTML
+        assert 'descZh: "打开 DonkeyDrifter"' in MENU_HTML
+        assert 'descEn: "Open DonkeyDrifter"' in MENU_HTML
+        # 7 号现在是 Drifter Console（DC），走 openDrifterConsole → /api/launch/dc
+        assert 'name: "Drifter Console"' in MENU_HTML
+        assert "openDrifterConsole()" in MENU_HTML
+        assert "/api/launch/dc" in MENU_HTML
+        # 0 号位已删除、占位行已移除
+        assert "no: 0" not in MENU_HTML
+        assert "placeholder" not in MENU_HTML
+        assert "已合并至 6" not in MENU_HTML
+        assert "Merged into #6" not in MENU_HTML
+        # 6 号仍走 launchDrive 启动 DD
+        assert "launchDrive()" in MENU_HTML
+        # 原 7 号 Web 链路仍不存在
+        assert "launchWebUI" not in MENU_HTML
+        assert "/api/launch/web" not in MENU_HTML
+        assert "overlay.startingWeb" not in MENU_HTML
+        # 8 号 Donkey UI 仍在原位
+        assert "no: 8" in MENU_HTML
 
     def test_new_i18n_keys_bilingual(self):
         for key in ("overlay.working", "overlay.done",

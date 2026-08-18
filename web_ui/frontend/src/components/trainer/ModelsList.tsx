@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { listModels, deleteModel, downloadModelUrl, loadModelToCar, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2 } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 
 interface ModelItem {
@@ -214,6 +214,16 @@ export const ModelsList: React.FC = () => {
                   className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmDelete(m);
+                  }}
+                  title={t('trainer.deleteModel')}
+                  className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
