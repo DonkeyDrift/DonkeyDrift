@@ -258,20 +258,6 @@ async def list_local_ips():
     return {"ips": ips, "count": len(ips)}
 
 
-@router.post("/discover")
-async def discover_cars():
-    """扫描局域网中开放 SSH 端口（22）的主机，返回候选车辆 IP 列表。"""
-    try:
-        found, scanned = await discover_hosts(port=22)
-        message = ""
-        if not found:
-            message = f"扫描了 {scanned} 个地址，未在局域网中发现开放 SSH 端口的主机。请确认车端已开机并与本机处于同一网络。"
-        else:
-            message = f"扫描了 {scanned} 个地址，发现 {len(found)} 个开放 SSH 端口的主机。"
-        return {"status": True, "found": found, "count": len(found), "scanned": scanned, "message": message}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
 async def _check_drifter_console(ip: str) -> dict | None:
     try:
         def _fetch():
