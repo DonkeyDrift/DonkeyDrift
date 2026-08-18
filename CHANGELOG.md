@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (33)
+## 2026-08-18 (34)
 
 - fix(launcher): KCW 入口 URL 用 mDNS 主机名后被 kimi 的 DNS-rebinding 栅栏 403 拦截——冷启动加 `--allowed-host` 放行入口 host，复用前重探入口 host 跳过未放行的旧实例（Issue #168 后续）
   - 根因：上一轮把 KCW 入口 URL 的 host 从 DHCP 局域网 IP 改为稳定 mDNS 主机名 `tony007.local` 以稳定 origin；但 `kimi web --host`（绑 0.0.0.0）只自动放行本机接口 IP（`192.168.3.57` 返回 200），mDNS 主机名是主机名而非接口 IP、不会被自动放行——浏览器用 `Host: tony007.local` 访问即被 40301（Invalid Host header）拦下。实测 `127.0.0.1:58640` 与 `192.168.3.57:58640` 均 200、`tony007.local:58640` 403 复现。
@@ -12,6 +12,19 @@
   - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMdnsHostnameAndAllowedHosts`（小写化 + allowed-host 三种组合 4 项）、`test_entry_host_must_pass_rebind_gate`（复用重探跳过 403 实例）、`test_spawn_passes_mdns_and_lan_allowed_hosts`；更新 `test_spawn_success_captures_url_and_keeps_proc` 的启动命令断言。本文件 48 项、launcher 相关 86 项全部通过。
   - 验证：手动以 `kimi web --no-open --host --port 58646 --allowed-host tony007.local --allowed-host 192.168.3.57` 起测试实例，`curl http://tony007.local:58646/api/v1/meta`（小写）与 `http://TONY007.local:58646/...`（大写）均 200，修复生效。
   - 注：本次在 `Tony-kcw-allowed-host` 功能分支（worktree 作业）上完成。Firmware 无改动，无需 OTA。
+
+## 2026-08-18 (33)
+
+- fix(launcher): DSH 局域网 mDNS 主机名入口被 `/api` 通用信任栅栏 403——`--trusted-host` 同时声明局域网 IP 与 mDNS 主机名（Issue #164 追加）
+  - 根因：`_lan_url()` 把 dsh web 入口 URL 的 host 从回环/局域网 IP 改写为 mDNS 主机名 `TONY007.local`（`_entry_host()` mDNS 优先，issue #168 稳定 origin 设计）；但 `--trusted-host` 之前只传了局域网 IP（`_lan_ip()`）。浏览器打开 `http://TONY007.local:<port>` 时 `Host` 头是 `tony007.local:<port>`，dsh-client-connection 的 `/api` 通用信任栅栏（`isTrustedApiRequest(req, trustedHosts)`，`trustedHosts` 由 `webserver.host=0.0.0.0` 自动派生的局域网 IP + `--trusted-host` 组成）里没有 `TONY007.local` → 所有 `/api/*` 请求 403（`host.listDirectory` 只是第一个暴露的症状，随后设置页/其他功能同样不可用）。
+  - `donkeycar/launcher/dsh_web.py`：
+    - 从 `kimi_web` 引入 `_mdns_hostname`；
+    - `_spawn_and_capture()` 参数由 `lan_ip` 改为 `trusted_hosts`（authority 列表），逐项追加 `--trusted-host`；
+    - `launch_dsh_web()` 新增 `mdns_fn` 测试钩子（默认 `_mdns_hostname`），构造 `trusted_hosts = [lan_ip, mdns]`（去空、去重）后传给 `_spawn_and_capture`；
+    - 模块 docstring 的 `--trusted-host` 说明同步更新。
+  - 测试同步：`tests/test_launcher_dsh_web.py` `_fake_lan_ip` fixture 默认 patch `dsh_web._mdns_hostname` 返回 None（隔离真实 mDNS 探测）；新增 `test_spawn_adds_mdns_host_to_trusted_host`（断言 `--trusted-host 192.168.3.10 --trusted-host TONY007.local`）；文件 30 项全部通过。
+  - 验证：本地复现——仅 `--trusted-host 192.168.3.57` 时，`Host: TONY007.local` 的 `/api/host.listDirectory` 返回 403、`Host: 192.168.3.57` 返回 200；补上 `--trusted-host TONY007.local` 后 mDNS host 返回 200（修复生效）。
+  - 注：本次在 `Tony-issue164-dsh-auto-enter-projects` 功能分支（worktree 作业）追加提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。此前 (32) 的 UUID polyfill 与本次 mDNS trusted-host 是 issue #164 的两个独立根因，均需线上 launcher 更新部署后生效。
 
 ## 2026-08-18 (32)
 
