@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-18 (38)
+
+- fix(web-ui): Drive 页摄像头偶发卡死在「正在连接摄像头...」——MJPEG 首帧无超时、WebRTC 收到 track 却无首帧、carOnline 门控竞态三处叠加（Issue #221）
+  - 背景：进入 Drive 页后偶发既没切到 WebRTC、也没回退到 MJPEG，永远停在「正在连接摄像头...」，FPS 显示 `-`。三条失效路径：① MJPEG `<img src="/drive/video">` 只有 `onError` 才重试，后端无首帧时既不触发 `onLoad` 也不触发 `onError`，`status` 永远 `loading`；② WebRTC 在 `ontrack` 即置 `connected`、`videoReady` 要等 `onloadeddata`，首帧不解码时 `webRtcConnected=true` 会重置 MJPEG 回退计时器但 `webRtcVisible` 永为 false（黑屏 + 遮罩不消失）；③ `carOnline` 初值 `null` 被 `?? false` 压成 `false`，挂载时不启动 WebRTC，随后 `null→true` 又触发整体 `closePeer` 重启会话。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：新增 `DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS=5000`，MJPEG `loading` 首帧超时按 `onError` 同路重试；fallback 门控由 `webRtcConnected` 改为 `webRtcVisible`；`carOnline` 直接传 `null`（不再 `?? false`）。
+  - `web_ui/frontend/src/hooks/useDriveWebRtcVideo.ts`：新增 `DRIVE_WEBRTC_VIDEO_READY_TIMEOUT_MS=8000` 与 `videoReadyTimeoutMs` 选项，`ontrack` 后首帧迟迟不解码则超时降级重试；`carOnline` 类型放宽为 `boolean | null`，挂载生命周期与 `carOnline` 门控拆成两个 effect（`shouldRunRef` 只在「应运行」状态翻转时 start/stop，挂载 cleanup 复位兼容 StrictMode）。
+  - 测试同步：`VideoStream.test.tsx` 新增「MJPEG 首帧超时后自动重试」；`useDriveWebRtcVideo.test.tsx` `HookProbe` 透传 `videoReadyTimeoutMs` 并新增「收到 track 但首帧未就绪时超时降级」。前端 vitest 全量 20 文件 102 项、`tsc -b --noEmit` 通过；相关文件 eslint 0 error、无新增警告。
+  - 注：本次在 `Tony-fix-issue-221` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (37)
 
 - fix(tm): 摄像头画面与边框贴合——容器 aspect-ratio 跟随当前帧实际宽高比，消除画面与边框空隙（Issue #220）

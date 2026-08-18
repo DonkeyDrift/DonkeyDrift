@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS, VideoStream } from './VideoStream';
+import { DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS, DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS, VideoStream } from './VideoStream';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 
 vi.mock('../../hooks/useDriveWebRtcVideo', () => ({
@@ -149,6 +149,37 @@ describe('VideoStream', () => {
     expect(screen.getByText('非 60FPS 验收路径')).toBeInTheDocument();
     expect(screen.queryByLabelText('WebRTC 摄像头画面')).not.toBeInTheDocument();
     expect(screen.getByAltText('摄像头画面')).toBeInTheDocument();
+  });
+
+  it('MJPEG 首帧超时后自动重试', async () => {
+    vi.useFakeTimers();
+    mockWebRtc.mockReturnValue(degradedState());
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      json: async () => ({ online: true, fps: 0, car_ws_connected: true, last_seen_age_sec: 0 }),
+    })));
+
+    render(<VideoStream transport="mjpeg" />);
+
+    // 首帧超时前仍显示连接中
+    await act(async () => {
+      vi.advanceTimersByTime(DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS - 1);
+    });
+    expect(screen.getByText('正在连接摄像头...')).toBeInTheDocument();
+
+    // 超时后按 onError 同路进入 error
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByText('摄像头未连接')).toBeInTheDocument();
+
+    // 2 秒后重试回到 loading
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getByText('正在连接摄像头...')).toBeInTheDocument();
+
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('车端离线且超过 fallback 延迟后显示 DriveApiBridge 连接诊断', async () => {
