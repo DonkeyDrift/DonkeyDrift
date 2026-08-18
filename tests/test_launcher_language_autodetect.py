@@ -45,12 +45,17 @@ def test_launcher_launch_drive_page_is_bilingual_and_follows_browser():
     assert "indexOf('zh')===0?'zh':'en'" in page
 
     # 双语字典键对齐
-    for key in ("starting", "failed", "unknown", "network"):
+    for key in ("starting", "waiting", "failed", "notready", "unknown",
+                "network"):
         assert f"{key}:" in page
     assert "starting:'正在启动 DonkeyDrifter...'" in page
     assert "starting:'Starting DonkeyDrifter...'" in page
+    assert "waiting:'正在等待 Web UI 就绪...'" in page
+    assert "waiting:'Waiting for Web UI to be ready...'" in page
     assert "failed:'启动失败'" in page
     assert "failed:'Launch failed'" in page
+    assert "notready:'Web UI 未就绪，未跳转（可稍后重试）。'" in page
+    assert "notready:'Web UI not ready, redirect skipped (retry later).'" in page
     assert "unknown:'未知错误'" in page
     assert "unknown:'Unknown error'" in page
     assert "network:'网络错误: '" in page
@@ -58,6 +63,13 @@ def test_launcher_launch_drive_page_is_bilingual_and_follows_browser():
 
     # 所有用户可见文案经 t() 渲染，无残留硬编码中文
     assert "document.getElementById('text').textContent=t('starting');" in page
-    assert page.count("document.getElementById('text').textContent=t('failed');") == 2
+    # launched-error / 未就绪 / 网络异常三处失败文案
+    assert page.count("document.getElementById('text').textContent=t('failed');") == 3
+    assert "document.getElementById('text').textContent=t('waiting')+' ('+(i+1)+'/30)';" in page
     assert "d.error||t('unknown')" in page
+    assert "t('notready')+(d.warning||'')" in page
     assert "t('network')+e.message" in page
+
+    # 就绪轮询：跳转前先探测目标可连（30 次 × 1s），不通不盲目跳转
+    assert "await fetch(url,{mode:'no-cors'});" in page
+    assert "window.location.href=url;" in page

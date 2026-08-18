@@ -248,6 +248,26 @@ def _launch_drive():
             frontend_port, backend_port, warning = _wait_for_web_ready(
                 web_proc, frontend_port, backend_port,
             )
+            if warning is not None:
+                # web 进程提前退出（前端构建失败/依赖缺失等）必然失败：
+                # 兜底端口（入参 5188）在生产模式下从不监听，照常跳转只会
+                # 把用户带去死端口（Safari 报"无法连接服务器"）——改报
+                # error，让跳转页显示原因而不是重定向。
+                if web_proc.poll() is not None:
+                    return {
+                        "status": "error",
+                        "error": f"Web UI 启动失败：{warning}，"
+                                 "详情见 launcher 日志"
+                                 "（journalctl --user -u "
+                                 "donkeydrifter-launcher）",
+                    }
+                # 仍在启动中但超时：登记未出现时兜底返回的是入参 5188——
+                # 生产模式（bundled web ui）前端由后端端口托管（#135），
+                # 5188 从不监听，修正为后端端口，避免跳转目标必死。
+                if (web_ui_path is not None
+                        and frontend_port != backend_port
+                        and read_instance() is None):
+                    frontend_port = backend_port
 
         # 构建 car 命令（DRIVE_API_SERVER_URL 用实际后端端口）
         car_cmd = [sys.executable, "manage.py", "drive"]
@@ -1263,8 +1283,8 @@ body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;
 // 语言：显式存储选择优先，否则跟随浏览器语言（zh* → 中文，其余 → 英文）
 var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
 var T={
-  zh:{starting:'正在启动 DonkeyDrifter...',failed:'启动失败',unknown:'未知错误',network:'网络错误: '},
-  en:{starting:'Starting DonkeyDrifter...',failed:'Launch failed',unknown:'Unknown error',network:'Network error: '}
+  zh:{starting:'正在启动 DonkeyDrifter...',waiting:'正在等待 Web UI 就绪...',failed:'启动失败',notready:'Web UI 未就绪，未跳转（可稍后重试）。',unknown:'未知错误',network:'网络错误: '},
+  en:{starting:'Starting DonkeyDrifter...',waiting:'Waiting for Web UI to be ready...',failed:'Launch failed',notready:'Web UI not ready, redirect skipped (retry later).',unknown:'Unknown error',network:'Network error: '}
 };
 function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
 document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
@@ -1275,7 +1295,25 @@ document.getElementById('text').textContent=t('starting');
     var d=await r.json();
     if(d.status==='launched'){
       var url=d.url.replace('localhost',window.location.hostname);
-      window.location.href=url;
+      // 就绪轮询（30 次 × 1s）：后端带 warning（仍启动中/探测未过）或跳转
+      // 目标尚未监听时，立即重定向会撞上死端口（Safari 报"无法连接服务
+      // 器"）——轮询目标可连后才跳，不通则停下显示提示，不盲目跳转。
+      var ready=false;
+      for(var i=0;i<30;i++){
+        try{
+          await fetch(url,{mode:'no-cors'});
+          ready=true;break;
+        }catch(e){
+          document.getElementById('text').textContent=t('waiting')+' ('+(i+1)+'/30)';
+          await new Promise(function(res){setTimeout(res,1000);});
+        }
+      }
+      if(ready){window.location.href=url;}
+      else{
+        document.getElementById('spinner').style.display='none';
+        document.getElementById('text').textContent=t('failed');
+        document.getElementById('error').textContent=t('notready')+(d.warning||'');
+      }
     }else{
       document.getElementById('spinner').style.display='none';
       document.getElementById('text').textContent=t('failed');
