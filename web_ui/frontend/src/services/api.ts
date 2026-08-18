@@ -304,6 +304,17 @@ export const listBackups = async (workingDir?: string) => {
   return response.data;
 };
 
+export interface TrainerTub {
+  name: string;
+  relative_path: string;
+  absolute_path: string;
+}
+
+export const listTrainerTubs = async (workingDir?: string): Promise<{ tubs: TrainerTub[]; current_tub_path: string }> => {
+  const response = await api.get('/trainer/tubs', { params: workingDir ? { working_dir: workingDir } : {} });
+  return response.data as { tubs: TrainerTub[]; current_tub_path: string };
+};
+
 export const startLocalTrain = async (params: {
   tub: string;
   model: string;
@@ -478,6 +489,16 @@ export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKim
   // validateStatus 全放行：launcher 的业务错误（非 200）同样带 JSON
   // {status, error} 体，交给调用方按 status 判断，不按 HTTP 状态码抛异常。
   const response = await api.post('/launch/kimi-code-web', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
+export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
+  // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。
+  const response = await api.post('/launch/dsh', {}, {
     signal,
     validateStatus: () => true,
   });
