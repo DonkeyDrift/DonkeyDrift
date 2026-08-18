@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-18 (4)
+
+- fix(web-ui): 顶部导航切换 Tub Manager 严重卡顿三轮修复——TM 页常驻保活 + 懒加载 chunk 空闲预取 + 后台快捷键/播放守卫（Issue #135，二轮 dev→生产模式后用户仍报卡顿）
+  - 根因（Playwright + PerformanceObserver(longtask) 对用户 8000 生产实例实测确认）：react-router 每次导航到 `/` 都完整卸载重挂载 TubManagerPage——TubLibrary（2282 条记录列表 + 图片 LRU）与 TubEditor（chart-vendor 图表）整树重建，每次切换产生 77-99ms 主线程 longtask，其余页面 0ms；用户真实浏览器（更多扩展、非无头）放大到数百 ms 体感卡顿。
+  - `web_ui/frontend/src/App.tsx`：新增 `KeepAliveTubManager` 组件挂在 Routes 之外（Layout main 内、Suspense 外，ErrorBoundary 仍包住）——TubManagerPage 首次进入后常驻不卸载，用 `location.pathname === '/'` 切换 `hidden` class（面板挂 `<div data-tub-manager>` 且切走时 hidden，DOM 保留、状态不丢）；原 `<Route path="/">` 改为 `element={null}`；新增 `useIdlePrefetch` hook 空闲时（requestIdleCallback）预取 Drive/Trainer/Pilot/Connector 4 个懒加载 chunk，消除冷切换时的脚本解析卡顿。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：新增 `isTubManagerRoute = useLocation().pathname === '/'` 守卫——空格键播放/暂停监听仅在 TM 页生效（切走不串页）；新增切走自动停播 effect（`isPlayingRef.current = false` + `setIsPlaying(false)`，防止后台页面持续预取图片耗资源）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：全局键盘监听同样加 `isTubManagerRoute` 守卫。
+  - 测试同步：`web_ui/frontend/src/App.test.tsx` 新增 keep-alive describe（mock 4 个懒加载页面组件）——TM 面板切走仍挂载且 hidden、切回恢复可见、不重拉 tub；`web_ui/frontend/src/components/TubLibrary.test.tsx` render 包 `MemoryRouter` 适配新 `useLocation` 依赖。vitest 全量 19 文件 95 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 实测（8021 测试实例 + chrome-headless-shell，tub=/home/dkc/projects/mycar/data，2282 帧）：修复前 TM 每次切换 longtask 77-99ms；修复后热切换全部归零（R2 及 Drive↔TM 来回 x3 全 0ms），仅首轮冷加载一次性 70-84ms；功能抽查确认切走面板 hidden 仍挂载、切回立即可见、2282 帧数据完整保留不重拉。
+
 ## 2026-08-18 (3)
 
 - feat(web-ui): Tub 导航器合入录制视频库——TM 页只保留「录制视频库」一个预览面板，TubNavigator 组件整体删除

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { useStore } from '../store/useStore';
@@ -115,6 +116,8 @@ export const TubLibrary: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const tubPath = useStore((state) => state.tubPath);
+  // TM 页在 App 中常驻保活（#135）：据此在切走时停播并屏蔽全局快捷键
+  const isTubManagerRoute = useLocation().pathname === '/';
   const setTub = useStore((state) => state.setTub);
   const fields = useStore((state) => state.fields);
   const config = useStore((state) => state.config);
@@ -404,10 +407,11 @@ export const TubLibrary: React.FC = () => {
     };
   }, [isPlaying, records, frameInterval, tubPath]);
 
-  // 空格键播放/暂停（原 Tub 导航器快捷键；输入框内不触发）
+  // 空格键播放/暂停（原 Tub 导航器快捷键；输入框内不触发；TM 页切走时不响应）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return;
+      if (!isTubManagerRoute) return;
       const active = document.activeElement;
       if (
         active instanceof HTMLTextAreaElement ||
@@ -425,7 +429,15 @@ export const TubLibrary: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [isTubManagerRoute]);
+
+  // 切走时自动停止回放，避免常驻保活后后台持续拉帧占资源
+  useEffect(() => {
+    if (!isTubManagerRoute) {
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+    }
+  }, [isTubManagerRoute]);
 
   const jumpToFrame = useCallback((idx: number) => {
     setIsPlaying(false);

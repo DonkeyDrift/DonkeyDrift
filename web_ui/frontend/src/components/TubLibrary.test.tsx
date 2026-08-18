@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { TubLibrary } from './TubLibrary';
 import { useStore } from '../store/useStore';
 import { getSessionRecords, listTubSessions } from '../services/api';
@@ -66,7 +67,7 @@ describe('TubLibrary auto-select newest recording', () => {
   });
 
   it('selects the newest session (first in list) on load', async () => {
-    render(<TubLibrary />);
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
     await waitFor(() => {
       expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
@@ -79,7 +80,7 @@ describe('TubLibrary auto-select newest recording', () => {
 
   it('shows the select hint when no tub is loaded', () => {
     useStore.setState({ tubPath: null });
-    render(<TubLibrary />);
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
     expect(listTubSessions).not.toHaveBeenCalled();
   });
@@ -115,7 +116,7 @@ describe('TubLibrary pin to top', () => {
   };
 
   it('moves an older recording to the top when pinned, and restores it when unpinned', async () => {
-    render(<TubLibrary />);
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();

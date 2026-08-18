@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -42,6 +43,8 @@ type RecordAction = {
 export const TubEditor: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
+  // TM 页在 App 中常驻保活（#135）：据此在切走时屏蔽全局快捷键
+  const isTubManagerRoute = useLocation().pathname === '/';
   const themeRef = useRef(theme);
   const records = useStore((state) => state.records);
   const isDragging = useStore((state) => state.isDragging);
@@ -868,6 +871,7 @@ export const TubEditor: React.FC = () => {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (!records.length) return;
+      if (!isTubManagerRoute) return;
       if (isEditableTarget(event.target)) return;
 
       if (event.key === 'Escape') {
@@ -992,6 +996,7 @@ export const TubEditor: React.FC = () => {
       handleZoomOut,
       handleZoomReset,
       redoSelectionRange,
+      isTubManagerRoute,
     ]
   );
 
