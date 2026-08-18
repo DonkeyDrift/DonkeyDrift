@@ -510,3 +510,20 @@ def test_client_connect_does_not_request_car_state_when_offline(monkeypatch):
         pass
 
     assert {"type": "request_car_state"} not in sent_to_car
+
+
+def test_client_car_mode_command_forwards_to_car(monkeypatch):
+    client, drive = make_online_client()
+    sent_to_car = []
+
+    async def fake_send_to_car(payload):
+        sent_to_car.append(payload)
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
+
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        ws.send_json({"car_mode": 2})
+        time.sleep(0.1)
+
+    assert {"car_mode": 2} in sent_to_car

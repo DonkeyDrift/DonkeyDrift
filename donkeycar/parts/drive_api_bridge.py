@@ -299,6 +299,7 @@ class DriveApiBridge:
         self.mode_latch = None
         self.recording = False
         self.recording_latch = None
+        self.car_mode = None
         self.buttons: Dict[str, bool] = {}
         self.reconnect_simulator = False
 
@@ -430,6 +431,15 @@ class DriveApiBridge:
             self.mode_latch = msg["drive_mode"]
         if "recording" in msg:
             self.recording_latch = bool(msg["recording"])
+        if "car_mode" in msg:
+            try:
+                value = int(msg["car_mode"])
+                if value in (0, 1, 2):
+                    self.car_mode = value
+                else:
+                    logger.warning("忽略非法 car_mode 命令: %r", msg["car_mode"])
+            except (TypeError, ValueError):
+                logger.warning("忽略非法 car_mode 命令: %r", msg["car_mode"])
         if "buttons" in msg:
             self.buttons.update(msg["buttons"])
 
@@ -787,11 +797,13 @@ class DriveApiBridge:
             self.recording = self.recording_latch
             self.recording_latch = None
 
+        car_mode_cmd = self.car_mode
+
         buttons = self.buttons
         self.buttons = {}
         reconnect = self.reconnect_simulator
         self.reconnect_simulator = False
-        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect
+        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect, car_mode_cmd
 
     def run(self, img_arr=None, num_records=0, mode=None, recording=None,
             imu_gz=None, imu_gx=None, imu_gy=None,

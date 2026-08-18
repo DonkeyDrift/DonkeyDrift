@@ -2,7 +2,7 @@ from .setup import on_pi
 
 from donkeycar.parts.actuator import (
     Arduino, ArdImu, PCA9685, PWMSteering, PWMThrottle,
-    ArdPWMSteering, ArdPWMThrottle,
+    ArdPWMSteering, ArdPWMThrottle, ArdModeCmd,
 )
 import pytest
 
@@ -393,3 +393,51 @@ def test_ardpwm_throttle_auto_mode_writes_pwm(fake_ard_pwm_controller):
         assert result is not None
     finally:
         Arduino.ard_device = original_device
+
+
+# ======================== 车控模式下行命令测试 ========================
+
+def test_arduino_set_car_mode_writes_cmd_frame():
+    """set_car_mode 应向串口写出 C<m> 帧，非法值不写。"""
+    original_device = Arduino.ard_device
+    fake = FakeArduinoSerial(b"")
+    Arduino.ard_device = fake
+    try:
+        controller = Arduino.__new__(Arduino)
+        controller.set_car_mode(2)
+        assert fake.written == [b"C2\n"]
+
+        # 非法值不写
+        controller.set_car_mode(3)
+        controller.set_car_mode(-1)
+        assert fake.written == [b"C2\n"]
+    finally:
+        Arduino.ard_device = original_device
+
+
+class FakeModeController:
+    def __init__(self):
+        self.written = []
+
+    def set_car_mode(self, mode):
+        self.written.append(mode)
+
+
+def test_ard_mode_cmd_writes_and_dedups():
+    """ArdModeCmd 首次命令写入、重复命令去重、None 不写。"""
+    ctrl = FakeModeController()
+    part = ArdModeCmd(controller=ctrl)
+
+    part.run(2)
+    part.run(2)       # 重复命令去重
+    part.run(None)    # 无命令不写
+    part.run(1)
+
+    assert ctrl.written == [2, 1]
+
+
+def test_ard_mode_cmd_requires_controller():
+    """ArdModeCmd 未提供控制器时应抛 ValueError。"""
+    with pytest.raises(ValueError):
+        ArdModeCmd(controller=None)
+

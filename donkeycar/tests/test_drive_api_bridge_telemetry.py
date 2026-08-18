@@ -145,3 +145,28 @@ def test_run_delegates_telemetry_kwargs(monkeypatch):
     assert len(telemetry_msgs) == 1
     assert telemetry_msgs[0]["gz"] == 0.5
     assert telemetry_msgs[0]["throttle"] == 0.2
+
+
+def test_car_mode_command_is_sticky_and_returned():
+    """car_mode 命令应作为第 7 个返回值传出，且粘滞（无新命令时仍保持）。"""
+    bridge = _make_bridge()
+    bridge._handle_message({"car_mode": 2})
+
+    outputs = bridge.run_threaded(img_arr=None)
+    assert outputs[6] == 2
+
+    # 粘滞：下一次调用仍返回最后一次命令值，避免主循环漏读单次 latch
+    outputs = bridge.run_threaded(img_arr=None)
+    assert outputs[6] == 2
+
+
+def test_car_mode_command_rejects_invalid_values():
+    """非法 car_mode（非 0/1/2 或非数字）不改变命令值。"""
+    bridge = _make_bridge()
+    bridge._handle_message({"car_mode": 3})
+    bridge._handle_message({"car_mode": "x"})
+
+    assert bridge.car_mode is None
+    outputs = bridge.run_threaded(img_arr=None)
+    assert outputs[6] is None
+

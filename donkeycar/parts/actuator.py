@@ -1214,7 +1214,22 @@ class Arduino:
         # with Arduino.ard_lock:
         #     Arduino.ard_device.write(("%d:%d\n" % (self.PWM_steering, self.PWM_throttle)).encode('ascii'))
         # return
-    
+
+    def set_car_mode(self, mode: int):
+        """下发车控模式命令到 ESP32（Serial1 下行 C<m> 帧，m ∈ {0,1,2}）。
+
+        与 Firmware#111 的 RX 契约对齐：0=手动 / 1=半自动 / 2=全自动。
+        仅接受合法值；写串口在 ard_lock 下进行，异常吞掉并告警，不影响主循环。
+        """
+        if mode not in (0, 1, 2):
+            logger.warning("忽略非法车控模式命令: %r", mode)
+            return
+        try:
+            with Arduino.ard_lock:
+                Arduino.ard_device.write(f"C{mode}\n".encode('ascii'))
+        except Exception as exc:
+            logger.warning("下发车控模式命令失败: %s", exc)
+
     def _read_serial_bytes(self):
         """将串口可读字节全部读入 _rx_buf（持有 ard_lock）。"""
         with Arduino.ard_lock:
@@ -1653,6 +1668,36 @@ class ArdRc:
 
     def shutdown(self):
         self.running = False
+
+
+class ArdModeCmd:
+    """把 web UI 下发的车控模式命令写到 ESP32（Pi → ESP32 下行）。
+
+    上游 DriveApiBridge 通过 'car/mode_cmd' Memory 输出最后一条车控模式命令
+    （0=手动 / 1=半自动 / 2=全自动，尚无命令时为 None），本 Part 去重后调用
+    Arduino.set_car_mode() 写 Serial1 下行 C<m> 帧。与 ArdRc/ArdImu 共享同一
+    个 Arduino 控制器（同一串口连接）。
+
+    使用方式（须在 Arduino 控制器创建之后注册）：
+        mode_cmd = ArdModeCmd(controller=arduino_controller)
+        V.add(mode_cmd, inputs=['car/mode_cmd'])
+    """
+
+    def __init__(self, controller=None):
+        if controller is None:
+            raise ValueError("ArdModeCmd 需要一个 Arduino 控制器实例")
+        self.controller = controller
+        self.last_mode = None
+
+    def run(self, mode_cmd=None):
+        """mode_cmd 为 None 或与上次相同则不写，避免重复刷帧。"""
+        if mode_cmd is None or mode_cmd == self.last_mode:
+            return
+        self.last_mode = mode_cmd
+        self.controller.set_car_mode(mode_cmd)
+
+    def shutdown(self):
+        self.last_mode = None
 
 
 class RcRecordMerge:
