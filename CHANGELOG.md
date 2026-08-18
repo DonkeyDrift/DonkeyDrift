@@ -1,5 +1,19 @@
 # 变更日志
 
+## 2026-08-18 (36)
+
+- feat(trainer): 「我这台电脑」训练模式开箱即用——新增一键环境检测（SSH/平台/Python/donkeycar）与 Windows/Mac 适配引导（Issue #218）
+  - 背景：mypc 训练档此前只是"能用 SSH 的高级用法"，用户需自己开 SSH、装 donkeycar、手写 `train_my_pc.conf`，页面无引导；远端命令是 POSIX 风格（`tar`/`cd`/bash），Windows 原生 SSH 基本要 WSL，Mac 未适配，且连接/缺依赖时只看到训练 job 失败、无修复提示。
+  - `web_ui/backend/mypc_probe.py`（新增）：轻量、无副作用的预检模块——SSH 连通性检测、`uname -s`/`wsl.exe` 平台探测（Linux/macOS/Windows + WSL）、Python 解释器探测（先验配置 `python_path`，再按 `python3`/`python`/`~/miniconda3/envs/donkey/bin/python`/`/opt/homebrew/bin/python3` 等常见顺序自动探测）、`donkeycar` 包与 `donkey` CLI 校验；每项返回 `ok/warn/fail` + 可操作修复提示，汇总 `suggestions`。
+  - `web_ui/backend/routers/trainer.py`：新增 `POST /api/trainer/mypc/probe`（`asyncio.to_thread` 跑阻塞的 paramiko 探测），入参为 host/user/password/port/remote_dir_base/python_path。
+  - `web_ui/frontend/src/services/api.ts`：新增 `MyPcProbeResult`/`MyPcProbeCheck` 类型与 `probeMyPc()`。
+  - `web_ui/frontend/src/components/trainer/MyPcProbePanel.tsx`（新增）：mypc 表单下的「环境检测」面板——检测按钮、加载态、逐项结果（绿勾/黄警告/红叉/蓝信息 + 修复提示）、检测到的 Python 一键回填表单、修复建议列表。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mypc 模式在 RemoteConfigForm 下接入 MyPcProbePanel，`onApplyPythonPath` 回填 `python_path`。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：zh/en 各新增 10 条检测相关词条（`myPcProbe*`）。
+  - `docs/guide/web-drive-console-user-guide.md`：新增「本机训练（This Computer）」章节，说明首次使用准备（SSH 开启方式）、Windows（推荐 WSL）/macOS/Linux 平台支持与默认 Python 路径、连接失败/缺依赖时的排查指引。
+  - 测试同步：新增 `web_ui/backend/tests/test_trainer_mypc_probe.py`（6 项：Linux 就绪、SSH 失败、macOS 自动探测、Windows 无 WSL、缺 donkeycar、配置 python_path 优先）；`test_trainer_mypc.py` 新增探测路由端点测试。后端 pytest 全量 89 项、前端 vitest 20 文件 100 项、`tsc -b --noEmit` 全部通过。
+  - 注：本次在 worktree `.worktrees/issue218-trainer-mypc-ootb` 基于最新 `origin/Tony` 建功能分支 `Tony-issue218-trainer-mypc-ootb` 作业，主工作区在 `Tony-joystick-default-collapsed` 分支有并行会话未提交改动（`main.py` SPA 深链 + 未跟踪 `train_my_pc.conf`），全程未触碰。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (35)
 
 - feat(web-ui): 虚拟摇杆面板默认折叠——每次进入/刷新 Drive 页都折叠为「虚拟摇杆」标题一行
