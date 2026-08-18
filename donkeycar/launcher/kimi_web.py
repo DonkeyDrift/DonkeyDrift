@@ -26,7 +26,7 @@
   ``#token=`` 片段）；只绑了回环的存活实例（如 TUI 内嵌 server）对
   局域网 IP 探测不通时视为不可复用，由调用方另拉监听 0.0.0.0 的实例。
 
-issue #168（打开后是"全新状态"）的两处约束：
+issue #168（打开后是"全新状态"）的三处约束：
 - 复用路径校验实例运行目录：登记条目不带 cwd，改读 ``/proc/<pid>/cwd``
   与请求的 cwd 比对；不是同一目录的实例（如在 mycar 里跑的 TUI 内嵌
   server）不复用，另起目标目录的实例，KCW 才会进对工作区。
@@ -34,6 +34,9 @@ issue #168（打开后是"全新状态"）的两处约束：
   localStorage，按 origin（含端口）隔离；复用路径可能挑到不同端口的
   实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
   首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
+- 入口 host 用 mDNS 主机名（``<hostname>.local``）：origin 还含 host，
+  上位机 DHCP 换 IP 同样会让 origin 漂移、置顶再次"被清空"；mDNS 主机
+  名不随 IP 变化，作为入口 host 优先使用，解析不到才回退局域网 IP。
 """
 
 import json
@@ -41,6 +44,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -192,6 +196,35 @@ def _lan_ip():
         return None
 
 
+def _mdns_hostname():
+    """本机稳定 mDNS 主机名（如 ``TONY007.local``），origin 不随 IP 漂移。
+
+    浏览器把 KCW 的置顶/模式/语言主题等 UI 偏好存 localStorage、按 origin
+    （协议+host+端口）隔离；host 用 DHCP 局域网 IP 时，IP 一变 origin 就
+    变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，作为
+    入口 host 优先使用。仅当 mDNS 名能解析到本机局域网 IP 时返回，否则
+    None（回退局域网 IP，保持原有可达性）。
+    """
+    hostname = socket.gethostname()
+    if not hostname:
+        return None
+    fqdn = f"{hostname.split('.')[0]}.local"
+    lan = _lan_ip()
+    if not lan:
+        return None
+    try:
+        infos = socket.getaddrinfo(fqdn, None, socket.AF_INET)
+    except (socket.gaierror, OSError):
+        return None
+    addrs = {info[4][0] for info in infos}
+    return fqdn if lan in addrs else None
+
+
+def _entry_host():
+    """KCW 入口 URL 的稳定 host：mDNS 主机名优先，其次局域网 IP。"""
+    return _mdns_hostname() or _lan_ip()
+
+
 def _is_loopback_host(host) -> bool:
     """URL host 是否是上位机本机视角地址（远程浏览器打不开）。
 
@@ -206,18 +239,23 @@ def _is_loopback_host(host) -> bool:
 
 
 def _lan_url(url: str):
-    """把 URL 里的回环/通配 host 改写为本机局域网 IP。
+    """把 URL 的 host 改写为稳定入口 host（mDNS 主机名优先，其次局域网 IP）。
 
-    保留端口、路径与 ``#token=`` 片段（token 在 # 片段里由前端页面读取，
-    不经过网络传输）。探测不到局域网 IP 或 host 本就远程可达时原样返回。
+    回环/通配 host（``localhost``/``127.x``/``0.0.0.0``）必须改写为远程
+    浏览器可达的地址（issue #125）；本机局域网 IP 也一并改写为 mDNS 主机
+    名，让 origin 不随 DHCP 换 IP 漂移（issue #168 后续）。保留端口、路径
+    与 ``#token=`` 片段；探测不到局域网 IP 或 host 是其它远程地址时原样
+    返回。
     """
-    lan = _lan_ip()
-    if not lan:
+    entry = _entry_host()
+    if not entry:
         return url
     parts = urllib.parse.urlsplit(url)
-    if not _is_loopback_host(parts.hostname):
+    host = (parts.hostname or "").lower().strip("[]")
+    lan = _lan_ip()
+    if not (_is_loopback_host(host) or (lan and host == lan)):
         return url
-    netloc = f"{lan}:{parts.port}" if parts.port else lan
+    netloc = f"{entry}:{parts.port}" if parts.port else entry
     return urllib.parse.urlunsplit(
         (parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
@@ -255,6 +293,10 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
         if cwd_real is not None and _proc_cwd(inst["pid"]) != cwd_real:
             continue
         host = inst["host"]
+        # 实例是否本机视角（回环/通配，或登记的就是本机局域网 IP）；
+        # 只有本机实例才值得改用 mDNS 稳定 origin（issue #168 后续）
+        is_local = _is_loopback_host(host) or (
+            _lan_ip() is not None and host == _lan_ip())
         if _is_loopback_host(host):
             # 只绑回环的实例（如 TUI 内嵌 server）远程浏览器访问不到；
             # 对局域网 IP 再探一次：通了说明实际监听 0.0.0.0 只是登记
@@ -265,6 +307,8 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
             host = lan
         if not _probe_server(host, inst["port"], token):
             continue
+        if is_local:
+            host = _entry_host() or host
         url = f"http://{host}:{inst['port']}/"
         if token:
             url += f"#token={token}"
