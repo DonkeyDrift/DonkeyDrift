@@ -110,10 +110,10 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
           type="button"
           onClick={() => onConfigChange({ advancedEnabled: !config.advancedEnabled })}
           aria-expanded={config.advancedEnabled}
-          className="w-full py-2 flex items-center justify-between text-sm text-zinc-400 hover:text-zinc-200"
+          className="w-full flex items-center justify-between text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
         >
           <span className="font-medium">{t('trainer.advancedOptions')}</span>
-          {config.advancedEnabled ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {config.advancedEnabled ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
 
         {config.advancedEnabled && (
