@@ -18,8 +18,8 @@ vi.mock('./services/api', () => ({
 vi.mock('./components/SidePanel', () => ({
   SidePanel: () => <div data-testid="side-panel" />,
 }));
-vi.mock('./components/TubNavigator', () => ({
-  TubNavigator: () => <div data-testid="tub-navigator" />,
+vi.mock('./components/TubLibrary', () => ({
+  TubLibrary: () => <div data-testid="tub-library" />,
 }));
 vi.mock('./components/TubEditor', () => ({
   TubEditor: () => <div data-testid="tub-editor" />,
