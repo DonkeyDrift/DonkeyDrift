@@ -26,8 +26,8 @@ describe('ModeTabs', () => {
     renderTabs('local', vi.fn());
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveTextContent('我这台电脑');
-    expect(buttons[1]).toHaveTextContent('当前这台 Linux 电脑');
+    expect(buttons[0]).toHaveTextContent('客户端');
+    expect(buttons[1]).toHaveTextContent('本机');
     expect(buttons[2]).toHaveTextContent('云端');
   });
 
@@ -44,7 +44,7 @@ describe('ModeTabs', () => {
     renderTabs('local', onChange);
     fireEvent.click(screen.getByText('云端'));
     expect(onChange).toHaveBeenCalledWith('online');
-    fireEvent.click(screen.getByText('我这台电脑'));
+    fireEvent.click(screen.getByText('客户端'));
     expect(onChange).toHaveBeenCalledWith('mypc');
   });
 });
