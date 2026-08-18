@@ -264,8 +264,6 @@ export const CarConnectorPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-zinc-100">{t('connector.pageTitle')}</h1>
-
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* 左栏 */}
         <div className="space-y-6">
