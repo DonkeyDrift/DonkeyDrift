@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-18 (22)
+
+- fix(launcher): KCW 入口 URL host 用 mDNS 主机名，置顶/模式/语言主题不再随 DHCP 换 IP 被清空（Issue #168 后续）
+  - 背景：Issue #168 已固定端口 58640、缺省 cwd 落到 Projects 工作区，但浏览器把 KCW 的置顶等 UI 偏好存在 localStorage、按 origin（协议+host+端口）隔离；host 用上位机 DHCP 局域网 IP（近期从 .41 漂到 .57）时，IP 一变 origin 就变，置顶聊天仍会"全部消失"。
+  - `donkeycar/launcher/kimi_web.py`：
+    - 新增 `_mdns_hostname()`（`socket.gethostname()` 拼 ``<hostname>.local``，仅当 mDNS 解析到本机局域网 IP 时才采用）与 `_entry_host()`（mDNS 优先、局域网 IP 回退）。
+    - `_lan_url()`：回环/通配 host 与本机局域网 IP 统一改写为稳定入口 host，mDNS 可用时入口 URL 的 host 稳定、不随 IP 漂移。
+    - `_live_instance_url()`：本机实例（登记回环/通配或本机 IP）组装入口 URL 时改用 `_entry_host()`；其它远程 host 不受影响。
+    - 模块 docstring 更新为"三处约束"（cwd 校验 / 固定端口 / mDNS host）。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 4 项 mDNS 优先与 foreign host 不误改断言，autouse fixture 默认钉 `_mdns_hostname` 为 None 保持既有断言稳定；本文件 42 passed、launcher 相关 116 passed。
+  - 注：本次改动在 `Tony-kcw-origin-stable` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (21)
 
 - fix(web-ui): 修复流程页滚出 Drive 后视频流/WebSocket 仍在后台运行，拖慢整页切换（Issue #135 收尾）+ 后端静态资源缓存头
