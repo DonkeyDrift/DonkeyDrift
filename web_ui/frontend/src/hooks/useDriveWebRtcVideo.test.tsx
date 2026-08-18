@@ -61,8 +61,9 @@ const HookProbe: React.FC<{
   factory?: () => RTCPeerConnection;
   negotiationTimeoutMs?: number;
   retryIntervalMs?: number;
-}> = ({ signal, onState, factory, negotiationTimeoutMs, retryIntervalMs }) => {
-  const state = useDriveWebRtcVideo({ incomingSignal: signal, peerConnectionFactory: factory, negotiationTimeoutMs, retryIntervalMs });
+  videoReadyTimeoutMs?: number;
+}> = ({ signal, onState, factory, negotiationTimeoutMs, retryIntervalMs, videoReadyTimeoutMs }) => {
+  const state = useDriveWebRtcVideo({ incomingSignal: signal, peerConnectionFactory: factory, negotiationTimeoutMs, retryIntervalMs, videoReadyTimeoutMs });
   onState(state);
   return <video ref={state.videoRef} />;
 };
@@ -166,6 +167,27 @@ describe('useDriveWebRtcVideo', () => {
     await waitFor(() => {
       expect(lastCallValue(onState).state).toBe('degraded');
     });
+  });
+
+  it('收到 track 但首帧未就绪时超时降级', async () => {
+    const pc = new FakePeerConnection();
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} factory={factory} negotiationTimeoutMs={1000} videoReadyTimeoutMs={10} />);
+
+    await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+
+    await act(async () => {
+      pc.ontrack?.({
+        streams: [{} as MediaStream],
+        track: {} as MediaStreamTrack,
+        receiver: { playoutDelayHint: undefined } as RTCRtpReceiver & { playoutDelayHint?: number },
+      } as unknown as RTCTrackEvent);
+    });
+
+    await waitFor(() => expect(lastCallValue(onState).state).toBe('connected'));
+    await waitFor(() => expect(lastCallValue(onState).state).toBe('degraded'));
   });
 
   it('降级后会自动重试 WebRTC session', async () => {

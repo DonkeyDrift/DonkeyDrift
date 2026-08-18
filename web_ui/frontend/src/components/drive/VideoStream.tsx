@@ -7,6 +7,7 @@ import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
 
 export const DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS = 3000;
+export const DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS = 5000;
 
 interface VideoStreamProps {
   className?: string;
@@ -29,10 +30,11 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mjpegFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mjpegFirstFrameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevWebRtcVisibleRef = useRef(false);
   const selectedTransport = transport ?? getDriveVideoTransport();
   const forceMjpeg = selectedTransport === 'mjpeg';
-  const { videoRef, state, stats, metrics, videoReady } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline: carOnline ?? false });
+  const { videoRef, state, stats, metrics, videoReady } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline });
 
   const streamUrl = `${API_URL}/drive/video`;
   // 任意值阴影皮肤 CSS 覆盖不到:浅色改用皮肤同款软 slate 阴影
@@ -72,12 +74,34 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
     return () => resetRetry();
   }, [retryCount]);
 
+  // MJPEG 首帧超时：后端无首帧时 <img> 既不 onLoad 也不 onError，会永远停在 loading；
+  // 超时后按 onError 同路重试（retryCount++ 重挂载 <img>），避免卡死。
+  useEffect(() => {
+    if (status !== 'loading') {
+      return;
+    }
+    mjpegFirstFrameTimerRef.current = setTimeout(() => {
+      mjpegFirstFrameTimerRef.current = null;
+      setStatus('error');
+      resetRetry();
+      retryTimerRef.current = setTimeout(() => {
+        setRetryCount((c) => c + 1);
+      }, 2000);
+    }, DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS);
+    return () => {
+      if (mjpegFirstFrameTimerRef.current) {
+        clearTimeout(mjpegFirstFrameTimerRef.current);
+        mjpegFirstFrameTimerRef.current = null;
+      }
+    };
+  }, [status]);
+
   useEffect(() => {
     if (forceMjpeg) {
       resetFallbackTimer();
       return;
     }
-    if (webRtcConnected) {
+    if (webRtcVisible) {
       resetFallbackTimer();
       setMjpegFallbackAllowed(false);
       return;
@@ -89,7 +113,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       }, DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS);
     }
     return () => undefined;
-  }, [forceMjpeg, webRtcConnected]);
+  }, [forceMjpeg, webRtcVisible]);
 
   useEffect(() => resetFallbackTimer, []);
 

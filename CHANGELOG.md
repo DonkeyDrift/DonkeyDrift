@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-18 (38)
+## 2026-08-18 (39)
 
 - fix(trainer): 训练器 SSH 凭据不再明文落盘/入库，my-PC 默认配置不再指向云服务器（Issue #219）
   - 根因：`train_my_pc.conf` 与 `train_online.conf` 明文存 `password = dkc@2026`，且 my-PC 配置直接复制云服务器 `haowenpi.com`/`ubuntu`；`donkeycar/management/train_online.py` 的 `_load_config()` 在配置缺失时硬编码生成云服务器默认值，是 my-PC 被污染的来源。
@@ -16,6 +16,15 @@
   - 配置与 gitignore：`web_ui/backend/train_online.conf` 移除密码并取消 git 跟踪；新增 `web_ui/backend/train_my_pc.conf.example` 空模板；`.gitignore` 忽略两个 `.conf`。
   - 测试同步：`tests/test_trainer_mypc.py` 新增/更新——ssh 凭据透传、config 不写密码、get 返回空密码、自动创建的默认配置不含明文密码；trainer 相关 17 项通过；前端 `tsc -b --noEmit` 通过。
   - 注：历史已提交过该明文密码（`train_online.conf`、前端构建产物、`train_online.py`、`useStore.ts` 等多处），建议轮换该密码；历史清洗（filter-repo + 强推）属破坏性/共享操作，需用户另行授权后处理，本次未动历史。本次在 `Tony-issue219-trainer-ssh-credentials` 分支（worktree 作业）完成。
+
+## 2026-08-18 (38)
+
+- fix(web-ui): Drive 页摄像头偶发卡死在「正在连接摄像头...」——MJPEG 首帧无超时、WebRTC 收到 track 却无首帧、carOnline 门控竞态三处叠加（Issue #221）
+  - 背景：进入 Drive 页后偶发既没切到 WebRTC、也没回退到 MJPEG，永远停在「正在连接摄像头...」，FPS 显示 `-`。三条失效路径：① MJPEG `<img src="/drive/video">` 只有 `onError` 才重试，后端无首帧时既不触发 `onLoad` 也不触发 `onError`，`status` 永远 `loading`；② WebRTC 在 `ontrack` 即置 `connected`、`videoReady` 要等 `onloadeddata`，首帧不解码时 `webRtcConnected=true` 会重置 MJPEG 回退计时器但 `webRtcVisible` 永为 false（黑屏 + 遮罩不消失）；③ `carOnline` 初值 `null` 被 `?? false` 压成 `false`，挂载时不启动 WebRTC，随后 `null→true` 又触发整体 `closePeer` 重启会话。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：新增 `DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS=5000`，MJPEG `loading` 首帧超时按 `onError` 同路重试；fallback 门控由 `webRtcConnected` 改为 `webRtcVisible`；`carOnline` 直接传 `null`（不再 `?? false`）。
+  - `web_ui/frontend/src/hooks/useDriveWebRtcVideo.ts`：新增 `DRIVE_WEBRTC_VIDEO_READY_TIMEOUT_MS=8000` 与 `videoReadyTimeoutMs` 选项，`ontrack` 后首帧迟迟不解码则超时降级重试；`carOnline` 类型放宽为 `boolean | null`，挂载生命周期与 `carOnline` 门控拆成两个 effect（`shouldRunRef` 只在「应运行」状态翻转时 start/stop，挂载 cleanup 复位兼容 StrictMode）。
+  - 测试同步：`VideoStream.test.tsx` 新增「MJPEG 首帧超时后自动重试」；`useDriveWebRtcVideo.test.tsx` `HookProbe` 透传 `videoReadyTimeoutMs` 并新增「收到 track 但首帧未就绪时超时降级」。前端 vitest 全量 20 文件 102 项、`tsc -b --noEmit` 通过；相关文件 eslint 0 error、无新增警告。
+  - 注：本次在 `Tony-fix-issue-221` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
 
 ## 2026-08-18 (37)
 
