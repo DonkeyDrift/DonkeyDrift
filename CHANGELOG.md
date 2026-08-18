@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-18 (26)
+
+- fix(trainer): Trainer 三档标签由「客户端/本机/云端」改为「我的电脑 / Linux 电脑 / 云端」，消除用户对前后两档语义的混淆（Issue #170 收尾）
+  - 背景：上一轮「客户端/本机」对普通用户不够直观——「本机」在用户自己电脑上操作时易被误读为"我的电脑"，与「客户端」难以区分。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc`「客户端」→「我的电脑」、`tabLocal`「本机」→「Linux 电脑」、`startMyPcTraining`→「在我的电脑上训练」、`startLocalTraining`→「在 Linux 电脑上训练」、`startCloudTraining`→「在云端训练」、`myPcTraining`→「我的电脑训练」；en 同步 `My Computer / Linux PC / Train on My Computer / Train on This Linux PC / Train on Cloud / My Computer Training`（`tabCloud` 云端 / Cloud 不变）。
+  - `web_ui/frontend/src/components/trainer/ModeTabs.test.tsx`：三档渲染与点击断言同步新短名。
+  - 测试同步：前端 vitest `ModeTabs.test.tsx` 3 项通过、`tsc -b --noEmit` 通过。
+  - 注：本次改动在 `Tony-issue170-trainer-mode-naming2` 功能分支（worktree 作业）上完成并按分支流程提交、PR 合入 `Tony`。Firmware 无改动，无需 OTA。
+
 ## 2026-08-18 (25)
 
 - fix(web-ui): 流程页滚动卡顿收尾补刀——遥测图 60fps 空转、PA 播放循环、Drive UI 50ms 同步与同导航项重复点击滚动（#178 后续）
