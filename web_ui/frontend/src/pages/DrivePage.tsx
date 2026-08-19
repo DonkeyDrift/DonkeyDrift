@@ -256,15 +256,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     <div className="space-y-4">
       {/* 顶部工具栏：窄屏允许换行，避免一排溢出（页内标题已上移到 section 头 #178） */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* 左：驾驶模式 + 模型 + Park 状态 */}
+        {/* 左：Park 状态 + 驾驶模式 + 模型 */}
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-          <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
-          <ModelSelector
-            value={currentModel}
-            options={models}
-            onChange={handleModelChange}
-            disabled={!carState.online || modelsLoading}
-          />
           {telemetry?.rc_park === 1 && (
             <span
               className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
@@ -273,6 +266,13 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               {t('drive.parkLocked')}
             </span>
           )}
+          <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
+          <ModelSelector
+            value={currentModel}
+            options={models}
+            onChange={handleModelChange}
+            disabled={!carState.online || modelsLoading}
+          />
         </div>
         {/* 右：已录制条数 + 录制 */}
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
