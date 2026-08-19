@@ -789,7 +789,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
                   'steering', 'throttle', 'pilot/angle', 'pilot/throttle']
     V.add(ctr,
           inputs=ctr_inputs,
-          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'car/mode_cmd'],
+          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
           threaded=True)
 
     #

@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-19 (44)
+
+- fix(drive): 修正 complete 模板 DriveApiBridge 输出错位，让 car/mode_cmd 真正到达 ArdModeCmd（Issue #223 后续）
+  - 根因：`DriveApiBridge.run_threaded` 返回 7 元组 `(angle, throttle, mode, recording, buttons, reconnect_simulator, car_mode_cmd)`，但 `donkeycar/templates/complete.py` 的输出列表只有 6 项、缺 `reconnect_simulator` 占位，导致第 6 个返回值 `reconnect_simulator` 错接到 `car/mode_cmd`、真正的车控模式命令（第 7 个返回值）被丢弃，「前端选模式 → 车端切模式」仍不生效。
+  - `donkeycar/templates/complete.py`：DriveApiBridge outputs 由 6 项补为 7 项，按返回顺序加入 `reconnect_simulator`，使 `car/mode_cmd` 落到第 7 位。
+  - 测试同步：`donkeycar/tests/test_template_drive_api_bridge.py` 新增 `test_complete_template_drive_api_bridge_outputs_include_car_mode_cmd` 断言输出顺序；`test_template_drive_api_bridge.py` + `test_actuator.py` 共 34 passed / 2 skipped。
+  - 注：本次在 `Tony-issue223-fix-mode-outputs` 功能分支（worktree `issue223-mode-protocol` 作业）完成；仅 DD 模板改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (43)
 
 - fix(web-ui): 导航切换改为快速平滑滑动并修复卡死后瞬跳与滚动锚定顶走（Issue #135 第六轮）
