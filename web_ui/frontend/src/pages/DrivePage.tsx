@@ -257,11 +257,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
           <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
-          {telemetry?.rc_park === 1 && (
-            <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium text-xs whitespace-nowrap">
-              {t('drive.parkLocked')}
-            </span>
-          )}
           <ModelSelector
             value={currentModel}
             options={models}
@@ -290,6 +285,14 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             {t('drive.recordedCount', { count: carState.numRecords })}
           </span>
         </div>
+        {telemetry?.rc_park === 1 && (
+          <span
+            className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium text-xs whitespace-nowrap"
+            data-rc-park={telemetry.rc_park}
+          >
+            {t('drive.parkLocked')}
+          </span>
+        )}
       </div>
 
       {/* 摄像头 + 遥测：抽屉展开时在 lg 屏让出右侧空间，画面随抽屉同步缩放 */}

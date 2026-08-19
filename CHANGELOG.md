@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-19 (45)
+## 2026-08-19 (46)
 
 - feat(drive): 虚拟摇杆折叠框改为贴屏幕最右的抽屉，收起时摄像头画面与遥测曲线占满整页宽度（Issue #232）
   - 需求：原布局是 `grid grid-cols-1 lg:grid-cols-3`，摄像头+遥测占左 2/3、控制面板占右 1/3；折叠只是隐藏右列内部内容、右列容器仍在，画面不会放大。改为右侧抽屉后，收起时控制面板完全退出布局流，画面占满整页宽度；展开时抽屉从屏幕最右往左滑出，画面同步缩小让位。
@@ -11,6 +11,13 @@
     - 输入源选择、摇杆、油门条、可编程按钮、参数面板、快捷键提示整体迁入抽屉；`joystickOpen` 状态与折叠语义保持不变。
   - 测试同步：前端 vitest 全量 20 文件 104 项通过、`tsc -b --noEmit`、`npm run build` 通过。
   - 注：本次在 `Tony-issue232-joystick-drawer` 功能分支（worktree `session-issue232` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (45)
+
+- fix(web-ui): 把 Drive 页 Park 锁定徽标从顶栏控制组中间移到顶栏右侧，作为独立状态指示（不再夹在模式选择器与模型选择器之间）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：移除顶栏左组里 `DriveModeSelector` 与 `ModelSelector` 之间的 Park 徽标；在顶栏右端（`justify-between` 空位）单独渲染，`rc_park === 1` 时显示红色「Park 锁定 · 油门被钳 0」，并加 `whitespace-nowrap` 防止窄屏换行。
+  - 测试同步：前端 `npm run check`、`vitest`（20 文件 104 项）与 `npm run build` 全过，无新增测试文件。
+  - 注：本次在 `Tony-park-btn-pos` 功能分支（worktree `park-btn-pos` 作业）完成；仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-19 (44)
 
