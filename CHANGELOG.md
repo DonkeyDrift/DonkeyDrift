@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-19 (51)
+
+- fix(launcher): Donkey 菜单页主题不随浏览器深浅色同步——主题按钮改为三态（跟随系统 / 浅色 / 深色），手动选择后可切回"跟随系统"（Issue #230 同源，扩展到 Donkey 启动页）
+  - 背景：Donkey 菜单页（8090 launcher）与 DD web_ui 修复前存在同一问题：手动单击主题按钮后显式主题被持久化到 localStorage（`donkeydrifter.ui.theme`），从此不再跟随浏览器，且按钮是"深/浅"二选一、没有"跟随系统"入口。
+  - `donkeycar/launcher/server.py`：
+    - 首屏防闪烁脚本接受 `system`，并把模式与生效主题分别写到 `html[data-mode]` / `html[data-theme]`。
+    - 主题按钮新增显示器图标（`icon-monitor`），图标显隐由 `html[data-mode]` 驱动：跟随系统显显示器、浅色显太阳、深色显月亮；移除按钮上的 `data-i18n-aria/title`，改由 `renderThemeBtn()` 统一生成动态 aria-label/title，并在语言切换后重新渲染。
+    - `applyTheme()` 同时写 `data-mode` 与 `data-theme`；`toggleTheme()` 由"深↔浅"二选一改为三态循环 `跟随系统 → 浅色 → 深色 → 跟随系统`；`initTheme()` 仍按存储值（含 `system`）初始化并监听 `prefers-color-scheme` 变化。
+    - i18n 新增 `theme.followSystem` / `theme.toggleSystem`（中英）。
+  - `tests/test_launcher_theme_single_button.py`：由"二选一"用例改为三态用例，覆盖 `data-mode` 图标显隐、三态循环、首屏 `system` 解析与 `data-mode`/`data-theme` 写入等。
+  - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
+  - 注：本次在 `Tony-issue230-donkey-theme-sync` 功能分支（worktree 作业）完成，仅动 DD 的 launcher 页面，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (50)
 
 - feat(drive): Drive 页右侧抽屉的「虚拟摇杆」触发把手改为竖排文字，贴屏幕最右缘（Issue #232 微调）
