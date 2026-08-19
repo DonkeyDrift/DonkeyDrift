@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-19 (66)
+
+- fix(web-ui): DonkeyDrifter 页主题按钮去掉「跟随系统」显示器图标，改为深/浅两态互切（默认仍跟随浏览器，但不显示跟随系统状态）（Issue #230 最终形态，DD 前端）
+  - 背景：DD 前端（8000）主题按钮此前为 跟随系统/浅色/深色 三态，其中「跟随系统」显示显示器（电脑）图标；用户要求默认仍跟随浏览器，但按钮只保留太阳/月亮两态、去掉电脑图标。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：删除 `Monitor` 图标与 `NEXT_MODE`/`MODE_LABEL` 三态逻辑，改为按当前生效主题（`useResolvedTheme()`）在浅/深之间互切，图标仅太阳/月亮；aria-label 仅 `切换到浅色主题`/`切换到深色主题`。
+  - `web_ui/frontend/src/lib/theme.ts`：删除仅三态按钮使用的 `useThemeMode` 与 `THEME_MODE_CHANGE_EVENT`；`setTheme` 不再广播 mode 事件，`useResolvedTheme` 订阅逻辑不变；`readStoredTheme` 仍默认 `system`（无存储时跟随浏览器并实时监听）。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：由三态用例改为两态用例（8 项），覆盖默认跟随系统、浅/深互切、持久化、手动选择后不再跟随。
+  - 测试同步：`ThemeSwitcher` 8 项通过、`npm run check`（tsc）通过、`npm run build` 通过；完整前端 vitest 中 `App.test.tsx` 有 3 项因 `services/api` mock 缺 `getDonkeyUrl` 失败，为既有问题（PR #257 引入 `getDonkeyUrl` 未同步 mock），与本次改动无关。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (65)
 
 - fix(web-ui): Drive 页顶部工具栏移入视频列，录制按钮右边缘与摄像头画面右边界对齐；修复 App.test mock 缺 getDonkeyUrl
