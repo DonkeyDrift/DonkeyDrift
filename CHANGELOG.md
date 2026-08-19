@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-19 (42)
+## 2026-08-19 (43)
 
 - fix(web-ui): 导航切换改为快速平滑滑动并修复卡死后瞬跳与滚动锚定顶走（Issue #135 第六轮）
   - 需求：点导航标签后不是瞬跳，而是像快进的手动翻页一样滑到目标分区；此前实测点击后主线程冻结、动画被压成一次瞬跳，部分场景滚动被浏览器按回原地。
@@ -13,6 +13,14 @@
   - 实测（Playwright CPU 4x 节流）：Drive↔TM↔Trainer↔PA 四段切换全部精准落位（err=0）、滑动 0.8–1.2s 单调平滑、每段仅 1 个 ~140–175ms longtask（第五轮基线单段 836ms 峰值且落位错 936–3182px）。
   - 测试同步：前端 vitest 20 文件 104 项全过、`tsc --noEmit` 与 `npm run build` 通过（无新增测试文件，滑动动画由 Playwright 实测脚本覆盖）。
   - 注：本次在 `Tony-issue135-nav-glide-round6` 功能分支（worktree `.worktrees/issue135-r6` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (42)
+
+- fix(drive): 车控模式下行协议对齐 Firmware#111——DD 下发 `MODE <m>` 而非 `C<m>`（Issue #223 端到端修复）
+  - 根因：Issue #223 DD 侧 `Arduino.set_car_mode()` 写 `C<m>\n`，但 Firmware #111 的 `CommandDispatcher` 只解析 `MODE ` / `MODE:` 前缀，两端协议不一致，导致「前端选模式 → 车端切模式」这条链路永远不通。
+  - `donkeycar/parts/actuator.py`：`set_car_mode()` 下发帧由 `C{mode}\n` 改为 `MODE {mode}\n`；docstring 与 `ArdModeCmd` 注释同步由 `C<m>` 改为 `MODE <m>`。
+  - 测试同步：`donkeycar/tests/test_actuator.py` `test_arduino_set_car_mode_writes_cmd_frame` 断言由 `C2\n` 改为 `MODE 2\n`；本文件 28 passed / 2 skipped。
+  - 注：本次在 `Tony-issue223-fix-mode-protocol` 功能分支（worktree 作业）完成，仅 DD 改动、Firmware 无改动、无需 OTA。
 
 ## 2026-08-19 (41)
 

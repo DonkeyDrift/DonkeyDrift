@@ -1216,7 +1216,7 @@ class Arduino:
         # return
 
     def set_car_mode(self, mode: int):
-        """下发车控模式命令到 ESP32（Serial1 下行 C<m> 帧，m ∈ {0,1,2}）。
+        """下发车控模式命令到 ESP32（Serial1 下行 MODE <m> 帧，m ∈ {0,1,2}）。
 
         与 Firmware#111 的 RX 契约对齐：0=手动 / 1=半自动 / 2=全自动。
         仅接受合法值；写串口在 ard_lock 下进行，异常吞掉并告警，不影响主循环。
@@ -1226,7 +1226,7 @@ class Arduino:
             return
         try:
             with Arduino.ard_lock:
-                Arduino.ard_device.write(f"C{mode}\n".encode('ascii'))
+                Arduino.ard_device.write(f"MODE {mode}\n".encode('ascii'))
         except Exception as exc:
             logger.warning("下发车控模式命令失败: %s", exc)
 
@@ -1675,7 +1675,7 @@ class ArdModeCmd:
 
     上游 DriveApiBridge 通过 'car/mode_cmd' Memory 输出最后一条车控模式命令
     （0=手动 / 1=半自动 / 2=全自动，尚无命令时为 None），本 Part 去重后调用
-    Arduino.set_car_mode() 写 Serial1 下行 C<m> 帧。与 ArdRc/ArdImu 共享同一
+    Arduino.set_car_mode() 写 Serial1 下行 MODE <m> 帧。与 ArdRc/ArdImu 共享同一
     个 Arduino 控制器（同一串口连接）。
 
     使用方式（须在 Arduino 控制器创建之后注册）：
