@@ -20,6 +20,7 @@ import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
 import { Circle, ChevronLeft, ChevronRight, Joystick } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
 type DrivePageProps = {
@@ -59,6 +60,35 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [joystickOpen, setJoystickOpen] = useState(false);
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
+
+  // 把手顶部动态对齐摄像头画面顶部：抽屉经 portal 挂到 body 后，把手是抽屉内 absolute 元素，
+  // 这里实时量出「摄像头画面顶部 - 抽屉顶部」作为把手在抽屉内的 top。
+  const cameraWrapRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const cam = cameraWrapRef.current?.getBoundingClientRect();
+      const drw = drawerRef.current?.getBoundingClientRect();
+      if (!cam || !drw || !handleRef.current) return;
+      const next = Math.max(0, cam.top - drw.top);
+      handleRef.current.style.top = `${next}px`;
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, []);
 
   const { params, loadFromServer } = useDriveStore();
   const { configPath } = useStore();
@@ -301,7 +331,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       </div>
 
       {/* 摄像头 + 遥测：抽屉展开时在 lg 屏让出右侧空间，画面随抽屉同步缩放 */}
-      <div className={`transition-all duration-300 ease-in-out ${joystickOpen ? 'lg:mr-[24rem]' : 'lg:mr-0'}`}>
+      <div ref={cameraWrapRef} className={`transition-all duration-300 ease-in-out ${joystickOpen ? 'lg:mr-[24rem]' : 'lg:mr-0'}`}>
         {active ? (
           <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
         ) : (
@@ -310,14 +340,18 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         <TelemetryChart telemetry={telemetry} className="mt-4" active={active} />
       </div>
 
-      {/* 右侧抽屉：虚拟摇杆控制面板（贴屏幕最右，从右往左滑出） */}
-      <div
-        className={`fixed right-0 top-[143px] lg:top-16 h-[calc(100vh-143px)] lg:h-[calc(100vh-4rem)] z-40 transition-all duration-300 ease-in-out ${
-          joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
-        }`}
-      >
+      {/* 右侧抽屉：虚拟摇杆控制面板（贴屏幕最右，从右往左滑出）。
+          经 createPortal 挂到 body，避免上层 section 的 content-visibility:paint containment
+          把 fixed 定位劫持为相对 section（否则把手会贴着摄像头画面右边而非屏幕右边）。 */}
+      {createPortal(
+        <div
+          ref={drawerRef}
+          className={`fixed right-0 top-[143px] lg:top-16 h-[calc(100vh-143px)] lg:h-[calc(100vh-4rem)] z-40 transition-all duration-300 ease-in-out ${
+            joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
+          }`}
+        >
         {/* 浮动触发把手：抽屉收起/展开开关，始终贴在屏幕右缘；「虚拟摇杆」竖排书写 */}
-        <div className="absolute right-full top-2 flex flex-col items-end">
+        <div ref={handleRef} className="absolute right-full flex flex-col items-end">
           <button
             onClick={() => setJoystickOpen(!joystickOpen)}
             title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
@@ -369,7 +403,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
         </div>
-      </div>
+        </div>,
+        document.body,
+      )}
 
     </div>
   );
