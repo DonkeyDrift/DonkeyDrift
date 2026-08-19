@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-19 (68)
+
+- feat(web-ui): Donkey 菜单改为当前页内嵌显示，顶栏控件（静音/DEV/Car Connector）样式对齐 DC 与 OTA
+  - `web_ui/frontend/src/App.tsx`：新增 `/donkey` 懒加载路由与空闲预取，指向新内嵌页 `DonkeyMenuPage`。
+  - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`（新增）：以 iframe 嵌入 launcher(:8090) 的 Donkey 菜单页，点击顶栏 Donkey 不再新开标签页（与 Drifter Console 的 `/console` 一致）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`DonkeyEntryLink` 由 `<a target="_blank">` 改为 `<Link to="/donkey">`，图标由 `Car` 改为 `Menu`；导出 `entryLinkCls` 供 Layout 复用。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：`ConsoleMuteButton` 静音态改 DC 蓝 `#5cc8ff`（边框/图标同色）并补 `aria-pressed`；`ConsoleDevToggle` 由滑块改为与 OTA 同款文字胶囊按钮（开启 cyan 高亮、关闭同 OTA 灰）。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.console-mute-btn` 并入主题/语言按钮的双层内圈视觉（修复与语言切换按钮边框厚度不一致），并加静音激活态蓝色覆盖。
+  - `web_ui/frontend/src/components/Layout.tsx`：Car Connector 导航项改用 `entryLinkCls`（与 KCW/DSH 同字号/弱化色）并加左侧 `Settings` 齿轮图标，桌面/移动端同步。
+  - 测试同步：`EnterButtons.test.tsx` 断言 Donkey 改走 `/donkey` 内嵌路由；`ConsoleControls.test.tsx` 新增 DEV 胶囊与静音蓝态断言；前端 vitest 全量 21 文件 112 项、`npm run check`（tsc）、`npm run build` 全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (67)
 
 - fix(drive): Drive 页虚拟摇杆抽屉面板移到把手左侧、标题不换行、副标题改为跑马灯（Issue #232 第五轮微调）
