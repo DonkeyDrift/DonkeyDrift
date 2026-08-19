@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-19 (50)
+
+- feat(drive): Drive 页右侧抽屉的「虚拟摇杆」触发把手改为竖排文字，贴屏幕最右缘（Issue #232 微调）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：把手按钮由横向 `flex items-center` 改为 `flex flex-col items-center`，展开/收起 chevron 置顶，`t('drive.virtualJoystick')` 用 `[writing-mode:vertical-rl]` 竖排、`tracking-wider leading-none` 收紧字距；按钮 `px-1.5 py-2 rounded-l-md` 收窄为竖向窄条，仍通过 `absolute right-full` 贴屏幕右缘。
+  - 测试同步：前端 vitest 全量 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer-v2` 功能分支（worktree `session-issue232-v2` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (49)
 
 - feat(console): Drifter Console 完全集成进 DonkeyDrifter——当前标签页内进入 + UI 重绘为 DD 风格（Issue #234）
