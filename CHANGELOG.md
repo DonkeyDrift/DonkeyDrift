@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-19 (46)
+
+- fix(web-ui): 页面主题不随浏览器深浅色同步——主题切换改为三态（浅色 / 深色 / 跟随系统），手动选择后可切回"跟随系统"（Issue #230）
+  - 背景：首次访问默认跟随浏览器 `prefers-color-scheme`；但手动单击主题切换按钮后，显式主题被持久化到 localStorage（`donkeydrifter.ui.theme`），从此不再跟随浏览器；且切换按钮是"深/浅"二选一，用户没有入口选回"跟随系统"。
+  - `web_ui/frontend/src/lib/theme.ts`：新增 `THEME_MODE_CHANGE_EVENT` 与 `useThemeMode()`（订阅当前模式 `system/light/dark`）；`setTheme()` 在持久化并应用后广播模式变化事件，供切换按钮反映三态。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：单按钮改为三态循环 `跟随系统 → 浅色 → 深色 → 跟随系统`；图标随模式显示 `Monitor` / `Sun` / `Moon`，aria-label 说明当前模式与下一次点击动作；挂载时仍按本地存储再应用一次，与 index.html 首屏内联脚本保持一致。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：由"静音式二选一"用例改为三态用例，覆盖默认跟随系统、循环三态、切回跟随系统后恢复同步、手动选择后不再跟随、持久化挂载与未知值回退等 10 项。
+  - 测试同步：前端 vitest 全量 20 文件 106 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次在 `Tony-issue230-theme-sync` 功能分支（worktree 作业）完成，仅动 DD 前端，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (45)
 
 - fix(web-ui): 把 Drive 页 Park 锁定徽标从顶栏控制组中间移到顶栏右侧，作为独立状态指示（不再夹在模式选择器与模型选择器之间）
