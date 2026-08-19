@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-19 (65)
+
+- fix(web-ui): Drive 页顶部工具栏移入视频列，录制按钮右边缘与摄像头画面右边界对齐；修复 App.test mock 缺 getDonkeyUrl
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏（左组 Park/模式/模型，右组录制条数/录制）由页面全宽独立一行移入「视频+遥测」左列（`flex-1 min-w-0`）内，右组右边缘随视频列收缩/扩展，抽屉展开时不再越过摄像头画面右边界；工具栏与视频之间加 `mb-4` 间距。录制与录制条数间隙保持 `gap-2 lg:gap-3` 不变。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock('./services/api')` 补 `getDonkeyUrl`（Issue #257 顶栏 Donkey 入口引入 `getDonkeyUrl` 后漏更新 mock，导致 3 项 App 测试失败）。
+  - 测试同步：前端 vitest 21 文件 112 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (64)
 
 - feat(web-ui): 把 DC 头部静音/OTA/DEV/Donkey 四控件整合进 DonkeyDrifter 顶栏，重设计为 DD 风格，静音与车端 DC 双向同步
