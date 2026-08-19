@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-19 (69)
+
+- feat(console): Drifter Console 由 DD 风格重绘改为 iframe 1:1 嵌入车端原版，并在连接条「连接」按钮右侧显示车端固件版本号（Issue #234）
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：整页重写——删除 571 行 DD 风格重绘（状态 key=value 表格、遥测卡片、终端、Wi-Fi STA、OTA、开发模式、静音），改为 iframe 直接加载 `http://<ip>/`，排版与显示功能与车端 Web Console 完全一致；仅保留一条极简「发现/手动连接」工具条（设备选择下拉 + 重扫 + 手动 IP + 连接）。
+  - 连接条版本号：`useEffect([selectedIp])` 调用车端 `api/status`，用 `version=(\S+)` 提取固件版本、去 `V` 前缀后以 `v1.8.19` 格式显示在「连接」按钮右侧（`font-mono text-xs text-zinc-400`）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`DrifterConsoleEntryLink` 由「扫描车端 + `window.open` 新标签页打开车端原版」改为 `<Link to="/console">` 当前标签页内进入。
+  - `web_ui/frontend/src/App.tsx`：新增 `/console` 懒加载路由与空闲预取；`isConsole` 时隐藏左侧 `SidePanel`（Loaders/Connectors 浮动抽屉不再遮挡 iframe），其它页面保持正常显示。
+  - `web_ui/frontend/src/components/Layout.tsx`：`isConsole` 时流程锚点（Drive/TM/Trainer/PA）一律不高亮，Drifter Console 由 `DrifterConsoleEntryLink` 自身高亮，修复「打开 DC 时 Drive 仍为蓝色、DC 仍为灰色」；`<main>` 在 `/console` 改为 `py-0` 全屏比例。
+  - `web_ui/frontend/src/i18n/messages/console.ts`：缩短「未发现设备，请确保连接同一网络」连接中提示文案。
+  - 测试同步：前端 `npm run check`（tsc）与 `npm run build` 通过、vitest 全量通过。
+  - 注：配套 Firmware 改动见 Firmware 仓库当日条目（v1.8.19 隐藏 DC 主页面 header 行）。
+
 ## 2026-08-19 (68)
 
 - feat(web-ui): Donkey 菜单改为当前页内嵌显示，顶栏控件（静音/DEV/Car Connector）样式对齐 DC 与 OTA
