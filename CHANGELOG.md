@@ -1,5 +1,116 @@
 # 变更日志
 
+## 2026-08-19 (65)
+
+- fix(web-ui): Drive 页顶部工具栏移入视频列，录制按钮右边缘与摄像头画面右边界对齐；修复 App.test mock 缺 getDonkeyUrl
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏（左组 Park/模式/模型，右组录制条数/录制）由页面全宽独立一行移入「视频+遥测」左列（`flex-1 min-w-0`）内，右组右边缘随视频列收缩/扩展，抽屉展开时不再越过摄像头画面右边界；工具栏与视频之间加 `mb-4` 间距。录制与录制条数间隙保持 `gap-2 lg:gap-3` 不变。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock('./services/api')` 补 `getDonkeyUrl`（Issue #257 顶栏 Donkey 入口引入 `getDonkeyUrl` 后漏更新 mock，导致 3 项 App 测试失败）。
+  - 测试同步：前端 vitest 21 文件 112 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (64)
+
+- feat(web-ui): 把 DC 头部静音/OTA/DEV/Donkey 四控件整合进 DonkeyDrifter 顶栏，重设计为 DD 风格，静音与车端 DC 双向同步
+  - 背景：用户要求 DD 页面顶栏承担原 Drifter Console 头部的一部分控制——静音键放在 GitHub 图标右侧、主题切换左侧并与 DC 双向同步；OTA/DEV 开关放在语言切换右侧；Donkey 入口移入顶部导航栏并加图标（参考 Kimi/DeepSeek 入口样式）。
+  - `web_ui/frontend/src/hooks/useConsoleDevice.ts`（新增）：模块级去重 + `sessionStorage` 缓存 ESP32 IP，导出 `useConsoleDevice()`（返回 `{ip, resolving}`），供静音/OTA/DEV 复用设备发现结果。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`（新增）：`ConsoleMuteButton`（lucide `Volume2/VolumeX`，5s 轮询 `/api/console/proxy/<ip>/api/mute` 双向同步）、`ConsoleOtaButton`（新标签页打开 `http://<ip>/update`）、`ConsoleDevToggle`（DEV 滑块，5s 轮询 `/api/devmode`，直接切换无确认弹窗，与内嵌 `/console` 页一致）。
+  - `web_ui/frontend/src/services/api.ts`：新增 `getDonkeyUrl()`（`${protocol}//${hostname}:8090/`）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `DonkeyEntryLink`（lucide `Car` 图标 + 导航链接样式，参考 Kimi/DeepSeek 入口）。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面右上角顺序 `VersionBadge → GitHubLink → ConsoleMuteButton → ThemeSwitcher → LanguageSwitcher → ConsoleOtaButton → ConsoleDevToggle`；桌面导航最左侧加入 `DonkeyEntryLink`；移动端第二行与汉堡菜单面板同步接入。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：新增 `common.enterButtons.donkey` / `donkeyTitle`（zh/en）；`web_ui/frontend/src/i18n/messages/console.ts`：新增 `console.muteAria` / `unmuteAria` / `otaOpen` / `unreachable`（zh/en）。
+  - 测试同步：新增 `ConsoleControls.test.tsx`（6 项）；`EnterButtons.test.tsx` 补 Donkey 入口断言并 mock `getDonkeyUrl`；前端 `npm run check`（tsc）、vitest 相关 13 项、`npm run build` 全部通过。
+  - 注：Firmware 侧同步移除 DC 头部 Donkey/OTA/DEV 并补静音轮询（v1.8.17），见 Firmware CHANGELOG。
+
+## 2026-08-19 (63)
+
+- fix(web-ui): Drive 页遥测曲线图改「有新帧才重绘 + 10fps 节流」，消除空闲 60fps 空转长任务——修复 #135 切换标签页卡顿（尤其 Drive → Drifter Console）
+  - 根因：`TelemetryChart` 用 `requestAnimationFrame` 每帧无条件 `setRenderTick` 触发 chart.js 重绘（60fps），即使遥测为空也持续渲染。CPU 4x 实测 Drive 页空闲 10s 产生 25 个 longtask（峰值 ~1s），主线程被连续占满，点击其它标签时路由切换/卸载被饿死，表现为「点了很久才动、一动就瞬跳」。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：移除 rAF 60fps 空转循环，改为「收到新遥测帧写入环形缓冲后，按 `CHART_REDRAW_INTERVAL_MS`（100ms，~10fps）节流 `setRenderTick`」；空闲无遥测时 chart.js 不再重绘。
+  - 实测（CPU 4x）：Drive 页空闲 10s longtask 0（修复前 25 个、峰值 ~1s）；Drive → `/console` 路由切换 336ms、切换后 FlowPage 干净卸载、无 longtask；FlowPage 四段导航滑动仍精准落位（err 0/1/1/0）、每段仅 1 个 ~150-180ms longtask。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (62)
+
+- fix(web-ui): Drive 页 Park 锁定移到驾驶模式选择器左侧
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶栏左组顺序由「驾驶模式 → 模型 → Park 锁定」改为「Park 锁定 → 驾驶模式 → 模型」，Park 锁定作为状态指示置于手动/半自动/全自动选择框左侧。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (61)
+
+- fix(web-ui): Drive 流程节标题副标题垂直对齐并复刻 SectionCardTitle 悬停动画（Issue #233 补充）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 的标题 `h2` 补 `leading-none`、副标题补 `leading-none`，消除小字相对标题偏高；副标题展开宽度 `max-w-[400px]` → `max-w-[300px]`，与 `SectionCardTitle` 动画参数完全一致（`transition-all duration-300 ease-in-out`）。
+
+## 2026-08-19 (60)
+
+- fix(launcher): Donkey 菜单页主题按钮去掉「跟随系统」显示器图标，改为深/浅两态互切（默认仍跟随浏览器，但不显示跟随系统状态）（Issue #230 最终形态）
+  - 背景：上一步三态修复后，主题按钮为 跟随系统/浅色/深色 三态，其中「跟随系统」显示显示器（电脑）图标；用户要求默认仍跟随浏览器，但按钮只保留太阳/月亮两态、去掉电脑图标。
+  - `donkeycar/launcher/server.py`：
+    - 删除 `icon-monitor` 显示器 SVG 与相关 CSS；图标显隐改由生效主题 `html[data-theme]` 驱动（浅色显太阳、深色显月亮），不再写 `html[data-mode]`。
+    - `toggleTheme()` 由三态循环改回深↔浅两态互切（按当前生效主题取反）；`renderThemeBtn()` 的 aria-label/title 改为仅 `theme.toggleLight` / `theme.toggleDark`。
+    - `initTheme()` 仍保留 `system` 默认态（无存储时跟随浏览器 `prefers-color-scheme` 并监听变化）；首屏防闪烁脚本只写生效主题 `html[data-theme]`，v3 一次性清除旧残留逻辑不变。
+    - i18n 删除 `theme.followSystem` / `theme.toggleSystem`（中英）。
+  - `tests/test_launcher_theme_single_button.py`：由三态用例改为两态用例，断言移除 `icon-monitor`/`data-mode`/`followSystem`/`toggleSystem`，保留默认跟随浏览器与 v3 迁移覆盖。
+  - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
+  - 注：仅 Donkey launcher（8090）改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (59)
+
+- fix(drive): Drive 页右侧抽屉改为贴视频画面右侧并 sticky 顶部对齐，滚动时留在顶部不跟走（Issue #232 第四次微调）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：移除 `createPortal` 与基于 scroll/resize 的把手 `top` 动态对齐逻辑（`cameraWrapRef`/`drawerRef`/`handleRef` 及对应 `useEffect` 全部删除）；视频+遥测与抽屉改为 `flex` 左右并排（`lg:flex-row`），抽屉 `aside` 用 `lg:sticky lg:top-16` 锚定在视频右侧并随滚动保持在顶部，收起时面板 `w-0 border-0`、展开时 `w-[min(24rem,calc(100vw-3.5rem))]`；把手由 `absolute right-full` 改为并排独立按钮；面板四角圆角 `rounded-lg` 对齐视频边框（`border border-zinc-800`）。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer-v4` 功能分支（worktree `session-issue232-v4` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (58)
+
+- fix(web-ui): Drive 流程节标题悬停副标题字号进一步调小到 `text-xs`（12px）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 悬停副标题字号 `text-sm` → `text-xs`，让灰色小字更明显变小。
+
+## 2026-08-19 (57)
+
+- fix(web-ui): Drive 页顶栏右组顺序调整 + Park 锁定对齐模型选择器高度并缩短文案
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：右组由「录制按钮 → 已录制条数」改为「已录制条数 → 录制按钮」；Park 锁定徽标由小号 `px-2 py-0.5 rounded` 改为与 `ModelSelector` 同高同大小的 `px-3 py-1.5 rounded-lg border`（红色语义保留）。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：`drive.recordedCount` 中文「已录制条数 {count}」→「已录制条数: {count}」；`drive.parkLocked` 中文「Park 锁定 · 油门被钳 0」→「Park 锁定」、英文「Park locked · throttle clamped to 0」→「Park locked」。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (56)
+
+- fix(launcher): Donkey 菜单页「跟随系统」仍不生效——清除旧二选一遗留的显式主题，首次访问自动恢复跟随系统（Issue #230）
+  - 根因：上一版三态修复后，用户浏览器里 8090 origin 的 `localStorage['donkeydrifter.ui.theme']` 仍残留旧二选一时期的显式 `light`/`dark`，页面加载时 `initTheme()` 优先读到显式值，`mode` 不再是 `system`，因此仍不跟随系统。
+  - `donkeycar/launcher/server.py`：首屏防闪烁脚本加入一次性迁移——首次访问若 `donkeydrifter.ui.theme.v3 !== '1'`，先 `removeItem('donkeydrifter.ui.theme')` 清掉旧显式残留并写入 `donkeydrifter.ui.theme.v3='1'`，之后尊重用户后续手动选择（仅清一次旧残留）。
+  - `tests/test_launcher_theme_single_button.py`：新增首屏迁移字符串断言，覆盖旧残留清除逻辑。
+  - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
+  - 注：仅 Donkey launcher（8090）改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (55)
+
+- fix(web-ui): Drive 流程节标题悬停副标题字号回调为 `text-sm`，与全站副标题标准一致（Issue #233 补充）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 的悬停副标题（如「驾驶并采集训练数据」）字号由 `text-base` 改为 `text-sm`，避免灰色小字过大。
+
+## 2026-08-19 (54)
+
+- fix(drive): Drive 页右侧抽屉把手真正贴屏幕最右并对齐摄像头画面顶部（Issue #232 第三次微调）
+  - 根因：上层 section 的 `content-visibility:auto` 带来 paint containment，导致把手 `fixed right-0` 实际相对 section（摄像头画面右缘）而非 viewport 定位。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：整个抽屉（把手+面板）改用 `createPortal(..., document.body)` 挂到 body，脱离 section containment；新增 `cameraWrapRef`/`drawerRef`/`handleRef`，在 scroll/resize 时用 `requestAnimationFrame` 量出「摄像头画面顶部 - 抽屉顶部」并直接写把手 `style.top`（ref 直写 DOM，避免每次滚动触发整页重渲染、复现 #135 卡顿），使把手顶部与摄像头画面顶部水平对齐。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer-v3` 功能分支（worktree `session-issue232-v3` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (53)
+
+- fix(web-ui): Drive 流程节标题副标题改为悬停淡入并放大字号，抽屉「虚拟摇杆」标题统一到 SectionCardTitle 标准（Issue #233 补充）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 的副标题（如 Drive 的「驾驶并采集训练数据」）由常驻 `<p class="text-sm">` 改为 `group-hover` 悬停淡入的 `<span>`，与全站卡片小标题交互一致；字号由 `text-sm` 放大到 `text-base`。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：右侧抽屉内「虚拟摇杆」标题由手写 group-hover 结构改用 `SectionCardTitle` 组件，字号/字重/颜色统一到全站标准（16px / font-semibold / text-white）。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`npm run check`（tsc）、`npm run build` 通过。
+
+## 2026-08-19 (52)
+
+- fix(web-ui): Drive 页顶栏左右分组——左侧驾驶模式/模型/Park 锁定，右侧录制/已录制条数
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏由单组改为左右两组，`justify-between` 分居两端——左组 `DriveModeSelector` → `ModelSelector` → `rc_park` 驻车锁定徽标；右组录制按钮 → 已录制条数。模型选择器按逻辑与驾驶模式同属「车怎么开」配置，故归入左组。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过（新 `DrivePage-*.js` bundle）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (51)
 
 - fix(launcher): Donkey 菜单页主题不随浏览器深浅色同步——主题按钮改为三态（跟随系统 / 浅色 / 深色），手动选择后可切回"跟随系统"（Issue #230 同源，扩展到 Donkey 启动页）

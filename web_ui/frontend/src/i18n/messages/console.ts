@@ -76,6 +76,10 @@ export const console: { zh: Record<string, string>; en: Record<string, string> }
     'console.muteTitle': '声音',
     'console.muteOn': '静音',
     'console.muteOff': '正常',
+    'console.muteAria': '静音',
+    'console.unmuteAria': '取消静音',
+    'console.otaOpen': '打开 OTA 更新页面',
+    'console.unreachable': 'Drifter Console 不在线',
   },
   en: {
     'console.title': 'Drifter Console',
@@ -153,5 +157,9 @@ export const console: { zh: Record<string, string>; en: Record<string, string> }
     'console.muteTitle': 'Sound',
     'console.muteOn': 'Muted',
     'console.muteOff': 'Unmuted',
+    'console.muteAria': 'Mute',
+    'console.unmuteAria': 'Unmute',
+    'console.otaOpen': 'Open OTA update page',
+    'console.unreachable': 'Drifter Console offline',
   },
 };
