@@ -25,6 +25,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const activeSection = useFlowStore((s) => s.activeSection);
   // Car Connector 是独立路由，只在 /connector 上高亮
   const isConnector = location.pathname === '/connector';
+  // Drifter Console 也是独立路由（Issue #234）：在 /console 上由 DrifterConsoleEntryLink
+  // 自身高亮，此时 Drive 等流程锚点一律不高亮
+  const isConsole = location.pathname === '/console';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // 切换路由后收起手机菜单
@@ -34,7 +37,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   const flowClass = (section: FlowSectionId) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
-      !isConnector && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
+      !isConnector && !isConsole && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
     }`;
   const linkClass = (active: boolean) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${active ? 'text-cyan-500' : 'text-zinc-400'}`;
