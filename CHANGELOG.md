@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-08-19 (55)
+
+- fix(web-ui): Drive 流程节标题悬停副标题字号回调为 `text-sm`，与全站副标题标准一致（Issue #233 补充）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 的悬停副标题（如「驾驶并采集训练数据」）字号由 `text-base` 改为 `text-sm`，避免灰色小字过大。
+
 ## 2026-08-19 (54)
 
 - fix(drive): Drive 页右侧抽屉把手真正贴屏幕最右并对齐摄像头画面顶部（Issue #232 第三次微调）
