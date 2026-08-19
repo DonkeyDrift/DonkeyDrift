@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-19 (49)
+
+- feat(console): Drifter Console 完全集成进 DonkeyDrifter——当前标签页内进入 + UI 重绘为 DD 风格（Issue #234）
+  - 前置修正：DD 入口按钮文案 `DrifterConsole` → `Drifter Console`（`web_ui/frontend/src/i18n/messages/common.ts` zh/en 两处）。
+  - 交互：`components/EnterButtons.tsx` 的 `DrifterConsoleEntryLink` 由「扫描车端 + `window.open` 新标签页打开车端原版 DC」改为 `<Link to="/console">` 当前标签页内进入 DD 内嵌页面；`App.tsx` 新增 `/console` 懒加载路由与空闲预取。
+  - 内嵌页面 `pages/DrifterConsolePage.tsx`：以 DD 组件（Card/CardTitle/Button/Input + zinc/cyan 主题）实现设备发现/手动 IP、状态 key=value 表格、遥测卡片（模式/驻车/漂移/电压/油门/转向/陀螺仪/6 通道/舵机/电调/中点/漂移补偿/偏航/油门模式）、终端（web/serial 命令 + `/api/log` 轮询）、Wi-Fi STA（扫描/连接/状态）、OTA 固件上传（`/update` multipart）、开发模式/静音开关。
+  - 新增 `services/console.ts`：车端 HTTP 经 DD 后端同源代理的访问层；新增 `i18n/messages/console.ts` 并注册到 `messages/index.ts`。
+  - 后端新增 `routers/console.py`：`/api/console/proxy/{ip}/{path:path}` 通用反向代理（GET/POST/PUT/DELETE/PATCH，仅 IPv4、urllib 转发、原样透传状态码/Content-Type/body，含车端 4xx/5xx 透传）；`main.py` 注册 `/api/console`。
+  - 测试同步：后端新增 `tests/test_console.py`（路由注册 / IPv4 校验 / 转发方法体头透传 3 项），后端 pytest 96 passed；前端 `EnterButtons.test.tsx` 断言 Drifter Console 改为 `/console` 路由链接，vitest 20 文件 104 项、`tsc -b --noEmit`、`npm run build` 全过。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (48)
 
 - feat(web-ui): 全站卡片小标题统一为「左侧图标 + 悬停灰色副标题」，抽出 `SectionCardTitle` 组件（Issue #233）
