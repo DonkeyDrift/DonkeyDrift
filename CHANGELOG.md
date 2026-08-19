@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-19 (62)
+
+- fix(web-ui): Drive 页 Park 锁定移到驾驶模式选择器左侧
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶栏左组顺序由「驾驶模式 → 模型 → Park 锁定」改为「Park 锁定 → 驾驶模式 → 模型」，Park 锁定作为状态指示置于手动/半自动/全自动选择框左侧。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (61)
 
 - fix(web-ui): Drive 流程节标题副标题垂直对齐并复刻 SectionCardTitle 悬停动画（Issue #233 补充）
