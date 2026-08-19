@@ -129,7 +129,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         )}
       </header>
-      <main className="container mx-auto px-4 py-6 space-y-6">
+      <main className={isConsole ? 'py-0' : 'container mx-auto px-4 py-6 space-y-6'}>
         {children}
       </main>
       <FabActions />

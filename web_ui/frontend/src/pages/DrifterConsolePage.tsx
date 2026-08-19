@@ -42,9 +42,9 @@ export const DrifterConsolePage: React.FC = () => {
   }, [manualIp]);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       {/* 极简工具条：选择车端 / 重扫 / 手动 IP。只负责“连到哪台车”，不喧宾夺主。 */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-900/50 px-4 py-2">
         <SquareTerminal className="h-4 w-4 shrink-0 text-cyan-400" />
         <label htmlFor="console-device-select" className="sr-only">
           {t('console.selectDevice')}
@@ -81,13 +81,15 @@ export const DrifterConsolePage: React.FC = () => {
       </div>
 
       {selectedIp ? (
-        <iframe
-          src={`http://${selectedIp}/`}
-          title="Drifter Console"
-          className="h-[calc(100vh-9.5rem)] w-full rounded-lg border border-zinc-800 bg-zinc-950"
-        />
+        <div className="min-h-0 flex-1">
+          <iframe
+            src={`http://${selectedIp}/`}
+            title="Drifter Console"
+            className="h-full w-full border-0 bg-zinc-950"
+          />
+        </div>
       ) : (
-        <div className="flex h-[calc(100vh-9.5rem)] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/30 px-6 text-center text-sm text-zinc-500">
+        <div className="flex flex-1 items-center justify-center bg-zinc-900/30 px-6 text-center text-sm text-zinc-500">
           {t('console.noDevice')}
         </div>
       )}
