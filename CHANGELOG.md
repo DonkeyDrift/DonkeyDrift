@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-19 (53)
+
+- fix(drive): Drive 页右侧抽屉把手真正贴屏幕最右并对齐摄像头画面顶部（Issue #232 第三次微调）
+  - 根因：上层 section 的 `content-visibility:auto` 带来 paint containment，导致把手 `fixed right-0` 实际相对 section（摄像头画面右缘）而非 viewport 定位。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：整个抽屉（把手+面板）改用 `createPortal(..., document.body)` 挂到 body，脱离 section containment；新增 `cameraWrapRef`/`drawerRef`/`handleRef`，在 scroll/resize 时用 `requestAnimationFrame` 量出「摄像头画面顶部 - 抽屉顶部」并直接写把手 `style.top`（ref 直写 DOM，避免每次滚动触发整页重渲染、复现 #135 卡顿），使把手顶部与摄像头画面顶部水平对齐。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer-v3` 功能分支（worktree `session-issue232-v3` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (52)
 
 - fix(web-ui): Drive 页顶栏左右分组——左侧驾驶模式/模型/Park 锁定，右侧录制/已录制条数
