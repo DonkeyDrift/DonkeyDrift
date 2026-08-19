@@ -15,6 +15,8 @@ export interface SectionCardTitleProps
   title: React.ReactNode;
   /** 悬停后淡入弹出的灰色副标题（可选） */
   subtitle?: React.ReactNode;
+  /** 副标题改为跑马灯滚动（用于宽度受限处，循环从左到右展示完整文案） */
+  subtitleMarquee?: boolean;
   /** 追加在标题行末尾、位于副标题之前的额外内容（如实时状态徽标） */
   children?: React.ReactNode;
 }
@@ -27,6 +29,7 @@ export const SectionCardTitle: React.FC<SectionCardTitleProps> = ({
   icon,
   title,
   subtitle,
+  subtitleMarquee = false,
   children,
   className,
   ...props
@@ -38,12 +41,19 @@ export const SectionCardTitle: React.FC<SectionCardTitleProps> = ({
     >
       <div className="flex items-center gap-2">
         {icon}
-        <span>{title}</span>
+        <span className="whitespace-nowrap">{title}</span>
         {children}
       </div>
-      {subtitle && (
+      {subtitle && !subtitleMarquee && (
         <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3 text-sm text-zinc-400 font-normal">
           {subtitle}
+        </span>
+      )}
+      {subtitle && subtitleMarquee && (
+        <span className="max-w-0 opacity-0 overflow-hidden transition-all duration-300 ease-in-out group-hover:max-w-40 group-hover:opacity-100 group-hover:ml-3 text-sm text-zinc-400 font-normal">
+          <span className="inline-block whitespace-nowrap will-change-transform group-hover:animate-[marquee-x_9s_ease-in-out_infinite]">
+            {subtitle}
+          </span>
         </span>
       )}
     </CardTitle>
