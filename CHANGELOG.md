@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-19 (45)
+
+- feat(drive): 虚拟摇杆折叠框改为贴屏幕最右的抽屉，收起时摄像头画面与遥测曲线占满整页宽度（Issue #232）
+  - 需求：原布局是 `grid grid-cols-1 lg:grid-cols-3`，摄像头+遥测占左 2/3、控制面板占右 1/3；折叠只是隐藏右列内部内容、右列容器仍在，画面不会放大。改为右侧抽屉后，收起时控制面板完全退出布局流，画面占满整页宽度；展开时抽屉从屏幕最右往左滑出，画面同步缩小让位。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：
+    - 移除三列 grid，摄像头+遥测改为单列全宽容器；抽屉展开时在 lg 屏加 `lg:mr-[24rem]` 让位（`transition-all` 与抽屉滑动同 duration/easing，画面随抽屉缩放）。
+    - 控制面板改为 `fixed right-0` 右侧抽屉（`top-[143px] lg:top-16 h-[calc(100vh-143px)] lg:h-[calc(100vh-4rem)] z-40`，与左侧 SidePanel 的偏移/层级对齐），展开 `w-[min(24rem,calc(100vw-3.5rem))]`、收起 `w-0`；面板内容区 `overflow-y-auto` 可滚动。
+    - 抽屉左缘新增常驻浮动触发把手（`absolute right-full`，`rounded-l-md`）：收起时贴屏幕右缘、展开时随抽屉左缘移动；`ChevronLeft`/`ChevronRight` 表示展开/收起方向，title 复用 `drive.expandJoystick`/`drive.collapseJoystick` 文案。
+    - 输入源选择、摇杆、油门条、可编程按钮、参数面板、快捷键提示整体迁入抽屉；`joystickOpen` 状态与折叠语义保持不变。
+  - 测试同步：前端 vitest 全量 20 文件 104 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer` 功能分支（worktree `session-issue232` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (44)
 
 - fix(drive): 修正 complete 模板 DriveApiBridge 输出错位，让 car/mode_cmd 真正到达 ArdModeCmd（Issue #223 后续）
