@@ -1,5 +1,6 @@
 import React from 'react';
 import { Activity } from 'lucide-react';
+import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { TrainingJob } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 
@@ -43,9 +44,11 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({ job }) => {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
       <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">
-          {t('trainer.trainingStatus')}
-        </h3>
+        <SectionCardTitle
+          icon={<Activity className="w-5 h-5" />}
+          title={t('trainer.trainingStatus')}
+          subtitle={t('trainer.trainingStatusSubtitle')}
+        />
         {job && (
           <span className={`text-sm font-bold ${statusColor}`}>{statusLabel[status!]}</span>
         )}

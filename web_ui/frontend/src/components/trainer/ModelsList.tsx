@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { listModels, deleteModel, downloadModelUrl, loadModelToCar, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2 } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes } from 'lucide-react';
+import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useTranslation } from '@/i18n';
 
 interface ModelItem {
@@ -145,7 +146,11 @@ export const ModelsList: React.FC = () => {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3 relative">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainedModels')}</h3>
+        <SectionCardTitle
+          icon={<Boxes className="w-5 h-5" />}
+          title={t('trainer.trainedModels')}
+          subtitle={t('trainer.trainedModelsSubtitle')}
+        />
         <button
           onClick={refresh}
           disabled={loading}

@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import { Card, CardHeader, CardContent } from '../components/ui/Card';
+import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 import { Button } from '../components/ui/Button';
+import { Car, Download, ScrollText, Settings, Upload } from 'lucide-react';
 import { Input } from '../components/ui/Input';
 import {
   getConnectorConfig,
@@ -248,7 +250,11 @@ export const CarConnectorPage: React.FC = () => {
           {/* 连接配置 */}
           <Card>
             <CardHeader>
-              <CardTitle>{t('connector.configTitle')}</CardTitle>
+              <SectionCardTitle
+                icon={<Settings className="w-5 h-5" />}
+                title={t('connector.configTitle')}
+                subtitle={t('connector.configTitleSubtitle')}
+              />
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -316,7 +322,11 @@ export const CarConnectorPage: React.FC = () => {
           {/* 拉取 Tub */}
           <Card>
             <CardHeader>
-              <CardTitle>{t('connector.pullTubTitle')}</CardTitle>
+              <SectionCardTitle
+                icon={<Download className="w-5 h-5" />}
+                title={t('connector.pullTubTitle')}
+                subtitle={t('connector.pullTubTitleSubtitle')}
+              />
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -356,7 +366,11 @@ export const CarConnectorPage: React.FC = () => {
           {/* 推送 Pilots */}
           <Card>
             <CardHeader>
-              <CardTitle>{t('connector.pushPilotsTitle')}</CardTitle>
+              <SectionCardTitle
+                icon={<Upload className="w-5 h-5" />}
+                title={t('connector.pushPilotsTitle')}
+                subtitle={t('connector.pushPilotsTitleSubtitle')}
+              />
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -413,7 +427,11 @@ export const CarConnectorPage: React.FC = () => {
           {/* 远程驾驶 */}
           <Card>
             <CardHeader>
-              <CardTitle>{t('connector.remoteDriveTitle')}</CardTitle>
+              <SectionCardTitle
+                icon={<Car className="w-5 h-5" />}
+                title={t('connector.remoteDriveTitle')}
+                subtitle={t('connector.remoteDriveTitleSubtitle')}
+              />
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -499,9 +517,11 @@ export const CarConnectorPage: React.FC = () => {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>
-                  {isJobRunning ? t('connector.jobRunning') : t('connector.jobLog')}
-                </CardTitle>
+                <SectionCardTitle
+                  icon={<ScrollText className="w-5 h-5" />}
+                  title={isJobRunning ? t('connector.jobRunning') : t('connector.jobLog')}
+                  subtitle={t('connector.jobLogSubtitle')}
+                />
                 {isJobRunning && (
                   <Button onClick={cancelJob} variant="danger" size="sm">
                     {t('connector.cancel')}

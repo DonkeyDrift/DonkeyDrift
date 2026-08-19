@@ -17,6 +17,7 @@ import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
 import { useTrainingJob } from '../hooks/useTrainingJob';
 import { useTranslation } from '@/i18n';
+import { Cpu } from 'lucide-react';
 import type { TrainerMode } from '../components/trainer/ModeTabs';
 
 const TRAINING_KEYS = [
@@ -255,6 +256,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
               <RemoteConfigForm
                 titleKey="trainer.myPcTraining"
                 hintKey="trainer.myPcFirstUseHint"
+                icon={<Cpu className="w-5 h-5" />}
+                subtitleKey="trainer.myPcTrainingSubtitle"
                 host={myPcForm.host}
                 onHostChange={(v) => setMyPcForm((f) => ({ ...f, host: v }))}
                 user={myPcForm.user}
@@ -279,6 +282,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
             </>
           ) : (
             <RemoteConfigForm
+              subtitleKey="trainer.cloudTrainingSubtitle"
               host={onlineForm.host}
               onHostChange={(v) => setOnlineForm((f) => ({ ...f, host: v }))}
               user={onlineForm.user}

@@ -7,6 +7,7 @@ import {
   ScanLine,
   XCircle,
 } from 'lucide-react';
+import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { probeMyPc, type MyPcProbeResult } from '../../services/api';
 import { useTranslation } from '@/i18n';
 
@@ -68,9 +69,11 @@ export const MyPcProbePanel: React.FC<MyPcProbePanelProps> = ({
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">
-            {t('trainer.myPcProbe')}
-          </h3>
+          <SectionCardTitle
+            icon={<ScanLine className="w-5 h-5" />}
+            title={t('trainer.myPcProbe')}
+            subtitle={t('trainer.myPcProbeSubtitle')}
+          />
           <p className="text-xs text-zinc-500 mt-1">{t('trainer.myPcProbeHint')}</p>
         </div>
         <button

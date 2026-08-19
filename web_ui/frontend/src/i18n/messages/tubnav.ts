@@ -22,6 +22,7 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     // TubLoader
     'tub.loaderTitle': 'Tub 加载器',
     'tub.loaderSubtitle': '选择 Tub 目录，通常为 ./data',
+    'tub.loaderHoverSubtitle': '选择 Tub 目录',
     'tub.pathPlaceholder': 'Tub 路径，例如 /home/dkc/projects/mycar/data',
     'tub.pathInputAria': 'Tub 路径输入框',
     'tub.browse': '浏览',
@@ -37,6 +38,7 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     // SimulatorConfig
     'tub.simTitle': '模拟器配置',
     'tub.simSubtitle': '配置 DonkeySim 模拟器连接',
+    'tub.simHoverSubtitle': '配置模拟器连接',
     'tub.simHostLabel': '模拟器主机 IP',
     'tub.simHostPlaceholder': '例如 192.168.1.100',
     'tub.simHostAria': '模拟器主机 IP',
@@ -80,6 +82,7 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     // TubLoader
     'tub.loaderTitle': 'Tub Loader',
     'tub.loaderSubtitle': 'Select tub directory, typically ./data',
+    'tub.loaderHoverSubtitle': 'Select a tub directory',
     'tub.pathPlaceholder': 'Tub path, e.g. /home/dkc/projects/mycar/data',
     'tub.pathInputAria': 'Tub path input field',
     'tub.browse': 'Browse',
@@ -95,6 +98,7 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     // SimulatorConfig
     'tub.simTitle': 'Simulator Configuration',
     'tub.simSubtitle': 'Configure the DonkeySim simulator connection',
+    'tub.simHoverSubtitle': 'Configure simulator connection',
     'tub.simHostLabel': 'Simulator host IP',
     'tub.simHostPlaceholder': 'e.g. 192.168.1.100',
     'tub.simHostAria': 'Simulator host IP',
