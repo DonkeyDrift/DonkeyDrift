@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-19 (56)
+
+- fix(launcher): Donkey 菜单页「跟随系统」仍不生效——清除旧二选一遗留的显式主题，首次访问自动恢复跟随系统（Issue #230）
+  - 根因：上一版三态修复后，用户浏览器里 8090 origin 的 `localStorage['donkeydrifter.ui.theme']` 仍残留旧二选一时期的显式 `light`/`dark`，页面加载时 `initTheme()` 优先读到显式值，`mode` 不再是 `system`，因此仍不跟随系统。
+  - `donkeycar/launcher/server.py`：首屏防闪烁脚本加入一次性迁移——首次访问若 `donkeydrifter.ui.theme.v3 !== '1'`，先 `removeItem('donkeydrifter.ui.theme')` 清掉旧显式残留并写入 `donkeydrifter.ui.theme.v3='1'`，之后尊重用户后续手动选择（仅清一次旧残留）。
+  - `tests/test_launcher_theme_single_button.py`：新增首屏迁移字符串断言，覆盖旧残留清除逻辑。
+  - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
+  - 注：仅 Donkey launcher（8090）改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (55)
 
 - fix(web-ui): Drive 流程节标题悬停副标题字号回调为 `text-sm`，与全站副标题标准一致（Issue #233 补充）

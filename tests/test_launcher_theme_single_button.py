@@ -67,6 +67,9 @@ def test_launcher_theme_follows_browser_until_manual_click():
     # 首屏防闪烁脚本：显式 light/dark/system 优先，system 经 matchMedia 解析，
     # 并把模式与生效主题分别写到 html[data-mode]/html[data-theme]
     assert "var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';" in source
+    # v3 一次性迁移：清除旧二选一遗留的显式 light/dark，恢复默认跟随系统
+    assert "if(localStorage.getItem('donkeydrifter.ui.theme.v3')!=='1'){" in source
+    assert "localStorage.removeItem('donkeydrifter.ui.theme');" in source
     assert "matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'" in source
     assert "document.documentElement.dataset.mode=t;document.documentElement.dataset.theme=r" in source
 

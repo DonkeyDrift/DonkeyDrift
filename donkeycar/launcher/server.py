@@ -1337,8 +1337,8 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
-    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统，经 matchMedia 实时解析）
-    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';var r=t;if(r==='system'){r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.mode=t;document.documentElement.dataset.theme=r}catch(e){}})();
+    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统；v3 一次性清除旧二选一遗留显式值）
+    (function(){try{if(localStorage.getItem('donkeydrifter.ui.theme.v3')!=='1'){localStorage.removeItem('donkeydrifter.ui.theme');localStorage.setItem('donkeydrifter.ui.theme.v3','1')}var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';var r=t;if(r==='system'){r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.mode=t;document.documentElement.dataset.theme=r}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
