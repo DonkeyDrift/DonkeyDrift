@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-19 (58)
+
+- fix(drive): Drive 页右侧抽屉改为贴视频画面右侧并 sticky 顶部对齐，滚动时留在顶部不跟走（Issue #232 第四次微调）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：移除 `createPortal` 与基于 scroll/resize 的把手 `top` 动态对齐逻辑（`cameraWrapRef`/`drawerRef`/`handleRef` 及对应 `useEffect` 全部删除）；视频+遥测与抽屉改为 `flex` 左右并排（`lg:flex-row`），抽屉 `aside` 用 `lg:sticky lg:top-16` 锚定在视频右侧并随滚动保持在顶部，收起时面板 `w-0 border-0`、展开时 `w-[min(24rem,calc(100vw-3.5rem))]`；把手由 `absolute right-full` 改为并排独立按钮；面板四角圆角 `rounded-lg` 对齐视频边框（`border border-zinc-800`）。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer-v4` 功能分支（worktree `session-issue232-v4` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (57)
 
 - fix(web-ui): Drive 页顶栏右组顺序调整 + Park 锁定对齐模型选择器高度并缩短文案
