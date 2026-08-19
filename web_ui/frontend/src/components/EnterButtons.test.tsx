@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
 
 vi.mock('@/i18n', () => ({
@@ -10,20 +11,29 @@ vi.mock('@/i18n', () => ({
   }),
 }));
 vi.mock('@/services/api', () => ({
-  discoverConnectorConsoles: vi.fn(),
   launchKimiCodeWeb: vi.fn(),
   launchDsh: vi.fn(),
 }));
-import { discoverConnectorConsoles, launchDsh, launchKimiCodeWeb } from '@/services/api';
-const mockDiscover = vi.mocked(discoverConnectorConsoles);
+import { launchDsh, launchKimiCodeWeb } from '@/services/api';
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
 const mockLaunchDsh = vi.mocked(launchDsh);
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('entry link components (Issue #175 nav-link style)', () => {
   it('renders each entry with the de-emphasized advanced link style', () => {
-    render(<><DrifterConsoleEntryLink /><KimiCodeWebEntryLink /><DshEntryLink /></>);
-    for (const label of ['common.enterButtons.drifterConsole', 'common.enterButtons.kimiCodeWeb', 'common.enterButtons.dsh']) {
+    render(
+      <MemoryRouter>
+        <DrifterConsoleEntryLink />
+        <KimiCodeWebEntryLink />
+        <DshEntryLink />
+      </MemoryRouter>,
+    );
+    // Drifter Console 已改为 SPA 内路由链接（Issue #234），其余两个仍是按钮入口
+    const drifterLink = screen.getByText('common.enterButtons.drifterConsole').closest('a');
+    expect(drifterLink).toBeInTheDocument();
+    expect(drifterLink?.className).toContain('text-xs');
+    expect(drifterLink?.className).toContain('text-zinc-500');
+    for (const label of ['common.enterButtons.kimiCodeWeb', 'common.enterButtons.dsh']) {
       const btn = screen.getByText(label).closest('button');
       expect(btn).toBeInTheDocument();
       // 弱化处理：更小字号 + 更淡颜色，一眼可辨为高级选项
@@ -34,21 +44,15 @@ describe('entry link components (Issue #175 nav-link style)', () => {
 });
 
 describe('DrifterConsoleEntryLink', () => {
-  it('opens Drifter Console on success', async () => {
-    mockDiscover.mockResolvedValue({ status: true, found: [{ ip: '192.168.3.46', port: 80, reachable: true }], count: 1, scanned: 256, message: '' });
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-    render(<DrifterConsoleEntryLink />);
-    fireEvent.click(screen.getByText('common.enterButtons.drifterConsole'));
-    await waitFor(() => { expect(openSpy).toHaveBeenCalledWith('http://192.168.3.46/', '_blank', 'noopener,noreferrer'); });
-    openSpy.mockRestore();
-  });
-  it('alerts on no console', async () => {
-    mockDiscover.mockResolvedValue({ status: true, found: [], count: 0, scanned: 256, message: '' });
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    render(<DrifterConsoleEntryLink />);
-    fireEvent.click(screen.getByText('common.enterButtons.drifterConsole'));
-    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
-    alertSpy.mockRestore();
+  it('links to the embedded Drifter Console route in the current tab', () => {
+    render(
+      <MemoryRouter>
+        <DrifterConsoleEntryLink />
+      </MemoryRouter>,
+    );
+    const link = screen.getByText('common.enterButtons.drifterConsole').closest('a');
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/console');
   });
 });
 
