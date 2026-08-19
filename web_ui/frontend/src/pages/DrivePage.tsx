@@ -254,56 +254,55 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   return (
     <div className="space-y-4">
-      {/* 顶部工具栏：窄屏允许换行，避免一排溢出（页内标题已上移到 section 头 #178） */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* 左：Park 状态 + 驾驶模式 + 模型 */}
-        <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-          {telemetry?.rc_park === 1 && (
-            <span
-              className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
-              data-rc-park={telemetry.rc_park}
-            >
-              {t('drive.parkLocked')}
-            </span>
-          )}
-          <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
-          <ModelSelector
-            value={currentModel}
-            options={models}
-            onChange={handleModelChange}
-            disabled={!carState.online || modelsLoading}
-          />
-        </div>
-        {/* 右：已录制条数 + 录制 */}
-        <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-          <span className="text-xs text-zinc-500 whitespace-nowrap">
-            {t('drive.recordedCount', { count: carState.numRecords })}
-          </span>
-          <button
-            onClick={toggleRecording}
-            disabled={!carState.online || recordingLock}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-              ${recording
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-              }
-              ${!carState.online || recordingLock ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-          >
-            {recording ? (
-              <Circle className="w-3.5 h-3.5 fill-current animate-pulse text-red-400" />
-            ) : (
-              <Circle className="w-3.5 h-3.5" />
-            )}
-            {recording ? t('drive.recording', { duration: formatDuration(recordDuration) }) : t('drive.record')}
-          </button>
-        </div>
-      </div>
-
       {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">
-        {/* 左：视频 + 遥测 */}
+        {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
         <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+            {/* 左：Park 状态 + 驾驶模式 + 模型 */}
+            <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+              {telemetry?.rc_park === 1 && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
+                  data-rc-park={telemetry.rc_park}
+                >
+                  {t('drive.parkLocked')}
+                </span>
+              )}
+              <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
+              <ModelSelector
+                value={currentModel}
+                options={models}
+                onChange={handleModelChange}
+                disabled={!carState.online || modelsLoading}
+              />
+            </div>
+            {/* 右：已录制条数 + 录制 */}
+            <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+              <span className="text-xs text-zinc-500 whitespace-nowrap">
+                {t('drive.recordedCount', { count: carState.numRecords })}
+              </span>
+              <button
+                onClick={toggleRecording}
+                disabled={!carState.online || recordingLock}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                  ${recording
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                  }
+                  ${!carState.online || recordingLock ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                {recording ? (
+                  <Circle className="w-3.5 h-3.5 fill-current animate-pulse text-red-400" />
+                ) : (
+                  <Circle className="w-3.5 h-3.5" />
+                )}
+                {recording ? t('drive.recording', { duration: formatDuration(recordDuration) }) : t('drive.record')}
+              </button>
+            </div>
+          </div>
+
           {active ? (
             <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
           ) : (

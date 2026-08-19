@@ -17,6 +17,7 @@ vi.mock('./services/api', () => ({
   discoverConnectorConsoles: vi.fn(),
   launchKimiCodeWeb: vi.fn(),
   launchDsh: vi.fn(),
+  getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));
 
 vi.mock('./components/SidePanel', () => ({
