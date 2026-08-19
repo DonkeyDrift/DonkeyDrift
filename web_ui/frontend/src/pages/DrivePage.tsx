@@ -19,7 +19,7 @@ import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } f
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
-import { Circle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Circle, ChevronDown, ChevronUp, Joystick } from 'lucide-react';
 
 type DrivePageProps = {
   /** 该 section 是否在视口内：滚走后停用全局快捷键/键盘驾驶，避免误触（#178） */
@@ -316,7 +316,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               className="flex items-center gap-1 hover:text-zinc-200 transition-colors"
               title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
             >
-              <span className="font-medium">{t('drive.virtualJoystick')}</span>
+              <span className="flex items-center w-fit group cursor-default">
+                <span className="flex items-center gap-2">
+                  <Joystick className="w-5 h-5" />
+                  <span className="font-medium">{t('drive.virtualJoystick')}</span>
+                </span>
+                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3 text-sm text-zinc-400 font-normal">
+                  {t('drive.virtualJoystickSubtitle')}
+                </span>
+              </span>
               {joystickOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {joystickOpen && (

@@ -1,5 +1,6 @@
 import React from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useStore, type TrainerLocalConfig } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 import type { TrainerTub } from '../../services/api';
@@ -35,7 +36,11 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainingConfig')}</h3>
+      <SectionCardTitle
+        icon={<SlidersHorizontal className="w-5 h-5" />}
+        title={t('trainer.trainingConfig')}
+        subtitle={t('trainer.trainingConfigSubtitle')}
+      />
 
       <div className="space-y-1">
         <label className="text-xs text-zinc-500">{t('trainer.tubPath')}</label>
