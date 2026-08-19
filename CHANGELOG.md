@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-08-19 (58)
+
+- fix(web-ui): Drive 流程节标题悬停副标题字号进一步调小到 `text-xs`（12px）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 悬停副标题字号 `text-sm` → `text-xs`，让灰色小字更明显变小。
+
 ## 2026-08-19 (57)
 
 - fix(web-ui): Drive 页顶栏右组顺序调整 + Park 锁定对齐模型选择器高度并缩短文案
