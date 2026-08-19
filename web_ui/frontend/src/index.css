@@ -90,3 +90,21 @@ body,
 .tub-editor-scroll-slider:disabled::-moz-range-thumb {
   background: rgb(34 211 238 / 0.3);
 }
+
+/* SectionCardTitle 副标题跑马灯：从左到右滚动展示完整文案，
+   播到最右（文本右端进入可视窗口）后短暂停顿，再回到起点重播。
+   窗口宽度与组件内 group-hover:max-w-40（10rem）保持一致。 */
+@keyframes marquee-x {
+  0% {
+    transform: translateX(0);
+  }
+  72% {
+    transform: translateX(calc(-100% + 10rem));
+  }
+  88% {
+    transform: translateX(calc(-100% + 10rem));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}

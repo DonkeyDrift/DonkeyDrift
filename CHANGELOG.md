@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-19 (67)
+
+- fix(drive): Drive 页虚拟摇杆抽屉面板移到把手左侧、标题不换行、副标题改为跑马灯（Issue #232 第五轮微调）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：抽屉内部 `flex items-start gap-2` 中「面板内容」与「浮动触发把手按钮」对调，展开后顺序变为 视频画面 → 虚拟摇杆面板 → 把手开关，把手仍在面板右侧（展开时位于视频右侧更外侧）；`SectionCardTitle` 传入 `subtitleMarquee`。
+  - `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：新增可选 `subtitleMarquee?: boolean` prop；标题 `<span>` 加 `whitespace-nowrap`，保证「虚拟摇杆」四字单行完整显示；副标题在 `subtitleMarquee` 为 true 时改为跑马灯渲染（外层 `overflow-hidden`、内层 `inline-block whitespace-nowrap` + `animate-[marquee-x_9s_ease-in-out_infinite]`），默认 false，不影响其他页面。
+  - `web_ui/frontend/src/index.css`：新增 `@keyframes marquee-x`（`0% translateX(0)` → `72%`/`88% translateX(calc(-100% + 10rem))` 停顿 → `100% translateX(0)` 重播），实现副标题从左到右播放、到右端稍停后重播。
+  - 测试同步：前端 vitest 21 文件 110 项通过、`npm run check`（tsc）通过、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (66)
 
 - fix(web-ui): DonkeyDrifter 页主题按钮去掉「跟随系统」显示器图标，改为深/浅两态互切（默认仍跟随浏览器，但不显示跟随系统状态）（Issue #230 最终形态，DD 前端）

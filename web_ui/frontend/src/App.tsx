@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { SidePanel } from './components/SidePanel';
 import { t as translate } from '@/i18n';
@@ -70,9 +70,13 @@ function PageLoading() {
 
 function AppShell() {
   useIdlePrefetch();
+  const { pathname } = useLocation();
+  // Drifter Console（/console）是全屏 iframe，左侧 Loaders/Connectors 浮动抽屉会遮挡内容，
+  // 仅在该路由下隐藏 SidePanel，其它页面保持正常显示。
+  const isConsole = pathname === '/console';
   return (
     <ErrorBoundary>
-      <SidePanel />
+      {!isConsole && <SidePanel />}
       <Layout>
         <React.Suspense fallback={<PageLoading />}>
           <Routes>
