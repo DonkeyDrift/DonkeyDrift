@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-19 (45)
+
+- fix(web-ui): 把 Drive 页 Park 锁定徽标从顶栏控制组中间移到顶栏右侧，作为独立状态指示（不再夹在模式选择器与模型选择器之间）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：移除顶栏左组里 `DriveModeSelector` 与 `ModelSelector` 之间的 Park 徽标；在顶栏右端（`justify-between` 空位）单独渲染，`rc_park === 1` 时显示红色「Park 锁定 · 油门被钳 0」，并加 `whitespace-nowrap` 防止窄屏换行。
+  - 测试同步：前端 `npm run check`、`vitest`（20 文件 104 项）与 `npm run build` 全过，无新增测试文件。
+  - 注：本次在 `Tony-park-btn-pos` 功能分支（worktree `park-btn-pos` 作业）完成；仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (44)
 
 - fix(drive): 修正 complete 模板 DriveApiBridge 输出错位，让 car/mode_cmd 真正到达 ArdModeCmd（Issue #223 后续）
