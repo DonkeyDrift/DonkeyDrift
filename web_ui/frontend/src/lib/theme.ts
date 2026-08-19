@@ -12,6 +12,7 @@ export const THEME_CLASS: Record<ResolvedTheme, string> = {
 };
 
 const THEME_CHANGE_EVENT = 'donkeydrifter:theme-changed';
+const THEME_MODE_CHANGE_EVENT = 'donkeydrifter:theme-mode-changed';
 
 /** 读取持久化主题选择;无存储或存储值非法时默认跟随系统('system'),用户显式选择浅色/深色后以其为准。 */
 export const readStoredTheme = (): ThemeMode => {
@@ -89,6 +90,7 @@ export const setTheme = (mode: ThemeMode): void => {
     /* localStorage 不可用时仅保留内存中的选择 */
   }
   applyTheme(mode);
+  window.dispatchEvent(new CustomEvent<ThemeMode>(THEME_MODE_CHANGE_EVENT, { detail: mode }));
 };
 
 const subscribe = (onChange: () => void) => {
@@ -99,3 +101,16 @@ const subscribe = (onChange: () => void) => {
 /** 订阅当前生效主题('light' | 'dark'),供 canvas / 图表等 JS 配色使用。 */
 export const useResolvedTheme = (): ResolvedTheme =>
   useSyncExternalStore(subscribe, getResolvedTheme, () => 'dark');
+
+const subscribeMode = (onChange: () => void) => {
+  window.addEventListener(THEME_MODE_CHANGE_EVENT, onChange);
+  window.addEventListener(THEME_CHANGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener(THEME_MODE_CHANGE_EVENT, onChange);
+    window.removeEventListener(THEME_CHANGE_EVENT, onChange);
+  };
+};
+
+/** 订阅当前主题模式('system' | 'light' | 'dark'),供切换按钮显示"跟随系统"等三态。 */
+export const useThemeMode = (): ThemeMode =>
+  useSyncExternalStore(subscribeMode, readStoredTheme, () => 'system');

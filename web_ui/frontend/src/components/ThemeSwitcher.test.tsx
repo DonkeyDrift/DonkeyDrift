@@ -39,7 +39,10 @@ const setSystemDark = (dark: boolean) => {
 
 const getButton = () => screen.getByRole('button');
 
-describe('ThemeSwitcher（静音式单按钮）', () => {
+const hasIcon = (name: 'monitor' | 'sun' | 'moon') =>
+  getButton().querySelector(`svg.lucide-${name}`);
+
+describe('ThemeSwitcher（三态：跟随系统 / 浅色 / 深色）', () => {
   beforeEach(() => {
     window.localStorage.clear();
     document.documentElement.classList.remove('theme-mus4', 'theme-light');
@@ -47,77 +50,105 @@ describe('ThemeSwitcher（静音式单按钮）', () => {
     window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
   });
 
-  it('renders a single icon button showing the moon in dark mode', () => {
+  it('默认跟随系统：系统为深色时显示跟随系统图标并应用深色皮肤', () => {
     render(<ThemeSwitcher />);
-    const btn = getButton();
-    expect(btn.querySelector('svg.lucide-moon')).not.toBeNull();
-    expect(btn.querySelector('svg.lucide-sun')).toBeNull();
-    expect(btn).toHaveAttribute('aria-label', '切换到浅色主题');
+    expect(hasIcon('monitor')).not.toBeNull();
+    expect(hasIcon('sun')).toBeNull();
+    expect(hasIcon('moon')).toBeNull();
+    expect(getButton()).toHaveAttribute('aria-label', '跟随系统主题（当前深色），点击切换到浅色');
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-light')).toBe(false);
   });
 
-  it('shows the sun icon and light skin when the system prefers light', () => {
+  it('默认跟随系统：系统为浅色时应用浅色皮肤并显示跟随系统图标', () => {
     setSystemDark(false);
     render(<ThemeSwitcher />);
-    const btn = getButton();
-    expect(btn.querySelector('svg.lucide-sun')).not.toBeNull();
-    expect(btn).toHaveAttribute('aria-label', '切换到深色主题');
+    expect(hasIcon('monitor')).not.toBeNull();
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(getButton()).toHaveAttribute('aria-label', '跟随系统主题（当前浅色），点击切换到浅色');
   });
 
-  it('toggles to light on click and persists the selection', () => {
+  it('首次点击从跟随系统切到浅色并持久化', () => {
     render(<ThemeSwitcher />);
     fireEvent.click(getButton());
-    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
+    expect(hasIcon('sun')).not.toBeNull();
+    expect(hasIcon('monitor')).toBeNull();
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
   });
 
-  it('toggles back to dark on second click and persists the selection', () => {
+  it('第二次点击切到深色并持久化', () => {
     render(<ThemeSwitcher />);
-    fireEvent.click(getButton()); // → light
-    fireEvent.click(getButton()); // → dark
-    expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
+    fireEvent.click(getButton()); // 跟随系统 → 浅色
+    fireEvent.click(getButton()); // 浅色 → 深色
+    expect(hasIcon('moon')).not.toBeNull();
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
   });
 
-  it('follows system theme changes by default when nothing is stored', () => {
+  it('第三次点击切回跟随系统并持久化 system，随后恢复跟随系统变化', () => {
     render(<ThemeSwitcher />);
+    fireEvent.click(getButton()); // → 浅色
+    fireEvent.click(getButton()); // → 深色
+    fireEvent.click(getButton()); // → 跟随系统
+    expect(hasIcon('monitor')).not.toBeNull();
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('system');
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
     act(() => setSystemDark(false));
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
+    expect(hasIcon('monitor')).not.toBeNull();
+  });
+
+  it('跟随系统模式下随系统深浅色实时切换且不写入持久化', () => {
+    render(<ThemeSwitcher />);
+    expect(hasIcon('monitor')).not.toBeNull();
+    expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    act(() => setSystemDark(false));
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(hasIcon('monitor')).not.toBeNull();
     // 跟随系统期间不写入持久化选择,仅手动单击才存储
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
     act(() => setSystemDark(true));
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
   });
 
-  it('stops following the system after a manual click', () => {
+  it('手动选择浅色后不再跟随系统变化', () => {
+    render(<ThemeSwitcher />); // 系统深色
+    fireEvent.click(getButton()); // → 显式浅色
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    act(() => setSystemDark(false)); // 系统变浅色也不影响显式选择
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(hasIcon('sun')).not.toBeNull();
+    act(() => setSystemDark(true)); // 系统再变深色仍保持浅色
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true);
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+  });
+
+  it('手动选择深色后不再跟随系统变化', () => {
     setSystemDark(false);
-    render(<ThemeSwitcher />);
-    fireEvent.click(getButton()); // light → dark
+    render(<ThemeSwitcher />); // 系统浅色
+    fireEvent.click(getButton()); // → 显式浅色（与当前视觉一致）
+    fireEvent.click(getButton()); // → 深色
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
-    act(() => setSystemDark(false)); // 系统再变也不跟随
+    expect(hasIcon('moon')).not.toBeNull();
+    act(() => setSystemDark(true)); // 系统变深色也不影响显式选择
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
   });
 
-  it('applies the persisted skin and icon on mount', () => {
+  it('挂载时按已持久化选择应用皮肤与图标', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
     render(<ThemeSwitcher />);
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
+    expect(hasIcon('sun')).not.toBeNull();
   });
 
-  it('falls back to following the system for unknown stored values', () => {
+  it('未知存储值回退到跟随系统', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'unknown');
     setSystemDark(false);
     render(<ThemeSwitcher />);
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
-    expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
+    expect(hasIcon('monitor')).not.toBeNull();
   });
 });

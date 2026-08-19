@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-19 (45)
+## 2026-08-19 (48)
 
 - feat(web-ui): 全站卡片小标题统一为「左侧图标 + 悬停灰色副标题」，抽出 `SectionCardTitle` 组件（Issue #233）
   - 需求：以 TM「录制视频库」小标题为基准，把 DD 所有页面的卡片小标题统一成同款 UI——左侧语义图标 + 悬停淡入灰色副标题；副标题文案补充进 i18n 中英双语。
@@ -15,6 +15,35 @@
   - i18n 新增副标题文案（`arena.ts` / `common.ts` / `connector.ts` / `drive.ts` / `trainer.ts` / `tubnav.ts` 中英双语）。
   - 测试同步：`npm run check`（tsc）、`npm run build`、前端 vitest 20 文件 104 项全部通过。
   - 注：本次在 `Tony-issue233-section-card-titles` 功能分支（worktree `session-issue233` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (47)
+
+- feat(drive): 虚拟摇杆折叠框改为贴屏幕最右的抽屉，收起时摄像头画面与遥测曲线占满整页宽度（Issue #232）
+  - 需求：原布局是 `grid grid-cols-1 lg:grid-cols-3`，摄像头+遥测占左 2/3、控制面板占右 1/3；折叠只是隐藏右列内部内容、右列容器仍在，画面不会放大。改为右侧抽屉后，收起时控制面板完全退出布局流，画面占满整页宽度；展开时抽屉从屏幕最右往左滑出，画面同步缩小让位。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：
+    - 移除三列 grid，摄像头+遥测改为单列全宽容器；抽屉展开时在 lg 屏加 `lg:mr-[24rem]` 让位（`transition-all` 与抽屉滑动同 duration/easing，画面随抽屉缩放）。
+    - 控制面板改为 `fixed right-0` 右侧抽屉（`top-[143px] lg:top-16 h-[calc(100vh-143px)] lg:h-[calc(100vh-4rem)] z-40`，与左侧 SidePanel 的偏移/层级对齐），展开 `w-[min(24rem,calc(100vw-3.5rem))]`、收起 `w-0`；面板内容区 `overflow-y-auto` 可滚动。
+    - 抽屉左缘新增常驻浮动触发把手（`absolute right-full`，`rounded-l-md`）：收起时贴屏幕右缘、展开时随抽屉左缘移动；`ChevronLeft`/`ChevronRight` 表示展开/收起方向，title 复用 `drive.expandJoystick`/`drive.collapseJoystick` 文案。
+    - 输入源选择、摇杆、油门条、可编程按钮、参数面板、快捷键提示整体迁入抽屉；`joystickOpen` 状态与折叠语义保持不变。
+  - 测试同步：前端 vitest 全量 20 文件 104 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer` 功能分支（worktree `session-issue232` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (46)
+
+- fix(web-ui): 页面主题不随浏览器深浅色同步——主题切换改为三态（浅色 / 深色 / 跟随系统），手动选择后可切回"跟随系统"（Issue #230）
+  - 背景：首次访问默认跟随浏览器 `prefers-color-scheme`；但手动单击主题切换按钮后，显式主题被持久化到 localStorage（`donkeydrifter.ui.theme`），从此不再跟随浏览器；且切换按钮是"深/浅"二选一，用户没有入口选回"跟随系统"。
+  - `web_ui/frontend/src/lib/theme.ts`：新增 `THEME_MODE_CHANGE_EVENT` 与 `useThemeMode()`（订阅当前模式 `system/light/dark`）；`setTheme()` 在持久化并应用后广播模式变化事件，供切换按钮反映三态。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：单按钮改为三态循环 `跟随系统 → 浅色 → 深色 → 跟随系统`；图标随模式显示 `Monitor` / `Sun` / `Moon`，aria-label 说明当前模式与下一次点击动作；挂载时仍按本地存储再应用一次，与 index.html 首屏内联脚本保持一致。
+  - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：由"静音式二选一"用例改为三态用例，覆盖默认跟随系统、循环三态、切回跟随系统后恢复同步、手动选择后不再跟随、持久化挂载与未知值回退等 10 项。
+  - 测试同步：前端 vitest 全量 20 文件 106 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：本次在 `Tony-issue230-theme-sync` 功能分支（worktree 作业）完成，仅动 DD 前端，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (45)
+
+- fix(web-ui): 把 Drive 页 Park 锁定徽标从顶栏控制组中间移到顶栏右侧，作为独立状态指示（不再夹在模式选择器与模型选择器之间）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：移除顶栏左组里 `DriveModeSelector` 与 `ModelSelector` 之间的 Park 徽标；在顶栏右端（`justify-between` 空位）单独渲染，`rc_park === 1` 时显示红色「Park 锁定 · 油门被钳 0」，并加 `whitespace-nowrap` 防止窄屏换行。
+  - 测试同步：前端 `npm run check`、`vitest`（20 文件 104 项）与 `npm run build` 全过，无新增测试文件。
+  - 注：本次在 `Tony-park-btn-pos` 功能分支（worktree `park-btn-pos` 作业）完成；仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-19 (44)
 
