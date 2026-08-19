@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-19 (58)
+## 2026-08-19 (59)
 
 - fix(launcher): Donkey 菜单页主题按钮去掉「跟随系统」显示器图标，改为深/浅两态互切（默认仍跟随浏览器，但不显示跟随系统状态）（Issue #230 最终形态）
   - 背景：上一步三态修复后，主题按钮为 跟随系统/浅色/深色 三态，其中「跟随系统」显示显示器（电脑）图标；用户要求默认仍跟随浏览器，但按钮只保留太阳/月亮两态、去掉电脑图标。
@@ -12,6 +12,11 @@
   - `tests/test_launcher_theme_single_button.py`：由三态用例改为两态用例，断言移除 `icon-monitor`/`data-mode`/`followSystem`/`toggleSystem`，保留默认跟随浏览器与 v3 迁移覆盖。
   - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
   - 注：仅 Donkey launcher（8090）改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (58)
+
+- fix(web-ui): Drive 流程节标题悬停副标题字号进一步调小到 `text-xs`（12px）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 悬停副标题字号 `text-sm` → `text-xs`，让灰色小字更明显变小。
 
 ## 2026-08-19 (57)
 
