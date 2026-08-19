@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-19 (50)
+## 2026-08-19 (51)
 
 - fix(launcher): Donkey 菜单页主题不随浏览器深浅色同步——主题按钮改为三态（跟随系统 / 浅色 / 深色），手动选择后可切回"跟随系统"（Issue #230 同源，扩展到 Donkey 启动页）
   - 背景：Donkey 菜单页（8090 launcher）与 DD web_ui 修复前存在同一问题：手动单击主题按钮后显式主题被持久化到 localStorage（`donkeydrifter.ui.theme`），从此不再跟随浏览器，且按钮是"深/浅"二选一、没有"跟随系统"入口。
@@ -12,6 +12,13 @@
   - `tests/test_launcher_theme_single_button.py`：由"二选一"用例改为三态用例，覆盖 `data-mode` 图标显隐、三态循环、首屏 `system` 解析与 `data-mode`/`data-theme` 写入等。
   - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
   - 注：本次在 `Tony-issue230-donkey-theme-sync` 功能分支（worktree 作业）完成，仅动 DD 的 launcher 页面，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (50)
+
+- feat(drive): Drive 页右侧抽屉的「虚拟摇杆」触发把手改为竖排文字，贴屏幕最右缘（Issue #232 微调）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：把手按钮由横向 `flex items-center` 改为 `flex flex-col items-center`，展开/收起 chevron 置顶，`t('drive.virtualJoystick')` 用 `[writing-mode:vertical-rl]` 竖排、`tracking-wider leading-none` 收紧字距；按钮 `px-1.5 py-2 rounded-l-md` 收窄为竖向窄条，仍通过 `absolute right-full` 贴屏幕右缘。
+  - 测试同步：前端 vitest 全量 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：本次在 `Tony-issue232-joystick-drawer-v2` 功能分支（worktree `session-issue232-v2` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-19 (49)
 

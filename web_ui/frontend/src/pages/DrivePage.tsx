@@ -311,15 +311,17 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
         }`}
       >
-        {/* 浮动触发把手：抽屉收起/展开开关，始终贴在屏幕右缘 */}
-        <div className="absolute right-full top-2 flex flex-col gap-1 items-end">
+        {/* 浮动触发把手：抽屉收起/展开开关，始终贴在屏幕右缘；「虚拟摇杆」竖排书写 */}
+        <div className="absolute right-full top-2 flex flex-col items-end">
           <button
             onClick={() => setJoystickOpen(!joystickOpen)}
             title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
-            className="border p-2 rounded-l-md transition-all duration-300 shadow-lg flex items-center bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
+            className="border rounded-l-md transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
           >
-            <span className="text-xs font-medium whitespace-nowrap">{t('drive.virtualJoystick')}</span>
-            {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0 ml-1" /> : <ChevronLeft className="w-4 h-4 shrink-0 ml-1" />}
+            {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+            <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+              {t('drive.virtualJoystick')}
+            </span>
           </button>
         </div>
 
