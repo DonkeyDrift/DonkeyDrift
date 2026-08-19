@@ -7,6 +7,7 @@ import { t as translate } from '@/i18n';
 const FlowPage = React.lazy(() => import('./pages/FlowPage').then((module) => ({ default: module.FlowPage })));
 const CarConnectorPage = React.lazy(() => import('./pages/CarConnectorPage').then((module) => ({ default: module.CarConnectorPage })));
 const DrifterConsolePage = React.lazy(() => import('./pages/DrifterConsolePage').then((module) => ({ default: module.DrifterConsolePage })));
+const DonkeyMenuPage = React.lazy(() => import('./pages/DonkeyMenuPage').then((module) => ({ default: module.DonkeyMenuPage })));
 
 type ErrorBoundaryProps = {
   children?: React.ReactNode;
@@ -42,6 +43,7 @@ function useIdlePrefetch() {
       void import('./pages/FlowPage');
       void import('./pages/CarConnectorPage');
       void import('./pages/DrifterConsolePage');
+      void import('./pages/DonkeyMenuPage');
     };
     if ('requestIdleCallback' in window) {
       const idle = window as Window & {
@@ -83,6 +85,7 @@ function AppShell() {
                 保住 #135 的常驻保活效果；CC 保持独立路由。 */}
             <Route path="/connector" element={<CarConnectorPage />} />
             <Route path="/console" element={<DrifterConsolePage />} />
+            <Route path="/donkey" element={<DonkeyMenuPage />} />
             <Route path="*" element={<FlowPage />} />
           </Routes>
         </React.Suspense>

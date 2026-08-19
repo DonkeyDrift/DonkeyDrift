@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { Menu, Settings, X } from 'lucide-react';
 import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
 import { VersionBadge } from './VersionBadge';
-import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink } from './EnterButtons';
+import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, KimiCodeWebEntryLink } from './EnterButtons';
 import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './ConsoleControls';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
@@ -40,8 +40,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
       !isConnector && !isConsole && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
     }`;
-  const linkClass = (active: boolean) =>
-    `transition-colors hover:text-cyan-400 whitespace-nowrap ${active ? 'text-cyan-500' : 'text-zinc-400'}`;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
@@ -70,7 +68,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   {t(item.labelKey)}
                 </Link>
               ))}
-              <Link to="/connector" className={linkClass(isConnector)}>
+              <Link
+                to="/connector"
+                className={`${entryLinkCls} ${isConnector ? 'text-cyan-400' : ''}`}
+              >
+                <Settings className="w-3.5 h-3.5 shrink-0" />
                 {t('common.nav.carConnector')}
               </Link>
               <KimiCodeWebEntryLink />
@@ -125,8 +127,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <Link
                 to="/connector"
                 onClick={() => setMobileMenuOpen(false)}
-                className={`py-2.5 ${linkClass(isConnector)}`}
+                className={`${entryLinkCls} ${isConnector ? 'text-cyan-400' : ''}`}
               >
+                <Settings className="w-3.5 h-3.5 shrink-0" />
                 {t('common.nav.carConnector')}
               </Link>
               <div className="mt-1 border-t border-zinc-800/60">

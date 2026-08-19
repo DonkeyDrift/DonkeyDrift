@@ -56,6 +56,14 @@ describe('ConsoleMuteButton', () => {
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute('title', 'console.unreachable');
   });
+
+  it('turns blue when muted', async () => {
+    mockGetJson.mockResolvedValue({ muted: 1 });
+    render(<ConsoleMuteButton />);
+    const btn = await screen.findByRole('button', { name: 'console.unmuteAria' });
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    expect(btn.className).toContain('text-[#5cc8ff]');
+  });
 });
 
 describe('ConsoleOtaButton', () => {
@@ -75,12 +83,14 @@ describe('ConsoleOtaButton', () => {
 });
 
 describe('ConsoleDevToggle', () => {
-  it('reflects dev mode state and toggles via text/plain proxy', async () => {
+  it('renders as an OTA-style capsule and toggles via text/plain proxy', async () => {
     mockGetJson.mockResolvedValue({ enabled: false });
     render(<ConsoleDevToggle />);
 
     const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle.className).toContain('h-8');
+    expect(toggle.className).toContain('bg-zinc-800');
     fireEvent.click(toggle);
 
     await waitFor(() => {
@@ -91,6 +101,16 @@ describe('ConsoleDevToggle', () => {
         'text/plain;charset=UTF-8',
       );
     });
+  });
+
+  it('highlights in cyan when enabled', async () => {
+    mockGetJson.mockResolvedValue({ enabled: true });
+    render(<ConsoleDevToggle />);
+
+    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle.className).toContain('bg-cyan-500/25');
+    expect(toggle.className).toContain('text-cyan-400');
   });
 
   it('is disabled when the console is unreachable', () => {
