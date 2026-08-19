@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-19 (58)
+
+- fix(launcher): Donkey 菜单页主题按钮去掉「跟随系统」显示器图标，改为深/浅两态互切（默认仍跟随浏览器，但不显示跟随系统状态）（Issue #230 最终形态）
+  - 背景：上一步三态修复后，主题按钮为 跟随系统/浅色/深色 三态，其中「跟随系统」显示显示器（电脑）图标；用户要求默认仍跟随浏览器，但按钮只保留太阳/月亮两态、去掉电脑图标。
+  - `donkeycar/launcher/server.py`：
+    - 删除 `icon-monitor` 显示器 SVG 与相关 CSS；图标显隐改由生效主题 `html[data-theme]` 驱动（浅色显太阳、深色显月亮），不再写 `html[data-mode]`。
+    - `toggleTheme()` 由三态循环改回深↔浅两态互切（按当前生效主题取反）；`renderThemeBtn()` 的 aria-label/title 改为仅 `theme.toggleLight` / `theme.toggleDark`。
+    - `initTheme()` 仍保留 `system` 默认态（无存储时跟随浏览器 `prefers-color-scheme` 并监听变化）；首屏防闪烁脚本只写生效主题 `html[data-theme]`，v3 一次性清除旧残留逻辑不变。
+    - i18n 删除 `theme.followSystem` / `theme.toggleSystem`（中英）。
+  - `tests/test_launcher_theme_single_button.py`：由三态用例改为两态用例，断言移除 `icon-monitor`/`data-mode`/`followSystem`/`toggleSystem`，保留默认跟随浏览器与 v3 迁移覆盖。
+  - 测试同步：launcher 相关测试 138 项全部通过；`python -m py_compile donkeycar/launcher/server.py` 通过。
+  - 注：仅 Donkey launcher（8090）改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (57)
 
 - fix(web-ui): Drive 页顶栏右组顺序调整 + Park 锁定对齐模型选择器高度并缩短文案
