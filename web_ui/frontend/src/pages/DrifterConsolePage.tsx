@@ -3,6 +3,7 @@ import { RefreshCw, SquareTerminal } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { discoverConnectorConsoles } from '../services/api';
+import { consoleGetText } from '../services/console';
 import { useTranslation } from '@/i18n';
 
 /**
@@ -16,6 +17,7 @@ export const DrifterConsolePage: React.FC = () => {
   const [scanning, setScanning] = useState(false);
   const [selectedIp, setSelectedIp] = useState('');
   const [manualIp, setManualIp] = useState('');
+  const [version, setVersion] = useState('');
 
   const discover = useCallback(async () => {
     setScanning(true);
@@ -40,6 +42,27 @@ export const DrifterConsolePage: React.FC = () => {
     if (!ip) return;
     setSelectedIp(ip);
   }, [manualIp]);
+
+  // 车端固件版本从 /api/status 的 version= 字段读取，显示在工具条“连接”按钮右侧。
+  useEffect(() => {
+    if (!selectedIp) {
+      setVersion('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const text = await consoleGetText(selectedIp, 'api/status');
+        const m = text.match(/version=(\S+)/);
+        if (!cancelled) setVersion(m ? `v${m[1].replace(/^V/i, '')}` : '');
+      } catch {
+        if (!cancelled) setVersion('');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIp]);
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
@@ -78,6 +101,9 @@ export const DrifterConsolePage: React.FC = () => {
         <Button onClick={connectManual} variant="secondary" size="sm">
           {t('console.connect')}
         </Button>
+        {version && (
+          <span className="ml-1 whitespace-nowrap font-mono text-xs text-zinc-400">{version}</span>
+        )}
       </div>
 
       {selectedIp ? (
