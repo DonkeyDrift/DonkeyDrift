@@ -538,6 +538,11 @@ export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWeb
   return response.data as LaunchKimiCodeWebResult;
 };
 
+// Donkey 菜单/启动页由 launcher（:8090）服务，与后端 launch.py 的
+// LAUNCHER_BASE_URL 约定一致；从浏览器侧按当前访问主机推导。
+export const getDonkeyUrl = (): string =>
+  `${window.location.protocol}//${window.location.hostname}:8090/`;
+
 // ------------------------------------------------------------------
 // Pilot Arena APIs
 // ------------------------------------------------------------------

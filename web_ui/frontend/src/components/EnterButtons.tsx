@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FlaskConical, Sparkles, SquareTerminal } from 'lucide-react';
+import { Car, FlaskConical, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { getDonkeyUrl, launchDsh, launchKimiCodeWeb } from '@/services/api';
 
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
@@ -46,6 +46,23 @@ const useLauncherEntry = (
 // 外链入口不做路由激活态
 const entryLinkCls =
   'flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors whitespace-nowrap cursor-pointer py-2.5';
+
+export const DonkeyEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  // Donkey 菜单/启动页（launcher :8090）是 Donkey 生态的根入口，新标签页打开。
+  return (
+    <a
+      href={getDonkeyUrl()}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={t('common.enterButtons.donkeyTitle')}
+      className={entryLinkCls}
+    >
+      <Car className="w-3.5 h-3.5 shrink-0" />
+      {t('common.enterButtons.donkey')}
+    </a>
+  );
+};
 
 export const DrifterConsoleEntryLink: React.FC = () => {
   const { t } = useTranslation();

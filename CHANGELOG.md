@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-19 (64)
+
+- feat(web-ui): 把 DC 头部静音/OTA/DEV/Donkey 四控件整合进 DonkeyDrifter 顶栏，重设计为 DD 风格，静音与车端 DC 双向同步
+  - 背景：用户要求 DD 页面顶栏承担原 Drifter Console 头部的一部分控制——静音键放在 GitHub 图标右侧、主题切换左侧并与 DC 双向同步；OTA/DEV 开关放在语言切换右侧；Donkey 入口移入顶部导航栏并加图标（参考 Kimi/DeepSeek 入口样式）。
+  - `web_ui/frontend/src/hooks/useConsoleDevice.ts`（新增）：模块级去重 + `sessionStorage` 缓存 ESP32 IP，导出 `useConsoleDevice()`（返回 `{ip, resolving}`），供静音/OTA/DEV 复用设备发现结果。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`（新增）：`ConsoleMuteButton`（lucide `Volume2/VolumeX`，5s 轮询 `/api/console/proxy/<ip>/api/mute` 双向同步）、`ConsoleOtaButton`（新标签页打开 `http://<ip>/update`）、`ConsoleDevToggle`（DEV 滑块，5s 轮询 `/api/devmode`，直接切换无确认弹窗，与内嵌 `/console` 页一致）。
+  - `web_ui/frontend/src/services/api.ts`：新增 `getDonkeyUrl()`（`${protocol}//${hostname}:8090/`）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `DonkeyEntryLink`（lucide `Car` 图标 + 导航链接样式，参考 Kimi/DeepSeek 入口）。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面右上角顺序 `VersionBadge → GitHubLink → ConsoleMuteButton → ThemeSwitcher → LanguageSwitcher → ConsoleOtaButton → ConsoleDevToggle`；桌面导航最左侧加入 `DonkeyEntryLink`；移动端第二行与汉堡菜单面板同步接入。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：新增 `common.enterButtons.donkey` / `donkeyTitle`（zh/en）；`web_ui/frontend/src/i18n/messages/console.ts`：新增 `console.muteAria` / `unmuteAria` / `otaOpen` / `unreachable`（zh/en）。
+  - 测试同步：新增 `ConsoleControls.test.tsx`（6 项）；`EnterButtons.test.tsx` 补 Donkey 入口断言并 mock `getDonkeyUrl`；前端 `npm run check`（tsc）、vitest 相关 13 项、`npm run build` 全部通过。
+  - 注：Firmware 侧同步移除 DC 头部 Donkey/OTA/DEV 并补静音轮询（v1.8.17），见 Firmware CHANGELOG。
+
 ## 2026-08-19 (63)
 
 - fix(web-ui): Drive 页遥测曲线图改「有新帧才重绘 + 10fps 节流」，消除空闲 60fps 空转长任务——修复 #135 切换标签页卡顿（尤其 Drive → Drifter Console）
