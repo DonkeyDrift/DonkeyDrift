@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-08-19 (60)
+
+- fix(web-ui): Drive 流程节标题副标题垂直对齐并复刻 SectionCardTitle 悬停动画（Issue #233 补充）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 的标题 `h2` 补 `leading-none`、副标题补 `leading-none`，消除小字相对标题偏高；副标题展开宽度 `max-w-[400px]` → `max-w-[300px]`，与 `SectionCardTitle` 动画参数完全一致（`transition-all duration-300 ease-in-out`）。
+
 ## 2026-08-19 (59)
 
 - fix(drive): Drive 页右侧抽屉改为贴视频画面右侧并 sticky 顶部对齐，滚动时留在顶部不跟走（Issue #232 第四次微调）
