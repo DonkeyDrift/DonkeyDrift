@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-08-19 (48)
+
+- feat(web-ui): 全站卡片小标题统一为「左侧图标 + 悬停灰色副标题」，抽出 `SectionCardTitle` 组件（Issue #233）
+  - 需求：以 TM「录制视频库」小标题为基准，把 DD 所有页面的卡片小标题统一成同款 UI——左侧语义图标 + 悬停淡入灰色副标题；副标题文案补充进 i18n 中英双语。
+  - 新增 `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：复用 `CardTitle`，统一渲染图标 + 标题 + 可选副标题（`group-hover` 淡入展开，`transition-all duration-300`），并支持 `children` 追加标题行内徽标。
+  - 全站替换：
+    - `TubLibrary.tsx`、`TubEditor.tsx`：基准实现改为复用 `SectionCardTitle`。
+    - `TubLoader.tsx`、`ConfigLoader.tsx`、`SimulatorConfig.tsx`：补齐悬停副标题。
+    - `PilotArenaPage.tsx`：当前数据 / 飞行员名称 / 图像处理 / Tub 绘图 / 变换前 / 变换后。
+    - `CarConnectorPage.tsx`：连接配置 / 拉取 Tub / 推送 Pilots / 远程驾驶 / 任务日志。
+    - `TrainerPage.tsx` 及 trainer 组件：训练配置 / 云端训练 / 本机训练 / 环境检测 / 训练状态 / 训练日志 / 已训练模型。
+    - `DrivePage.tsx`：虚拟摇杆区块标题。
+  - i18n 新增副标题文案（`arena.ts` / `common.ts` / `connector.ts` / `drive.ts` / `trainer.ts` / `tubnav.ts` 中英双语）。
+  - 测试同步：`npm run check`（tsc）、`npm run build`、前端 vitest 20 文件 104 项全部通过。
+  - 注：本次在 `Tony-issue233-section-card-titles` 功能分支（worktree `session-issue233` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (47)
 
 - feat(drive): 虚拟摇杆折叠框改为贴屏幕最右的抽屉，收起时摄像头画面与遥测曲线占满整页宽度（Issue #232）

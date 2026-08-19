@@ -10,8 +10,10 @@ import {
   Tooltip,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { Card, CardContent, CardHeader } from '../components/ui/Card';
+import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 import { Button } from '../components/ui/Button';
+import { ArrowLeftRight, ArrowRightLeft, Cpu, Database, LineChart, SlidersHorizontal } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import {
   ArenaModel,
@@ -825,7 +827,11 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
 
       <Card>
         <CardHeader>
-          <CardTitle>{t('arena.currentData')}</CardTitle>
+          <SectionCardTitle
+            icon={<Database className="w-5 h-5" />}
+            title={t('arena.currentData')}
+            subtitle={t('arena.currentDataSubtitle')}
+          />
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 text-sm lg:grid-cols-3">
@@ -876,7 +882,11 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <CardTitle>{viewer.pilot?.name || t('arena.noPilotLoaded')}</CardTitle>
+                  <SectionCardTitle
+                    icon={<Cpu className="w-5 h-5" />}
+                    title={viewer.pilot?.name || t('arena.noPilotLoaded')}
+                    subtitle={t('arena.pilotSubtitle')}
+                  />
                   <p className="mt-1 text-xs text-zinc-500">{viewer.pilot?.model_type || viewer.modelType}</p>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => unloadViewer(viewer)}>{t('arena.remove')}</Button>
@@ -977,7 +987,11 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle>{t('arena.imageProcessing')}</CardTitle>
+          <SectionCardTitle
+            icon={<SlidersHorizontal className="w-5 h-5" />}
+            title={t('arena.imageProcessing')}
+            subtitle={t('arena.imageProcessingSubtitle')}
+          />
           <Button variant="secondary" size="sm" onClick={() => setImageProcessingCollapsed((collapsed) => !collapsed)}>
             {imageProcessingCollapsed ? t('arena.expand') : t('arena.collapse')}
           </Button>
@@ -1020,7 +1034,12 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div>
-                <div className="mb-2 text-sm font-medium text-zinc-300">{t('arena.preTransformations')}</div>
+                <SectionCardTitle
+                  className="mb-2"
+                  icon={<ArrowLeftRight className="w-5 h-5" />}
+                  title={t('arena.preTransformations')}
+                  subtitle={t('arena.preTransformationsSubtitle')}
+                />
                 <div className="flex flex-wrap gap-2">
                   {TRANSFORMATION_OPTIONS.map((name) => (
                     <button
@@ -1035,7 +1054,12 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 </div>
               </div>
               <div>
-                <div className="mb-2 text-sm font-medium text-zinc-300">{t('arena.postTransformations')}</div>
+                <SectionCardTitle
+                  className="mb-2"
+                  icon={<ArrowRightLeft className="w-5 h-5" />}
+                  title={t('arena.postTransformations')}
+                  subtitle={t('arena.postTransformationsSubtitle')}
+                />
                 <div className="flex flex-wrap gap-2">
                   {TRANSFORMATION_OPTIONS.map((name) => (
                     <button
@@ -1056,7 +1080,11 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
 
       <Card>
         <CardHeader>
-          <CardTitle>{t('arena.tubPlot')}</CardTitle>
+          <SectionCardTitle
+            icon={<LineChart className="w-5 h-5" />}
+            title={t('arena.tubPlot')}
+            subtitle={t('arena.tubPlotSubtitle')}
+          />
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_140px_auto]">

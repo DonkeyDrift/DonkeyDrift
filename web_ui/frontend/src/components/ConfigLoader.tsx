@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { Card, CardContent, CardHeader } from './ui/Card';
+import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
@@ -116,10 +117,11 @@ export const ConfigLoader: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FolderCog className="w-5 h-5" />
-          {t('common.configLoader.title')}
-        </CardTitle>
+        <SectionCardTitle
+          icon={<FolderCog className="w-5 h-5" />}
+          title={t('common.configLoader.title')}
+          subtitle={t('common.configLoader.hoverSubtitle')}
+        />
         <p className="text-sm text-zinc-400">{t('common.configLoader.description')}</p>
         <p className="text-xs text-zinc-600">{t('common.configLoader.apiLabel', { origin: window.location.origin })}</p>
       </CardHeader>

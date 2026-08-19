@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { Card, CardContent, CardHeader } from './ui/Card';
+import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { useStore } from '../store/useStore';
 import {
@@ -510,15 +511,11 @@ export const TubLibrary: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center w-fit group cursor-default">
-          <div className="flex items-center gap-2">
-            <Clapperboard className="w-5 h-5" />
-            <span>{t('tubLibrary.title')}</span>
-          </div>
-          <span className="text-sm text-zinc-400 font-normal max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3">
-            {t('tub.subtitle')}
-          </span>
-        </CardTitle>
+        <SectionCardTitle
+          icon={<Clapperboard className="w-5 h-5" />}
+          title={t('tubLibrary.title')}
+          subtitle={t('tub.subtitle')}
+        />
         <p className="text-sm text-zinc-400">{t('tubLibrary.subtitle')}</p>
       </CardHeader>
       <CardContent>

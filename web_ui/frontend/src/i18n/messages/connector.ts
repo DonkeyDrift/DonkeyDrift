@@ -52,6 +52,11 @@ export const connector: { zh: Record<string, string>; en: Record<string, string>
     'connector.tubPulledButRefreshFailed': 'Tub 已拉取，但本地刷新失败: {message}',
     'connector.jobStatusReadFailed': '任务状态读取失败: {message}',
     'connector.jobStartFailed': '启动失败: {message}',
+    'connector.configTitleSubtitle': '配置与车端的 SSH 连接',
+    'connector.pullTubTitleSubtitle': '从车端拉取 Tub 数据到本地',
+    'connector.pushPilotsTitleSubtitle': '把本地模型推送到车端',
+    'connector.remoteDriveTitleSubtitle': '在车端远程启动驾驶',
+    'connector.jobLogSubtitle': '查看任务进度与实时日志',
   },
   en: {
     'connector.configTitle': 'Connection Config',
@@ -103,5 +108,10 @@ export const connector: { zh: Record<string, string>; en: Record<string, string>
     'connector.tubPulledButRefreshFailed': 'Tub pulled, but local refresh failed: {message}',
     'connector.jobStatusReadFailed': 'Failed to read job status: {message}',
     'connector.jobStartFailed': 'Failed to start: {message}',
+    'connector.configTitleSubtitle': 'Configure the SSH connection to the car',
+    'connector.pullTubTitleSubtitle': 'Pull Tub data from the car to local',
+    'connector.pushPilotsTitleSubtitle': 'Push local models to the car',
+    'connector.remoteDriveTitleSubtitle': 'Start driving remotely on the car',
+    'connector.jobLogSubtitle': 'View job progress and live logs',
   },
 };

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, ScrollText } from 'lucide-react';
 import { TrainingJob } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 
@@ -30,7 +30,15 @@ export const LogPanel: React.FC<LogPanelProps> = ({ job }) => {
         onClick={() => setIsExpanded(!isExpanded)}
         className="px-4 py-2 border-b border-zinc-800 flex items-center justify-between w-full hover:bg-zinc-800/50 transition-colors"
       >
-        <span className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainingLog')}</span>
+        <span className="flex items-center w-fit group cursor-default">
+          <span className="flex items-center gap-2">
+            <ScrollText className="w-5 h-5" />
+            <span className="text-sm font-semibold leading-none tracking-tight text-white">{t('trainer.trainingLog')}</span>
+          </span>
+          <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3 text-sm text-zinc-400 font-normal">
+            {t('trainer.trainingLogSubtitle')}
+          </span>
+        </span>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-600">{t('trainer.logLines', { count: logs.length })}</span>
           {isExpanded ? (

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { Card, CardContent, CardHeader } from './ui/Card';
+import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
@@ -154,10 +155,11 @@ export const SimulatorConfig: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Gamepad2 className="w-5 h-5" />
-          {t('tub.simTitle')}
-        </CardTitle>
+        <SectionCardTitle
+          icon={<Gamepad2 className="w-5 h-5" />}
+          title={t('tub.simTitle')}
+          subtitle={t('tub.simHoverSubtitle')}
+        />
         <p className="text-sm text-zinc-400">{t('tub.simSubtitle')}</p>
       </CardHeader>
       <CardContent>

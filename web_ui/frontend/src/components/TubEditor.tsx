@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { Card, CardContent, CardHeader } from './ui/Card';
+import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
@@ -1516,15 +1517,11 @@ export const TubEditor: React.FC = () => {
     return (
       <Card className={chartCardClassName}>
         <CardHeader>
-          <CardTitle className="group flex w-fit items-center cursor-default">
-            <div className="flex items-center gap-2">
-              <LineChart className="w-5 h-5" />
-              <span>{t('tubEditor.title')}</span>
-            </div>
-            <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-normal text-zinc-400 opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[320px] group-hover:opacity-100">
-              {t('tubEditor.subtitle')}
-            </span>
-          </CardTitle>
+          <SectionCardTitle
+            icon={<LineChart className="w-5 h-5" />}
+            title={t('tubEditor.title')}
+            subtitle={t('tubEditor.subtitle')}
+          />
         </CardHeader>
         <CardContent>
             <div
@@ -1544,20 +1541,17 @@ export const TubEditor: React.FC = () => {
   return (
     <Card className={chartCardClassName}>
       <CardHeader className="relative flex flex-col items-start justify-between gap-4 space-y-0">
-        <CardTitle className="group flex w-fit items-center cursor-default">
-          <div className="flex items-center gap-2">
-            <LineChart className="w-5 h-5" />
-            <span>{t('tubEditor.title')}</span>
-            {isDragging && (
-              <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-400 animate-pulse">
-                {t('tubEditor.liveUpdate')}
-              </span>
-            )}
-          </div>
-          <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-normal text-zinc-400 opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[320px] group-hover:opacity-100">
-            {t('tubEditor.subtitle')}
-          </span>
-        </CardTitle>
+        <SectionCardTitle
+          icon={<LineChart className="w-5 h-5" />}
+          title={t('tubEditor.title')}
+          subtitle={t('tubEditor.subtitle')}
+        >
+          {isDragging && (
+            <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-400 animate-pulse">
+              {t('tubEditor.liveUpdate')}
+            </span>
+          )}
+        </SectionCardTitle>
         <div className="flex w-full max-w-full flex-wrap items-start justify-between gap-2">
           <div className="ml-auto flex flex-col items-end gap-1">
             <div className="flex min-h-[30px] flex-wrap items-center justify-end gap-2">
