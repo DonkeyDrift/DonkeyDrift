@@ -20,7 +20,6 @@ import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
 import { Circle, ChevronLeft, ChevronRight, Joystick } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
 type DrivePageProps = {
@@ -60,35 +59,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [joystickOpen, setJoystickOpen] = useState(false);
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
-
-  // 把手顶部动态对齐摄像头画面顶部：抽屉经 portal 挂到 body 后，把手是抽屉内 absolute 元素，
-  // 这里实时量出「摄像头画面顶部 - 抽屉顶部」作为把手在抽屉内的 top。
-  const cameraWrapRef = useRef<HTMLDivElement>(null);
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const handleRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      const cam = cameraWrapRef.current?.getBoundingClientRect();
-      const drw = drawerRef.current?.getBoundingClientRect();
-      if (!cam || !drw || !handleRef.current) return;
-      const next = Math.max(0, cam.top - drw.top);
-      handleRef.current.style.top = `${next}px`;
-    };
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    update();
-    window.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('resize', schedule);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', schedule);
-      window.removeEventListener('resize', schedule);
-    };
-  }, []);
 
   const { params, loadFromServer } = useDriveStore();
   const { configPath } = useStore();
@@ -286,15 +256,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     <div className="space-y-4">
       {/* 顶部工具栏：窄屏允许换行，避免一排溢出（页内标题已上移到 section 头 #178） */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* 左：驾驶模式 + 模型 + Park 状态 */}
+        {/* 左：Park 状态 + 驾驶模式 + 模型 */}
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-          <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
-          <ModelSelector
-            value={currentModel}
-            options={models}
-            onChange={handleModelChange}
-            disabled={!carState.online || modelsLoading}
-          />
           {telemetry?.rc_park === 1 && (
             <span
               className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
@@ -303,6 +266,13 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               {t('drive.parkLocked')}
             </span>
           )}
+          <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
+          <ModelSelector
+            value={currentModel}
+            options={models}
+            onChange={handleModelChange}
+            disabled={!carState.online || modelsLoading}
+          />
         </div>
         {/* 右：已录制条数 + 录制 */}
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
@@ -330,82 +300,75 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         </div>
       </div>
 
-      {/* 摄像头 + 遥测：抽屉展开时在 lg 屏让出右侧空间，画面随抽屉同步缩放 */}
-      <div ref={cameraWrapRef} className={`transition-all duration-300 ease-in-out ${joystickOpen ? 'lg:mr-[24rem]' : 'lg:mr-0'}`}>
-        {active ? (
-          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
-        ) : (
-          <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
-        )}
-        <TelemetryChart telemetry={telemetry} className="mt-4" active={active} />
-      </div>
-
-      {/* 右侧抽屉：虚拟摇杆控制面板（贴屏幕最右，从右往左滑出）。
-          经 createPortal 挂到 body，避免上层 section 的 content-visibility:paint containment
-          把 fixed 定位劫持为相对 section（否则把手会贴着摄像头画面右边而非屏幕右边）。 */}
-      {createPortal(
-        <div
-          ref={drawerRef}
-          className={`fixed right-0 top-[143px] lg:top-16 h-[calc(100vh-143px)] lg:h-[calc(100vh-4rem)] z-40 transition-all duration-300 ease-in-out ${
-            joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
-          }`}
-        >
-        {/* 浮动触发把手：抽屉收起/展开开关，始终贴在屏幕右缘；「虚拟摇杆」竖排书写 */}
-        <div ref={handleRef} className="absolute right-full flex flex-col items-end">
-          <button
-            onClick={() => setJoystickOpen(!joystickOpen)}
-            title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
-            className="border rounded-l-md transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
-          >
-            {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
-            <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
-              {t('drive.virtualJoystick')}
-            </span>
-          </button>
+      {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
+      <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">
+        {/* 左：视频 + 遥测 */}
+        <div className="flex-1 min-w-0">
+          {active ? (
+            <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+          ) : (
+            <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
+          )}
+          <TelemetryChart telemetry={telemetry} className="mt-4" active={active} />
         </div>
 
-        {/* 面板内容 */}
-        <div className="h-full bg-zinc-900 border-l border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden">
-          <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
-            <div className="flex items-center justify-between gap-2">
-              <SectionCardTitle
-                icon={<Joystick className="w-5 h-5" />}
-                title={t('drive.virtualJoystick')}
-                subtitle={t('drive.virtualJoystickSubtitle')}
-              />
-              <InputSourceSelector
-                value={inputSource}
-                onChange={setInputSource}
-                gamepadConnected={gamepadConnected}
-                gyroAvailable={permissionState !== 'unsupported'}
-              />
-            </div>
-            <div className="flex flex-col items-center gap-4">
-              <div className="grid grid-cols-[auto_220px] gap-6">
-                <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
-                <div className="flex flex-col items-center gap-2 w-[220px]">
-                  <VirtualJoystick
-                    onChange={(a, t) => {
-                      joystickRef.current = { angle: a, throttle: t };
-                      lastInputType.current = 'joystick';
-                    }}
-                    size={220}
+        {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}
+        <aside className="z-40 lg:sticky lg:top-16 lg:shrink-0">
+          <div className="flex items-start gap-2">
+            {/* 浮动触发把手：抽屉收起/展开开关；「虚拟摇杆」竖排书写 */}
+            <button
+              onClick={() => setJoystickOpen(!joystickOpen)}
+              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
+              className="shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
+            >
+              {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+              <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                {t('drive.virtualJoystick')}
+              </span>
+            </button>
+
+            {/* 面板内容 */}
+            <div className={`${joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))] border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg transition-all duration-300 ease-in-out`}>
+              <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <SectionCardTitle
+                    icon={<Joystick className="w-5 h-5" />}
+                    title={t('drive.virtualJoystick')}
+                    subtitle={t('drive.virtualJoystickSubtitle')}
                   />
-                  <ControlBars angle={angle} className="w-full" />
+                  <InputSourceSelector
+                    value={inputSource}
+                    onChange={setInputSource}
+                    gamepadConnected={gamepadConnected}
+                    gyroAvailable={permissionState !== 'unsupported'}
+                  />
                 </div>
-              </div>
-              <ProgrammableButtons className="w-full max-w-[240px]" />
-              <ParameterPanel className="w-full max-w-[360px]" />
-              <div className="text-[10px] text-zinc-500 text-center">
-                {t('drive.hotkeysLine1')}<br />
-                {t('drive.hotkeysLine2')}
+                <div className="flex flex-col items-center gap-4">
+                  <div className="grid grid-cols-[auto_220px] gap-6">
+                    <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+                    <div className="flex flex-col items-center gap-2 w-[220px]">
+                      <VirtualJoystick
+                        onChange={(a, t) => {
+                          joystickRef.current = { angle: a, throttle: t };
+                          lastInputType.current = 'joystick';
+                        }}
+                        size={220}
+                      />
+                      <ControlBars angle={angle} className="w-full" />
+                    </div>
+                  </div>
+                  <ProgrammableButtons className="w-full max-w-[240px]" />
+                  <ParameterPanel className="w-full max-w-[360px]" />
+                  <div className="text-[10px] text-zinc-500 text-center">
+                    {t('drive.hotkeysLine1')}<br />
+                    {t('drive.hotkeysLine2')}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        </div>,
-        document.body,
-      )}
+        </aside>
+      </div>
 
     </div>
   );
