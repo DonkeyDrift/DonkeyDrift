@@ -3,7 +3,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
+import { DonkeyEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
@@ -13,8 +13,9 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/services/api', () => ({
   launchKimiCodeWeb: vi.fn(),
   launchDsh: vi.fn(),
+  getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { getDonkeyUrl, launchDsh, launchKimiCodeWeb } from '@/services/api';
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
 const mockLaunchDsh = vi.mocked(launchDsh);
 beforeEach(() => { vi.clearAllMocks(); });
@@ -23,6 +24,7 @@ describe('entry link components (Issue #175 nav-link style)', () => {
   it('renders each entry with the de-emphasized advanced link style', () => {
     render(
       <MemoryRouter>
+        <DonkeyEntryLink />
         <DrifterConsoleEntryLink />
         <KimiCodeWebEntryLink />
         <DshEntryLink />
@@ -40,6 +42,21 @@ describe('entry link components (Issue #175 nav-link style)', () => {
       expect(btn?.className).toContain('text-xs');
       expect(btn?.className).toContain('text-zinc-500');
     }
+  });
+});
+
+describe('DonkeyEntryLink', () => {
+  it('opens the Donkey launcher menu page in a new tab', () => {
+    render(
+      <MemoryRouter>
+        <DonkeyEntryLink />
+      </MemoryRouter>,
+    );
+    const link = screen.getByText('common.enterButtons.donkey').closest('a');
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', 'http://localhost:8090/');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(getDonkeyUrl).toHaveBeenCalled();
   });
 });
 
