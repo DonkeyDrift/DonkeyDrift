@@ -297,15 +297,18 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           />
           {telemetry?.rc_park === 1 && (
             <span
-              className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium text-xs whitespace-nowrap"
+              className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
               data-rc-park={telemetry.rc_park}
             >
               {t('drive.parkLocked')}
             </span>
           )}
         </div>
-        {/* 右：录制 + 已录制条数 */}
+        {/* 右：已录制条数 + 录制 */}
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+          <span className="text-xs text-zinc-500 whitespace-nowrap">
+            {t('drive.recordedCount', { count: carState.numRecords })}
+          </span>
           <button
             onClick={toggleRecording}
             disabled={!carState.online || recordingLock}
@@ -324,9 +327,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             )}
             {recording ? t('drive.recording', { duration: formatDuration(recordDuration) }) : t('drive.record')}
           </button>
-          <span className="text-xs text-zinc-500 whitespace-nowrap">
-            {t('drive.recordedCount', { count: carState.numRecords })}
-          </span>
         </div>
       </div>
 

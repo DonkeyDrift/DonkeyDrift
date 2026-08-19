@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-19 (57)
+
+- fix(web-ui): Drive 页顶栏右组顺序调整 + Park 锁定对齐模型选择器高度并缩短文案
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：右组由「录制按钮 → 已录制条数」改为「已录制条数 → 录制按钮」；Park 锁定徽标由小号 `px-2 py-0.5 rounded` 改为与 `ModelSelector` 同高同大小的 `px-3 py-1.5 rounded-lg border`（红色语义保留）。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：`drive.recordedCount` 中文「已录制条数 {count}」→「已录制条数: {count}」；`drive.parkLocked` 中文「Park 锁定 · 油门被钳 0」→「Park 锁定」、英文「Park locked · throttle clamped to 0」→「Park locked」。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (56)
 
 - fix(launcher): Donkey 菜单页「跟随系统」仍不生效——清除旧二选一遗留的显式主题，首次访问自动恢复跟随系统（Issue #230）
