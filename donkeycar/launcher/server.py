@@ -1338,7 +1338,7 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
     // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统，经 matchMedia 实时解析）
-    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=t}catch(e){}})();
+    (function(){try{var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';var r=t;if(r==='system'){r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.mode=t;document.documentElement.dataset.theme=r}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
@@ -1378,10 +1378,13 @@ MENU_HTML = r"""<!DOCTYPE html>
         #themeBtn{margin-left:auto;background:#111820;border-color:#344154;box-shadow:inset 0 0 0 1px #2b3441;color:#b9c5d3}
         #themeBtn:hover{color:#e8edf2}
         #themeBtn svg{width:16px;height:16px}
-        /* 图标反映当前生效主题：深色显月亮，浅色显太阳 */
+        /* 图标反映当前模式：跟随系统显显示器，浅色显太阳，深色显月亮 */
         #themeBtn .icon-sun{display:none}
-        html[data-theme="light"] #themeBtn .icon-sun{display:block}
-        html[data-theme="light"] #themeBtn .icon-moon{display:none}
+        #themeBtn .icon-monitor{display:none}
+        html[data-mode="light"] #themeBtn .icon-sun{display:block}
+        html[data-mode="light"] #themeBtn .icon-moon{display:none}
+        html[data-mode="system"] #themeBtn .icon-monitor{display:block}
+        html[data-mode="system"] #themeBtn .icon-moon{display:none}
         .headerBreak{display:none}
 
         /* 手机版顶栏两行：第一行 图标/标题/GitHub/版本号（与电脑版一致），
@@ -1528,9 +1531,10 @@ MENU_HTML = r"""<!DOCTYPE html>
             </a>
             <span class="versionBadge">v{{VERSION}}</span>
             <div class="headerBreak"></div>
-            <button type="button" id="themeBtn" class="langBtn" aria-label="主题" data-i18n-aria="theme.title" title="主题" data-i18n-title="theme.title">
+            <button type="button" id="themeBtn" class="langBtn" aria-label="主题" title="主题">
                 <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
                 <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                <svg class="icon-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
             </button>
             <button type="button" id="langBtn" class="langBtn" aria-label="语言" data-i18n-aria="language.title">中</button>
         </div>
@@ -1587,6 +1591,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'theme.title': '主题',
                 'theme.toggleLight': '切换到浅色主题',
                 'theme.toggleDark': '切换到深色主题',
+                'theme.followSystem': '跟随系统主题',
+                'theme.toggleSystem': '切换到跟随系统',
                 'fab.quick': '快捷入口',
                 'fab.help': '帮助',
                 'cwd.label': '当前工作目录',
@@ -1624,6 +1630,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'theme.title': 'Theme',
                 'theme.toggleLight': 'Switch to light theme',
                 'theme.toggleDark': 'Switch to dark theme',
+                'theme.followSystem': 'Follow system theme',
+                'theme.toggleSystem': 'Switch to follow system',
                 'fab.quick': 'Quick actions',
                 'fab.help': 'Help',
                 'cwd.label': 'Current Working Directory',
@@ -1694,6 +1702,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             if (langBtn) {
                 langBtn.textContent = uiLang === 'zh' ? '中' : 'EN';
             }
+            renderThemeBtn();
             renderMenu();
         }
         function setLanguage(lang) {
@@ -1704,9 +1713,9 @@ MENU_HTML = r"""<!DOCTYPE html>
             setLanguage(uiLang === 'zh' ? 'en' : 'zh');
         }
 
-        // ── 主题：静音式单按钮，单击深↔浅互切；未手动切换前跟随浏览器
-        //    prefers-color-scheme（'system' 态经 matchMedia 实时解析并监听），
-        //    手动单击后持久化显式选择，不再跟随（与 DD web_ui 同语义） ──
+        // ── 主题：静音式单按钮三态循环 跟随系统 → 浅色 → 深色 → 跟随系统 ──
+        //    未手动切换前跟随浏览器 prefers-color-scheme（'system' 态经 matchMedia
+        //    实时解析并监听）；手动单击可显式选择浅/深，再切回"跟随系统"后恢复同步 ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -1716,12 +1725,20 @@ MENU_HTML = r"""<!DOCTYPE html>
         function renderThemeBtn() {
             var btn = document.getElementById('themeBtn');
             if (!btn) return;
-            var effective = document.documentElement.dataset.theme || 'dark';
-            btn.setAttribute('aria-label', t(effective === 'light' ? 'theme.toggleDark' : 'theme.toggleLight'));
-            btn.title = t(effective === 'light' ? 'theme.toggleDark' : 'theme.toggleLight');
+            var label;
+            if (uiTheme === 'system') {
+                label = t('theme.followSystem') + '，' + t('theme.toggleLight');
+            } else if (uiTheme === 'light') {
+                label = t('theme.toggleDark');
+            } else {
+                label = t('theme.toggleSystem');
+            }
+            btn.setAttribute('aria-label', label);
+            btn.title = label;
         }
         function applyTheme(mode) {
-            uiTheme = (mode === 'light' || mode === 'dark') ? mode : 'system';
+            uiTheme = (mode === 'light' || mode === 'dark' || mode === 'system') ? mode : 'system';
+            document.documentElement.dataset.mode = uiTheme;
             document.documentElement.dataset.theme =
                 uiTheme === 'system' ? systemTheme() : uiTheme;
             renderThemeBtn();
@@ -1731,8 +1748,9 @@ MENU_HTML = r"""<!DOCTYPE html>
             applyTheme(mode);
         }
         function toggleTheme() {
-            var effective = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-            setTheme(effective === 'light' ? 'dark' : 'light');
+            if (uiTheme === 'system') setTheme('light');
+            else if (uiTheme === 'light') setTheme('dark');
+            else setTheme('system');
         }
         function initTheme() {
             var stored = 'system';
