@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-19 (63)
+
+- fix(web-ui): Drive 页遥测曲线图改「有新帧才重绘 + 10fps 节流」，消除空闲 60fps 空转长任务——修复 #135 切换标签页卡顿（尤其 Drive → Drifter Console）
+  - 根因：`TelemetryChart` 用 `requestAnimationFrame` 每帧无条件 `setRenderTick` 触发 chart.js 重绘（60fps），即使遥测为空也持续渲染。CPU 4x 实测 Drive 页空闲 10s 产生 25 个 longtask（峰值 ~1s），主线程被连续占满，点击其它标签时路由切换/卸载被饿死，表现为「点了很久才动、一动就瞬跳」。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：移除 rAF 60fps 空转循环，改为「收到新遥测帧写入环形缓冲后，按 `CHART_REDRAW_INTERVAL_MS`（100ms，~10fps）节流 `setRenderTick`」；空闲无遥测时 chart.js 不再重绘。
+  - 实测（CPU 4x）：Drive 页空闲 10s longtask 0（修复前 25 个、峰值 ~1s）；Drive → `/console` 路由切换 336ms、切换后 FlowPage 干净卸载、无 longtask；FlowPage 四段导航滑动仍精准落位（err 0/1/1/0）、每段仅 1 个 ~150-180ms longtask。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (62)
 
 - fix(web-ui): Drive 页 Park 锁定移到驾驶模式选择器左侧

@@ -29,6 +29,10 @@ ChartJS.register(
 /** 环形缓冲长度，与固件 WebConsole 对齐（约 2.6 秒 @100Hz）。 */
 const BUFFER_SIZE = 256;
 
+/** chart.js 重绘节流间隔（~10fps）。改成「有新遥测帧才重绘 + 10fps 节流」，
+ *  彻底消除空闲时的 60fps 空转长任务（#135 切换标签页卡顿主因之一）。 */
+const CHART_REDRAW_INTERVAL_MS = 100;
+
 /** 单条曲线的显示配置。 */
 interface CurveConfig {
   /** 显示名的 i18n key（driveViz 命名空间）。 */
@@ -78,7 +82,8 @@ interface TelemetryChartProps {
 
 /**
  * 实时遥测曲线图，移植自固件 Drifter Console。
- * - 256 点环形缓冲，requestAnimationFrame 节流重绘（上限 60fps），避免 100Hz 全量 setState
+ * - 256 点环形缓冲；有新遥测帧才写入，并按 ~10fps 节流触发 chart.js 重绘，
+ *   避免 100Hz 全量 setState，也避免空闲时 60fps 空转（#135 切换标签页卡顿）
  * - 默认 5 条曲线（Throttle/Steering/GyroZ/RC Steering/RC Throttle），其余通过工具栏开关
  * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
@@ -92,7 +97,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
   const writeIndexRef = useRef(0);
   const filledRef = useRef(0);
   const pausedRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
+  const lastRenderAtRef = useRef(0);
   const latestTelemetryRef = useRef<Telemetry | null>(null);
 
   const [paused, setPaused] = useState(false);
@@ -135,24 +140,15 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       writeIndexRef.current = (idx + 1) % BUFFER_SIZE;
       filledRef.current = Math.min(filledRef.current + 1, BUFFER_SIZE);
       setHasData(true);
+      // 有新数据才重绘，并按 CHART_REDRAW_INTERVAL_MS 节流（~10fps）：
+      // 空闲无遥测时不再有 60fps 空转，把主线程让给路由切换/滚动。
+      const now = performance.now();
+      if (now - lastRenderAtRef.current >= CHART_REDRAW_INTERVAL_MS) {
+        lastRenderAtRef.current = now;
+        setRenderTick((t) => (t + 1) % 1_000_000);
+      }
     }
   }, [telemetry, active]);
-
-  // requestAnimationFrame 节流重绘：合并 100Hz 写入到 60fps 重绘。
-  // section 不可见时停止重绘，避免滚走后仍 60fps 空转（#178）。
-  useEffect(() => {
-    if (!active) return;
-    const tick = () => {
-      setRenderTick((t) => (t + 1) % 1_000_000);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-      }
-    };
-  }, [active]);
 
   const handlePauseToggle = useCallback(() => {
     pausedRef.current = !pausedRef.current;
