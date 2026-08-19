@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-19 (42)
+
+- fix(drive): 车控模式下行协议对齐 Firmware#111——DD 下发 `MODE <m>` 而非 `C<m>`（Issue #223 端到端修复）
+  - 根因：Issue #223 DD 侧 `Arduino.set_car_mode()` 写 `C<m>\n`，但 Firmware #111 的 `CommandDispatcher` 只解析 `MODE ` / `MODE:` 前缀，两端协议不一致，导致「前端选模式 → 车端切模式」这条链路永远不通。
+  - `donkeycar/parts/actuator.py`：`set_car_mode()` 下发帧由 `C{mode}\n` 改为 `MODE {mode}\n`；docstring 与 `ArdModeCmd` 注释同步由 `C<m>` 改为 `MODE <m>`。
+  - 测试同步：`donkeycar/tests/test_actuator.py` `test_arduino_set_car_mode_writes_cmd_frame` 断言由 `C2\n` 改为 `MODE 2\n`；本文件 28 passed / 2 skipped。
+  - 注：本次在 `Tony-issue223-fix-mode-protocol` 功能分支（worktree 作业）完成，仅 DD 改动、Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (41)
 
 - fix(launcher): 打开 Kimi Code Web 仍反复弹「选择语言/主题」欢迎页、置顶看似丢失——入口 URL 追加 `?kimi_onboarded=1` 跳过首次 onboarding 并写入 localStorage（Issue #168 后续）

@@ -398,19 +398,19 @@ def test_ardpwm_throttle_auto_mode_writes_pwm(fake_ard_pwm_controller):
 # ======================== 车控模式下行命令测试 ========================
 
 def test_arduino_set_car_mode_writes_cmd_frame():
-    """set_car_mode 应向串口写出 C<m> 帧，非法值不写。"""
+    """set_car_mode 应向串口写出 MODE <m> 帧，非法值不写。"""
     original_device = Arduino.ard_device
     fake = FakeArduinoSerial(b"")
     Arduino.ard_device = fake
     try:
         controller = Arduino.__new__(Arduino)
         controller.set_car_mode(2)
-        assert fake.written == [b"C2\n"]
+        assert fake.written == [b"MODE 2\n"]
 
         # 非法值不写
         controller.set_car_mode(3)
         controller.set_car_mode(-1)
-        assert fake.written == [b"C2\n"]
+        assert fake.written == [b"MODE 2\n"]
     finally:
         Arduino.ard_device = original_device
 
