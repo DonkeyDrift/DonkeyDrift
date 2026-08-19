@@ -1,5 +1,19 @@
 # 变更日志
 
+## 2026-08-19 (43)
+
+- fix(web-ui): 导航切换改为快速平滑滑动并修复卡死后瞬跳与滚动锚定顶走（Issue #135 第六轮）
+  - 需求：点导航标签后不是瞬跳，而是像快进的手动翻页一样滑到目标分区；此前实测点击后主线程冻结、动画被压成一次瞬跳，部分场景滚动被浏览器按回原地。
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：
+    - 自定义 rAF 滑动替代 `scrollIntoView(smooth)`：时长按距离 250–750ms + easeOutCubic，快而有翻页感；动画进度按每帧限幅增量（≤48ms）推进，主线程被数据加载占住几秒导致 rAF 全程饿死时，恢复后不会一步跳到终点（"点了很久才动、一动就瞬跳"的根源）。
+    - section 常驻 `overflow-anchor:none` + 滑动期间锁 html/body：目标/途经 section 因 content-visibility 展开产生布局位移时，Chrome 滚动锚定会把视口反向顶走或把程序化滚动按回原地（实测 drive→tub 被钉在顶部约 2s、pilot→drive 先反向跳 665px 再滑回）。
+    - 落定后 250/750/1500ms 三次校验：目标被布局展开推走 >32px 时补一次短滑，保证精准落位。
+    - 滑动期间冻结 scroll-spy、点击瞬间激活目标 section：途经分区不再反复启停视频流/WebRTC/WebSocket（此前 IO 翻转风暴的放大链）；手动滚动时 spy 提交去抖 100ms，消除边界抖动。
+    - 用户滚轮/触摸/按键立即接管：取消滑动并作废在途会话与后续校验；prefers-reduced-motion 或首次深链直接落位。
+  - 实测（Playwright CPU 4x 节流）：Drive↔TM↔Trainer↔PA 四段切换全部精准落位（err=0）、滑动 0.8–1.2s 单调平滑、每段仅 1 个 ~140–175ms longtask（第五轮基线单段 836ms 峰值且落位错 936–3182px）。
+  - 测试同步：前端 vitest 20 文件 104 项全过、`tsc --noEmit` 与 `npm run build` 通过（无新增测试文件，滑动动画由 Playwright 实测脚本覆盖）。
+  - 注：本次在 `Tony-issue135-nav-glide-round6` 功能分支（worktree `.worktrees/issue135-r6` 作业）完成。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (42)
 
 - fix(drive): 车控模式下行协议对齐 Firmware#111——DD 下发 `MODE <m>` 而非 `C<m>`（Issue #223 端到端修复）
