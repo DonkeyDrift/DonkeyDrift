@@ -212,6 +212,25 @@ class TestMdnsHostnameAndAllowedHosts:
 
 
 # ===========================================================================
+# _mark_onboarded（issue #168 后续：跳过首次语言/主题欢迎页）
+# ===========================================================================
+class TestMarkOnboarded:
+    def test_adds_param_keeps_token_fragment(self):
+        url = "http://192.168.3.10:58627/#token=t0k123"
+        assert kimi_web._mark_onboarded(url) == \
+            "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k123"
+
+    def test_preserves_existing_query(self):
+        url = "http://tony007.local:58640/session/abc?foo=bar#token=t0k"
+        assert kimi_web._mark_onboarded(url) == \
+            "http://tony007.local:58640/session/abc?foo=bar&kimi_onboarded=1#token=t0k"
+
+    def test_does_not_duplicate_existing_param(self):
+        url = "http://tony007.local:58640/?kimi_onboarded=1#token=t0k"
+        assert kimi_web._mark_onboarded(url) == url
+
+
+# ===========================================================================
 # strip_ansi / extract_web_url
 # ===========================================================================
 class TestStripAnsi:
@@ -420,7 +439,7 @@ class TestLaunchKimiCodeWeb:
             live_url_fn=_live,
             popen_fn=_make_popen(spawned))
         assert result == {"status": "ok",
-                          "url": "http://192.168.3.10:58627/#token=t0k"}
+                          "url": "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k"}
         assert spawned == []  # 复用路径不起子进程
         # 复用探测带上了请求的 cwd（issue #168）
         assert seen["cwd"] == "/home/dkc/projects"
@@ -434,7 +453,7 @@ class TestLaunchKimiCodeWeb:
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
         # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125）
-        assert result["url"] == "http://192.168.3.10:58627/#token=t0k123"
+        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k123"
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in kimi_web._SPAWNED_PROCS
@@ -502,7 +521,7 @@ class TestLaunchKimiCodeWeb:
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
-        assert result["url"] == "http://192.168.3.10:58627/#token=t0k"
+        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k"
         assert proc.killed is True  # 失败的子进程被杀净
 
     def test_spawn_banner_timeout_kills_proc(self):

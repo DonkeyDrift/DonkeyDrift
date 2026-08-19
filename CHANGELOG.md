@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-19 (41)
+
+- fix(launcher): 打开 Kimi Code Web 仍反复弹「选择语言/主题」欢迎页、置顶看似丢失——入口 URL 追加 `?kimi_onboarded=1` 跳过首次 onboarding 并写入 localStorage（Issue #168 后续）
+  - 根因：KCW 前端把 onboarding 完成态存 `localStorage` 键 `kimi-web.onboarded`、按 origin 隔离；置顶也是 `kimi-web.pinned-sessions`、同样按 origin。前几轮已把 origin 稳定到 `tony007.local:58640`（固定端口 + mDNS 主机名），但迁移到新 origin 后，老 origin 的 onboarding 标记不会跟随——用户每次打开都停在欢迎页、且因不敢点「下一步」而永远进不去，误以为置顶又丢了。
+  - 修复：`donkeycar/launcher/kimi_web.py` 新增 `_mark_onboarded(url)`，给入口 URL 追加 `?kimi_onboarded=1`（KCW 前端在 URL 带该参数时会把 `kimi-web.onboarded` 写进当前 origin 的 localStorage 并直接进主界面，之后不带该参数也不再弹欢迎页，等效于 KCW 自己的桌面→Web 迁移通道）；`launch_kimi_code_web` 三条成功返回路径（复用、冷启动、冷启动兜底复用）统一套用 `_mark_onboarded(_lan_url(url))`。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMarkOnboarded`（追加参数保留 `#token=` 片段、保留已有 query、已有参数不去重）3 项；`TestLaunchKimiCodeWeb` 3 处 URL 断言更新为带 `?kimi_onboarded=1`。`test_launcher_kimi_web.py` + `test_launcher_dsh_web.py` 共 81 项通过。
+  - 注：本次在 `Tony-kcw-onboarding-skip` 功能分支（worktree 作业）完成。仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-18 (40)
 
 - fix(trainer): 训练器 SSH 凭据不再明文落盘/入库，my-PC 默认配置不再指向云服务器（Issue #219）

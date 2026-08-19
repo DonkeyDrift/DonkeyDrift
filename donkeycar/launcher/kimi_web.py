@@ -286,6 +286,26 @@ def _lan_url(url: str):
         (parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+def _mark_onboarded(url: str) -> str:
+    """给 KCW 入口 URL 追加 ``?kimi_onboarded=1``，跳过首次语言/主题欢迎页。
+
+    KCW 前端把 onboarding 完成态（欢迎页的选语言/主题）存 localStorage 键
+    ``kimi-web.onboarded``、按 origin 隔离。launcher 是受管入口——用户已在
+    Kimi 登录并使用过（有凭据/会话/置顶），不必再走欢迎页；迁移到 mDNS
+    稳定 origin（issue #168 后续）后，老 origin 的 onboarding 标记不会跟随，
+    用户会被欢迎页反复挡住、误以为"置顶又丢了"。URL 带 ``?kimi_onboarded=1``
+    时前端会把它写进当前 origin 的 localStorage 并直接进主界面，之后即使
+    不再带该参数也不会再弹欢迎页（等效于 KCW 自己的桌面→Web 迁移通道）。
+    """
+    parts = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    if not any(k == "kimi_onboarded" for k, _ in pairs):
+        pairs.append(("kimi_onboarded", "1"))
+    query = urllib.parse.urlencode(pairs)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def _proc_cwd(pid: int):
     """实例进程的运行目录（``/proc/<pid>/cwd`` 的真实路径）。
 
@@ -493,7 +513,7 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 关键字传参——_live_instance_url 首参是 instances_dir
     url = live_url_fn(cwd=cwd_str)
     if url:
-        url = _lan_url(url)
+        url = _mark_onboarded(_lan_url(url))
         logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
         return {"status": "ok", "url": url}
 
@@ -510,14 +530,14 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                                           popen_fn=popen_fn)
     if url:
         _SPAWNED_PROCS.append(proc)
-        url = _lan_url(url)
+        url = _mark_onboarded(_lan_url(url))
         logger.info("Kimi Code Web 已启动: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
     url = live_url_fn(cwd=cwd_str)
     if url:
-        url = _lan_url(url)
+        url = _mark_onboarded(_lan_url(url))
         logger.info("冷启动未果，复用到已运行实例: %s", url)
         return {"status": "ok", "url": url}
     logger.warning("启动 Kimi Code Web 失败: %s", error)
