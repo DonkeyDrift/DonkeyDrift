@@ -53,7 +53,7 @@ function FlowSectionHeader({ step, meta }: { step: number; meta: SectionMeta }) 
       </span>
       <div className="flex min-w-0 items-center">
         <h2 className="text-xl font-bold text-zinc-100">{t(meta.titleKey)}</h2>
-        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[400px] group-hover:opacity-100 text-sm text-zinc-400 font-normal">
+        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[400px] group-hover:opacity-100 text-xs text-zinc-400 font-normal">
           {t(meta.descKey)}
         </span>
       </div>
