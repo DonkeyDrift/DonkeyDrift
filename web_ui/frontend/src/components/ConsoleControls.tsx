@@ -63,8 +63,13 @@ export const ConsoleMuteButton: React.FC = () => {
       onClick={toggle}
       disabled={unreachable || busy}
       aria-label={label}
+      aria-pressed={muted === true}
       title={unreachable ? t('console.unreachable') : label}
-      className="console-mute-btn flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className={`console-mute-btn flex items-center justify-center w-8 h-8 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+        muted
+          ? 'bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]'
+          : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100'
+      }`}
     >
       {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
     </button>
@@ -105,7 +110,7 @@ export const ConsoleOtaButton: React.FC = () => {
   );
 };
 
-/** DEV 开关：滑块显示 DEV 字样，开启时 cyan 高亮；每 5s 轮询同步。 */
+/** DEV 开关：与 OTA 同款文字胶囊按钮，开启时 cyan 高亮；每 5s 轮询同步。 */
 export const ConsoleDevToggle: React.FC = () => {
   const { t } = useTranslation();
   const { ip } = useConsoleDevice();
@@ -151,6 +156,8 @@ export const ConsoleDevToggle: React.FC = () => {
   };
 
   const unreachable = !ip;
+  const cls =
+    'console-dev-toggle inline-flex items-center justify-center h-8 px-3 rounded-full border text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
   return (
     <button
       type="button"
@@ -160,17 +167,13 @@ export const ConsoleDevToggle: React.FC = () => {
       disabled={unreachable || busy}
       onClick={toggle}
       title={unreachable ? t('console.unreachable') : t('console.devModeTitle')}
-      className={`console-dev-toggle relative h-6 w-12 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-        enabled ? 'bg-cyan-500/25 border-cyan-500/60' : 'bg-zinc-800 border-zinc-700'
+      className={`${cls} ${
+        enabled
+          ? 'bg-cyan-500/25 border-cyan-500/60 text-cyan-400'
+          : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-cyan-400 hover:border-cyan-500/50'
       }`}
     >
-      <span
-        className={`absolute top-0.5 left-0.5 flex h-5 w-9 items-center justify-center rounded-full text-[9px] font-extrabold leading-none transition-transform ${
-          enabled ? 'translate-x-2 bg-cyan-400 text-zinc-950' : 'bg-zinc-600 text-zinc-200'
-        }`}
-      >
-        DEV
-      </span>
+      DEV
     </button>
   );
 };

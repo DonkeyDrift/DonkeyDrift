@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Car, FlaskConical, Sparkles, SquareTerminal } from 'lucide-react';
+import { FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { getDonkeyUrl, launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb } from '@/services/api';
 
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
@@ -43,24 +43,22 @@ const useLauncherEntry = (
 
 // 高级入口的导航链接样式（Issue #175）：融入导航行、去掉胶囊外壳，但用
 // 更小字号 + 更淡颜色 + 图标做弱化处理，一眼可辨为不常用的高级选项；
-// 外链入口不做路由激活态
-const entryLinkCls =
+// 外链入口不做路由激活态；Car Connector 复用同一样式（见 Layout.tsx）。
+export const entryLinkCls =
   'flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors whitespace-nowrap cursor-pointer py-2.5';
 
 export const DonkeyEntryLink: React.FC = () => {
   const { t } = useTranslation();
-  // Donkey 菜单/启动页（launcher :8090）是 Donkey 生态的根入口，新标签页打开。
+  // Donkey 菜单（launcher :8090）改为在当前标签页内嵌显示，与 Drifter Console 一致。
   return (
-    <a
-      href={getDonkeyUrl()}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Link
+      to="/donkey"
       title={t('common.enterButtons.donkeyTitle')}
       className={entryLinkCls}
     >
-      <Car className="w-3.5 h-3.5 shrink-0" />
+      <Menu className="w-3.5 h-3.5 shrink-0" />
       {t('common.enterButtons.donkey')}
-    </a>
+    </Link>
   );
 };
 

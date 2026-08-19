@@ -15,7 +15,7 @@ vi.mock('@/services/api', () => ({
   launchDsh: vi.fn(),
   getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));
-import { getDonkeyUrl, launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb } from '@/services/api';
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
 const mockLaunchDsh = vi.mocked(launchDsh);
 beforeEach(() => { vi.clearAllMocks(); });
@@ -46,7 +46,7 @@ describe('entry link components (Issue #175 nav-link style)', () => {
 });
 
 describe('DonkeyEntryLink', () => {
-  it('opens the Donkey launcher menu page in a new tab', () => {
+  it('links to the embedded Donkey menu route in the current tab', () => {
     render(
       <MemoryRouter>
         <DonkeyEntryLink />
@@ -54,9 +54,8 @@ describe('DonkeyEntryLink', () => {
     );
     const link = screen.getByText('common.enterButtons.donkey').closest('a');
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', 'http://localhost:8090/');
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(getDonkeyUrl).toHaveBeenCalled();
+    expect(link).toHaveAttribute('href', '/donkey');
+    expect(link).not.toHaveAttribute('target');
   });
 });
 
