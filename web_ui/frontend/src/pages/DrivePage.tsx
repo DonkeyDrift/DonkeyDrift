@@ -314,19 +314,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}
         <aside className="z-40 lg:sticky lg:top-16 lg:shrink-0">
           <div className="flex items-start gap-2">
-            {/* 浮动触发把手：抽屉收起/展开开关；「虚拟摇杆」竖排书写 */}
-            <button
-              onClick={() => setJoystickOpen(!joystickOpen)}
-              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
-              className="shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
-            >
-              {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
-              <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
-                {t('drive.virtualJoystick')}
-              </span>
-            </button>
-
-            {/* 面板内容 */}
+            {/* 面板内容：夹在视频画面与把手（展开开关）之间 */}
             <div className={`${joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))] border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg transition-all duration-300 ease-in-out`}>
               <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
                 <div className="flex items-center justify-between gap-2">
@@ -334,6 +322,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                     icon={<Joystick className="w-5 h-5" />}
                     title={t('drive.virtualJoystick')}
                     subtitle={t('drive.virtualJoystickSubtitle')}
+                    subtitleMarquee
                   />
                   <InputSourceSelector
                     value={inputSource}
@@ -365,6 +354,18 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                 </div>
               </div>
             </div>
+
+            {/* 浮动触发把手：抽屉收起/展开开关；「虚拟摇杆」竖排书写 */}
+            <button
+              onClick={() => setJoystickOpen(!joystickOpen)}
+              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
+              className="shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
+            >
+              {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+              <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                {t('drive.virtualJoystick')}
+              </span>
+            </button>
           </div>
         </aside>
       </div>
