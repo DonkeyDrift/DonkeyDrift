@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-19 (53)
+
+- fix(web-ui): Drive 流程节标题副标题改为悬停淡入并放大字号，抽屉「虚拟摇杆」标题统一到 SectionCardTitle 标准（Issue #233 补充）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 的副标题（如 Drive 的「驾驶并采集训练数据」）由常驻 `<p class="text-sm">` 改为 `group-hover` 悬停淡入的 `<span>`，与全站卡片小标题交互一致；字号由 `text-sm` 放大到 `text-base`。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：右侧抽屉内「虚拟摇杆」标题由手写 group-hover 结构改用 `SectionCardTitle` 组件，字号/字重/颜色统一到全站标准（16px / font-semibold / text-white）。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`npm run check`（tsc）、`npm run build` 通过。
+
 ## 2026-08-19 (52)
 
 - fix(web-ui): Drive 页顶栏左右分组——左侧驾驶模式/模型/Park 锁定，右侧录制/已录制条数
