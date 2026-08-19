@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-19 (65)
+## 2026-08-19 (66)
 
 - fix(web-ui): DonkeyDrifter 页主题按钮去掉「跟随系统」显示器图标，改为深/浅两态互切（默认仍跟随浏览器，但不显示跟随系统状态）（Issue #230 最终形态，DD 前端）
   - 背景：DD 前端（8000）主题按钮此前为 跟随系统/浅色/深色 三态，其中「跟随系统」显示显示器（电脑）图标；用户要求默认仍跟随浏览器，但按钮只保留太阳/月亮两态、去掉电脑图标。
@@ -8,6 +8,14 @@
   - `web_ui/frontend/src/lib/theme.ts`：删除仅三态按钮使用的 `useThemeMode` 与 `THEME_MODE_CHANGE_EVENT`；`setTheme` 不再广播 mode 事件，`useResolvedTheme` 订阅逻辑不变；`readStoredTheme` 仍默认 `system`（无存储时跟随浏览器并实时监听）。
   - `web_ui/frontend/src/components/ThemeSwitcher.test.tsx`：由三态用例改为两态用例（8 项），覆盖默认跟随系统、浅/深互切、持久化、手动选择后不再跟随。
   - 测试同步：`ThemeSwitcher` 8 项通过、`npm run check`（tsc）通过、`npm run build` 通过；完整前端 vitest 中 `App.test.tsx` 有 3 项因 `services/api` mock 缺 `getDonkeyUrl` 失败，为既有问题（PR #257 引入 `getDonkeyUrl` 未同步 mock），与本次改动无关。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-19 (65)
+
+- fix(web-ui): Drive 页顶部工具栏移入视频列，录制按钮右边缘与摄像头画面右边界对齐；修复 App.test mock 缺 getDonkeyUrl
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏（左组 Park/模式/模型，右组录制条数/录制）由页面全宽独立一行移入「视频+遥测」左列（`flex-1 min-w-0`）内，右组右边缘随视频列收缩/扩展，抽屉展开时不再越过摄像头画面右边界；工具栏与视频之间加 `mb-4` 间距。录制与录制条数间隙保持 `gap-2 lg:gap-3` 不变。
+  - `web_ui/frontend/src/App.test.tsx`：`vi.mock('./services/api')` 补 `getDonkeyUrl`（Issue #257 顶栏 Donkey 入口引入 `getDonkeyUrl` 后漏更新 mock，导致 3 项 App 测试失败）。
+  - 测试同步：前端 vitest 21 文件 112 项通过、`tsc -b --noEmit`、`npm run build` 通过。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-19 (64)
