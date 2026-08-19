@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-19 (52)
+
+- fix(web-ui): Drive 页顶栏左右分组——左侧驾驶模式/模型/Park 锁定，右侧录制/已录制条数
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部工具栏由单组改为左右两组，`justify-between` 分居两端——左组 `DriveModeSelector` → `ModelSelector` → `rc_park` 驻车锁定徽标；右组录制按钮 → 已录制条数。模型选择器按逻辑与驾驶模式同属「车怎么开」配置，故归入左组。
+  - 测试同步：前端 vitest 20 文件 105 项通过、`tsc -b --noEmit`、`npm run build` 通过（新 `DrivePage-*.js` bundle）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (51)
 
 - fix(launcher): Donkey 菜单页主题不随浏览器深浅色同步——主题按钮改为三态（跟随系统 / 浅色 / 深色），手动选择后可切回"跟随系统"（Issue #230 同源，扩展到 Donkey 启动页）
