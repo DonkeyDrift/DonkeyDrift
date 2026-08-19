@@ -47,13 +47,15 @@ function SectionFallback() {
 function FlowSectionHeader({ step, meta }: { step: number; meta: SectionMeta }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-3">
+    <div className="group flex items-center gap-3">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-500/40 bg-cyan-500/10 text-sm font-bold text-cyan-400">
         {step}
       </span>
-      <div className="min-w-0">
+      <div className="flex min-w-0 items-center">
         <h2 className="text-xl font-bold text-zinc-100">{t(meta.titleKey)}</h2>
-        <p className="text-sm text-zinc-400">{t(meta.descKey)}</p>
+        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-300 ease-in-out group-hover:ml-3 group-hover:max-w-[400px] group-hover:opacity-100 text-base text-zinc-400 font-normal">
+          {t(meta.descKey)}
+        </span>
       </div>
     </div>
   );
