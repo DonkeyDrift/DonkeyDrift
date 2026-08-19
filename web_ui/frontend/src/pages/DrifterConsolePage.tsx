@@ -109,7 +109,7 @@ export const DrifterConsolePage: React.FC = () => {
       {selectedIp ? (
         <div className="min-h-0 flex-1">
           <iframe
-            src={`http://${selectedIp}/`}
+            src={`http://${selectedIp}/?embedded=1`}
             title="Drifter Console"
             className="h-full w-full border-0 bg-zinc-950"
           />

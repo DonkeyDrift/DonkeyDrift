@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-19 (70)
+
+- fix(console): Drifter Console 内嵌 iframe 改用 `?embedded=1` 参数加载，只隐藏 DD 嵌入视图里的车端 DC 标题栏，车端 DC 页面本身标题栏保持显示（Issue #234）
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：iframe `src` 由 `http://<ip>/` 改为 `http://<ip>/?embedded=1`。
+  - 配套 Firmware 改动见 Firmware 仓库当日条目（v1.8.20 恢复 DC 标题栏显示、新增 `body.embedded .headerRow{display:none}` 与 embedded 参数检测）。
+
 ## 2026-08-19 (69)
 
 - feat(console): Drifter Console 由 DD 风格重绘改为 iframe 1:1 嵌入车端原版，并在连接条「连接」按钮右侧显示车端固件版本号（Issue #234）
