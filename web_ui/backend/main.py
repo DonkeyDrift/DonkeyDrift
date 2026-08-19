@@ -10,7 +10,7 @@ import logging
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch
+from routers import config, tub, trainer, drive, arena, connector, launch, console
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -65,6 +65,7 @@ app.include_router(drive.router, prefix="/api/drive", tags=["drive"])
 app.include_router(arena.router, prefix="/api/arena", tags=["arena"])
 app.include_router(connector.router, prefix="/api/connector", tags=["connector"])
 app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
+app.include_router(console.router, prefix="/api/console", tags=["console"])
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(
