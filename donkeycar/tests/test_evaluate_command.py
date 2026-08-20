@@ -65,3 +65,9 @@ def test_evaluate_run_without_model_writes_data_stats(monkeypatch, tmp_path):
     assert 'throttle_stats' in data
     assert np.isclose(data['angle_stats']['mean'], 0.0)
     assert np.isclose(data['throttle_stats']['mean'], 0.5)
+    # 角度 [-0.5, 0.0, 0.5]：直行 1/3、中间幅度 2/3、大转向 0；左 1/3、右 1/3。
+    assert np.isclose(data['angle_stats']['abs_lt_0.05_ratio'], 1.0 / 3.0)
+    assert np.isclose(data['angle_stats']['mid_ratio'], 2.0 / 3.0)
+    assert np.isclose(data['angle_stats']['hard_ratio'], 0.0)
+    assert np.isclose(data['angle_stats']['left_ratio'], 1.0 / 3.0)
+    assert np.isclose(data['angle_stats']['right_ratio'], 1.0 / 3.0)

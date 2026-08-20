@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (106)
+
+- feat(donkeycar): `evaluate` 数据统计模式新增转向幅度三档占比 + 左右对称性指标
+  - 背景：目标 4 定位到 angle corr≈0 的根因是转向数据本身——85% 直行、中间幅度（0.05<|angle|≤0.5）仅约 3.3%、且右转 91.5% vs 左转 7.9% 极度不对称；原 `evaluate` 只有 `abs_lt_0.05_ratio`，无法一眼看出「中间幅度缺失」与「左右不对称」这两个数据质量缺口。
+  - `donkeycar/management/base.py`：`Evaluate.run()` 无 `--model` 分支的 `angle_stats` 新增 `mid_ratio`（0.05≤|angle|≤0.5）、`hard_ratio`（|angle|>0.5）、`left_ratio`（angle<0）、`right_ratio`（angle>0），保留 `abs_lt_0.05_ratio`（=直行占比）。三档占比相加为 1，左右占比 left+right+zero 相加为 1。
+  - 测试同步：`donkeycar/tests/test_evaluate_command.py` 新增对 `mid_ratio`/`hard_ratio`/`left_ratio`/`right_ratio` 的断言，`pytest -q` 4 passed。
+  - 注：仅新增 CLI 统计字段，不影响本机 Web UI，无需部署/OTA。
+
 ## 2026-08-21 (105)
 
 - fix(layout): DonkeyDrifter 左上角 logo 去掉外边框（#2b3441），与 Donkey 图标视觉一致
