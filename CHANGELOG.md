@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-20 (96)
+## 2026-08-20 (97)
 
 - fix(theme): Donkey 与 DonkeyDrifter 深浅色手动切换改为仅内存态、不写存储——修复「手动切换后刷新仍保持所选主题，无法重新跟随系统」的问题，使 D / DD / DC 三页一致：默认跟随系统、每次进入/刷新都重新按浏览器 prefers-color-scheme 解析
   - 背景：D（launcher 8090）与 DD（8000）此前把主题选择持久化到 localStorage/sessionStorage，手动点过太阳/月亮后刷新仍保持所选主题、不再跟随系统；本次与 DC（Firmware v1.8.27）对齐为不持久化。
@@ -10,6 +10,14 @@
   - `donkeycar/launcher/server.py`：删除 `THEME_STORAGE_KEY` 常量与 v3 迁移/localStorage 读取；首屏脚本改为直接按系统解析；`setTheme` 改为仅 `applyTheme`（删 localStorage.setItem）；`initTheme` 改为 `applyTheme('system')` + 系统监听（删 localStorage 读取）。
   - 测试同步：`web_ui/frontend/src/components/ThemeSwitcher.test.tsx` 重写为断言「setTheme 不写 localStorage/sessionStorage（`window.localStorage.length===0` 与 `window.sessionStorage.length===0`）」；`tests/test_launcher_theme_single_button.py` 更新首屏脚本断言、删除 v3/localStorage 断言、新增 `applyTheme('system')` 与「无 localStorage 读取」断言。
   - 注：Firmware 侧 DC 同步改动见 Firmware `CHANGELOG.md` v1.8.27。
+
+## 2026-08-20 (96)
+
+- fix(launcher): DD 内嵌 Donkey 的 11/12 号彻底删除（整行含序号），6/7 仍置灰占位
+  - 背景：上一条 (94) 把 6/7/11/12 都做成了内嵌置灰占位；用户要求 11/12（Kimi Code Web / DeepSeek Harness）彻底删掉（整行连同序号都不显示），6（DonkeyDrifter）/7（Drifter Console）保持置灰占位不变。
+  - `donkeycar/launcher/server.py`：`menuItems` 的 11/12 号由 `ddTopbarOnly:true` 改为 `ddHidden:true`；`renderMenu()` 在遍历开头新增 `if (isEmbedded && item.ddHidden) return`（内嵌时整行不渲染，序号 11/12 直接空出）；`selectItem()` 新增 `if (isEmbedded && item.ddHidden) return`（内嵌时数字键无响应）。6/7 仍 `ddTopbarOnly:true`（内嵌置灰占位），单独打开 Donkey（:8090）时 6/7/11/12 均完整可点击。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_6_7_11_12_embedded_only_placeholder` 重写为 `test_menu_6_7_grayed_11_12_hidden_embedded`（断言 6/7 `ddTopbarOnly`、11/12 `ddHidden` + `isEmbedded && item.ddHidden` 守卫）；launcher 相关 139 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
 
 ## 2026-08-20 (95)
 
