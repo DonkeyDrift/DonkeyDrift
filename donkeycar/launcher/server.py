@@ -1805,7 +1805,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
             {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
-            {no: 6,  cat: "drive",  name: "DonkeyDrifter", descZh: "打开 DonkeyDrifter",                    descEn: "Open DonkeyDrifter",                            favorite: true},
+            {no: 6,  cat: "drive",  name: "DonkeyDrifter", descZh: "打开 DonkeyDrifter",                    descEn: "Open DonkeyDrifter",                            favorite: true,  ddTopbarOnly: true, phDescZh: "当前已在 DonkeyDrifter 内", phDescEn: "Already inside DonkeyDrifter"},
             {no: 7,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                          favorite: true,  ddTopbarOnly: true},
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
@@ -1835,9 +1835,9 @@ MENU_HTML = r"""<!DOCTYPE html>
                     ? 'menuItem placeholder' : 'menuItem';
                 div.dataset.no = item.no;
                 if (isPlaceholder) {
-                    // 占位行：与 DonkeyDrifter 顶栏重复的入口不再出现在 Donkey
-                    // 菜单，不可点击、无分类 pill、无常用标、样式置灰；仅在
-                    // 内嵌于 DD（?embedded=1）时生效，单独打开 Donkey 时完整显示。
+                    // 占位行：DD 内嵌时与顶栏重复（7/11/12）或自身即 DD（6）的
+                    // 入口不再出现在 Donkey 菜单，不可点击、无分类 pill、无常用标、
+                    // 样式置灰；仅在 ?embedded=1 时生效，单独打开 Donkey 时完整显示。
                     div.onclick = null;
                     div.innerHTML =
                         '<div class="menuNo">' + item.no + '</div>' +
@@ -1845,8 +1845,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                             '<div class="menuName">' + item.name + '</div>' +
                             '<div class="menuDesc">' +
                                 (uiLang === 'en'
-                                    ? 'Merged into DonkeyDrifter top bar'
-                                    : '已并入 DonkeyDrifter 顶栏') +
+                                    ? (item.phDescEn || 'Merged into DonkeyDrifter top bar')
+                                    : (item.phDescZh || '已并入 DonkeyDrifter 顶栏')) +
                             '</div>' +
                         '</div>';
                     grid.appendChild(div);
@@ -1878,17 +1878,17 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项（issue #126：全部菜单项已接线）。7/11/12 在内嵌于
+        // 选择菜单项（issue #126：全部菜单项已接线）。6/7/11/12 在内嵌于
         // DonkeyDrifter（?embedded=1）时为占位行——数字键/点击只给轻提示；
-        // 单独打开 Donkey 时恢复为完整入口（Drifter Console / Kimi Code Web /
-        // DeepSeek Harness）。
+        // 单独打开 Donkey 时恢复为完整入口（DonkeyDrifter / Drifter Console /
+        // Kimi Code Web / DeepSeek Harness）。
         function selectItem(no) {
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
             if (item.placeholder || (isEmbedded && item.ddTopbarOnly)) {
                 showError(uiLang === 'en'
-                    ? 'Merged into DonkeyDrifter top bar'
-                    : '已并入 DonkeyDrifter 顶栏');
+                    ? (item.phDescEn || 'Merged into DonkeyDrifter top bar')
+                    : (item.phDescZh || '已并入 DonkeyDrifter 顶栏'));
                 return;
             }
             highlightRow(no);

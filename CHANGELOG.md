@@ -1,12 +1,20 @@
 # 变更日志
 
+## 2026-08-20 (94)
+
+- fix(launcher): DD 内嵌 Donkey 的 6 号（DonkeyDrifter）也置灰占位——6/7/11/12 均仅内嵌时占位，单独打开 Donkey 仍完整
+  - 背景：6 号「DonkeyDrifter」在内嵌于 DonkeyDrifter 的 Donkey 菜单里是自引用（用户当前已在 DD 内），属冗余入口；用户要求检查并删除，且只删 DD 内嵌的 Donkey、单独 Donkey 页（:8090）不动。
+  - `donkeycar/launcher/server.py`：`menuItems` 的 6 号新增 `ddTopbarOnly:true`，并加 `phDescZh/phDescEn`（「当前已在 DonkeyDrifter 内 / Already inside DonkeyDrifter」）；`renderMenu()` 与 `selectItem()` 的占位描述由硬编码「已并入 DonkeyDrifter 顶栏」改为优先取 `item.phDescZh/phDescEn`，缺省回退到「已并入 DonkeyDrifter 顶栏 / Merged into DonkeyDrifter top bar」（7/11/12 无 phDesc、走回退）。
+  - 11/12 号上一轮已加 `ddTopbarOnly`（内嵌置灰），本次无额外改动。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_7_11_12_embedded_only_placeholder` 重写为 `test_menu_6_7_11_12_embedded_only_placeholder`（新增 6 号 name、`当前已在 DonkeyDrifter 内`/`Already inside DonkeyDrifter`、`no === 6`/`launchDrive()` 接线断言）；launcher 相关 139 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-20 (93)
 
 - feat(console): DonkeyDrifter 顶栏静音键切换成功后经 postMessage 即时同步内嵌 Drifter Console，无需等 5s 轮询或手动刷新（Issue #117 续）
   - `web_ui/frontend/src/components/ConsoleControls.tsx`：新增导出常量 `MUTE_CHANGED_EVENT = 'dd-console-mute-changed'`；`ConsoleMuteButton.toggle()` 在 POST 成功并 `fetchMute()` 后 `window.dispatchEvent(new CustomEvent(MUTE_CHANGED_EVENT, { detail: { muted: next === 1 } }))`，广播最新静音态。
   - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：给内嵌 iframe 增加 `ref={iframeRef}`，新增 `useEffect` 监听 `MUTE_CHANGED_EVENT`，回调里 `iframeRef.current?.contentWindow?.postMessage({ type: MUTE_CHANGED_EVENT, muted }, '*')`，让车端原版 DC 页面即时更新静音图标；不重载 iframe、不丢曲线/终端状态（静音是高频轻量操作）。
   - 测试同步：`ConsoleControls.test.tsx` 新增「切换后广播 MUTE_CHANGED_EVENT 且 detail.muted 正确」用例；前端 `npm run build`（tsc + vite）通过。
-
 ## 2026-08-20 (92)
 
 - fix(drive): 遥测曲线勾选框默认全部选中
