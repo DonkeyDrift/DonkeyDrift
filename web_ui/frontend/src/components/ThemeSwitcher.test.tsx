@@ -41,7 +41,7 @@ const getButton = () => screen.getByRole('button');
 
 describe('ThemeSwitcher（静音式单按钮）', () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    window.sessionStorage.clear();
     document.documentElement.classList.remove('theme-mus4', 'theme-light');
     systemDark = true;
     window.matchMedia = vi.fn(matchMediaMock) as unknown as typeof window.matchMedia;
@@ -71,7 +71,7 @@ describe('ThemeSwitcher（静音式单按钮）', () => {
     expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(false);
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    expect(window.sessionStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
   });
 
   it('toggles back to dark on second click and persists the selection', () => {
@@ -80,7 +80,7 @@ describe('ThemeSwitcher（静音式单按钮）', () => {
     fireEvent.click(getButton()); // → dark
     expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    expect(window.sessionStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
   });
 
   it('follows system theme changes by default when nothing is stored', () => {
@@ -91,7 +91,7 @@ describe('ThemeSwitcher（静音式单按钮）', () => {
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
     expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
     // 跟随系统期间不写入持久化选择,仅手动单击才存储
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
     act(() => setSystemDark(true));
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
     expect(getButton().querySelector('svg.lucide-moon')).not.toBeNull();
@@ -101,20 +101,20 @@ describe('ThemeSwitcher（静音式单按钮）', () => {
     setSystemDark(false);
     render(<ThemeSwitcher />);
     fireEvent.click(getButton()); // light → dark
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    expect(window.sessionStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
     act(() => setSystemDark(false)); // 系统再变也不跟随
     expect(document.documentElement.classList.contains('theme-mus4')).toBe(true);
   });
 
   it('applies the persisted skin and icon on mount', () => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
+    window.sessionStorage.setItem(THEME_STORAGE_KEY, 'light');
     render(<ThemeSwitcher />);
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);
     expect(getButton().querySelector('svg.lucide-sun')).not.toBeNull();
   });
 
   it('falls back to following the system for unknown stored values', () => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, 'unknown');
+    window.sessionStorage.setItem(THEME_STORAGE_KEY, 'unknown');
     setSystemDark(false);
     render(<ThemeSwitcher />);
     expect(document.documentElement.classList.contains('theme-light')).toBe(true);

@@ -303,15 +303,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {/* 摄像头：按可用高度反推宽度并保持画面比例、居中显示，避免左右黑边 */}
-          <div className="flex-1 min-h-0 flex items-center justify-center">
+          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线以半透明浮层覆盖在画面上方 */}
+          <div className="relative flex-1 min-h-0 aspect-video lg:aspect-auto">
             {active ? (
-              <VideoStream className="w-full lg:w-auto lg:h-full lg:max-w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+              <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
             ) : (
-              <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
+              <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
             )}
+            <TelemetryChart telemetry={telemetry} active={active} overlay className="absolute inset-x-3 top-14 z-20" />
           </div>
-          <TelemetryChart telemetry={telemetry} className="mt-4 shrink-0" active={active} />
         </div>
 
         {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}

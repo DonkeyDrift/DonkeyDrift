@@ -15,9 +15,11 @@ interface VideoStreamProps {
   transport?: DriveVideoTransport;
   clientId?: string;
   onLatencyChange?: (latencyMs: number) => void;
+  /** 视频 object-fit：'contain' 完整显示（可能留黑边），'cover' 填满容器并裁边放大 */
+  objectFit?: 'contain' | 'cover';
 }
 
-export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomingSignal = null, transport, clientId, onLatencyChange }) => {
+export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomingSignal = null, transport, clientId, onLatencyChange, objectFit = 'contain' }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const [status, setStatus] = useState<'loading' | 'connected' | 'error'>('loading');
@@ -247,7 +249,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           setStatus('error');
           scheduleRetry();
         }}
-        className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${mjpegVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 w-full h-full ${objectFit === 'cover' ? 'object-cover' : 'object-contain'} transition-opacity duration-500 ${mjpegVisible ? 'opacity-100' : 'opacity-0'}`}
       />
       {/* WebRTC 层：覆盖在 MJPEG 上方，首帧就绪后先渐入，完全显示后 MJPEG 再淡出 */}
       {!forceMjpeg && (
@@ -257,7 +259,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           autoPlay
           playsInline
           muted
-          className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${
+          className={`absolute inset-0 w-full h-full ${objectFit === 'cover' ? 'object-cover' : 'object-contain'} transition-opacity duration-500 ${
             webRtcVisible ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
           }`}
         />
