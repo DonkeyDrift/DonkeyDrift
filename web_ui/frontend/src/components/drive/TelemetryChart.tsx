@@ -78,6 +78,8 @@ interface TelemetryChartProps {
   className?: string;
   /** 所在 section 是否可见：不可见时停掉 rAF 重绘与写入，避免滚走后空转（#178） */
   active?: boolean;
+  /** 覆盖模式：贴在视频画面上方的半透明浮层（默认隐藏曲线开关，全屏后仍可调） */
+  overlay?: boolean;
 }
 
 /**
@@ -88,7 +90,7 @@ interface TelemetryChartProps {
  * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
  */
-export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '', active = true }) => {
+export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '', active = true, overlay = false }) => {
   const { t } = useTranslation();
   // canvas/图表配色不受皮肤 CSS 控制，订阅主题以重建 chart 配置
   const theme = useResolvedTheme();
@@ -244,7 +246,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
   return (
     <div
       className={cn(
-        'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
+        overlay
+          ? 'rounded-lg border border-white/10 bg-slate-950/50 backdrop-blur-sm p-2'
+          : 'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
         fullscreen && 'fixed inset-0 z-50 rounded-none p-4 bg-slate-950',
         className,
       )}
@@ -285,30 +289,32 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
           </button>
         </div>
       </div>
-      <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : 'h-40')}>
+      <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : overlay ? 'h-28' : 'h-40')}>
         <Line data={chartData} options={chartOptions} />
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-        {CURVES.map((c) => {
-          const on = visibleKeys.has(c.key as string);
-          const color = curveColor(c, theme);
-          return (
-            <label
-              key={c.key as string}
-              className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
-            >
-              <input
-                type="checkbox"
-                checked={on}
-                onChange={() => toggleCurve(c.key as string)}
-                className="accent-[var(--curve-color)]"
-                style={{ ['--curve-color' as string]: color }}
-              />
-              <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
-            </label>
-          );
-        })}
-      </div>
+      {(!overlay || fullscreen) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+          {CURVES.map((c) => {
+            const on = visibleKeys.has(c.key as string);
+            const color = curveColor(c, theme);
+            return (
+              <label
+                key={c.key as string}
+                className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggleCurve(c.key as string)}
+                  className="accent-[var(--curve-color)]"
+                  style={{ ['--curve-color' as string]: color }}
+                />
+                <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
