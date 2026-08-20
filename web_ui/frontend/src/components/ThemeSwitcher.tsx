@@ -8,7 +8,8 @@ export type { ThemeMode };
 /**
  * 静音式单按钮主题切换：单击在深/浅之间来回切，图标反映当前生效主题，
  * 首次访问（未手动切换过）跟随浏览器 prefers-color-scheme（由 lib/theme 负责）；
- * 手动单击后选择持久化，不再跟随浏览器。
+ * 手动单击后选择在当前会话内持久化（sessionStorage），不再跟随浏览器；
+ * 关闭标签页后重新跟随系统。
  */
 export const ThemeSwitcher: React.FC = () => {
   const resolved = useResolvedTheme();
