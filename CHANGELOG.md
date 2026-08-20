@@ -1,12 +1,21 @@
 # 变更日志
 
-## 2026-08-20 (72)
+## 2026-08-20 (73)
 
 - fix(drive): 虚拟摇杆抽屉展开/收起动画收窄过渡属性，减少卡顿（Issue #232 后续）
   - `web_ui/frontend/src/pages/DrivePage.tsx`：抽屉面板由 `transition-all` 改为 `will-change-[width] transition-[width]`，展开/收起只过渡 width，不再同时过渡 border 等 layout 属性，降低每帧 reflow/paint 负担。
   - `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：跑马灯副标题外层由 `transition-all` 改为 `transition-[opacity,margin-left]`，去掉 max-width 的 layout 过渡（宽度瞬时切换、由 `overflow-hidden` 裁剪），避免 hover 触发跑马灯时与抽屉展开动画叠加产生额外 reflow。
   - 测试同步：前端 vitest 21 文件 112 项通过、`npm run check`（tsc）通过、`npm run build` 通过。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (72)
+
+- fix(console): Drifter Console 连接条微调——「未发现设备」文案缩短、版本号样式对齐 DD 顶栏版本号、连接条与 iframe 视觉融合（Issue #234）
+  - `web_ui/frontend/src/i18n/messages/console.ts`：`console.noDevice` 中英两处缩短为「未发现设备」/「No device found」，去掉「请确认同一网络」半句。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：
+    - 工具条去掉 `border-b border-zinc-800 bg-zinc-900/50`，改为与下方 iframe 同底色、无分隔线。
+    - 版本号由 `font-mono text-xs text-zinc-400` 改为对齐顶栏 `VersionBadge` 的 `text-zinc-500 text-xs uppercase tracking-wider`，渲染为 `v{version}`（version 存纯版本号，去 V 前缀）。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
 
 ## 2026-08-20 (71)
 
