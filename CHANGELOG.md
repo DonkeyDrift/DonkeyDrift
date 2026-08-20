@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (72)
+
+- fix(drive): 虚拟摇杆抽屉展开/收起动画收窄过渡属性，减少卡顿（Issue #232 后续）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：抽屉面板由 `transition-all` 改为 `will-change-[width] transition-[width]`，展开/收起只过渡 width，不再同时过渡 border 等 layout 属性，降低每帧 reflow/paint 负担。
+  - `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：跑马灯副标题外层由 `transition-all` 改为 `transition-[opacity,margin-left]`，去掉 max-width 的 layout 过渡（宽度瞬时切换、由 `overflow-hidden` 裁剪），避免 hover 触发跑马灯时与抽屉展开动画叠加产生额外 reflow。
+  - 测试同步：前端 vitest 21 文件 112 项通过、`npm run check`（tsc）通过、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (71)
 
 - fix(launcher): Kimi Code Web 入口 origin 由 mDNS 主机名优先回退为局域网 IP 优先，恢复被 mDNS 迁移孤立的置顶与「完全自主」权限偏好（Issue #168 后续）

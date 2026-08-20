@@ -315,7 +315,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         <aside className="z-40 lg:sticky lg:top-16 lg:shrink-0">
           <div className="flex items-start gap-2">
             {/* 面板内容：夹在视频画面与把手（展开开关）之间 */}
-            <div className={`${joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))] border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg transition-all duration-300 ease-in-out`}>
+            <div className={`${joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))] border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg will-change-[width] transition-[width] duration-300 ease-in-out`}>
               <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
                 <div className="flex items-center justify-between gap-2">
                   <SectionCardTitle
