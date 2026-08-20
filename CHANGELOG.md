@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (83)
+
+- fix(layout): DD 顶栏 logo/标题贴左、右侧控件（含 DEV）贴右，与 Donkey 页左侧菜单左缘对齐
+  - `web_ui/frontend/src/components/Layout.tsx`：顶栏内层容器去掉 `container mx-auto px-4`，改为全宽无横向内边距，使标题左侧 logo/标题贴到窗口最左、右侧版本号/GitHub/静音/主题/语言/OTA/DEV 贴到最右，与全宽 Donkey 内嵌页左侧菜单左缘对齐。
+  - 测试同步：前端 vitest 全量 21 文件 117 项通过、`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (82)
 
 - feat(drive): 遥测曲线以半透明浮层覆盖在摄像头画面上方，摄像头铺满并裁边放大
