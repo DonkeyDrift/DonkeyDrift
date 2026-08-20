@@ -1337,8 +1337,9 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
-    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统；v3 一次性清除旧二选一遗留显式值）
-    (function(){try{if(localStorage.getItem('donkeydrifter.ui.theme.v3')!=='1'){localStorage.removeItem('donkeydrifter.ui.theme');localStorage.setItem('donkeydrifter.ui.theme.v3','1')}var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';var r=t;if(r==='system'){r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=r}catch(e){}})();
+    // 首屏防闪烁：渲染前按系统深浅色（prefers-color-scheme）直接解析，不读任何存储；
+    // 因此每次进入/刷新都会重新跟随系统。matchMedia 不可用时回退深色。
+    (function(){try{var r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';document.documentElement.dataset.theme=r}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
@@ -1584,7 +1585,6 @@ MENU_HTML = r"""<!DOCTYPE html>
     <script>
         // ── i18n（与 DD/DC 同一套 data-i18n 模式与交互） ──
         const LANG_STORAGE_KEY = 'donkeydrifter.ui.lang';
-        const THEME_STORAGE_KEY = 'donkeydrifter.ui.theme';
 
         const I18N = {
             zh: {
@@ -1731,9 +1731,9 @@ MENU_HTML = r"""<!DOCTYPE html>
             setLanguage(uiLang === 'zh' ? 'en' : 'zh');
         }
 
-        // ── 主题：静音式单按钮，深/浅两态互切；未手动切换前跟随浏览器
+        // ── 主题：静音式单按钮，深/浅两态互切；默认跟随浏览器
         //    prefers-color-scheme（'system' 默认态经 matchMedia 实时解析并监听），
-        //    手动单击后持久化显式浅/深选择，不再跟随（与 DD web_ui 同语义） ──
+        //    手动单击只在当前页面视图内切换（仅内存，不持久化），每次进入/刷新重新跟随系统 ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -1755,7 +1755,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             renderThemeBtn();
         }
         function setTheme(mode) {
-            try { localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (e) {}
             applyTheme(mode);
         }
         function toggleTheme() {
@@ -1763,12 +1762,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             setTheme(effective === 'light' ? 'dark' : 'light');
         }
         function initTheme() {
-            var stored = 'system';
-            try {
-                var s = localStorage.getItem(THEME_STORAGE_KEY);
-                if (s === 'light' || s === 'dark' || s === 'system') stored = s;
-            } catch (e) {}
-            applyTheme(stored);
+            applyTheme('system');
             try {
                 var mq = window.matchMedia('(prefers-color-scheme: light)');
                 var onChange = function() { if (uiTheme === 'system') applyTheme('system'); };
@@ -1805,13 +1799,13 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 3,  cat: "data",   name: "Clear Data",   descZh: "清空当前项目 data 目录",                 descEn: "Clear the current project's data directory",     favorite: false},
             {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
-            {no: 6,  cat: "drive",  name: "DonkeyDrifter", descZh: "打开 DonkeyDrifter",                    descEn: "Open DonkeyDrifter",                            favorite: true},
+            {no: 6,  cat: "drive",  name: "DonkeyDrifter", descZh: "打开 DonkeyDrifter",                    descEn: "Open DonkeyDrifter",                            favorite: true,  ddTopbarOnly: true, phDescZh: "当前已在 DonkeyDrifter 内", phDescEn: "Already inside DonkeyDrifter"},
             {no: 7,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                          favorite: true,  ddTopbarOnly: true},
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
-            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                     descEn: "Open Kimi Code Web",                            favorite: true,  ddTopbarOnly: true},
-            {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                   favorite: true,  ddTopbarOnly: true},
+            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                     descEn: "Open Kimi Code Web",                            favorite: true,  ddHidden: true},
+            {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                   favorite: true,  ddHidden: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -1829,15 +1823,20 @@ MENU_HTML = r"""<!DOCTYPE html>
             const grid = document.getElementById('menu-grid');
             grid.innerHTML = '';
             menuItems.forEach(item => {
+                if (isEmbedded && item.ddHidden) {
+                    // DD 内嵌时 11/12 号彻底删除：整行（含序号）都不渲染；
+                    // 单独打开 Donkey 时仍为完整入口。
+                    return;
+                }
                 const div = document.createElement('div');
                 const isPlaceholder = item.placeholder || (isEmbedded && item.ddTopbarOnly);
                 div.className = isPlaceholder
                     ? 'menuItem placeholder' : 'menuItem';
                 div.dataset.no = item.no;
                 if (isPlaceholder) {
-                    // 占位行：与 DonkeyDrifter 顶栏重复的入口不再出现在 Donkey
-                    // 菜单，不可点击、无分类 pill、无常用标、样式置灰；仅在
-                    // 内嵌于 DD（?embedded=1）时生效，单独打开 Donkey 时完整显示。
+                    // 占位行：DD 内嵌时与顶栏重复（7/11/12）或自身即 DD（6）的
+                    // 入口不再出现在 Donkey 菜单，不可点击、无分类 pill、无常用标、
+                    // 样式置灰；仅在 ?embedded=1 时生效，单独打开 Donkey 时完整显示。
                     div.onclick = null;
                     div.innerHTML =
                         '<div class="menuNo">' + item.no + '</div>' +
@@ -1845,8 +1844,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                             '<div class="menuName">' + item.name + '</div>' +
                             '<div class="menuDesc">' +
                                 (uiLang === 'en'
-                                    ? 'Merged into DonkeyDrifter top bar'
-                                    : '已并入 DonkeyDrifter 顶栏') +
+                                    ? (item.phDescEn || 'Merged into DonkeyDrifter top bar')
+                                    : (item.phDescZh || '已并入 DonkeyDrifter 顶栏')) +
                             '</div>' +
                         '</div>';
                     grid.appendChild(div);
@@ -1878,17 +1877,21 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项（issue #126：全部菜单项已接线）。7/11/12 在内嵌于
-        // DonkeyDrifter（?embedded=1）时为占位行——数字键/点击只给轻提示；
-        // 单独打开 Donkey 时恢复为完整入口（Drifter Console / Kimi Code Web /
-        // DeepSeek Harness）。
+        // 选择菜单项（issue #126：全部菜单项已接线）。6/7 在内嵌于
+        // DonkeyDrifter（?embedded=1）时为占位行（数字键/点击只给轻提示），
+        // 11/12 在内嵌时彻底删除（数字键无响应）；单独打开 Donkey 时
+        // 6/7/11/12 均恢复为完整入口（DonkeyDrifter / Drifter Console /
+        // Kimi Code Web / DeepSeek Harness）。
         function selectItem(no) {
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
+            if (isEmbedded && item.ddHidden) {
+                return;
+            }
             if (item.placeholder || (isEmbedded && item.ddTopbarOnly)) {
                 showError(uiLang === 'en'
-                    ? 'Merged into DonkeyDrifter top bar'
-                    : '已并入 DonkeyDrifter 顶栏');
+                    ? (item.phDescEn || 'Merged into DonkeyDrifter top bar')
+                    : (item.phDescZh || '已并入 DonkeyDrifter 顶栏'));
                 return;
             }
             highlightRow(no);

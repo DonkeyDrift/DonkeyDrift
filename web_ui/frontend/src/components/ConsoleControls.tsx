@@ -278,7 +278,7 @@ export const ConsoleDevToggle: React.FC = () => {
           title={unreachable ? t('console.unreachable') : undefined}
           className={`${cls} ${
             enabled
-              ? 'bg-cyan-500/25 border-cyan-500/60 text-cyan-400'
+              ? 'bg-[#5cc8ff]/25 border-[#5cc8ff] text-[#5cc8ff] shadow-[inset_0_0_0_1px_#5cc8ff]'
               : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-cyan-400 hover:border-cyan-500/50'
           }`}
         >

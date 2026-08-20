@@ -11,9 +11,9 @@
 - HTTP 端点：GET /api/projects、/api/data/backups、/api/train/next-model；
   POST /api/launch/web（issue #181 随 Web 菜单下线，应 404）、
   /api/createcar（非法项目名 400）、/api/data/*
-- 前端静态断言：MENU_HTML 各菜单动作接线（7/11/12 号在 DD 内嵌
-  ?embedded=1 时为占位行、序号保留不递补，单独打开 Donkey 时仍为完整
-  可点击入口）、terminal.html ?cmd= 自动执行
+- 前端静态断言：MENU_HTML 各菜单动作接线（6/7 号在 DD 内嵌
+  ?embedded=1 时为占位行，11/12 号彻底删除整行；单独打开 Donkey 时
+  6/7/11/12 均为完整可点击入口）、terminal.html ?cmd= 自动执行
 
 不启动真实 donkey / 子进程，全部替身。
 """
@@ -399,32 +399,41 @@ class TestFrontendWiring:
         # 所有菜单项接线后不再有 notImplemented 分支
         assert "showError(t('overlay.notImplemented'))" not in MENU_HTML
 
-    def test_menu_7_11_12_embedded_only_placeholder(self):
-        # 用户指示：7 号 Drifter Console、11 号 Kimi Code Web、12 号
-        # DeepSeek Harness 与 DonkeyDrifter 顶栏（标签页栏）重复。DD 内嵌
-        # （?embedded=1）时把它们渲染为置灰占位行、序号保留不递补；单独打开
-        # Donkey（:8090）时仍保留完整可点击入口。
+    def test_menu_6_7_grayed_11_12_hidden_embedded(self):
+        # 用户指示：DD 内嵌（?embedded=1）时 6/7 号（DonkeyDrifter / Drifter
+        # Console）渲染为置灰占位行、序号保留不递补；11/12 号（Kimi Code Web /
+        # DeepSeek Harness）彻底删除——整行含序号都不渲染。单独打开 Donkey
+        # （:8090）时 6/7/11/12 仍保留完整可点击入口。
+        assert 'name: "DonkeyDrifter"' in MENU_HTML
         assert 'name: "Drifter Console"' in MENU_HTML
         assert 'name: "Kimi Code Web"' in MENU_HTML
         assert 'name: "DeepSeek Harness"' in MENU_HTML
-        # 仅内嵌模式才占位：ddTopbarOnly 标记 + readEmbedded 解析 ?embedded=1
+        # 6/7 仍是置灰占位（内嵌时显示）；6 号占位描述是「当前已在 DD 内」
         assert "ddTopbarOnly: true" in MENU_HTML
+        assert "isEmbedded && item.ddTopbarOnly" in MENU_HTML
+        assert "当前已在 DonkeyDrifter 内" in MENU_HTML
+        assert "Already inside DonkeyDrifter" in MENU_HTML
+        # 11/12 彻底删除：内嵌时整行不渲染（ddHidden 标记 + 守卫）
+        assert "ddHidden: true" in MENU_HTML
+        assert "isEmbedded && item.ddHidden" in MENU_HTML
+        # readEmbedded 解析 ?embedded=1
         assert "function readEmbedded" in MENU_HTML
         assert "[?&]embedded=1" in MENU_HTML
         assert "const isEmbedded = readEmbedded()" in MENU_HTML
-        assert "isEmbedded && item.ddTopbarOnly" in MENU_HTML
-        # 占位行渲染与提示文案仍在（内嵌时才触发）
+        # 占位行渲染与提示文案仍在（6/7 内嵌时触发）
         assert "'menuItem placeholder'" in MENU_HTML
         assert "已并入 DonkeyDrifter 顶栏" in MENU_HTML
         assert "Merged into DonkeyDrifter top bar" in MENU_HTML
-        # 单独打开时 7/11/12 是完整入口：selectItem 接线恢复
+        # 单独打开时 6/7/11/12 都是完整入口：selectItem 接线恢复
+        assert "no === 6" in MENU_HTML
         assert "no === 7" in MENU_HTML
         assert "no === 11" in MENU_HTML
         assert "no === 12" in MENU_HTML
+        assert "launchDrive()" in MENU_HTML
         assert "openDrifterConsole()" in MENU_HTML
         assert "launchKimiCodeWeb()" in MENU_HTML
         assert "launchDshWeb()" in MENU_HTML
-        # 序号保留、不递补：8 号 Donkey UI 仍在原位
+        # 8 号 Donkey UI 仍在原位（11/12 删除不递补）
         assert "no: 8" in MENU_HTML
         # 原 7 号 Web 链路仍不存在
         assert "launchWebUI" not in MENU_HTML

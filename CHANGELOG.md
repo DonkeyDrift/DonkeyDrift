@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-20 (94)
+## 2026-08-20 (98)
 
 - feat(drive): Drive 遥测曲线左右分栏（转向/姿态 vs 油门/加速度）+ 整屏放大，移除暂停/清空按钮
   - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：`CurveConfig` 新增 `group` 字段并导出 `CurveGroup` 类型与 `curvesByGroup` 辅助；`TelemetryChart` 新增 `title`/`group`/`chartHeightClassName` 可选参数，`TelemetryLegend` 新增 `group` 参数（按分组只渲染该组曲线与复选框）；删除暂停/清空/全屏按钮及其状态逻辑（`paused`/`handlePauseToggle`/`handleClear`/`fullscreen`/`toggleFullscreen`），全屏改为由父组件统一管理整块画面。
@@ -9,13 +9,49 @@
   - 测试同步：`TelemetryChart.test.tsx` 删除暂停/清空/全屏用例，新增「group 模式下只渲染该分组的曲线与图例」用例，7 项通过；前端 vitest 21 文件 116 项、`npm run build`（tsc + vite）通过。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
+
+## 2026-08-20 (97)
+
+- fix(theme): Donkey 与 DonkeyDrifter 深浅色手动切换改为仅内存态、不写存储——修复「手动切换后刷新仍保持所选主题，无法重新跟随系统」的问题，使 D / DD / DC 三页一致：默认跟随系统、每次进入/刷新都重新按浏览器 prefers-color-scheme 解析
+  - 背景：D（launcher 8090）与 DD（8000）此前把主题选择持久化到 localStorage/sessionStorage，手动点过太阳/月亮后刷新仍保持所选主题、不再跟随系统；本次与 DC（Firmware v1.8.27）对齐为不持久化。
+  - `web_ui/frontend/src/lib/theme.ts`：删除 `THEME_STORAGE_KEY`，新增模块级内存态 `let currentThemeMode: ThemeMode = 'system'`；`readStoredTheme` 改为返回内存态；`setTheme` 改为只更新内存态并 `applyTheme`（不写 localStorage/sessionStorage）。
+  - `web_ui/frontend/index.html`：首屏防闪烁脚本改为直接 `matchMedia('(prefers-color-scheme: dark)')` 解析，不读任何存储。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：删除 `THEME_STORAGE_KEY` 导出；注释更新为「仅内存、不持久化、每次进入/刷新重新跟随系统」。
+  - `donkeycar/launcher/server.py`：删除 `THEME_STORAGE_KEY` 常量与 v3 迁移/localStorage 读取；首屏脚本改为直接按系统解析；`setTheme` 改为仅 `applyTheme`（删 localStorage.setItem）；`initTheme` 改为 `applyTheme('system')` + 系统监听（删 localStorage 读取）。
+  - 测试同步：`web_ui/frontend/src/components/ThemeSwitcher.test.tsx` 重写为断言「setTheme 不写 localStorage/sessionStorage（`window.localStorage.length===0` 与 `window.sessionStorage.length===0`）」；`tests/test_launcher_theme_single_button.py` 更新首屏脚本断言、删除 v3/localStorage 断言、新增 `applyTheme('system')` 与「无 localStorage 读取」断言。
+  - 注：Firmware 侧 DC 同步改动见 Firmware `CHANGELOG.md` v1.8.27。
+
+## 2026-08-20 (96)
+
+- fix(launcher): DD 内嵌 Donkey 的 11/12 号彻底删除（整行含序号），6/7 仍置灰占位
+  - 背景：上一条 (94) 把 6/7/11/12 都做成了内嵌置灰占位；用户要求 11/12（Kimi Code Web / DeepSeek Harness）彻底删掉（整行连同序号都不显示），6（DonkeyDrifter）/7（Drifter Console）保持置灰占位不变。
+  - `donkeycar/launcher/server.py`：`menuItems` 的 11/12 号由 `ddTopbarOnly:true` 改为 `ddHidden:true`；`renderMenu()` 在遍历开头新增 `if (isEmbedded && item.ddHidden) return`（内嵌时整行不渲染，序号 11/12 直接空出）；`selectItem()` 新增 `if (isEmbedded && item.ddHidden) return`（内嵌时数字键无响应）。6/7 仍 `ddTopbarOnly:true`（内嵌置灰占位），单独打开 Donkey（:8090）时 6/7/11/12 均完整可点击。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_6_7_11_12_embedded_only_placeholder` 重写为 `test_menu_6_7_grayed_11_12_hidden_embedded`（断言 6/7 `ddTopbarOnly`、11/12 `ddHidden` + `isEmbedded && item.ddHidden` 守卫）；launcher 相关 139 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-20 (95)
+
+- fix(console): DonkeyDrifter 顶栏 DEV 开关开启态对齐 Drifter Console 原版效果（#5cc8ff + 内描边）
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：`ConsoleDevToggle` 的 `enabled` 分支由 `bg-cyan-500/25 border-cyan-500/60 text-cyan-400` 改为 `bg-[#5cc8ff]/25 border-[#5cc8ff] text-[#5cc8ff] shadow-[inset_0_0_0_1px_#5cc8ff]`，完全对齐 DC 页面 `.devOn` 的 `background:rgba(92,200,255,.25);border-color:#5cc8ff;box-shadow:inset 0 0 0 1px #5cc8ff;color:#5cc8ff`。
+  - `web_ui/frontend/src/components/ConsoleControls.test.tsx`：用例 `highlights in cyan when enabled` 改名为 `highlights like the DC DEV toggle when enabled`，断言更新为 `bg-[#5cc8ff]/25` / `border-[#5cc8ff]` / `text-[#5cc8ff]` / `shadow-[inset_0_0_0_1px_#5cc8ff]`。
+  - 测试同步：`npm run build`（tsc + vite）通过；`ConsoleControls.test.tsx` 11 项通过；全量 vitest 21 文件 117 项中 116 通过（`App.test.tsx` 的 Tub Manager 保持挂载用例在并行跑时偶发 waitFor 超时，单跑该文件 6 项全通过，属既有 flaky，与本次无关）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (94)
+
+- fix(launcher): DD 内嵌 Donkey 的 6 号（DonkeyDrifter）也置灰占位——6/7/11/12 均仅内嵌时占位，单独打开 Donkey 仍完整
+  - 背景：6 号「DonkeyDrifter」在内嵌于 DonkeyDrifter 的 Donkey 菜单里是自引用（用户当前已在 DD 内），属冗余入口；用户要求检查并删除，且只删 DD 内嵌的 Donkey、单独 Donkey 页（:8090）不动。
+  - `donkeycar/launcher/server.py`：`menuItems` 的 6 号新增 `ddTopbarOnly:true`，并加 `phDescZh/phDescEn`（「当前已在 DonkeyDrifter 内 / Already inside DonkeyDrifter」）；`renderMenu()` 与 `selectItem()` 的占位描述由硬编码「已并入 DonkeyDrifter 顶栏」改为优先取 `item.phDescZh/phDescEn`，缺省回退到「已并入 DonkeyDrifter 顶栏 / Merged into DonkeyDrifter top bar」（7/11/12 无 phDesc、走回退）。
+  - 11/12 号上一轮已加 `ddTopbarOnly`（内嵌置灰），本次无额外改动。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_7_11_12_embedded_only_placeholder` 重写为 `test_menu_6_7_11_12_embedded_only_placeholder`（新增 6 号 name、`当前已在 DonkeyDrifter 内`/`Already inside DonkeyDrifter`、`no === 6`/`launchDrive()` 接线断言）；launcher 相关 139 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-20 (93)
 
 - feat(console): DonkeyDrifter 顶栏静音键切换成功后经 postMessage 即时同步内嵌 Drifter Console，无需等 5s 轮询或手动刷新（Issue #117 续）
   - `web_ui/frontend/src/components/ConsoleControls.tsx`：新增导出常量 `MUTE_CHANGED_EVENT = 'dd-console-mute-changed'`；`ConsoleMuteButton.toggle()` 在 POST 成功并 `fetchMute()` 后 `window.dispatchEvent(new CustomEvent(MUTE_CHANGED_EVENT, { detail: { muted: next === 1 } }))`，广播最新静音态。
   - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：给内嵌 iframe 增加 `ref={iframeRef}`，新增 `useEffect` 监听 `MUTE_CHANGED_EVENT`，回调里 `iframeRef.current?.contentWindow?.postMessage({ type: MUTE_CHANGED_EVENT, muted }, '*')`，让车端原版 DC 页面即时更新静音图标；不重载 iframe、不丢曲线/终端状态（静音是高频轻量操作）。
   - 测试同步：`ConsoleControls.test.tsx` 新增「切换后广播 MUTE_CHANGED_EVENT 且 detail.muted 正确」用例；前端 `npm run build`（tsc + vite）通过。
-
 ## 2026-08-20 (92)
 
 - fix(drive): 遥测曲线勾选框默认全部选中
