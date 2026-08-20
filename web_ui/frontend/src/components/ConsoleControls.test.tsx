@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { ConsoleMuteButton, ConsoleOtaButton, ConsoleDevToggle } from './ConsoleControls';
+import { ConsoleMuteButton, ConsoleOtaButton, ConsoleDevToggle, MUTE_CHANGED_EVENT } from './ConsoleControls';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -63,6 +63,23 @@ describe('ConsoleMuteButton', () => {
     const btn = await screen.findByRole('button', { name: 'console.unmuteAria' });
     expect(btn).toHaveAttribute('aria-pressed', 'true');
     expect(btn.className).toContain('text-[#5cc8ff]');
+  });
+
+  it('broadcasts MUTE_CHANGED_EVENT after toggling so the embedded console updates immediately', async () => {
+    mockGetJson.mockResolvedValue({ muted: 0 });
+    const listener = vi.fn();
+    window.addEventListener(MUTE_CHANGED_EVENT, listener);
+    try {
+      render(<ConsoleMuteButton />);
+      const btn = await screen.findByRole('button', { name: 'console.muteAria' });
+      fireEvent.click(btn);
+
+      await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+      const event = listener.mock.calls[0][0] as CustomEvent<{ muted: boolean }>;
+      expect(event.detail.muted).toBe(true);
+    } finally {
+      window.removeEventListener(MUTE_CHANGED_EVENT, listener);
+    }
   });
 });
 
@@ -158,14 +175,16 @@ describe('ConsoleDevToggle', () => {
     expect(screen.getByText('console.devHint')).toBeInTheDocument();
   });
 
-  it('highlights in cyan when enabled', async () => {
+  it('highlights like the DC DEV toggle when enabled', async () => {
     mockGetJson.mockResolvedValue({ enabled: true });
     render(<ConsoleDevToggle />);
 
     const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle.className).toContain('bg-cyan-500/25');
-    expect(toggle.className).toContain('text-cyan-400');
+    expect(toggle.className).toContain('bg-[#5cc8ff]/25');
+    expect(toggle.className).toContain('border-[#5cc8ff]');
+    expect(toggle.className).toContain('text-[#5cc8ff]');
+    expect(toggle.className).toContain('shadow-[inset_0_0_0_1px_#5cc8ff]');
   });
 
   it('is disabled when the console is unreachable', () => {

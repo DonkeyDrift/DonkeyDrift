@@ -16,6 +16,10 @@ const POLL_MS = 5000;
 // 让车端原版页面立刻反映最新 dev_mode，不必等 DC 自己的 5s 轮询或手动刷新。
 export const DEV_MODE_CHANGED_EVENT = 'dd-console-devmode-changed';
 
+// 静音成功切换后广播该事件，内嵌 Drifter Console 页面监听后直接 postMessage 到 DC，
+// 让车端原版页面立刻更新静音图标，不重载 iframe（静音是高频轻量操作，重载会丢曲线/终端状态）。
+export const MUTE_CHANGED_EVENT = 'dd-console-mute-changed';
+
 /** 静音按钮：位于 GitHub 图标右侧、主题切换左侧；每 5s 轮询以同步 DC 侧改动。 */
 export const ConsoleMuteButton: React.FC = () => {
   const { t } = useTranslation();
@@ -45,14 +49,18 @@ export const ConsoleMuteButton: React.FC = () => {
 
   const toggle = async () => {
     if (!ip || muted === null || busy) return;
+    const next = muted ? 0 : 1;
     setBusy(true);
     try {
       await consolePostForm(
         ip,
         'api/mute',
-        new URLSearchParams({ muted: muted ? '0' : '1' }),
+        new URLSearchParams({ muted: String(next) }),
       );
       await fetchMute();
+      window.dispatchEvent(
+        new CustomEvent(MUTE_CHANGED_EVENT, { detail: { muted: next === 1 } }),
+      );
     } catch {
       setMuted(null);
     } finally {
@@ -270,7 +278,7 @@ export const ConsoleDevToggle: React.FC = () => {
           title={unreachable ? t('console.unreachable') : undefined}
           className={`${cls} ${
             enabled
-              ? 'bg-cyan-500/25 border-cyan-500/60 text-cyan-400'
+              ? 'bg-[#5cc8ff]/25 border-[#5cc8ff] text-[#5cc8ff] shadow-[inset_0_0_0_1px_#5cc8ff]'
               : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-cyan-400 hover:border-cyan-500/50'
           }`}
         >

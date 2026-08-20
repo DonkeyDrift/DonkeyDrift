@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, SquareTerminal } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { discoverConnectorConsoles } from '../services/api';
 import { consoleGetText } from '../services/console';
-import { DEV_MODE_CHANGED_EVENT } from '../components/ConsoleControls';
+import { DEV_MODE_CHANGED_EVENT, MUTE_CHANGED_EVENT } from '../components/ConsoleControls';
 import { useTranslation } from '@/i18n';
 
 /**
@@ -20,6 +20,7 @@ export const DrifterConsolePage: React.FC = () => {
   const [manualIp, setManualIp] = useState('');
   const [version, setVersion] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const discover = useCallback(async () => {
     setScanning(true);
@@ -50,6 +51,19 @@ export const DrifterConsolePage: React.FC = () => {
     const reload = () => setReloadKey((k) => k + 1);
     window.addEventListener(DEV_MODE_CHANGED_EVENT, reload);
     return () => window.removeEventListener(DEV_MODE_CHANGED_EVENT, reload);
+  }, []);
+
+  // 顶栏静音键成功切换后，直接 postMessage 到内嵌 DC，让静音图标立刻更新，无需重载 iframe。
+  useEffect(() => {
+    const forward = (e: Event) => {
+      const detail = (e as CustomEvent<{ muted: boolean }>).detail;
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: MUTE_CHANGED_EVENT, muted: detail?.muted === true },
+        '*',
+      );
+    };
+    window.addEventListener(MUTE_CHANGED_EVENT, forward);
+    return () => window.removeEventListener(MUTE_CHANGED_EVENT, forward);
   }, []);
 
   // 车端固件版本从 /api/status 的 version= 字段读取，显示在工具条“连接”按钮右侧。
@@ -119,6 +133,7 @@ export const DrifterConsolePage: React.FC = () => {
         <div className="min-h-0 flex-1">
           <iframe
             key={reloadKey}
+            ref={iframeRef}
             src={`http://${selectedIp}/?embedded=1&lang=${lang}`}
             title="Drifter Console"
             className="h-full w-full border-0 bg-zinc-950"
