@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-20 (79)
+## 2026-08-20 (80)
 
 - feat(console): DD 顶栏 OTA 改为当前页弹窗上传、DEV 开启加确认/悬浮提示，并让 DEV 状态即时同步到内嵌 DC
   - `web_ui/frontend/src/components/ConsoleControls.tsx`：`ConsoleOtaButton` 由 `<a href="http://<ip>/update" target="_blank">` 改为按钮打开本地上传弹窗（文件选择 + 上传/状态 + 成功/失败文案），用 `consolePostForm(ip, 'update', FormData)` 经同源代理上传固件，成功后提示设备重启；`ConsoleDevToggle` 增加开启确认弹窗（关闭直接生效），仅在 `enabled=false` 时点开启弹出 `console.devTitle/devBody` 确认框，确认后才 POST '1'；DEV 按钮加自定义悬浮提示（`console.devHint`，对齐 DC 文案）；成功切换后派发 `dd-console-devmode-changed` 事件。
@@ -9,6 +9,12 @@
   - `web_ui/backend/routers/console.py`：OTA `POST /update` 单独放宽超时 `PROXY_TIMEOUT=10` → `OTA_TIMEOUT=300`，避免大固件上传超时；`_forward_sync` 增加 `timeout` 参数（默认 10s）。
   - 测试同步：`ConsoleControls.test.tsx` 11 项（新增 OTA 弹窗上传/DEV 确认/DEV 悬浮提示/关闭免确认断言）、`tests/test_console.py` 4 项（新增 update 走长超时断言）；前端 vitest 全量 21 文件 117 项、`tsc -b --noEmit`/`npm run build`、后端 pytest 97 项全部通过。
   - 注：仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (79)
+
+- fix(layout): 去掉 DonkeyDrifter 顶栏与内容区之间的分隔横线（Issue #234 后续）
+  - `web_ui/frontend/src/components/Layout.tsx`：`<header>` 去掉 `border-b border-zinc-800`，顶部导航/标题与下方内容视觉融合，不再有一条横向分隔线。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
 
 ## 2026-08-20 (78)
 
