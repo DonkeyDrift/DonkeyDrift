@@ -49,12 +49,19 @@ export const entryLinkCls =
 
 export const DonkeyEntryLink: React.FC = () => {
   const { t } = useTranslation();
-  // Donkey 菜单（launcher :8090）改为在当前标签页内嵌显示，与 Drifter Console 一致。
+  const { pathname } = useLocation();
+  const active = pathname === '/donkey';
+  // Donkey 菜单（launcher :8090）改为在当前标签页内嵌显示，与 Drifter Console 一致；
+  // 处于 /donkey 时按流程导航的激活态高亮蓝色（text-cyan-500）。
   return (
     <Link
       to="/donkey"
       title={t('common.enterButtons.donkeyTitle')}
-      className={entryLinkCls}
+      className={
+        active
+          ? 'flex items-center gap-1 text-xs font-medium text-cyan-500 hover:text-cyan-400 transition-colors whitespace-nowrap cursor-pointer py-2.5'
+          : entryLinkCls
+      }
     >
       <Menu className="w-3.5 h-3.5 shrink-0" />
       {t('common.enterButtons.donkey')}

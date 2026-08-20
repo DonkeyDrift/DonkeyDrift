@@ -1,10 +1,20 @@
 # 变更日志
 
-## 2026-08-20 (75)
+## 2026-08-20 (76)
 
 - fix(drive): 限制摄像头高度，让 Drive 页摄像头与下方遥测曲线同屏可见
   - `web_ui/frontend/src/pages/DrivePage.tsx`：`VideoStream` 增加 `lg:max-h-[calc(100vh-32rem)]` 视口高度上限。摄像头按实际画面比例自适应后，在常见桌面屏上画面过高会把 `TelemetryChart` 顶出首屏；加此上限后曲线无需滚动即可同屏显示。`VideoStream` 内部画面为 `object-contain`，高度被压缩时完整居中、只留黑边不裁切。
   - 测试同步：`npm run check`（tsc）通过、`npm run build`（vite）通过，产物含该类名与 `max-height: calc(100vh - 32rem)` 规则。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (75)
+
+- fix(web-ui): Donkey 内嵌页改为全屏铺满，并修正 Donkey 模式下的顶栏高亮、侧栏遮挡与帮助小球
+  - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`：去掉 DD 侧标题栏与 `space-y-3` 包装，iframe 铺满顶栏以下全部可视区域（`h-[calc(100vh-3.5rem)]` + `h-full w-full border-0`），用户看到与真实 Donkey 启动页（8090）一致的完整界面。
+  - `web_ui/frontend/src/App.tsx`：`isConsole` 扩展为 `isFullBleed`（`/console` 或 `/donkey`），`/donkey` 同样隐藏左侧 Loaders/Connectors 浮动抽屉，避免遮挡内嵌 launcher。
+  - `web_ui/frontend/src/components/Layout.tsx`：新增 `isDonkey`/`isFullBleed`；`/donkey` 时流程锚点（Drive 等）一律不高亮；`<main>` 在 `/donkey` 改 `py-0` 全屏比例；`/donkey` 隐藏 DD 右下角 FAB，让 launcher 自带的 Donkey 帮助小球显示、不与 DD FAB 重叠。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`DonkeyEntryLink` 增加 `/donkey` 激活态（`text-cyan-500`），修复「在 Donkey 页时 Drive 为蓝色、Donkey 为灰色」。
+  - 测试同步：`EnterButtons.test.tsx` 新增 Donkey 激活态断言；`App.test.tsx` 新增 `/donkey` 隐藏 SidePanel 与 FabActions 的断言；前端 vitest 21 文件 114 项、`npm run check`（tsc）、`npm run build` 全部通过。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (74)
@@ -30,7 +40,6 @@
     - 工具条去掉 `border-b border-zinc-800 bg-zinc-900/50`，改为与下方 iframe 同底色、无分隔线。
     - 版本号由 `font-mono text-xs text-zinc-400` 改为对齐顶栏 `VersionBadge` 的 `text-zinc-500 text-xs uppercase tracking-wider`，渲染为 `v{version}`（version 存纯版本号，去 V 前缀）。
   - 测试同步：前端 `npm run build`（tsc + vite）通过。
-
 ## 2026-08-20 (71)
 
 - fix(launcher): Kimi Code Web 入口 origin 由 mDNS 主机名优先回退为局域网 IP 优先，恢复被 mDNS 迁移孤立的置顶与「完全自主」权限偏好（Issue #168 后续）

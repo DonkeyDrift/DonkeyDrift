@@ -57,6 +57,16 @@ describe('DonkeyEntryLink', () => {
     expect(link).toHaveAttribute('href', '/donkey');
     expect(link).not.toHaveAttribute('target');
   });
+
+  it('highlights cyan when the current route is /donkey', () => {
+    render(
+      <MemoryRouter initialEntries={['/donkey']}>
+        <DonkeyEntryLink />
+      </MemoryRouter>,
+    );
+    const link = screen.getByText('common.enterButtons.donkey').closest('a');
+    expect(link?.className).toContain('text-cyan-500');
+  });
 });
 
 describe('DrifterConsoleEntryLink', () => {

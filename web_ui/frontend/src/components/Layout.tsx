@@ -26,9 +26,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const activeSection = useFlowStore((s) => s.activeSection);
   // Car Connector 是独立路由，只在 /connector 上高亮
   const isConnector = location.pathname === '/connector';
-  // Drifter Console 也是独立路由（Issue #234）：在 /console 上由 DrifterConsoleEntryLink
+  // Drifter Console（/console）与 Donkey 菜单（/donkey）也是独立路由：由各自入口
   // 自身高亮，此时 Drive 等流程锚点一律不高亮
   const isConsole = location.pathname === '/console';
+  const isDonkey = location.pathname === '/donkey';
+  const isFullBleed = isConsole || isDonkey;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // 切换路由后收起手机菜单
@@ -38,7 +40,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   const flowClass = (section: FlowSectionId) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
-      !isConnector && !isConsole && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
+      !isConnector && !isFullBleed && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
     }`;
 
   return (
@@ -142,10 +144,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         )}
       </header>
-      <main className={isConsole ? 'py-0' : 'container mx-auto px-4 py-6 space-y-6'}>
+      <main className={isFullBleed ? 'py-0' : 'container mx-auto px-4 py-6 space-y-6'}>
         {children}
       </main>
-      <FabActions />
+      {/* /donkey 是铺满的 launcher 内嵌页，右下角帮助小球应由 Donkey 自己提供，
+          隐藏 DD 的 FAB 避免与 launcher 自带 FAB 重叠（Issue #263 补强）。 */}
+      {!isDonkey && <FabActions />}
     </div>
   );
 };
