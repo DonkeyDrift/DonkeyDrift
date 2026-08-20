@@ -8,6 +8,13 @@
   - 测试同步：`tests/test_launcher_menu_actions.py` 新增 `test_embedded_hides_topbar_chrome`，断言内嵌隐藏逻辑（`if (isEmbedded)` / 选择器 / 去框样式）与单独打开时各元素仍在 HTML；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
   - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
 
+## 2026-08-21 (105)
+
+- fix(layout): DonkeyDrifter 左上角 logo 去掉外边框（#2b3441），与 Donkey 图标视觉一致
+  - `web_ui/frontend/src/components/Layout.tsx`：标题左侧 `<img>` 的 className 由 `w-8 h-8 rounded-lg border border-[#2b3441]` 改为 `w-8 h-8 rounded-lg`，去掉 1px 深色外边框；同步更新注释（「1px #2b3441 边框」→「无外边框」）。
+  - 测试同步：`npm run build`（tsc + vite）通过；前端 vitest 21 文件 114 项全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-21 (104)
 
 - fix(drive): 整屏放大键由视频右上角移到右下角（油门/加速度曲线框上方），避免与右上角帧率显示干涉
