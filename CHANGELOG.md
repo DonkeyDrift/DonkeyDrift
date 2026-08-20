@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-20 (78)
+
+- fix(layout): 去掉 DonkeyDrifter 顶栏与内容区之间的分隔横线（Issue #234 后续）
+  - `web_ui/frontend/src/components/Layout.tsx`：`<header>` 去掉 `border-b border-zinc-800`，顶部导航/标题与下方内容视觉融合，不再有一条横向分隔线。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
 ## 2026-08-20 (77)
 
 - fix(drive): 摄像头按可用高度反推宽度并略降曲线图高度，画面更大且消除左右黑边
