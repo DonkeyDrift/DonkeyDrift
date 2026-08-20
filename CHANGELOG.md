@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-20 (74)
+## 2026-08-20 (75)
 
 - fix(web-ui): Donkey 内嵌页改为全屏铺满，并修正 Donkey 模式下的顶栏高亮、侧栏遮挡与帮助小球
   - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`：去掉 DD 侧标题栏与 `space-y-3` 包装，iframe 铺满顶栏以下全部可视区域（`h-[calc(100vh-3.5rem)]` + `h-full w-full border-0`），用户看到与真实 Donkey 启动页（8090）一致的完整界面。
@@ -8,6 +8,13 @@
   - `web_ui/frontend/src/components/Layout.tsx`：新增 `isDonkey`/`isFullBleed`；`/donkey` 时流程锚点（Drive 等）一律不高亮；`<main>` 在 `/donkey` 改 `py-0` 全屏比例；`/donkey` 隐藏 DD 右下角 FAB，让 launcher 自带的 Donkey 帮助小球显示、不与 DD FAB 重叠。
   - `web_ui/frontend/src/components/EnterButtons.tsx`：`DonkeyEntryLink` 增加 `/donkey` 激活态（`text-cyan-500`），修复「在 Donkey 页时 Drive 为蓝色、Donkey 为灰色」。
   - 测试同步：`EnterButtons.test.tsx` 新增 Donkey 激活态断言；`App.test.tsx` 新增 `/donkey` 隐藏 SidePanel 与 FabActions 的断言；前端 vitest 21 文件 114 项、`npm run check`（tsc）、`npm run build` 全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (74)
+
+- fix(flow): Drive/TM/Trainer/PA 大页节标题的灰色小字由垂直居中改为基线对齐，与标题视觉平行（Issue #233）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 内层容器由 `items-center` 改为 `items-baseline`，小字 span 去掉多余的 `leading-none`，与基准组件 `SectionCardTitle`（视频录制库/Top编辑器）的小字 class 保持一致，消除小字相对 `text-xl` 大标题偏高、不平行的问题。
+  - 测试同步：`npm run check`（tsc）通过、`npm run build` 通过。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (73)

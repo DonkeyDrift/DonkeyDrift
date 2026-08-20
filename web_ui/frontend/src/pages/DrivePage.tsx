@@ -304,7 +304,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           </div>
 
           {active ? (
-            <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+            /* 桌面端给摄像头一个视口高度上限，保证下方遥测曲线无需滚动也能同屏可见；
+               object-contain 会在高度被压缩时保留画面完整（四周黑边），不会裁切。 */
+            <VideoStream className="w-full lg:max-h-[calc(100vh-32rem)]" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
           ) : (
             <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
           )}
