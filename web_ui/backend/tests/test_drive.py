@@ -527,3 +527,50 @@ def test_client_car_mode_command_forwards_to_car(monkeypatch):
         time.sleep(0.1)
 
     assert {"car_mode": 2} in sent_to_car
+
+
+async def _first_frame_part(drive):
+    gen = drive._frame_generator()
+    try:
+        return await gen.__anext__()
+    finally:
+        await gen.aclose()
+
+
+def test_video_stream_emits_placeholder_when_online_without_frame():
+    client, drive = make_client()
+    drive.drive_state.car_last_seen = datetime.now()
+    drive.drive_state.last_frame = None
+
+    part = asyncio.run(_first_frame_part(drive))
+
+    assert b"Content-Type: image/jpeg" in part
+    payload = part.split(b"\r\n\r\n", 1)[1]
+    assert payload.startswith(b"\xff\xd8")
+
+
+def test_video_stream_emits_real_frame_when_online():
+    client, drive = make_client()
+    drive.drive_state.car_last_seen = datetime.now()
+    drive.drive_state.last_frame = b"\xff\xd8REALJPEG\xff\xd9"
+
+    part = asyncio.run(_first_frame_part(drive))
+
+    assert b"REALJPEG" in part
+
+
+def test_video_stream_stays_silent_when_offline():
+    client, drive = make_client()
+    drive.drive_state.last_frame = None
+
+    async def run():
+        gen = drive._frame_generator()
+        try:
+            await asyncio.wait_for(gen.__anext__(), timeout=0.3)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            await gen.aclose()
+
+    assert asyncio.run(run()) is False
