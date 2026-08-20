@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (89)
+
+- feat(console): DonkeyDrifter 顶栏静音键切换成功后经 postMessage 即时同步内嵌 Drifter Console，无需等 5s 轮询或手动刷新（Issue #117 续）
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：新增导出常量 `MUTE_CHANGED_EVENT = 'dd-console-mute-changed'`；`ConsoleMuteButton.toggle()` 在 POST 成功并 `fetchMute()` 后 `window.dispatchEvent(new CustomEvent(MUTE_CHANGED_EVENT, { detail: { muted: next === 1 } }))`，广播最新静音态。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：给内嵌 iframe 增加 `ref={iframeRef}`，新增 `useEffect` 监听 `MUTE_CHANGED_EVENT`，回调里 `iframeRef.current?.contentWindow?.postMessage({ type: MUTE_CHANGED_EVENT, muted }, '*')`，让车端原版 DC 页面即时更新静音图标；不重载 iframe、不丢曲线/终端状态（静音是高频轻量操作）。
+  - 测试同步：`ConsoleControls.test.tsx` 新增「切换后广播 MUTE_CHANGED_EVENT 且 detail.muted 正确」用例；前端 `npm run build`（tsc + vite）通过。
+
 ## 2026-08-20 (88)
 
 - fix(layout): DonkeyDrifter 顶栏改为纯色背景，消除与内容区之间的半透明背景边界横线（Issue #234 后续）
