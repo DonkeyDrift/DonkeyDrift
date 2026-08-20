@@ -1,12 +1,19 @@
 # 变更日志
 
-## 2026-08-20 (99)
+## 2026-08-20 (100)
 
 - fix(launcher): KCW 入口注入 `?kimi_origin=<origin>`，钉住前端 API 基地址，修复任务执行时 getSessionSnapshot 报 "TypeError: Load failed"
   - 背景：上一轮把入口 origin 回退为局域网 IP 优先（PR #266），但用户点 Kimi 后执行任务仍报「无法加载当前会话内容 / TypeError: Load failed」，请求打到 `http://tony007.local:58640`（mDNS 旧 origin）。根因：KCW 0.36.1 前端 API 基地址判定为 URL `?kimi_origin` → `sessionStorage["kimi-desktop-server-origin"]` → `window.location.origin`；launcher 未注入 `kimi_origin`，浏览器残留早期 mDNS 阶段写进 sessionStorage 的 `tony007.local` 仍把 API 指到连不上的 mDNS host。
   - `donkeycar/launcher/kimi_web.py`：新增 `_mark_origin()`（追加 `?kimi_origin=http://<entry_host>:<port>/`，同名参数先去重再追加），三处返回点由 `_mark_onboarded(_lan_url(url))` 改为 `_mark_origin(_mark_onboarded(_lan_url(url)))`；模块 docstring 增加第 4 条 issue #168 约束说明。
   - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMarkOrigin`（追加 / 覆盖旧 origin / 保留路径与其它 query 三例），`test_reuses_live_instance_without_spawning` / `test_spawn_success_captures_url_and_keeps_proc` / `test_spawn_failure_falls_back_to_reuse` 三处返回 URL 断言补 `kimi_origin`；`test_launcher_kimi_web.py` + `test_launcher_dsh_web.py` 共 84 passed。
   - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-20 (99)
+
+- feat(donkeycar): 新增 `evaluate` 命令，量化评估模型 angle/throttle 预测质量并检查数据分布
+  - `donkeycar/management/base.py`：新增 `Evaluate(BaseCommand)`（`parse_args` / `_metrics` / `run`）并在 `commands` 注册 `'evaluate': Evaluate`。两种模式：传 `--model` 时用 `TubDataset` 读记录、`model.run(img)` 推理，对 angle/throttle 输出 `corr / mae / rmse / mean_err / count`；不传 `--model` 时输出 `user/angle`、`user/throttle` 的分布统计（mean/std/min/max，另给 angle 的 `abs_lt_0.05_ratio`）；`--out` 写 JSON。用于客观判断模型是否真正学到转向/油门信号（corr≈0 即退化为预测均值/多数类），并判断训练数据是否均衡。
+  - `donkeycar/tests/test_evaluate_command.py`：新增 4 项测试（`parse_args` 参数解析、`_metrics` 完美预测与常量标签无相关、无模型模式经 mock 跑数据统计并写 JSON），`pytest -q` 4 passed。
+  - 注：仅新增 CLI 命令，不影响本机 Web UI，无需部署/OTA。
 
 ## 2026-08-20 (98)
 
