@@ -39,7 +39,7 @@ def test_launcher_menu_theme_is_mute_style_single_button():
 
 def test_launcher_theme_toggles_between_light_and_dark():
     """单击切换：toggleTheme 按生效主题在 浅色 ↔ 深色 间互切，
-    经 setTheme 持久化显式选择（沿用 donkeydrifter.ui.theme 键）。"""
+    setTheme 仅更新内存态，不写 localStorage（每次进入/刷新重新跟随系统）。"""
     source = _launcher_source()
 
     body = source.split("function toggleTheme()", 1)[1].split("function initTheme()", 1)[0]
@@ -52,23 +52,21 @@ def test_launcher_theme_toggles_between_light_and_dark():
 
 
 def test_launcher_theme_follows_browser_until_manual_click():
-    """默认跟随浏览器：无显式存储时 'system' 态经 matchMedia 实时解析，
-    并监听 prefers-color-scheme 变化实时跟随；手动单击后写入显式浅/深选择不再跟随。"""
+    """默认跟随浏览器：'system' 态经 matchMedia 实时解析并监听 prefers-color-scheme
+    变化实时跟随；每次进入/刷新都重新跟随系统，手动单击仅当前视图内切换（不持久化）。"""
     source = _launcher_source()
 
     body = source.split("function initTheme()", 1)[1].split("// ── DC FAB", 1)[0]
-    assert "if (s === 'light' || s === 'dark' || s === 'system') stored = s;" in body
+    assert "applyTheme('system');" in body
     assert "matchMedia('(prefers-color-scheme: light)')" in body
     assert "if (uiTheme === 'system') applyTheme('system');" in body
 
-    # 首屏防闪烁脚本：显式 light/dark/system 优先，system 经 matchMedia 解析，
-    # 并把生效主题写到 html[data-theme]
-    assert "var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';" in source
-    # v3 一次性迁移：清除旧二选一遗留的显式 light/dark，恢复默认跟随系统
-    assert "if(localStorage.getItem('donkeydrifter.ui.theme.v3')!=='1'){" in source
-    assert "localStorage.removeItem('donkeydrifter.ui.theme');" in source
-    assert "matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'" in source
-    assert "document.documentElement.dataset.theme=r" in source
+    # 首屏防闪烁脚本：不读任何存储，直接按系统深浅色解析并写到 html[data-theme]，
+    # 因此每次进入/刷新都会重新跟随系统
+    assert "(function(){try{var r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';document.documentElement.dataset.theme=r}catch(e){}})();" in source
+    assert "localStorage.getItem('donkeydrifter.ui.theme')" not in source
+    assert "localStorage.setItem('donkeydrifter.ui.theme')" not in source
+    assert "donkeydrifter.ui.theme.v3" not in source
 
     # 两态按钮不再提供"跟随系统"入口（无 followSystem/toggleSystem 文案）
     assert "'theme.followSystem'" not in source

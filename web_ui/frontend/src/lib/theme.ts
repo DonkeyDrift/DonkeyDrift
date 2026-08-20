@@ -3,9 +3,6 @@ import { useSyncExternalStore } from 'react';
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 
-export const THEME_STORAGE_KEY = 'donkeydrifter.ui.theme';
-
-/** 各生效主题对应的 <html> class:深色 = MUS4 皮肤,浅色 = MUS4 Light 皮肤。 */
 export const THEME_CLASS: Record<ResolvedTheme, string> = {
   dark: 'theme-mus4',
   light: 'theme-light',
@@ -13,16 +10,11 @@ export const THEME_CLASS: Record<ResolvedTheme, string> = {
 
 const THEME_CHANGE_EVENT = 'donkeydrifter:theme-changed';
 
-/** 读取持久化主题选择;无存储或存储值非法时默认跟随系统('system'),用户显式选择浅色/深色后以其为准。 */
-export const readStoredTheme = (): ThemeMode => {
-  try {
-    const stored = window.sessionStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
-    return 'system';
-  } catch {
-    return 'system';
-  }
-};
+/** 当前主题模式，仅存内存：页面刷新/重新进入即重置为 'system'（跟随系统）。 */
+let currentThemeMode: ThemeMode = 'system';
+
+/** 读取当前主题模式（内存态）；默认 'system' 跟随系统。 */
+export const readStoredTheme = (): ThemeMode => currentThemeMode;
 
 const DARK_SCHEME_QUERY = '(prefers-color-scheme: dark)';
 
@@ -81,13 +73,9 @@ export const applyTheme = (mode: ThemeMode): ResolvedTheme => {
   return resolved;
 };
 
-/** 持久化用户选择并立即生效。 */
+/** 更新当前主题模式（仅内存，不持久化）并立即生效。 */
 export const setTheme = (mode: ThemeMode): void => {
-  try {
-    window.sessionStorage.setItem(THEME_STORAGE_KEY, mode);
-  } catch {
-    /* sessionStorage 不可用时仅保留内存中的选择 */
-  }
+  currentThemeMode = mode;
   applyTheme(mode);
 };
 
