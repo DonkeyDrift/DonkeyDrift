@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-20 (85)
+
+- feat(launcher): Donkey 菜单与 Drifter Console 内嵌时经 iframe src 的 `?lang=` 跟随 DonkeyDrifter 语言——修复「DD 已切英文、内嵌 Donkey/DC 仍是中文」的跨源语言不同步问题
+  - 背景：DD（:8000）顶栏 `LanguageSwitcher` 切换语言只写 DD 自己 origin 的 `localStorage['donkeydrifter.ui.lang']`；内嵌的 launcher（:8090）与车端 DC（:80）是跨源 iframe，各自读自己 origin 的 localStorage / 车端 `/api/language`，DD 切语言不会传导过去。
+  - `donkeycar/launcher/server.py`：`readStoredLanguage()` 前新增 `readUrlLanguage()`（解析 `?lang=zh|en`），`readStoredLanguage` 优先返回 `?lang=`，无参数时再走 localStorage/浏览器语言，使 launcher 首次加载即与 DD 语言一致。
+  - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`：iframe src 由 `getDonkeyUrl()` 改为 `${getDonkeyUrl()}?lang=${lang}`；切换 DD 语言时 src 变化触发 iframe 重载，内嵌 Donkey 菜单随之切换。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：iframe src 由 `/?embedded=1` 改为 `/?embedded=1&lang=${lang}`，把 DD 语言传给车端 DC。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 新增 `test_menu_reads_dd_lang_url_param`；launcher 相关 139 passed，前端 vitest 21 文件 117 项、`tsc -b --noEmit` 全部通过。
+  - 注：Firmware 侧同步改动（DC 读 `?lang=`）见 Firmware `CHANGELOG.md` v1.8.25。
+
 ## 2026-08-20 (84)
 
 - feat(launcher): Donkey 菜单 7/11/12 号（Drifter Console / Kimi Code Web / DeepSeek Harness）并入 DonkeyDrifter 顶栏，改为置灰占位行且序号不递补
