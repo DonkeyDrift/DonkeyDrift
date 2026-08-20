@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { ConsoleMuteButton, ConsoleOtaButton, ConsoleDevToggle } from './ConsoleControls';
+import { ConsoleMuteButton, ConsoleOtaButton, ConsoleDevToggle, MUTE_CHANGED_EVENT } from './ConsoleControls';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -63,6 +63,23 @@ describe('ConsoleMuteButton', () => {
     const btn = await screen.findByRole('button', { name: 'console.unmuteAria' });
     expect(btn).toHaveAttribute('aria-pressed', 'true');
     expect(btn.className).toContain('text-[#5cc8ff]');
+  });
+
+  it('broadcasts MUTE_CHANGED_EVENT after toggling so the embedded console updates immediately', async () => {
+    mockGetJson.mockResolvedValue({ muted: 0 });
+    const listener = vi.fn();
+    window.addEventListener(MUTE_CHANGED_EVENT, listener);
+    try {
+      render(<ConsoleMuteButton />);
+      const btn = await screen.findByRole('button', { name: 'console.muteAria' });
+      fireEvent.click(btn);
+
+      await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+      const event = listener.mock.calls[0][0] as CustomEvent<{ muted: boolean }>;
+      expect(event.detail.muted).toBe(true);
+    } finally {
+      window.removeEventListener(MUTE_CHANGED_EVENT, listener);
+    }
   });
 });
 
