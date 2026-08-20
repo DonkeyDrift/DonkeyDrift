@@ -1692,6 +1692,25 @@ MENU_HTML = r"""<!DOCTYPE html>
             } catch (e) { return false; }
         }
         const isEmbedded = readEmbedded();
+        // 内嵌于 DonkeyDrifter（?embedded=1）时，隐藏与 DD 顶栏/标题重复的
+        // chrome：Donkey 图标、GitHub 图标、深浅色切换、中英文切换、
+        // 「当前工作目录」框、「菜单」标题；并去掉菜单外层 panel 的框
+        // （内容 menu-grid 保留）。单独打开 Donkey（:8090）时全部保留。
+        if (isEmbedded) {
+            document.querySelectorAll('.logoLink, .ghLink, .cwdBar, .sectionTitle').forEach(function(el) {
+                el.style.display = 'none';
+            });
+            ['themeBtn', 'langBtn'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            var panel = document.querySelector('.panel');
+            if (panel) {
+                panel.style.background = 'none';
+                panel.style.border = 'none';
+                panel.style.padding = '0';
+            }
+        }
         function readStoredLanguage() {
             const fromUrl = readUrlLanguage();
             if (fromUrl) return fromUrl;
