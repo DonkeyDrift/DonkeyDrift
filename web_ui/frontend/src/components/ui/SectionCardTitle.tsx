@@ -50,7 +50,7 @@ export const SectionCardTitle: React.FC<SectionCardTitleProps> = ({
         </span>
       )}
       {subtitle && subtitleMarquee && (
-        <span className="max-w-0 opacity-0 overflow-hidden transition-all duration-300 ease-in-out group-hover:max-w-40 group-hover:opacity-100 group-hover:ml-3 text-sm text-zinc-400 font-normal">
+        <span className="max-w-0 opacity-0 overflow-hidden transition-[opacity,margin-left] duration-300 ease-in-out group-hover:max-w-40 group-hover:opacity-100 group-hover:ml-3 text-sm text-zinc-400 font-normal">
           <span className="inline-block whitespace-nowrap will-change-transform group-hover:animate-[marquee-x_9s_ease-in-out_infinite]">
             {subtitle}
           </span>
