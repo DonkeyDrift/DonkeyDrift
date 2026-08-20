@@ -440,6 +440,25 @@ class TestFrontendWiring:
         assert "/api/launch/web" not in MENU_HTML
         assert "overlay.startingWeb" not in MENU_HTML
 
+    def test_embedded_hides_topbar_chrome(self):
+        # 用户指示：DD 内嵌（?embedded=1）时隐藏与顶栏/标题重复的 chrome——
+        # Donkey 图标、GitHub 图标、深浅色切换、中英文切换、当前工作目录框、
+        # 「菜单」标题；菜单外层 panel 去框但保留 menu-grid 内容。单独打开
+        # Donkey（:8090）时这些元素仍完整保留。
+        assert "if (isEmbedded) {" in MENU_HTML
+        assert ".logoLink, .ghLink, .cwdBar, .sectionTitle" in MENU_HTML
+        assert "'themeBtn', 'langBtn'" in MENU_HTML
+        assert "panel.style.background = 'none';" in MENU_HTML
+        assert "panel.style.border = 'none';" in MENU_HTML
+        assert "panel.style.padding = '0';" in MENU_HTML
+        # 单独打开时的元素仍在 HTML 中（隐藏逻辑仅内嵌时生效）
+        assert 'class="logoLink"' in MENU_HTML
+        assert 'class="ghLink"' in MENU_HTML
+        assert 'id="themeBtn"' in MENU_HTML
+        assert 'id="langBtn"' in MENU_HTML
+        assert 'class="cwdBar"' in MENU_HTML
+        assert 'class="sectionTitle"' in MENU_HTML
+
     def test_new_i18n_keys_bilingual(self):
         for key in ("overlay.working", "overlay.done",
                     "menu.createcar.prompt", "menu.clear.confirm",

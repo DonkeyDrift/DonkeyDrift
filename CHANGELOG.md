@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (106)
+
+- fix(launcher): DD 内嵌 Donkey 隐藏与顶栏/标题重复的 chrome，单独 :8090 不受影响
+  - 背景：DD 内嵌 Donkey（`?embedded=1`）时，页头仍显示 Donkey 图标、GitHub 图标、深浅色切换、中英文切换、当前工作目录框与「菜单」标题，且菜单外层有一圈 panel 框——这些与 DD 顶栏/标题重复，用户要求在内嵌视图中删掉、只留菜单内容。
+  - `donkeycar/launcher/server.py`：`const isEmbedded = readEmbedded()` 后新增内嵌态 chrome 清理——`isEmbedded` 时对 `.logoLink`、`.ghLink`、`.cwdBar`、`.sectionTitle` 隐藏（`display:none`），对 `#themeBtn`、`#langBtn` 隐藏，并对 `.panel` 去框（`background/border/padding` 清零）以保留 `menu-grid` 菜单内容；单独打开 Donkey（:8090）时上述元素全部保留。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 新增 `test_embedded_hides_topbar_chrome`，断言内嵌隐藏逻辑（`if (isEmbedded)` / 选择器 / 去框样式）与单独打开时各元素仍在 HTML；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-21 (104)
 
 - fix(drive): 整屏放大键由视频右上角移到右下角（油门/加速度曲线框上方），避免与右上角帧率显示干涉
