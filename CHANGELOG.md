@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-20 (93)
+
+- fix(theme): Donkey 与 DonkeyDrifter 深浅色手动切换改为仅内存态、不写存储——修复「手动切换后刷新仍保持所选主题，无法重新跟随系统」的问题，使 D / DD / DC 三页一致：默认跟随系统、每次进入/刷新都重新按浏览器 prefers-color-scheme 解析
+  - 背景：D（launcher 8090）与 DD（8000）此前把主题选择持久化到 localStorage/sessionStorage，手动点过太阳/月亮后刷新仍保持所选主题、不再跟随系统；本次与 DC（Firmware v1.8.27）对齐为不持久化。
+  - `web_ui/frontend/src/lib/theme.ts`：删除 `THEME_STORAGE_KEY`，新增模块级内存态 `let currentThemeMode: ThemeMode = 'system'`；`readStoredTheme` 改为返回内存态；`setTheme` 改为只更新内存态并 `applyTheme`（不写 localStorage/sessionStorage）。
+  - `web_ui/frontend/index.html`：首屏防闪烁脚本改为直接 `matchMedia('(prefers-color-scheme: dark)')` 解析，不读任何存储。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：删除 `THEME_STORAGE_KEY` 导出；注释更新为「仅内存、不持久化、每次进入/刷新重新跟随系统」。
+  - `donkeycar/launcher/server.py`：删除 `THEME_STORAGE_KEY` 常量与 v3 迁移/localStorage 读取；首屏脚本改为直接按系统解析；`setTheme` 改为仅 `applyTheme`（删 localStorage.setItem）；`initTheme` 改为 `applyTheme('system')` + 系统监听（删 localStorage 读取）。
+  - 测试同步：`web_ui/frontend/src/components/ThemeSwitcher.test.tsx` 重写为断言「setTheme 不写 localStorage/sessionStorage（`window.localStorage.length===0` 与 `window.sessionStorage.length===0`）」；`tests/test_launcher_theme_single_button.py` 更新首屏脚本断言、删除 v3/localStorage 断言、新增 `applyTheme('system')` 与「无 localStorage 读取」断言。
+  - 注：Firmware 侧 DC 同步改动见 Firmware `CHANGELOG.md` v1.8.27。
+
 ## 2026-08-20 (92)
 
 - fix(drive): 遥测曲线勾选框默认全部选中
