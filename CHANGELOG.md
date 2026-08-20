@@ -1,10 +1,19 @@
 # 变更日志
 
-## 2026-08-20 (78)
+## 2026-08-20 (79)
 
 - fix(layout): 去掉 DonkeyDrifter 顶栏与内容区之间的分隔横线（Issue #234 后续）
   - `web_ui/frontend/src/components/Layout.tsx`：`<header>` 去掉 `border-b border-zinc-800`，顶部导航/标题与下方内容视觉融合，不再有一条横向分隔线。
   - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
+## 2026-08-20 (78)
+
+- fix(web-ui): DD 主题切换改为会话级持久化，避免手动选择永久覆盖「跟随系统」
+  - `web_ui/frontend/src/lib/theme.ts`：主题持久化存储由 `localStorage` 改为 `sessionStorage`（`readStoredTheme` 读取与 `setTheme` 写入两处），手动选择仅在当前标签页会话内生效，关闭标签页后重新跟随系统，消除「点过一次主题按钮后永远不再跟随系统」的问题。
+  - `web_ui/frontend/index.html`：首屏内联脚本同步改读 `sessionStorage`，旧 `localStorage` 残留不再影响首屏主题。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：注释更新为会话级持久化语义。
+  - 测试同步：`ThemeSwitcher.test.tsx` 断言由 `localStorage` 改为 `sessionStorage`；`vitest` ThemeSwitcher 8 项通过、`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (77)
 
