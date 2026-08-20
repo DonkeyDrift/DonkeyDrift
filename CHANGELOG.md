@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (91)
+
+- feat(connector): Car Connector 新增「车辆设置」iframe 区块，1:1 嵌入车端 Drifter Console 的设置功能（Issue #234 后续）
+  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：新增自包含组件，复用 `discoverConnectorConsoles` 做设备发现 + 设备选择下拉 + 重扫按钮，用 iframe 直连 `http://<ip>/?embedded=1` 呈现车端配网 / OTA / 开发模式 / 漂移设置 / Judge / 摇杆校准等设置；DonkeyDrifter 的 `/console` 入口保持不变。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：在页面末尾接入 `<CarSettingsPanel />`。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：新增 `connector.carSettingsTitle` / `connector.carSettingsSubtitle`（zh/en）。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
 ## 2026-08-20 (90)
 
 - fix(drive): 遥测曲线图例移到视频画面外部下方，勾选框不再遮挡摄像头
@@ -21,14 +29,6 @@
 
 - fix(layout): DonkeyDrifter 顶栏改为纯色背景，消除与内容区之间的半透明背景边界横线（Issue #234 后续）
   - `web_ui/frontend/src/components/Layout.tsx`：`<header>` 去掉 `bg-zinc-900/50 backdrop-blur supports-[backdrop-filter]:bg-zinc-900/50`，改为 `bg-zinc-950`，与下方内容区同色，视觉上完全融合，不再有一条横向分界线。
-  - 测试同步：前端 `npm run build`（tsc + vite）通过。
-
-## 2026-08-20 (91)
-
-- feat(connector): Car Connector 新增「车辆设置」iframe 区块，1:1 嵌入车端 Drifter Console 的设置功能（Issue #234 后续）
-  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：新增自包含组件，复用 `discoverConnectorConsoles` 做设备发现 + 设备选择下拉 + 重扫按钮，用 iframe 直连 `http://<ip>/?embedded=1` 呈现车端配网 / OTA / 开发模式 / 漂移设置 / Judge / 摇杆校准等设置；DonkeyDrifter 的 `/console` 入口保持不变。
-  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：在页面末尾接入 `<CarSettingsPanel />`。
-  - `web_ui/frontend/src/i18n/messages/connector.ts`：新增 `connector.carSettingsTitle` / `connector.carSettingsSubtitle`（zh/en）。
   - 测试同步：前端 `npm run build`（tsc + vite）通过。
 
 ## 2026-08-20 (87)
