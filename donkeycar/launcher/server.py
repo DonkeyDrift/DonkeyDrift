@@ -1415,6 +1415,9 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
         .menuItem:hover{border-color:#5cc8ff;background:linear-gradient(135deg,#1c2430,#151f2a)}
         .menuItem.selected{border-color:#5cc8ff;box-shadow:0 0 12px rgba(92,200,255,.2)}
+        .menuItem.placeholder{cursor:default;opacity:.45;border-style:dashed}
+        .menuItem.placeholder:hover{border-color:#344154;background:linear-gradient(135deg,#1c2430,#121821)}
+        .menuItem.placeholder .menuNo{color:#8fa1b5}
 
         /* Number badge (monospace cyan) */
         .menuNo{flex:none;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font:800 16px Consolas,monospace;color:#5cc8ff;background:#0d1219;border:1px solid #2b3441;border-radius:8px}
@@ -1486,6 +1489,8 @@ MENU_HTML = r"""<!DOCTYPE html>
         html[data-theme="light"] .menuItem:hover{border-color:#0c9bd6;background:linear-gradient(135deg,#fff,#e8f4fb)}
         html[data-theme="light"] .menuItem.selected{border-color:#0c9bd6;box-shadow:0 0 12px rgba(12,155,214,.18)}
         html[data-theme="light"] .menuNo{color:#0c9bd6;background:#eef1f6;border-color:#d5dce4}
+        html[data-theme="light"] .menuItem.placeholder:hover{border-color:#ccd5df;background:linear-gradient(135deg,#fff,#edf1f6)}
+        html[data-theme="light"] .menuItem.placeholder .menuNo{color:#7c8da0}
         html[data-theme="light"] .cat-manage{background:rgba(12,155,214,.12);color:#0c9bd6;border-color:rgba(12,155,214,.3)}
         html[data-theme="light"] .cat-data{background:rgba(31,174,107,.12);color:#1fae6b;border-color:rgba(31,174,107,.3)}
         html[data-theme="light"] .cat-drive{background:rgba(217,154,23,.12);color:#b57d0e;border-color:rgba(217,154,23,.3)}
@@ -1562,7 +1567,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         <section class="helpSection">
             <h3 data-i18n="help.groupKeys">键盘操作</h3>
             <ul class="helpList">
-                <li data-i18n="help.keyNumbers">数字键 1-12：选择对应菜单项</li>
+                <li data-i18n="help.keyNumbers">数字键 1-12：选择对应菜单项（7、11、12 已并入 DonkeyDrifter 顶栏）</li>
             </ul>
         </section>
     </div>
@@ -1595,7 +1600,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': '帮助',
                 'help.close': '关闭帮助',
                 'help.groupKeys': '键盘操作',
-                'help.keyNumbers': '数字键 1-12：选择对应菜单项',
+                'help.keyNumbers': '数字键 1-12：选择对应菜单项（7、11、12 已并入 DonkeyDrifter 顶栏）',
                 'overlay.findingDc': '正在查找 Drifter Console...',
                 'overlay.dcNotFound': '未找到 Drifter Console（请确认车辆已开机并联网）',
                 'overlay.starting': '正在启动 DonkeyDrifter...',
@@ -1632,7 +1637,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'help.title': 'Help',
                 'help.close': 'Close help',
                 'help.groupKeys': 'Keyboard',
-                'help.keyNumbers': 'Number keys 1-12: select the corresponding menu item',
+                'help.keyNumbers': 'Number keys 1-12: select the corresponding menu item (#7, #11, #12 merged into DonkeyDrifter top bar)',
                 'overlay.findingDc': 'Locating Drifter Console...',
                 'overlay.dcNotFound': 'Drifter Console not found (make sure the car is powered on and connected)',
                 'overlay.starting': 'Starting DonkeyDrifter...',
@@ -1780,12 +1785,12 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 4,  cat: "data",   name: "Backup Data",  descZh: "备份当前项目 data 目录",                 descEn: "Back up the current project's data directory",   favorite: false},
             {no: 5,  cat: "data",   name: "Restore Data", descZh: "从备份恢复 data 目录",                   descEn: "Restore the data directory from a backup",       favorite: false},
             {no: 6,  cat: "drive",  name: "DonkeyDrifter", descZh: "打开 DonkeyDrifter",                    descEn: "Open DonkeyDrifter",                            favorite: true},
-            {no: 7,  cat: "drive",  name: "Drifter Console", descZh: "打开 Drifter Console",                descEn: "Open Drifter Console",                           favorite: true},
+            {no: 7,  cat: null,     name: "—",           descZh: "已并入 DonkeyDrifter 顶栏（Drifter Console）", descEn: "Merged into DonkeyDrifter top bar (Drifter Console)", favorite: false, placeholder: true},
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
-            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                    descEn: "Open Kimi Code Web",                             favorite: true},
-            {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                    favorite: true},
+            {no: 11, cat: null,     name: "—",           descZh: "已并入 DonkeyDrifter 顶栏（Kimi Code Web）", descEn: "Merged into DonkeyDrifter top bar (Kimi Code Web)", favorite: false, placeholder: true},
+            {no: 12, cat: null,     name: "—",           descZh: "已并入 DonkeyDrifter 顶栏（DeepSeek Harness）", descEn: "Merged into DonkeyDrifter top bar (DeepSeek Harness)", favorite: false, placeholder: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -1804,8 +1809,24 @@ MENU_HTML = r"""<!DOCTYPE html>
             grid.innerHTML = '';
             menuItems.forEach(item => {
                 const div = document.createElement('div');
-                div.className = 'menuItem';
+                div.className = item.placeholder
+                    ? 'menuItem placeholder' : 'menuItem';
                 div.dataset.no = item.no;
+                if (item.placeholder) {
+                    // 占位行：与 DonkeyDrifter 顶栏重复的入口不再出现在 Donkey
+                    // 菜单，不可点击、无分类 pill、无常用标、样式置灰
+                    div.onclick = null;
+                    div.innerHTML =
+                        '<div class="menuNo">' + item.no + '</div>' +
+                        '<div class="menuContent">' +
+                            '<div class="menuName">' + item.name + '</div>' +
+                            '<div class="menuDesc">' +
+                                (uiLang === 'en' ? item.descEn : item.descZh) +
+                            '</div>' +
+                        '</div>';
+                    grid.appendChild(div);
+                    return;
+                }
                 div.onclick = () => selectItem(item.no);
                 const favMark = item.favorite
                     ? ' <span class="favorite">' + t('menu.favorite') + '</span>' : '';
@@ -1832,10 +1853,15 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项（issue #126：全部菜单项已接线）
+        // 选择菜单项（issue #126：全部菜单项已接线；7/11/12 已并入
+        // DonkeyDrifter 顶栏，为占位行——数字键/点击只给轻提示，不触发动作）
         function selectItem(no) {
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
+            if (item.placeholder) {
+                showError(uiLang === 'en' ? item.descEn : item.descZh);
+                return;
+            }
             highlightRow(no);
 
             if (no === 1) {
@@ -1850,18 +1876,12 @@ MENU_HTML = r"""<!DOCTYPE html>
                 restoreData();
             } else if (no === 6) {
                 launchDrive();
-            } else if (no === 7) {
-                openDrifterConsole();
             } else if (no === 8) {
                 launchInTerminal('donkey ui', t('menu.donkeyui.openTerminal'));
             } else if (no === 9) {
                 launchTrainLocal();
             } else if (no === 10) {
                 launchTrainOnline();
-            } else if (no === 11) {
-                launchKimiCodeWeb();
-            } else if (no === 12) {
-                launchDshWeb();
             }
         }
 

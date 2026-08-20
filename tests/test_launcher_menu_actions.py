@@ -11,8 +11,8 @@
 - HTTP 端点：GET /api/projects、/api/data/backups、/api/train/next-model；
   POST /api/launch/web（issue #181 随 Web 菜单下线，应 404）、
   /api/createcar（非法项目名 400）、/api/data/*
-- 前端静态断言：MENU_HTML 各菜单动作接线（0 号 DC 移到 7 号、
-  6 号改名 DonkeyDrifter）、terminal.html ?cmd= 自动执行
+- 前端静态断言：MENU_HTML 各菜单动作接线（7/11/12 号已并入
+  DonkeyDrifter 顶栏、改为占位行，序号保留不递补）、terminal.html ?cmd= 自动执行
 
 不启动真实 donkey / 子进程，全部替身。
 """
@@ -398,29 +398,31 @@ class TestFrontendWiring:
         # 所有菜单项接线后不再有 notImplemented 分支
         assert "showError(t('overlay.notImplemented'))" not in MENU_HTML
 
-    def test_menu_6_renamed_and_dc_moved_to_7(self):
-        # 用户指示：0 号「Drifter Console」移到 7 号、删 0 号位；
-        # 6 号改名 DonkeyDrifter，小字「打开 DonkeyDrifter」
+    def test_menu_7_11_12_merged_into_dd_topbar(self):
+        # 用户指示：7 号 Drifter Console、11 号 Kimi Code Web、12 号
+        # DeepSeek Harness 已并入 DonkeyDrifter 顶栏（标签页栏），Donkey
+        # 菜单对应项改为占位行、序号保留不递补。
         assert 'name: "DonkeyDrifter"' in MENU_HTML
         assert 'descZh: "打开 DonkeyDrifter"' in MENU_HTML
         assert 'descEn: "Open DonkeyDrifter"' in MENU_HTML
-        # 7 号现在是 Drifter Console（DC），走 openDrifterConsole → /api/launch/dc
-        assert 'name: "Drifter Console"' in MENU_HTML
-        assert "openDrifterConsole()" in MENU_HTML
-        assert "/api/launch/dc" in MENU_HTML
-        # 0 号位已删除、占位行已移除
-        assert "no: 0" not in MENU_HTML
-        assert "placeholder" not in MENU_HTML
-        assert "已合并至 6" not in MENU_HTML
-        assert "Merged into #6" not in MENU_HTML
         # 6 号仍走 launchDrive 启动 DD
         assert "launchDrive()" in MENU_HTML
+        # 7/11/12 号占位行：placeholder 标记 + 「已并入 DonkeyDrifter 顶栏」双语描述
+        assert "placeholder: true" in MENU_HTML
+        assert "已并入 DonkeyDrifter 顶栏" in MENU_HTML
+        assert "Merged into DonkeyDrifter top bar" in MENU_HTML
+        assert "'menuItem placeholder'" in MENU_HTML
+        # 序号保留、不递补：8 号 Donkey UI 与 12 号占位行仍在原位
+        assert "no: 8" in MENU_HTML
+        assert "no: 12" in MENU_HTML
+        # 原 DC/Kimi/DSH 菜单动作不再接入 selectItem（占位行点击只提示）
+        assert "no === 7" not in MENU_HTML
+        assert "no === 11" not in MENU_HTML
+        assert "no === 12" not in MENU_HTML
         # 原 7 号 Web 链路仍不存在
         assert "launchWebUI" not in MENU_HTML
         assert "/api/launch/web" not in MENU_HTML
         assert "overlay.startingWeb" not in MENU_HTML
-        # 8 号 Donkey UI 仍在原位
-        assert "no: 8" in MENU_HTML
 
     def test_new_i18n_keys_bilingual(self):
         for key in ("overlay.working", "overlay.done",
