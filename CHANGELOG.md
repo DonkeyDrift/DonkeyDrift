@@ -1,12 +1,21 @@
 # 变更日志
 
-## 2026-08-21 (101)
+## 2026-08-21 (102)
 
 - fix(trainer): 训练收尾保存 loss 元数据报 `'dict' object has no attribute 'history'`，改为按 dict 直接取值
   - 根因：`donkeycar/parts/keras.py` 的 `train()` 返回 `history.history`（普通 dict），但 `pipeline/training.py` 保存 loss 元数据时仍按 `tf.keras.callbacks.History` 对象取 `history.history.get(...)`，触发 `AttributeError`；该段在 `try/except` 内仅打 error，模型训练本身与 `database.json`（直接存 dict）不受影响，只缺 `*_meta.json` 侧车文件。
   - `donkeycar/pipeline/training.py`：`history.history.get('loss'/'val_loss', [])` 改为 `history.get('loss'/'val_loss', [])`。
   - 验证：模块可正常导入，`dict.get` 逻辑输出正确（本机无 GPU，走 float32）。目标 2 的 41 轮训练已产出 `pilot_2`（best val_loss 0.1595）。
   - 注：仅 donkeycar 库训练路径改动，不影响本机 Web UI，无需部署/OTA；Firmware 无改动。
+
+## 2026-08-20 (101)
+
+- fix(donkeycar): KerasCategorical 运行时解码由 argmax 改为 softmax 期望值，避免恒输出直行/停车
+  - 背景：categorical 模型输出 15（angle）/20（throttle）类 softmax 分布，但 `KerasCategorical.interpreter_to_output` 之前用 `linear_unbin`（内部 `np.argmax`）解码，把概率分布坍缩成单一分箱、输出跳变；在本机模拟器数据（85% 直行）下 angle 恒预测直行、throttle 恒预测多数类，corr≈0。
+  - `donkeycar/utils.py`：新增 `linear_unbin_softmax(arr, N, offset, R)`——用概率加权平均求期望分箱索引再反缩放回连续值（one-hot 输入下与 `linear_unbin` 结果一致，向后兼容）。
+  - `donkeycar/parts/keras.py`：`KerasCategorical.interpreter_to_output` 的 angle/throttle 解码改调 `linear_unbin_softmax`；类 docstring 同步更新。`KerasBehavioral` 继承同一 `interpreter_to_output`，一并受益。
+  - 测试同步：`donkeycar/tests/test_util_data.py` 新增 `TestLinearUnbinSoftmax` 4 项（one-hot 等价 / 均匀分布取中心 / 偏斜分布加权平均 / throttle 期望值），`test_util_data.py` 23 passed；另以 `object.__new__` 轻量验证 `interpreter_to_output` 对 0.5/0.5 两分箱输出 0.0、均匀 throttle 输出 0.2375。
+  - 注：仅 donkeycar 库改动，不影响本机 Web UI，无需部署/OTA。
 
 ## 2026-08-20 (100)
 
