@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
-import { TelemetryChart, TelemetryLegend, CURVES } from '../components/drive/TelemetryChart';
+import { TelemetryChart, TelemetryLegend, curvesByGroup } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
@@ -19,7 +19,8 @@ import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } f
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
-import { Circle, ChevronLeft, ChevronRight, Joystick } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { Circle, ChevronLeft, ChevronRight, Joystick, Maximize2, Minimize2 } from 'lucide-react';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
 type DrivePageProps = {
@@ -57,14 +58,18 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
   const [joystickOpen, setJoystickOpen] = useState(false);
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(
-    () => new Set(CURVES.map((c) => c.key as string)),
+  const [fullscreen, setFullscreen] = useState(false);
+  const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
+    () => new Set(curvesByGroup('steering').map((c) => c.key as string)),
+  );
+  const [throttleVisibleKeys, setThrottleVisibleKeys] = useState<Set<string>>(
+    () => new Set(curvesByGroup('throttle').map((c) => c.key as string)),
   );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
 
-  const toggleCurve = useCallback((key: string) => {
-    setVisibleKeys((prev) => {
+  const toggleSteeringCurve = useCallback((key: string) => {
+    setSteeringVisibleKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
@@ -73,6 +78,22 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       }
       return next;
     });
+  }, []);
+
+  const toggleThrottleCurve = useCallback((key: string) => {
+    setThrottleVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    setFullscreen((f) => !f);
   }, []);
 
   const { params, loadFromServer } = useDriveStore();
@@ -318,24 +339,57 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线以半透明浮层覆盖在画面下方 */}
-          <div className="relative flex-1 min-h-0 aspect-video lg:aspect-auto">
+          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右上角为整屏放大 */}
+          <div
+            className={cn(
+              'relative',
+              fullscreen
+                ? 'fixed inset-0 z-50 bg-black'
+                : 'flex-1 min-h-0 aspect-video lg:aspect-auto',
+            )}
+          >
             {active ? (
               <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
             ) : (
               <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
             )}
-            <TelemetryChart
-              telemetry={telemetry}
-              active={active}
-              overlay
-              visibleKeys={visibleKeys}
-              onToggleCurve={toggleCurve}
-              className="absolute inset-x-3 bottom-3 z-20"
-            />
+            <div className="absolute inset-x-3 bottom-3 z-20 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <TelemetryChart
+                telemetry={telemetry}
+                active={active}
+                overlay
+                title="driveViz.chartTitleSteering"
+                group="steering"
+                visibleKeys={steeringVisibleKeys}
+                onToggleCurve={toggleSteeringCurve}
+                chartHeightClassName={fullscreen ? 'h-44' : undefined}
+              />
+              <TelemetryChart
+                telemetry={telemetry}
+                active={active}
+                overlay
+                title="driveViz.chartTitleThrottle"
+                group="throttle"
+                visibleKeys={throttleVisibleKeys}
+                onToggleCurve={toggleThrottleCurve}
+                chartHeightClassName={fullscreen ? 'h-44' : undefined}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+              aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+              className="absolute top-3 right-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+            >
+              {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
           </div>
-          {/* 曲线显隐图例：放在视频画面外部（下方），不再遮挡画面 */}
-          <TelemetryLegend visibleKeys={visibleKeys} onToggle={toggleCurve} className="mt-3 shrink-0" />
+          {/* 曲线显隐图例：分左右两组放在视频画面外部（下方），不再遮挡画面 */}
+          <div className="mt-3 shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <TelemetryLegend group="steering" visibleKeys={steeringVisibleKeys} onToggle={toggleSteeringCurve} />
+            <TelemetryLegend group="throttle" visibleKeys={throttleVisibleKeys} onToggle={toggleThrottleCurve} />
+          </div>
         </div>
 
         {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}

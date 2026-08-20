@@ -1,12 +1,33 @@
 # 变更日志
 
-## 2026-08-20 (97)
+## 2026-08-20 (99)
 
 - fix(launcher): KCW 入口注入 `?kimi_origin=<origin>`，钉住前端 API 基地址，修复任务执行时 getSessionSnapshot 报 "TypeError: Load failed"
   - 背景：上一轮把入口 origin 回退为局域网 IP 优先（PR #266），但用户点 Kimi 后执行任务仍报「无法加载当前会话内容 / TypeError: Load failed」，请求打到 `http://tony007.local:58640`（mDNS 旧 origin）。根因：KCW 0.36.1 前端 API 基地址判定为 URL `?kimi_origin` → `sessionStorage["kimi-desktop-server-origin"]` → `window.location.origin`；launcher 未注入 `kimi_origin`，浏览器残留早期 mDNS 阶段写进 sessionStorage 的 `tony007.local` 仍把 API 指到连不上的 mDNS host。
   - `donkeycar/launcher/kimi_web.py`：新增 `_mark_origin()`（追加 `?kimi_origin=http://<entry_host>:<port>/`，同名参数先去重再追加），三处返回点由 `_mark_onboarded(_lan_url(url))` 改为 `_mark_origin(_mark_onboarded(_lan_url(url)))`；模块 docstring 增加第 4 条 issue #168 约束说明。
   - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMarkOrigin`（追加 / 覆盖旧 origin / 保留路径与其它 query 三例），`test_reuses_live_instance_without_spawning` / `test_spawn_success_captures_url_and_keeps_proc` / `test_spawn_failure_falls_back_to_reuse` 三处返回 URL 断言补 `kimi_origin`；`test_launcher_kimi_web.py` + `test_launcher_dsh_web.py` 共 84 passed。
   - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-20 (98)
+
+- feat(drive): Drive 遥测曲线左右分栏（转向/姿态 vs 油门/加速度）+ 整屏放大，移除暂停/清空按钮
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：`CurveConfig` 新增 `group` 字段并导出 `CurveGroup` 类型与 `curvesByGroup` 辅助；`TelemetryChart` 新增 `title`/`group`/`chartHeightClassName` 可选参数，`TelemetryLegend` 新增 `group` 参数（按分组只渲染该组曲线与复选框）；删除暂停/清空/全屏按钮及其状态逻辑（`paused`/`handlePauseToggle`/`handleClear`/`fullscreen`/`toggleFullscreen`），全屏改为由父组件统一管理整块画面。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：曲线显隐改为左右两组独立状态（`steeringVisibleKeys`/`throttleVisibleKeys` + 各自 toggle）；视频容器内渲染两个 `TelemetryChart` overlay 浮层（左=转向/姿态、右=油门/加速度），图例分左右两组放视频容器下方；新增整屏放大按钮（右上角），全屏时视频容器 `fixed inset-0 z-50 bg-black` 放大摄像头 + 遥测曲线，曲线高度 `h-44`。
+  - `web_ui/frontend/src/i18n/messages/driveviz.ts`：新增 `chartTitleSteering`（转向 / 姿态）与 `chartTitleThrottle`（油门 / 加速度），删除不再使用的 `paused`/`pause`/`resume`/`clear`。
+  - 测试同步：`TelemetryChart.test.tsx` 删除暂停/清空/全屏用例，新增「group 模式下只渲染该分组的曲线与图例」用例，7 项通过；前端 vitest 21 文件 116 项、`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+
+## 2026-08-20 (97)
+
+- fix(theme): Donkey 与 DonkeyDrifter 深浅色手动切换改为仅内存态、不写存储——修复「手动切换后刷新仍保持所选主题，无法重新跟随系统」的问题，使 D / DD / DC 三页一致：默认跟随系统、每次进入/刷新都重新按浏览器 prefers-color-scheme 解析
+  - 背景：D（launcher 8090）与 DD（8000）此前把主题选择持久化到 localStorage/sessionStorage，手动点过太阳/月亮后刷新仍保持所选主题、不再跟随系统；本次与 DC（Firmware v1.8.27）对齐为不持久化。
+  - `web_ui/frontend/src/lib/theme.ts`：删除 `THEME_STORAGE_KEY`，新增模块级内存态 `let currentThemeMode: ThemeMode = 'system'`；`readStoredTheme` 改为返回内存态；`setTheme` 改为只更新内存态并 `applyTheme`（不写 localStorage/sessionStorage）。
+  - `web_ui/frontend/index.html`：首屏防闪烁脚本改为直接 `matchMedia('(prefers-color-scheme: dark)')` 解析，不读任何存储。
+  - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：删除 `THEME_STORAGE_KEY` 导出；注释更新为「仅内存、不持久化、每次进入/刷新重新跟随系统」。
+  - `donkeycar/launcher/server.py`：删除 `THEME_STORAGE_KEY` 常量与 v3 迁移/localStorage 读取；首屏脚本改为直接按系统解析；`setTheme` 改为仅 `applyTheme`（删 localStorage.setItem）；`initTheme` 改为 `applyTheme('system')` + 系统监听（删 localStorage 读取）。
+  - 测试同步：`web_ui/frontend/src/components/ThemeSwitcher.test.tsx` 重写为断言「setTheme 不写 localStorage/sessionStorage（`window.localStorage.length===0` 与 `window.sessionStorage.length===0`）」；`tests/test_launcher_theme_single_button.py` 更新首屏脚本断言、删除 v3/localStorage 断言、新增 `applyTheme('system')` 与「无 localStorage 读取」断言。
+  - 注：Firmware 侧 DC 同步改动见 Firmware `CHANGELOG.md` v1.8.27。
 
 ## 2026-08-20 (96)
 

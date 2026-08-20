@@ -104,26 +104,6 @@ describe('TelemetryChart', () => {
     });
   });
 
-  it('暂停后切换为继续按钮', async () => {
-    render(<TelemetryChart telemetry={sampleTelemetry()} />);
-
-    await waitForDataset('油门');
-
-    fireEvent.click(screen.getByLabelText('暂停'));
-
-    expect(screen.getByLabelText('继续')).toBeInTheDocument();
-  });
-
-  it('清空后重置等待状态', async () => {
-    render(<TelemetryChart telemetry={sampleTelemetry()} />);
-
-    await waitForDataset('油门');
-
-    fireEvent.click(screen.getByLabelText('清空'));
-
-    expect(screen.getByText('（等待数据）')).toBeInTheDocument();
-  });
-
   it('勾选隐藏的曲线后显示对应数据集', async () => {
     render(<TelemetryChart telemetry={sampleTelemetry({ gx: 0.5 })} />);
 
@@ -154,13 +134,31 @@ describe('TelemetryChart', () => {
     expect(screen.getByTestId('dataset-陀螺仪 Z')).toBeInTheDocument();
   });
 
-  it('全屏按钮切换全屏状态', async () => {
-    render(<TelemetryChart telemetry={sampleTelemetry()} />);
+  it('group 模式下只渲染该分组的曲线与图例', async () => {
+    render(
+      <TelemetryChart
+        telemetry={sampleTelemetry({ rc_steering: -0.5, pilot_angle: 0.3 })}
+        title="driveViz.chartTitleSteering"
+        group="steering"
+      />,
+    );
 
-    await waitForDataset('油门');
+    expect(screen.getByText('转向 / 姿态')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText('全屏'));
+    await waitForDataset('转向');
+    expect(screen.getByTestId('dataset-陀螺仪 Z')).toBeInTheDocument();
+    expect(screen.getByTestId('dataset-RC 转向')).toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-油门')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-RC 油门')).not.toBeInTheDocument();
 
-    expect(screen.getByLabelText('退出全屏')).toBeInTheDocument();
+    const labels = screen
+      .getAllByRole('checkbox')
+      .map((cb) => cb.parentElement?.querySelector('span')?.textContent);
+    expect(labels).toHaveLength(6);
+    expect(labels).toEqual(
+      expect.arrayContaining(['转向', '陀螺仪 Z', 'RC 转向', '陀螺仪 X', '陀螺仪 Y', 'Pilot 角度']),
+    );
+    expect(labels).not.toEqual(expect.arrayContaining(['油门', 'RC 油门', '加速度 X']));
   });
+
 });
