@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (95)
+
+- fix(console): DonkeyDrifter 顶栏 DEV 开关开启态对齐 Drifter Console 原版效果（#5cc8ff + 内描边）
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：`ConsoleDevToggle` 的 `enabled` 分支由 `bg-cyan-500/25 border-cyan-500/60 text-cyan-400` 改为 `bg-[#5cc8ff]/25 border-[#5cc8ff] text-[#5cc8ff] shadow-[inset_0_0_0_1px_#5cc8ff]`，完全对齐 DC 页面 `.devOn` 的 `background:rgba(92,200,255,.25);border-color:#5cc8ff;box-shadow:inset 0 0 0 1px #5cc8ff;color:#5cc8ff`。
+  - `web_ui/frontend/src/components/ConsoleControls.test.tsx`：用例 `highlights in cyan when enabled` 改名为 `highlights like the DC DEV toggle when enabled`，断言更新为 `bg-[#5cc8ff]/25` / `border-[#5cc8ff]` / `text-[#5cc8ff]` / `shadow-[inset_0_0_0_1px_#5cc8ff]`。
+  - 测试同步：`npm run build`（tsc + vite）通过；`ConsoleControls.test.tsx` 11 项通过；全量 vitest 21 文件 117 项中 116 通过（`App.test.tsx` 的 Tub Manager 保持挂载用例在并行跑时偶发 waitFor 超时，单跑该文件 6 项全通过，属既有 flaky，与本次无关）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (94)
 
 - fix(launcher): DD 内嵌 Donkey 的 6 号（DonkeyDrifter）也置灰占位——6/7/11/12 均仅内嵌时占位，单独打开 Donkey 仍完整
