@@ -380,7 +380,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               onClick={toggleFullscreen}
               title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
               aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              className="absolute top-3 right-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+              className={cn(
+                'absolute right-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors',
+                fullscreen ? 'bottom-[13rem]' : 'bottom-36',
+              )}
             >
               {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>

@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (104)
+
+- fix(drive): 整屏放大键由视频右上角移到右下角（油门/加速度曲线框上方），避免与右上角帧率显示干涉
+  - 背景：上一轮「整屏放大」功能把放大键放在了视频画面右上角，与同区域右上角的帧率（FPS）文字重叠干涉；用户要求挪到不干涉的位置——视频画面右下角、再往上一点，即油门/加速度曲线框的上方。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：放大按钮定位由右上角改为 `absolute right-3`，垂直位置非全屏 `bottom-36`（浮在右板块曲线 h-28 上方）、全屏 `bottom-[13rem]`（浮在 h-44 曲线上方）；其余整屏放大逻辑不变。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过，入口 `index-DSgVDX7x.js`、DrivePage chunk `DrivePage-CY-vFxm4.js`。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后需重建 dist 并部署到本机 8000。
+
 ## 2026-08-21 (103)
 
 - fix(drive): 车端在线但未推首帧时 MJPEG `/drive/video` 立即回占位帧，修复进入 Drive 页偶发一直卡「正在连接摄像头」、需很久才连上（Issue #221 补充修复）
