@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (74)
+
+- fix(flow): Drive/TM/Trainer/PA 大页节标题的灰色小字由垂直居中改为基线对齐，与标题视觉平行（Issue #233）
+  - `web_ui/frontend/src/pages/FlowPage.tsx`：`FlowSectionHeader` 内层容器由 `items-center` 改为 `items-baseline`，小字 span 去掉多余的 `leading-none`，与基准组件 `SectionCardTitle`（视频录制库/Top编辑器）的小字 class 保持一致，消除小字相对 `text-xl` 大标题偏高、不平行的问题。
+  - 测试同步：`npm run check`（tsc）通过、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (73)
 
 - fix(drive): 虚拟摇杆抽屉展开/收起动画收窄过渡属性，减少卡顿（Issue #232 后续）
