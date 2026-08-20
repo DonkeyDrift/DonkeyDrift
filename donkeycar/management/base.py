@@ -714,10 +714,18 @@ class Evaluate(BaseCommand):
         else:
             a = np.asarray(user_angles)
             t = np.asarray(user_throttles)
+            abs_a = np.abs(a)
             result['angle_stats'] = {
                 'mean': float(a.mean()), 'std': float(a.std()),
                 'min': float(a.min()), 'max': float(a.max()),
-                'abs_lt_0.05_ratio': float(np.mean(np.abs(a) < 0.05)),
+                # 转向幅度三档占比（直行 / 中间幅度 / 大转向），三者相加为 1；
+                # 中间幅度缺失是"模型学不到连续转向"的典型数据问题。
+                'abs_lt_0.05_ratio': float(np.mean(abs_a < 0.05)),
+                'mid_ratio': float(np.mean((abs_a >= 0.05) & (abs_a <= 0.5))),
+                'hard_ratio': float(np.mean(abs_a > 0.5)),
+                # 左右对称性：left+right+zero 相加为 1，偏差过大说明转向样本左右不均衡。
+                'left_ratio': float(np.mean(a < 0)),
+                'right_ratio': float(np.mean(a > 0)),
             }
             result['throttle_stats'] = {
                 'mean': float(t.mean()), 'std': float(t.std()),

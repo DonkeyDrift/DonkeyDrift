@@ -1,12 +1,20 @@
 # 变更日志
 
-## 2026-08-21 (106)
+## 2026-08-21 (107)
 
 - fix(launcher): DD 内嵌 Donkey 隐藏与顶栏/标题重复的 chrome，单独 :8090 不受影响
   - 背景：DD 内嵌 Donkey（`?embedded=1`）时，页头仍显示 Donkey 图标、GitHub 图标、深浅色切换、中英文切换、当前工作目录框与「菜单」标题，且菜单外层有一圈 panel 框——这些与 DD 顶栏/标题重复，用户要求在内嵌视图中删掉、只留菜单内容。
   - `donkeycar/launcher/server.py`：`const isEmbedded = readEmbedded()` 后新增内嵌态 chrome 清理——`isEmbedded` 时对 `.logoLink`、`.ghLink`、`.cwdBar`、`.sectionTitle` 隐藏（`display:none`），对 `#themeBtn`、`#langBtn` 隐藏，并对 `.panel` 去框（`background/border/padding` 清零）以保留 `menu-grid` 菜单内容；单独打开 Donkey（:8090）时上述元素全部保留。
   - 测试同步：`tests/test_launcher_menu_actions.py` 新增 `test_embedded_hides_topbar_chrome`，断言内嵌隐藏逻辑（`if (isEmbedded)` / 选择器 / 去框样式）与单独打开时各元素仍在 HTML；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
   - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-21 (106)
+
+- feat(donkeycar): `evaluate` 数据统计模式新增转向幅度三档占比 + 左右对称性指标
+  - 背景：目标 4 定位到 angle corr≈0 的根因是转向数据本身——85% 直行、中间幅度（0.05<|angle|≤0.5）仅约 3.3%、且右转 91.5% vs 左转 7.9% 极度不对称；原 `evaluate` 只有 `abs_lt_0.05_ratio`，无法一眼看出「中间幅度缺失」与「左右不对称」这两个数据质量缺口。
+  - `donkeycar/management/base.py`：`Evaluate.run()` 无 `--model` 分支的 `angle_stats` 新增 `mid_ratio`（0.05≤|angle|≤0.5）、`hard_ratio`（|angle|>0.5）、`left_ratio`（angle<0）、`right_ratio`（angle>0），保留 `abs_lt_0.05_ratio`（=直行占比）。三档占比相加为 1，左右占比 left+right+zero 相加为 1。
+  - 测试同步：`donkeycar/tests/test_evaluate_command.py` 新增对 `mid_ratio`/`hard_ratio`/`left_ratio`/`right_ratio` 的断言，`pytest -q` 4 passed。
+  - 注：仅新增 CLI 统计字段，不影响本机 Web UI，无需部署/OTA。
 
 ## 2026-08-21 (105)
 
