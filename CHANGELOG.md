@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (108)
+
+- fix(drive): 整屏放大键再上移，避开下方油门/加速度曲线框
+  - 背景：上一轮把放大键移到视频右下角 `bottom-36`/`bottom-[13rem]`，仍叠在油门/加速度曲线框顶部——overlay 曲线块除 h-28/h-44 曲线区外还含标题行与 p-2 内边距，实际整体更高。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：非全屏由 `bottom-36` 改为 `bottom-48`、全屏由 `bottom-[13rem]` 改为 `bottom-64`，使按钮底部落在曲线框顶部之上约 28px，不再遮挡。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (107)
 
 - fix(launcher): DD 内嵌 Donkey 隐藏与顶栏/标题重复的 chrome，单独 :8090 不受影响
