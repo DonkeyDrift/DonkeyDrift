@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-20 (81)
+## 2026-08-20 (82)
 
 - feat(drive): 遥测曲线以半透明浮层覆盖在摄像头画面上方，摄像头铺满并裁边放大
   - `web_ui/frontend/src/pages/DrivePage.tsx`：左列视频由「按高度反推宽度居中」改为 `relative flex-1` 填满剩余空间（移动端 `aspect-video`、桌面端 `lg:aspect-auto`），`VideoStream` 传 `objectFit="cover"` 铺满并裁边放大、消除左右空边；`TelemetryChart` 改为 `overlay` 覆盖模式，`absolute inset-x-3 top-14` 贴在画面上方。
@@ -8,6 +8,16 @@
   - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：新增 `overlay` 覆盖模式——半透明底 `bg-slate-950/50` + `backdrop-blur-sm`、紧凑高度 `h-28`、默认收起曲线开关（全屏后仍可调）。
   - 测试同步：`npm run build`（tsc + vite）通过，产物含 `object-cover`/`top-14`/`h-28`/`bg-slate-950/50`/`backdrop-blur-sm`。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (81)
+
+- feat(console): DD 顶栏 OTA 改为当前页弹窗上传、DEV 开启加确认/悬浮提示，并让 DEV 状态即时同步到内嵌 DC
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：`ConsoleOtaButton` 由 `<a href="http://<ip>/update" target="_blank">` 改为按钮打开本地上传弹窗（文件选择 + 上传/状态 + 成功/失败文案），用 `consolePostForm(ip, 'update', FormData)` 经同源代理上传固件，成功后提示设备重启；`ConsoleDevToggle` 增加开启确认弹窗（关闭直接生效），仅在 `enabled=false` 时点开启弹出 `console.devTitle/devBody` 确认框，确认后才 POST '1'；DEV 按钮加自定义悬浮提示（`console.devHint`，对齐 DC 文案）；成功切换后派发 `dd-console-devmode-changed` 事件。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：监听 `dd-console-devmode-changed` 事件并重载 iframe（`reloadKey`），让内嵌车端 DC 立即反映最新 dev_mode。
+  - `web_ui/frontend/src/i18n/messages/console.ts`：新增 `console.devTitle/devBody/devConfirm/devHint/console.cancel` 中英文案（对齐 DC `dev.title/dev.body/button.confirmDev/devHint`）。
+  - `web_ui/backend/routers/console.py`：OTA `POST /update` 单独放宽超时 `PROXY_TIMEOUT=10` → `OTA_TIMEOUT=300`，避免大固件上传超时；`_forward_sync` 增加 `timeout` 参数（默认 10s）。
+  - 测试同步：`ConsoleControls.test.tsx` 11 项（新增 OTA 弹窗上传/DEV 确认/DEV 悬浮提示/关闭免确认断言）、`tests/test_console.py` 4 项（新增 update 走长超时断言）；前端 vitest 全量 21 文件 117 项、`tsc -b --noEmit`/`npm run build`、后端 pytest 97 项全部通过。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (80)
 

@@ -4,6 +4,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { discoverConnectorConsoles } from '../services/api';
 import { consoleGetText } from '../services/console';
+import { DEV_MODE_CHANGED_EVENT } from '../components/ConsoleControls';
 import { useTranslation } from '@/i18n';
 
 /**
@@ -18,6 +19,7 @@ export const DrifterConsolePage: React.FC = () => {
   const [selectedIp, setSelectedIp] = useState('');
   const [manualIp, setManualIp] = useState('');
   const [version, setVersion] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   const discover = useCallback(async () => {
     setScanning(true);
@@ -42,6 +44,13 @@ export const DrifterConsolePage: React.FC = () => {
     if (!ip) return;
     setSelectedIp(ip);
   }, [manualIp]);
+
+  // 顶栏 DEV 开关成功切换后，立刻重载内嵌 DC iframe，让车端原版页面即时反映 dev_mode。
+  useEffect(() => {
+    const reload = () => setReloadKey((k) => k + 1);
+    window.addEventListener(DEV_MODE_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(DEV_MODE_CHANGED_EVENT, reload);
+  }, []);
 
   // 车端固件版本从 /api/status 的 version= 字段读取，显示在工具条“连接”按钮右侧。
   useEffect(() => {
@@ -109,6 +118,7 @@ export const DrifterConsolePage: React.FC = () => {
       {selectedIp ? (
         <div className="min-h-0 flex-1">
           <iframe
+            key={reloadKey}
             src={`http://${selectedIp}/?embedded=1`}
             title="Drifter Console"
             className="h-full w-full border-0 bg-zinc-950"
