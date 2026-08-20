@@ -13,7 +13,7 @@ import { useTranslation } from '@/i18n';
  * 排版与显示功能与车端 Web Console 完全一致，仅保留一条最小的“发现/手动连接”工具条。
  */
 export const DrifterConsolePage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [devices, setDevices] = useState<{ ip: string; port: number; reachable: boolean }[]>([]);
   const [scanning, setScanning] = useState(false);
   const [selectedIp, setSelectedIp] = useState('');
@@ -119,7 +119,7 @@ export const DrifterConsolePage: React.FC = () => {
         <div className="min-h-0 flex-1">
           <iframe
             key={reloadKey}
-            src={`http://${selectedIp}/?embedded=1`}
+            src={`http://${selectedIp}/?embedded=1&lang=${lang}`}
             title="Drifter Console"
             className="h-full w-full border-0 bg-zinc-950"
           />
