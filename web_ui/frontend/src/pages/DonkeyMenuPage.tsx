@@ -11,13 +11,17 @@ import { useTranslation } from '@/i18n';
  *  语言同步：launcher 与 DD 跨源（:8090 vs :8000），localStorage 各自独立，
  *  因此把 DD 当前语言经 iframe src 的 `?lang=` 参数传入；DD 切换语言时
  *  src 变化触发 iframe 重载，内嵌 Donkey 菜单随之切换，不会出现“DD 已是
- *  英文、Donkey 菜单仍是中文”的错位。 */
+ *  英文、Donkey 菜单仍是中文”的错位。
+ *
+ *  `?embedded=1` 标记当前为 DD 内嵌模式：launcher 据此把与 DD 顶栏重复的
+ *  7/11/12（Drifter Console / Kimi Code Web / DeepSeek Harness）渲染为置灰
+ *  占位行；单独打开 Donkey（:8090）时无此参数，仍保留完整可点击入口。 */
 export const DonkeyMenuPage: React.FC = () => {
   const { t, lang } = useTranslation();
   return (
     <div className="h-[calc(100vh-3.5rem)]">
       <iframe
-        src={`${getDonkeyUrl()}?lang=${lang}`}
+        src={`${getDonkeyUrl()}?embedded=1&lang=${lang}`}
         title={t('common.enterButtons.donkeyTitle')}
         className="h-full w-full border-0 bg-zinc-950"
       />

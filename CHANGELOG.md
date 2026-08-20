@@ -1,11 +1,43 @@
 # 变更日志
 
-## 2026-08-20 (89)
+## 2026-08-20 (93)
 
 - feat(console): DonkeyDrifter 顶栏静音键切换成功后经 postMessage 即时同步内嵌 Drifter Console，无需等 5s 轮询或手动刷新（Issue #117 续）
   - `web_ui/frontend/src/components/ConsoleControls.tsx`：新增导出常量 `MUTE_CHANGED_EVENT = 'dd-console-mute-changed'`；`ConsoleMuteButton.toggle()` 在 POST 成功并 `fetchMute()` 后 `window.dispatchEvent(new CustomEvent(MUTE_CHANGED_EVENT, { detail: { muted: next === 1 } }))`，广播最新静音态。
   - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：给内嵌 iframe 增加 `ref={iframeRef}`，新增 `useEffect` 监听 `MUTE_CHANGED_EVENT`，回调里 `iframeRef.current?.contentWindow?.postMessage({ type: MUTE_CHANGED_EVENT, muted }, '*')`，让车端原版 DC 页面即时更新静音图标；不重载 iframe、不丢曲线/终端状态（静音是高频轻量操作）。
   - 测试同步：`ConsoleControls.test.tsx` 新增「切换后广播 MUTE_CHANGED_EVENT 且 detail.muted 正确」用例；前端 `npm run build`（tsc + vite）通过。
+
+## 2026-08-20 (92)
+
+- fix(drive): 遥测曲线勾选框默认全部选中
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`visibleKeys` 初始值由 `CURVES.filter((c) => c.defaultOn)` 改为 `CURVES` 全量，Drive 页遥测曲线图例默认勾选全部曲线（之前默认只勾选 5 条，其余 7 条需手动开启）。
+  - 测试同步：`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (91)
+
+- feat(connector): Car Connector 新增「车辆设置」iframe 区块，1:1 嵌入车端 Drifter Console 的设置功能（Issue #234 后续）
+  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：新增自包含组件，复用 `discoverConnectorConsoles` 做设备发现 + 设备选择下拉 + 重扫按钮，用 iframe 直连 `http://<ip>/?embedded=1` 呈现车端配网 / OTA / 开发模式 / 漂移设置 / Judge / 摇杆校准等设置；DonkeyDrifter 的 `/console` 入口保持不变。
+  - `web_ui/frontend/src/pages/CarConnectorPage.tsx`：在页面末尾接入 `<CarSettingsPanel />`。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：新增 `connector.carSettingsTitle` / `connector.carSettingsSubtitle`（zh/en）。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
+## 2026-08-20 (90)
+
+- fix(drive): 遥测曲线图例移到视频画面外部下方，勾选框不再遮挡摄像头
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：导出 `CURVES` 与新的 `TelemetryLegend` 组件；`TelemetryChart` 新增受控 `visibleKeys`/`onToggleCurve` 可选参数（不传则内部自管，保持兼容）；`overlay` 覆盖模式不再在图内渲染图例。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：持有曲线显隐状态（`visibleKeys` + `toggleCurve`），把 `TelemetryLegend` 放到视频容器下方（`mt-3 shrink-0`），曲线图本体仍以半透明浮层覆盖在画面底部。
+  - 测试同步：`npm run build`（tsc + vite）通过、`TelemetryChart.test.tsx` 9 项通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (89)
+
+- fix(launcher): 7/11/12（Drifter Console / Kimi Code Web / DeepSeek Harness）仅在 DD 内嵌 Donkey 时置灰占位，单独打开 Donkey（:8090）恢复完整可点击入口
+  - 背景：上一条 (84) 把 7/11/12 改为 `placeholder:true` 占位行，但 launcher 同一 `server.py` 同时服务 DD 内嵌 `/donkey` 与独立 Donkey 页（:8090），导致单独打开 Donkey 时 7/11/12 也被置灰；用户要求只改 DD 内嵌的 Donkey、单独 Donkey 页不受影响。
+  - `donkeycar/launcher/server.py`：新增 `readEmbedded()` 解析 `?embedded=1` 与常量 `const isEmbedded`；`menuItems` 的 7/11/12 恢复为完整条目（原始 `name`/`cat`/`descZh`/`descEn`/`favorite`）并加 `ddTopbarOnly:true` 标记；`renderMenu()` 与 `selectItem()` 的占位守卫由 `item.placeholder` 改为 `item.placeholder || (isEmbedded && item.ddTopbarOnly)`，占位文案统一为「已并入 DonkeyDrifter 顶栏 / Merged into DonkeyDrifter top bar」；`selectItem()` 恢复 `no===7→openDrifterConsole()`、`no===11→launchKimiCodeWeb()`、`no===12→launchDshWeb()` 三个动作分支；帮助文案 `help.keyNumbers`（HTML+i18n zh/en）由「7、11、12 已并入…」改回中性「数字键 1-12：选择对应菜单项」，避免单独打开时误导。
+  - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`：iframe src 由 `${getDonkeyUrl()}?lang=${lang}` 改为 `${getDonkeyUrl()}?embedded=1&lang=${lang}`，标记 DD 内嵌模式。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_7_11_12_merged_into_dd_topbar` 重写为 `test_menu_7_11_12_embedded_only_placeholder`（断言 7/11/12 恢复完整 name、`ddTopbarOnly:true`、`readEmbedded`/`embedded=1`/`isEmbedded`、`isEmbedded && item.ddTopbarOnly`、`no===7/11/12` 动作分支恢复）；launcher 相关 139 passed、前端 vitest 21 文件 117 项、`tsc -b --noEmit` 全部通过。
+  - 注：仅 DD/launcher 改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (88)
 
