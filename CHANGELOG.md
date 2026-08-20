@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-20 (81)
+
+- feat(drive): 遥测曲线以半透明浮层覆盖在摄像头画面上方，摄像头铺满并裁边放大
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：左列视频由「按高度反推宽度居中」改为 `relative flex-1` 填满剩余空间（移动端 `aspect-video`、桌面端 `lg:aspect-auto`），`VideoStream` 传 `objectFit="cover"` 铺满并裁边放大、消除左右空边；`TelemetryChart` 改为 `overlay` 覆盖模式，`absolute inset-x-3 top-14` 贴在画面上方。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：新增 `objectFit` 参数（默认 `contain`），内部 `img`/`video` 按 `cover`/`contain` 切换 `object-cover`/`object-contain`。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：新增 `overlay` 覆盖模式——半透明底 `bg-slate-950/50` + `backdrop-blur-sm`、紧凑高度 `h-28`、默认收起曲线开关（全屏后仍可调）。
+  - 测试同步：`npm run build`（tsc + vite）通过，产物含 `object-cover`/`top-14`/`h-28`/`bg-slate-950/50`/`backdrop-blur-sm`。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (80)
 
 - fix(drive): 虚拟摇杆把手英文改为横排两行（Virtual / Joystick），中文保持竖排（Issue #232 后续）
