@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import sys
 from pathlib import Path
@@ -50,6 +51,7 @@ def test_forward_sync_preserves_method_body_and_headers(monkeypatch):
         captured["method"] = req.get_method()
         captured["body"] = req.data
         captured["content_type"] = req.get_header("Content-type")
+        captured["timeout"] = timeout
         return FakeResponse()
 
     monkeypatch.setattr(console.urllib.request, "urlopen", fake_urlopen)
@@ -67,3 +69,40 @@ def test_forward_sync_preserves_method_body_and_headers(monkeypatch):
     assert captured["method"] == "POST"
     assert captured["body"] == b"--form--"
     assert captured["content_type"] == "multipart/form-data; boundary=x"
+    assert captured["timeout"] == console.PROXY_TIMEOUT
+
+
+def test_forward_uses_long_timeout_only_for_ota_update(monkeypatch):
+    console = importlib.import_module("routers.console")
+    captured = {}
+
+    def fake_forward_sync(url, method, body, content_type, timeout):
+        captured["url"] = url
+        captured["timeout"] = timeout
+        return (200, {"Content-Type": "text/plain"}, b"ACK:UPDATE_OK")
+
+    monkeypatch.setattr(console, "_forward_sync", fake_forward_sync)
+
+    asyncio.run(
+        console._forward(
+            "192.168.3.46",
+            "update",
+            "POST",
+            "",
+            b"--form--",
+            "multipart/form-data; boundary=x",
+        )
+    )
+    assert captured["timeout"] == console.OTA_TIMEOUT
+
+    asyncio.run(
+        console._forward(
+            "192.168.3.46",
+            "api/status",
+            "GET",
+            "",
+            None,
+            None,
+        )
+    )
+    assert captured["timeout"] == console.PROXY_TIMEOUT

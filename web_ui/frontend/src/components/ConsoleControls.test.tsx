@@ -67,11 +67,35 @@ describe('ConsoleMuteButton', () => {
 });
 
 describe('ConsoleOtaButton', () => {
-  it('links to the car HTTP OTA page when the console is reachable', () => {
+  it('opens an in-page upload dialog instead of navigating to a new page', async () => {
     render(<ConsoleOtaButton />);
-    const link = screen.getByRole('link', { name: 'OTA' });
-    expect(link).toHaveAttribute('href', 'http://192.168.1.10/update');
-    expect(link).toHaveAttribute('target', '_blank');
+    const btn = screen.getByRole('button', { name: 'OTA' });
+    fireEvent.click(btn);
+
+    expect(await screen.findByText('console.otaTitle')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('uploads the chosen firmware via the console proxy', async () => {
+    mockPostForm.mockResolvedValue('ACK:UPDATE_OK');
+    render(<ConsoleOtaButton />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    const fileInput = await screen.findByLabelText('console.otaChooseFile');
+    const file = new File(['binary'], 'firmware.bin', { type: 'application/octet-stream' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'console.otaUpload' }));
+
+    await waitFor(() => {
+      expect(mockPostForm).toHaveBeenCalledWith(
+        '192.168.1.10',
+        'update',
+        expect.any(FormData),
+      );
+    });
+    const form = mockPostForm.mock.calls[0][2] as FormData;
+    expect(form.get('update')).toBe(file);
   });
 
   it('renders disabled when the console is unreachable', () => {
@@ -83,15 +107,17 @@ describe('ConsoleOtaButton', () => {
 });
 
 describe('ConsoleDevToggle', () => {
-  it('renders as an OTA-style capsule and toggles via text/plain proxy', async () => {
+  it('requires confirmation before enabling', async () => {
     mockGetJson.mockResolvedValue({ enabled: false });
     render(<ConsoleDevToggle />);
 
     const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(toggle.className).toContain('h-8');
-    expect(toggle.className).toContain('bg-zinc-800');
     fireEvent.click(toggle);
+
+    expect(await screen.findByText('console.devTitle')).toBeInTheDocument();
+    expect(mockPostText).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'console.devConfirm' }));
 
     await waitFor(() => {
       expect(mockPostText).toHaveBeenCalledWith(
@@ -101,6 +127,35 @@ describe('ConsoleDevToggle', () => {
         'text/plain;charset=UTF-8',
       );
     });
+  });
+
+  it('disables immediately without confirmation', async () => {
+    mockGetJson.mockResolvedValue({ enabled: true });
+    render(<ConsoleDevToggle />);
+
+    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(mockPostText).toHaveBeenCalledWith(
+        '192.168.1.10',
+        'api/devmode',
+        '0',
+        'text/plain;charset=UTF-8',
+      );
+    });
+    expect(screen.queryByText('console.devTitle')).toBeNull();
+  });
+
+  it('renders as an OTA-style capsule and shows a hover hint', async () => {
+    mockGetJson.mockResolvedValue({ enabled: false });
+    render(<ConsoleDevToggle />);
+
+    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle.className).toContain('h-8');
+    expect(toggle.className).toContain('bg-zinc-800');
+    expect(screen.getByText('console.devHint')).toBeInTheDocument();
   });
 
   it('highlights in cyan when enabled', async () => {
