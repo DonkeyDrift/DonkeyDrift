@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (90)
+
+- fix(drive): 遥测曲线图例移到视频画面外部下方，勾选框不再遮挡摄像头
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：导出 `CURVES` 与新的 `TelemetryLegend` 组件；`TelemetryChart` 新增受控 `visibleKeys`/`onToggleCurve` 可选参数（不传则内部自管，保持兼容）；`overlay` 覆盖模式不再在图内渲染图例。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：持有曲线显隐状态（`visibleKeys` + `toggleCurve`），把 `TelemetryLegend` 放到视频容器下方（`mt-3 shrink-0`），曲线图本体仍以半透明浮层覆盖在画面底部。
+  - 测试同步：`npm run build`（tsc + vite）通过、`TelemetryChart.test.tsx` 9 项通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (89)
 
 - fix(launcher): 7/11/12（Drifter Console / Kimi Code Web / DeepSeek Harness）仅在 DD 内嵌 Donkey 时置灰占位，单独打开 Donkey（:8090）恢复完整可点击入口
