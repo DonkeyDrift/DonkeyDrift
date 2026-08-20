@@ -28,7 +28,7 @@ type DrivePageProps = {
 };
 
 export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const clientIdRef = useRef(createDriveClientId());
@@ -358,16 +358,24 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               </div>
             </div>
 
-            {/* 浮动触发把手：抽屉收起/展开开关；「虚拟摇杆」竖排书写 */}
+            {/* 浮动触发把手：抽屉收起/展开开关；中文竖排、英文横排两行 */}
             <button
               onClick={() => setJoystickOpen(!joystickOpen)}
               title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
               className="shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
             >
               {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
-              <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
-                {t('drive.virtualJoystick')}
-              </span>
+              {lang === 'en' ? (
+                <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
+                  {t('drive.virtualJoystick').split(' ').map((word) => (
+                    <span key={word}>{word}</span>
+                  ))}
+                </span>
+              ) : (
+                <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                  {t('drive.virtualJoystick')}
+                </span>
+              )}
             </button>
           </div>
         </aside>
