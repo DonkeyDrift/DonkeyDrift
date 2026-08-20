@@ -58,7 +58,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
   const [joystickOpen, setJoystickOpen] = useState(false);
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(
-    () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
+    () => new Set(CURVES.map((c) => c.key as string)),
   );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
