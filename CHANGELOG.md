@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-20 (93)
+
+- fix(launcher): DD 内嵌 Donkey 的 6 号（DonkeyDrifter）也置灰占位——6/7/11/12 均仅内嵌时占位，单独打开 Donkey 仍完整
+  - 背景：6 号「DonkeyDrifter」在内嵌于 DonkeyDrifter 的 Donkey 菜单里是自引用（用户当前已在 DD 内），属冗余入口；用户要求检查并删除，且只删 DD 内嵌的 Donkey、单独 Donkey 页（:8090）不动。
+  - `donkeycar/launcher/server.py`：`menuItems` 的 6 号新增 `ddTopbarOnly:true`，并加 `phDescZh/phDescEn`（「当前已在 DonkeyDrifter 内 / Already inside DonkeyDrifter」）；`renderMenu()` 与 `selectItem()` 的占位描述由硬编码「已并入 DonkeyDrifter 顶栏」改为优先取 `item.phDescZh/phDescEn`，缺省回退到「已并入 DonkeyDrifter 顶栏 / Merged into DonkeyDrifter top bar」（7/11/12 无 phDesc、走回退）。
+  - 11/12 号上一轮已加 `ddTopbarOnly`（内嵌置灰），本次无额外改动。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_7_11_12_embedded_only_placeholder` 重写为 `test_menu_6_7_11_12_embedded_only_placeholder`（新增 6 号 name、`当前已在 DonkeyDrifter 内`/`Already inside DonkeyDrifter`、`no === 6`/`launchDrive()` 接线断言）；launcher 相关 139 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-20 (92)
 
 - fix(drive): 遥测曲线勾选框默认全部选中
