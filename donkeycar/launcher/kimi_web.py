@@ -34,9 +34,12 @@ issue #168（打开后是"全新状态"）的三处约束：
   localStorage，按 origin（含端口）隔离；复用路径可能挑到不同端口的
   实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
   首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
-- 入口 host 用 mDNS 主机名（``<hostname>.local``）：origin 还含 host，
-  上位机 DHCP 换 IP 同样会让 origin 漂移、置顶再次"被清空"；mDNS 主机
-  名不随 IP 变化，作为入口 host 优先使用，解析不到才回退局域网 IP。
+- 入口 host 用本机局域网 IP 优先、mDNS 主机名兜底：origin 还含 host。
+  早期曾改为 mDNS 主机名优先以避免 DHCP 换 IP 漂移，但迁移到 mDNS
+  origin 时老 origin（局域网 IP）的 localStorage（置顶/权限模式等）不会
+  跟随，用户表现为"置顶全没了、自主模式变逐条确认"；回退 IP 优先可让老
+  origin 的偏好直接恢复，mDNS 仅在 IP 探测不到时兜底（两种入口都写进
+  ``--allowed-host``，仍能过 40301）。
 """
 
 import json
@@ -202,8 +205,8 @@ def _mdns_hostname():
     浏览器把 KCW 的置顶/模式/语言主题等 UI 偏好存 localStorage、按 origin
     （协议+host+端口）隔离；host 用 DHCP 局域网 IP 时，IP 一变 origin 就
     变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，作为
-    入口 host 优先使用。仅当 mDNS 名能解析到本机局域网 IP 时返回，否则
-    None（回退局域网 IP，保持原有可达性）。
+    IP 探测不到时的兜底入口 host。仅当 mDNS 名能解析到本机局域网 IP 时
+    返回，否则 None（保持原有可达性）。
 
     主机名统一小写化：浏览器会把 URL 里的 host 小写化后放进 Host 头，
     kimi 的 DNS-rebinding 栅栏按 Host 头比对 ``--allowed-host``，三者
@@ -227,8 +230,18 @@ def _mdns_hostname():
 
 
 def _entry_host():
-    """KCW 入口 URL 的稳定 host：mDNS 主机名优先，其次局域网 IP。"""
-    return _mdns_hostname() or _lan_ip()
+    """KCW 入口 URL 的入口 host：优先本机局域网 IP，其次 mDNS 主机名。
+
+    issue #168 后续曾改为 mDNS 主机名优先，意图让 origin 不随 DHCP 换 IP
+    漂移；但迁移到 mDNS origin 时，浏览器里已存在的老 origin（局域网 IP）
+    localStorage（置顶 ``kimi-web.pinned-sessions``、权限模式
+    ``kimi-web.permission`` 等）不会跟随，用户表现为"置顶全没了、自主模式
+    变逐条确认"。回退为局域网 IP 优先：只要本机 IP 未变，入口 origin 就是
+    老 origin，浏览器里已有的置顶/模式偏好即可恢复；mDNS 主机名仅作为 IP
+    探测不到时的兜底（两者都会写进 ``--allowed-host``，两种入口都能过
+    40301）。
+    """
+    return _lan_ip() or _mdns_hostname()
 
 
 def _allowed_host_values():
@@ -237,9 +250,8 @@ def _allowed_host_values():
     ``kimi web --host`` 绑定 0.0.0.0 时，浏览器用非回环 Host 访问会被
     kimi 的 DNS-rebinding 检查拦下（40301 Invalid Host header）。本机接口
     IP 会被 kimi 自动放行，但 mDNS 主机名是主机名而非接口 IP，不会被自动
-    放行——必须显式写进 ``--allowed-host``。这里收集入口 host 与局域网 IP
-    （后者是 mDNS 解析不到时 URL 回退的 host），去重后返回，供冷启动命令
-    使用。
+    放行——必须显式写进 ``--allowed-host``。这里收集 mDNS 主机名与局域网 IP
+    （两者都可能是入口 host，去重后返回），供冷启动命令使用。
     """
     hosts = []
     fqdn = _mdns_hostname()
@@ -265,13 +277,12 @@ def _is_loopback_host(host) -> bool:
 
 
 def _lan_url(url: str):
-    """把 URL 的 host 改写为稳定入口 host（mDNS 主机名优先，其次局域网 IP）。
+    """把 URL 的 host 改写为入口 host（局域网 IP 优先，其次 mDNS 主机名）。
 
     回环/通配 host（``localhost``/``127.x``/``0.0.0.0``）必须改写为远程
-    浏览器可达的地址（issue #125）；本机局域网 IP 也一并改写为 mDNS 主机
-    名，让 origin 不随 DHCP 换 IP 漂移（issue #168 后续）。保留端口、路径
-    与 ``#token=`` 片段；探测不到局域网 IP 或 host 是其它远程地址时原样
-    返回。
+    浏览器可达的地址（issue #125）；本机局域网 IP 也一并改写为入口 host，
+    让入口 origin 稳定（issue #168 后续）。保留端口、路径与 ``#token=``
+    片段；探测不到局域网 IP 或 host 是其它远程地址时原样返回。
     """
     entry = _entry_host()
     if not entry:
@@ -291,9 +302,9 @@ def _mark_onboarded(url: str) -> str:
 
     KCW 前端把 onboarding 完成态（欢迎页的选语言/主题）存 localStorage 键
     ``kimi-web.onboarded``、按 origin 隔离。launcher 是受管入口——用户已在
-    Kimi 登录并使用过（有凭据/会话/置顶），不必再走欢迎页；迁移到 mDNS
-    稳定 origin（issue #168 后续）后，老 origin 的 onboarding 标记不会跟随，
-    用户会被欢迎页反复挡住、误以为"置顶又丢了"。URL 带 ``?kimi_onboarded=1``
+    Kimi 登录并使用过（有凭据/会话/置顶），不必再走欢迎页；入口 origin
+    变化（issue #168 后续）后，老 origin 的 onboarding 标记不会跟随，用户
+    会被欢迎页反复挡住、误以为"置顶又丢了"。URL 带 ``?kimi_onboarded=1``
     时前端会把它写进当前 origin 的 localStorage 并直接进主界面，之后即使
     不再带该参数也不会再弹欢迎页（等效于 KCW 自己的桌面→Web 迁移通道）。
     """

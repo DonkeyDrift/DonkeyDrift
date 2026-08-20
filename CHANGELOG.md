@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (71)
+
+- fix(launcher): Kimi Code Web 入口 origin 由 mDNS 主机名优先回退为局域网 IP 优先，恢复被 mDNS 迁移孤立的置顶与「完全自主」权限偏好（Issue #168 后续）
+  - 背景：KCW 的置顶（`kimi-web.pinned-sessions`）、权限模式（`kimi-web.permission`）、onboarding 等 UI 偏好都存浏览器 localStorage、按 origin 隔离。前几轮为抗 DHCP 换 IP 漂移把入口 origin 稳定到 `tony007.local:58640`，但这次迁移本身把老 origin（局域网 IP `192.168.3.57:58640`）里的偏好孤立了——用户表现为「置顶全没了、原来是完全自主模式现在变逐条确认」。服务端无法跨 origin 读写浏览器 localStorage，唯一能恢复老偏好的办法是让入口 origin 回到老 IP。
+  - `donkeycar/launcher/kimi_web.py`：`_entry_host()` 由 `return _mdns_hostname() or _lan_ip()` 改为 `return _lan_ip() or _mdns_hostname()`——局域网 IP 优先、mDNS 主机名兜底；同步更新模块 docstring、`_mdns_hostname()`/`_lan_url()`/`_mark_onboarded()`/`_allowed_host_values()` docstring 说明回退原因。`--allowed-host` 仍同时放行 mDNS 与局域网 IP，两种入口都能过 40301。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 的 mDNS 优先断言改为 IP 优先（loopback/本机 IP/local instance 三处），新增 mDNS 兜底用例（无局域网 IP 时回退 mDNS），删除已不可达的 mDNS rebind 门用例；`test_launcher_kimi_web.py` + `test_launcher_dsh_web.py` 共 81 passed。
+  - 注：纯 DD launcher 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-19 (70)
 
 - fix(console): Drifter Console 内嵌 iframe 改用 `?embedded=1` 参数加载，只隐藏 DD 嵌入视图里的车端 DC 标题栏，车端 DC 页面本身标题栏保持显示（Issue #234）
