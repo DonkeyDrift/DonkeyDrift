@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-20 (89)
+
+- fix(launcher): 7/11/12（Drifter Console / Kimi Code Web / DeepSeek Harness）仅在 DD 内嵌 Donkey 时置灰占位，单独打开 Donkey（:8090）恢复完整可点击入口
+  - 背景：上一条 (84) 把 7/11/12 改为 `placeholder:true` 占位行，但 launcher 同一 `server.py` 同时服务 DD 内嵌 `/donkey` 与独立 Donkey 页（:8090），导致单独打开 Donkey 时 7/11/12 也被置灰；用户要求只改 DD 内嵌的 Donkey、单独 Donkey 页不受影响。
+  - `donkeycar/launcher/server.py`：新增 `readEmbedded()` 解析 `?embedded=1` 与常量 `const isEmbedded`；`menuItems` 的 7/11/12 恢复为完整条目（原始 `name`/`cat`/`descZh`/`descEn`/`favorite`）并加 `ddTopbarOnly:true` 标记；`renderMenu()` 与 `selectItem()` 的占位守卫由 `item.placeholder` 改为 `item.placeholder || (isEmbedded && item.ddTopbarOnly)`，占位文案统一为「已并入 DonkeyDrifter 顶栏 / Merged into DonkeyDrifter top bar」；`selectItem()` 恢复 `no===7→openDrifterConsole()`、`no===11→launchKimiCodeWeb()`、`no===12→launchDshWeb()` 三个动作分支；帮助文案 `help.keyNumbers`（HTML+i18n zh/en）由「7、11、12 已并入…」改回中性「数字键 1-12：选择对应菜单项」，避免单独打开时误导。
+  - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`：iframe src 由 `${getDonkeyUrl()}?lang=${lang}` 改为 `${getDonkeyUrl()}?embedded=1&lang=${lang}`，标记 DD 内嵌模式。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_7_11_12_merged_into_dd_topbar` 重写为 `test_menu_7_11_12_embedded_only_placeholder`（断言 7/11/12 恢复完整 name、`ddTopbarOnly:true`、`readEmbedded`/`embedded=1`/`isEmbedded`、`isEmbedded && item.ddTopbarOnly`、`no===7/11/12` 动作分支恢复）；launcher 相关 139 passed、前端 vitest 21 文件 117 项、`tsc -b --noEmit` 全部通过。
+  - 注：仅 DD/launcher 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (88)
 
 - fix(layout): DonkeyDrifter 顶栏改为纯色背景，消除与内容区之间的半透明背景边界横线（Issue #234 后续）
