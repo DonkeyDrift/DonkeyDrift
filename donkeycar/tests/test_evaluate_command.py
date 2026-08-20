@@ -1,0 +1,67 @@
+import json
+
+import numpy as np
+
+from donkeycar.management.base import Evaluate
+
+
+def test_evaluate_parse_args():
+    args = Evaluate().parse_args(
+        ['--tub', 'tub_a', 'tub_b', '--model', 'models/pilot',
+         '--type', 'linear', '--out', 'results.json'])
+    assert args.tub == ['tub_a', 'tub_b']
+    assert args.model == 'models/pilot'
+    assert args.type == 'linear'
+    assert args.out == 'results.json'
+    assert args.config == './config.py'
+
+
+def test_evaluate_metrics_perfect_predictions():
+    metrics = Evaluate()._metrics([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+    assert metrics['count'] == 3
+    assert metrics['corr'] == 1.0
+    assert metrics['mae'] == 0.0
+    assert metrics['rmse'] == 0.0
+    assert metrics['mean_err'] == 0.0
+
+
+def test_evaluate_metrics_constant_true_yields_no_correlation():
+    metrics = Evaluate()._metrics([5.0, 5.0, 5.0], [1.0, 2.0, 3.0])
+    assert metrics['count'] == 3
+    assert metrics['corr'] is None
+    assert metrics['mae'] == 3.0
+    assert np.isclose(metrics['rmse'], np.sqrt(29.0 / 3.0))
+    assert metrics['mean_err'] == 3.0
+
+
+def test_evaluate_run_without_model_writes_data_stats(monkeypatch, tmp_path):
+    class FakeConfig:
+        DEFAULT_MODEL_TYPE = 'linear'
+
+    class FakeRecord:
+        def __init__(self, angle, throttle):
+            self.underlying = {'user/angle': angle, 'user/throttle': throttle}
+
+    class FakeDataset:
+        def __init__(self, config, tub_paths, seq_size):
+            self._records = [
+                FakeRecord(-0.5, 0.6), FakeRecord(0.0, 0.5), FakeRecord(0.5, 0.4)]
+        def get_records(self):
+            return self._records
+        def close(self):
+            pass
+
+    monkeypatch.setattr('donkeycar.management.base.load_config',
+                        lambda path: FakeConfig())
+    monkeypatch.setattr('donkeycar.pipeline.types.TubDataset', FakeDataset)
+
+    out_path = tmp_path / 'results.json'
+    Evaluate().run(['--tub', 'tub_a', '--out', str(out_path)])
+
+    data = json.loads(out_path.read_text(encoding='utf-8'))
+    assert data['records'] == 3
+    assert data['model'] is None
+    assert 'angle_stats' in data
+    assert 'throttle_stats' in data
+    assert np.isclose(data['angle_stats']['mean'], 0.0)
+    assert np.isclose(data['throttle_stats']['mean'], 0.5)

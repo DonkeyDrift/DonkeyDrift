@@ -627,6 +627,113 @@ class ShowPredictionPlots(BaseCommand):
                               args.type, args.noshow)
 
 
+class Evaluate(BaseCommand):
+    """量化评估模型在 tub 上的 angle/throttle 预测误差。
+
+    输出与真实标签的相关系数 corr、MAE、RMSE、mean_err，用于客观判断模型是否
+    真正学到了转向/油门信号（corr 接近 0 即退化为"预测均值/预测多数类"）。
+    不传 --model 时只输出标签分布，便于判断数据是否均衡。
+    """
+
+    def parse_args(self, args):
+        parser = argparse.ArgumentParser(prog='evaluate',
+                                         usage='%(prog)s [options]')
+        parser.add_argument('--tub', nargs='+', help='tub data for evaluation')
+        parser.add_argument('--model', default=None, help='model to evaluate')
+        parser.add_argument('--type', default=None,
+                            help='model type, defaults to '
+                                 'config.DEFAULT_MODEL_TYPE')
+        parser.add_argument('--config', default='./config.py', help=HELP_CONFIG)
+        parser.add_argument('--out', default=None,
+                            help='path to write results as JSON')
+        parsed_args = parser.parse_args(args)
+        return parsed_args
+
+    def _metrics(self, y_true, y_pred):
+        import numpy as np
+        y_true = np.asarray(y_true, dtype=np.float64)
+        y_pred = np.asarray(y_pred, dtype=np.float64)
+        err = y_true - y_pred
+        corr = None
+        if np.std(y_true) > 0 and np.std(y_pred) > 0:
+            corr = float(np.corrcoef(y_true, y_pred)[0, 1])
+        return {
+            'count': int(len(y_true)),
+            'corr': corr,
+            'mae': float(np.mean(np.abs(err))),
+            'rmse': float(np.sqrt(np.mean(err ** 2))),
+            'mean_err': float(np.mean(err)),
+        }
+
+    def run(self, args):
+        args = self.parse_args(args)
+        args.tub = ','.join(args.tub)
+        cfg = load_config(args.config)
+
+        import numpy as np
+        from donkeycar.pipeline.types import TubDataset
+
+        model = None
+        model_type = args.type
+        if args.model:
+            if model_type is None:
+                model_type = cfg.DEFAULT_MODEL_TYPE
+            model = dk.utils.get_model_by_type(model_type, cfg)
+            model.load(os.path.expanduser(args.model))
+
+        tub_paths = [os.path.expanduser(t) for t in args.tub.split(',')]
+        dataset = TubDataset(config=cfg, tub_paths=tub_paths,
+                             seq_size=model.seq_size() if model else 0)
+        records = dataset.get_records()
+
+        user_angles = []
+        user_throttles = []
+        pilot_angles = []
+        pilot_throttles = []
+        for r in records:
+            user_angles.append(float(r.underlying['user/angle']))
+            user_throttles.append(float(r.underlying['user/throttle']))
+            if model:
+                img = r.image()
+                a, t = model.run(img)
+                pilot_angles.append(float(a))
+                pilot_throttles.append(float(t))
+        dataset.close()
+
+        result = {
+            'records': len(records),
+            'model': os.path.expanduser(args.model) if args.model else None,
+            'type': model_type,
+        }
+        if model:
+            result['angle'] = self._metrics(user_angles, pilot_angles)
+            result['throttle'] = self._metrics(user_throttles, pilot_throttles)
+            print(f"records: {result['records']}")
+            print(f"angle:   {result['angle']}")
+            print(f"throttle: {result['throttle']}")
+        else:
+            a = np.asarray(user_angles)
+            t = np.asarray(user_throttles)
+            result['angle_stats'] = {
+                'mean': float(a.mean()), 'std': float(a.std()),
+                'min': float(a.min()), 'max': float(a.max()),
+                'abs_lt_0.05_ratio': float(np.mean(np.abs(a) < 0.05)),
+            }
+            result['throttle_stats'] = {
+                'mean': float(t.mean()), 'std': float(t.std()),
+                'min': float(t.min()), 'max': float(t.max()),
+            }
+            print(f"records: {result['records']}")
+            print(f"user/angle stats:   {result['angle_stats']}")
+            print(f"user/throttle stats: {result['throttle_stats']}")
+
+        if args.out:
+            import json
+            with open(os.path.expanduser(args.out), 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            print(f"wrote {args.out}")
+
+
 class Train(BaseCommand):
 
     def parse_args(self, args):
@@ -1419,6 +1526,7 @@ def execute_from_command_line():
         'calibrate': CalibrateCar,
         'tubplot': ShowPredictionPlots,
         'tubhist': ShowHistogram,
+        'evaluate': Evaluate,
         'makemovie': MakeMovieShell,
         'createjs': CreateJoystick,
         'cnnactivations': ShowCnnActivations,
