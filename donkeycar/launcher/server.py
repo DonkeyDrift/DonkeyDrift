@@ -1673,7 +1673,19 @@ MENU_HTML = r"""<!DOCTYPE html>
             try { return String(navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
             catch (e) { return 'zh'; }
         }
+        // 内嵌在 DonkeyDrifter（:8000）时，父页通过 iframe src 的 ?lang= 参数
+        // 传入其当前语言；该参数优先级最高，确保首次加载即与 DD 语言一致，
+        // 不因跨源 localStorage（:8000 vs :8090）各自为政而出现中英不齐。
+        function readUrlLanguage() {
+            try {
+                const m = /[?&]lang=(zh|en)(?:&|$)/.exec(window.location.search);
+                if (m) return m[1];
+            } catch (e) {}
+            return null;
+        }
         function readStoredLanguage() {
+            const fromUrl = readUrlLanguage();
+            if (fromUrl) return fromUrl;
             try {
                 const v = localStorage.getItem(LANG_STORAGE_KEY);
                 if (v === 'zh' || v === 'en') return v;

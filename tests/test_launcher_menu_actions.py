@@ -433,6 +433,15 @@ class TestFrontendWiring:
         # zh 与 en 两个语言块都含新键：统计出现次数 ≥ 2
         assert MENU_HTML.count("'menu.createcar.prompt'") >= 2
 
+    def test_menu_reads_dd_lang_url_param(self):
+        # DD 内嵌 Donkey 时经 iframe src 的 `?lang=` 传入语言；launcher
+        # 需优先读取该参数，跨源 localStorage（:8000 vs :8090）各自独立
+        # 时仍能与 DD 语言一致，避免“DD 已英文、Donkey 菜单仍中文”。
+        assert "function readUrlLanguage" in MENU_HTML
+        assert "window.location.search" in MENU_HTML
+        assert "[?&]lang=(zh|en)" in MENU_HTML
+        assert "const fromUrl = readUrlLanguage()" in MENU_HTML
+
     def test_terminal_html_supports_cmd_param(self):
         page = (Path(launcher_server.__file__).parent /
                 "terminal_static" / "terminal.html").read_text("utf-8")
