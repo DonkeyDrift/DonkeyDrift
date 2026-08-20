@@ -257,8 +257,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">
         {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div className="flex-1 min-w-0 flex flex-col lg:h-[calc(100vh-9rem)]">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
             {/* 左：Park 状态 + 驾驶模式 + 模型 */}
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
               {telemetry?.rc_park === 1 && (
@@ -303,14 +303,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {active ? (
-            /* 桌面端给摄像头一个视口高度上限，保证下方遥测曲线无需滚动也能同屏可见；
-               object-contain 会在高度被压缩时保留画面完整（四周黑边），不会裁切。 */
-            <VideoStream className="w-full lg:max-h-[calc(100vh-32rem)]" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
-          ) : (
-            <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
-          )}
-          <TelemetryChart telemetry={telemetry} className="mt-4" active={active} />
+          {/* 摄像头：按可用高度反推宽度并保持画面比例、居中显示，避免左右黑边 */}
+          <div className="flex-1 min-h-0 flex items-center justify-center">
+            {active ? (
+              <VideoStream className="w-full lg:w-auto lg:h-full lg:max-w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+            ) : (
+              <div className="w-full aspect-video bg-zinc-950 border border-zinc-800 rounded-lg" />
+            )}
+          </div>
+          <TelemetryChart telemetry={telemetry} className="mt-4 shrink-0" active={active} />
         </div>
 
         {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}
