@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (97)
+
+- fix(launcher): KCW 入口注入 `?kimi_origin=<origin>`，钉住前端 API 基地址，修复任务执行时 getSessionSnapshot 报 "TypeError: Load failed"
+  - 背景：上一轮把入口 origin 回退为局域网 IP 优先（PR #266），但用户点 Kimi 后执行任务仍报「无法加载当前会话内容 / TypeError: Load failed」，请求打到 `http://tony007.local:58640`（mDNS 旧 origin）。根因：KCW 0.36.1 前端 API 基地址判定为 URL `?kimi_origin` → `sessionStorage["kimi-desktop-server-origin"]` → `window.location.origin`；launcher 未注入 `kimi_origin`，浏览器残留早期 mDNS 阶段写进 sessionStorage 的 `tony007.local` 仍把 API 指到连不上的 mDNS host。
+  - `donkeycar/launcher/kimi_web.py`：新增 `_mark_origin()`（追加 `?kimi_origin=http://<entry_host>:<port>/`，同名参数先去重再追加），三处返回点由 `_mark_onboarded(_lan_url(url))` 改为 `_mark_origin(_mark_onboarded(_lan_url(url)))`；模块 docstring 增加第 4 条 issue #168 约束说明。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 新增 `TestMarkOrigin`（追加 / 覆盖旧 origin / 保留路径与其它 query 三例），`test_reuses_live_instance_without_spawning` / `test_spawn_success_captures_url_and_keeps_proc` / `test_spawn_failure_falls_back_to_reuse` 三处返回 URL 断言补 `kimi_origin`；`test_launcher_kimi_web.py` + `test_launcher_dsh_web.py` 共 84 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-20 (96)
 
 - fix(launcher): DD 内嵌 Donkey 的 11/12 号彻底删除（整行含序号），6/7 仍置灰占位

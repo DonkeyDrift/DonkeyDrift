@@ -239,6 +239,32 @@ class TestMarkOnboarded:
 
 
 # ===========================================================================
+# _mark_origin（issue #168 后续：钉住前端 API origin，防旧 origin 残留）
+# ===========================================================================
+class TestMarkOrigin:
+    def test_adds_origin_keeps_onboarded_and_token(self):
+        url = "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k123"
+        assert kimi_web._mark_origin(url) == (
+            "http://192.168.3.10:58627/?kimi_onboarded=1"
+            "&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k123")
+
+    def test_overwrites_existing_kimi_origin(self):
+        # 残留旧 origin（如 mDNS 阶段写进 sessionStorage 的 tony007.local）
+        # 必须被本次入口 origin 覆盖，否则后续 API 会打到连不上的 host
+        url = ("http://192.168.3.10:58627/?kimi_onboarded=1"
+               "&kimi_origin=http%3A%2F%2Ftony007.local%3A58640#token=t0k")
+        assert kimi_web._mark_origin(url) == (
+            "http://192.168.3.10:58627/?kimi_onboarded=1"
+            "&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k")
+
+    def test_preserves_path_and_other_query(self):
+        url = "http://192.168.3.10:58627/session/abc?foo=bar#token=t0k"
+        assert kimi_web._mark_origin(url) == (
+            "http://192.168.3.10:58627/session/abc?foo=bar"
+            "&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k")
+
+
+# ===========================================================================
 # strip_ansi / extract_web_url
 # ===========================================================================
 class TestStripAnsi:
@@ -432,7 +458,7 @@ class TestLaunchKimiCodeWeb:
             live_url_fn=_live,
             popen_fn=_make_popen(spawned))
         assert result == {"status": "ok",
-                          "url": "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k"}
+                          "url": "http://192.168.3.10:58627/?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"}
         assert spawned == []  # 复用路径不起子进程
         # 复用探测带上了请求的 cwd（issue #168）
         assert seen["cwd"] == "/home/dkc/projects"
@@ -446,7 +472,7 @@ class TestLaunchKimiCodeWeb:
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
         # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125）
-        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k123"
+        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k123"
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in kimi_web._SPAWNED_PROCS
@@ -514,7 +540,7 @@ class TestLaunchKimiCodeWeb:
             resolve_binary_fn=lambda: "/x/kimi",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
-        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1#token=t0k"
+        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"
         assert proc.killed is True  # 失败的子进程被杀净
 
     def test_spawn_banner_timeout_kills_proc(self):
