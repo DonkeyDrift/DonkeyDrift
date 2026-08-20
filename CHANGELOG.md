@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (75)
+
+- fix(drive): 限制摄像头高度，让 Drive 页摄像头与下方遥测曲线同屏可见
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`VideoStream` 增加 `lg:max-h-[calc(100vh-32rem)]` 视口高度上限。摄像头按实际画面比例自适应后，在常见桌面屏上画面过高会把 `TelemetryChart` 顶出首屏；加此上限后曲线无需滚动即可同屏显示。`VideoStream` 内部画面为 `object-contain`，高度被压缩时完整居中、只留黑边不裁切。
+  - 测试同步：`npm run check`（tsc）通过、`npm run build`（vite）通过，产物含该类名与 `max-height: calc(100vh - 32rem)` 规则。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (74)
 
 - fix(flow): Drive/TM/Trainer/PA 大页节标题的灰色小字由垂直居中改为基线对齐，与标题视觉平行（Issue #233）
