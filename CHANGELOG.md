@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-20 (98)
+
+- feat(drive): Drive 遥测曲线左右分栏（转向/姿态 vs 油门/加速度）+ 整屏放大，移除暂停/清空按钮
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：`CurveConfig` 新增 `group` 字段并导出 `CurveGroup` 类型与 `curvesByGroup` 辅助；`TelemetryChart` 新增 `title`/`group`/`chartHeightClassName` 可选参数，`TelemetryLegend` 新增 `group` 参数（按分组只渲染该组曲线与复选框）；删除暂停/清空/全屏按钮及其状态逻辑（`paused`/`handlePauseToggle`/`handleClear`/`fullscreen`/`toggleFullscreen`），全屏改为由父组件统一管理整块画面。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：曲线显隐改为左右两组独立状态（`steeringVisibleKeys`/`throttleVisibleKeys` + 各自 toggle）；视频容器内渲染两个 `TelemetryChart` overlay 浮层（左=转向/姿态、右=油门/加速度），图例分左右两组放视频容器下方；新增整屏放大按钮（右上角），全屏时视频容器 `fixed inset-0 z-50 bg-black` 放大摄像头 + 遥测曲线，曲线高度 `h-44`。
+  - `web_ui/frontend/src/i18n/messages/driveviz.ts`：新增 `chartTitleSteering`（转向 / 姿态）与 `chartTitleThrottle`（油门 / 加速度），删除不再使用的 `paused`/`pause`/`resume`/`clear`。
+  - 测试同步：`TelemetryChart.test.tsx` 删除暂停/清空/全屏用例，新增「group 模式下只渲染该分组的曲线与图例」用例，7 项通过；前端 vitest 21 文件 116 项、`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+
 ## 2026-08-20 (97)
 
 - fix(theme): Donkey 与 DonkeyDrifter 深浅色手动切换改为仅内存态、不写存储——修复「手动切换后刷新仍保持所选主题，无法重新跟随系统」的问题，使 D / DD / DC 三页一致：默认跟随系统、每次进入/刷新都重新按浏览器 prefers-color-scheme 解析
