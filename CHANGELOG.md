@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (76)
+
+- fix(drive): 限制摄像头高度，让 Drive 页摄像头与下方遥测曲线同屏可见
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`VideoStream` 增加 `lg:max-h-[calc(100vh-32rem)]` 视口高度上限。摄像头按实际画面比例自适应后，在常见桌面屏上画面过高会把 `TelemetryChart` 顶出首屏；加此上限后曲线无需滚动即可同屏显示。`VideoStream` 内部画面为 `object-contain`，高度被压缩时完整居中、只留黑边不裁切。
+  - 测试同步：`npm run check`（tsc）通过、`npm run build`（vite）通过，产物含该类名与 `max-height: calc(100vh - 32rem)` 规则。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (75)
 
 - fix(web-ui): Donkey 内嵌页改为全屏铺满，并修正 Donkey 模式下的顶栏高亮、侧栏遮挡与帮助小球
