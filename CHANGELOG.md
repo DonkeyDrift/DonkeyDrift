@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (77)
+
+- fix(drive): 摄像头按可用高度反推宽度并略降曲线图高度，画面更大且消除左右黑边
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：左列改为 `flex flex-col` + 桌面端 `lg:h-[calc(100vh-9rem)]`，摄像头区 `flex-1` 撑满剩余高度；`VideoStream` 由 `w-full + max-h` 改为 `lg:h-full lg:w-auto lg:max-w-full` 居中，按实际画面比例反推宽度，替换原先高度压缩时 `object-contain` 产生的左右黑边。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：曲线区高度 `h-48` → `h-40`，为摄像头让出更多纵向空间。
+  - 测试同步：`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (76)
 
 - fix(drive): 限制摄像头高度，让 Drive 页摄像头与下方遥测曲线同屏可见
