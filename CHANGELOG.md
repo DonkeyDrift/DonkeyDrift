@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (92)
+
+- fix(drive): 遥测曲线勾选框默认全部选中
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`visibleKeys` 初始值由 `CURVES.filter((c) => c.defaultOn)` 改为 `CURVES` 全量，Drive 页遥测曲线图例默认勾选全部曲线（之前默认只勾选 5 条，其余 7 条需手动开启）。
+  - 测试同步：`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (91)
 
 - feat(connector): Car Connector 新增「车辆设置」iframe 区块，1:1 嵌入车端 Drifter Console 的设置功能（Issue #234 后续）
