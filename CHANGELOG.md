@@ -1,12 +1,20 @@
 # 变更日志
 
-## 2026-08-21 (102)
+## 2026-08-21 (103)
 
 - fix(drive): 车端在线但未推首帧时 MJPEG `/drive/video` 立即回占位帧，修复进入 Drive 页偶发一直卡「正在连接摄像头」、需很久才连上（Issue #221 补充修复）
   - 背景：后端 `_frame_generator` 在「无帧或车端离线」时只 `sleep(0.1)` 空转、不发送任何字节；浏览器 `<img src="/drive/video">` 收不到首帧，既不触发 `onLoad` 也不触发 `onError`，前端 `VideoStream` 的 `status` 永远停在 `loading`，于是「正在连接摄像头」长时间挂着；上一轮 5s 超时只能让它在「正在连接 / 未连接」之间空转，无法真正结束等待。
   - `web_ui/backend/routers/drive.py`：新增 `_make_placeholder_frame()`（Pillow 生成 640×360 深色「等待画面」占位 JPEG）+ 模块级 `_PLACEHOLDER_FRAME` 缓存 + `_multipart_part()` 分片构造辅助 + `PLACEHOLDER_FRAME_INTERVAL=0.5`；`_frame_generator` 改为「有真实帧且在线 → 推真实帧；离线 → 保持静默（前端走 /drive/stats 显示车端离线）；在线但无首帧 → 按 2fps 推占位帧让 `<img>` 立即 `onLoad`」。
   - 测试同步：`web_ui/backend/tests/test_drive.py` 新增 3 项（在线无帧推占位帧 / 在线有帧推真实帧 / 离线静默不推流），backend `pytest -q` 100 passed。
   - 注：仅 DD 后端改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-21 (102)
+
+- fix(trainer): 训练收尾保存 loss 元数据报 `'dict' object has no attribute 'history'`，改为按 dict 直接取值
+  - 根因：`donkeycar/parts/keras.py` 的 `train()` 返回 `history.history`（普通 dict），但 `pipeline/training.py` 保存 loss 元数据时仍按 `tf.keras.callbacks.History` 对象取 `history.history.get(...)`，触发 `AttributeError`；该段在 `try/except` 内仅打 error，模型训练本身与 `database.json`（直接存 dict）不受影响，只缺 `*_meta.json` 侧车文件。
+  - `donkeycar/pipeline/training.py`：`history.history.get('loss'/'val_loss', [])` 改为 `history.get('loss'/'val_loss', [])`。
+  - 验证：模块可正常导入，`dict.get` 逻辑输出正确（本机无 GPU，走 float32）。目标 2 的 41 轮训练已产出 `pilot_2`（best val_loss 0.1595）。
+  - 注：仅 donkeycar 库训练路径改动，不影响本机 Web UI，无需部署/OTA；Firmware 无改动。
 
 ## 2026-08-20 (101)
 
