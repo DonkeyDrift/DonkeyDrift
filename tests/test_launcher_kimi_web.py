@@ -120,8 +120,8 @@ def _clean_spawned():
 def _fake_lan_ip(monkeypatch):
     """固定本机局域网 IP，隔离真实网络探测（issue #125 的 URL 改写）。
 
-    同时把 mDNS 主机名探测钉为 None——默认走 IP 回退路径，保持既有断言
-    稳定；mDNS 优先路径由专门测试用 monkeypatch 覆盖验证。
+    同时把 mDNS 主机名探测钉为 None——默认走 IP 入口路径，保持既有断言
+    稳定；mDNS 兜底路径由专门测试用 monkeypatch 覆盖验证。
     """
     monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
     monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
@@ -159,19 +159,27 @@ class TestLanUrl:
         url = "http://127.0.0.1:58627/#token=t0k123"
         assert kimi_web._lan_url(url) == url
 
-    def test_mdns_hostname_preferred_over_loopback(self, monkeypatch):
-        # issue #168 后续：host 用 mDNS 主机名，origin 不随 DHCP 换 IP 漂移
+    def test_lan_ip_preferred_over_mdns_for_loopback(self, monkeypatch):
+        # issue #168 后续：入口 host 回退为局域网 IP 优先，老 origin 偏好恢复
         monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
         assert kimi_web._lan_url(
             "http://127.0.0.1:58627/#token=t0k123") == \
-            "http://TONY007.local:58627/#token=t0k123"
+            "http://192.168.3.10:58627/#token=t0k123"
 
-    def test_mdns_hostname_preferred_over_lan_ip(self, monkeypatch):
-        # banner 的 Network 行给的是本机局域网 IP，也改写为 mDNS 稳定 origin
+    def test_lan_ip_preferred_over_mdns_for_lan_host(self, monkeypatch):
+        # banner 的 Network 行给的是本机局域网 IP，入口 host 仍用 IP（不换 mDNS）
         monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
         assert kimi_web._lan_url(
             "http://192.168.3.10:58627/#token=t0k123") == \
-            "http://TONY007.local:58627/#token=t0k123"
+            "http://192.168.3.10:58627/#token=t0k123"
+
+    def test_mdns_fallback_when_no_lan_ip(self, monkeypatch):
+        # IP 探测不到时兜底 mDNS 主机名，入口仍可达
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: None)
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
+        assert kimi_web._lan_url(
+            "http://127.0.0.1:58627/#token=t0k123") == \
+            "http://tony007.local:58627/#token=t0k123"
 
     def test_mdns_hostname_keeps_foreign_host(self, monkeypatch):
         # 其它远程 host（非本机 IP）不受 mDNS 改写影响
@@ -310,10 +318,9 @@ class TestLiveInstanceUrl:
                                           cwd="/home/dkc/projects")
         assert url == "http://192.168.3.10:58627/#token=tok-xyz"
 
-    def test_mdns_hostname_preferred_for_local_instance(
-            self, tmp_path, monkeypatch):
+    def test_lan_ip_preferred_for_local_instance(self, tmp_path, monkeypatch):
         # issue #168 后续：本机实例（登记 0.0.0.0/回环）复用后入口 host 用
-        # mDNS 主机名，origin 不随 DHCP 换 IP 漂移
+        # 局域网 IP（老 origin），置顶/模式偏好直接恢复
         inst_dir = tmp_path / "instances"
         _write_instance(inst_dir, pid=os.getpid())
         token_file = tmp_path / "server.token"
@@ -321,21 +328,7 @@ class TestLiveInstanceUrl:
         monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "TONY007.local")
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         url = kimi_web._live_instance_url(inst_dir, token_file)
-        assert url == "http://TONY007.local:58627/#token=tok-xyz"
-
-    def test_entry_host_must_pass_rebind_gate(self, tmp_path, monkeypatch):
-        # issue #168 后续：入口 host 改用 mDNS 后，复用前要对它再探一次；
-        # 老实例（没带 --allowed-host）对局域网 IP 通、对 mDNS host 403，
-        # 必须跳过而不是返回一个浏览器一打开就 403 的 URL
-        inst_dir = tmp_path / "instances"
-        _write_instance(inst_dir, pid=os.getpid())
-        token_file = tmp_path / "server.token"
-        token_file.write_text("tok-xyz\n", encoding="utf-8")
-        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
-        monkeypatch.setattr(
-            kimi_web, "_probe_server",
-            lambda host, port, token: host != "tony007.local")
-        assert kimi_web._live_instance_url(inst_dir, token_file) is None
+        assert url == "http://192.168.3.10:58627/#token=tok-xyz"
 
     def test_cwd_mismatching_instance_skipped(self, tmp_path, monkeypatch):
         # 实例跑在别的目录（如 mycar 里的 TUI 内嵌 server）时不复用，
