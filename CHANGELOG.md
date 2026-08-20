@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-20 (96)
+
+- fix(launcher): DD 内嵌 Donkey 的 11/12 号彻底删除（整行含序号），6/7 仍置灰占位
+  - 背景：上一条 (94) 把 6/7/11/12 都做成了内嵌置灰占位；用户要求 11/12（Kimi Code Web / DeepSeek Harness）彻底删掉（整行连同序号都不显示），6（DonkeyDrifter）/7（Drifter Console）保持置灰占位不变。
+  - `donkeycar/launcher/server.py`：`menuItems` 的 11/12 号由 `ddTopbarOnly:true` 改为 `ddHidden:true`；`renderMenu()` 在遍历开头新增 `if (isEmbedded && item.ddHidden) return`（内嵌时整行不渲染，序号 11/12 直接空出）；`selectItem()` 新增 `if (isEmbedded && item.ddHidden) return`（内嵌时数字键无响应）。6/7 仍 `ddTopbarOnly:true`（内嵌置灰占位），单独打开 Donkey（:8090）时 6/7/11/12 均完整可点击。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_6_7_11_12_embedded_only_placeholder` 重写为 `test_menu_6_7_grayed_11_12_hidden_embedded`（断言 6/7 `ddTopbarOnly`、11/12 `ddHidden` + `isEmbedded && item.ddHidden` 守卫）；launcher 相关 139 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-20 (95)
 
 - fix(console): DonkeyDrifter 顶栏 DEV 开关开启态对齐 Drifter Console 原版效果（#5cc8ff + 内描边）

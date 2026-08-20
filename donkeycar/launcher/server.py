@@ -1810,8 +1810,8 @@ MENU_HTML = r"""<!DOCTYPE html>
             {no: 8,  cat: "filter", name: "Donkey UI",    descZh: "启动数据筛选工具（Windows下需要WSL来运行）", descEn: "Start the data filtering tool (requires WSL on Windows)", favorite: true},
             {no: 9,  cat: "train",  name: "Train Local",  descZh: "本地训练",                               descEn: "Train locally",                                favorite: true},
             {no: 10, cat: "train",  name: "Train Online", descZh: "云端训练（train_online.conf）",          descEn: "Cloud training (train_online.conf)",             favorite: true},
-            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                     descEn: "Open Kimi Code Web",                            favorite: true,  ddTopbarOnly: true},
-            {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                   favorite: true,  ddTopbarOnly: true},
+            {no: 11, cat: "manage", name: "Kimi Code Web", descZh: "打开 Kimi Code Web",                     descEn: "Open Kimi Code Web",                            favorite: true,  ddHidden: true},
+            {no: 12, cat: "manage", name: "DeepSeek Harness", descZh: "打开 DeepSeek Harness（DSH）",        descEn: "Open DeepSeek Harness (DSH)",                   favorite: true,  ddHidden: true},
         ];
         const catLabels = {
             manage: {zh: "管理", en: "Manage"},
@@ -1829,6 +1829,11 @@ MENU_HTML = r"""<!DOCTYPE html>
             const grid = document.getElementById('menu-grid');
             grid.innerHTML = '';
             menuItems.forEach(item => {
+                if (isEmbedded && item.ddHidden) {
+                    // DD 内嵌时 11/12 号彻底删除：整行（含序号）都不渲染；
+                    // 单独打开 Donkey 时仍为完整入口。
+                    return;
+                }
                 const div = document.createElement('div');
                 const isPlaceholder = item.placeholder || (isEmbedded && item.ddTopbarOnly);
                 div.className = isPlaceholder
@@ -1878,13 +1883,17 @@ MENU_HTML = r"""<!DOCTYPE html>
             selectedNo = no;
         }
 
-        // 选择菜单项（issue #126：全部菜单项已接线）。6/7/11/12 在内嵌于
-        // DonkeyDrifter（?embedded=1）时为占位行——数字键/点击只给轻提示；
-        // 单独打开 Donkey 时恢复为完整入口（DonkeyDrifter / Drifter Console /
+        // 选择菜单项（issue #126：全部菜单项已接线）。6/7 在内嵌于
+        // DonkeyDrifter（?embedded=1）时为占位行（数字键/点击只给轻提示），
+        // 11/12 在内嵌时彻底删除（数字键无响应）；单独打开 Donkey 时
+        // 6/7/11/12 均恢复为完整入口（DonkeyDrifter / Drifter Console /
         // Kimi Code Web / DeepSeek Harness）。
         function selectItem(no) {
             const item = menuItems.find(m => m.no === no);
             if (!item) return;
+            if (isEmbedded && item.ddHidden) {
+                return;
+            }
             if (item.placeholder || (isEmbedded && item.ddTopbarOnly)) {
                 showError(uiLang === 'en'
                     ? (item.phDescEn || 'Merged into DonkeyDrifter top bar')
