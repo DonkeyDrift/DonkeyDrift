@@ -40,6 +40,12 @@ issue #168（打开后是"全新状态"）的三处约束：
   跟随，用户表现为"置顶全没了、自主模式变逐条确认"；回退 IP 优先可让老
   origin 的偏好直接恢复，mDNS 仅在 IP 探测不到时兜底（两种入口都写进
   ``--allowed-host``，仍能过 40301）。
+- 入口 URL 注入 ``?kimi_origin=<origin>``：KCW 0.36.1 前端把 API 基地址
+  判定为 URL 的 ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]``
+  → ``window.location.origin``；launcher 显式写 ``kimi_origin`` 后，即使
+  浏览器残留旧 origin（如早期 mDNS 阶段的 ``tony007.local``）的
+  sessionStorage 也会被覆盖，避免任务执行时 ``/sessions/*/snapshot`` 等
+  请求打到连不上的 host（报 "TypeError: Load failed"）。
 """
 
 import json
@@ -317,6 +323,32 @@ def _mark_onboarded(url: str) -> str:
         (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+def _mark_origin(url: str) -> str:
+    """给 KCW 入口 URL 追加 ``?kimi_origin=<origin>``，钉住前端 API 基地址。
+
+    KCW 0.36.1 前端把 API 基地址的判定顺序写成：URL 查询参数
+    ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]`` →
+    ``window.location.origin``（详见其 boot 包里的 ``g$()``/``Ike()``）。
+    桌面端把 ``kimi_origin`` 显式写进交接 URL，前端读到后还会把它写进
+    sessionStorage——即使浏览器里残留旧 origin（例如之前 mDNS 阶段的
+    ``tony007.local``）的 sessionStorage，也会被本次入口 origin 覆盖，
+    不会再让 ``/sessions/*/snapshot`` 等 API 请求打到一个浏览器连不上的
+    host（issue #168 后续：任务执行时报 "TypeError: Load failed"）。
+
+    origin 取当前 URL 的 scheme+netloc（即 ``_lan_url`` 改写后的稳定入口
+    host:port），保留路径、``kimi_onboarded`` 与 ``#token=`` 片段；同名
+    参数若已存在则先去掉再追加，保证唯一。
+    """
+    parts = urllib.parse.urlsplit(url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    pairs = [(k, v) for k, v in pairs if k != "kimi_origin"]
+    pairs.append(("kimi_origin", origin))
+    query = urllib.parse.urlencode(pairs)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def _proc_cwd(pid: int):
     """实例进程的运行目录（``/proc/<pid>/cwd`` 的真实路径）。
 
@@ -524,7 +556,7 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 关键字传参——_live_instance_url 首参是 instances_dir
     url = live_url_fn(cwd=cwd_str)
     if url:
-        url = _mark_onboarded(_lan_url(url))
+        url = _mark_origin(_mark_onboarded(_lan_url(url)))
         logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
         return {"status": "ok", "url": url}
 
@@ -541,14 +573,14 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                                           popen_fn=popen_fn)
     if url:
         _SPAWNED_PROCS.append(proc)
-        url = _mark_onboarded(_lan_url(url))
+        url = _mark_origin(_mark_onboarded(_lan_url(url)))
         logger.info("Kimi Code Web 已启动: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
     url = live_url_fn(cwd=cwd_str)
     if url:
-        url = _mark_onboarded(_lan_url(url))
+        url = _mark_origin(_mark_onboarded(_lan_url(url)))
         logger.info("冷启动未果，复用到已运行实例: %s", url)
         return {"status": "ok", "url": url}
     logger.warning("启动 Kimi Code Web 失败: %s", error)
