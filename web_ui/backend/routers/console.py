@@ -17,6 +17,9 @@ router = APIRouter()
 # DC 车端 HTTP 接口的超时（状态/遥测轮询都很轻量，10s 足够）
 PROXY_TIMEOUT = 10
 
+# OTA 固件上传（POST /update）需要传输完整 .bin，耗时明显更长，单独放宽超时。
+OTA_TIMEOUT = 300
+
 
 def _validate_ip(ip: str) -> str:
     """仅允许 IPv4 局域网地址，避免代理被用于任意内网/外网 SSRF。"""
@@ -29,13 +32,19 @@ def _validate_ip(ip: str) -> str:
     return ip
 
 
-def _forward_sync(url: str, method: str, body: bytes | None, content_type: str | None) -> tuple[int, dict, bytes]:
+def _forward_sync(
+    url: str,
+    method: str,
+    body: bytes | None,
+    content_type: str | None,
+    timeout: int = PROXY_TIMEOUT,
+) -> tuple[int, dict, bytes]:
     headers = {}
     if content_type:
         headers["Content-Type"] = content_type
     request = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=PROXY_TIMEOUT) as resp:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
             return resp.status, dict(resp.headers), resp.read()
     except urllib.error.HTTPError as exc:
         # 车端返回 4xx/5xx 时也原样透传，不能让浏览器拿到空 500
@@ -47,9 +56,11 @@ async def _forward(ip: str, path: str, method: str, query: str, body: bytes | No
     url = f"http://{ip}/{path}"
     if query:
         url += f"?{query}"
+    # OTA 上传是大文件传输，走长超时；其余轻量接口保持 10s。
+    timeout = OTA_TIMEOUT if path == "update" else PROXY_TIMEOUT
     try:
         status, headers, data = await asyncio.to_thread(
-            _forward_sync, url, method, body, content_type
+            _forward_sync, url, method, body, content_type, timeout
         )
     except urllib.error.URLError as exc:
         raise HTTPException(status_code=502, detail=f"无法连接车端 {ip}: {exc.reason}") from exc
