@@ -285,7 +285,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
           </button>
         </div>
       </div>
-      <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : 'h-48')}>
+      <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : 'h-40')}>
         <Line data={chartData} options={chartOptions} />
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
