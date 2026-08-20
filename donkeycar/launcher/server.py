@@ -1337,8 +1337,9 @@ MENU_HTML = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
-    // 首屏防闪烁：渲染前应用持久化主题（与 DD/DC 同一模式，默认跟随系统；v3 一次性清除旧二选一遗留显式值）
-    (function(){try{if(localStorage.getItem('donkeydrifter.ui.theme.v3')!=='1'){localStorage.removeItem('donkeydrifter.ui.theme');localStorage.setItem('donkeydrifter.ui.theme.v3','1')}var t=localStorage.getItem('donkeydrifter.ui.theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';var r=t;if(r==='system'){r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'}document.documentElement.dataset.theme=r}catch(e){}})();
+    // 首屏防闪烁：渲染前按系统深浅色（prefers-color-scheme）直接解析，不读任何存储；
+    // 因此每次进入/刷新都会重新跟随系统。matchMedia 不可用时回退深色。
+    (function(){try{var r=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';document.documentElement.dataset.theme=r}catch(e){}})();
     </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
@@ -1584,7 +1585,6 @@ MENU_HTML = r"""<!DOCTYPE html>
     <script>
         // ── i18n（与 DD/DC 同一套 data-i18n 模式与交互） ──
         const LANG_STORAGE_KEY = 'donkeydrifter.ui.lang';
-        const THEME_STORAGE_KEY = 'donkeydrifter.ui.theme';
 
         const I18N = {
             zh: {
@@ -1731,9 +1731,9 @@ MENU_HTML = r"""<!DOCTYPE html>
             setLanguage(uiLang === 'zh' ? 'en' : 'zh');
         }
 
-        // ── 主题：静音式单按钮，深/浅两态互切；未手动切换前跟随浏览器
+        // ── 主题：静音式单按钮，深/浅两态互切；默认跟随浏览器
         //    prefers-color-scheme（'system' 默认态经 matchMedia 实时解析并监听），
-        //    手动单击后持久化显式浅/深选择，不再跟随（与 DD web_ui 同语义） ──
+        //    手动单击只在当前页面视图内切换（仅内存，不持久化），每次进入/刷新重新跟随系统 ──
         function systemTheme() {
             try {
                 return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -1755,7 +1755,6 @@ MENU_HTML = r"""<!DOCTYPE html>
             renderThemeBtn();
         }
         function setTheme(mode) {
-            try { localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (e) {}
             applyTheme(mode);
         }
         function toggleTheme() {
@@ -1763,12 +1762,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             setTheme(effective === 'light' ? 'dark' : 'light');
         }
         function initTheme() {
-            var stored = 'system';
-            try {
-                var s = localStorage.getItem(THEME_STORAGE_KEY);
-                if (s === 'light' || s === 'dark' || s === 'system') stored = s;
-            } catch (e) {}
-            applyTheme(stored);
+            applyTheme('system');
             try {
                 var mq = window.matchMedia('(prefers-color-scheme: light)');
                 var onChange = function() { if (uiTheme === 'system') applyTheme('system'); };
