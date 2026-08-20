@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (101)
+
+- fix(trainer): 训练收尾保存 loss 元数据报 `'dict' object has no attribute 'history'`，改为按 dict 直接取值
+  - 根因：`donkeycar/parts/keras.py` 的 `train()` 返回 `history.history`（普通 dict），但 `pipeline/training.py` 保存 loss 元数据时仍按 `tf.keras.callbacks.History` 对象取 `history.history.get(...)`，触发 `AttributeError`；该段在 `try/except` 内仅打 error，模型训练本身与 `database.json`（直接存 dict）不受影响，只缺 `*_meta.json` 侧车文件。
+  - `donkeycar/pipeline/training.py`：`history.history.get('loss'/'val_loss', [])` 改为 `history.get('loss'/'val_loss', [])`。
+  - 验证：模块可正常导入，`dict.get` 逻辑输出正确（本机无 GPU，走 float32）。目标 2 的 41 轮训练已产出 `pilot_2`（best val_loss 0.1595）。
+  - 注：仅 donkeycar 库训练路径改动，不影响本机 Web UI，无需部署/OTA；Firmware 无改动。
+
 ## 2026-08-20 (100)
 
 - fix(launcher): KCW 入口注入 `?kimi_origin=<origin>`，钉住前端 API 基地址，修复任务执行时 getSessionSnapshot 报 "TypeError: Load failed"
