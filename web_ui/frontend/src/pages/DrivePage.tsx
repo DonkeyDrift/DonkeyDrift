@@ -310,7 +310,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             ) : (
               <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
             )}
-            <TelemetryChart telemetry={telemetry} active={active} overlay className="absolute inset-x-3 top-14 z-20" />
+            <TelemetryChart telemetry={telemetry} active={active} overlay className="absolute inset-x-3 bottom-3 z-20" />
           </div>
         </div>
 
