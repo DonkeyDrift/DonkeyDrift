@@ -45,7 +45,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
-      <header className="bg-zinc-900/50 backdrop-blur supports-[backdrop-filter]:bg-zinc-900/50 sticky top-0 z-50">
+      <header className="bg-zinc-950 sticky top-0 z-50">
         <div className="px-3">
           <div className="h-14 flex items-center">
             {/* 标题左侧 logo：样式对齐 Donkey 启动页（8090）headerLogo —— 32×32、rounded-lg(8px)、1px #2b3441 边框、与标题 gap 12px */}

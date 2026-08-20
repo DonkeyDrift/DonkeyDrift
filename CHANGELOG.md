@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-20 (88)
+
+- fix(layout): DonkeyDrifter 顶栏改为纯色背景，消除与内容区之间的半透明背景边界横线（Issue #234 后续）
+  - `web_ui/frontend/src/components/Layout.tsx`：`<header>` 去掉 `bg-zinc-900/50 backdrop-blur supports-[backdrop-filter]:bg-zinc-900/50`，改为 `bg-zinc-950`，与下方内容区同色，视觉上完全融合，不再有一条横向分界线。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
 ## 2026-08-20 (87)
 
 - fix(drive): 遥测曲线覆盖浮层由摄像头画面上方移到下方，贴着画面底部
