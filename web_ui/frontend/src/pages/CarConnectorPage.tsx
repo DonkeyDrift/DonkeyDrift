@@ -26,6 +26,7 @@ import { useDriveWebsocket } from '../hooks/useDriveWebsocket';
 import { useStore } from '../store/useStore';
 import { useTranslation } from '@/i18n';
 import { useNavigate } from 'react-router-dom';
+import { CarSettingsPanel } from '../components/CarSettingsPanel';
 
 type FormatOption = 'h5' | 'savedmodel' | 'tflite' | 'trt';
 
@@ -556,6 +557,7 @@ export const CarConnectorPage: React.FC = () => {
           </Card>
         </div>
       </div>
+      <CarSettingsPanel />
     </div>
   );
 };
