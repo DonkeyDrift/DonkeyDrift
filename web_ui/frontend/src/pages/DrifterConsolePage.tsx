@@ -54,7 +54,7 @@ export const DrifterConsolePage: React.FC = () => {
       try {
         const text = await consoleGetText(selectedIp, 'api/status');
         const m = text.match(/version=(\S+)/);
-        if (!cancelled) setVersion(m ? `v${m[1].replace(/^V/i, '')}` : '');
+        if (!cancelled) setVersion(m ? m[1].replace(/^V/i, '') : '');
       } catch {
         if (!cancelled) setVersion('');
       }
@@ -67,7 +67,7 @@ export const DrifterConsolePage: React.FC = () => {
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       {/* 极简工具条：选择车端 / 重扫 / 手动 IP。只负责“连到哪台车”，不喧宾夺主。 */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-900/50 px-4 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2">
         <SquareTerminal className="h-4 w-4 shrink-0 text-cyan-400" />
         <label htmlFor="console-device-select" className="sr-only">
           {t('console.selectDevice')}
@@ -102,7 +102,7 @@ export const DrifterConsolePage: React.FC = () => {
           {t('console.connect')}
         </Button>
         {version && (
-          <span className="ml-1 whitespace-nowrap font-mono text-xs text-zinc-400">{version}</span>
+          <span className="text-zinc-500 text-xs uppercase tracking-wider">v{version}</span>
         )}
       </div>
 

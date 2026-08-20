@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-20 (72)
+
+- fix(console): Drifter Console 连接条微调——「未发现设备」文案缩短、版本号样式对齐 DD 顶栏版本号、连接条与 iframe 视觉融合（Issue #234）
+  - `web_ui/frontend/src/i18n/messages/console.ts`：`console.noDevice` 中英两处缩短为「未发现设备」/「No device found」，去掉「请确认同一网络」半句。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：
+    - 工具条去掉 `border-b border-zinc-800 bg-zinc-900/50`，改为与下方 iframe 同底色、无分隔线。
+    - 版本号由 `font-mono text-xs text-zinc-400` 改为对齐顶栏 `VersionBadge` 的 `text-zinc-500 text-xs uppercase tracking-wider`，渲染为 `v{version}`（version 存纯版本号，去 V 前缀）。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
 ## 2026-08-20 (71)
 
 - fix(launcher): Kimi Code Web 入口 origin 由 mDNS 主机名优先回退为局域网 IP 优先，恢复被 mDNS 迁移孤立的置顶与「完全自主」权限偏好（Issue #168 后续）
