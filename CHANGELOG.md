@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (86)
+
+- fix(drive): 遥测曲线覆盖浮层由摄像头画面上方移到下方，贴着画面底部
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`TelemetryChart` 的 overlay 定位由 `absolute inset-x-3 top-14 z-20` 改为 `absolute inset-x-3 bottom-3 z-20`，曲线浮层贴到摄像头画面底部，避开顶部延迟/FPS 角标，视觉更贴合用户预期。
+  - 测试同步：`npm run build`（tsc + vite）通过，产物含 `bottom-3`、不含 `top-14`。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (85)
 
 - feat(launcher): Donkey 菜单与 Drifter Console 内嵌时经 iframe src 的 `?lang=` 跟随 DonkeyDrifter 语言——修复「DD 已切英文、内嵌 Donkey/DC 仍是中文」的跨源语言不同步问题
