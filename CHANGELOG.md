@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (80)
+
+- fix(drive): 虚拟摇杆把手英文改为横排两行（Virtual / Joystick），中文保持竖排（Issue #232 后续）
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`useTranslation` 增加 `lang`；把手文字按语言渲染——`lang === 'en'` 时去掉 `writing-mode:vertical-rl`，改为 `flex flex-col` 把 `drive.virtualJoystick` 按空格拆成两行横排（第一行 Virtual、第二行 Joystick），中文仍走竖排分支；注释同步更新为「中文竖排、英文横排两行」。
+  - 测试同步：前端 vitest 21 文件 114 项通过、`npm run check`（tsc）通过、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (79)
 
 - fix(layout): 去掉 DonkeyDrifter 顶栏与内容区之间的分隔横线（Issue #234 后续）
@@ -13,7 +20,6 @@
   - `web_ui/frontend/index.html`：首屏内联脚本同步改读 `sessionStorage`，旧 `localStorage` 残留不再影响首屏主题。
   - `web_ui/frontend/src/components/ThemeSwitcher.tsx`：注释更新为会话级持久化语义。
   - 测试同步：`ThemeSwitcher.test.tsx` 断言由 `localStorage` 改为 `sessionStorage`；`vitest` ThemeSwitcher 8 项通过、`npm run build`（tsc + vite）通过。
-  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (77)
 
