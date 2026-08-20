@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (99)
+
+- feat(donkeycar): 新增 `evaluate` 命令，量化评估模型 angle/throttle 预测质量并检查数据分布
+  - `donkeycar/management/base.py`：新增 `Evaluate(BaseCommand)`（`parse_args` / `_metrics` / `run`）并在 `commands` 注册 `'evaluate': Evaluate`。两种模式：传 `--model` 时用 `TubDataset` 读记录、`model.run(img)` 推理，对 angle/throttle 输出 `corr / mae / rmse / mean_err / count`；不传 `--model` 时输出 `user/angle`、`user/throttle` 的分布统计（mean/std/min/max，另给 angle 的 `abs_lt_0.05_ratio`）；`--out` 写 JSON。用于客观判断模型是否真正学到转向/油门信号（corr≈0 即退化为预测均值/多数类），并判断训练数据是否均衡。
+  - `donkeycar/tests/test_evaluate_command.py`：新增 4 项测试（`parse_args` 参数解析、`_metrics` 完美预测与常量标签无相关、无模型模式经 mock 跑数据统计并写 JSON），`pytest -q` 4 passed。
+  - 注：仅新增 CLI 命令，不影响本机 Web UI，无需部署/OTA。
+
 ## 2026-08-20 (98)
 
 - feat(drive): Drive 遥测曲线左右分栏（转向/姿态 vs 油门/加速度）+ 整屏放大，移除暂停/清空按钮
