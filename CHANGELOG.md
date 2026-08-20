@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-20 (86)
+
+- fix(layout): DD 顶栏左右内边距由 0 调整为 12px，logo/标题与 DEV 对齐到 DC 内容左缘
+  - `web_ui/frontend/src/components/Layout.tsx`：上一条 (83) 把顶栏内层容器改成全宽无内边距后过于贴边；本次改为 `px-3`（12px），与 Drifter Console 内嵌页 `body{margin:12px}` 的左侧最外框左缘对齐，右侧 DEV 同样 12px 贴右。
+  - 测试同步：前端 vitest 全量 21 文件 117 项通过、`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (85)
 
 - feat(launcher): Donkey 菜单与 Drifter Console 内嵌时经 iframe src 的 `?lang=` 跟随 DonkeyDrifter 语言——修复「DD 已切英文、内嵌 Donkey/DC 仍是中文」的跨源语言不同步问题
