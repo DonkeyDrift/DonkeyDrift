@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
-import { TelemetryChart } from '../components/drive/TelemetryChart';
+import { TelemetryChart, TelemetryLegend, CURVES } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
@@ -57,8 +57,23 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
   const [joystickOpen, setJoystickOpen] = useState(false);
+  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(
+    () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
+  );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
+
+  const toggleCurve = useCallback((key: string) => {
+    setVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   const { params, loadFromServer } = useDriveStore();
   const { configPath } = useStore();
@@ -303,15 +318,24 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线以半透明浮层覆盖在画面上方 */}
+          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线以半透明浮层覆盖在画面下方 */}
           <div className="relative flex-1 min-h-0 aspect-video lg:aspect-auto">
             {active ? (
               <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
             ) : (
               <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
             )}
-            <TelemetryChart telemetry={telemetry} active={active} overlay className="absolute inset-x-3 bottom-3 z-20" />
+            <TelemetryChart
+              telemetry={telemetry}
+              active={active}
+              overlay
+              visibleKeys={visibleKeys}
+              onToggleCurve={toggleCurve}
+              className="absolute inset-x-3 bottom-3 z-20"
+            />
           </div>
+          {/* 曲线显隐图例：放在视频画面外部（下方），不再遮挡画面 */}
+          <TelemetryLegend visibleKeys={visibleKeys} onToggle={toggleCurve} className="mt-3 shrink-0" />
         </div>
 
         {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}

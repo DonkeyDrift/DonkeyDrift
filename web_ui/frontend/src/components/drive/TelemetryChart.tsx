@@ -57,7 +57,7 @@ const curveColor = (c: CurveConfig, theme: ResolvedTheme): string =>
   theme === 'light' ? c.lightColor ?? c.color : c.color;
 
 /** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
-const CURVES: CurveConfig[] = [
+export const CURVES: CurveConfig[] = [
   { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1fae6b', key: 'throttle', defaultOn: true },
   { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0c9bd6', key: 'steering', defaultOn: true },
   { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', key: 'gz', defaultOn: true, scale: 0.2 },
@@ -72,14 +72,55 @@ const CURVES: CurveConfig[] = [
   { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', defaultOn: false },
 ];
 
+interface TelemetryLegendProps {
+  /** 当前显示的曲线 key 集合。 */
+  visibleKeys: Set<string>;
+  /** 切换某条曲线显隐。 */
+  onToggle: (key: string) => void;
+  className?: string;
+}
+
+/** 曲线显隐图例（复选框）。覆盖模式下由父组件放在视频画面外部渲染。 */
+export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({ visibleKeys, onToggle, className = '' }) => {
+  const { t } = useTranslation();
+  const theme = useResolvedTheme();
+  return (
+    <div className={cn('flex flex-wrap gap-x-3 gap-y-1', className)}>
+      {CURVES.map((c) => {
+        const on = visibleKeys.has(c.key as string);
+        const color = curveColor(c, theme);
+        return (
+          <label
+            key={c.key as string}
+            className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
+          >
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={() => onToggle(c.key as string)}
+              className="accent-[var(--curve-color)]"
+              style={{ ['--curve-color' as string]: color }}
+            />
+            <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+};
+
 interface TelemetryChartProps {
   /** 最新一帧遥测（由父组件通过 ref 持有，避免高频 setState）。 */
   telemetry: Telemetry | null;
   className?: string;
   /** 所在 section 是否可见：不可见时停掉 rAF 重绘与写入，避免滚走后空转（#178） */
   active?: boolean;
-  /** 覆盖模式：贴在视频画面上方的半透明浮层（默认隐藏曲线开关，全屏后仍可调） */
+  /** 覆盖模式：贴在视频画面下方的半透明浮层（曲线开关由父组件在画面外部渲染） */
   overlay?: boolean;
+  /** 受控：当前显示的曲线 key 集合；不传则组件内部自管（覆盖模式由父组件外部渲染图例时传入） */
+  visibleKeys?: Set<string>;
+  /** 受控：切换曲线显隐；不传则组件内部自管 */
+  onToggleCurve?: (key: string) => void;
 }
 
 /**
@@ -90,7 +131,14 @@ interface TelemetryChartProps {
  * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
  */
-export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '', active = true, overlay = false }) => {
+export const TelemetryChart: React.FC<TelemetryChartProps> = ({
+  telemetry,
+  className = '',
+  active = true,
+  overlay = false,
+  visibleKeys: controlledVisibleKeys,
+  onToggleCurve,
+}) => {
   const { t } = useTranslation();
   // canvas/图表配色不受皮肤 CSS 控制，订阅主题以重建 chart 配置
   const theme = useResolvedTheme();
@@ -103,9 +151,10 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
   const latestTelemetryRef = useRef<Telemetry | null>(null);
 
   const [paused, setPaused] = useState(false);
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(
+  const [internalVisibleKeys, setInternalVisibleKeys] = useState<Set<string>>(
     () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
+  const visibleKeys = controlledVisibleKeys ?? internalVisibleKeys;
   const [fullscreen, setFullscreen] = useState(false);
   // 用于触发 Line 重绘的版本号
   const [renderTick, setRenderTick] = useState(0);
@@ -170,7 +219,11 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
   }, []);
 
   const toggleCurve = useCallback((key: string) => {
-    setVisibleKeys((prev) => {
+    if (onToggleCurve) {
+      onToggleCurve(key);
+      return;
+    }
+    setInternalVisibleKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
@@ -179,7 +232,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       }
       return next;
     });
-  }, []);
+  }, [onToggleCurve]);
 
   const toggleFullscreen = useCallback(() => {
     setFullscreen((f) => !f);
@@ -292,28 +345,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : overlay ? 'h-28' : 'h-40')}>
         <Line data={chartData} options={chartOptions} />
       </div>
-      {(!overlay || fullscreen) && (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-          {CURVES.map((c) => {
-            const on = visibleKeys.has(c.key as string);
-            const color = curveColor(c, theme);
-            return (
-              <label
-                key={c.key as string}
-                className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
-              >
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => toggleCurve(c.key as string)}
-                  className="accent-[var(--curve-color)]"
-                  style={{ ['--curve-color' as string]: color }}
-                />
-                <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
-              </label>
-            );
-          })}
-        </div>
+      {!overlay && (
+        <TelemetryLegend visibleKeys={visibleKeys} onToggle={toggleCurve} className="mt-2" />
       )}
     </div>
   );
