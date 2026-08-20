@@ -256,12 +256,14 @@ class KerasCategorical(KerasPilot):
     into discreet angles and then uses categorical cross entropy to train the
     network to activate a single neuron for each steering and throttle
     choice. This can be interesting because we get the confidence value as a
-    distribution over all choices. This uses the dk.utils.linear_bin and
-    dk.utils.linear_unbin to transform continuous real numbers into a range
-    of discreet values for training and runtime. The input and output are
-    therefore bounded and must be chosen wisely to match the data. The
-    default ranges work for the default setup. But cars which go faster may
-    want to enable a higher throttle range. And cars with larger steering
+    distribution over all choices. Training uses dk.utils.linear_bin to
+    one-hot encode continuous targets; at runtime the softmax distribution is
+    decoded with dk.utils.linear_unbin_softmax (expected value over bins)
+    rather than argmax, so the output is continuous and preserves the model's
+    confidence instead of collapsing to a single discrete bin. The input and
+    output are therefore bounded and must be chosen wisely to match the data.
+    The default ranges work for the default setup. But cars which go faster
+    may want to enable a higher throttle range. And cars with larger steering
     throw may want more bins.
     """
     def __init__(self,
@@ -285,9 +287,10 @@ class KerasCategorical(KerasPilot):
     def interpreter_to_output(self, interpreter_out):
         angle_binned, throttle_binned = interpreter_out
         N = len(throttle_binned)
-        throttle = dk.utils.linear_unbin(throttle_binned, N=N,
-                                         offset=0.0, R=self.throttle_range)
-        angle = dk.utils.linear_unbin(angle_binned)
+        throttle = dk.utils.linear_unbin_softmax(throttle_binned, N=N,
+                                                 offset=0.0,
+                                                 R=self.throttle_range)
+        angle = dk.utils.linear_unbin_softmax(angle_binned)
         return angle, throttle
 
     def y_transform(self, record: Union[TubRecord, List[TubRecord]]) \

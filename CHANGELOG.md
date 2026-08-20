@@ -1,12 +1,21 @@
 # 变更日志
 
-## 2026-08-21 (101)
+## 2026-08-21 (102)
 
 - fix(drive): 车端在线但未推首帧时 MJPEG `/drive/video` 立即回占位帧，修复进入 Drive 页偶发一直卡「正在连接摄像头」、需很久才连上（Issue #221 补充修复）
   - 背景：后端 `_frame_generator` 在「无帧或车端离线」时只 `sleep(0.1)` 空转、不发送任何字节；浏览器 `<img src="/drive/video">` 收不到首帧，既不触发 `onLoad` 也不触发 `onError`，前端 `VideoStream` 的 `status` 永远停在 `loading`，于是「正在连接摄像头」长时间挂着；上一轮 5s 超时只能让它在「正在连接 / 未连接」之间空转，无法真正结束等待。
   - `web_ui/backend/routers/drive.py`：新增 `_make_placeholder_frame()`（Pillow 生成 640×360 深色「等待画面」占位 JPEG）+ 模块级 `_PLACEHOLDER_FRAME` 缓存 + `_multipart_part()` 分片构造辅助 + `PLACEHOLDER_FRAME_INTERVAL=0.5`；`_frame_generator` 改为「有真实帧且在线 → 推真实帧；离线 → 保持静默（前端走 /drive/stats 显示车端离线）；在线但无首帧 → 按 2fps 推占位帧让 `<img>` 立即 `onLoad`」。
   - 测试同步：`web_ui/backend/tests/test_drive.py` 新增 3 项（在线无帧推占位帧 / 在线有帧推真实帧 / 离线静默不推流），backend `pytest -q` 100 passed。
   - 注：仅 DD 后端改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-20 (101)
+
+- fix(donkeycar): KerasCategorical 运行时解码由 argmax 改为 softmax 期望值，避免恒输出直行/停车
+  - 背景：categorical 模型输出 15（angle）/20（throttle）类 softmax 分布，但 `KerasCategorical.interpreter_to_output` 之前用 `linear_unbin`（内部 `np.argmax`）解码，把概率分布坍缩成单一分箱、输出跳变；在本机模拟器数据（85% 直行）下 angle 恒预测直行、throttle 恒预测多数类，corr≈0。
+  - `donkeycar/utils.py`：新增 `linear_unbin_softmax(arr, N, offset, R)`——用概率加权平均求期望分箱索引再反缩放回连续值（one-hot 输入下与 `linear_unbin` 结果一致，向后兼容）。
+  - `donkeycar/parts/keras.py`：`KerasCategorical.interpreter_to_output` 的 angle/throttle 解码改调 `linear_unbin_softmax`；类 docstring 同步更新。`KerasBehavioral` 继承同一 `interpreter_to_output`，一并受益。
+  - 测试同步：`donkeycar/tests/test_util_data.py` 新增 `TestLinearUnbinSoftmax` 4 项（one-hot 等价 / 均匀分布取中心 / 偏斜分布加权平均 / throttle 期望值），`test_util_data.py` 23 passed；另以 `object.__new__` 轻量验证 `interpreter_to_output` 对 0.5/0.5 两分箱输出 0.0、均匀 throttle 输出 0.2375。
+  - 注：仅 donkeycar 库改动，不影响本机 Web UI，无需部署/OTA。
 
 ## 2026-08-20 (100)
 
