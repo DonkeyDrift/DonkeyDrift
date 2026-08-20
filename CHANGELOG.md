@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-20 (87)
+## 2026-08-20 (89)
 
 - fix(launcher): 7/11/12（Drifter Console / Kimi Code Web / DeepSeek Harness）仅在 DD 内嵌 Donkey 时置灰占位，单独打开 Donkey（:8090）恢复完整可点击入口
   - 背景：上一条 (84) 把 7/11/12 改为 `placeholder:true` 占位行，但 launcher 同一 `server.py` 同时服务 DD 内嵌 `/donkey` 与独立 Donkey 页（:8090），导致单独打开 Donkey 时 7/11/12 也被置灰；用户要求只改 DD 内嵌的 Donkey、单独 Donkey 页不受影响。
@@ -8,6 +8,19 @@
   - `web_ui/frontend/src/pages/DonkeyMenuPage.tsx`：iframe src 由 `${getDonkeyUrl()}?lang=${lang}` 改为 `${getDonkeyUrl()}?embedded=1&lang=${lang}`，标记 DD 内嵌模式。
   - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_menu_7_11_12_merged_into_dd_topbar` 重写为 `test_menu_7_11_12_embedded_only_placeholder`（断言 7/11/12 恢复完整 name、`ddTopbarOnly:true`、`readEmbedded`/`embedded=1`/`isEmbedded`、`isEmbedded && item.ddTopbarOnly`、`no===7/11/12` 动作分支恢复）；launcher 相关 139 passed、前端 vitest 21 文件 117 项、`tsc -b --noEmit` 全部通过。
   - 注：仅 DD/launcher 改动，Firmware 无改动、无需 OTA。
+
+## 2026-08-20 (88)
+
+- fix(layout): DonkeyDrifter 顶栏改为纯色背景，消除与内容区之间的半透明背景边界横线（Issue #234 后续）
+  - `web_ui/frontend/src/components/Layout.tsx`：`<header>` 去掉 `bg-zinc-900/50 backdrop-blur supports-[backdrop-filter]:bg-zinc-900/50`，改为 `bg-zinc-950`，与下方内容区同色，视觉上完全融合，不再有一条横向分界线。
+  - 测试同步：前端 `npm run build`（tsc + vite）通过。
+
+## 2026-08-20 (87)
+
+- fix(drive): 遥测曲线覆盖浮层由摄像头画面上方移到下方，贴着画面底部
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`TelemetryChart` 的 overlay 定位由 `absolute inset-x-3 top-14 z-20` 改为 `absolute inset-x-3 bottom-3 z-20`，曲线浮层贴到摄像头画面底部，避开顶部延迟/FPS 角标，视觉更贴合用户预期。
+  - 测试同步：`npm run build`（tsc + vite）通过，产物含 `bottom-3`、不含 `top-14`。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-08-20 (86)
 
