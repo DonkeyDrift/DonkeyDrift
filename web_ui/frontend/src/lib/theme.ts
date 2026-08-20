@@ -16,7 +16,7 @@ const THEME_CHANGE_EVENT = 'donkeydrifter:theme-changed';
 /** 读取持久化主题选择;无存储或存储值非法时默认跟随系统('system'),用户显式选择浅色/深色后以其为准。 */
 export const readStoredTheme = (): ThemeMode => {
   try {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const stored = window.sessionStorage.getItem(THEME_STORAGE_KEY);
     if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
     return 'system';
   } catch {
@@ -84,9 +84,9 @@ export const applyTheme = (mode: ThemeMode): ResolvedTheme => {
 /** 持久化用户选择并立即生效。 */
 export const setTheme = (mode: ThemeMode): void => {
   try {
-    window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+    window.sessionStorage.setItem(THEME_STORAGE_KEY, mode);
   } catch {
-    /* localStorage 不可用时仅保留内存中的选择 */
+    /* sessionStorage 不可用时仅保留内存中的选择 */
   }
   applyTheme(mode);
 };
