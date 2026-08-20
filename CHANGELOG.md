@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-20 (84)
+
+- feat(launcher): Donkey 菜单 7/11/12 号（Drifter Console / Kimi Code Web / DeepSeek Harness）并入 DonkeyDrifter 顶栏，改为置灰占位行且序号不递补
+  - 背景：Donkey（launcher，8090 菜单页）里的 7/11/12 号入口与 DonkeyDrifter 顶栏标签页里的高级入口重复——DC / KCW / DSH 三个入口在顶栏已经能进，Donkey 菜单内保留即冗余；用户要求删除后序号空出、不递补。
+  - `donkeycar/launcher/server.py`（MENU_HTML 内嵌前端）：`menuItems` 的 7/11/12 号改为 `placeholder:true`（`name:"—"`、`cat:null`、`descZh/descEn` 标注「已并入 DonkeyDrifter 顶栏」、无常用标）；`renderMenu()` 新增占位行渲染分支（不渲染分类 pill、不渲染常用标、不可点击）；`selectItem()` 增加 `if (item.placeholder)` 守卫（点击仅轻提示已并入顶栏）并移除 `no===7/11/12` 三个动作分支；新增 `.menuItem.placeholder` 深/浅色样式；帮助文案三处（HTML + i18n zh + i18n en）同步「7、11、12 已并入 DonkeyDrifter 顶栏」。
+  - 刻意保留 `openDrifterConsole`/`launchKimiCodeWeb`/`launchDshWeb` 函数定义与后端 `/api/launch/*` 端点（DD 后端仍会转发 KCW/DSH 到这些端点）。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 把 `test_menu_6_renamed_and_dc_moved_to_7` 重写为 `test_menu_7_11_12_merged_into_dd_topbar`（断言 placeholder 标记、双语「已并入…」、`no === 7/11/12` 不再出现、`no:8`/`no:12` 仍在）；launcher 相关测试共 138 passed。
+  - 注：本次改动位于 launcher 共享源，`donkeycar/launcher/server.py` 同时服务「独立 Donkey 页（8090）」与 DD 内嵌 `/donkey`（iframe 到同一 launcher），两处页面一起生效，无法只改其中一边。Firmware 无改动、无需 OTA。
+
 ## 2026-08-20 (83)
 
 - fix(layout): DD 顶栏 logo/标题贴左、右侧控件（含 DEV）贴右，与 Donkey 页左侧菜单左缘对齐
