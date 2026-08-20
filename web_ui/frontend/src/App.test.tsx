@@ -168,3 +168,29 @@ describe('TubManager keep-alive navigation (#135 round 3)', () => {
     expect(loadTub).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('full-bleed iframe routes hide DD chrome', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(loadTub).mockResolvedValue(sampleTub);
+    resetStore();
+  });
+
+  it('hides SidePanel and FabActions on /donkey so the embedded launcher UI is unobstructed', async () => {
+    const { container } = render(<App />);
+    // 默认路由下 DD 侧面板与 FAB 都在
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="side-panel"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="fab-actions"]')).not.toBeNull();
+    });
+
+    act(() => {
+      window.location.hash = '#/donkey';
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="side-panel"]')).toBeNull();
+      expect(container.querySelector('[data-testid="fab-actions"]')).toBeNull();
+    });
+  });
+});
