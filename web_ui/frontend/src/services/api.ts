@@ -542,17 +542,6 @@ export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKim
   return response.data as LaunchKimiCodeWebResult;
 };
 
-export const launchClaudeCode = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
-  // 同 launchKimiCodeWeb：Claude Code 无官方 web UI，经后端转发到 launcher 的
-  // /api/launch/claude-code，返回 launcher 自带网页终端的 URL（/terminal?cmd=claude），
-  // 前端在新标签页打开该终端即自动执行 claude；端点毫秒级返回，无需长超时。
-  const response = await api.post('/launch/claude-code', {}, {
-    signal,
-    validateStatus: () => true,
-  });
-  return response.data as LaunchKimiCodeWebResult;
-};
-
 export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
   // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
   // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。

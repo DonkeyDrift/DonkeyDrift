@@ -28,7 +28,6 @@ def test_main_registers_launch_router():
     routes = collect_route_paths(main.app.routes)
     assert "/api/launch/kimi-code-web" in routes
     assert "/api/launch/dsh" in routes
-    assert "/api/launch/claude-code" in routes
 
 
 def test_post_to_launcher_posts_body_and_preserves_timeout(monkeypatch):
@@ -39,7 +38,7 @@ def test_post_to_launcher_posts_body_and_preserves_timeout(monkeypatch):
         status = 200
 
         def read(self):
-            return b'{"status":"ok","url":"http://x/terminal?cmd=claude"}'
+            return b'{"status":"ok","url":"http://x:8081/"}'
 
         def __enter__(self):
             return self
@@ -56,11 +55,11 @@ def test_post_to_launcher_posts_body_and_preserves_timeout(monkeypatch):
 
     monkeypatch.setattr(launch.urllib.request, "urlopen", fake_urlopen)
 
-    status, payload = launch._post_to_launcher("/api/launch/claude-code", b"{}")
+    status, payload = launch._post_to_launcher("/api/launch/kimi-code-web", b"{}")
 
     assert status == 200
-    assert payload == b'{"status":"ok","url":"http://x/terminal?cmd=claude"}'
-    assert captured["url"] == launch.LAUNCHER_BASE_URL + "/api/launch/claude-code"
+    assert payload == b'{"status":"ok","url":"http://x:8081/"}'
+    assert captured["url"] == launch.LAUNCHER_BASE_URL + "/api/launch/kimi-code-web"
     assert captured["method"] == "POST"
     assert captured["body"] == b"{}"
     assert captured["timeout"] == launch.FORWARD_TIMEOUT_S
@@ -77,12 +76,12 @@ def test_post_to_launcher_passthrough_launcher_business_error(monkeypatch):
 
     monkeypatch.setattr(launch.urllib.request, "urlopen", fake_urlopen)
 
-    status, payload = launch._post_to_launcher("/api/launch/claude-code", b"{}")
+    status, payload = launch._post_to_launcher("/api/launch/dsh", b"{}")
     assert status == 500
     assert payload == b'{"status":"error","error":"boom"}'
 
 
-def test_forward_launch_claude_code_returns_launcher_json(monkeypatch):
+def test_forward_launch_kimi_code_web_returns_launcher_json(monkeypatch):
     launch = importlib.import_module("routers.launch")
     captured = {}
 
@@ -90,18 +89,17 @@ def test_forward_launch_claude_code_returns_launcher_json(monkeypatch):
         captured["path"] = path
         captured["body"] = body
         return 200, json.dumps(
-            {"status": "ok",
-             "url": "http://localhost:8090/terminal?cmd=claude"}).encode()
+            {"status": "ok", "url": "http://localhost:8081/"}).encode()
 
     monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
 
-    resp = asyncio.run(launch.launch_claude_code(_FakeRequest()))
+    resp = asyncio.run(launch.launch_kimi_code_web(_FakeRequest()))
 
-    assert captured["path"] == "/api/launch/claude-code"
+    assert captured["path"] == "/api/launch/kimi-code-web"
     assert captured["body"] == b"{}"
     assert resp.status_code == 200
     assert json.loads(resp.body) == {
-        "status": "ok", "url": "http://localhost:8090/terminal?cmd=claude"}
+        "status": "ok", "url": "http://localhost:8081/"}
 
 
 def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
@@ -112,7 +110,7 @@ def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
 
     monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
 
-    resp = asyncio.run(launch.launch_claude_code(_FakeRequest()))
+    resp = asyncio.run(launch.launch_dsh(_FakeRequest()))
 
     assert resp.status_code == 502
     assert json.loads(resp.body)["status"] == "error"
@@ -124,7 +122,7 @@ def test_forward_launch_non_json_response_returns_502(monkeypatch):
     monkeypatch.setattr(
         launch, "_post_to_launcher", lambda path, body: (200, b"not-json"))
 
-    resp = asyncio.run(launch.launch_claude_code(_FakeRequest()))
+    resp = asyncio.run(launch.launch_kimi_code_web(_FakeRequest()))
 
     assert resp.status_code == 502
     assert json.loads(resp.body)["error"] == "launcher 返回了非 JSON 响应"

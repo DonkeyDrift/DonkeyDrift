@@ -1,5 +1,24 @@
 # 变更日志
 
+
+
+## 2026-08-21 (146)
+
+- fix(frontend): 移除 DD 标签栏「C Code」入口按钮及其全部配套代码（后端路由 / launcher 端点 / 前端组件 / i18n / 测试），恢复为 Kimi Code Web + DeepSeek Harness 两个弱化入口
+  - 背景：C Code 入口（条目 (137) / PR #337 引入）经实际使用后用户决定移除；Claude Code 无官方 web UI，复用 launcher 网页终端的方案体验不佳，遂删除。
+  - `donkeycar/launcher/server.py`：删除 `POST /api/launch/claude-code` 端点分发与 `_handle_launch_claude_code()` 方法（返回网页终端 URL 的实现）；清理仅 claude-code 使用的 `import shlex`、`from urllib.parse import quote`、`from donkeycar.launcher.kimi_web import _entry_host`（`_KIMI_WEB_CORS_HEADERS` 保留——kimi/dsh 仍在用）。
+  - `web_ui/backend/routers/launch.py`：删除 `POST /claude-code` 转发路由与 `launch_claude_code` 函数；docstring 改回只描述 kimi-code-web / dsh 两个端点。
+  - `web_ui/frontend/src/services/api.ts`：删除 `launchClaudeCode` 函数。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：删除 `CCodeEntryLink` 组件；lucide import 去掉 `Terminal`；api import 去掉 `launchClaudeCode`。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航与移动菜单两处删除 `<CCodeEntryLink />` 及 import；注释去掉「C Code」。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：zh + en 各删除 `cCode` 5 键（`cCode` / `cCodeTitle` / `cCodeStarting` / `cCodeFailed` / `cCodeNetworkError`）。
+  - `web_ui/frontend/src/components/EnterButtons.test.tsx`：删除 `describe('CCodeEntryLink')` 测试块及相关 mock（`launchClaudeCode` / `mockLaunchCCode`）；import 去掉 `CCodeEntryLink`。
+  - 删除文件 `tests/test_launcher_claude_code.py`（claude-code 端点专属测试，端点已移除）。
+  - `web_ui/backend/tests/test_launch.py`：保留文件（仍覆盖 kimi / dsh 转发），删除 claude-code 用例、路由注册断言改回两条（kimi-code-web / dsh）。
+  - 测试同步：`pytest web_ui/backend/tests/test_launch.py tests/test_launcher_kimi_web.py tests/test_launcher_dsh_web.py -q` → 108 passed；`npx vitest run src/components/EnterButtons.test.tsx` → 8 passed；`npx tsc --noEmit` 通过。
+  - 注：配套固件侧 DC 头部 C Code 按钮移除在 Firmware 仓库 v1.8.32；收尾后部署 DD 到 8000 + OTA 刷车验证。
+
+
 ## 2026-08-21 (145)
 
 - fix(layout): DD 左上角 logo 与 Drifter Console 图标同尺寸（box-sizing 改 content-box，总 34px）
@@ -8,6 +27,7 @@
   - `web_ui/frontend/src/components/Layout.tsx`：注释同步更新为「32px 内容 + 1px 边框外凸（content-box，总 34px）」。
   - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 22 文件 126 项全绿。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 
 ## 2026-08-21 (144)
 
@@ -48,6 +68,7 @@
   - 本机配置：`/etc/avahi/avahi-daemon.conf` 删除无效键，`[server] use-ipv6=no` + `[publish] publish-aaaa-on-ipv4=no`；重启后 daemon active，实测 `tony007.local` 只解析出 A（192.168.3.62）、AAAA 全无；launcher 入口恢复 `http://tony007.local:58640/`（A-only，无 IPv6 黑洞，origin 稳定）。
   - 测试同步：TestAvahiIpv6Entry 重写为双键语义（都关→False；只关其一→True；默认→True；注释忽略→True；`publish-addresses=no`→False；文件缺失→True）；kimi 测试文件 66 passed、launcher 回归 170 passed。
   - 注：仅 launcher 后端改动，Firmware 无改动、无需 OTA；已 ff 部署 worktree 并重启 donkeydrifter-launcher 生效。
+
 ## 2026-08-21 (140)
 
 - fix(launcher): DeepSeek Harness 改用固定专属端口 58641 + 跨 launcher 重启复用，根治「置顶（手动排序）/当前会话/草稿丢失」

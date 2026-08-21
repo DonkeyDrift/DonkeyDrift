@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FlaskConical, Menu, Sparkles, SquareTerminal, Terminal } from 'lucide-react';
+import { FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { launchClaudeCode, launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb } from '@/services/api';
 
-// 启动 launcher 侧服务（kimi / claude-code / dsh）并在新标签页打开目标 URL：
+// 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
 const useLauncherEntry = (
   launch: (signal: AbortSignal) => Promise<{ status: string; url?: string; error?: string }>,
@@ -110,29 +110,6 @@ export const KimiCodeWebEntryLink: React.FC = () => {
     >
       <Sparkles className="w-3.5 h-3.5 shrink-0" />
       {launching ? t('common.enterButtons.kimiCodeWebStarting') : t('common.enterButtons.kimiCodeWeb')}
-    </button>
-  );
-};
-
-export const CCodeEntryLink: React.FC = () => {
-  const { t } = useTranslation();
-  // claude-code 端点只返回网页终端 URL、毫秒级响应，10s 超时足够
-  const { launching, enter } = useLauncherEntry(launchClaudeCode, {
-    startingKey: 'common.enterButtons.cCodeStarting',
-    failedKey: 'common.enterButtons.cCodeFailed',
-    networkKey: 'common.enterButtons.cCodeNetworkError',
-    timeoutMs: 10000,
-  });
-  return (
-    <button
-      type="button"
-      onClick={enter}
-      disabled={launching}
-      title={t('common.enterButtons.cCodeTitle')}
-      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
-    >
-      <Terminal className="w-3.5 h-3.5 shrink-0" />
-      {launching ? t('common.enterButtons.cCodeStarting') : t('common.enterButtons.cCode')}
     </button>
   );
 };
