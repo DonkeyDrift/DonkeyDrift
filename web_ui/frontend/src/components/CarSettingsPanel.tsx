@@ -9,8 +9,10 @@ import { useTranslation } from '@/i18n';
 /**
  * 车辆设置（Issue #234 后续）：把车端 Drifter Console 里的设置类功能（Wi-Fi 配网、
  * OTA、开发模式、漂移设置、Judge、摇杆校准等）用 iframe 1:1 嵌入 Car Connector 页面。
- * 与 /console 的 Drifter Console 一样，直接加载车端根路径 `http://<ip>/?embedded=1`，
- * 设置 UI 与车端 Web Console 完全一致；DonkeyDrifter 的 /console 入口保持不变。
+ * 与 /console 的 Drifter Console 一样，加载车端根路径，但用 `?embedded=1&settings=1`
+ * 只呈现车端 DC 的「设置」视图（配网 / OTA / 开发模式 / 漂移 / Judge / 摇杆校准），
+ * 不显示 Mode/Park/Drift/电池等状态卡；设置 UI 与车端 Web Console 完全一致，
+ * DonkeyDrifter 的 /console 入口保持不变。
  */
 export const CarSettingsPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -72,7 +74,7 @@ export const CarSettingsPanel: React.FC = () => {
         {selectedIp ? (
           <div className="min-h-[60vh]">
             <iframe
-              src={`http://${selectedIp}/?embedded=1`}
+              src={`http://${selectedIp}/?embedded=1&settings=1`}
               title={t('connector.carSettingsTitle')}
               className="h-[60vh] w-full rounded-md border-0 bg-zinc-950"
             />

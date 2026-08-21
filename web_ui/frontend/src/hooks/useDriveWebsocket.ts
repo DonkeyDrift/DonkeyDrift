@@ -111,15 +111,24 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'car_connection') {
-            setCarState((prev) => ({ ...prev, online: !!msg.online }));
+            setCarState((prev) => {
+              const online = !!msg.online;
+              if (online === prev.online) return prev;
+              return { ...prev, online };
+            });
           }
           if (msg.type === 'car_state') {
-            setCarState((prev) => ({
-              ...prev,
-              driveMode: msg.drive_mode ?? prev.driveMode,
-              recording: !!msg.recording,
-              numRecords: Number(msg.num_records) || 0,
-            }));
+            setCarState((prev) => {
+              const driveMode = msg.drive_mode ?? prev.driveMode;
+              const recording = !!msg.recording;
+              const numRecords = Number(msg.num_records) || 0;
+              // 控制循环 60Hz 会让后端原样回广播 car_state；值未变时返回原引用，
+              // 让 React 跳过重渲染，避免 60Hz 重渲染整个 DrivePage（#135 第八轮）。
+              if (driveMode === prev.driveMode && recording === prev.recording && numRecords === prev.numRecords) {
+                return prev;
+              }
+              return { ...prev, driveMode, recording, numRecords };
+            });
           }
           if (msg.type === 'webrtc_signal') {
             onWebRtcSignal?.(msg as WebRtcSignal);

@@ -15,6 +15,7 @@ import { InputSourceSelector, InputSource } from '../components/drive/InputSourc
 import { ModelSelector } from '../components/drive/ModelSelector';
 import { useDriveStore } from '../store/useDriveStore';
 import { useStore } from '../store/useStore';
+import { useTelemetryStore } from '../store/useTelemetryStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
@@ -31,12 +32,30 @@ type DrivePageProps = {
 export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
   const { t, lang } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
-  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const clientIdRef = useRef(createDriveClientId());
+  // 100Hz 遥测走旁路 feed，不落本组件 state（#135 第八轮）：只把 rc_mode/rc_park
+  // 这类低频字段在“值变化”时落一次 state，供驾驶模式跟随与 Park 锁定徽标使用。
+  const lastRcModeRef = useRef<number | null>(null);
+  const lastRcParkRef = useRef<number | null>(null);
+  const [rcMode, setRcMode] = useState<number | null>(null);
+  const [rcPark, setRcPark] = useState<number | null>(null);
+
+  const handleTelemetry = useCallback((t: Telemetry) => {
+    useTelemetryStore.getState().push(t);
+    if (typeof t.rc_mode === 'number' && t.rc_mode !== lastRcModeRef.current) {
+      lastRcModeRef.current = t.rc_mode;
+      setRcMode(t.rc_mode);
+    }
+    if (typeof t.rc_park === 'number' && t.rc_park !== lastRcParkRef.current) {
+      lastRcParkRef.current = t.rc_park;
+      setRcPark(t.rc_park);
+    }
+  }, []);
+
   const { connected, carState, send } = useDriveWebsocket({
     enabled: active,
     onWebRtcSignal: setWebRtcSignal,
-    onTelemetry: setTelemetry,
+    onTelemetry: handleTelemetry,
     clientId: clientIdRef.current,
   });
 
@@ -61,10 +80,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [fullscreen, setFullscreen] = useState(false);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
-    () => new Set(curvesByGroup('steering').map((c) => c.key as string)),
+    () => new Set(curvesByGroup('steering').filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
   const [throttleVisibleKeys, setThrottleVisibleKeys] = useState<Set<string>>(
-    () => new Set(curvesByGroup('throttle').map((c) => c.key as string)),
+    () => new Set(curvesByGroup('throttle').filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
@@ -238,13 +257,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   // 车端真实模式（ESP32 rc_mode）变化时，选择器跟随（遥控器/DC 端切换）。
   // 仅接受 0/1/2；无遥测时由上面的 carState.driveMode 兜底。
   useEffect(() => {
-    if (typeof telemetry?.rc_mode === 'number') {
-      const rcMode = telemetry.rc_mode;
-      if (rcMode === 0 || rcMode === 1 || rcMode === 2) {
-        setMode(rcModeToDriveMode(rcMode));
-      }
+    if (rcMode === 0 || rcMode === 1 || rcMode === 2) {
+      setMode(rcModeToDriveMode(rcMode));
     }
-  }, [telemetry?.rc_mode]);
+  }, [rcMode]);
 
   const handleModeChange = useCallback((newMode: DriveMode) => {
     setMode(newMode);
@@ -311,10 +327,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
             {/* 左：Park 状态 + 驾驶模式 + 模型 */}
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-              {telemetry?.rc_park === 1 && (
+              {rcPark === 1 && (
                 <span
                   className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
-                  data-rc-park={telemetry.rc_park}
+                  data-rc-park={rcPark}
                 >
                   {t('drive.parkLocked')}
                 </span>
@@ -365,7 +381,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             )}
             <div className="absolute inset-x-3 bottom-3 z-20 grid grid-cols-1 md:grid-cols-2 gap-3">
               <TelemetryChart
-                telemetry={telemetry}
                 active={active}
                 overlay
                 title="driveViz.chartTitleSteering"
@@ -375,7 +390,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                 chartHeightClassName={fullscreen ? 'h-44' : undefined}
               />
               <TelemetryChart
-                telemetry={telemetry}
                 active={active}
                 overlay
                 title="driveViz.chartTitleThrottle"

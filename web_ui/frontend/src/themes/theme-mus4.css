@@ -650,4 +650,8 @@ html.theme-mus4 .console-mute-btn[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px #5cc8ff;
   color: #5cc8ff;
 }
+/* 标题左侧 logo 边框：对齐 Drifter Console headerLogo 深色主题 #2b3441 */
+html.theme-mus4 .header-logo {
+  border-color: #2b3441;
+}
 

@@ -9,9 +9,10 @@ import {
   Legend,
   Tooltip,
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import type { Chart, ChartDataset, ChartOptions } from 'chart.js';
 import { cn } from '../../lib/utils';
 import type { Telemetry } from '../../hooks/useDriveWebsocket';
+import { useTelemetryStore } from '../../store/useTelemetryStore';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
 
@@ -25,12 +26,14 @@ ChartJS.register(
   Tooltip,
 );
 
-/** 环形缓冲长度，与固件 WebConsole 对齐（约 2.6 秒 @100Hz）。 */
-const BUFFER_SIZE = 256;
+/** 环形缓冲长度（约 1.3 秒 @100Hz）。100Hz 遥测下曲线点数越少，重绘越便宜，
+ *  while 仍足以呈现转向/油门的实时趋势；#135 第八轮实测 chart.js 重绘是卡顿主因，
+ *  更小的缓冲配合 update('none') 可把每次重绘压到亚毫秒级。 */
+const BUFFER_SIZE = 128;
 
-/** chart.js 重绘节流间隔（~10fps）。改成「有新遥测帧才重绘 + 10fps 节流」，
- *  彻底消除空闲时的 60fps 空转长任务（#135 切换标签页卡顿主因之一）。 */
-const CHART_REDRAW_INTERVAL_MS = 100;
+/** chart.js 重绘节流间隔（~5fps）。遥测 100Hz，两张图若每帧全量 update 会占满主线程
+ *  （#135：点 Donkey/Drift Console 无响应）。5fps 足够看趋势，同时给路由切换留空闲。 */
+const CHART_REDRAW_INTERVAL_MS = 200;
 
 /** 曲线分组：左右分栏各管一组——转向/姿态 vs 油门/加速度。 */
 export type CurveGroup = 'steering' | 'throttle';
@@ -127,8 +130,6 @@ export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
 };
 
 interface TelemetryChartProps {
-  /** 最新一帧遥测（由父组件通过 ref 持有，避免高频 setState）。 */
-  telemetry: Telemetry | null;
   className?: string;
   /** 所在 section 是否可见：不可见时停掉重绘与写入，避免滚走后空转（#178） */
   active?: boolean;
@@ -148,14 +149,18 @@ interface TelemetryChartProps {
 
 /**
  * 实时遥测曲线图，移植自固件 Drifter Console。
- * - 256 点环形缓冲；有新遥测帧才写入，并按 ~10fps 节流触发 chart.js 重绘，
- *   避免 100Hz 全量 setState，也避免空闲时 60fps 空转（#135 切换标签页卡顿）
+ *
+ * 性能关键（#135 第八轮）：不再用 react-chartjs-2 的 <Line>，因为后者每次 data 变化都会
+ * 重设 chart.options，触发 chart.js 的 _configure + Proxy 全量解析，100Hz 遥测下持续占满
+ * 主线程。这里改用原生 Chart.js 持有实例，重绘时直接改写 dataset 数据数组并调用
+ * chart.update('none')（跳过动画/布局/配置解析），使每次重绘降至亚毫秒级。
+ *
+ * - 128 点环形缓冲；有新遥测帧才写入，并按 ~5fps 节流触发重绘
  * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
  * - 暂停/清空/全屏等操作已移除：全屏由父组件统一管理整块画面（视频 + 曲线）
  */
-export const TelemetryChart: React.FC<TelemetryChartProps> = ({
-  telemetry,
+export const TelemetryChart = React.memo(function TelemetryChart({
   className = '',
   active = true,
   overlay = false,
@@ -164,64 +169,167 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   title,
   group,
   chartHeightClassName,
-}) => {
+}: TelemetryChartProps) {
   const { t } = useTranslation();
-  // canvas/图表配色不受皮肤 CSS 控制，订阅主题以重建 chart 配置
   const theme = useResolvedTheme();
   // 本实例管理的曲线子集
   const curves = useMemo(() => (group ? curvesByGroup(group) : CURVES), [group]);
-  // 各曲线的环形缓冲：number[] 长度恒为 BUFFER_SIZE，未填满处为 NaN
+  // 各曲线的环形缓冲与显示缓冲：恒为 BUFFER_SIZE 的 number[]，未填满处为 NaN
   const buffersRef = useRef<Record<string, number[]>>({});
+  const displayRef = useRef<Record<string, number[]>>({});
   const writeIndexRef = useRef(0);
   const filledRef = useRef(0);
   const lastRenderAtRef = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartRef = useRef<Chart<'line'> | null>(null);
+  // 当前 chart 内 dataset 对应的曲线（按 dataset 顺序），供 redraw 按索引定位缓冲。
+  const activeCurvesRef = useRef<CurveConfig[]>([]);
 
   const [internalVisibleKeys, setInternalVisibleKeys] = useState<Set<string>>(
     () => new Set(curves.filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
   const visibleKeys = controlledVisibleKeys ?? internalVisibleKeys;
-  // 用于触发 Line 重绘的版本号
-  const [renderTick, setRenderTick] = useState(0);
   const [hasData, setHasData] = useState(false);
 
-  // 初始化缓冲
+  // 初始化环形/显示缓冲（仅一次）
   if (Object.keys(buffersRef.current).length === 0) {
     for (const c of curves) {
       buffersRef.current[c.key as string] = new Array(BUFFER_SIZE).fill(NaN);
+      displayRef.current[c.key as string] = new Array(BUFFER_SIZE).fill(NaN);
     }
   }
 
-  // 收到新遥测帧：写入环形缓冲
-  useEffect(() => {
-    if (!telemetry || !active) return;
+  const chartOptions = useMemo<ChartOptions<'line'>>(
+    () => ({
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      normalized: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        title: { display: false },
+      },
+      scales: {
+        x: { display: false },
+        y: {
+          min: -1,
+          max: 1,
+          grid: { color: theme === 'light' ? '#dbe2ea' : 'rgba(255,255,255,0.06)' },
+          ticks: { color: theme === 'light' ? '#5b6b7d' : '#8fa1b5', font: { size: 10 } },
+        },
+      },
+    }),
+    [theme],
+  );
 
+  // 把环形缓冲按“最旧→最新”顺序展开到显示缓冲（当前 active 曲线）。数据集持有同一数组引用，
+  // 重绘与“勾选新曲线”时都调用它，保证新开启的曲线立刻带上已有历史。
+  const syncDisplay = useCallback(() => {
     const buffers = buffersRef.current;
-    const idx = writeIndexRef.current;
-    let wroteAny = false;
-    for (const c of curves) {
-      const val = telemetry[c.key];
+    const display = displayRef.current;
+    const writeIdx = writeIndexRef.current;
+    const filled = filledRef.current;
+    const activeCurves = activeCurvesRef.current;
+    for (const c of activeCurves) {
       const buf = buffers[c.key as string];
-      if (typeof val === 'number' && Number.isFinite(val)) {
-        buf[idx] = val * (c.scale ?? 1);
-        wroteAny = true;
+      const out = display[c.key as string];
+      if (filled < BUFFER_SIZE) {
+        for (let i = 0; i < BUFFER_SIZE; i++) out[i] = i < filled ? buf[i] : NaN;
       } else {
-        // 缺失字段不写入，该位置保持 NaN（曲线在此处断开）
-        buf[idx] = NaN;
+        for (let i = 0; i < BUFFER_SIZE; i++) out[i] = buf[(writeIdx + i) % BUFFER_SIZE];
       }
     }
-    if (wroteAny) {
+  }, []);
+
+  // 创建/重建 chart 实例：仅当曲线集合、显隐、主题变化时重建（用户操作，低频）。
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const activeCurves = curves.filter((c) => visibleKeys.has(c.key as string));
+    activeCurvesRef.current = activeCurves;
+    const labels = Array.from({ length: BUFFER_SIZE }, (_, i) => i);
+    const datasets: ChartDataset<'line', number[]>[] = activeCurves.map((c) => {
+      const color = curveColor(c, theme);
+      return {
+        label: t(c.labelKey),
+        data: displayRef.current[c.key as string],
+        borderColor: color,
+        backgroundColor: color,
+        pointRadius: 0,
+        borderWidth: 1.5,
+        spanGaps: false, // NaN 处断开曲线
+        tension: 0,
+        parsing: false,
+        normalized: true,
+      };
+    });
+
+    chartRef.current?.destroy();
+    chartRef.current = new ChartJS(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: chartOptions,
+    });
+    // 新开启的曲线立刻填充已有历史（例如测试里勾选隐藏曲线后无需等下一帧）。
+    syncDisplay();
+
+    return () => {
+      chartRef.current?.destroy();
+      chartRef.current = null;
+    };
+  }, [curves, visibleKeys, theme, chartOptions, t, syncDisplay]);
+
+  // 从旁路遥测 feed 订阅新帧并写入环形缓冲；重绘直接改写 chart dataset，不再触发 React 渲染。
+  useEffect(() => {
+    if (!active) return;
+
+    const redraw = () => {
+      const chart = chartRef.current;
+      if (!chart) return;
+      syncDisplay();
+      chart.update('none');
+    };
+
+    const writeFrame = (frame: Telemetry) => {
+      const buffers = buffersRef.current;
+      const idx = writeIndexRef.current;
+      let wroteAny = false;
+      for (const c of curves) {
+        const val = frame[c.key];
+        const buf = buffers[c.key as string];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          buf[idx] = val * (c.scale ?? 1);
+          wroteAny = true;
+        } else {
+          // 缺失字段不写入，该位置保持 NaN（曲线在此处断开）
+          buf[idx] = NaN;
+        }
+      }
+      if (!wroteAny) return;
       writeIndexRef.current = (idx + 1) % BUFFER_SIZE;
       filledRef.current = Math.min(filledRef.current + 1, BUFFER_SIZE);
       setHasData(true);
-      // 有新数据才重绘，并按 CHART_REDRAW_INTERVAL_MS 节流（~10fps）：
-      // 空闲无遥测时不再有 60fps 空转，把主线程让给路由切换/滚动。
+      // 有新数据才重绘，并按 CHART_REDRAW_INTERVAL_MS 节流（~5fps）。
       const now = performance.now();
       if (now - lastRenderAtRef.current >= CHART_REDRAW_INTERVAL_MS) {
         lastRenderAtRef.current = now;
-        setRenderTick((t) => (t + 1) % 1_000_000);
+        redraw();
       }
-    }
-  }, [telemetry, active, curves]);
+    };
+
+    const unsubscribe = useTelemetryStore.subscribe((state) => {
+      if (state.latest) writeFrame(state.latest);
+    });
+    // 订阅时若已有最新帧，立即写入一次（便于测试/深链恢复后直接有数据）
+    const latest = useTelemetryStore.getState().latest;
+    if (latest) writeFrame(latest);
+
+    return unsubscribe;
+  }, [active, curves, syncDisplay]);
 
   const toggleCurve = useCallback((key: string) => {
     if (onToggleCurve) {
@@ -239,64 +347,6 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     });
   }, [onToggleCurve]);
 
-  // 构造 chart.js 数据：按写入顺序展开环形缓冲（最旧 -> 最新）
-  const chartData = useMemo(() => {
-    const buffers = buffersRef.current;
-    const writeIdx = writeIndexRef.current;
-    const filled = filledRef.current;
-    const activeCurves = curves.filter((c) => visibleKeys.has(c.key as string));
-
-    const datasets = activeCurves.map((c) => {
-      const buf = buffers[c.key as string];
-      let ordered: number[];
-      if (filled < BUFFER_SIZE) {
-        // 未填满：取 [0, filled)
-        ordered = buf.slice(0, filled);
-      } else {
-        // 已填满：从 writeIdx 开始环绕
-        ordered = buf.slice(writeIdx).concat(buf.slice(0, writeIdx));
-      }
-      const color = curveColor(c, theme);
-      return {
-        label: t(c.labelKey),
-        data: ordered,
-        borderColor: color,
-        backgroundColor: color,
-        pointRadius: 0,
-        borderWidth: 1.5,
-        spanGaps: false, // NaN 处断开曲线
-        tension: 0,
-      };
-    });
-
-    const labels = datasets[0]?.data.map((_, i) => i) ?? [];
-    return { labels, datasets };
-    // renderTick 驱动重绘；theme 变化时按新主题重建配色
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curves, visibleKeys, renderTick, theme]);
-
-  const chartOptions = useMemo(
-    () => ({
-      animation: { duration: 0 } as const,
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false },
-      },
-      scales: {
-        x: { display: false },
-        y: {
-          min: -1,
-          max: 1,
-          grid: { color: theme === 'light' ? '#dbe2ea' : 'rgba(255,255,255,0.06)' },
-          ticks: { color: theme === 'light' ? '#5b6b7d' : '#8fa1b5', font: { size: 10 } },
-        },
-      },
-    }),
-    [theme],
-  );
-
   return (
     <div
       className={cn(
@@ -313,11 +363,11 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         </div>
       </div>
       <div className={cn('relative', chartHeightClassName ?? (overlay ? 'h-28' : 'h-40'))}>
-        <Line data={chartData} options={chartOptions} />
+        <canvas ref={canvasRef} />
       </div>
       {!overlay && (
         <TelemetryLegend group={group} visibleKeys={visibleKeys} onToggle={toggleCurve} className="mt-2" />
       )}
     </div>
   );
-};
+});

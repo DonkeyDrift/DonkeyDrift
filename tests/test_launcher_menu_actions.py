@@ -442,17 +442,20 @@ class TestFrontendWiring:
 
     def test_embedded_hides_topbar_chrome(self):
         # 用户指示：DD 内嵌（?embedded=1）时隐藏与顶栏/标题重复的 chrome——
-        # Donkey 图标、GitHub 图标、深浅色切换、中英文切换、「菜单」标题；
-        # 菜单外层 panel 与「当前工作目录」bar 只去框（背景/边框/内边距清零），
-        # 文字内容（menu-grid / cwd label+路径）保留。单独打开 Donkey（:8090）
-        # 时这些元素仍完整保留。
+        # Donkey 图标、GitHub 图标、深浅色切换、中英文切换、「Donkey」标题、
+        # 「菜单」标题；菜单外层 panel 与「当前工作目录」bar 只去框（背景/边框/
+        # 内边距清零），文字内容（menu-grid / cwd label+路径）保留；版本号移到
+        # 「当前工作目录」右侧。单独打开 Donkey（:8090）时这些元素仍完整保留。
         assert "if (isEmbedded) {" in MENU_HTML
-        assert ".logoLink, .ghLink, .sectionTitle" in MENU_HTML
+        assert ".logoLink, .ghLink, .headerRow h1, .sectionTitle" in MENU_HTML
         assert "'themeBtn', 'langBtn'" in MENU_HTML
         assert "['panel', 'cwdBar']" in MENU_HTML
         assert "box.style.background = 'none';" in MENU_HTML
         assert "box.style.border = 'none';" in MENU_HTML
         assert "box.style.padding = '0';" in MENU_HTML
+        # 版本号移到当前工作目录右侧
+        assert "var badge = document.querySelector('.versionBadge');" in MENU_HTML
+        assert "cwdBar.appendChild(badge);" in MENU_HTML
         # 当前工作目录只去框、文字保留（不被 display:none）
         assert 'class="cwdBar"' in MENU_HTML
         assert 'id="cwd-path"' in MENU_HTML
@@ -460,6 +463,8 @@ class TestFrontendWiring:
         # 单独打开时的元素仍在 HTML 中（隐藏逻辑仅内嵌时生效）
         assert 'class="logoLink"' in MENU_HTML
         assert 'class="ghLink"' in MENU_HTML
+        assert 'class="titleLink"' in MENU_HTML
+        assert 'class="versionBadge"' in MENU_HTML
         assert 'id="themeBtn"' in MENU_HTML
         assert 'id="langBtn"' in MENU_HTML
         assert 'class="sectionTitle"' in MENU_HTML

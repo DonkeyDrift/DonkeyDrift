@@ -1,12 +1,58 @@
 # 变更日志
 
-## 2026-08-21 (114)
+## 2026-08-21 (119)
 
 - fix(drive): 车端离线时也回占位帧，修复 Drive 页反复「正在连接摄像头 → 摄像头未连接」
   - 背景：上一轮占位帧修复只在「车端在线但无首帧」时回占位帧，「车端离线」时仍保持静默（`sleep(0.1)` 不发任何字节）；浏览器 `<img src="/drive/video">` 收不到首帧，既不 `onLoad` 也不 `onError`，前端 `VideoStream` 会一直卡「正在连接摄像头」，长时间无数据甚至被浏览器判为加载失败（`onError`）显示「摄像头未连接」。本机存在「车端 WebSocket 连 8001、默认入口 8000」的端口分裂时，8000 后端恒判车端离线，必现该循环。
   - `web_ui/backend/routers/drive.py`：`_frame_generator` 去掉「车端离线静默」分支——只要没有真实帧可推（车端离线，或在线但尚未推首帧），都按 2fps 推占位帧，让 `<img>` 立即 `onLoad`；仅在占位帧生成失败（Pillow 不可用）时才静默。
   - 测试同步：`web_ui/backend/tests/test_drive.py` 的 `test_video_stream_stays_silent_when_offline` 改为 `test_video_stream_emits_placeholder_when_offline`，断言离线也立即返回有效 JPEG 占位帧；backend `pytest -q` 100 passed。
   - 注：仅 DD 后端改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist；收尾后需重启后端部署验证。
+
+## 2026-08-21 (118)
+
+- fix(drive): 遥测曲线改用原生 Chart.js 直改 dataset + `update('none')`，消除切换标签页卡顿与点击无响应（Issue #135）
+  - 背景：Drive 页两张实时遥测曲线用 react-chartjs-2 的 `<Line>`，每次数据变化都会重设 `chart.options`，触发 chart.js 的 `_configure` + Proxy 全量重解析（CPU profile 里 `ownKeys`/`configure`/`qs` 等占满主线程，100Hz 遥测下主线程占用约 87%、longtask 约 3 次/秒每次约 300ms），导致点 Donkey / Drift Console 要等数分钟甚至无响应，只有开新窗口才有反应。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：弃用 react-chartjs-2 `<Line>`，改为 `<canvas>` + 原生 `Chart` 实例；重绘时直接改写 dataset 数据数组（`parsing:false`/`normalized:true`）并调用 `chart.update('none')`，跳过动画/布局/配置解析，每次重绘降至亚毫秒级；环形缓冲 256→128，重绘节流 ~5fps 保持不变；新增 `syncDisplay` 让勾选隐藏曲线后立刻带上已有历史。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：遥测继续走旁路 feed（100Hz 不落 state）；overlay 曲线默认显隐由「全部分组曲线」改为「仅 `defaultOn` 曲线」，把默认绘制曲线从 12 条降到 5 条。
+  - `web_ui/frontend/src/store/useTelemetryStore.ts`（新增）：zustand 旁路遥测 store（`latest`/`push`/`reset`），遥测帧不触发 React 重渲染。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：`car_connection`/`car_state` 值不变时 `return prev`，避免控制循环 60Hz 回广播造成 60Hz 重渲染。
+  - `web_ui/frontend/src/hooks/useDriveWebRtcVideo.ts`：`setMetrics` 逐帧改 500ms 节流。
+  - 测试同步：`TelemetryChart.test.tsx` 改为断言原生 chart 实例的 dataset 数据（mock `Chart` 构造器 + `canvas.getContext`）；`npm run check`（tsc）通过；`npx vitest run` 21 文件 114 项通过；`npm run build` 通过，入口 `index-CExCDR9k.js`、DrivePage chunk `DrivePage-CCOrU13W.js`。
+  - 验证：Playwright + CDP CPU 4x 节流 + 假车 100Hz 遥测实测——longtask 由 24~25 次 / 约 7000ms 降到 0~2 次 / 约 0~119ms；点 Donkey 到内嵌 iframe 出现由 >10s 超时降到约 0.4~0.9s。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后需重建 dist 并部署到本机 8000。
+
+## 2026-08-21 (117)
+
+- fix(layout): DD 左上角 logo 边框改为随主题，对齐 Drifter Console headerLogo（浅色灰边）
+  - 背景：上一轮把 logo 边框硬编码为 `border-[#2b3441]`，在浅色主题下显得是「黑边」；而 Drifter Console 的 headerLogo 边框是随主题的——深色 `#2b3441`、浅色 `#d5dce4`（灰）。用户看到 DC 浅色下的灰边、DD 却是深灰黑边。
+  - `web_ui/frontend/src/components/Layout.tsx`：logo `<img>` className 由 `w-8 h-8 rounded-lg border border-[#2b3441]` 改为 `w-8 h-8 rounded-lg border header-logo`，边框色交由主题 CSS 决定。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：末尾各新增 `html.theme-mus4 .header-logo { border-color:#2b3441 }` 与 `html.theme-light .header-logo { border-color:#d5dce4 }`，完全对齐 DC headerLogo 的深/浅边框值。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 21 文件 114 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (116)
+
+- fix(drive): 摄像头画面去掉整框（边框+圆角矩形），改为四角圆弧取景框，避免无画面时四角出现黑角
+  - 背景：视频流容器此前是 `bg-zinc-950 border border-zinc-800 rounded-lg` 的整块圆角矩形；摄像头未连接时，圆角矩形边框与圆角裁切在四角留下黑角，观感突兀。用户要求只显示四角圆弧、不显示整框。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：根容器 className 去掉 `border border-zinc-800 rounded-lg`（保留 `bg-zinc-950 overflow-hidden`）；新增 4 个 `absolute` 角标 `<span>`（`top/left`、`top/right`、`bottom/left`、`bottom/right`，`h-6 w-6`、`border-2 border-zinc-700`、`rounded-*-lg`、`z-40 pointer-events-none`），只画圆角弧线、不画整框。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (115)
+
+- fix(launcher): DD 内嵌 Donkey 删除「Donkey」标题，版本号移到「当前工作目录」右侧
+  - 背景：内嵌视图精简到只剩菜单后，页头还残留「Donkey」标题与版本号；用户要求删掉标题、把版本号挪到当前工作目录那一行右侧。
+  - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .sectionTitle` 扩展为 `.logoLink, .ghLink, .headerRow h1, .sectionTitle`（删掉「Donkey」标题）；新增 `var badge = document.querySelector('.versionBadge')` 并 `cwdBar.appendChild(badge)`，把版本号移到 `.cwdBar` 末尾（label/路径右侧）；单独打开 Donkey（:8090）时标题与版本号位置均保持不变。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新（隐藏选择器含 `.headerRow h1`、版本号移动 `cwdBar.appendChild`、`titleLink`/`versionBadge` 仍在 HTML）；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-21 (114)
+
+- fix(connector): Car Connector「车辆设置」改为只嵌车端 DC 的设置视图（`?embedded=1&settings=1`），不再把整个 DC 主页（Mode/Park/Drift/电池等显示卡）塞进来
+  - 背景：Car Connector 之前的「车辆设置」iframe 直接加载车端根路径 `?embedded=1`，把 DC 主页的状态显示卡（Mode RC、Park、Logged、Drift Off、电池电量等）也一并带进来；用户指出这些是「显示」而非「设置」，正确需求是只放设置类板块（Wi-Fi 配网、OTA、开发模式、漂移设置、Judge、摇杆校准）。
+  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：iframe `src` 由 `http://${selectedIp}/?embedded=1` 改为 `http://${selectedIp}/?embedded=1&settings=1`，并同步更新组件头注释。车端配合 Firmware 侧新增 `?settings=1` 仅设置视图（见 Firmware `WebConsoleAssets.h`）。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：本改动依赖 Firmware v1.8.28 的 `?settings=1` 视图；Firmware 已同步 OTA 至车辆（192.168.3.46，版本 v1.8.28）。
 
 ## 2026-08-21 (113)
 
