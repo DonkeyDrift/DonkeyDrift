@@ -1,12 +1,29 @@
 # 变更日志
 
-## 2026-08-21 (112)
+## 2026-08-21 (114)
 
 - fix(connector): Car Connector「车辆设置」改为只嵌车端 DC 的设置视图（`?embedded=1&settings=1`），不再把整个 DC 主页（Mode/Park/Drift/电池等显示卡）塞进来
   - 背景：Car Connector 之前的「车辆设置」iframe 直接加载车端根路径 `?embedded=1`，把 DC 主页的状态显示卡（Mode RC、Park、Logged、Drift Off、电池电量等）也一并带进来；用户指出这些是「显示」而非「设置」，正确需求是只放设置类板块（Wi-Fi 配网、OTA、开发模式、漂移设置、Judge、摇杆校准）。
   - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：iframe `src` 由 `http://${selectedIp}/?embedded=1` 改为 `http://${selectedIp}/?embedded=1&settings=1`，并同步更新组件头注释。车端配合 Firmware 侧新增 `?settings=1` 仅设置视图（见 Firmware `WebConsoleAssets.h`）。
   - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
   - 注：本改动依赖 Firmware v1.8.28 的 `?settings=1` 视图；Firmware 已同步 OTA 至车辆（192.168.3.46，版本 v1.8.28）。
+
+## 2026-08-21 (113)
+
+- fix(drive): 整屏放大键改为原生全屏（`requestFullscreen`），与 Drifter Console 遥测曲线全屏一致
+  - 背景：上一轮「整屏放大」用的是 CSS `fixed inset-0` 假全屏覆盖层，未真正进入浏览器全屏（浏览器地址栏/页面其它元素仍在）；用户要求参考 Drifter Console 遥测曲线右下角全屏按钮，做到真正全屏。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `videoContainerRef` 指向摄像头容器；`toggleFullscreen` 改为 `document.fullscreenElement === el ? document.exitFullscreen() : el.requestFullscreen()`；新增 `fullscreenchange` 监听同步 `fullscreen` 状态（含 ESC 退出），继续驱动曲线高度与图标；容器 className 去掉 `fixed inset-0 z-50 bg-black` 假全屏分支，改为恒定的 `relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black`。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (112)
+
+- fix(console): DD 顶栏 OTA/DEV 开关边框厚度与深浅/中英文切换按钮对齐为双层边框
+  - 背景：Drifter Console（DC）顶栏的 OTA 与 DEV 按钮此前只吃到 `html.theme-* .bg-zinc-800` 的 `outline:1px` 描边（`outline-offset:-1px`），观感是单层 1px 边框；而旁边的深浅切换、中英文切换、静音按钮走 `border-color + box-shadow:inset 0 0 0 1px` 的双层边框，两者边框厚度/颜色明显不一致。
+  - `web_ui/frontend/src/themes/theme-mus4.css`：把 `.console-ota-btn`、`.console-dev-toggle` 纳入与 `.theme-switcher-btn`/`.language-switcher-btn`/`.console-mute-btn` 同款基础覆盖（`outline:none; background:#111820; border-color:#344154; box-shadow:inset 0 0 0 1px #2b3441; color:#b9c5d3`），并新增 OTA/DEV hover（`#5cc8ff` 双层）、DEV `[aria-checked="true"]` 开启态（`rgba(92,200,255,.25)` 底 + `#5cc8ff` 双层）、OTA `:disabled` 置灰（`#8fa1b5`）。
+  - `web_ui/frontend/src/themes/theme-light.css`：同步浅色皮肤（基础 `#f4f6f9/#ccd5df/#d5dce4/#3f4f63`、hover `#0c9bd6` 双层、DEV 开启 `#5cc8ff` 双层、OTA 禁用 `#5b6b7d`）。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过；`npx vitest run src/components/ConsoleControls.test.tsx` 12 passed。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
 
 ## 2026-08-21 (111)
 
