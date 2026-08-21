@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (148)
+
+- feat(connector): Car Connector 内嵌完整配网板块（1:1 车端 DC），删除 postMessage 按钮式配网（Issue #234 续）
+  - 背景：用户希望 Car Connector 像 Drifter Console 那样把完整配网板块（SSID / 扫描 / 密码 / 上位机配网 / 历史 / AP 前缀预览）直接铺在页面里，而不是只放「STA 配置 / AP 名称」两个按钮再 postMessage 打开 iframe 内的弹窗。
+  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：删除 `openWifiSta`/`openWifiAp` postMessage 回调、`iframeRef` 与两个配网按钮（含 `Wifi` 图标、竖线分隔）；iframe `src` 由 `?embedded=1&settings=1` 改为 `?embedded=1&settings=1&wifi=1`，同屏呈现车端 1:1 的「调校 + AP 名称配置 + STA Wi-Fi 配置」三个板块；iframe 高度由 `h-[60vh]` 提升到 `h-[80vh] min-h-[560px]` 容纳配网表单；设备下拉空占位与未选设备占位区分扫描中/未发现（与 DrifterConsolePage 一致）。DEV / OTA 不在该视图内。
+  - 测试：`npx vitest run` → 123 项全绿、`npm run check`（tsc）、`npm run build` 通过（入口 `index-Badxtyv1.js`）。
+  - 依赖：配套车端固件 v1.8.33（`?wifi=1` 静态配网板块视图）须先 OTA 刷车，否则 iframe `&wifi=1` 被旧固件忽略、配网板块不显示。
+  - 注：DD 前端改动，Firmware 侧见同日 v1.8.33 条目；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (147)
 
 - fix(tub-library): 下载 tar.gz 改为 pipe+线程流式响应，Safari 立即弹出下载通知
