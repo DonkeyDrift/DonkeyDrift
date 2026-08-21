@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-21 (130)
+
+- fix(connector): Car Connector「车辆设置」把连接与配网融合成一个板块——顶部设备发现/选择 + STA/AP 配网按钮合并，iframe 只保留车端 DC 的「调校」视图
+  - 背景：上一版「车辆设置」顶部是设备发现/选择（连接），下方 iframe 里车端 DC 的 `?settings=1` 视图还带有「系统（OTA/开发模式）」与「Wi-Fi 配网」两行；用户反馈「系统」行太突兀应整行删除，「配网」与顶部「连接」功能重复，应融合成一个板块。
+  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：
+    - 顶部连接行新增「STA Wi-Fi 配置」「AP 名称配置」两个按钮（与设备选择、重新扫描并列，中间用竖线分隔），点按经 `iframeRef.contentWindow.postMessage({type:'dd-open-wifi-sta'|'dd-open-wifi-ap'})` 打开车端 DC 的配网弹窗；未选中设备时禁用配网按钮。
+    - iframe 增加 `ref={iframeRef}`；组件头注释同步更新为「连接 + 配网融合、下方只呈现调校」。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：新增 `connector.wifiStaButton` / `connector.wifiApButton`（zh/en），`connector.carSettingsSubtitle` 由「配网 / OTA / 开发模式 / 漂移设置等」改为「连接 / 配网 / 漂移设置 / Judge / 手柄校准」。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过，入口 `index-DYVHxIKZ.js`、CarConnectorPage chunk `CarConnectorPage-BegwM-jT.js`。
+  - 注：本改动依赖 Firmware v1.8.30（车端 DC `?settings=1` 删掉系统/配网行并新增 `dd-open-wifi-*` postMessage 处理），Firmware 已同步 OTA。
+
 ## 2026-08-21 (129)
 
 - refactor(tub-library): 下载按钮移入会话行 pin/trash 区域，与 Pin/Delete 并列
