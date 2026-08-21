@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (120)
+
+- fix(drive): 全屏/叠加态去掉白色边框与灰色蒙版，遥测曲线只保留纯线条与标题
+  - 背景：整屏放大后，摄像头画面四角取景框与遥测曲线的 `border-white/10` 白框、`bg-slate-950/50 backdrop-blur-sm` 灰色蒙版显得杂乱；用户要求去掉白框、删掉蒙版。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：四角取景框改为仅在摄像头未连接（`!webRtcVisible && status !== 'connected'`）时显示，连上/全屏时不再出现。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：overlay 模式容器 className 由 `rounded-lg border border-white/10 bg-slate-950/50 backdrop-blur-sm p-2` 改为 `p-2`，去掉白框与灰色蒙版，只保留标题与曲线线条。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (119)
 
 - fix(drive): 车端离线时也回占位帧，修复 Drive 页反复「正在连接摄像头 → 摄像头未连接」
