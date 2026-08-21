@@ -189,12 +189,9 @@ describe('TubLibrary download button', () => {
     const downloadButtons = await screen.findAllByRole('button', { name: /下载/ });
     fireEvent.click(downloadButtons[0]);
 
-    await waitFor(() => {
-      expect(downloadTubSession).toHaveBeenCalledWith(
-        '/tmp/tub',
-        '26-08-16_1',
-        sessions[0].start_time_ms,
-      );
-    });
+    expect(downloadTubSession).toHaveBeenCalledWith(
+      '/tmp/tub',
+      '26-08-16_1',
+    );
   });
 });
