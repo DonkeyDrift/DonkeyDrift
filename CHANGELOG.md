@@ -1,12 +1,28 @@
 # 变更日志
 
-## 2026-08-21 (109)
+## 2026-08-21 (111)
 
 - fix(launcher): DD 内嵌 Donkey 的「当前工作目录」只去框、保留文字（上一轮误删整块）
   - 背景：上一轮把 `.cwdBar` 与 `.panel` 一起去框时，误将 `.cwdBar` 放进 `display:none` 隐藏列表，导致「当前工作目录」文字与路径在内嵌视图里整块消失；用户要求只删框、不删文字。
   - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .cwdBar, .sectionTitle` 改为 `.logoLink, .ghLink, .sectionTitle`（`.cwdBar` 不再隐藏）；去框循环由单个 `.panel` 改为 `['panel', 'cwdBar']`，对两者只做 `background/border/padding` 清零，保留 `display:flex` 与文字内容（label「当前工作目录」+ 路径）。
   - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新——隐藏选择器不含 `.cwdBar`、去框选择器为 `['panel', 'cwdBar']`，并新增 `cwd-path` / `cwd.label` 仍在的断言；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
   - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
+## 2026-08-21 (110)
+
+- fix(drive): 整屏放大键间距对齐——下边距与右边距一致（均 12px）
+  - 背景：上一轮把放大键上移到 `bottom-48`/`bottom-64`，离油门/加速度曲线框太远显空；要求放大键右边到视频右边框、下边到曲线框上边框的距离一致。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：非全屏 `bottom-48` → `bottom-44`、全屏 `bottom-64` → `bottom-60`，使下边距与 `right-3`（12px）对齐。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (109)
+
+- fix(layout): DD 左上角 logo 对齐 Drifter Console 独立页图标（恢复 1px #2b3441 边框）
+  - 背景：DC 独立页头图标为 32×32、`border-radius:8px`、`border:1px solid #2b3441` + `/favicon.png` 头盔图（与 DD `/logo.png` 为同一张图）；上一轮按「去掉黑边」去掉了边框，现按用户要求直接照搬 DC 图标，因此恢复该边框。
+  - `web_ui/frontend/src/components/Layout.tsx`：标题左侧 logo 的 `img` className 由 `w-8 h-8 rounded-lg` 改为 `w-8 h-8 rounded-lg border border-[#2b3441]`，并同步注释为「与 Drifter Console headerLogo 完全一致」。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 21 文件 114 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
 
 ## 2026-08-21 (108)
 
