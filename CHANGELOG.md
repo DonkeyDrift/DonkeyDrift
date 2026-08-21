@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-21 (133)
+
+- fix(drive): 视频画面恢复圆角、遥测曲线去掉横向网格线与左侧刻度数字、面板标题移到曲线下方
+  - 背景：Drive 页用户反馈三处——① 摄像头画面四个角变成直角（之前是圆弧）；② 遥测曲线之间的横向网格线（1.0/0.5/-0.5/-1.0）与左侧刻度数字遮挡画面；③ 「转向 / 姿态」「油门 / 加速度」两个面板标题应移到各自曲线下方（左右位置不变、高度贴近原 -1.0 刻度下方）。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：视频容器（`videoContainerRef`）在非全屏时加 `rounded-lg overflow-hidden`，四角恢复圆角并把 object-cover 视频与底部遥测浮层裁进圆角；全屏时不加圆角（铺满屏幕）。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：
+    - `chartOptions.scales.y` 改为 `display: false`（删掉原 grid/ticks 配色），整体隐藏 y 轴——横向网格线与左侧刻度数字全去掉；`min: -1, max: 1` 保留仍决定量程，曲线铺满全宽（不再给左侧刻度留 gutter）。
+    - 面板标题行从画布上方移到画布下方（`mb-2` 改 `mt-2`），overlay 与分栏两种模式都生效；左右对齐不变。
+  - 测试同步：`web_ui/frontend/src/components/drive/TelemetryChart.test.tsx` 新增两项回归——「y 轴整体隐藏（display:false 且 min/max 仍为 -1/1）」「面板标题渲染在曲线画布下方（DOM 顺序 canvas 先于 title）」；`npx vitest run src/components/drive/TelemetryChart.test.tsx` 10 项通过、`npx vitest run` 21 文件 120 项通过、`npx tsc -b --noEmit`、`npm run build` 全部通过。
+  - 验证：临时预览端口实测截图——视频四角恢复圆角（computed border-radius 12px）、两张遥测 canvas 非背景像素为 0（无横线无数字）、标题位于曲线下方。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (132)
 
 - fix(tub-library): Safari 点击下载后始终不触发下载——blob URL 过早回收
