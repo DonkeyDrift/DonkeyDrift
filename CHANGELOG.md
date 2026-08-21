@@ -11,6 +11,17 @@
   - 测试同步：`TubLibrary.test.tsx` mock 加 `downloadTubSession: vi.fn()`，新增 `describe('TubLibrary download button')` 两个测试（按钮存在且 enabled、点击调用 `downloadTubSession`）；`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过。
   - 注：仅 DD 改动（后端 + 前端），Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
 
+## 2026-08-21 (125)
+
+- fix(tub-library): 二轮帧率优化——移除播放热路径多余状态调用、节流预取、去掉 FPS 徽章 backdrop-blur
+  - 背景：第一轮 (121) 做了直接 canvas 绘制 + 节流 `setFrame` 每 6 帧，但播放循环仍有三个性能瓶颈：① 每帧调 `setImageError(false)` / `setFrameAspect()` 产生无谓的 React 状态入队开销（即使值不变也会创建 update 对象、入队、处理队列）；② `prefetchFromIndex(next)` 每帧调用，遍历 60 个 URL + 对每个 cached entry 做 LRU touch（Map.delete + Map.set）；③ FPS 徽章 `backdrop-blur-md` 在 canvas 每帧更新时强制浏览器重新采样模糊背景，是 backdrop-filter 配合频繁变化背景的已知性能陷阱。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：
+    - 播放循环每帧不再调 `setImageError(false)` / `setFrameAspect()`——`setFrameAspect` 在 draw effect（非播放时）已处理，播放期间 aspect ratio 不变；`setImageError` 也无需每帧调，图片能画出说明没出错。
+    - `prefetchFromIndex` 从每帧调用改为 `if (next % UI_UPDATE_EVERY_N_FRAMES === 0)` 每 6 帧一次，预取窗口 60 帧仍有 54 帧余量。
+    - FPS 徽章去掉 `backdrop-blur-md`，改用不透明背景 `bg-zinc-900/80`，消除 backdrop-filter 每帧重采样开销。
+  - 测试同步：`npx vitest run TubLibrary` 4 项通过；`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动，无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (124)
 
 - fix(tub): TM 报错 `len should return >= 0`——`Manifest.__len__()` 在删除全部记录后返回负数
