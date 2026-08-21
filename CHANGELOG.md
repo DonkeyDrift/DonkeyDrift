@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-21 (149)
+
+- perf(tub-library): 下载响应即时启动——所有 Tub I/O 移入后台线程，Safari 点击即弹下载通知
+  - 背景：上一轮 (147) 把 tar.gz 构建移入后台线程，但打开 Tub、遍历所有 record 找 session 的操作仍在主线程——大 Tub（几千条 record）仅遍历就要数秒，HTTP 响应在这期间不发送，Safari 迟迟不弹下载通知。
+  - `web_ui/backend/routers/tub.py`：Tub 打开、record 遍历、图片读取、gzip 压缩全部移入后台线程；HTTP 响应在 `os.pipe()` 创建后立即返回 `StreamingResponse`。新增 `startTimeMs` 查询参数——前端传入 session 的 `start_time_ms`，后端直接用其格式化文件名，无需读 Tub 取 `start_time_ms`。去掉响应前的 session 存在性校验（前端只会对已列出的 session 发起下载，不会请求不存在的 session）。
+  - `web_ui/frontend/src/services/api.ts`：`downloadTubSession` 恢复 `start_time_ms` 参数，作为 `startTimeMs` 查询参数传给后端。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：`handleDownload` 传回 `session.start_time_ms`。
+  - 测试同步：`TubLibrary.test.tsx` 断言恢复 `start_time_ms` 参数；后端 `pytest -q` 106 项通过；`npx vitest run` 6 项通过；`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：DD 后端 + 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist + 重启 8000 后端部署。
+
 ## 2026-08-21 (148)
 
 - fix(tub-manager): 修正一屏布局——视频画面放大、Tub 编辑器底部滑块不再被裁
