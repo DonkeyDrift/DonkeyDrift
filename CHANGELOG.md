@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-21 (111)
+## 2026-08-21 (112)
 
 - fix(console): DD 顶栏 OTA/DEV 开关边框厚度与深浅/中英文切换按钮对齐为双层边框
   - 背景：Drifter Console（DC）顶栏的 OTA 与 DEV 按钮此前只吃到 `html.theme-* .bg-zinc-800` 的 `outline:1px` 描边（`outline-offset:-1px`），观感是单层 1px 边框；而旁边的深浅切换、中英文切换、静音按钮走 `border-color + box-shadow:inset 0 0 0 1px` 的双层边框，两者边框厚度/颜色明显不一致。
@@ -8,6 +8,14 @@
   - `web_ui/frontend/src/themes/theme-light.css`：同步浅色皮肤（基础 `#f4f6f9/#ccd5df/#d5dce4/#3f4f63`、hover `#0c9bd6` 双层、DEV 开启 `#5cc8ff` 双层、OTA 禁用 `#5b6b7d`）。
   - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过；`npx vitest run src/components/ConsoleControls.test.tsx` 12 passed。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (111)
+
+- fix(launcher): DD 内嵌 Donkey 的「当前工作目录」只去框、保留文字（上一轮误删整块）
+  - 背景：上一轮把 `.cwdBar` 与 `.panel` 一起去框时，误将 `.cwdBar` 放进 `display:none` 隐藏列表，导致「当前工作目录」文字与路径在内嵌视图里整块消失；用户要求只删框、不删文字。
+  - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .cwdBar, .sectionTitle` 改为 `.logoLink, .ghLink, .sectionTitle`（`.cwdBar` 不再隐藏）；去框循环由单个 `.panel` 改为 `['panel', 'cwdBar']`，对两者只做 `background/border/padding` 清零，保留 `display:flex` 与文字内容（label「当前工作目录」+ 路径）。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新——隐藏选择器不含 `.cwdBar`、去框选择器为 `['panel', 'cwdBar']`，并新增 `cwd-path` / `cwd.label` 仍在的断言；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
 
 ## 2026-08-21 (110)
 
