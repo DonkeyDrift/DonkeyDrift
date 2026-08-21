@@ -39,6 +39,10 @@ const PREFETCH_AHEAD = 60;
 // HTTP/1.1 同源并发连接约 6 个，预取并发超过它反而会挤占当前帧请求。
 const PREFETCH_CONCURRENCY = 6;
 
+// 播放时每 N 帧才更新一次 React 状态（帧计数器、进度条、统计），
+// 避免每帧 re-render 整个组件树吃掉帧预算导致掉帧（#128）。
+const UI_UPDATE_EVERY_N_FRAMES = 6;
+
 const formatDateTime = (ms: number | null) => {
   if (ms === null || ms === undefined) return null;
   const date = new Date(ms);
@@ -149,6 +153,8 @@ export const TubLibrary: React.FC = () => {
   const fpsStartRef = useRef<number>(0);
   const fpsFramesRef = useRef<number>(0);
   const lastIndexSyncRef = useRef<number>(0);
+  // 预计算所有帧的图片 URL，避免播放循环每帧重复调用 getImageUrl()
+  const imageUrlsRef = useRef<string[]>([]);
 
   const frameInterval = 1000 / Math.max(1, driveLoopHz);
 
@@ -163,6 +169,40 @@ export const TubLibrary: React.FC = () => {
       cache.delete(oldest);
     }
   }, []);
+
+  // 预取：从指定索引开始向前 PREFETCH_AHEAD 帧发起加载请求。
+  // 从播放循环内调用，不作为独立 React effect，避免每帧触发 effect 开销。
+  const prefetchFromIndex = useCallback((idx: number) => {
+    const urls = imageUrlsRef.current;
+    if (!urls.length) return;
+    const toFetch: string[] = [];
+    for (let offset = 1; offset <= PREFETCH_AHEAD; offset += 1) {
+      const url = urls[idx + offset];
+      if (!url) continue;
+      const cached = imageCacheRef.current.get(url);
+      if (cached) {
+        touchImageCache(url, cached);
+        continue;
+      }
+      toFetch.push(url);
+    }
+    let cursor = 0;
+    let inFlight = 0;
+    const pump = () => {
+      while (inFlight < PREFETCH_CONCURRENCY && cursor < toFetch.length) {
+        const url = toFetch[cursor++];
+        const img = new Image();
+        inFlight += 1;
+        img.onload = img.onerror = () => {
+          inFlight -= 1;
+          pump();
+        };
+        touchImageCache(url, img);
+        img.src = url;
+      }
+    };
+    pump();
+  }, [touchImageCache]);
 
   const refreshSessions = useCallback(async (path: string) => {
     setError(null);
@@ -186,12 +226,22 @@ export const TubLibrary: React.FC = () => {
     recordsRef.current = records;
   }, [records]);
 
+  // 预计算所有帧的图片 URL，避免播放循环每帧重复调用 getImageUrl()
+  useEffect(() => {
+    imageUrlsRef.current = records.map((r) => {
+      const path = findImagePath(r);
+      return path ? getImageUrl(path, tubPath) : '';
+    });
+  }, [records, tubPath]);
+
   useEffect(() => {
     isPlayingRef.current = isPlaying;
     if (!isPlaying) {
       setActualFps(0);
       fpsStartRef.current = 0;
       fpsFramesRef.current = 0;
+      // 播放结束后把实际显示帧同步到 React 状态，让进度条/统计/全局联动对齐
+      setFrame(frameRef.current);
     }
   }, [isPlaying]);
 
@@ -280,8 +330,12 @@ export const TubLibrary: React.FC = () => {
       t('tub.notAvailable'),
     );
 
-  // Draw the current frame whenever it changes
+  // Draw the current frame whenever it changes (manual navigation only;
+  // playback loop draws directly to canvas to avoid per-frame React re-render)
   useEffect(() => {
+    // 播放期间由播放循环直接画到 canvas，跳过此 effect 避免 re-render
+    if (isPlayingRef.current) return;
+
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
@@ -327,45 +381,14 @@ export const TubLibrary: React.FC = () => {
     }
   }, [currentImagePath, tubPath, theme, touchImageCache]);
 
-  // 预取：优先紧邻的下一帧立即发起，其余按窗口排队，受并发上限约束，
-  // 避免一次性几十个请求挤占 HTTP/1.1 的 ~6 个同源连接（#128）。
-  useEffect(() => {
-    if (!records.length) return;
-    const urls: string[] = [];
-    for (let offset = 1; offset <= PREFETCH_AHEAD; offset += 1) {
-      const nextPath = findImagePath(records[frame + offset]);
-      if (!nextPath) continue;
-      const url = getImageUrl(nextPath, tubPath);
-      const cached = imageCacheRef.current.get(url);
-      if (cached) {
-        touchImageCache(url, cached);
-        continue;
-      }
-      urls.push(url);
-    }
-    let cursor = 0;
-    let inFlight = 0;
-    const pump = () => {
-      while (inFlight < PREFETCH_CONCURRENCY && cursor < urls.length) {
-        const url = urls[cursor++];
-        const img = new Image();
-        inFlight += 1;
-        // 无论成败都留在缓存：error 的帧后续不再重复请求
-        img.onload = img.onerror = () => {
-          inFlight -= 1;
-          pump();
-        };
-        touchImageCache(url, img);
-        img.src = url;
-      }
-    };
-    pump();
-  }, [frame, records, tubPath, touchImageCache]);
-
-  // Playback loop: advance frames at DRIVE_LOOP_HZ, only when cached to avoid
-  // stalls; plays once and stops at the last frame (原 Tub 导航器单次播放行为).
+  // Playback loop: advance frames at DRIVE_LOOP_HZ, drawing directly to canvas
+  // and throttling React state updates to ~10fps to avoid per-frame re-renders
+  // that eat the frame budget and cause dropped frames (#128).
   useEffect(() => {
     if (!isPlaying || !records.length) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
 
     const step = (time: number) => {
       if (!isPlayingRef.current) return;
@@ -377,27 +400,45 @@ export const TubLibrary: React.FC = () => {
         lastFrameTimeRef.current = time - ((time - lastFrameTimeRef.current) % frameInterval);
         const next = frameRef.current + 1;
         if (next >= records.length) {
-          // 末帧后停止播放
           setIsPlaying(false);
+          setFrame(frameRef.current);
           return;
         }
-        const nextPath = findImagePath(records[next]);
-        if (nextPath) {
-          const nextImg = imageCacheRef.current.get(getImageUrl(nextPath, tubPath));
+        const url = imageUrlsRef.current[next];
+        if (url) {
+          const nextImg = imageCacheRef.current.get(url);
           if (!nextImg || !nextImg.complete) {
-            // Frame not ready yet: hold on the current frame instead of skipping
             rafRef.current = requestAnimationFrame(step);
             return;
           }
+          // 直接画到 canvas，不触发 React re-render
+          if (canvas && ctx) {
+            if (canvas.width !== nextImg.width || canvas.height !== nextImg.height) {
+              canvas.width = nextImg.width;
+              canvas.height = nextImg.height;
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(nextImg, 0, 0);
+            setImageError(false);
+            setFrameAspect(nextImg.width / nextImg.height);
+          }
         }
         frameRef.current = next;
-        setFrame(next);
+
+        // 预取从播放循环内发起，不作为独立 effect
+        prefetchFromIndex(next);
+
         // FPS 按实际换帧数累计（#128），画面冻结时角标跟随下降
         fpsFramesRef.current += 1;
         if (time - fpsStartRef.current >= 1000) {
           setActualFps(Math.round((fpsFramesRef.current * 1000) / (time - fpsStartRef.current)));
           fpsStartRef.current = time;
           fpsFramesRef.current = 0;
+        }
+
+        // 节流 UI 状态更新（帧计数器、进度条、统计、全局 index 联动）
+        if (next % UI_UPDATE_EVERY_N_FRAMES === 0) {
+          setFrame(next);
         }
       }
       rafRef.current = requestAnimationFrame(step);
@@ -408,7 +449,7 @@ export const TubLibrary: React.FC = () => {
     return () => {
       if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, records, frameInterval, tubPath]);
+  }, [isPlaying, records, frameInterval, prefetchFromIndex]);
 
   // 空格键播放/暂停（原 Tub 导航器快捷键；输入框内不触发；TM 页切走时不响应）
   useEffect(() => {
