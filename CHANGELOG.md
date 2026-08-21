@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (112)
+
+- fix(console): DD 顶栏 OTA/DEV 开关边框厚度与深浅/中英文切换按钮对齐为双层边框
+  - 背景：Drifter Console（DC）顶栏的 OTA 与 DEV 按钮此前只吃到 `html.theme-* .bg-zinc-800` 的 `outline:1px` 描边（`outline-offset:-1px`），观感是单层 1px 边框；而旁边的深浅切换、中英文切换、静音按钮走 `border-color + box-shadow:inset 0 0 0 1px` 的双层边框，两者边框厚度/颜色明显不一致。
+  - `web_ui/frontend/src/themes/theme-mus4.css`：把 `.console-ota-btn`、`.console-dev-toggle` 纳入与 `.theme-switcher-btn`/`.language-switcher-btn`/`.console-mute-btn` 同款基础覆盖（`outline:none; background:#111820; border-color:#344154; box-shadow:inset 0 0 0 1px #2b3441; color:#b9c5d3`），并新增 OTA/DEV hover（`#5cc8ff` 双层）、DEV `[aria-checked="true"]` 开启态（`rgba(92,200,255,.25)` 底 + `#5cc8ff` 双层）、OTA `:disabled` 置灰（`#8fa1b5`）。
+  - `web_ui/frontend/src/themes/theme-light.css`：同步浅色皮肤（基础 `#f4f6f9/#ccd5df/#d5dce4/#3f4f63`、hover `#0c9bd6` 双层、DEV 开启 `#5cc8ff` 双层、OTA 禁用 `#5b6b7d`）。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过；`npx vitest run src/components/ConsoleControls.test.tsx` 12 passed。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (111)
 
 - fix(launcher): DD 内嵌 Donkey 的「当前工作目录」只去框、保留文字（上一轮误删整块）

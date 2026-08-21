@@ -657,7 +657,9 @@ html.theme-light .\[\&\:\:-moz-range-track\]\:bg-zinc-800::-moz-range-track {
    outline 描边规则，保证与 DC/D 的 border+内圈双层视觉一致。 */
 html.theme-light .theme-switcher-btn,
 html.theme-light .language-switcher-btn,
-html.theme-light .console-mute-btn {
+html.theme-light .console-mute-btn,
+html.theme-light .console-ota-btn,
+html.theme-light .console-dev-toggle {
   outline: none;
   background: #f4f6f9;
   border-color: #ccd5df;
@@ -676,6 +678,23 @@ html.theme-light .theme-switcher-btn:hover,
 html.theme-light .language-switcher-btn:hover,
 html.theme-light .console-mute-btn:not([aria-pressed="true"]):hover {
   color: #1a2330;
+}
+html.theme-light .console-ota-btn:not(:disabled):hover,
+html.theme-light .console-dev-toggle:not([aria-checked="true"]):not(:disabled):hover {
+  color: #0c9bd6;
+  border-color: #0c9bd6;
+  box-shadow: inset 0 0 0 1px #0c9bd6;
+}
+/* DEV 开启态：DC 蓝 #5cc8ff 双层边框，压过基础覆盖（基础覆盖 specificity 高于 Tailwind 单类） */
+html.theme-light .console-dev-toggle[aria-checked="true"] {
+  background: rgba(92, 200, 255, 0.25);
+  border-color: #5cc8ff;
+  box-shadow: inset 0 0 0 1px #5cc8ff;
+  color: #5cc8ff;
+}
+/* OTA 禁用态（设备不可达）：仅置灰文字，双层边框保持 */
+html.theme-light .console-ota-btn:disabled {
+  color: #5b6b7d;
 }
 /* 静音激活态：DC 蓝 #5cc8ff（与 Drifter Console 一致），边框与内圈同色，保持双层视觉 */
 html.theme-light .console-mute-btn[aria-pressed="true"] {
