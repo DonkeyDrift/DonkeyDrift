@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (131)
+
+- fix(launcher): DD 内嵌 Donkey 去掉「当前工作目录」上方的多余间距（隐藏空 headerRow + 去 body 上边距）
+  - 背景：删掉「Donkey」标题并移走版本号后，内嵌视图里 `.headerRow` 变为空容器但仍保留 `margin:0 0 10px` 的下边距，叠加 `body` 的 `margin:12px` 上边距，导致「当前工作目录」行离 DD 标题栏间隔过大（约 22px）。
+  - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .headerRow h1, .sectionTitle` 扩展为 `.logoLink, .ghLink, .headerRow, .sectionTitle`（隐藏整个 headerRow，连带去掉其 10px 下边距）；新增 `document.body.style.marginTop = '0'` 去掉 body 上边距，让「当前工作目录」贴近 DD 标题栏；单独打开 Donkey（:8090）时 headerRow 与 body 边距均保持不变。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新（隐藏选择器含 `.headerRow`、新增 `document.body.style.marginTop = '0'` 断言）；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist；收尾后需重启 8090 launcher 部署验证。
+
 ## 2026-08-21 (130)
 
 - fix(connector): Car Connector「车辆设置」把连接与配网融合成一个板块——顶部设备发现/选择 + STA/AP 配网按钮合并，iframe 只保留车端 DC 的「调校」视图

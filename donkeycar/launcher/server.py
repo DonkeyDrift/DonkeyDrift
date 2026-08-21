@@ -1694,11 +1694,13 @@ MENU_HTML = r"""<!DOCTYPE html>
         const isEmbedded = readEmbedded();
         // 内嵌于 DonkeyDrifter（?embedded=1）时，隐藏与 DD 顶栏/标题重复的
         // chrome：Donkey 图标、GitHub 图标、深浅色切换、中英文切换、
-        // 「Donkey」标题、「菜单」标题；菜单外层 panel 与「当前工作目录」bar
-        // 只去框（背景/边框/内边距清零），文字内容（menu-grid / cwd label+路径）
-        // 保留；版本号移到「当前工作目录」右侧。单独打开 Donkey（:8090）时全部保留。
+        // 「Donkey」标题（连同整个 headerRow，去掉其下边距）、「菜单」标题；
+        // 菜单外层 panel 与「当前工作目录」bar 只去框（背景/边框/内边距清零），
+        // 文字内容（menu-grid / cwd label+路径）保留；再去掉 body 上边距，让
+        // 「当前工作目录」贴近 DD 标题栏；版本号移到「当前工作目录」右侧。
+        // 单独打开 Donkey（:8090）时全部保留。
         if (isEmbedded) {
-            document.querySelectorAll('.logoLink, .ghLink, .headerRow h1, .sectionTitle').forEach(function(el) {
+            document.querySelectorAll('.logoLink, .ghLink, .headerRow, .sectionTitle').forEach(function(el) {
                 el.style.display = 'none';
             });
             ['themeBtn', 'langBtn'].forEach(function(id) {
@@ -1713,6 +1715,8 @@ MENU_HTML = r"""<!DOCTYPE html>
                     box.style.padding = '0';
                 }
             });
+            // 去掉 body 上边距（页面级 12px），让「当前工作目录」贴近 DD 标题栏
+            document.body.style.marginTop = '0';
             // 版本号移到「当前工作目录」右侧（cwdBar 末尾）
             var badge = document.querySelector('.versionBadge');
             var cwdBar = document.querySelector('.cwdBar');
