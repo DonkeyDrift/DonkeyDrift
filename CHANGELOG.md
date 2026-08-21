@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-21 (147)
+## 2026-08-21 (148)
 
 - fix(tub-manager): 修正一屏布局——视频画面放大、Tub 编辑器底部滑块不再被裁
   - 背景：上一版（143）把录制视频库与 Tub 编辑器改为一屏并排，但视频 `max-h-[22vh]` 压得太小看不清，图表容器 `min-h-[12rem]`（192px）占满空间把底部滚滑块+选区/删除指示条挤出 `overflow-hidden` 可见区域。
@@ -8,6 +8,20 @@
   - `web_ui/frontend/src/components/TubLibrary.tsx`：视频容器 max-h 调大。
   - `web_ui/frontend/src/components/TubEditor.tsx`：图表容器 min-h 调小。
   - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。纯 CSS 改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+- fix(tub-library): 下载 tar.gz 改为 pipe+线程流式响应，Safari 立即弹出下载通知
+  - 背景：此前 `download_session` 端点先把整个 tar.gz 构建到 `BytesIO` 内存缓冲（遍历所有 record、读所有 JPEG、gzip 压缩），完成后才 `StreamingResponse` 开始发送。浏览器要等好几秒才收到第一个字节，Safari 不会在等待期间弹出下载通知。
+  - `web_ui/backend/routers/tub.py`：改用 `os.pipe()` + `threading.Thread`——后台线程把 tar.gz 写入管道写端，`StreamingResponse` 的生成器从管道读端 `read(65536)` 逐块 yield。浏览器在第一张图片压缩完成时（毫秒级）就收到数据，立即弹出下载通知并显示进度条。新增 `import threading`。
+  - 测试同步：后端 `pytest -q` 106 项通过（无 download_session 专属测试，不涉及）。
+  - 注：仅 DD 后端改动，Firmware 无改动、无需 OTA；收尾后重启 8000 后端部署。
+
+## 2026-08-21 (147)
+
+- fix(drive): 遥测图例「全选」框在全选状态下变蓝
+  - 背景：上一轮 (142) 加的「全选」勾选框固定用 `accent-slate-400`（灰色），全选时没有「已全选」的视觉反馈；用户希望全选状态下勾选框被勾上且变蓝。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：「全选」`input` 的 `className` 从固定 `accent-slate-400` 改为 `allSelected ? 'accent-blue-500' : 'accent-slate-400'`——全选时蓝色勾、半选/未选时灰色（半选仍显示 indeterminate 横杠）。
+  - 验证：`npx vitest run src/components/drive/TelemetryChart.test.tsx` 11 项通过、`npm run build` 通过；临时预览端口实测两个「全选」框在全选态 `checked:true`、`accent-color: rgb(59,130,246)`（blue-500）。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
 
 ## 2026-08-21 (146)
