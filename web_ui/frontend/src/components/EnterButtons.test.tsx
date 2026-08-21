@@ -3,7 +3,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { DonkeyEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
+import { DonkeyEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink, CCodeEntryLink, DshEntryLink } from './EnterButtons';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
@@ -12,11 +12,13 @@ vi.mock('@/i18n', () => ({
 }));
 vi.mock('@/services/api', () => ({
   launchKimiCodeWeb: vi.fn(),
+  launchClaudeCode: vi.fn(),
   launchDsh: vi.fn(),
   getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchClaudeCode, launchDsh, launchKimiCodeWeb } from '@/services/api';
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
+const mockLaunchCCode = vi.mocked(launchClaudeCode);
 const mockLaunchDsh = vi.mocked(launchDsh);
 beforeEach(() => { vi.clearAllMocks(); });
 
@@ -100,6 +102,43 @@ describe('KimiCodeWebEntryLink', () => {
     mockLaunchKimi.mockResolvedValue({ status: 'error', error: 'boom' });
     render(<KimiCodeWebEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
+    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    expect(fakeWin.close).toHaveBeenCalled();
+    openSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+});
+
+describe('CCodeEntryLink', () => {
+  it('renders with the de-emphasized advanced link style', () => {
+    render(
+      <MemoryRouter>
+        <CCodeEntryLink />
+      </MemoryRouter>,
+    );
+    const btn = screen.getByText('common.enterButtons.cCode').closest('button');
+    expect(btn).toBeInTheDocument();
+    // 弱化处理：更小字号 + 更淡颜色，一眼可辨为高级选项
+    expect(btn?.className).toContain('text-xs');
+    expect(btn?.className).toContain('text-zinc-500');
+  });
+  it('opens the web terminal URL in the pre-opened tab on success', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    mockLaunchCCode.mockResolvedValue({ status: 'ok', url: 'http://192.168.3.57:8090/terminal?cmd=claude' });
+    render(<CCodeEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.cCode'));
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    await waitFor(() => { expect(fakeWin.location.href).toBe('http://192.168.3.57:8090/terminal?cmd=claude'); });
+    openSpy.mockRestore();
+  });
+  it('closes the tab and alerts on failure', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mockLaunchCCode.mockResolvedValue({ status: 'error', error: 'boom' });
+    render(<CCodeEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.cCode'));
     await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
     expect(fakeWin.close).toHaveBeenCalled();
     openSpy.mockRestore();
