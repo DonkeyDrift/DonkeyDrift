@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (124)
+
+- fix(tub): TM 报错 `len should return >= 0`——`Manifest.__len__()` 在删除全部记录后返回负数
+  - 根因：`donkeycar/parts/datastore_v2.py:441` `Manifest.__len__()` 返回 `self.current_index - len(self.deleted_indexes)`，当 `deleted_indexes` 条目数超过 `current_index`（如 tub 中所有记录被删除）时返回负数，Python `len()` 内置函数抛出 `TypeError: 'len()' should return >= 0`。任何对 `Tub`、`Manifest`、`ManifestIterator` 调用 `len()` 的代码路径（makemovie、training pipeline、TM 等）均会触发。
+  - 修复：`Manifest.__len__()` 改为 `return max(0, self.current_index - len(self.deleted_indexes))`，用 `max(0, ...)` 钳制为非负。不影响正常场景下的行为。
+  - 测试同步：`donkeycar/tests/test_tub_v2.py` 新增 `test_delete_all_records_len`——删除全部记录后 `len(tub)` 应返回 0 而非抛出 `TypeError`；4 项测试全部通过。
+  - 注：仅 donkeycar Python 库改动，DD 前端/Firmware 无改动、无需 OTA；无需本机部署。
+
 ## 2026-08-21 (123)
 
 - fix(drive): Drive 遥测曲线不显示——移除数据集 `parsing:false` 导致的解析跳过（Issue #135 收尾回归）
