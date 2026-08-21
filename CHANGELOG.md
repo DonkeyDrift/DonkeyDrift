@@ -2,6 +2,15 @@
 
 ## 2026-08-21 (149)
 
+- fix(tub-manager): 一屏布局大幅修正——视频放大不再截断、编辑器底部滑块完整显示、整体更紧凑
+  - 背景：上一版（148）把视频 `max-h` 从 22vh 调到 30vh、图表 `min-h` 从 12rem 调到 8rem，但用户反馈仍看不清视频、编辑器底部仍不完整，改动幅度不够。
+  - 修复（6 处 CSS 改动，3 个文件）：
+    - `TubManagerPage.tsx`：容器 `h-[calc(100vh-200px)]`→`h-[calc(100vh-180px)]`（+20px 空间），间距 `gap-6`→`gap-4`（省 8px）。
+    - `TubLibrary.tsx`：视频容器 `max-h-[30vh]`→`max-h-[36vh]`（1080p 下从 324px 放宽到自然高度 ~341px，不再截断画面）；会话列表 `max-h-[30vh]`→`max-h-[24vh]`（收紧，不再抢空间）；`RecordStats` 从 `h-[60px] w-[88px]` + `text-lg` 改为 `h-[44px] w-[80px]` + `text-sm`（更紧凑，省 16px）。
+    - `TubEditor.tsx`：图表容器 `min-h-[8rem]`→`min-h-[6rem]`（128px→96px，底部滚滑块+选区/删除指示条空间更充裕，不再被 `overflow-hidden` 裁掉）。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。纯 CSS 改动，未新增单测。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 - perf(tub-library): 下载响应即时启动——所有 Tub I/O 移入后台线程，Safari 点击即弹下载通知
   - 背景：上一轮 (147) 把 tar.gz 构建移入后台线程，但打开 Tub、遍历所有 record 找 session 的操作仍在主线程——大 Tub（几千条 record）仅遍历就要数秒，HTTP 响应在这期间不发送，Safari 迟迟不弹下载通知。
   - `web_ui/backend/routers/tub.py`：Tub 打开、record 遍历、图片读取、gzip 压缩全部移入后台线程；HTTP 响应在 `os.pipe()` 创建后立即返回 `StreamingResponse`。新增 `startTimeMs` 查询参数——前端传入 session 的 `start_time_ms`，后端直接用其格式化文件名，无需读 Tub 取 `start_time_ms`。去掉响应前的 session 存在性校验（前端只会对已列出的 session 发起下载，不会请求不存在的 session）。
