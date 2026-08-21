@@ -189,36 +189,18 @@ export const deleteTubSession = async (tubPath: string, sessionId: string) => {
   };
 };
 
-export const downloadTubSession = async (
+export const downloadTubSession = (
   tubPath: string,
   sessionId: string,
-  start_time_ms: number | null,
 ) => {
-  const response = await api.get('/tub/download_session', {
-    params: { tubPath, sessionId },
-    responseType: 'blob',
-  });
-  const filename = (() => {
-    if (start_time_ms !== null && !Number.isNaN(start_time_ms)) {
-      const d = new Date(start_time_ms);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      return `recording_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}.tar.gz`;
-    }
-    return `recording_${sessionId}.tar.gz`;
-  })();
-  const url = window.URL.createObjectURL(
-    new Blob([response.data], { type: 'application/gzip' }),
-  );
+  const params = new URLSearchParams({ tubPath, sessionId });
   const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
+  link.href = `${API_URL}/tub/download_session?${params.toString()}`;
+  // Let the server set the filename via Content-Disposition
+  link.download = '';
   document.body.appendChild(link);
   link.click();
-  // Delay cleanup so Safari has time to start the async download
-  setTimeout(() => {
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  }, 150);
+  document.body.removeChild(link);
 };
 
 export const getImageUrl = (path: string, tubPath?: string) => {

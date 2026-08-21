@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (144)
+
+- fix(tub-library): 下载改为浏览器原生 HTTP 下载，Safari 立即弹出下载通知+进度条
+  - 背景：此前 `downloadTubSession` 用 axios `responseType:'blob'` 先把整个文件下载到内存，再用 blob URL 触发保存。Safari 不会在"内存下载"阶段显示下载通知，用户只看到图标弹跳却无下载进度条。
+  - `web_ui/frontend/src/services/api.ts`：`downloadTubSession` 从 async axios blob 改为同步——直接构造 `<a href="服务器URL">` + `link.click()` 让浏览器原生发起 HTTP 下载。后端已设 `Content-Disposition: attachment`，浏览器立即显示原生下载通知与进度条。函数签名去掉 `start_time_ms`（文件名由后端 Content-Disposition 设置）。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：`handleDownload` 改为同步调用，`downloadingId` 设 1 秒后自动清除作为点击视觉反馈，实际下载进度由浏览器原生 UI 显示。
+  - 测试同步：`TubLibrary.test.tsx` 下载测试参数去掉 `start_time_ms`，断言改为同步调用；`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过，`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
+
 ## 2026-08-21 (143)
 
 - feat(tub-manager): 录制视频库与 Tub 编辑器一屏并排显示，无需滚动切换

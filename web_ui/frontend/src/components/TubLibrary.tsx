@@ -494,17 +494,17 @@ export const TubLibrary: React.FC = () => {
     setFrame(idx);
   }, []);
 
-  const handleDownload = useCallback(async (session: TubSession) => {
+  const handleDownload = useCallback((session: TubSession) => {
     if (!tubPath) return;
     setDownloadingId(session.session_id);
     setError(null);
     try {
-      await downloadTubSession(tubPath, session.session_id, session.start_time_ms);
+      downloadTubSession(tubPath, session.session_id);
     } catch (err) {
       setError(getApiErrorMessage(err, t('tubLibrary.downloadFailed')));
-    } finally {
-      setDownloadingId(null);
     }
+    // The browser handles the actual download natively (progress bar etc.)
+    setTimeout(() => setDownloadingId(null), 1000);
   }, [tubPath, t]);
 
   const confirmDelete = useCallback(async () => {
