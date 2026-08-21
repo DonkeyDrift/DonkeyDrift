@@ -9,7 +9,6 @@ import http.server
 import json
 import os
 import re
-import shlex
 import shutil
 import signal
 import socket
@@ -20,11 +19,11 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 from donkeycar._version import __version__
 from donkeycar.launcher.dc_discovery import find_drifter_console
-from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
+from donkeycar.launcher.kimi_web import launch_kimi_code_web
 from donkeycar.launcher.dsh_web import launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 from donkeycar.webui_instance import (
@@ -956,8 +955,6 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._handle_launch_kimi_code_web()
         elif path == "/api/launch/dsh":
             self._handle_launch_dsh()
-        elif path == "/api/launch/claude-code":
-            self._handle_launch_claude_code()
         elif path == "/api/createcar":
             body, err = self._read_json_body()
             if err is not None:
@@ -1132,60 +1129,6 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         result = launch_dsh_web(cwd=cwd)
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
-                         extra_headers=_KIMI_WEB_CORS_HEADERS)
-
-    def _handle_launch_claude_code(self):
-        """POST /api/launch/claude-code：回网页终端 URL（Claude Code）。
-
-        Claude Code 没有官方 web UI：端点不启动任何子进程，只回 launcher
-        自带网页终端的 URL（/terminal?cmd=...，终端页面连上 WebSocket
-        后把 cmd 作为首行命令执行），claude 在浏览器终端会话里运行，
-        毫秒级返回。请求体可选 JSON {"cwd": "/abs/path"} 指定 claude
-        运行目录，缺省为 /home/dkc/projects（与 kimi-code-web 同目录）；
-        cwd 不存在直接报错，绝不回退到其它目录。入口 host 用
-        _entry_host()（mDNS 主机名优先，局域网 IP 兜底），端口固定
-        launcher 自身 8090。所有响应带 CORS 头（DC 跨域调用，
-        见 _KIMI_WEB_CORS_HEADERS）。
-        """
-        content_length = int(self.headers.get("Content-Length", 0))
-        cwd = None
-        if content_length > 0:
-            raw = self.rfile.read(content_length)
-            try:
-                body = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                self._serve_json(
-                    {"status": "error", "error": "请求体不是合法 JSON"},
-                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
-                )
-                return
-            if not isinstance(body, dict):
-                self._serve_json(
-                    {"status": "error", "error": "请求体必须是 JSON 对象"},
-                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
-                )
-                return
-            cwd = body.get("cwd")
-            if cwd is not None and not isinstance(cwd, str):
-                self._serve_json(
-                    {"status": "error", "error": "cwd 必须是字符串"},
-                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
-                )
-                return
-        # 缺省与 kimi-code-web 同目录，不落回用户主目录
-        if cwd is None:
-            cwd = "/home/dkc/projects"
-        if not Path(cwd).expanduser().is_dir():
-            self._serve_json(
-                {"status": "error",
-                 "error": f"cwd 目录不存在或不是目录: {cwd}"
-                          "（不会回退到其它目录）"},
-                code=500, extra_headers=_KIMI_WEB_CORS_HEADERS,
-            )
-            return
-        cmd = f"cd {shlex.quote(cwd)} && claude"
-        url = f"http://{_entry_host()}:8090/terminal?cmd={quote(cmd, safe='')}"
-        self._serve_json({"status": "ok", "url": url},
                          extra_headers=_KIMI_WEB_CORS_HEADERS)
 
     def _serve_html(self):
