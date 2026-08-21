@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (135)
+
+- fix(console): DD 内嵌 Drifter Console 扫描期间不再误显示「未发现设备」，改为显示「正在扫描局域网…」
+  - 背景：进入 DD 的 Drifter Console 页后局域网扫描约需 2.5–3s，期间设备下拉与主区域一直显示「未发现设备」，扫描结束后才纠正——用户观感为「显示未发现设备、扫描很久、还是未发现设备」。另实测本轮用户侧扫不到设备的根因是 Clash VPN（系统代理/TUN）拦截了到本机后端与车端的局域网请求，关闭 VPN 后 `POST /api/connector/discover_console` 实测 ~2.5s 正常返回 `found:[192.168.3.46]`。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：设备下拉的空占位 option 与主区域占位文案均由固定 `console.noDevice` 改为 `scanning ? console.scanning : console.noDevice`（扫描中与扫描结束无设备两种状态正确区分）。
+  - 测试同步：新增 `web_ui/frontend/src/pages/DrifterConsolePage.test.tsx` 两项回归——① 扫描进行中显示 `console.scanning` 且不出现 `console.noDevice`、扫描结束无设备才显示 `console.noDevice`；② 扫描发现设备后自动选中第一台并加载内嵌 DC iframe（src 指向该车 IP）。`npx vitest run` → 22 文件 122 项全绿（App.test.tsx 的 TubManager keep-alive 用例在全量并发下偶发超时，单跑与全量复跑均通过，与本改动无关）；`npm run check`（tsc）、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (134)
 
 - fix(layout): DD 左上角 logo 圆角对齐 Drifter Console headerLogo（8px，修正 12px）
