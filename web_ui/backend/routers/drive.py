@@ -700,7 +700,13 @@ def _multipart_part(boundary: bytes, frame: bytes) -> bytes:
 
 
 async def _frame_generator():
-    """帧生成器，逐帧输出 multipart 分片"""
+    """帧生成器，逐帧输出 multipart 分片。
+
+    只要没有真实帧可推（车端离线，或在线但尚未推首帧），就推占位帧，
+    让浏览器 <img> 立即 onLoad——既避免前端一直卡在「正在连接摄像头」，
+    也避免长时间收不到任何字节被浏览器判为加载失败（onError →「摄像头未连接」）。
+    车端是否在线由 /drive/stats 与前端状态徽章另行呈现。
+    """
     boundary = b"--donkeyframe"
     last_sent_ts = 0.0
     min_interval = 1.0 / 25.0  # 最高 25fps 发送
@@ -719,13 +725,12 @@ async def _frame_generator():
             yield _multipart_part(boundary, frame)
             continue
 
-        # 车端离线时不发占位帧：保持静默，让前端通过 /drive/stats 轮询显示「车端离线」。
-        if not online or _PLACEHOLDER_FRAME is None:
+        # 占位帧生成失败时（如 Pillow 不可用）才静默，避免发送空分片。
+        if _PLACEHOLDER_FRAME is None:
             await asyncio.sleep(0.1)
             continue
 
-        # 车端在线但还没有首帧：发送占位帧，让 <img> 立即 onLoad，
-        # 避免前端一直卡在「正在连接摄像头」。
+        # 车端离线或在线但还没有首帧：发送占位帧，让 <img> 立即 onLoad。
         now = time.time()
         if now - last_sent_ts < PLACEHOLDER_FRAME_INTERVAL:
             await asyncio.sleep(PLACEHOLDER_FRAME_INTERVAL / 2)
