@@ -124,7 +124,7 @@ export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
             type="checkbox"
             checked={allSelected}
             onChange={() => onToggleAll(!allSelected)}
-            className="accent-slate-400"
+            className={allSelected ? 'accent-blue-500' : 'accent-slate-400'}
           />
           <span>{t('driveViz.selectAll')}</span>
         </label>
