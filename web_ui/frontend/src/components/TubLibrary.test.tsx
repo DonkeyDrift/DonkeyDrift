@@ -192,6 +192,7 @@ describe('TubLibrary download button', () => {
     expect(downloadTubSession).toHaveBeenCalledWith(
       '/tmp/tub',
       '26-08-16_1',
+      sessions[0].start_time_ms,
     );
   });
 });

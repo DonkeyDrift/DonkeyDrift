@@ -499,7 +499,7 @@ export const TubLibrary: React.FC = () => {
     setDownloadingId(session.session_id);
     setError(null);
     try {
-      downloadTubSession(tubPath, session.session_id);
+      downloadTubSession(tubPath, session.session_id, session.start_time_ms);
     } catch (err) {
       setError(getApiErrorMessage(err, t('tubLibrary.downloadFailed')));
     }
