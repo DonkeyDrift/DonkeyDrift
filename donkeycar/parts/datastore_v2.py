@@ -438,7 +438,7 @@ class Manifest(object):
 
     def __len__(self):
         # current_index is already pointing to the next index
-        return self.current_index - len(self.deleted_indexes)
+        return max(0, self.current_index - len(self.deleted_indexes))
 
 
 class ManifestIterator(object):
