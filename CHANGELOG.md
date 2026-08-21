@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-21 (137)
+
+- feat(launcher): 新增「C Code」入口——DD 标签栏与 DC 头部在 Kimi Code Web 与 DeepSeek Harness 之间加入 Claude Code 入口，点击在 launcher 网页终端新标签页里运行 `claude`
+  - 背景：DD/DC 已有 Kimi Code Web、DeepSeek Harness 两个弱化入口按钮，用户要求在其间加入 C Code（Claude Code）。Claude Code 无官方 web UI，故复用 launcher 的 `/terminal?cmd=` 网页终端机制（菜单 8/9/10 同款：终端页面连上 WebSocket 后把 cmd 作为首行命令执行），入口即开即得、端点毫秒级返回。
+  - `donkeycar/launcher/server.py`：新增 `POST /api/launch/claude-code` 端点（`_handle_launch_claude_code`），镜像 kimi/dsh 处理器的请求体校验（可选 JSON `{"cwd": ...}`，非法 JSON/非对象/cwd 非字符串 → 400，cwd 目录不存在 → 500 且不回退其它目录，缺省 `/home/dkc/projects`）；成功返回 `{"status":"ok","url": "http://<entry-host>:8090/terminal?cmd=<urlencoded 'cd <cwd> && claude'>"}`，entry-host 复用 `kimi_web._entry_host()`（mDNS 主机名优先、局域网 IP 兜底，origin 不随 DHCP 漂移）；所有响应带 `_KIMI_WEB_CORS_HEADERS`（DC 从 ESP32 origin 跨域调用），该常量注释由「仅该端点放行」更新为「仅 launch 类端点放行」。不启动任何子进程——claude 由浏览器终端会话执行。
+  - `web_ui/backend/routers/launch.py`：新增 `@router.post("/claude-code")` 转发路由（镜像 dsh 路由），模块 docstring 更新为涵盖三个端点。
+  - `web_ui/frontend/src/services/api.ts`：新增 `launchClaudeCode`（POST `/launch/claude-code`，`validateStatus: () => true`，返回复用 `LaunchKimiCodeWebResult`）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`KimiCodeWebEntryLink` 与 `DshEntryLink` 之间新增 `CCodeEntryLink`——lucide-react `Terminal` 图标（`w-3.5 h-3.5`），复用 `useLauncherEntry` 与 `entryLinkCls` 弱化样式，timeoutMs 10000（端点即时返回）。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面 nav 与移动端菜单两处均在 KCW 与 DSH 之间插入 `<CCodeEntryLink />`。
+  - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 各新增 `common.enterButtons.cCode` 组 5 键（标签 "C Code"，title 说明在网页终端启动 Claude Code）。
+  - 测试同步：新建 `tests/test_launcher_claude_code.py` 7 项（缺省/显式/含空格/不存在 cwd、非法 JSON、非对象体、CORS 头、URL 形态，`_entry_host` monkeypatch 钉住）；新建 `web_ui/backend/tests/test_launch.py` 6 项（三条 launch 路由注册、转发与 502 兜底）；`web_ui/frontend/src/components/EnterButtons.test.tsx` 新增 `describe('CCodeEntryLink')` 3 项（弱化样式/成功开窗/失败 alert，11 项全过），`tsc --noEmit` 通过。launcher 侧回归 `test_launcher_dsh_web.py`/`test_launcher_kimi_web.py` 84 项全过。
+  - 注：Firmware 侧配套改动在同日条目 v1.8.30（DC 头部按钮 + openCCode() + i18n）；收尾后部署 8000（重建 dist）并 OTA 刷车。
 ## 2026-08-21 (136)
 
 - feat(evaluate): `donkey evaluate` 不传 `--model` 时新增转向数据健康度告警，把「angle corr≈0」的根因固化进诊断输出
@@ -64,7 +76,7 @@
   - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过，入口 `index-DYVHxIKZ.js`、CarConnectorPage chunk `CarConnectorPage-BegwM-jT.js`。
   - 注：本改动依赖 Firmware v1.8.30（车端 DC `?settings=1` 删掉系统/配网行并新增 `dd-open-wifi-*` postMessage 处理），Firmware 已同步 OTA。
 
-## 2026-08-21 (129)
+## 2026-08-21 (137)
 
 - refactor(tub-library): 下载按钮移入会话行 pin/trash 区域，与 Pin/Delete 并列
   - 背景：下载按钮此前在底部播放控制工具栏（Refresh 与 Delete 之间），与会话行内 Pin/Delete 按钮分离，操作入口不统一。

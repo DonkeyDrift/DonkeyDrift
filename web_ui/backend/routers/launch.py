@@ -1,10 +1,11 @@
 """DD 前端 → launcher（:8090）的 launch 转发路由。
 
-"打开 Kimi Code Web" 的自动化端点（POST /api/launch/kimi-code-web）实现
-在 launcher 服务（donkeycar/launcher/server.py，默认 :8090）上；DD 前端
-与后端同源，相对路径 POST /api/launch/kimi-code-web 到达本后端，由本路由
-原样转发给 launcher，浏览器侧无跨域问题。launcher 侧的 CORS 头是为 DC
-（ESP32 origin 直连 :8090）准备的，与本转发路径无关。
+"打开 Kimi Code Web / DeepSeek Harness / C Code" 的自动化端点
+（POST /api/launch/kimi-code-web、/api/launch/dsh、/api/launch/claude-code）
+实现在 launcher 服务（donkeycar/launcher/server.py，默认 :8090）上；
+DD 前端与后端同源，相对路径 POST /api/launch/<端点名> 到达本后端，由
+本路由原样转发给 launcher，浏览器侧无跨域问题。launcher 侧的 CORS 头
+是为 DC（ESP32 origin 直连 :8090）准备的，与本转发路径无关。
 """
 
 import asyncio
@@ -52,6 +53,12 @@ async def launch_kimi_code_web(request: Request):
 async def launch_dsh(request: Request):
     """转发 POST /api/launch/dsh（DeepSeek Harness）到 launcher 并回传其 JSON 响应。"""
     return await _forward_launch(request, "/api/launch/dsh")
+
+
+@router.post("/claude-code")
+async def launch_claude_code(request: Request):
+    """转发 POST /api/launch/claude-code（C Code/Claude Code）到 launcher 并回传其 JSON 响应。"""
+    return await _forward_launch(request, "/api/launch/claude-code")
 
 
 async def _forward_launch(request: Request, launcher_path: str) -> JSONResponse:
