@@ -351,7 +351,7 @@ export const TelemetryChart = React.memo(function TelemetryChart({
     <div
       className={cn(
         overlay
-          ? 'rounded-lg border border-white/10 bg-slate-950/50 backdrop-blur-sm p-2'
+          ? 'p-2'
           : 'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
         className,
       )}
