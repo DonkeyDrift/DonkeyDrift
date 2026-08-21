@@ -63,6 +63,8 @@ describe('TubLibrary auto-select newest recording', () => {
       tubPath: '/tmp/tub',
       fields: ['cam/image_array', 'user/angle'],
       config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
     });
   });
 
@@ -76,6 +78,18 @@ describe('TubLibrary auto-select newest recording', () => {
     await waitFor(() => {
       expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
     });
+  });
+
+  it('pushes the selected session records into the store for the editor', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionId).toBe('26-08-16_1');
+    });
+    expect(useStore.getState().activeSessionRecords).toEqual([
+      { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+      { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+    ]);
   });
 
   it('shows the select hint when no tub is loaded', () => {

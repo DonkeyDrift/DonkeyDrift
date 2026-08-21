@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 
 const MAX_SELECTION_HISTORY = 120;
 
-interface TubRecord {
+export interface TubRecord {
   _index: number;
   _timestamp_ms: number;
   [key: string]: unknown;
@@ -67,6 +67,8 @@ interface AppState {
   totalPhysicalRecords: number;
   deletedIndexes: number[];
   currentIndex: number;
+  activeSessionId: string | null;
+  activeSessionRecords: TubRecord[];
   fields: string[];
   isLoading: boolean;
   loadedTubPath: string | null;
@@ -92,6 +94,7 @@ interface AppState {
   requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
+  setActiveSession: (sessionId: string | null, records: TubRecord[]) => void;
   setDeletedIndexes: (deletedIndexes: number[], totalPhysicalRecords?: number) => void;
   setCurrentIndex: (index: number | ((prev: number) => number)) => void;
   setIsDragging: (isDragging: boolean) => void;
@@ -132,6 +135,8 @@ export const useStore = create<AppState>()(
       totalPhysicalRecords: 0,
       deletedIndexes: [],
       currentIndex: 0,
+      activeSessionId: null,
+      activeSessionRecords: [],
       fields: [],
       isLoading: false,
       loadedTubPath: null,
@@ -195,6 +200,8 @@ export const useStore = create<AppState>()(
           deletedIndexes: deletedIndexes ?? [],
           fields,
           currentIndex: records.length > 0 ? 0 : 0,
+          activeSessionId: null,
+          activeSessionRecords: [],
           error: null,
           activeDrawer: null,
           isPlaying: false,
@@ -216,6 +223,8 @@ export const useStore = create<AppState>()(
               : 0,
           isPlaying: false,
         })),
+      setActiveSession: (sessionId, records) =>
+        set({ activeSessionId: sessionId, activeSessionRecords: records }),
       setCurrentIndex: (index) =>
         set((state) => ({
           currentIndex: typeof index === 'function' ? index(state.currentIndex) : index,
