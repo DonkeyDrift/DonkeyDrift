@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 import hashlib
 import os
+import io
 import json
+import tarfile
 from collections import OrderedDict
 from donkeycar.parts.tub_v2 import Tub
 from donkeycar.pipeline.types import TubRecord
@@ -262,6 +264,88 @@ async def get_session_records(tubPath: str, sessionId: str):
         return {"status": True, "path": path, "records": records}
     except Exception as e:
         logger.error(f"Failed to read session {sessionId} of tub {path}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/download_session")
+async def download_session(tubPath: str, sessionId: str):
+    """Download a recording session's frames as a tar.gz archive.
+
+    Collects all JPEG images belonging to the session, packs them into a
+    tar.gz in memory, and streams the archive to the browser.
+    """
+    path = os.path.expanduser(tubPath)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    images_dir = os.path.join(path, 'images')
+
+    try:
+        tub = Tub(path, read_only=True)
+        try:
+            # Find the image_array field key from the first record that has one
+            image_key = None
+            session_records = []
+            for record in tub:
+                sid = str(record.get('_session_id', ''))
+                if sid != sessionId:
+                    continue
+                session_records.append(record)
+                if image_key is None:
+                    for k in record:
+                        if k.endswith('image_array') and isinstance(record[k], str):
+                            image_key = k
+                            break
+        finally:
+            tub.close()
+
+        if not session_records:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session '{sessionId}' not found in tub",
+            )
+
+        # Build a readable filename from the session's start timestamp
+        start_ms = session_records[0].get('_timestamp_ms')
+        if start_ms is not None:
+            from datetime import datetime
+            dt = datetime.fromtimestamp(start_ms / 1000)
+            filename = f"recording_{dt.strftime('%Y-%m-%d_%H_%M_%S')}.tar.gz"
+        else:
+            filename = f"recording_{sessionId}.tar.gz"
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+            for record in session_records:
+                if image_key is None:
+                    continue
+                img_name = record.get(image_key)
+                if not isinstance(img_name, str):
+                    continue
+                clean = img_name.replace('images/', '').replace('images\\', '')
+                img_path = os.path.join(images_dir, clean)
+                if not os.path.exists(img_path):
+                    img_path_alt = os.path.join(path, clean)
+                    if os.path.exists(img_path_alt):
+                        img_path = img_path_alt
+                    else:
+                        continue
+                with open(img_path, 'rb') as f:
+                    data = f.read()
+                info = tarfile.TarInfo(name=clean)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+
+        buf.seek(0)
+
+        return StreamingResponse(
+            buf,
+            media_type='application/gzip',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download session {sessionId} of tub {path}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/delete_session")
