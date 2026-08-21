@@ -45,6 +45,8 @@ from donkeycar.launcher import server as launcher_server
 # monkeypatch 成 None；需要直接验证其真实逻辑（主机名小写化）时用它调用，
 # 绕开 autouse 的覆盖（只 patch socket 与 _lan_ip，函数体内其余逻辑仍真实执行）。
 _ORIGINAL_MDNS_HOSTNAME = kimi_web._mdns_hostname
+# autouse fixture 会 monkeypatch _avahi_publishes_ipv6；解析逻辑测试用原始函数
+_ORIGINAL_AVAHI_PUBLISHES_IPV6 = kimi_web._avahi_publishes_ipv6
 
 
 # ===========================================================================
@@ -125,6 +127,9 @@ def _fake_lan_ip(monkeypatch):
     """
     monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
     monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
+    # 默认 avahi 不发布 AAAA：mDNS 主机名是安全入口（IPv6/AAAA 防护的
+    # 反向路径由专门测试覆盖）
+    monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: False)
 
 
 # ===========================================================================
@@ -188,6 +193,26 @@ class TestLanUrl:
         url = "http://192.168.3.41:58627/#token=t0k123"
         assert kimi_web._lan_url(url) == url
 
+    def test_mdns_suppressed_when_avahi_publishes_ipv6_loopback(
+            self, monkeypatch):
+        # IPv6/AAAA 防护：avahi 发布 AAAA 时 kimi web 只监听 IPv4，浏览器
+        # 选中 IPv6 会连接黑洞、KCW 报"无法连接到 Kimi 服务器"；入口回退
+        # 局域网 IPv4 IP，保证可达
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: True)
+        assert kimi_web._lan_url(
+            "http://127.0.0.1:58627/#token=t0k123") == \
+            "http://192.168.3.10:58627/#token=t0k123"
+
+    def test_mdns_suppressed_when_avahi_publishes_ipv6_lan_host(
+            self, monkeypatch):
+        # 同一防护对 banner 给出的本机局域网 IP host 也生效
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: True)
+        assert kimi_web._lan_url(
+            "http://192.168.3.10:58627/#token=t0k123") == \
+            "http://192.168.3.10:58627/#token=t0k123"
+
 
 # ===========================================================================
 # _mdns_hostname / _allowed_host_values（issue #168 后续：DNS-rebinding 栅栏）
@@ -218,6 +243,62 @@ class TestMdnsHostnameAndAllowedHosts:
         monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
         monkeypatch.setattr(kimi_web, "_lan_ip", lambda: None)
         assert kimi_web._allowed_host_values() == []
+
+
+# ===========================================================================
+# _avahi_publishes_ipv6 / _entry_host（IPv6/AAAA 防护：kimi web 只监听
+# IPv4，avahi 发布 AAAA 时入口回退局域网 IP，避免浏览器 IPv6 黑洞）
+# ===========================================================================
+class TestAvahiIpv6Entry:
+    def test_publish_disabled_returns_false(self, tmp_path):
+        conf = tmp_path / "avahi-daemon.conf"
+        conf.write_text("[publish]\npublish-aaaa-on-ipv6=no\n",
+                        encoding="utf-8")
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is False
+
+    def test_publish_enabled_returns_true(self, tmp_path):
+        conf = tmp_path / "avahi-daemon.conf"
+        conf.write_text("[publish]\npublish-aaaa-on-ipv6=yes\n",
+                        encoding="utf-8")
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
+
+    def test_default_when_key_absent_returns_true(self, tmp_path):
+        # 未显式关闭 = 默认发布（保守回退局域网 IP）
+        conf = tmp_path / "avahi-daemon.conf"
+        conf.write_text("[publish]\nuse-ipv4=yes\n", encoding="utf-8")
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
+
+    def test_commented_key_ignored(self, tmp_path):
+        conf = tmp_path / "avahi-daemon.conf"
+        conf.write_text("# publish-aaaa-on-ipv6=no\npublish-aaaa-on-ipv6=yes",
+                        encoding="utf-8")
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
+
+    def test_missing_conf_returns_true(self, tmp_path):
+        # 配置缺失视为发布（保守）
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(
+            tmp_path / "no-such-file") is True
+
+    def test_entry_host_mdns_when_no_ipv6_published(self, monkeypatch):
+        monkeypatch.setattr(kimi_web, "_mdns_hostname",
+                            lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: False)
+        assert kimi_web._entry_host() == "tony007.local"
+
+    def test_entry_host_lan_ip_when_ipv6_published(self, monkeypatch):
+        # IPv6/AAAA 防护：avahi 发布 AAAA 时 mDNS 名不再是安全入口，
+        # 回退局域网 IPv4 IP（可达性优先于 origin 稳定性）
+        monkeypatch.setattr(kimi_web, "_mdns_hostname",
+                            lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: True)
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+        assert kimi_web._entry_host() == "192.168.3.10"
+
+    def test_entry_host_lan_ip_when_no_mdns(self, monkeypatch):
+        monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: False)
+        monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+        assert kimi_web._entry_host() == "192.168.3.10"
 
 
 # ===========================================================================
