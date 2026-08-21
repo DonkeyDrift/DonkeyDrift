@@ -71,13 +71,13 @@ export const CURVES: CurveConfig[] = [
   { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', key: 'gz', group: 'steering', defaultOn: true, scale: 0.2 },
   { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', group: 'steering', defaultOn: true },
   { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', group: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', key: 'gx', group: 'steering', defaultOn: false, scale: 0.2 },
-  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', group: 'steering', defaultOn: false, scale: 0.2 },
-  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', group: 'throttle', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', group: 'throttle', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', group: 'throttle', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', group: 'steering', defaultOn: false },
-  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', group: 'throttle', defaultOn: false },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', key: 'gx', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', group: 'throttle', defaultOn: true },
 ];
 
 /** 按分组取曲线子集（保持 CURVES 顺序）。 */

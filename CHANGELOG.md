@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (127)
+
+- fix(drive): 遥测曲线勾选框默认全部勾选
+  - 背景：用户此前要求「默认每个选项都勾选上」，但 Drive 页遥测曲线图例仍有部分参数默认未勾选（只有 5 条 `defaultOn: true`、其余 7 条 `defaultOn: false`），打开页面时这些曲线不显示。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：`CURVES` 数组里 7 条 `defaultOn: false` 全部改为 `defaultOn: true`，现在 12 条曲线全部默认勾选。`DrivePage.tsx` 与 `TelemetryChart.tsx` 的初始 `visibleKeys` 均用 `filter((c) => c.defaultOn)` 派生，无需改动初始化逻辑，全勾选即自动生效。
+  - 测试同步：`web_ui/frontend/src/components/drive/TelemetryChart.test.tsx` 4 处更新——①「收到遥测后显示默认 5 条曲线」改为「收到遥测后默认显示全部曲线」，断言改为 `arrayContaining` 含全部 12 条 + `toHaveLength(12)`；② gyro/accel 缩放用例删除「勾选默认隐藏的 AccX 复选框」段，AccX 现在默认已显示，直接断言 `ax scale=1/9.8` 已写入；③「勾选隐藏的曲线后显示」改为「取消勾选默认显示的曲线后隐藏」，GyroX 默认已显示，点 checkbox 取消后应消失；④ 注释「三条默认曲线」改「全部默认曲线」。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (126)
 
 - feat(tub-library): 录制视频库新增下载视频到浏览器功能，打包为 tar.gz
