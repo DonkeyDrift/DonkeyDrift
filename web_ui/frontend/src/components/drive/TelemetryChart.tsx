@@ -263,8 +263,6 @@ export const TelemetryChart = React.memo(function TelemetryChart({
         borderWidth: 1.5,
         spanGaps: false, // NaN 处断开曲线
         tension: 0,
-        parsing: false,
-        normalized: true,
       };
     });
 

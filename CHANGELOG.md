@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (122)
+
+- fix(drive): Drive 遥测曲线不显示——移除数据集 `parsing:false` 导致的解析跳过（Issue #135 收尾回归）
+  - 背景：上一轮 (118) 把遥测图改为原生 Chart.js 直改 dataset + `update('none')`，并在每个数据集里写了 `parsing:false`/`normalized:true`。Chart.js 的 `DatasetController.parse` 在 `parsing===false` 时把 `meta._parsed` 直接设为原始 number 数组、跳过 `number → {x,y}` 解析；而 `LineController.updateElements` 读 `parsed[vAxis]`（即 `number['y']`）得 `undefined`，于是每个点 `skip=true`，曲线完全不画。Playwright 实测运行实例两张遥测图 canvas `colored:0`（只有灰色网格、零彩色曲线像素），而数据已写入缓冲（`waitingData=false`）——正好吻合。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：数据集配置删除 `parsing:false` 与 `normalized:true`（第 207 行 chartOptions 顶层的 `normalized:true` 属无效配置、无害，保留不动）。默认解析下 in-place 改数组 + `chart.update('none')` 会走 `_resyncElements → parse()` 重新解析，曲线正常重绘。
+  - 测试同步：`web_ui/frontend/src/components/drive/TelemetryChart.test.tsx` 新增回归断言「数据集未禁用 parsing」，防止再引入 `parsing:false`；`npx vitest run src/components/drive/TelemetryChart.test.tsx` 8 项通过、`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (121)
 
 - fix(tub-library): 录制视频库播放帧率过低——播放循环绕过 React 状态直接画 canvas，节流 UI 更新

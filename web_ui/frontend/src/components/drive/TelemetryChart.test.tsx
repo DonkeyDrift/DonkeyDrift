@@ -175,6 +175,16 @@ describe('TelemetryChart', () => {
     expect(labels).toEqual(expect.arrayContaining(['油门', '转向', '陀螺仪 Z']));
   });
 
+  it('数据集未禁用 parsing（否则曲线不渲染，回归 #修复遥测曲线）', async () => {
+    useTelemetryStore.getState().push(sampleTelemetry());
+    render(<TelemetryChart />);
+
+    await waitForChart();
+    for (const ds of latestChart().data.datasets) {
+      expect((ds as unknown as { parsing?: boolean }).parsing).not.toBe(false);
+    }
+  });
+
   it('group 模式下只渲染该分组的曲线与图例', async () => {
     useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5, pilot_angle: 0.3 }));
     render(
