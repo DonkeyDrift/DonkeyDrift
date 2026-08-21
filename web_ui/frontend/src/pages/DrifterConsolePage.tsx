@@ -101,7 +101,9 @@ export const DrifterConsolePage: React.FC = () => {
           value={selectedIp}
           onChange={(e) => setSelectedIp(e.target.value)}
         >
-          {devices.length === 0 && <option value="">{t('console.noDevice')}</option>}
+          {devices.length === 0 && (
+            <option value="">{scanning ? t('console.scanning') : t('console.noDevice')}</option>
+          )}
           {devices.map((d) => (
             <option key={d.ip} value={d.ip}>
               {d.ip}
@@ -141,7 +143,7 @@ export const DrifterConsolePage: React.FC = () => {
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center bg-zinc-900/30 px-6 text-center text-sm text-zinc-500">
-          {t('console.noDevice')}
+          {scanning ? t('console.scanning') : t('console.noDevice')}
         </div>
       )}
     </div>

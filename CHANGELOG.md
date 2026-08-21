@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-21 (129)
+## 2026-08-21 (137)
 
 - feat(launcher): 新增「C Code」入口——DD 标签栏与 DC 头部在 Kimi Code Web 与 DeepSeek Harness 之间加入 Claude Code 入口，点击在 launcher 网页终端新标签页里运行 `claude`
   - 背景：DD/DC 已有 Kimi Code Web、DeepSeek Harness 两个弱化入口按钮，用户要求在其间加入 C Code（Claude Code）。Claude Code 无官方 web UI，故复用 launcher 的 `/terminal?cmd=` 网页终端机制（菜单 8/9/10 同款：终端页面连上 WebSocket 后把 cmd 作为首行命令执行），入口即开即得、端点毫秒级返回。
@@ -12,6 +12,81 @@
   - `web_ui/frontend/src/i18n/messages/common.ts`：zh/en 各新增 `common.enterButtons.cCode` 组 5 键（标签 "C Code"，title 说明在网页终端启动 Claude Code）。
   - 测试同步：新建 `tests/test_launcher_claude_code.py` 7 项（缺省/显式/含空格/不存在 cwd、非法 JSON、非对象体、CORS 头、URL 形态，`_entry_host` monkeypatch 钉住）；新建 `web_ui/backend/tests/test_launch.py` 6 项（三条 launch 路由注册、转发与 502 兜底）；`web_ui/frontend/src/components/EnterButtons.test.tsx` 新增 `describe('CCodeEntryLink')` 3 项（弱化样式/成功开窗/失败 alert，11 项全过），`tsc --noEmit` 通过。launcher 侧回归 `test_launcher_dsh_web.py`/`test_launcher_kimi_web.py` 84 项全过。
   - 注：Firmware 侧配套改动在同日条目 v1.8.30（DC 头部按钮 + openCCode() + i18n）；收尾后部署 8000（重建 dist）并 OTA 刷车。
+## 2026-08-21 (136)
+
+- feat(evaluate): `donkey evaluate` 不传 `--model` 时新增转向数据健康度告警，把「angle corr≈0」的根因固化进诊断输出
+  - 背景：用新录制的 12531 条数据验证根因——旧数据（中间幅度 mid_ratio 仅 3.2%、左转 7.9%/右转 91.5%、直行 85%）训练后 angle corr≈0；重新采集均衡数据（mid_ratio 16.4%、左 37.3%/右 61.8%、直行 30.4%）后，纯 linear 基线 angle corr 即达 **0.9895**、throttle corr 0.8779。证明 angle corr≈0 不是训练不足，而是转向标签分布病态。
+  - `donkeycar/management/base.py`：新增 `Evaluate._angle_health_warnings()`，对 `mid_ratio<5%`、`left_ratio<10%` 或 `right_ratio<10%`、`abs_lt_0.05_ratio>70%` 三类病态输出中文告警并给「重新采集平滑连续转向数据」建议；`run()` 不传 `--model` 分支打印告警，并在 `--out` JSON 里写 `warnings` 字段（健康时无该字段）。
+  - 测试同步：`donkeycar/tests/test_evaluate_command.py` 新增 `test_angle_health_warnings_healthy` / `test_angle_health_warnings_unhealthy`，并给无模型路径加「健康数据无 warnings」断言；`pytest -q` 6 passed。
+  - 注：仅 donkeycar CLI 统计字段改动，不影响本机 Web UI，无需部署/OTA。
+
+## 2026-08-21 (135)
+
+- fix(console): DD 内嵌 Drifter Console 扫描期间不再误显示「未发现设备」，改为显示「正在扫描局域网…」
+  - 背景：进入 DD 的 Drifter Console 页后局域网扫描约需 2.5–3s，期间设备下拉与主区域一直显示「未发现设备」，扫描结束后才纠正——用户观感为「显示未发现设备、扫描很久、还是未发现设备」。另实测本轮用户侧扫不到设备的根因是 Clash VPN（系统代理/TUN）拦截了到本机后端与车端的局域网请求，关闭 VPN 后 `POST /api/connector/discover_console` 实测 ~2.5s 正常返回 `found:[192.168.3.46]`。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`：设备下拉的空占位 option 与主区域占位文案均由固定 `console.noDevice` 改为 `scanning ? console.scanning : console.noDevice`（扫描中与扫描结束无设备两种状态正确区分）。
+  - 测试同步：新增 `web_ui/frontend/src/pages/DrifterConsolePage.test.tsx` 两项回归——① 扫描进行中显示 `console.scanning` 且不出现 `console.noDevice`、扫描结束无设备才显示 `console.noDevice`；② 扫描发现设备后自动选中第一台并加载内嵌 DC iframe（src 指向该车 IP）。`npx vitest run` → 22 文件 122 项全绿（App.test.tsx 的 TubManager keep-alive 用例在全量并发下偶发超时，单跑与全量复跑均通过，与本改动无关）；`npm run check`（tsc）、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (134)
+
+- fix(layout): DD 左上角 logo 圆角对齐 Drifter Console headerLogo（8px，修正 12px）
+  - 背景：logo 此前用 Tailwind `rounded-lg`，但主题 CSS（`theme-mus4.css` / `theme-light.css`）把 `.rounded-lg` 全局改写为 12px，导致 logo 实际圆角 12px；而 Drifter Console 的 headerLogo 是 `border-radius:8px`。用户反馈两者圆角不一样。
+  - `web_ui/frontend/src/components/Layout.tsx`：logo `<img>` className 由 `w-8 h-8 rounded-lg border header-logo` 改为 `w-8 h-8 border header-logo`（去掉被主题改写的 rounded-lg）。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.header-logo` 规则内新增 `border-radius: 8px;`（显式锁定，对齐 DC），边框色随主题（深色 #2b3441 / 浅色 #d5dce4）不变。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 21 文件 118 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (133)
+
+- fix(drive): 视频画面恢复圆角、遥测曲线去掉横向网格线与左侧刻度数字、面板标题移到曲线下方
+  - 背景：Drive 页用户反馈三处——① 摄像头画面四个角变成直角（之前是圆弧）；② 遥测曲线之间的横向网格线（1.0/0.5/-0.5/-1.0）与左侧刻度数字遮挡画面；③ 「转向 / 姿态」「油门 / 加速度」两个面板标题应移到各自曲线下方（左右位置不变、高度贴近原 -1.0 刻度下方）。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：视频容器（`videoContainerRef`）在非全屏时加 `rounded-lg overflow-hidden`，四角恢复圆角并把 object-cover 视频与底部遥测浮层裁进圆角；全屏时不加圆角（铺满屏幕）。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：
+    - `chartOptions.scales.y` 改为 `display: false`（删掉原 grid/ticks 配色），整体隐藏 y 轴——横向网格线与左侧刻度数字全去掉；`min: -1, max: 1` 保留仍决定量程，曲线铺满全宽（不再给左侧刻度留 gutter）。
+    - 面板标题行从画布上方移到画布下方（`mb-2` 改 `mt-2`），overlay 与分栏两种模式都生效；左右对齐不变。
+  - 测试同步：`web_ui/frontend/src/components/drive/TelemetryChart.test.tsx` 新增两项回归——「y 轴整体隐藏（display:false 且 min/max 仍为 -1/1）」「面板标题渲染在曲线画布下方（DOM 顺序 canvas 先于 title）」；`npx vitest run src/components/drive/TelemetryChart.test.tsx` 10 项通过、`npx vitest run` 21 文件 120 项通过、`npx tsc -b --noEmit`、`npm run build` 全部通过。
+  - 验证：临时预览端口实测截图——视频四角恢复圆角（computed border-radius 12px）、两张遥测 canvas 非背景像素为 0（无横线无数字）、标题位于曲线下方。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (132)
+
+- fix(tub-library): Safari 点击下载后始终不触发下载——blob URL 过早回收
+  - 背景：`downloadTubSession` 在 `link.click()` 后立刻 `revokeObjectURL(url)`，Chrome 同步触发下载不受影响，但 Safari 下载是异步的——等 Safari 真正去取 blob 时 URL 已被回收，导致下载永远不开始（图标弹跳但无下载）。
+  - `web_ui/frontend/src/services/api.ts`：`createObjectURL` 改为显式构造 `new Blob([...], { type: 'application/gzip' })` 确保 MIME 类型正确；`removeChild` + `revokeObjectURL` 延迟到 `setTimeout(..., 150)` 执行，给 Safari 足够时间启动异步下载。
+  - 测试同步：`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过，`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
+
+## 2026-08-21 (131)
+
+- fix(launcher): DD 内嵌 Donkey 去掉「当前工作目录」上方的多余间距（隐藏空 headerRow + 去 body 上边距）
+  - 背景：删掉「Donkey」标题并移走版本号后，内嵌视图里 `.headerRow` 变为空容器但仍保留 `margin:0 0 10px` 的下边距，叠加 `body` 的 `margin:12px` 上边距，导致「当前工作目录」行离 DD 标题栏间隔过大（约 22px）。
+  - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .headerRow h1, .sectionTitle` 扩展为 `.logoLink, .ghLink, .headerRow, .sectionTitle`（隐藏整个 headerRow，连带去掉其 10px 下边距）；新增 `document.body.style.marginTop = '0'` 去掉 body 上边距，让「当前工作目录」贴近 DD 标题栏；单独打开 Donkey（:8090）时 headerRow 与 body 边距均保持不变。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新（隐藏选择器含 `.headerRow`、新增 `document.body.style.marginTop = '0'` 断言）；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist；收尾后需重启 8090 launcher 部署验证。
+
+## 2026-08-21 (130)
+
+- fix(connector): Car Connector「车辆设置」把连接与配网融合成一个板块——顶部设备发现/选择 + STA/AP 配网按钮合并，iframe 只保留车端 DC 的「调校」视图
+  - 背景：上一版「车辆设置」顶部是设备发现/选择（连接），下方 iframe 里车端 DC 的 `?settings=1` 视图还带有「系统（OTA/开发模式）」与「Wi-Fi 配网」两行；用户反馈「系统」行太突兀应整行删除，「配网」与顶部「连接」功能重复，应融合成一个板块。
+  - `web_ui/frontend/src/components/CarSettingsPanel.tsx`：
+    - 顶部连接行新增「STA Wi-Fi 配置」「AP 名称配置」两个按钮（与设备选择、重新扫描并列，中间用竖线分隔），点按经 `iframeRef.contentWindow.postMessage({type:'dd-open-wifi-sta'|'dd-open-wifi-ap'})` 打开车端 DC 的配网弹窗；未选中设备时禁用配网按钮。
+    - iframe 增加 `ref={iframeRef}`；组件头注释同步更新为「连接 + 配网融合、下方只呈现调校」。
+  - `web_ui/frontend/src/i18n/messages/connector.ts`：新增 `connector.wifiStaButton` / `connector.wifiApButton`（zh/en），`connector.carSettingsSubtitle` 由「配网 / OTA / 开发模式 / 漂移设置等」改为「连接 / 配网 / 漂移设置 / Judge / 手柄校准」。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过，入口 `index-DYVHxIKZ.js`、CarConnectorPage chunk `CarConnectorPage-BegwM-jT.js`。
+  - 注：本改动依赖 Firmware v1.8.30（车端 DC `?settings=1` 删掉系统/配网行并新增 `dd-open-wifi-*` postMessage 处理），Firmware 已同步 OTA。
+
+## 2026-08-21 (137)
+
+- refactor(tub-library): 下载按钮移入会话行 pin/trash 区域，与 Pin/Delete 并列
+  - 背景：下载按钮此前在底部播放控制工具栏（Refresh 与 Delete 之间），与会话行内 Pin/Delete 按钮分离，操作入口不统一。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：
+    - `isDownloading` state 改为 `downloadingId: string | null`，按会话跟踪下载状态。
+    - `handleDownload` 从使用 `selected` 改为接受 `session: TubSession` 参数，每行独立下载。
+    - 会话行按钮组（`gap-1`）在 Pin 与 Trash2 之间插入 Download 按钮（span role="button"），逻辑顺序 Pin → Download → Delete（组织 → 导出 → 销毁），下载中图标弹跳动画。
+    - 底部工具栏移除原 Download Button。
+  - 测试同步：`TubLibrary.test.tsx` 下载测试改用 `findAllByRole` 断言每行一个下载按钮（2 个会话 = 2 个按钮）、点击首行按钮调用 `downloadTubSession` 传入正确参数；`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过，`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
 
 ## 2026-08-21 (128)
 

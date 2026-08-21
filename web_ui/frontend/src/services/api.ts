@@ -206,14 +206,19 @@ export const downloadTubSession = async (
     }
     return `recording_${sessionId}.tar.gz`;
   })();
-  const url = window.URL.createObjectURL(response.data);
+  const url = window.URL.createObjectURL(
+    new Blob([response.data], { type: 'application/gzip' }),
+  );
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
   document.body.appendChild(link);
   link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+  // Delay cleanup so Safari has time to start the async download
+  setTimeout(() => {
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  }, 150);
 };
 
 export const getImageUrl = (path: string, tubPath?: string) => {

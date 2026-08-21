@@ -176,18 +176,18 @@ describe('TubLibrary download button', () => {
     });
   });
 
-  it('renders an enabled download button when a session with records is selected', async () => {
+  it('renders a download button for each session row', async () => {
     render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
-    const downloadButton = await screen.findByRole('button', { name: /下载/ });
-    expect(downloadButton).not.toBeDisabled();
+    const downloadButtons = await screen.findAllByRole('button', { name: /下载/ });
+    expect(downloadButtons).toHaveLength(sessions.length);
   });
 
-  it('calls downloadTubSession when the download button is clicked', async () => {
+  it('calls downloadTubSession with the correct session when a row download button is clicked', async () => {
     render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
-    const downloadButton = await screen.findByRole('button', { name: /下载/ });
-    fireEvent.click(downloadButton);
+    const downloadButtons = await screen.findAllByRole('button', { name: /下载/ });
+    fireEvent.click(downloadButtons[0]);
 
     await waitFor(() => {
       expect(downloadTubSession).toHaveBeenCalledWith(

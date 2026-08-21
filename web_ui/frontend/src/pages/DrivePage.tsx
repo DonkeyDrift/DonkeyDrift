@@ -372,7 +372,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
           <div
             ref={videoContainerRef}
-            className="relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black"
+            className={cn(
+              'relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black',
+              !fullscreen && 'rounded-lg overflow-hidden',
+            )}
           >
             {active ? (
               <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />

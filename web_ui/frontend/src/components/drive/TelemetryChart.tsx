@@ -212,11 +212,11 @@ export const TelemetryChart = React.memo(function TelemetryChart({
       },
       scales: {
         x: { display: false },
+        // y 轴整体隐藏：去掉横向网格线与左侧刻度数字；min/max 仍决定 [-1,1] 量程，曲线铺满全宽
         y: {
           min: -1,
           max: 1,
-          grid: { color: theme === 'light' ? '#dbe2ea' : 'rgba(255,255,255,0.06)' },
-          ticks: { color: theme === 'light' ? '#5b6b7d' : '#8fa1b5', font: { size: 10 } },
+          display: false,
         },
       },
     }),
@@ -354,14 +354,15 @@ export const TelemetryChart = React.memo(function TelemetryChart({
         className,
       )}
     >
-      <div className="flex items-center justify-between mb-2 gap-2">
+      <div className={cn('relative', chartHeightClassName ?? (overlay ? 'h-28' : 'h-40'))}>
+        <canvas ref={canvasRef} />
+      </div>
+      {/* 面板标题移到曲线画布下方（贴近画面下沿），左右位置不变 */}
+      <div className="flex items-center justify-between mt-2 gap-2">
         <div className="flex items-center gap-2">
           <span className="text-xs uppercase tracking-wider text-slate-400">{t(title ?? 'driveViz.chartTitle')}</span>
           {!hasData && <span className="text-xs text-slate-500">{t('driveViz.waitingData')}</span>}
         </div>
-      </div>
-      <div className={cn('relative', chartHeightClassName ?? (overlay ? 'h-28' : 'h-40'))}>
-        <canvas ref={canvasRef} />
       </div>
       {!overlay && (
         <TelemetryLegend group={group} visibleKeys={visibleKeys} onToggle={toggleCurve} className="mt-2" />
