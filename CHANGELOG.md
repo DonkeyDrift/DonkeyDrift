@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (110)
+
+- fix(drive): 整屏放大键间距对齐——下边距与右边距一致（均 12px）
+  - 背景：上一轮把放大键上移到 `bottom-48`/`bottom-64`，离油门/加速度曲线框太远显空；要求放大键右边到视频右边框、下边到曲线框上边框的距离一致。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：非全屏 `bottom-48` → `bottom-44`、全屏 `bottom-64` → `bottom-60`，使下边距与 `right-3`（12px）对齐。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (109)
 
 - fix(layout): DD 左上角 logo 对齐 Drifter Console 独立页图标（恢复 1px #2b3441 边框）
