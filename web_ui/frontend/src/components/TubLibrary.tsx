@@ -708,7 +708,7 @@ export const TubLibrary: React.FC = () => {
             {/* Right: player */}
             <div className="flex flex-col gap-3">
               <div
-                className="w-full max-h-[22vh] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
+                className="w-full max-h-[30vh] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
                 <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>

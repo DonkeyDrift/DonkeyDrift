@@ -1,6 +1,14 @@
 # 变更日志
 
-## 2026-08-21 (147)
+## 2026-08-21 (148)
+
+- fix(tub-manager): 修正一屏布局——视频画面放大、Tub 编辑器底部滑块不再被裁
+  - 背景：上一版（143）把录制视频库与 Tub 编辑器改为一屏并排，但视频 `max-h-[22vh]` 压得太小看不清，图表容器 `min-h-[12rem]`（192px）占满空间把底部滚滑块+选区/删除指示条挤出 `overflow-hidden` 可见区域。
+  - 修复：视频容器 `max-h-[22vh]`→`max-h-[30vh]`（1080p 下 237px→324px，画面明显更大）；图表容器 `min-h-[12rem]`→`min-h-[8rem]`（192px→128px，给底部滑块留足空间）。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：视频容器 max-h 调大。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：图表容器 min-h 调小。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。纯 CSS 改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
 
 - fix(tub-library): 下载 tar.gz 改为 pipe+线程流式响应，Safari 立即弹出下载通知
   - 背景：此前 `download_session` 端点先把整个 tar.gz 构建到 `BytesIO` 内存缓冲（遍历所有 record、读所有 JPEG、gzip 压缩），完成后才 `StreamingResponse` 开始发送。浏览器要等好几秒才收到第一个字节，Safari 不会在等待期间弹出下载通知。
