@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (117)
+
+- fix(layout): DD 左上角 logo 边框改为随主题，对齐 Drifter Console headerLogo（浅色灰边）
+  - 背景：上一轮把 logo 边框硬编码为 `border-[#2b3441]`，在浅色主题下显得是「黑边」；而 Drifter Console 的 headerLogo 边框是随主题的——深色 `#2b3441`、浅色 `#d5dce4`（灰）。用户看到 DC 浅色下的灰边、DD 却是深灰黑边。
+  - `web_ui/frontend/src/components/Layout.tsx`：logo `<img>` className 由 `w-8 h-8 rounded-lg border border-[#2b3441]` 改为 `w-8 h-8 rounded-lg border header-logo`，边框色交由主题 CSS 决定。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：末尾各新增 `html.theme-mus4 .header-logo { border-color:#2b3441 }` 与 `html.theme-light .header-logo { border-color:#d5dce4 }`，完全对齐 DC headerLogo 的深/浅边框值。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 21 文件 114 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (116)
 
 - fix(drive): 摄像头画面去掉整框（边框+圆角矩形），改为四角圆弧取景框，避免无画面时四角出现黑角
