@@ -107,13 +107,13 @@ const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => {
   const { t } = useTranslation();
   return (
     <div className="flex gap-4 text-left">
-      <div className="bg-zinc-800 rounded-md flex h-[44px] w-[80px] flex-col items-start justify-center px-2.5 pt-1 pb-1 text-left">
-        <div className="text-[10px] text-zinc-400 uppercase leading-tight">{t('tub.steering')}</div>
-        <div className="text-sm font-mono text-cyan-400 leading-tight">{steering}</div>
+      <div className="bg-zinc-800 rounded-md flex h-[60px] w-[88px] flex-col items-start justify-center px-3 pt-[10px] pb-[10px] text-left">
+        <div className="text-xs text-zinc-400 uppercase">{t('tub.steering')}</div>
+        <div className="text-lg font-mono text-cyan-400">{steering}</div>
       </div>
-      <div className="bg-zinc-800 rounded-md flex h-[44px] w-[80px] flex-col items-start justify-center px-2.5 pt-1 pb-1 text-left">
-        <div className="text-[10px] text-zinc-400 uppercase leading-tight">{t('tub.throttle')}</div>
-        <div className="text-sm font-mono text-cyan-400 leading-tight">{throttle}</div>
+      <div className="bg-zinc-800 rounded-md flex h-[60px] w-[88px] flex-col items-start justify-center px-3 pt-[10px] pb-[10px] text-left">
+        <div className="text-xs text-zinc-400 uppercase">{t('tub.throttle')}</div>
+        <div className="text-lg font-mono text-cyan-400">{throttle}</div>
       </div>
     </div>
   );
@@ -568,7 +568,7 @@ export const TubLibrary: React.FC = () => {
   };
 
   return (
-    <Card className="shrink-0">
+    <Card>
       <CardHeader>
         <SectionCardTitle
           icon={<Clapperboard className="w-5 h-5" />}
@@ -585,7 +585,7 @@ export const TubLibrary: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(220px,320px)_1fr] gap-4">
             {/* Left: recording list */}
-            <div className="flex flex-col min-h-0 max-h-[24vh]">
+            <div className="flex flex-col min-h-0 max-h-[520px]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-zinc-400">
                   {t('tubLibrary.recordingsCount', { count: sessions.length })}
@@ -708,7 +708,7 @@ export const TubLibrary: React.FC = () => {
             {/* Right: player */}
             <div className="flex flex-col gap-3">
               <div
-                className="w-full max-h-[36vh] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
+                className="w-full bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
                 <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>

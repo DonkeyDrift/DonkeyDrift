@@ -1596,7 +1596,7 @@ export const TubEditor: React.FC = () => {
     [setSelectionRange, records.length]
   );
 
-  const chartCardClassName = 'relative flex min-h-0 flex-1 flex-col';
+  const chartCardClassName = 'relative flex min-h-[clamp(20rem,48vh,34rem)] flex-col';
 
   if (!records.length) {
     return (
@@ -1792,7 +1792,7 @@ export const TubEditor: React.FC = () => {
       <CardContent className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={containerRef}
-          className={`relative min-h-[6rem] w-full flex-1 ${containerCursorClass} touch-none`}
+          className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           onMouseDown={handleMouseDown}

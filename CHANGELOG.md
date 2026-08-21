@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-21 (152)
+
+- revert(tub-manager): 回退一屏并排布局改动（143/148/149），恢复原始纵向滚动布局
+  - 背景：143/148/149 三版尝试把录制视频库与 Tub 编辑器压缩到一屏内，但视频被压得太小、编辑器底部被裁，用户要求回退。
+  - 回退（7 处 CSS 恢复，3 个文件）：
+    - `TubManagerPage.tsx`：`flex flex-col gap-4 h-[calc(100vh-180px)] min-h-0` → `space-y-6`。
+    - `TubLibrary.tsx`：Card `shrink-0` 移除；会话列表 `max-h-[24vh]`→`max-h-[520px]`；视频容器 `max-h-[36vh]` 移除；`RecordStats` 恢复 `h-[60px] w-[88px]` + `text-xs` + `text-lg`。
+    - `TubEditor.tsx`：`chartCardClassName` 恢复 `min-h-[clamp(20rem,48vh,34rem)]`；图表容器恢复 `min-h-[12rem]`。
+  - 验证：`diff` 对照 0dd0696d（改动前基线）确认 TubManagerPage/TubEditor 完全一致，TubLibrary 仅差异来自并行会话的 PR #353（下载优化，非本次布局改动）。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (151)
 
 - feat(launcher): KCW/DSH 每次点击都开新会话，不再复用旧窗口的旧会话
