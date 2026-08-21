@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-21 (139)
+
+- fix(tub-editor): Tub 编辑器会话视图 x 轴改用「会话内数组下标」，与录制库「N 帧」对齐
+  - 背景：上一版（122）已实现「只显示录制视频库当前浏览视频的遥测曲线」，但图表 x 轴仍用整个 tub 的全局物理帧号 `_index`（当前会话记录物理位置在 3832~16742），右端显示 ~16742，与录制库的「12531 帧」对不上，用户误以为遥测没按当前视频过滤。
+  - 根因：编辑器里范围输入框、悬停提示本就用「会话内数组下标」（0~N-1），唯独图表 x 轴用全局物理 `_index`，两套坐标不一致。
+  - 修复：会话视图下把 TubEditor 图表坐标统一为「会话内数组下标」(0..N-1)——数据点、x 轴 min/max、播放头、选区框、指针取帧、底部滑块（选区绿条/删除红条）全部按数组下标定位；删除段在数组里无占位，压缩为连续曲线（红条收敛为细条标记删除位置）。未选中会话的全局视图保持物理 `_index` 与删除空洞不变；删除/恢复后端调用仍用物理 `_index`（数据操作不受影响）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：新增 `isSessionScoped` / `isSessionScopedRef`；图表数据点 x 会话视图用 `originalIndex` 并跳过 null 断点；x 轴 min/max 会话视图用 `visibleRange.startIndex/endIndex`；`getIndexFromPointerX` 会话视图直接取整；播放头/选区框用数组下标；滑块绿条会话视图按数组下标百分比定位、红条经 `physicalToArrayPos` 映射到数组插入位置。
+  - 附带修复（顺手，规则 8）：`web_ui/frontend/src/App.test.tsx` 的 `services/api` mock 补上 `launchClaudeCode`——PR #337 引入 `CCodeEntryLink` 后该 mock 缺此导出导致 App.test.tsx 4 项报错。
+  - 测试同步：`npx tsc -b --noEmit`、`npx vitest run`（22 文件 125 项）、`npm run build` 全部通过。TubEditor 为 canvas/chart.js 组件、本仓库无其单测，本次坐标改动为纯展示层、不改数据操作，未新增单测。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (138)
 
 - fix(launcher): KCW 入口 host 防 IPv6/AAAA 黑洞——avahi 发布 AAAA 时入口回退局域网 IPv4 IP，浏览器不再因选中 IPv6 连接黑洞报「无法连接到 Kimi 服务器」

@@ -54,6 +54,9 @@ export const TubEditor: React.FC = () => {
   const setActiveSession = useStore((state) => state.setActiveSession);
   // 录制视频库选中某条录制时，编辑器只显示/编辑该条录制的记录；未选中时回退到整个 tub
   const records = activeSessionId != null ? activeSessionRecords : globalRecords;
+  // 会话作用域下图表 x 轴用「会话内数组下标」(0..N-1)，与录制库「N 帧」、范围输入框、悬停提示一致；
+  // 未选中会话时沿用整个 tub 的全局物理 _index（保留删除空洞）。
+  const isSessionScoped = activeSessionId != null;
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
   const currentIndex = useStore((state) => state.currentIndex);
@@ -95,10 +98,14 @@ export const TubEditor: React.FC = () => {
   const hoverPositionRef = useRef<{ x: number; y: number; dataIndex: number } | null>(null);
   const recordsRef = useRef(records);
   const sampledIndicesRef = useRef<number[]>([]);
+  const isSessionScopedRef = useRef(isSessionScoped);
 
   useEffect(() => {
     recordsRef.current = records;
   }, [records]);
+  useEffect(() => {
+    isSessionScopedRef.current = isSessionScoped;
+  }, [isSessionScoped]);
   const tooltipDataRef = useRef(tooltipData);
 
   const [rangeInputDraft, setRangeInputDraft] = useState<{ start: string; end: string } | null>(null);
@@ -608,7 +615,13 @@ export const TubEditor: React.FC = () => {
       if (!xAxis || !currentRecords.length) return 0;
       
       const targetIndexValue = xAxis.getValueForPixel(x);
-      
+
+      // 会话视图 x 轴即数组下标，指针值直接取整为下标；全局视图才需按物理 _index 二分。
+      if (isSessionScopedRef.current) {
+        const direct = Math.round(typeof targetIndexValue === 'number' ? targetIndexValue : 0);
+        return Math.max(0, Math.min(currentRecords.length - 1, direct));
+      }
+
       let low = 0;
       let high = currentRecords.length - 1;
       let closest = 0;
@@ -1046,24 +1059,27 @@ export const TubEditor: React.FC = () => {
     const throttleData: { x: number; y: number | null }[] = [];
 
     sampledRecords.forEach(({ record, originalIndex }, i) => {
-      if (i > 0) {
+      // 会话视图：x = 会话内数组下标（连续、无删除空洞），与范围输入/悬停提示一致。
+      // 全局视图：x = 物理 _index，删除处用 null 断点形成空洞。
+      const xValue = isSessionScoped ? originalIndex : record._index;
+      if (i > 0 && !isSessionScoped) {
         const { record: prevRecord, originalIndex: prevOriginalIndex } = sampledRecords[i - 1];
         // If the gap in _index is larger than the gap in array indices, it means records were deleted
         const originalIndexGap = originalIndex - prevOriginalIndex;
-        
+
         if (record._index - prevRecord._index > originalIndexGap) {
           // Insert a null point to break the line
           angleData.push({ x: prevRecord._index + 1, y: null });
           throttleData.push({ x: prevRecord._index + 1, y: null });
         }
       }
-      
+
       angleData.push({
-        x: record._index,
+        x: xValue,
         y: Number(record['user/angle'] ?? 0),
       });
       throttleData.push({
-        x: record._index,
+        x: xValue,
         y: Number(record['user/throttle'] ?? 0),
       });
     });
@@ -1095,7 +1111,7 @@ export const TubEditor: React.FC = () => {
       },
       sampledIndices: sampledX,
     };
-  }, [records, zoomPercent, t, theme]);
+  }, [records, zoomPercent, isSessionScoped, t, theme]);
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
@@ -1118,8 +1134,12 @@ export const TubEditor: React.FC = () => {
     scales: {
         x: {
             type: 'linear' as const,
-            min: records.length > 0 && records[visibleRange.startIndex] ? records[visibleRange.startIndex]._index : visibleRange.startIndex,
-            max: records.length > 0 && records[visibleRange.endIndex] ? records[visibleRange.endIndex]._index : visibleRange.endIndex,
+            min: isSessionScoped
+              ? visibleRange.startIndex
+              : records.length > 0 && records[visibleRange.startIndex] ? records[visibleRange.startIndex]._index : visibleRange.startIndex,
+            max: isSessionScoped
+              ? visibleRange.endIndex
+              : records.length > 0 && records[visibleRange.endIndex] ? records[visibleRange.endIndex]._index : visibleRange.endIndex,
             ticks: {
               color: theme === 'light' ? '#5b6b7d' : '#71717a',
               callback: (value: string | number) => `${Math.round(Number(value))}`,
@@ -1168,7 +1188,11 @@ export const TubEditor: React.FC = () => {
         const latestIndex = currentIndexRef.current;
         const totalRecords = records.length;
         const currentRecord = records[latestIndex];
-        const currentXValue = currentRecord ? currentRecord._index : latestIndex;
+        const currentXValue = isSessionScopedRef.current
+          ? latestIndex
+          : currentRecord
+            ? currentRecord._index
+            : latestIndex;
         
         const currentX = xAxis.getPixelForValue(currentXValue);
 
@@ -1199,12 +1223,22 @@ export const TubEditor: React.FC = () => {
         const drawSelectionBox = (startValue: number, endValue: number, isDraft: boolean) => {
             const chartArea = chart.chartArea;
             
-            const startRecord = records[Math.max(0, Math.min(startValue, records.length - 1))];
-            const startXValue = startRecord ? startRecord._index : 0;
-            
+            const clampedStartIdx = Math.max(0, Math.min(startValue, records.length - 1));
+            const startRecord = records[clampedStartIdx];
+            const startXValue = isSessionScopedRef.current
+              ? clampedStartIdx
+              : startRecord
+                ? startRecord._index
+                : 0;
+
             // endValue is exclusive. Get the last selected record.
-            const lastSelectedRecord = records[Math.max(0, Math.min(endValue - 1, records.length - 1))];
-            const endXValue = lastSelectedRecord ? lastSelectedRecord._index + 1 : startXValue + 1;
+            const clampedEndIdx = Math.max(0, Math.min(endValue - 1, records.length - 1));
+            const lastSelectedRecord = records[clampedEndIdx];
+            const endXValue = isSessionScopedRef.current
+              ? clampedEndIdx + 1
+              : lastSelectedRecord
+                ? lastSelectedRecord._index + 1
+                : startXValue + 1;
 
             const startX = xAxis.getPixelForValue(startXValue);
             const endX = xAxis.getPixelForValue(endXValue);
@@ -1350,37 +1384,55 @@ export const TubEditor: React.FC = () => {
     return null;
   }, [records.length, selectionDraft, selectionStartIndex, selectionEndIndex]);
 
-  // 会话作用域下，滑块的已删除红条/选区绿条改用会话自身的物理 _index 跨度定位；
-  // 未选中会话时沿用整个 tub 的 totalPhysicalRecords。
-  const isSessionScoped = activeSessionId != null;
+  // 滑块（底部概览条）与图表共用同一坐标：会话视图用「会话内数组下标」(0..N-1)，
+  // 全局视图用整个 tub 的物理 _index。选区绿条 / 已删除红条都按此坐标定位。
   const sessionFirstIndex = records.length > 0 ? records[0]._index : 0;
   const sessionLastIndex = records.length > 0 ? records[records.length - 1]._index : 0;
-  const sliderSpan = isSessionScoped
-    ? Math.max(1, sessionLastIndex - sessionFirstIndex + 1)
-    : totalPhysicalRecords;
-  const sliderOffset = isSessionScoped ? sessionFirstIndex : 0;
+  const sliderSpan = isSessionScoped ? Math.max(1, records.length) : totalPhysicalRecords;
+
+  // 会话视图下把物理 _index 映射为「数组插入位置」（小于该 _index 的活动记录数），
+  // 用于把已删除红条定位到数组坐标（删除段在数组里无占位，收敛为细条）。
+  const physicalToArrayPos = useCallback(
+    (physicalIdx: number): number => {
+      let lo = 0;
+      let hi = records.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if ((records[mid]._index ?? 0) < physicalIdx) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    },
+    [records]
+  );
 
   const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
     if (!sliderSelectionRange || !records.length || !sliderSpan) {
       return null;
     }
 
-    // Map array indices to physical _index values so the green bar aligns
-    // with the red deleted bars (which are plotted in the physical coordinate space).
-    const startRecord = records[Math.max(0, Math.min(sliderSelectionRange.startIndex, records.length - 1))];
-    const endRecord = records[Math.max(0, Math.min(sliderSelectionRange.endIndex - 1, records.length - 1))];
+    // 会话视图：选区下标即数组坐标，直接换算百分比；
+    // 全局视图：把数组下标映射到物理 _index，与红条（物理坐标）对齐。
+    const clampedStart = Math.max(0, Math.min(sliderSelectionRange.startIndex, records.length - 1));
+    const clampedEnd = Math.max(0, Math.min(sliderSelectionRange.endIndex - 1, records.length - 1));
+    const startRecord = records[clampedStart];
+    const endRecord = records[clampedEnd];
 
-    const startXValue = startRecord ? startRecord._index : 0;
-    const endXValue = endRecord ? endRecord._index + 1 : startXValue + 1;
+    const startXValue = isSessionScoped ? clampedStart : startRecord ? startRecord._index : 0;
+    const endXValue = isSessionScoped
+      ? clampedEnd + 1
+      : endRecord
+        ? endRecord._index + 1
+        : startXValue + 1;
 
-    const leftPercent = ((startXValue - sliderOffset) / sliderSpan) * 100;
+    const leftPercent = (startXValue / sliderSpan) * 100;
     const widthPercent = ((endXValue - startXValue) / sliderSpan) * 100;
 
     return {
       left: `${leftPercent}%`,
       width: `max(${widthPercent}%, 2px)`,
     };
-  }, [records, sliderSpan, sliderOffset, sliderSelectionRange]);
+  }, [records, isSessionScoped, sliderSpan, sliderSelectionRange]);
 
   const sliderDeletedStyles = useMemo<{ left: string; width: string }[]>(() => {
     const inScopeIndexes = isSessionScoped
@@ -1406,11 +1458,17 @@ export const TubEditor: React.FC = () => {
     }
     ranges.push({ start, end });
 
-    return ranges.map(({ start, end }) => ({
-      left: `${((start - sliderOffset) / sliderSpan) * 100}%`,
-      width: `max(${((end - start + 1) / sliderSpan) * 100}%, 2px)`,
-    }));
-  }, [deletedIndexes, isSessionScoped, sessionFirstIndex, sessionLastIndex, sliderSpan, sliderOffset]);
+    // 会话视图：删除段在数组坐标里无占位，映射到插入位置、收敛为细条；
+    // 全局视图：按物理 _index 跨度正常定位。
+    return ranges.map(({ start, end }) => {
+      const leftPos = isSessionScoped ? physicalToArrayPos(start) : start;
+      const widthCount = isSessionScoped ? 0 : end - start + 1;
+      return {
+        left: `${(leftPos / sliderSpan) * 100}%`,
+        width: `max(${(widthCount / sliderSpan) * 100}%, 2px)`,
+      };
+    });
+  }, [deletedIndexes, isSessionScoped, sessionFirstIndex, sessionLastIndex, sliderSpan, physicalToArrayPos]);
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
