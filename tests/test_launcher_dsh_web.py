@@ -7,11 +7,16 @@
   PRIVILEGED_METHODS 空信任表放宽为 trustedHosts，见 _PATCH_FENCE_*）
 - _patch_client_uuid_polyfill：client.js 顶部注入 crypto.randomUUID 兜底
   （非安全上下文下 RFC4122 v4，见 _PATCH_UUID_*）
+- _probe_dsh_fixed_port：固定端口特征探测（200 且响应体含
+  __DSH_BOOT__ 才视为 dsh；无标记/连接失败返回 None）
 - launch_dsh_web：存活实例复用（不起子进程）、冷启动拉起
-  ``dsh web --patch … --port 0 --trusted-host …``（_FakeProc 脚本化管道
-  输出）成功抓 banner URL 且改写为局域网 IP、cwd 透传、cwd 非法直接
-  报错、未安装 dsh、banner 超时杀进程、进程提前退出报错
-- _SPAWNED 登记：死进程剔除、探测失败剔除后走冷启动
+  ``dsh web --patch … --port 58641 --trusted-host …``（固定专属端口
+  DSH_WEB_PORT；_FakeProc 脚本化管道输出）成功抓 banner URL 且改写为
+  局域网入口（mDNS 主机名优先，其次局域网 IP）、cwd 透传、cwd 非法
+  直接报错、未安装 dsh、banner 超时杀进程、进程提前退出报错、冷启动
+  失败后固定端口兜底复用
+- _SPAWNED 登记：死进程剔除、探测失败剔除后走冷启动；登记为空
+  （模拟 launcher 重启）时经固定端口特征探测复用存活实例
 以及 POST /api/launch/dsh 端点：路由、参数校验、CORS 头（DC 从
 ESP32 origin 跨域调用依赖它）。不起真实 dsh。
 """
@@ -87,9 +92,27 @@ def _make_popen(procs):
     return _popen
 
 
-# dsh web 就绪 banner（一行，回环 URL 在前、LAN 在后）
-_DSH_BANNER = (b"\x1b[?1049hdsh web: http://127.0.0.1:43749 "
-               b"(LAN: http://192.168.3.57:43749)\r\n")
+class _FakeHttpResponse:
+    """urllib.request.urlopen 替身：固定 status/body 的上下文管理器响应。"""
+
+    def __init__(self, status=200, body=b""):
+        self.status = status
+        self._body = body
+
+    def read(self, _size=-1):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+# dsh web 就绪 banner（一行，回环 URL 在前、LAN 在后）；固定专属端口
+# 后 banner 端口恒为 DSH_WEB_PORT
+_DSH_BANNER = (b"\x1b[?1049hdsh web: http://127.0.0.1:58641 "
+               b"(LAN: http://192.168.3.57:58641)\r\n")
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +120,24 @@ def _clean_spawned():
     """每个测试后清掉 _SPAWNED，避免跨测试污染。"""
     yield
     dsh_web._SPAWNED.clear()
+
+
+# 真实 _probe_dsh_fixed_port 的引用：下面的 autouse fixture 默认把它钉成
+# 返回 None，需要真实探测行为的用例先恢复它再 mock urlopen
+_REAL_PROBE_DSH_FIXED_PORT = dsh_web._probe_dsh_fixed_port
+
+
+@pytest.fixture(autouse=True)
+def _no_fixed_port_dsh(monkeypatch):
+    """默认固定端口上没有存活 dsh，隔离真实端口探测。
+
+    _live_spawned_url 在 _SPAWNED 无存活条目后会探测固定端口
+    （_probe_dsh_fixed_port 真实 urlopen 127.0.0.1:DSH_WEB_PORT），结果随
+    本机端口占用漂移；默认钉死为 None。要覆盖固定端口行为的用例先
+    monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+    _REAL_PROBE_DSH_FIXED_PORT) 恢复真实函数，再 mock urlopen。
+    """
+    monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -135,12 +176,12 @@ class TestLaunchDshWeb:
     def test_reuses_live_spawned_instance_without_spawning(self, monkeypatch):
         # _live_spawned_url 的契约：返回前已把回环改写为局域网 IP
         monkeypatch.setattr(dsh_web, "_live_spawned_url",
-                            lambda: "http://192.168.3.10:43749/")
+                            lambda: "http://192.168.3.10:58641/")
         spawned = []
         result = launch_dsh_web(
             cwd=None, timeout_s=5.0,
             popen_fn=_make_popen(spawned))
-        assert result == {"status": "ok", "url": "http://192.168.3.10:43749/"}
+        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
         assert spawned == []  # 复用路径不起子进程
 
     def test_spawn_success_captures_url_and_keeps_proc(self):
@@ -152,19 +193,53 @@ class TestLaunchDshWeb:
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
         # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125 同款）
-        assert result["url"] == "http://192.168.3.10:43749"
+        assert result["url"] == "http://192.168.3.10:58641"
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in [e["proc"] for e in dsh_web._SPAWNED]
-        assert dsh_web._SPAWNED[0]["port"] == 43749
-        # 启动命令：web 子命令 + --patch 绕 host 限制 + 随机端口 +
+        assert dsh_web._SPAWNED[0]["port"] == 58641
+        # 启动命令：web 子命令 + --patch 绕 host 限制 + 固定专属端口 +
         # trusted-host 放行局域网 API 栅栏
         args = proc.args_seen
         assert args[0].endswith("dsh")
         assert args[1] == "web"
         assert "--patch" in args
-        assert args[args.index("--port") + 1] == "0"
+        assert args[args.index("--port") + 1] == "58641"
         assert args[args.index("--trusted-host") + 1] == "192.168.3.10"
+
+    def test_spawn_url_prefers_mdns_host(self, monkeypatch):
+        # 入口 URL 的 host mDNS 优先（回归覆盖）：_lan_url 查的是
+        # kimi_web 模块级 _mdns_hostname（autouse fixture 已钉 None，这里
+        # 解除钉死）；launch_dsh_web 的 mdns_fn 参数只影响
+        # --trusted-host，与本断言无关。mDNS 还要过 _entry_host 的
+        # avahi AAAA 防护才生效，一并钉为不发布
+        monkeypatch.setattr(kimi_web, "_mdns_hostname",
+                            lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: False)
+        proc = _FakeProc(payload=b"dsh web: http://127.0.0.1:58641/\r\n",
+                         hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/home/u/env/bin/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert result["url"] == "http://tony007.local:58641/"
+
+    def test_reuse_url_prefers_mdns_host(self, monkeypatch):
+        # 复用路径（_live_spawned_url 命中 _SPAWNED）同样 mDNS 优先；
+        # 同上需钉 _avahi_publishes_ipv6 为不发布，mDNS 才成为入口 host
+        monkeypatch.setattr(kimi_web, "_mdns_hostname",
+                            lambda: "tony007.local")
+        monkeypatch.setattr(kimi_web, "_avahi_publishes_ipv6", lambda: False)
+        proc = _FakeProc(hold=True)
+        dsh_web._SPAWNED.append({"proc": proc, "port": 58641})
+        monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        spawned = []
+        result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
+        assert result == {"status": "ok",
+                          "url": "http://tony007.local:58641/"}
+        assert spawned == []
 
     def test_spawn_skips_trusted_host_without_lan_ip(self):
         # 无局域网 IP（如离线）时不传 --trusted-host，其余照常
@@ -249,7 +324,7 @@ class TestLaunchDshWeb:
 class TestSpawnedRegistry:
     def test_live_entry_probed_and_rewritten(self, monkeypatch):
         proc = _FakeProc(hold=True)
-        dsh_web._SPAWNED.append({"proc": proc, "port": 43749})
+        dsh_web._SPAWNED.append({"proc": proc, "port": 58641})
         probed = []
         monkeypatch.setattr(
             dsh_web, "_probe_root",
@@ -257,27 +332,27 @@ class TestSpawnedRegistry:
         spawned = []
         result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
         # dsh 固定绑 0.0.0.0，复用探测走回环
-        assert probed == [("127.0.0.1", 43749)]
-        assert result == {"status": "ok", "url": "http://192.168.3.10:43749/"}
+        assert probed == [("127.0.0.1", 58641)]
+        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
         assert spawned == []
 
     def test_dead_entry_removed(self, monkeypatch):
         proc = _FakeProc(hold=True)
         proc._finish(0)  # 已退出
-        dsh_web._SPAWNED.append({"proc": proc, "port": 43749})
+        dsh_web._SPAWNED.append({"proc": proc, "port": 58641})
         fresh = _FakeProc(payload=_DSH_BANNER, hold=True)
         result = launch_dsh_web(
             cwd=None, timeout_s=10.0,
             resolve_binary_fn=lambda: "/x/dsh",
             lan_ip_fn=lambda: "192.168.3.10",
             popen_fn=_make_popen([fresh]))
-        # 死条目剔除后走冷启动
-        assert dsh_web._SPAWNED == [{"proc": fresh, "port": 43749}]
+        # 死条目剔除后走冷启动（固定端口探测被 autouse fixture 钉为 None）
+        assert dsh_web._SPAWNED == [{"proc": fresh, "port": 58641}]
         assert result["status"] == "ok"
 
     def test_probe_failure_removed_then_cold_start(self, monkeypatch):
         proc = _FakeProc(hold=True)  # 活着但端口僵死
-        dsh_web._SPAWNED.append({"proc": proc, "port": 43749})
+        dsh_web._SPAWNED.append({"proc": proc, "port": 58641})
         monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: False)
         procs = [_FakeProc(payload=_DSH_BANNER, hold=True)]
         fresh = procs[0]
@@ -289,6 +364,114 @@ class TestSpawnedRegistry:
         assert result["status"] == "ok"
         # 僵死条目被清掉，换上冷启动的新实例
         assert [e["proc"] for e in dsh_web._SPAWNED] == [fresh]
+
+
+# ===========================================================================
+# _probe_dsh_fixed_port（固定端口特征探测）与跨 launcher 重启的复用
+# ===========================================================================
+# dsh web 根 HTML 里的特征标记（window.__DSH_BOOT__）
+_DSH_BOOT_HTML = b"<html><script>window.__DSH_BOOT__={};</script></html>"
+
+
+class TestProbeDshFixedPort:
+    def test_hit_returns_lan_entry_url(self, monkeypatch):
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        seen = []
+
+        def fake_urlopen(url, timeout=None):
+            seen.append(url)
+            return _FakeHttpResponse(200, _DSH_BOOT_HTML)
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        assert dsh_web._probe_dsh_fixed_port() == \
+            "http://192.168.3.10:58641/"
+        # 探测走回环固定端口，返回前才改写为局域网入口
+        assert seen == ["http://127.0.0.1:58641/"]
+
+    def test_200_without_boot_marker_returns_none(self, monkeypatch):
+        # 200 但无 __DSH_BOOT__ 特征：是占用该端口的外部服务，不能当 dsh
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda url, timeout=None: _FakeHttpResponse(200,
+                                                        b"<html>v</html>"))
+        assert dsh_web._probe_dsh_fixed_port() is None
+
+    def test_connection_failure_returns_none(self, monkeypatch):
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+
+        def fake_urlopen(url, timeout=None):
+            raise urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        assert dsh_web._probe_dsh_fixed_port() is None
+
+
+class TestFixedPortReuse:
+    """launcher 重启后 _SPAWNED 丢失，固定端口探测通道的复用/穿透/兜底。"""
+
+    def test_empty_registry_reuses_live_dsh_on_fixed_port(self, monkeypatch):
+        # _SPAWNED 为空（模拟 launcher 重启）但固定端口上有存活 dsh：
+        # 直接复用，不冷启动
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda url, timeout=None: _FakeHttpResponse(200, _DSH_BOOT_HTML))
+        spawned = []
+        result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
+        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
+        assert spawned == []  # 复用路径不起子进程
+        # 实例非本进程拉起，没有 proc 可登记
+        assert dsh_web._SPAWNED == []
+
+    def test_200_without_boot_marker_falls_through_to_cold_start(
+            self, monkeypatch):
+        # 固定端口被外部服务占用（200 但无特征标记）：不复用，走冷启动
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda url, timeout=None: _FakeHttpResponse(200,
+                                                        b"<html>v</html>"))
+        proc = _FakeProc(payload=_DSH_BANNER, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/x/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        args = proc.args_seen
+        assert args[args.index("--port") + 1] == "58641"
+
+    def test_spawn_failure_falls_back_to_fixed_port_probe(self, monkeypatch):
+        # 冷启动失败兜底（对齐 kimi_web 语义）：第一次探测时实例尚未就绪
+        # （连接拒绝），spawn 失败后第二次探测已就绪 → 复用
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        calls = []
+
+        def fake_urlopen(url, timeout=None):
+            calls.append(url)
+            if len(calls) == 1:
+                raise urllib.error.URLError("connection refused")
+            return _FakeHttpResponse(200, _DSH_BOOT_HTML)
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        proc = _FakeProc(payload=b"Error: address already in use\r\n",
+                         exit_code=2)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/x/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
+        assert proc.killed is True  # 冷启动失败路径杀净
+        # 冷启动前一次 + 失败后兜底一次，都探回环固定端口
+        assert calls == ["http://127.0.0.1:58641/"] * 2
 
 
 # ===========================================================================

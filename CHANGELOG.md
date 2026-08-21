@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (140)
+
+- fix(launcher): DeepSeek Harness 改用固定专属端口 58641 + 跨 launcher 重启复用，根治「置顶（手动排序）/当前会话/草稿丢失」
+  - 背景：DSH 浏览器端的手动排序（localStorage `dsh.workspace.view.v5` 的 `sessionOrderByAccount`，即用户感知的「置顶」）、当前会话（`dsh.sessions.current`）、草稿（`dsh.conversation.chat`）均按 origin（协议+host+端口）隔离。host 维度此前已随 `_lan_url` mDNS 优先修复，但 DSH 冷启动用 `--port 0` 随机端口、复用登记 `_SPAWNED` 仅是 launcher 进程内存——launcher 一重启必冷启动新端口，origin 必变，localStorage 偏好全丢（launcher 日志实锤：14 天 8 次启动 8 个端口、零次复用）。与 Kimi Code Web 的 origin 漂移是同一个病的端口维度，KCW 已由固定端口 `KIMI_WEB_PORT = 58640` 根治，本次对齐。
+  - `donkeycar/launcher/dsh_web.py`：新增 `DSH_WEB_PORT = 58641`，冷启动由 `--port 0` 改为固定端口；新增 `_probe_dsh_fixed_port()`——GET 回环固定端口根路径，200 且响应体含 DSH 特征标记 `__DSH_BOOT__` 才视为存活 dsh（防误复用占用该端口的外部服务）；`_live_spawned_url()` 在 `_SPAWNED` 无存活条目后兜底探测固定端口（launcher 重启后也能复用存活实例，端口不再变）；`_spawn_and_capture` 失败后再探一次固定端口兜底复用（对齐 `kimi_web.py` 冷启动失败语义）；模块与各函数 docstring/注释全量对齐新语义。`_PATCH_YAML` 端口表达式跟随 `--port`、`--trusted-host` 裸 host 匹配任意端口，均无需改动。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 既有用例由随机端口/`--port 0` 改为固定 58641；新增回归——冷启动与复用两条路径入口 URL mDNS 优先（`test_spawn_url_prefers_mdns_host`/`test_reuse_url_prefers_mdns_host`，此前 DSH 侧零直接断言）、`TestFixedPortReuse`（登记空+固定端口存活→跨重启直接复用；200 无标记→不复用走冷启动；spawn 失败→兜底探测复用）、`TestProbeDshFixedPort` helper 单测三项；新增 autouse fixture `_no_fixed_port_dsh` 防测试真实探测本机 58641。合并 origin/Tony（含 `_avahi_publishes_ipv6` 防护）后 mDNS 用例同步钉 `_avahi_publishes_ipv6=False`。
+  - 验证：`pytest tests/test_launcher_dsh_web.py test_launcher_kimi_web.py test_launcher_claude_code.py test_launcher_menu_actions.py test_launcher_drive_launch.py test_launcher_service_unit.py -q` → 159 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist；收尾后需重启 8090 launcher 部署验证（首次点击 DSH 会在 58641 冷启动新实例，原随机端口实例需清理）。
+
 ## 2026-08-21 (139)
 
 - fix(tub-editor): Tub 编辑器会话视图 x 轴改用「会话内数组下标」，与录制库「N 帧」对齐
