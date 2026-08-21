@@ -430,6 +430,69 @@ def _proc_cwd(pid: int):
         return None
 
 
+def _create_session(port, token, cwd_str, timeout=PROBE_TIMEOUT_S):
+    """通过 REST API 在已运行的 kimi web 实例上创建新会话。
+
+    ``POST /api/v1/sessions`` 创建新会话，返回 session ID；失败返回 None。
+    用 127.0.0.1 直连（launcher 与 kimi web 同机），不经 mDNS。
+
+    每次点击 KCW 入口时调用，确保用户拿到的是一个全新的会话，而非
+    上次遗留的旧会话——用户明确要求"不是搜索现在已经有的窗口，而是
+    直接重新开一个新的 Session"。
+    """
+    body = json.dumps(
+        {"metadata": {"cwd": cwd_str or str(Path.home())}}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/sessions",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("data", {}).get("id")
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return None
+
+
+def _ensure_session_url(url, cwd_str, create_session_fn=None):
+    """确保入口 URL 指向一个新会话，而非裸入口或旧会话。
+
+    URL 路径已是 ``/sessions/<id>`` 的（冷启动 banner 的 ``Session:`` 行
+    直达一个新会话）直接返回；裸入口（路径为 ``/``）的通过 REST API
+    创建新会话后插入路径 ``/sessions/<sid>``。创建失败时原样返回（裸入口
+    仍可用，浏览器显示会话列表，用户手动选）。
+
+    用户要求每次点击 KCW 都开新会话（"不是搜索现在已经有的窗口，而是
+    直接重新开一个新的 Session"）：复用路径返回的裸入口不带会话 ID，
+    浏览器会显示上次的旧会话；冷启动路径的 ``Session:`` 行已带新会话，
+    无需再创建。
+    """
+    create_session_fn = create_session_fn or _create_session
+    parts = urllib.parse.urlsplit(url)
+    if parts.path.startswith("/sessions/"):
+        return url  # 已带会话路径（冷启动 Session: 行直达新会话）
+    port = parts.port
+    if port is None:
+        return url
+    # token 在 #token= 片段里
+    fragment = parts.fragment or ""
+    token = None
+    if fragment.startswith("token="):
+        token = fragment[len("token="):]
+    sid = create_session_fn(port, token, cwd_str)
+    if not sid:
+        logger.warning("创建新会话失败，返回裸入口 URL（浏览器显示会话列表）")
+        return url
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, f"/sessions/{sid}",
+         parts.query, parts.fragment))
+
+
 def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
                        cwd=None):
     """找已在运行的 kimi web 实例，返回带 ``#token=`` 的浏览器入口 URL。
@@ -586,8 +649,15 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
 
 def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                          live_url_fn=None, resolve_binary_fn=None,
-                         popen_fn=None):
+                         popen_fn=None, create_session_fn=None):
     """打开 Kimi Code Web：优先复用存活实例，否则拉起 ``kimi web``。
+
+    无论复用还是冷启动，返回的 URL 都指向一个**新会话**（``/sessions/<id>``），
+    而非裸入口——用户要求"不是搜索现在已经有的窗口，而是直接重新
+    开一个新的 Session"：复用路径的裸入口不带会话 ID，浏览器会显示
+    上次的旧会话；通过 ``_ensure_session_url`` 在裸入口上创建新会话
+    并插入路径，每次点击都开新会话。冷启动路径的 ``Session:`` banner
+    已带新会话，无需再创建。
 
     Args:
         cwd: kimi 运行目录（绝对路径）；None 表示上位机用户主目录。
@@ -595,10 +665,10 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             运行目录与之匹配的存活实例（issue #168）。
         timeout_s: 整体超时（秒），默认 120；调用方客户端超时应 ≥120s。
             复用路径毫秒级返回，仅冷启动路径可能用满。
-        live_url_fn / resolve_binary_fn / popen_fn: 测试钩子，默认
-            ``_live_instance_url`` / ``_resolve_kimi_binary`` /
-            ``subprocess.Popen``；live_url_fn 以 cwd（规范化后，None
-            表示不限定）为参调用。
+        live_url_fn / resolve_binary_fn / popen_fn / create_session_fn:
+            测试钩子，默认 ``_live_instance_url`` / ``_resolve_kimi_binary``
+            / ``subprocess.Popen`` / ``_create_session``；live_url_fn
+            以 cwd（规范化后，None 表示不限定）为参调用。
 
     Returns:
         成功 {"status": "ok", "url": <带 #token= 的入口 URL>}；
@@ -625,8 +695,10 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 关键字传参——_live_instance_url 首参是 instances_dir
     url = live_url_fn(cwd=cwd_str)
     if url:
-        url = _mark_origin(_mark_onboarded(_lan_url(url)))
-        logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
+        url = _mark_origin(_mark_onboarded(
+            _ensure_session_url(_lan_url(url), cwd_str,
+                                 create_session_fn=create_session_fn)))
+        logger.info("复用已运行的 Kimi Code Web 实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
 
     binary = resolve_binary_fn()
@@ -642,15 +714,19 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                                           popen_fn=popen_fn)
     if url:
         _SPAWNED_PROCS.append(proc)
-        url = _mark_origin(_mark_onboarded(_lan_url(url)))
+        url = _mark_origin(_mark_onboarded(
+            _ensure_session_url(_lan_url(url), cwd_str,
+                                 create_session_fn=create_session_fn)))
         logger.info("Kimi Code Web 已启动: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
     url = live_url_fn(cwd=cwd_str)
     if url:
-        url = _mark_origin(_mark_onboarded(_lan_url(url)))
-        logger.info("冷启动未果，复用到已运行实例: %s", url)
+        url = _mark_origin(_mark_onboarded(
+            _ensure_session_url(_lan_url(url), cwd_str,
+                                 create_session_fn=create_session_fn)))
+        logger.info("冷启动未果，复用到已运行实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
     logger.warning("启动 Kimi Code Web 失败: %s", error)
     return {"status": "error", "error": error}

@@ -51,6 +51,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 # 复用 kimi_web 的通用机制（同包内私有工具，见各引用处注释）
@@ -106,9 +107,37 @@ _PATCH_FENCE_NEW = ("PRIVILEGED_METHODS.has(method) && "
 # ``crypto.randomUUID`` 为 undefined，mintRpcId() 抛 TypeError 导致连接
 # 永不就绪、DSH 停在"选择工作区"。补丁在两行之间插入 getRandomValues
 # 版 RFC4122 v4 UUID 兜底（幂等自愈，见 _patch_client_uuid_polyfill）。
+#
+# 同时在这块补丁里注入"新会话"清理逻辑：URL 带 ``?dsh_new_session=1``
+# 时清除 ``localStorage["dsh.sessions.current"]``，使 DSH 前端不加载上次
+# 会话、直接进入"New Session"空白视图（用户要求"点击之后直接重新开一个
+# 新的 Session"，DSH 没有 REST API 创建会话，只能在前端侧清除当前会话
+# 指针）。补丁运行时机：``dsh-client-connection`` 的 ``immediately:true``
+# 插件加载阶段，早于 DSH 应用读取 localStorage。
 _PATCH_UUID_OLD = (
     "\t\tObject.defineProperty(exports, Symbol.toStringTag, "
     "{ value: \"Module\" });\n"
+    "\t\t//#region lib/types/client/connection.js\n"
+)
+# 旧版补丁（仅 UUID，无新会话清理）：用于迁移检测——已打过旧版的文件
+# 不会被新版 idempotency 检测到（文本不同），需要单独识别后替换升级。
+_PATCH_UUID_NEW_LEGACY = (
+    "\t\tObject.defineProperty(exports, Symbol.toStringTag, "
+    "{ value: \"Module\" });\n"
+    "\n"
+    "\t\t// [donkey-launcher] crypto.randomUUID is unavailable in non-secure\n"
+    "\t\t// contexts (LAN http://, not localhost); polyfill via getRandomValues.\n"
+    "\t\tif (globalThis.crypto && typeof globalThis.crypto.randomUUID !== \"function\") {\n"
+    "\t\t\tglobalThis.crypto.randomUUID = function randomUUID() {\n"
+    "\t\t\t\tconst b = globalThis.crypto.getRandomValues(new Uint8Array(16));\n"
+    "\t\t\t\tb[6] = (b[6] & 0x0f) | 0x40;\n"
+    "\t\t\t\tb[8] = (b[8] & 0x3f) | 0x80;\n"
+    "\t\t\t\tconst h = Array.from(b, (x) => x.toString(16).padStart(2, \"0\"));\n"
+    "\t\t\t\treturn [h.slice(0, 4).join(\"\"), h.slice(4, 6).join(\"\"),\n"
+    "\t\t\t\t\th.slice(6, 8).join(\"\"), h.slice(8, 10).join(\"\"),\n"
+    "\t\t\t\t\th.slice(10).join(\"\")].join(\"-\");\n"
+    "\t\t\t};\n"
+    "\t\t}\n"
     "\t\t//#region lib/types/client/connection.js\n"
 )
 _PATCH_UUID_NEW = (
@@ -127,6 +156,10 @@ _PATCH_UUID_NEW = (
     "\t\t\t\t\th.slice(6, 8).join(\"\"), h.slice(8, 10).join(\"\"),\n"
     "\t\t\t\t\th.slice(10).join(\"\")].join(\"-\");\n"
     "\t\t\t};\n"
+    "\t\t}\n"
+    "\t\t// [donkey-launcher] ?dsh_new_session=1: clear current session for fresh start\n"
+    "\t\tif (globalThis.location && new URLSearchParams(globalThis.location.search).has(\"dsh_new_session\")) {\n"
+    "\t\t\ttry { localStorage.removeItem(\"dsh.sessions.current\"); } catch (e) {}\n"
     "\t\t}\n"
     "\t\t//#region lib/types/client/connection.js\n"
 )
@@ -247,9 +280,14 @@ def _patch_client_uuid_polyfill(binary: str):
     这里在 client.js 顶部 CommonJS 桩之后注入 getRandomValues 版
     RFC4122 v4 UUID 兜底。
 
+    同时注入"新会话"清理逻辑：URL 带 ``?dsh_new_session=1`` 时清除
+    ``localStorage["dsh.sessions.current"]``，使 DSH 前端不加载上次会话、
+    直接进入"New Session"空白视图。
+
     幂等/自愈语义与 ``_patch_privileged_methods`` 一致：已打过的跳过；
-    源码升级未命中旧锚点也跳过；任何失败只告警不抛——dsh 仍可启动，仅
-    局域网自动进入 Projects 可能失效。
+    旧版补丁（仅 UUID，无新会话清理）自动升级为新版；源码升级未命中旧
+    锚点也跳过；任何失败只告警不抛——dsh 仍可启动，仅局域网自动进入
+    Projects 可能失效。
     """
     target = _connection_client_path(binary)
     if target is None:
@@ -259,7 +297,17 @@ def _patch_client_uuid_polyfill(binary: str):
         with _PATCH_LOCK:
             text = target.read_text(encoding="utf-8")
             if _PATCH_UUID_NEW in text:
-                return  # 已打过（幂等）
+                return  # 已打过新版（幂等）
+            # 旧版补丁迁移：仅有 UUID polyfill、没有新会话清理逻辑
+            if _PATCH_UUID_NEW_LEGACY in text:
+                tmp = target.with_name(target.name + ".donkey-patch.tmp")
+                tmp.write_text(
+                    text.replace(_PATCH_UUID_NEW_LEGACY, _PATCH_UUID_NEW),
+                    encoding="utf-8")
+                os.replace(tmp, target)
+                logger.info("dsh UUID 补丁：旧版升级为新版（+新会话清理）: %s",
+                            target)
+                return
             if _PATCH_UUID_OLD not in text:
                 logger.warning(
                     "dsh UUID 补丁：目标代码段未命中（dsh 可能已升级改版），"
@@ -270,7 +318,7 @@ def _patch_client_uuid_polyfill(binary: str):
                 text.replace(_PATCH_UUID_OLD, _PATCH_UUID_NEW),
                 encoding="utf-8")
             os.replace(tmp, target)
-            logger.info("dsh UUID 补丁：已为 client.js 注入 randomUUID 兜底: %s",
+            logger.info("dsh UUID 补丁：已为 client.js 注入 randomUUID + 新会话清理: %s",
                         target)
     except OSError as e:
         logger.warning(
@@ -419,6 +467,27 @@ def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
     return None, None, error
 
 
+def _mark_new_session(url: str) -> str:
+    """给 DSH 入口 URL 追加 ``?dsh_new_session=1``，触发前端清除当前会话。
+
+    DSH 前端在 ``dsh-client-connection`` 插件加载阶段检测该参数，命中时
+    清除 ``localStorage["dsh.sessions.current"]``，使 DSH 不加载上次会话、
+    直接进入"New Session"空白视图——用户要求"点击之后直接重新开一个新的
+    Session"。DSH 没有 REST API 创建会话，只能在前端侧清除当前会话指针。
+
+    与 KCW 的 ``_ensure_session_url`` 不同：KCW 通过 REST API 创建新会话
+    并返回 session 专属 URL；DSH 只能清除当前会话指针，让前端进入空白
+    视图（用户发送第一条消息时 DSH 才真正创建会话）。
+    """
+    parts = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    if not any(k == "dsh_new_session" for k, _ in pairs):
+        pairs.append(("dsh_new_session", "1"))
+    query = urllib.parse.urlencode(pairs)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                    resolve_binary_fn=None, lan_ip_fn=None, mdns_fn=None,
                    popen_fn=None):
@@ -428,6 +497,10 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     固定端口特征探测（launcher 重启后登记丢失的兜底）；冷启动绑固定
     专属端口 ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能
     被登记滞后的存活实例占用，对齐 ``kimi_web`` 的兜底语义）。
+
+    无论复用还是冷启动，返回的 URL 都带 ``?dsh_new_session=1``——DSH
+    前端检测到该参数时清除 ``localStorage["dsh.sessions.current"]``，
+    进入"New Session"空白视图（用户要求"直接重新开一个新的 Session"）。
 
     Args:
         cwd: dsh 运行目录（绝对路径）；None 表示上位机用户主目录。
@@ -461,7 +534,8 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 快路径：复用存活实例（_SPAWNED 内存登记 → 固定端口特征探测）
     url = _live_spawned_url()
     if url:
-        logger.info("复用已运行的 dsh web 实例: %s", url)
+        url = _mark_new_session(url)
+        logger.info("复用已运行的 dsh web 实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
 
     binary = resolve_binary_fn()
@@ -475,8 +549,8 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 冷启动前自愈补丁：放行特权方法的 trusted-host 访问（幂等，失败
     # 只影响局域网设置页，不影响 dsh 启动）
     _patch_privileged_methods(binary)
-    # client.js 注入 crypto.randomUUID 兜底（幂等，失败只影响局域网自动
-    # 进入 Projects，不影响 dsh 启动）
+    # client.js 注入 crypto.randomUUID 兜底 + ?dsh_new_session=1 清理逻辑
+    # （幂等，失败只影响局域网自动进入 Projects 和新会话清理，不影响 dsh 启动）
     _patch_client_uuid_polyfill(binary)
 
     lan_ip = lan_ip_fn()
@@ -491,15 +565,16 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         binary, cwd_str, trusted_hosts, deadline, popen_fn=popen_fn)
     if url:
         _SPAWNED.append({"proc": proc, "port": _url_port(url)})
-        url = _lan_url(url)
-        logger.info("dsh web 已启动: pid=%s url=%s", proc.pid, url)
+        url = _mark_new_session(_lan_url(url))
+        logger.info("dsh web 已启动（新会话）: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：固定端口可能被登记滞后的存活实例占用（如另一
     # launcher 此前拉起、本进程 _SPAWNED 没有登记的实例），再探一次复用
     url = _probe_dsh_fixed_port()
     if url:
-        logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例: %s", url)
+        url = _mark_new_session(url)
+        logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
     logger.warning("启动 dsh web 失败: %s", error)
     return {"status": "error", "error": error}

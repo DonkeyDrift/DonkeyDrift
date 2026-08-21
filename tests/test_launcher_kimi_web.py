@@ -553,9 +553,10 @@ class TestLaunchKimiCodeWeb:
         result = launch_kimi_code_web(
             cwd="/home/dkc/projects", timeout_s=5.0,
             live_url_fn=_live,
-            popen_fn=_make_popen(spawned))
+            popen_fn=_make_popen(spawned),
+            create_session_fn=lambda port, token, cwd: "session_test-id")
         assert result == {"status": "ok",
-                          "url": "http://192.168.3.10:58627/?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"}
+                          "url": "http://192.168.3.10:58627/sessions/session_test-id?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"}
         assert spawned == []  # 复用路径不起子进程
         # 复用探测带上了请求的 cwd（issue #168）
         assert seen["cwd"] == "/home/dkc/projects"
@@ -566,10 +567,12 @@ class TestLaunchKimiCodeWeb:
             cwd=None, timeout_s=10.0,
             live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/home/u/.kimi-code/bin/kimi",
-            popen_fn=_make_popen([proc]))
+            popen_fn=_make_popen([proc]),
+            create_session_fn=lambda port, token, cwd: "session_test-id")
         assert result["status"] == "ok"
-        # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125）
-        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k123"
+        # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125），
+        # 裸入口路径被插入新会话 /sessions/<id>（_ensure_session_url）
+        assert result["url"] == "http://192.168.3.10:58627/sessions/session_test-id?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k123"
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in kimi_web._SPAWNED_PROCS
@@ -592,7 +595,8 @@ class TestLaunchKimiCodeWeb:
             cwd=None, timeout_s=10.0,
             live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/home/u/.kimi-code/bin/kimi",
-            popen_fn=_make_popen([proc]))
+            popen_fn=_make_popen([proc]),
+            create_session_fn=lambda port, token, cwd: "session_test-id")
         assert result["status"] == "ok"
         args = proc.args_seen
         assert args[args.index("--allowed-host") + 1] == "tony007.local"
@@ -604,7 +608,8 @@ class TestLaunchKimiCodeWeb:
             cwd=str(tmp_path), timeout_s=10.0,
             live_url_fn=lambda cwd=None: None,
             resolve_binary_fn=lambda: "/x/kimi",
-            popen_fn=_make_popen([proc]))
+            popen_fn=_make_popen([proc]),
+            create_session_fn=lambda port, token, cwd: "session_test-id")
         assert result["status"] == "ok"
         assert proc.kwargs_seen["cwd"] == str(tmp_path)
 
@@ -635,9 +640,10 @@ class TestLaunchKimiCodeWeb:
             cwd=None, timeout_s=5.0,
             live_url_fn=lambda cwd=None: next(live_calls),
             resolve_binary_fn=lambda: "/x/kimi",
-            popen_fn=_make_popen([proc]))
+            popen_fn=_make_popen([proc]),
+            create_session_fn=lambda port, token, cwd: "session_test-id")
         assert result["status"] == "ok"
-        assert result["url"] == "http://192.168.3.10:58627/?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"
+        assert result["url"] == "http://192.168.3.10:58627/sessions/session_test-id?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"
         assert proc.killed is True  # 失败的子进程被杀净
 
     def test_spawn_banner_timeout_kills_proc(self):
@@ -662,6 +668,83 @@ class TestLaunchKimiCodeWeb:
         assert "提前退出" in result["error"]
         assert "something broke" in result["error"]
         assert proc.killed is True
+
+
+# ===========================================================================
+# _ensure_session_url / _create_session（每次点击开新会话）
+# ===========================================================================
+class TestEnsureSessionUrl:
+    def test_ensure_session_url_passes_through_with_session_path(self):
+        # 路径已是 /sessions/<id>（冷启动 Session: 行直达新会话）——原样返回，不调 API
+        url = "http://192.168.3.10:58640/sessions/abc-123#token=t0k"
+        called = []
+        result = kimi_web._ensure_session_url(
+            url, "/home/dkc/projects",
+            create_session_fn=lambda *a: called.append(a) or "should-not-be-used")
+        assert result == url
+        assert called == []  # create_session_fn 未被调用
+
+    def test_ensure_session_url_creates_session_for_bare_url(self):
+        # 裸入口（路径 /）触发 create_session_fn，返回带 /sessions/<id> 的 URL
+        url = "http://192.168.3.10:58640/#token=t0k"
+        calls = []
+
+        def fake_create(port, token, cwd_str):
+            calls.append((port, token, cwd_str))
+            return "new-sess-42"
+
+        result = kimi_web._ensure_session_url(
+            url, "/home/dkc/projects", create_session_fn=fake_create)
+        assert result == "http://192.168.3.10:58640/sessions/new-sess-42#token=t0k"
+        assert calls == [(58640, "t0k", "/home/dkc/projects")]
+
+    def test_ensure_session_url_fails_gracefully(self):
+        # create_session_fn 返回 None（创建失败）——返回原裸入口，浏览器显示会话列表
+        url = "http://192.168.3.10:58640/#token=t0k"
+        result = kimi_web._ensure_session_url(
+            url, "/home/dkc/projects",
+            create_session_fn=lambda *a: None)
+        assert result == url  # 原样返回，路径仍是 /
+
+
+class TestCreateSession:
+    def test_create_session_calls_api_correctly(self, monkeypatch):
+        # 验证 _create_session 向 POST /api/v1/sessions 发送正确请求并解析 session ID
+        captured = {}
+
+        class _FakeResp:
+            status = 200
+
+            def read(self):
+                return json.dumps(
+                    {"data": {"id": "sess-abc"}}).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["method"] = req.method
+            captured["data"] = req.data
+            captured["timeout"] = timeout
+            # header_items 返回 [(name, value), ...]，name 已大写化首字母
+            captured["headers"] = dict(req.header_items())
+            return _FakeResp()
+
+        monkeypatch.setattr(kimi_web.urllib.request, "urlopen", _fake_urlopen)
+
+        result = kimi_web._create_session(
+            58640, "tok-xyz", "/home/dkc/projects")
+        assert result == "sess-abc"
+        assert captured["url"] == "http://127.0.0.1:58640/api/v1/sessions"
+        assert captured["method"] == "POST"
+        assert json.loads(captured["data"]) == \
+            {"metadata": {"cwd": "/home/dkc/projects"}}
+        assert captured["headers"]["Authorization"] == "Bearer tok-xyz"
+        assert captured["headers"]["Content-type"] == "application/json"
 
 
 # ===========================================================================

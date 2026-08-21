@@ -181,7 +181,8 @@ class TestLaunchDshWeb:
         result = launch_dsh_web(
             cwd=None, timeout_s=5.0,
             popen_fn=_make_popen(spawned))
-        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
+        assert result == {"status": "ok",
+                         "url": "http://192.168.3.10:58641/?dsh_new_session=1"}
         assert spawned == []  # 复用路径不起子进程
 
     def test_spawn_success_captures_url_and_keeps_proc(self):
@@ -193,7 +194,7 @@ class TestLaunchDshWeb:
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
         # banner 里的 127.0.0.1 被改写为局域网 IP（issue #125 同款）
-        assert result["url"] == "http://192.168.3.10:58641"
+        assert result["url"] == "http://192.168.3.10:58641?dsh_new_session=1"
         # 成功时子进程保持存活（杀它即关 web 服务），句柄被模块留住
         assert proc.killed is False
         assert proc in [e["proc"] for e in dsh_web._SPAWNED]
@@ -224,7 +225,7 @@ class TestLaunchDshWeb:
             lan_ip_fn=lambda: "192.168.3.10",
             popen_fn=_make_popen([proc]))
         assert result["status"] == "ok"
-        assert result["url"] == "http://tony007.local:58641/"
+        assert result["url"] == "http://tony007.local:58641/?dsh_new_session=1"
 
     def test_reuse_url_prefers_mdns_host(self, monkeypatch):
         # 复用路径（_live_spawned_url 命中 _SPAWNED）同样 mDNS 优先；
@@ -238,7 +239,7 @@ class TestLaunchDshWeb:
         spawned = []
         result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
         assert result == {"status": "ok",
-                          "url": "http://tony007.local:58641/"}
+                          "url": "http://tony007.local:58641/?dsh_new_session=1"}
         assert spawned == []
 
     def test_spawn_skips_trusted_host_without_lan_ip(self):
@@ -333,7 +334,8 @@ class TestSpawnedRegistry:
         result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
         # dsh 固定绑 0.0.0.0，复用探测走回环
         assert probed == [("127.0.0.1", 58641)]
-        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
+        assert result == {"status": "ok",
+                          "url": "http://192.168.3.10:58641/?dsh_new_session=1"}
         assert spawned == []
 
     def test_dead_entry_removed(self, monkeypatch):
@@ -423,7 +425,8 @@ class TestFixedPortReuse:
             lambda url, timeout=None: _FakeHttpResponse(200, _DSH_BOOT_HTML))
         spawned = []
         result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
-        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
+        assert result == {"status": "ok",
+                          "url": "http://192.168.3.10:58641/?dsh_new_session=1"}
         assert spawned == []  # 复用路径不起子进程
         # 实例非本进程拉起，没有 proc 可登记
         assert dsh_web._SPAWNED == []
@@ -468,7 +471,8 @@ class TestFixedPortReuse:
             resolve_binary_fn=lambda: "/x/dsh",
             lan_ip_fn=lambda: "192.168.3.10",
             popen_fn=_make_popen([proc]))
-        assert result == {"status": "ok", "url": "http://192.168.3.10:58641/"}
+        assert result == {"status": "ok",
+                         "url": "http://192.168.3.10:58641/?dsh_new_session=1"}
         assert proc.killed is True  # 冷启动失败路径杀净
         # 冷启动前一次 + 失败后兜底一次，都探回环固定端口
         assert calls == ["http://127.0.0.1:58641/"] * 2
@@ -736,3 +740,36 @@ def test_endpoint_error_from_automation_is_500(http_server, monkeypatch):
     assert code == 500
     assert json.loads(payload)["error"] == "boom"
     assert headers.get("Access-Control-Allow-Origin") == "*"
+
+
+# ===========================================================================
+# _mark_new_session（URL 追加 ?dsh_new_session=1）
+# ===========================================================================
+def test_mark_new_session_appends_marker_and_is_idempotent():
+    """_mark_new_session 给裸 URL 追加 ?dsh_new_session=1，且幂等不重复加。"""
+    # 裸 URL（带尾斜杠）→ 追加 marker
+    assert dsh_web._mark_new_session(
+        "http://192.168.3.10:58641/") == \
+        "http://192.168.3.10:58641/?dsh_new_session=1"
+    # 裸 URL（不带尾斜杠）→ 追加 marker
+    assert dsh_web._mark_new_session(
+        "http://192.168.3.10:58641") == \
+        "http://192.168.3.10:58641?dsh_new_session=1"
+    # 已含 marker → 幂等，不重复追加
+    assert dsh_web._mark_new_session(
+        "http://192.168.3.10:58641/?dsh_new_session=1") == \
+        "http://192.168.3.10:58641/?dsh_new_session=1"
+    # 已含 marker（无尾斜杠）→ 幂等
+    assert dsh_web._mark_new_session(
+        "http://tony007.local:58641?dsh_new_session=1") == \
+        "http://tony007.local:58641?dsh_new_session=1"
+    # 已有其他 query 参数 → 追加在后面
+    assert dsh_web._mark_new_session(
+        "http://192.168.3.10:58641/?foo=bar") == \
+        "http://192.168.3.10:58641/?foo=bar&dsh_new_session=1"
+
+
+def test_patch_uuid_new_contains_new_session_marker():
+    """_PATCH_UUID_NEW 常量包含 dsh_new_session 清理逻辑的标记文本，
+    确保 client.js 补丁注入了新会话清除代码。"""
+    assert "dsh_new_session" in dsh_web._PATCH_UUID_NEW
