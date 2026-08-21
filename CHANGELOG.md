@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (128)
+
+- fix(launcher): KCW 入口 origin 改用 mDNS 主机名优先，置顶/收藏/自主模式不再随 DHCP 换 IP 丢失
+  - 背景：本机在家庭 Wi-Fi 走 DHCP，实测一天内 IP 连续变化（192.168.3.57 → .103 → .62）。KCW 前端的置顶 `kimi-web.pinned-sessions`、权限模式 `kimi-web.permission`、收藏模型 `kimi-web.starred-models` 等偏好都存浏览器 localStorage、按 origin（含 host）隔离。launcher 此前用局域网 IP 做入口 host，IP 每变一次 origin 就变、偏好被"清空"，用户反复表现为「置顶全没了、自主模式变逐条确认、收藏被取消」。
+  - `donkeycar/launcher/kimi_web.py`：`_entry_host()` 由 `_lan_ip() or _mdns_hostname()` 改为 `_mdns_hostname() or _lan_ip()`（mDNS 主机名优先，IP 仅作兜底）；同步更新模块 docstring 与 `_mdns_hostname`/`_entry_host`/`_lan_url` 的 docstring。mDNS 名与局域网 IP 都已写进 `--allowed-host`，两种入口都能过 kimi 的 DNS-rebinding 栅栏（40301）。
+  - 测试同步：`tests/test_launcher_kimi_web.py` 4 处断言从「IP 优先」改为「mDNS 优先」（`test_lan_ip_preferred_over_mdns_for_loopback`→`test_mdns_preferred_over_lan_ip_for_loopback`、`test_lan_ip_preferred_over_mdns_for_lan_host`→`test_mdns_preferred_over_lan_ip_for_lan_host`、`test_mdns_fallback_when_no_lan_ip`→`test_mdns_used_even_without_lan_ip`、`test_lan_ip_preferred_for_local_instance`→`test_mdns_preferred_for_local_instance`），并更新 fixture 注释；`tests/test_launcher_dsh_web.py` 的 `_fake_lan_ip` fixture 补 patch `kimi_web._mdns_hostname`（`_entry_host` 现 mDNS 优先，需同时钉住 kimi_web 命名空间的 mDNS 探测，避免 `_lan_url` 真去解析 mDNS 导致断言随网络漂移）。两文件 84 项单测全部通过。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；收尾后重启 launcher 服务部署并实测入口 URL 为 `tony007.local`。
+
 ## 2026-08-21 (127)
 
 - fix(drive): 遥测曲线勾选框默认全部勾选
