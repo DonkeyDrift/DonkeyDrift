@@ -5,7 +5,7 @@ import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
 import { VersionBadge } from './VersionBadge';
-import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, KimiCodeWebEntryLink } from './EnterButtons';
+import { CCodeEntryLink, DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, KimiCodeWebEntryLink } from './EnterButtons';
 import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './ConsoleControls';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
@@ -60,7 +60,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
             {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。
                 前四项是流程页锚点（#178），CC 仍是独立路由；高级入口（Donkey /
-                Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
+                Drift Console / Kimi Code Web / C Code / DeepSeek Harness）融入导航行但弱化样式，
                 见 EnterButtons.tsx（Issue #175） */}
             <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14">
               <DonkeyEntryLink />
@@ -78,6 +78,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 {t('common.nav.carConnector')}
               </Link>
               <KimiCodeWebEntryLink />
+              <CCodeEntryLink />
               <DshEntryLink />
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
@@ -112,7 +113,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         </div>
         {/* 手机菜单面板：导航项 + 高级入口（Donkey / Drifter Console / Kimi Code Web /
-            DeepSeek Harness，弱化样式与桌面一致）；主题/语言/版本号已移至标题区 */}
+            C Code / DeepSeek Harness，弱化样式与桌面一致）；主题/语言/版本号已移至标题区 */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-zinc-800 bg-zinc-900">
             <nav className="container mx-auto px-4 py-2 flex flex-col text-sm font-medium">
@@ -138,6 +139,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <DonkeyEntryLink />
                 <DrifterConsoleEntryLink />
                 <KimiCodeWebEntryLink />
+                <CCodeEntryLink />
                 <DshEntryLink />
               </div>
             </nav>
