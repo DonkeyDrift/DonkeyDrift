@@ -421,14 +421,14 @@ export const TubLibrary: React.FC = () => {
             }
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(nextImg, 0, 0);
-            setImageError(false);
-            setFrameAspect(nextImg.width / nextImg.height);
           }
         }
         frameRef.current = next;
 
-        // 预取从播放循环内发起，不作为独立 effect
-        prefetchFromIndex(next);
+        // 预取节流：窗口 60 帧，每 6 帧发起一次仍有 54 帧余量
+        if (next % UI_UPDATE_EVERY_N_FRAMES === 0) {
+          prefetchFromIndex(next);
+        }
 
         // FPS 按实际换帧数累计（#128），画面冻结时角标跟随下降
         fpsFramesRef.current += 1;
@@ -671,7 +671,7 @@ export const TubLibrary: React.FC = () => {
                 className="w-full bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
-                <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'} backdrop-blur-md`}>
+                <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>
                   <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
                   <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
                 </div>
