@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (134)
+
+- fix(layout): DD 左上角 logo 圆角对齐 Drifter Console headerLogo（8px，修正 12px）
+  - 背景：logo 此前用 Tailwind `rounded-lg`，但主题 CSS（`theme-mus4.css` / `theme-light.css`）把 `.rounded-lg` 全局改写为 12px，导致 logo 实际圆角 12px；而 Drifter Console 的 headerLogo 是 `border-radius:8px`。用户反馈两者圆角不一样。
+  - `web_ui/frontend/src/components/Layout.tsx`：logo `<img>` className 由 `w-8 h-8 rounded-lg border header-logo` 改为 `w-8 h-8 border header-logo`（去掉被主题改写的 rounded-lg）。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.header-logo` 规则内新增 `border-radius: 8px;`（显式锁定，对齐 DC），边框色随主题（深色 #2b3441 / 浅色 #d5dce4）不变。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 21 文件 118 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (133)
 
 - fix(drive): 视频画面恢复圆角、遥测曲线去掉横向网格线与左侧刻度数字、面板标题移到曲线下方
