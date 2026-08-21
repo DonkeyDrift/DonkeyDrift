@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-21 (143)
+
+- feat(tub-manager): 录制视频库与 Tub 编辑器一屏并排显示，无需滚动切换
+  - 背景：TubManagerPage 用 `space-y-6` 简单纵向堆叠，TubLibrary 的 `aspect-video` 播放器在宽屏上高度达 ~480px+、会话列表 `max-h-[520px]`，TubEditor 图表 `min-h-[clamp(20rem,48vh,34rem)]` 至少 320px，两者合计远超视口高度，用户必须上下滚动才能分别看到录制库和编辑器曲线。
+  - 修复：TubManagerPage 容器改为 `flex flex-col gap-6 h-[calc(100vh-200px)] min-h-0`，视口高度约束的 flex 列；TubLibrary 加 `shrink-0` 不抢空间、会话列表 `max-h-[520px]`→`max-h-[30vh]`、播放器加 `max-h-[22vh]` 约束高度；TubEditor 图表卡片 `min-h-[clamp(20rem,48vh,34rem)]`→`min-h-0 flex-1`，撑满剩余空间。CardContent 已有 `flex-1 min-h-0`、图表容器已有 `flex-1 min-h-[12rem]`，无需再改内部。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx`：容器 div 改 flex 列 + 视口高度约束。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：Card 加 `shrink-0`；会话列表 `max-h` 改 `30vh`；播放器容器加 `max-h-[22vh]`。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：`chartCardClassName` 从 `min-h-[clamp(20rem,48vh,34rem)]` 改为 `min-h-0 flex-1`。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 125 项）、`npm run build` 全部通过。本次为纯 CSS 布局改动，未新增单测。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (142)
 
 - feat(drive): 遥测曲线图例左侧加「全选」、全屏放大键挪到视频画面右下角
