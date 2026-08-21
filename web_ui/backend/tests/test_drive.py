@@ -559,18 +559,14 @@ def test_video_stream_emits_real_frame_when_online():
     assert b"REALJPEG" in part
 
 
-def test_video_stream_stays_silent_when_offline():
+def test_video_stream_emits_placeholder_when_offline():
+    # 车端离线时也要立即推占位帧，否则 <img> 收不到首帧，前端会一直
+    # 卡在「正在连接摄像头」，甚至被浏览器判为 onError 显示「摄像头未连接」。
     client, drive = make_client()
     drive.drive_state.last_frame = None
 
-    async def run():
-        gen = drive._frame_generator()
-        try:
-            await asyncio.wait_for(gen.__anext__(), timeout=0.3)
-            return True
-        except asyncio.TimeoutError:
-            return False
-        finally:
-            await gen.aclose()
+    part = asyncio.run(_first_frame_part(drive))
 
-    assert asyncio.run(run()) is False
+    assert b"Content-Type: image/jpeg" in part
+    payload = part.split(b"\r\n\r\n", 1)[1]
+    assert payload.startswith(b"\xff\xd8")

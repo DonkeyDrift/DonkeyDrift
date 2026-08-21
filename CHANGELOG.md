@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (114)
+
+- fix(drive): 车端离线时也回占位帧，修复 Drive 页反复「正在连接摄像头 → 摄像头未连接」
+  - 背景：上一轮占位帧修复只在「车端在线但无首帧」时回占位帧，「车端离线」时仍保持静默（`sleep(0.1)` 不发任何字节）；浏览器 `<img src="/drive/video">` 收不到首帧，既不 `onLoad` 也不 `onError`，前端 `VideoStream` 会一直卡「正在连接摄像头」，长时间无数据甚至被浏览器判为加载失败（`onError`）显示「摄像头未连接」。本机存在「车端 WebSocket 连 8001、默认入口 8000」的端口分裂时，8000 后端恒判车端离线，必现该循环。
+  - `web_ui/backend/routers/drive.py`：`_frame_generator` 去掉「车端离线静默」分支——只要没有真实帧可推（车端离线，或在线但尚未推首帧），都按 2fps 推占位帧，让 `<img>` 立即 `onLoad`；仅在占位帧生成失败（Pillow 不可用）时才静默。
+  - 测试同步：`web_ui/backend/tests/test_drive.py` 的 `test_video_stream_stays_silent_when_offline` 改为 `test_video_stream_emits_placeholder_when_offline`，断言离线也立即返回有效 JPEG 占位帧；backend `pytest -q` 100 passed。
+  - 注：仅 DD 后端改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist；收尾后需重启后端部署验证。
+
 ## 2026-08-21 (113)
 
 - fix(drive): 整屏放大键改为原生全屏（`requestFullscreen`），与 Drifter Console 遥测曲线全屏一致
