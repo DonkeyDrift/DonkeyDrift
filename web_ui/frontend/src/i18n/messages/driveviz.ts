@@ -33,6 +33,7 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.curveAccZ': '加速度 Z',
     'driveViz.curvePilotAngle': 'Pilot 角度',
     'driveViz.curvePilotThrottle': 'Pilot 油门',
+    'driveViz.selectAll': '全选',
     // ParameterPanel
     'driveViz.importSuccess': '参数导入成功',
     'driveViz.importFormatError': '参数文件格式错误',
@@ -87,6 +88,7 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.curveAccZ': 'AccZ',
     'driveViz.curvePilotAngle': 'Pilot Angle',
     'driveViz.curvePilotThrottle': 'Pilot Throttle',
+    'driveViz.selectAll': 'Select All',
     // ParameterPanel
     'driveViz.importSuccess': 'Parameters imported successfully',
     'driveViz.importFormatError': 'Invalid parameter file format',

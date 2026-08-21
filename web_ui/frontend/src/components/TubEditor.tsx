@@ -1596,7 +1596,7 @@ export const TubEditor: React.FC = () => {
     [setSelectionRange, records.length]
   );
 
-  const chartCardClassName = 'relative flex min-h-[clamp(20rem,48vh,34rem)] flex-col';
+  const chartCardClassName = 'relative flex min-h-0 flex-1 flex-col';
 
   if (!records.length) {
     return (

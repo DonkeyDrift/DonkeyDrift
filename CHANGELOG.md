@@ -1,6 +1,7 @@
 # 变更日志
 
-## 2026-08-21 (141)
+
+## 2026-08-21 (145)
 
 - fix(frontend): 移除 DD 标签栏「C Code」入口按钮及其全部配套代码（后端路由 / launcher 端点 / 前端组件 / i18n / 测试），恢复为 Kimi Code Web + DeepSeek Harness 两个弱化入口
   - 背景：C Code 入口（条目 (137) / PR #337 引入）经实际使用后用户决定移除；Claude Code 无官方 web UI，复用 launcher 网页终端的方案体验不佳，遂删除。
@@ -15,6 +16,47 @@
   - `web_ui/backend/tests/test_launch.py`：保留文件（仍覆盖 kimi / dsh 转发），删除 claude-code 用例、路由注册断言改回两条（kimi-code-web / dsh）。
   - 测试同步：`pytest web_ui/backend/tests/test_launch.py tests/test_launcher_kimi_web.py tests/test_launcher_dsh_web.py -q` → 108 passed；`npx vitest run src/components/EnterButtons.test.tsx` → 8 passed；`npx tsc --noEmit` 通过。
   - 注：配套固件侧 DC 头部 C Code 按钮移除在 Firmware 仓库 v1.8.32；收尾后部署 DD 到 8000 + OTA 刷车验证。
+
+
+## 2026-08-21 (144)
+
+- fix(tub-library): 下载改为浏览器原生 HTTP 下载，Safari 立即弹出下载通知+进度条
+  - 背景：此前 `downloadTubSession` 用 axios `responseType:'blob'` 先把整个文件下载到内存，再用 blob URL 触发保存。Safari 不会在"内存下载"阶段显示下载通知，用户只看到图标弹跳却无下载进度条。
+  - `web_ui/frontend/src/services/api.ts`：`downloadTubSession` 从 async axios blob 改为同步——直接构造 `<a href="服务器URL">` + `link.click()` 让浏览器原生发起 HTTP 下载。后端已设 `Content-Disposition: attachment`，浏览器立即显示原生下载通知与进度条。函数签名去掉 `start_time_ms`（文件名由后端 Content-Disposition 设置）。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：`handleDownload` 改为同步调用，`downloadingId` 设 1 秒后自动清除作为点击视觉反馈，实际下载进度由浏览器原生 UI 显示。
+  - 测试同步：`TubLibrary.test.tsx` 下载测试参数去掉 `start_time_ms`，断言改为同步调用；`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过，`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
+
+## 2026-08-21 (143)
+
+- feat(tub-manager): 录制视频库与 Tub 编辑器一屏并排显示，无需滚动切换
+  - 背景：TubManagerPage 用 `space-y-6` 简单纵向堆叠，TubLibrary 的 `aspect-video` 播放器在宽屏上高度达 ~480px+、会话列表 `max-h-[520px]`，TubEditor 图表 `min-h-[clamp(20rem,48vh,34rem)]` 至少 320px，两者合计远超视口高度，用户必须上下滚动才能分别看到录制库和编辑器曲线。
+  - 修复：TubManagerPage 容器改为 `flex flex-col gap-6 h-[calc(100vh-200px)] min-h-0`，视口高度约束的 flex 列；TubLibrary 加 `shrink-0` 不抢空间、会话列表 `max-h-[520px]`→`max-h-[30vh]`、播放器加 `max-h-[22vh]` 约束高度；TubEditor 图表卡片 `min-h-[clamp(20rem,48vh,34rem)]`→`min-h-0 flex-1`，撑满剩余空间。CardContent 已有 `flex-1 min-h-0`、图表容器已有 `flex-1 min-h-[12rem]`，无需再改内部。
+  - `web_ui/frontend/src/pages/TubManagerPage.tsx`：容器 div 改 flex 列 + 视口高度约束。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：Card 加 `shrink-0`；会话列表 `max-h` 改 `30vh`；播放器容器加 `max-h-[22vh]`。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：`chartCardClassName` 从 `min-h-[clamp(20rem,48vh,34rem)]` 改为 `min-h-0 flex-1`。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 125 项）、`npm run build` 全部通过。本次为纯 CSS 布局改动，未新增单测。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (142)
+
+- feat(drive): 遥测曲线图例左侧加「全选」、全屏放大键挪到视频画面右下角
+  - 背景：两个需求——① 两张遥测曲线底部勾选区各加一个「全选」：半选（部分勾选）时点击→全选，已全选时点击→全不选；② 全屏/放大键从原来避让遥测框的上方位置挪到整个视频画面的右下角。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：`TelemetryLegend` 新增可选 `onToggleAll(select:boolean)`；左侧渲染「全选」勾选框——已全选时 `checked`、半选时用 ref 设 `indeterminate` 横杠、点击调 `onToggleAll(!allSelected)`（全选→全不选、半选/全不选→全选）。`TelemetryChart` 内部（非受控时）提供 `toggleAll` 给自身图例；受控时不渲染（由父组件处理）。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `setSteeringAll`/`setThrottleAll`（一次性把整组 key 设为显示或隐藏）传给两个 `TelemetryLegend`；全屏按钮位置由 `fullscreen ? 'bottom-60' : 'bottom-44'` 改为固定 `bottom-3`（与遥测浮层同 `right-3/bottom-3` inset，叠在曲线之上 z-30），即整个视频画面右下角。
+  - i18n：`driveviz.ts` 新增 `driveViz.selectAll`（zh「全选」/en「Select All」）。
+  - 测试同步：`TelemetryChart.test.tsx` group 模式勾选框计数 6→7（含「全选」）；新增回归「半选时点击→全选、已全选时点击→全不选」（覆盖 indeterminate）。`npx vitest run TelemetryChart` 11 项、`npx vitest run` 22 文件 126 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 验证：临时预览端口实测——全屏按钮位于右下角（距视频右边/下边各 12px，与遥测浮层对齐）；两组图例各 1 个「全选」（共 2 个 + 12 条曲线勾选框 = 14 个）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
+## 2026-08-21 (141)
+
+- fix(launcher): avahi AAAA 防护改用 0.8 正确键名 publish-aaaa-on-ipv4/use-ipv6（publish-aaaa-on-ipv6 不存在，误写会导致 avahi-daemon 拒绝启动、mDNS 全停）
+  - 背景：条目 138 的入口 host IPv6/AAAA 防护（PR #340）在配置里写了 `publish-aaaa-on-ipv6`——avahi 0.8 的 `avahi-daemon.conf(5)` 没有这个键，重启时 avahi-daemon 报 `Invalid configuration key` 直接退出，mDNS 全停，tony007.local 反而彻底不可解析（用户实测报错更严重）。avahi 0.8 控制 AAAA 的正确键：`publish-aaaa-on-ipv4`（IPv4 mDNS 应答是否带 AAAA，默认 yes）、`use-ipv6`（IPv6 传输开关，默认 yes；IPv6 应答恒带 AAAA 无独立开关），两者都 no 才完全无 AAAA。
+  - `donkeycar/launcher/kimi_web.py`：`_avahi_publishes_ipv6()` 改为解析 `publish-aaaa-on-ipv4` / `use-ipv6` / `publish-addresses` 三键（`publish-addresses=no` 视为安全；缺失/不可读/注释一律保守视为发布）。
+  - 本机配置：`/etc/avahi/avahi-daemon.conf` 删除无效键，`[server] use-ipv6=no` + `[publish] publish-aaaa-on-ipv4=no`；重启后 daemon active，实测 `tony007.local` 只解析出 A（192.168.3.62）、AAAA 全无；launcher 入口恢复 `http://tony007.local:58640/`（A-only，无 IPv6 黑洞，origin 稳定）。
+  - 测试同步：TestAvahiIpv6Entry 重写为双键语义（都关→False；只关其一→True；默认→True；注释忽略→True；`publish-addresses=no`→False；文件缺失→True）；kimi 测试文件 66 passed、launcher 回归 170 passed。
+  - 注：仅 launcher 后端改动，Firmware 无改动、无需 OTA；已 ff 部署 worktree 并重启 donkeydrifter-launcher 生效。
 
 ## 2026-08-21 (140)
 
