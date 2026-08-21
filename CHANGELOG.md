@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (109)
+
+- fix(layout): DD 左上角 logo 对齐 Drifter Console 独立页图标（恢复 1px #2b3441 边框）
+  - 背景：DC 独立页头图标为 32×32、`border-radius:8px`、`border:1px solid #2b3441` + `/favicon.png` 头盔图（与 DD `/logo.png` 为同一张图）；上一轮按「去掉黑边」去掉了边框，现按用户要求直接照搬 DC 图标，因此恢复该边框。
+  - `web_ui/frontend/src/components/Layout.tsx`：标题左侧 logo 的 `img` className 由 `w-8 h-8 rounded-lg` 改为 `w-8 h-8 rounded-lg border border-[#2b3441]`，并同步注释为「与 Drifter Console headerLogo 完全一致」。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 21 文件 114 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (108)
 
 - fix(drive): 整屏放大键再上移，避开下方油门/加速度曲线框
