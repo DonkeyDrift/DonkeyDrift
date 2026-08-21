@@ -215,15 +215,8 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
 
   return (
     <div className={`relative bg-zinc-950 overflow-hidden ${className}`} style={{ aspectRatio }}>
-      {/* 四角取景框：仅在摄像头未连接时显示，只画圆角弧线、不画整框，避免无画面时四角出现黑角 */}
-      {!webRtcVisible && status !== 'connected' && (
-        <>
-          <span aria-hidden className="pointer-events-none absolute top-0 left-0 z-40 h-6 w-6 rounded-tl-lg border-l-2 border-t-2 border-zinc-700" />
-          <span aria-hidden className="pointer-events-none absolute top-0 right-0 z-40 h-6 w-6 rounded-tr-lg border-r-2 border-t-2 border-zinc-700" />
-          <span aria-hidden className="pointer-events-none absolute bottom-0 left-0 z-40 h-6 w-6 rounded-bl-lg border-l-2 border-b-2 border-zinc-700" />
-          <span aria-hidden className="pointer-events-none absolute bottom-0 right-0 z-40 h-6 w-6 rounded-br-lg border-r-2 border-b-2 border-zinc-700" />
-        </>
-      )}
+      {/* 摄像头未连接时不画四角取景框，仅靠容器圆角呈现干净外框 */}
+
       <div className="absolute top-2 left-2 z-30 flex items-start gap-2">
         <div className={`rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center ${overlayShadow} backdrop-blur-md min-w-[4.5rem]`}>
           <div className={`text-[10px] leading-none flex items-center justify-center gap-1 ${statusMeta.color}`}>

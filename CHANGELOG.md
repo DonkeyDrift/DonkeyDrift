@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (150)
+
+- fix(drive): 摄像头未连接时去掉四角取景框，仅保留容器圆角
+  - 背景：摄像头离线时 VideoStream 组件渲染 4 个 `span`（左上/右上/左下/右下角）拼出 L 形取景框，每角有一横一竖的 border 弧线，四个角出现黑色直角块，用户希望只保留容器本身的圆角。
+  - 修复：删除 `VideoStream.tsx` 中 `{!webRtcVisible && status !== 'connected' && (<>…4 个 span…</>)}` 整块，替换为一行注释。容器圆角由 `DrivePage.tsx` 视频容器 `rounded-lg overflow-hidden` 提供，删后四角仅呈现干净的圆角。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：删除四角取景框 span 块。
+  - 测试同步：`npx vitest run`（22 文件 123 项全通过）、`npm run build` 通过。纯删除改动，无新增单测。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (149)
 
 - fix(tub-manager): 一屏布局大幅修正——视频放大不再截断、编辑器底部滑块完整显示、整体更紧凑
