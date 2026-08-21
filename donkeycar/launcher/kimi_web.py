@@ -41,6 +41,15 @@ issue #168（打开后是"全新状态"）的三处约束：
   ``kimi-web.starred-models`` 等）被"清空"，用户反复丢置顶、自主模式变
   逐条确认；mDNS 主机名不随 IP 变化，是唯一稳定的 origin。IP 仅作 mDNS
   探测不到时的兜底（两者都写进 ``--allowed-host``，均能过 40301）。
+- 入口 host 的 IPv6/AAAA 防护（2026-08-21）：kimi web 只监听 IPv4
+  （0.0.0.0），而 avahi 默认会给 mDNS 名发布 AAAA（IPv6 地址）记录。
+  浏览器解析入口 host 时若选中 IPv6（部分浏览器优先 IPv6，或残留旧
+  临时地址缓存），TCP 连不上也不会立刻失败——黑洞等 30s 后 KCW 前端
+  abort，报"无法连接到 Kimi 服务器"（fetch AbortError）。因此入口
+  host 只有在 avahi 不发布 AAAA（publish-aaaa-on-ipv6=no，浏览器只
+  拿到 A 记录）时才用 mDNS 主机名；否则回退局域网 IPv4 IP，保证入口
+  一定可达。可达性优先于 origin 稳定性，但配上 avahi 的 AAAA 关闭
+  后两者兼得。
 - 入口 URL 注入 ``?kimi_origin=<origin>``：KCW 0.36.1 前端把 API 基地址
   判定为 URL 的 ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]``
   → ``window.location.origin``；launcher 显式写 ``kimi_origin`` 后，即使
@@ -87,6 +96,9 @@ KIMI_HOME = Path.home() / ".kimi-code"
 KIMI_BIN = KIMI_HOME / "bin" / "kimi"
 INSTANCES_DIR = KIMI_HOME / "server" / "instances"
 TOKEN_PATH = KIMI_HOME / "server.token"
+
+# avahi 发布策略配置（入口 host 的 IPv6/AAAA 防护，见 _avahi_publishes_ipv6）
+_AVAHI_CONF = Path("/etc/avahi/avahi-daemon.conf")
 
 # kimi web banner 里的失败特征 → 提前报错，不用傻等超时
 _SERVER_FAIL_MSG = "Failed to start server"
@@ -236,19 +248,55 @@ def _mdns_hostname():
     return fqdn if lan in addrs else None
 
 
+def _avahi_publishes_ipv6(conf_path=None):
+    """avahi 是否在给本机 mDNS 名发布 AAAA（IPv6 地址）记录。
+
+    kimi web 只监听 IPv4（``--host 0.0.0.0``）。avahi 发布 AAAA 时，
+    浏览器解析入口 host 可能选中 IPv6——连到本机 IPv6 地址但 58640
+    没有 IPv6 监听，或缓存了已轮换掉的临时地址，连接黑洞直到 KCW
+    前端 30s 超时报"无法连接到 Kimi 服务器"。入口 host 选择必须知道
+    avahi 的发布策略：读 ``publish-aaaa-on-ipv6``（默认 yes；显式
+    ``no`` 才不发布）。配置文件缺失/不可读/未显式关闭一律视为"发布"
+    （保守，回退 IPv4 局域网 IP，保证入口可达）。
+    """
+    conf_path = conf_path or _AVAHI_CONF
+    try:
+        text = Path(conf_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        if key.strip().lower() == "publish-aaaa-on-ipv6":
+            return val.strip().lower() not in ("no", "false", "0")
+    return True
+
+
 def _entry_host():
-    """KCW 入口 URL 的入口 host：优先 mDNS 主机名，其次本机局域网 IP。
+    """KCW 入口 URL 的入口 host：mDNS 主机名优先，其次本机局域网 IP。
 
     origin 含 host，而本机在家庭 Wi-Fi 下走 DHCP，IP 会随时变化（实测一天
     内 192.168.3.57 → .103 → .62）。用 IP 做 origin 时，IP 每变一次，KCW
     浏览器端的 localStorage（置顶 ``kimi-web.pinned-sessions``、权限模式
     ``kimi-web.permission``、收藏模型 ``kimi-web.starred-models`` 等）就按
     新 origin 重新隔离，用户表现为"置顶全没了、自主模式变逐条确认、收藏
-    被取消"。mDNS 主机名不随 IP 变化，是唯一稳定的 origin，因此优先使用；
-    局域网 IP 仅作为 mDNS 探测不到时的兜底（两者都会写进
-    ``--allowed-host``，两种入口都能过 40301）。
+    被取消"。mDNS 主机名不随 IP 变化，是唯一稳定的 origin，因此优先使用。
+
+    但 mDNS 名只有在 avahi 不发布 AAAA 时才是安全的入口 host：kimi web
+    只监听 IPv4，浏览器选中 IPv6（优先 IPv6 的浏览器或残留旧临时地址
+    缓存）会连接黑洞、30s 后 KCW 前端报"无法连接到 Kimi 服务器"
+    （fetch AbortError）。avahi 发布 AAAA（默认）时回退局域网 IPv4 IP，
+    可达性优先于 origin 稳定性；配置 ``publish-aaaa-on-ipv6=no`` 后
+    mDNS 名重新成为首选（两者都会写进 ``--allowed-host``，均能过 40301）。
     """
-    return _mdns_hostname() or _lan_ip()
+    fqdn = _mdns_hostname()
+    if fqdn and not _avahi_publishes_ipv6():
+        return fqdn
+    return _lan_ip()
 
 
 def _allowed_host_values():
