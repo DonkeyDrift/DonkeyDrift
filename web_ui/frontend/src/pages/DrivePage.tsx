@@ -59,6 +59,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
   const [joystickOpen, setJoystickOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
   const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
     () => new Set(curvesByGroup('steering').map((c) => c.key as string)),
   );
@@ -93,7 +94,20 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   }, []);
 
   const toggleFullscreen = useCallback(() => {
-    setFullscreen((f) => !f);
+    const el = videoContainerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen();
+    }
+  }, []);
+
+  // 原生全屏状态随浏览器 fullscreenchange 同步（含 ESC 退出），驱动图标与曲线高度。
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === videoContainerRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
   const { params, loadFromServer } = useDriveStore();
@@ -339,14 +353,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右上角为整屏放大 */}
+          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
           <div
-            className={cn(
-              'relative',
-              fullscreen
-                ? 'fixed inset-0 z-50 bg-black'
-                : 'flex-1 min-h-0 aspect-video lg:aspect-auto',
-            )}
+            ref={videoContainerRef}
+            className="relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black"
           >
             {active ? (
               <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />

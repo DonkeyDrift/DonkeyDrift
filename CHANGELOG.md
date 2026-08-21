@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (113)
+
+- fix(drive): 整屏放大键改为原生全屏（`requestFullscreen`），与 Drifter Console 遥测曲线全屏一致
+  - 背景：上一轮「整屏放大」用的是 CSS `fixed inset-0` 假全屏覆盖层，未真正进入浏览器全屏（浏览器地址栏/页面其它元素仍在）；用户要求参考 Drifter Console 遥测曲线右下角全屏按钮，做到真正全屏。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `videoContainerRef` 指向摄像头容器；`toggleFullscreen` 改为 `document.fullscreenElement === el ? document.exitFullscreen() : el.requestFullscreen()`；新增 `fullscreenchange` 监听同步 `fullscreen` 状态（含 ESC 退出），继续驱动曲线高度与图标；容器 className 去掉 `fixed inset-0 z-50 bg-black` 假全屏分支，改为恒定的 `relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black`。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (112)
 
 - fix(console): DD 顶栏 OTA/DEV 开关边框厚度与深浅/中英文切换按钮对齐为双层边框
