@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-21 (149)
+
+- fix(tub-manager): 一屏布局大幅修正——视频放大不再截断、编辑器底部滑块完整显示、整体更紧凑
+  - 背景：上一版（148）把视频 `max-h` 从 22vh 调到 30vh、图表 `min-h` 从 12rem 调到 8rem，但用户反馈仍看不清视频、编辑器底部仍不完整，改动幅度不够。
+  - 修复（6 处 CSS 改动，3 个文件）：
+    - `TubManagerPage.tsx`：容器 `h-[calc(100vh-200px)]`→`h-[calc(100vh-180px)]`（+20px 空间），间距 `gap-6`→`gap-4`（省 8px）。
+    - `TubLibrary.tsx`：视频容器 `max-h-[30vh]`→`max-h-[36vh]`（1080p 下从 324px 放宽到自然高度 ~341px，不再截断画面）；会话列表 `max-h-[30vh]`→`max-h-[24vh]`（收紧，不再抢空间）；`RecordStats` 从 `h-[60px] w-[88px]` + `text-lg` 改为 `h-[44px] w-[80px]` + `text-sm`（更紧凑，省 16px）。
+    - `TubEditor.tsx`：图表容器 `min-h-[8rem]`→`min-h-[6rem]`（128px→96px，底部滚滑块+选区/删除指示条空间更充裕，不再被 `overflow-hidden` 裁掉）。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。纯 CSS 改动，未新增单测。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (148)
 
 - fix(tub-manager): 修正一屏布局——视频画面放大、Tub 编辑器底部滑块不再被裁

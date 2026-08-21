@@ -64,7 +64,7 @@ export const TubManagerPage = memo(function TubManagerPage() {
         </div>
       )}
 
-      <div className="flex flex-col gap-6 h-[calc(100vh-200px)] min-h-0">
+      <div className="flex flex-col gap-4 h-[calc(100vh-180px)] min-h-0">
         <TubLibrary />
         <TubEditor />
       </div>
