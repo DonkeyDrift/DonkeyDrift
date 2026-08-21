@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (141)
+
+- fix(launcher): avahi AAAA 防护改用 0.8 正确键名 publish-aaaa-on-ipv4/use-ipv6（publish-aaaa-on-ipv6 不存在，误写会导致 avahi-daemon 拒绝启动、mDNS 全停）
+  - 背景：条目 138 的入口 host IPv6/AAAA 防护（PR #340）在配置里写了 `publish-aaaa-on-ipv6`——avahi 0.8 的 `avahi-daemon.conf(5)` 没有这个键，重启时 avahi-daemon 报 `Invalid configuration key` 直接退出，mDNS 全停，tony007.local 反而彻底不可解析（用户实测报错更严重）。avahi 0.8 控制 AAAA 的正确键：`publish-aaaa-on-ipv4`（IPv4 mDNS 应答是否带 AAAA，默认 yes）、`use-ipv6`（IPv6 传输开关，默认 yes；IPv6 应答恒带 AAAA 无独立开关），两者都 no 才完全无 AAAA。
+  - `donkeycar/launcher/kimi_web.py`：`_avahi_publishes_ipv6()` 改为解析 `publish-aaaa-on-ipv4` / `use-ipv6` / `publish-addresses` 三键（`publish-addresses=no` 视为安全；缺失/不可读/注释一律保守视为发布）。
+  - 本机配置：`/etc/avahi/avahi-daemon.conf` 删除无效键，`[server] use-ipv6=no` + `[publish] publish-aaaa-on-ipv4=no`；重启后 daemon active，实测 `tony007.local` 只解析出 A（192.168.3.62）、AAAA 全无；launcher 入口恢复 `http://tony007.local:58640/`（A-only，无 IPv6 黑洞，origin 稳定）。
+  - 测试同步：TestAvahiIpv6Entry 重写为双键语义（都关→False；只关其一→True；默认→True；注释忽略→True；`publish-addresses=no`→False；文件缺失→True）；kimi 测试文件 66 passed、launcher 回归 170 passed。
+  - 注：仅 launcher 后端改动，Firmware 无改动、无需 OTA；已 ff 部署 worktree 并重启 donkeydrifter-launcher 生效。
 ## 2026-08-21 (140)
 
 - fix(launcher): DeepSeek Harness 改用固定专属端口 58641 + 跨 launcher 重启复用，根治「置顶（手动排序）/当前会话/草稿丢失」
