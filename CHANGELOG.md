@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (145)
+
+- fix(layout): DD 左上角 logo 与 Drifter Console 图标同尺寸（box-sizing 改 content-box，总 34px）
+  - 背景：上一轮对齐了圆角与边框色，但 DD logo 仍比 DC 小一圈。根因：DC headerLogo 是 `width:32px` + `border:1px`（content-box，边框外凸，总 34px）；而 Tailwind preflight 把 `*` 默认设为 border-box，DD 的 `w-8 h-8`(32px) + 1px border 被算进 32px 内，图片只有 30px、整体 32px，比 DC 小 2px 且边框压在图内。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.header-logo` 规则内新增 `box-sizing: content-box;`（与 DC 一致，32px 内容 + 1px 边框外凸 = 34px）；圆角 8px、边框色随主题不变。
+  - `web_ui/frontend/src/components/Layout.tsx`：注释同步更新为「32px 内容 + 1px 边框外凸（content-box，总 34px）」。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 22 文件 126 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (144)
 
 - fix(tub-library): 下载改为浏览器原生 HTTP 下载，Safari 立即弹出下载通知+进度条
