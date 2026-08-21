@@ -139,7 +139,7 @@ export const TubLibrary: React.FC = () => {
   const [frame, setFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TubSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
@@ -494,18 +494,18 @@ export const TubLibrary: React.FC = () => {
     setFrame(idx);
   }, []);
 
-  const handleDownload = useCallback(async () => {
-    if (!selected || !tubPath) return;
-    setIsDownloading(true);
+  const handleDownload = useCallback(async (session: TubSession) => {
+    if (!tubPath) return;
+    setDownloadingId(session.session_id);
     setError(null);
     try {
-      await downloadTubSession(tubPath, selected.session_id, selected.start_time_ms);
+      await downloadTubSession(tubPath, session.session_id, session.start_time_ms);
     } catch (err) {
       setError(getApiErrorMessage(err, t('tubLibrary.downloadFailed')));
     } finally {
-      setIsDownloading(false);
+      setDownloadingId(null);
     }
-  }, [selected, tubPath, t]);
+  }, [tubPath, t]);
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete || !tubPath) return;
@@ -657,6 +657,30 @@ export const TubLibrary: React.FC = () => {
                         <span
                           role="button"
                           tabIndex={0}
+                          aria-label={t('tubLibrary.downloadAria')}
+                          title={t('tubLibrary.downloadAria')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDownload(session);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              void handleDownload(session);
+                            }
+                          }}
+                          className={`p-1.5 rounded-md shrink-0 cursor-pointer transition-colors ${
+                            downloadingId === session.session_id
+                              ? 'text-cyan-400'
+                              : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800/60'
+                          }`}
+                        >
+                          <Download className={`w-4 h-4 ${downloadingId === session.session_id ? 'animate-bounce' : ''}`} />
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
                           aria-label={t('tubLibrary.deleteAria')}
                           title={t('tubLibrary.deleteAria')}
                           onClick={(e) => {
@@ -791,18 +815,6 @@ export const TubLibrary: React.FC = () => {
                   onClick={requestTubRefresh}
                 >
                   <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label={t('tubLibrary.downloadAria')}
-                  title={t('tubLibrary.downloadAria')}
-                  disabled={!hasRecords || isDownloading}
-                  onClick={() => void handleDownload()}
-                >
-                  {isDownloading
-                    ? <><Download className="w-4 h-4 animate-bounce" /> <span className="ml-1 text-xs">{t('tubLibrary.downloading')}</span></>
-                    : <><Download className="w-4 h-4" /> <span className="ml-1 text-xs">{t('tubLibrary.download')}</span></>}
                 </Button>
                 <Button
                   size="sm"

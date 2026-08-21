@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-21 (129)
+
+- refactor(tub-library): 下载按钮移入会话行 pin/trash 区域，与 Pin/Delete 并列
+  - 背景：下载按钮此前在底部播放控制工具栏（Refresh 与 Delete 之间），与会话行内 Pin/Delete 按钮分离，操作入口不统一。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：
+    - `isDownloading` state 改为 `downloadingId: string | null`，按会话跟踪下载状态。
+    - `handleDownload` 从使用 `selected` 改为接受 `session: TubSession` 参数，每行独立下载。
+    - 会话行按钮组（`gap-1`）在 Pin 与 Trash2 之间插入 Download 按钮（span role="button"），逻辑顺序 Pin → Download → Delete（组织 → 导出 → 销毁），下载中图标弹跳动画。
+    - 底部工具栏移除原 Download Button。
+  - 测试同步：`TubLibrary.test.tsx` 下载测试改用 `findAllByRole` 断言每行一个下载按钮（2 个会话 = 2 个按钮）、点击首行按钮调用 `downloadTubSession` 传入正确参数；`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过，`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
+
 ## 2026-08-21 (128)
 
 - fix(launcher): KCW 入口 origin 改用 mDNS 主机名优先，置顶/收藏/自主模式不再随 DHCP 换 IP 丢失
