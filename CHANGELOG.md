@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (136)
+
+- feat(evaluate): `donkey evaluate` 不传 `--model` 时新增转向数据健康度告警，把「angle corr≈0」的根因固化进诊断输出
+  - 背景：用新录制的 12531 条数据验证根因——旧数据（中间幅度 mid_ratio 仅 3.2%、左转 7.9%/右转 91.5%、直行 85%）训练后 angle corr≈0；重新采集均衡数据（mid_ratio 16.4%、左 37.3%/右 61.8%、直行 30.4%）后，纯 linear 基线 angle corr 即达 **0.9895**、throttle corr 0.8779。证明 angle corr≈0 不是训练不足，而是转向标签分布病态。
+  - `donkeycar/management/base.py`：新增 `Evaluate._angle_health_warnings()`，对 `mid_ratio<5%`、`left_ratio<10%` 或 `right_ratio<10%`、`abs_lt_0.05_ratio>70%` 三类病态输出中文告警并给「重新采集平滑连续转向数据」建议；`run()` 不传 `--model` 分支打印告警，并在 `--out` JSON 里写 `warnings` 字段（健康时无该字段）。
+  - 测试同步：`donkeycar/tests/test_evaluate_command.py` 新增 `test_angle_health_warnings_healthy` / `test_angle_health_warnings_unhealthy`，并给无模型路径加「健康数据无 warnings」断言；`pytest -q` 6 passed。
+  - 注：仅 donkeycar CLI 统计字段改动，不影响本机 Web UI，无需部署/OTA。
+
 ## 2026-08-21 (135)
 
 - fix(console): DD 内嵌 Drifter Console 扫描期间不再误显示「未发现设备」，改为显示「正在扫描局域网…」

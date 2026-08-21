@@ -665,6 +665,43 @@ class Evaluate(BaseCommand):
             'mean_err': float(np.mean(err)),
         }
 
+    @staticmethod
+    def _angle_health_warnings(stats):
+        """根据 angle 标签分布给出数据健康度告警。
+
+        阈值基于实测结论：当中间幅度转向样本不足、或左右转向严重失衡、或
+        直行帧占比过高时，angle 回归会退化为"预测均值/预测多数类"，最终
+        angle corr 会接近 0（实测：mid_ratio=3.2% / left_ratio=7.9% 时
+        corr≈0；重新采集均衡数据 mid_ratio=16% / left_ratio=37% 后
+        corr≈0.99）。返回告警文案列表，健康时为空列表。
+        """
+        warnings = []
+
+        mid = stats.get('mid_ratio')
+        if mid is not None and mid < 0.05:
+            warnings.append(
+                '数据健康度差：中间幅度转向样本 mid_ratio 仅 %.1f%%（<5%%），'
+                '模型会退化为"预测均值"，angle corr 会接近 0。'
+                '建议重新采集平滑连续转向数据，覆盖 0.05~0.5 的中间幅度。'
+                % (mid * 100))
+
+        left = stats.get('left_ratio')
+        right = stats.get('right_ratio')
+        if left is not None and right is not None and \
+                (left < 0.1 or right < 0.1):
+            warnings.append(
+                '数据健康度差：左右转向样本严重失衡（left=%.1f%%, '
+                'right=%.1f%%），一侧占比低于 10%%。建议双向均衡采集。'
+                % (left * 100, right * 100))
+
+        straight = stats.get('abs_lt_0.05_ratio')
+        if straight is not None and straight > 0.7:
+            warnings.append(
+                '数据健康度差：直行帧占比 %.1f%%（>70%%），有效转向样本过少。'
+                '建议提高转向帧比例。' % (straight * 100))
+
+        return warnings
+
     def run(self, args):
         args = self.parse_args(args)
         args.tub = ','.join(args.tub)
@@ -731,9 +768,18 @@ class Evaluate(BaseCommand):
                 'mean': float(t.mean()), 'std': float(t.std()),
                 'min': float(t.min()), 'max': float(t.max()),
             }
+            warnings = self._angle_health_warnings(result['angle_stats'])
+            if warnings:
+                result['warnings'] = warnings
             print(f"records: {result['records']}")
             print(f"user/angle stats:   {result['angle_stats']}")
             print(f"user/throttle stats: {result['throttle_stats']}")
+            if warnings:
+                print("health warnings:")
+                for w in warnings:
+                    print(f"  - {w}")
+            else:
+                print("health warnings: none (数据分布健康)")
 
         if args.out:
             import json
