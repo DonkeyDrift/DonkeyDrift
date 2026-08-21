@@ -93,15 +93,16 @@ describe('TelemetryChart', () => {
     expect(screen.getByText('（等待数据）')).toBeInTheDocument();
   });
 
-  it('收到遥测后显示默认 5 条曲线', async () => {
+  it('收到遥测后默认显示全部曲线', async () => {
     useTelemetryStore.getState().push(sampleTelemetry());
     render(<TelemetryChart />);
 
     await waitForChart();
     const labels = latestChart().data.datasets.map((d) => d.label);
-    expect(labels).toEqual(expect.arrayContaining(['油门', '转向', '陀螺仪 Z', 'RC 转向', 'RC 油门']));
-    // 默认不显示 GyroX
-    expect(labels).not.toEqual(expect.arrayContaining(['陀螺仪 X']));
+    expect(labels).toEqual(
+      expect.arrayContaining(['油门', '转向', '陀螺仪 Z', 'RC 转向', 'RC 油门', '陀螺仪 X', '加速度 X', 'Pilot 角度', 'Pilot 油门']),
+    );
+    expect(labels).toHaveLength(12);
   });
 
   it('RC 手柄输入写入 RC 曲线', async () => {
@@ -125,15 +126,7 @@ describe('TelemetryChart', () => {
       expect(vals[0]).toBeCloseTo(0.1, 10);
     });
 
-    // 勾选默认隐藏的 AccX 复选框
-    const checkboxes = screen.getAllByRole('checkbox');
-    const accXCheckbox = checkboxes.find((cb) => {
-      const label = cb.parentElement?.querySelector('span');
-      return label?.textContent === '加速度 X';
-    }) as HTMLInputElement;
-    fireEvent.click(accXCheckbox);
-
-    // ax scale=1/9.8 -> 4.9/9.8≈0.5
+    // ax scale=1/9.8 -> 4.9/9.8≈0.5（默认已勾选）
     await waitFor(() => {
       const vals = dataset('加速度 X').filter((v): v is number => Number.isFinite(v));
       expect(vals.length).toBeGreaterThan(0);
@@ -141,16 +134,16 @@ describe('TelemetryChart', () => {
     });
   });
 
-  it('勾选隐藏的曲线后显示对应数据集', async () => {
+  it('取消勾选默认显示的曲线后隐藏对应数据集', async () => {
     useTelemetryStore.getState().push(sampleTelemetry({ gx: 0.5 }));
     render(<TelemetryChart />);
 
     await waitForChart();
 
-    // GyroX 默认不显示
-    expect(latestChart().data.datasets.map((d) => d.label)).not.toContain('陀螺仪 X');
+    // GyroX 默认已显示
+    expect(latestChart().data.datasets.map((d) => d.label)).toContain('陀螺仪 X');
 
-    // 勾选 GyroX 复选框
+    // 取消勾选 GyroX 复选框
     const checkboxes = screen.getAllByRole('checkbox');
     const gyroXCheckbox = checkboxes.find((cb) => {
       const label = cb.parentElement?.querySelector('span');
@@ -159,7 +152,7 @@ describe('TelemetryChart', () => {
     fireEvent.click(gyroXCheckbox);
 
     await waitFor(() => {
-      expect(latestChart().data.datasets.map((d) => d.label)).toContain('陀螺仪 X');
+      expect(latestChart().data.datasets.map((d) => d.label)).not.toContain('陀螺仪 X');
     });
   });
 
@@ -169,7 +162,7 @@ describe('TelemetryChart', () => {
     useTelemetryStore.getState().push(partial);
     render(<TelemetryChart />);
 
-    // 三条默认曲线（油门/转向/陀螺仪 Z 属不同分组，但组件默认管全部曲线）都应渲染
+    // 全部默认曲线（油门/转向/陀螺仪 Z 属不同分组，但组件默认管全部曲线）都应渲染
     await waitForChart();
     const labels = latestChart().data.datasets.map((d) => d.label);
     expect(labels).toEqual(expect.arrayContaining(['油门', '转向', '陀螺仪 Z']));
