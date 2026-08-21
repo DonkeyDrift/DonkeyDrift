@@ -1,5 +1,20 @@
 # 变更日志
 
+## 2026-08-21 (121)
+
+- fix(tub-library): 录制视频库播放帧率过低——播放循环绕过 React 状态直接画 canvas，节流 UI 更新
+  - 背景：TubLibrary 播放循环每帧调 `setFrame(next)`（60 次/秒），每次触发整个组件树 re-render + 3 个 useEffect（draw/prefetch/index sync），主线程开销 5-10ms/帧吃掉 16.7ms 帧预算，导致 rAF 回调延迟、大量掉帧，实际播放帧率远低于 60fps 目标。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：
+    - 新增 `UI_UPDATE_EVERY_N_FRAMES=6` 常量，播放时每 6 帧才 `setFrame()` 更新 React 状态（~10fps），帧计数器/进度条/统计/全局 index 联动均降频。
+    - 新增 `imageUrlsRef` + 预计算 effect：`records` 变化时一次性算好所有帧的图片 URL 存入 ref，播放循环每帧不再重复调 `findImagePath` + `getImageUrl`。
+    - 新增 `prefetchFromIndex` useCallback：把预取逻辑从独立 effect 移入播放循环内调用，去掉每帧 effect 开销。
+    - 播放循环重写：每帧从 `imageUrlsRef` 取 URL → 查 `imageCacheRef` → 直接 `ctx.drawImage()` 画到 canvas，不触发 React re-render；播放结束/暂停时才 `setFrame(frameRef.current)` 同步 React 状态到实际显示帧。
+    - draw effect 加 `isPlayingRef.current` 守卫，播放期间跳过该 effect（由播放循环直接画 canvas）。
+    - 删除独立 prefetch effect（已被 `prefetchFromIndex` 替代）。
+    - `isPlaying` effect 在 `!isPlaying` 时补 `setFrame(frameRef.current)`，让暂停/播放结束时进度条/统计对齐。
+  - 测试同步：`npx vitest run TubLibrary` 3 项通过；`npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动，无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (120)
 
 - fix(drive): 全屏/叠加态去掉白色边框与灰色蒙版，遥测曲线只保留纯线条与标题
