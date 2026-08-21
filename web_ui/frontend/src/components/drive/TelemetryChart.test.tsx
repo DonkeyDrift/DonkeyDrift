@@ -204,4 +204,25 @@ describe('TelemetryChart', () => {
     expect(legendLabels).not.toEqual(expect.arrayContaining(['油门', 'RC 油门', '加速度 X']));
   });
 
+  it('y 轴整体隐藏：去掉横向网格线与左侧刻度数字，但保留 [-1,1] 量程', async () => {
+    useTelemetryStore.getState().push(sampleTelemetry());
+    render(<TelemetryChart />);
+
+    await waitForChart();
+    const y = (latestChart().options.scales as Record<string, unknown>).y as Record<string, unknown>;
+    expect(y.display).toBe(false);
+    expect(y.min).toBe(-1);
+    expect(y.max).toBe(1);
+  });
+
+  it('面板标题渲染在曲线画布下方', async () => {
+    render(<TelemetryChart title="driveViz.chartTitleSteering" group="steering" />);
+
+    const title = screen.getByText('转向 / 姿态');
+    const canvas = document.querySelector('canvas');
+    expect(canvas).toBeTruthy();
+    // title 在 DOM 顺序上位于 canvas 之后（即渲染在画布下方）
+    expect(canvas!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
 });
