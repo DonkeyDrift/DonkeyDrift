@@ -192,8 +192,12 @@ export const deleteTubSession = async (tubPath: string, sessionId: string) => {
 export const downloadTubSession = (
   tubPath: string,
   sessionId: string,
+  startTimeMs: number | null,
 ) => {
   const params = new URLSearchParams({ tubPath, sessionId });
+  if (startTimeMs != null) {
+    params.set('startTimeMs', String(startTimeMs));
+  }
   const link = document.createElement('a');
   link.href = `${API_URL}/tub/download_session?${params.toString()}`;
   // Let the server set the filename via Content-Disposition
