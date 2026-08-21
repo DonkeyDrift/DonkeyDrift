@@ -9,7 +9,13 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   ``webserver.host=0.0.0.0`` 让局域网浏览器可达；patch 里 ``port`` 不能
   省略（配置校验要求有值），用 ``!!js ctx.webStartup.port ?? 3080``
   表达式跟随 ``--port`` 参数。
-- ``--port 0`` 由 OS 分配空闲端口，避免与默认 3080 冲突。
+- ``--port`` 绑固定专属端口 ``DSH_WEB_PORT``（58641；KCW 占 58640）：
+  浏览器把 DSH 的会话手动排序（``dsh.workspace.view.v5`` 的
+  sessionOrderByAccount，即用户感知的「置顶」）、当前会话
+  （``dsh.sessions.current``）、草稿（``dsh.conversation.chat``）等
+  偏好存 localStorage、按 origin（协议+host+端口）隔离；``--port 0``
+  随机端口会让每次冷启动 origin 漂移、偏好全丢（issue #168 同款问题，
+  KCW 已用固定端口根治，见 ``kimi_web.KIMI_WEB_PORT``）。
 - ``/api`` 有浏览器信任栅栏：Host 非回环必须在 ``--trusted-host`` 里
   声明才放行（裸 host 匹配任意端口）。入口 URL 的 host 会被改写为
   mDNS 主机名优先（``TONY007.local``，见 ``_lan_url``），所以
@@ -29,8 +35,12 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
 - 就绪 banner 一行：``dsh web: http://127.0.0.1:<port> (LAN: ...)``，
   抓第一个 URL（回环）后改写为局域网 IP（复用 kimi_web 的 _lan_url，
   issue #125 同款问题）。
-- 复用：dsh 没有类似 kimi 的实例登记文件，只复用本模块此前拉起且
-  仍存活（HTTP GET / 返回 200）的子进程。
+- 复用双通道（dsh 没有类似 kimi 的实例登记文件）：① ``_SPAWNED``
+  内存登记——本模块此前拉起且仍存活（HTTP GET / 返回 200）的子进程；
+  ② 固定端口特征探测 ``_probe_dsh_fixed_port``——launcher 重启后 ①
+  即丢，直接探 ``DSH_WEB_PORT``：GET / 返回 200 且响应体含 dsh 特征
+  标记 ``__DSH_BOOT__`` 才复用（仅 200 可能是占用该端口的外部服务）；
+  冷启动失败后再探一次 ② 兜底（端口可能被登记滞后的存活实例占用）。
 """
 
 import logging
@@ -63,6 +73,13 @@ SPAWN_TIMEOUT_S = 45.0
 _POLL_S = 0.2
 # 复用探测（GET /）的超时（秒）
 PROBE_TIMEOUT_S = 3.0
+# 冷启动绑定的固定专属端口（origin 稳定，对齐 kimi_web 的 KIMI_WEB_PORT
+# 做法）：浏览器 localStorage 按 origin（协议+host+端口）隔离，DSH 的
+# 会话手动排序（dsh.workspace.view.v5 的 sessionOrderByAccount，即用户
+# 感知的「置顶」）、当前会话（dsh.sessions.current）、草稿
+# （dsh.conversation.chat）都存里面；--port 0 随机端口会让每次冷启动
+# origin 漂移、偏好全丢。58640 是 KCW 专属端口，58641 给 dsh web 专属
+DSH_WEB_PORT = 58641
 
 # webserver 补丁层：host 置 0.0.0.0（局域网可达），port 表达式跟随
 # --port 参数（省略会让配置校验报 "port missing required value"）
@@ -117,8 +134,11 @@ _PATCH_UUID_NEW = (
 # 补丁锁：launcher 多线程，防并发重打
 _PATCH_LOCK = threading.Lock()
 
-# 本模块拉起的 dsh web 子进程登记：[{proc, host, port}]，保住引用不被
-# GC，生命周期同 launcher（杀掉子进程即关掉对应 web 服务）
+# 本模块拉起的 dsh web 子进程登记：[{proc, port}]，保住引用不被 GC，
+# 生命周期同 launcher（杀掉这些子进程即关掉对应 web 服务）。只是
+# launcher 进程内存、重启即丢——跨重启的复用靠 _probe_dsh_fixed_port
+# 固定端口特征探测；那样复用到的实例不是本进程拉起的，没有 proc 可
+# 登记（本 launcher 不掌握其生命周期）
 _SPAWNED = []
 
 
@@ -270,8 +290,40 @@ def _probe_root(host: str, port: int, timeout=PROBE_TIMEOUT_S) -> bool:
         return False
 
 
+def _probe_dsh_fixed_port():
+    """探测固定端口 ``DSH_WEB_PORT`` 上的存活 dsh web，命中返回入口 URL。
+
+    跨 launcher 重启的复用通道：launcher 重启后 ``_SPAWNED`` 内存登记
+    即丢，但此前拉起的 dsh web 可能还绑在固定端口上。仅 GET / 返回 200
+    不够——该端口也可能被外部服务占用，必须响应体含 dsh 特征标记
+    ``__DSH_BOOT__``（dsh web 根 HTML 里的 ``window.__DSH_BOOT__``）才
+    视为 dsh 复用；命中返回已改写为局域网入口（``_lan_url``）的 URL，
+    探测失败/非 200/无标记一律返回 None。
+    """
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{DSH_WEB_PORT}/",
+                timeout=PROBE_TIMEOUT_S) as resp:
+            if resp.status != 200:
+                return None
+            # 特征标记在根 HTML 头部，读前几十 KB 足够判定
+            body = resp.read(65536)
+    except (urllib.error.URLError, OSError):
+        return None
+    if b"__DSH_BOOT__" not in body:
+        return None
+    return _lan_url(f"http://127.0.0.1:{DSH_WEB_PORT}/")
+
+
 def _live_spawned_url():
-    """找本模块拉起且仍存活的 dsh web 实例，返回入口 URL；没有返回 None。"""
+    """找可复用的存活 dsh web 实例，返回入口 URL；没有返回 None。
+
+    先查 ``_SPAWNED`` 内存登记（本模块拉起且仍存活的子进程）；无存活
+    条目（如 launcher 已重启、登记丢失）再直接探测固定端口
+    （``_probe_dsh_fixed_port``），覆盖实例仍存活但登记已丢的场景。
+    """
     for entry in list(_SPAWNED):
         proc = entry["proc"]
         if proc.poll() is not None:
@@ -282,23 +334,23 @@ def _live_spawned_url():
             return _lan_url(f"http://127.0.0.1:{entry['port']}/")
         # 进程活着但端口探不通（僵死），清掉并走冷启动
         _SPAWNED.remove(entry)
-    return None
+    return _probe_dsh_fixed_port()
 
 
 def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
                        popen_fn=None):
-    """拉起 ``dsh web``（0.0.0.0 + 随机端口 + 可选 trusted-host）并等
-    ready banner 里的 URL。
+    """拉起 ``dsh web``（0.0.0.0 + 固定专属端口 ``DSH_WEB_PORT`` + 可选
+    trusted-host）并等 ready banner 里的 URL。
 
     ``trusted_hosts`` 是 /api 信任栅栏要放行的 authority 列表（裸 host
-    匹配任意端口，适配 ``--port 0`` 的随机端口），逐项追加到
-    ``--trusted-host``。返回 ``(proc, url, None)`` 或
-    ``(None, None, 错误原因)``；失败路径一律杀掉子进程，不留孤儿。
+    匹配任意端口），逐项追加到 ``--trusted-host``。返回
+    ``(proc, url, None)`` 或 ``(None, None, 错误原因)``；失败路径一律
+    杀掉子进程，不留孤儿。
     """
     popen_fn = popen_fn or subprocess.Popen
     cmd = [binary, "web",
            "--patch", _write_patch_file(),
-           "--port", "0"]
+           "--port", str(DSH_WEB_PORT)]
     for host in trusted_hosts:
         cmd += ["--trusted-host", host]
     try:
@@ -372,6 +424,11 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                    popen_fn=None):
     """打开 DeepSeek Harness web：优先复用存活实例，否则拉起 ``dsh web``。
 
+    复用分两路（见 ``_live_spawned_url``）：``_SPAWNED`` 内存登记 →
+    固定端口特征探测（launcher 重启后登记丢失的兜底）；冷启动绑固定
+    专属端口 ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能
+    被登记滞后的存活实例占用，对齐 ``kimi_web`` 的兜底语义）。
+
     Args:
         cwd: dsh 运行目录（绝对路径）；None 表示上位机用户主目录。
             目录不存在直接报错，绝不回退到其它目录。
@@ -384,8 +441,8 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         成功 {"status": "ok", "url": <入口 URL>}；
         失败 {"status": "error", "error": <原因>}。
         URL 的回环 host 已改写为局域网可达入口（mDNS 主机名优先，其次
-        局域网 IP）；成功拉起的子进程保持存活（杀它即关 web 服务）；
-        失败路径杀净。
+        局域网 IP）；成功拉起的子进程保持存活（杀它即关 web 服务；经
+        固定端口探测复用到的实例非本进程拉起，不在此列）；失败路径杀净。
     """
     resolve_binary_fn = resolve_binary_fn or _resolve_dsh_binary
     lan_ip_fn = lan_ip_fn or _lan_ip
@@ -401,7 +458,7 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             }
         cwd_str = str(cwd_path)
 
-    # 快路径：本模块拉起的实例仍在跑
+    # 快路径：复用存活实例（_SPAWNED 内存登记 → 固定端口特征探测）
     url = _live_spawned_url()
     if url:
         logger.info("复用已运行的 dsh web 实例: %s", url)
@@ -438,6 +495,12 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         logger.info("dsh web 已启动: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
+    # 冷启动失败兜底：固定端口可能被登记滞后的存活实例占用（如另一
+    # launcher 此前拉起、本进程 _SPAWNED 没有登记的实例），再探一次复用
+    url = _probe_dsh_fixed_port()
+    if url:
+        logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例: %s", url)
+        return {"status": "ok", "url": url}
     logger.warning("启动 dsh web 失败: %s", error)
     return {"status": "error", "error": error}
 
