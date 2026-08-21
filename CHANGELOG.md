@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-21 (118)
+
+- fix(drive): 遥测曲线改用原生 Chart.js 直改 dataset + `update('none')`，消除切换标签页卡顿与点击无响应（Issue #135）
+  - 背景：Drive 页两张实时遥测曲线用 react-chartjs-2 的 `<Line>`，每次数据变化都会重设 `chart.options`，触发 chart.js 的 `_configure` + Proxy 全量重解析（CPU profile 里 `ownKeys`/`configure`/`qs` 等占满主线程，100Hz 遥测下主线程占用约 87%、longtask 约 3 次/秒每次约 300ms），导致点 Donkey / Drift Console 要等数分钟甚至无响应，只有开新窗口才有反应。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：弃用 react-chartjs-2 `<Line>`，改为 `<canvas>` + 原生 `Chart` 实例；重绘时直接改写 dataset 数据数组（`parsing:false`/`normalized:true`）并调用 `chart.update('none')`，跳过动画/布局/配置解析，每次重绘降至亚毫秒级；环形缓冲 256→128，重绘节流 ~5fps 保持不变；新增 `syncDisplay` 让勾选隐藏曲线后立刻带上已有历史。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：遥测继续走旁路 feed（100Hz 不落 state）；overlay 曲线默认显隐由「全部分组曲线」改为「仅 `defaultOn` 曲线」，把默认绘制曲线从 12 条降到 5 条。
+  - `web_ui/frontend/src/store/useTelemetryStore.ts`（新增）：zustand 旁路遥测 store（`latest`/`push`/`reset`），遥测帧不触发 React 重渲染。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：`car_connection`/`car_state` 值不变时 `return prev`，避免控制循环 60Hz 回广播造成 60Hz 重渲染。
+  - `web_ui/frontend/src/hooks/useDriveWebRtcVideo.ts`：`setMetrics` 逐帧改 500ms 节流。
+  - 测试同步：`TelemetryChart.test.tsx` 改为断言原生 chart 实例的 dataset 数据（mock `Chart` 构造器 + `canvas.getContext`）；`npm run check`（tsc）通过；`npx vitest run` 21 文件 114 项通过；`npm run build` 通过，入口 `index-CExCDR9k.js`、DrivePage chunk `DrivePage-CCOrU13W.js`。
+  - 验证：Playwright + CDP CPU 4x 节流 + 假车 100Hz 遥测实测——longtask 由 24~25 次 / 约 7000ms 降到 0~2 次 / 约 0~119ms；点 Donkey 到内嵌 iframe 出现由 >10s 超时降到约 0.4~0.9s。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后需重建 dist 并部署到本机 8000。
+
 ## 2026-08-21 (117)
 
 - fix(layout): DD 左上角 logo 边框改为随主题，对齐 Drifter Console headerLogo（浅色灰边）

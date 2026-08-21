@@ -147,6 +147,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const frameTimestampsRef = useRef<number[]>([]);
   const frameCallbackRef = useRef<number | null>(null);
   const lastBrowserStatsSentAtRef = useRef(0);
+  const lastMetricsAtRef = useRef(0);
   const trackReceivedRef = useRef(false);
   const negotiationTimerRef = useRef<number | null>(null);
   const retryTimerRef = useRef<number | null>(null);
@@ -216,7 +217,12 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
       frameTimestampsRef.current = [...frameTimestampsRef.current.slice(-119), metadata.presentationTime];
       const nextMetrics = calculateVideoMetrics(frameTimestampsRef.current);
-      setMetrics(nextMetrics);
+      // FPS/延迟徽标无需逐帧刷新：500ms 节流一次，避免 60fps 重渲染 VideoStream（#135）
+      const now = performance.now();
+      if (now - lastMetricsAtRef.current >= 500) {
+        lastMetricsAtRef.current = now;
+        setMetrics(nextMetrics);
+      }
       const sessionId = sessionIdRef.current;
       if (sessionId && nextMetrics.browserFps > 0 && metadata.presentationTime - lastBrowserStatsSentAtRef.current >= 1000) {
         lastBrowserStatsSentAtRef.current = metadata.presentationTime;
