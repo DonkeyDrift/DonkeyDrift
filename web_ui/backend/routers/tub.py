@@ -6,6 +6,7 @@ import os
 import io
 import json
 import tarfile
+import threading
 from collections import OrderedDict
 from donkeycar.parts.tub_v2 import Tub
 from donkeycar.pipeline.types import TubRecord
@@ -271,7 +272,9 @@ async def download_session(tubPath: str, sessionId: str):
     """Download a recording session's frames as a tar.gz archive.
 
     Collects all JPEG images belonging to the session, packs them into a
-    tar.gz in memory, and streams the archive to the browser.
+    tar.gz, and streams the archive to the browser via a pipe so that the
+    browser receives data immediately rather than waiting for the entire
+    archive to be built in memory.
     """
     path = os.path.expanduser(tubPath)
     if not os.path.exists(path):
@@ -313,32 +316,53 @@ async def download_session(tubPath: str, sessionId: str):
         else:
             filename = f"recording_{sessionId}.tar.gz"
 
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-            for record in session_records:
-                if image_key is None:
-                    continue
-                img_name = record.get(image_key)
-                if not isinstance(img_name, str):
-                    continue
-                clean = img_name.replace('images/', '').replace('images\\', '')
-                img_path = os.path.join(images_dir, clean)
-                if not os.path.exists(img_path):
-                    img_path_alt = os.path.join(path, clean)
-                    if os.path.exists(img_path_alt):
-                        img_path = img_path_alt
-                    else:
-                        continue
-                with open(img_path, 'rb') as f:
-                    data = f.read()
-                info = tarfile.TarInfo(name=clean)
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
+        # Stream the tar.gz via a pipe so the browser receives data
+        # immediately (Safari shows its download prompt right away)
+        # rather than waiting for the entire archive to finish.
+        read_fd, write_fd = os.pipe()
 
-        buf.seek(0)
+        def _build_tar():
+            try:
+                with os.fdopen(write_fd, 'wb') as f:
+                    with tarfile.open(fileobj=f, mode='w:gz') as tar:
+                        for record in session_records:
+                            if image_key is None:
+                                continue
+                            img_name = record.get(image_key)
+                            if not isinstance(img_name, str):
+                                continue
+                            clean = img_name.replace('images/', '').replace('images\\', '')
+                            img_path = os.path.join(images_dir, clean)
+                            if not os.path.exists(img_path):
+                                img_path_alt = os.path.join(path, clean)
+                                if os.path.exists(img_path_alt):
+                                    img_path = img_path_alt
+                                else:
+                                    continue
+                            with open(img_path, 'rb') as f_img:
+                                data = f_img.read()
+                            info = tarfile.TarInfo(name=clean)
+                            info.size = len(data)
+                            tar.addfile(info, io.BytesIO(data))
+            except Exception as e:
+                logger.error(f"Failed to build tar for session {sessionId} of tub {path}: {e}")
+
+        thread = threading.Thread(target=_build_tar, daemon=True)
+        thread.start()
+
+        def _stream():
+            try:
+                with os.fdopen(read_fd, 'rb') as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                thread.join()
 
         return StreamingResponse(
-            buf,
+            _stream(),
             media_type='application/gzip',
             headers={'Content-Disposition': f'attachment; filename="{filename}"'},
         )
