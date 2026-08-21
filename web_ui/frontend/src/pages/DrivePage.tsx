@@ -112,6 +112,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     });
   }, []);
 
+  // 全选/全不选：把整组曲线一次性设为显示或隐藏
+  const setSteeringAll = useCallback((select: boolean) => {
+    setSteeringVisibleKeys(select ? new Set(curvesByGroup('steering').map((c) => c.key as string)) : new Set());
+  }, []);
+
+  const setThrottleAll = useCallback((select: boolean) => {
+    setThrottleVisibleKeys(select ? new Set(curvesByGroup('throttle').map((c) => c.key as string)) : new Set());
+  }, []);
+
   const toggleFullscreen = useCallback(() => {
     const el = videoContainerRef.current;
     if (!el) return;
@@ -402,23 +411,21 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                 chartHeightClassName={fullscreen ? 'h-44' : undefined}
               />
             </div>
+            {/* 全屏/放大：整个视频画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
             <button
               type="button"
               onClick={toggleFullscreen}
               title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
               aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              className={cn(
-                'absolute right-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors',
-                fullscreen ? 'bottom-60' : 'bottom-44',
-              )}
+              className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
             >
               {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
           </div>
-          {/* 曲线显隐图例：分左右两组放在视频画面外部（下方），不再遮挡画面 */}
+          {/* 曲线显隐图例：分左右两组放在视频画面外部（下方），不再遮挡画面；每组左侧带「全选」 */}
           <div className="mt-3 shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <TelemetryLegend group="steering" visibleKeys={steeringVisibleKeys} onToggle={toggleSteeringCurve} />
-            <TelemetryLegend group="throttle" visibleKeys={throttleVisibleKeys} onToggle={toggleThrottleCurve} />
+            <TelemetryLegend group="steering" visibleKeys={steeringVisibleKeys} onToggle={toggleSteeringCurve} onToggleAll={setSteeringAll} />
+            <TelemetryLegend group="throttle" visibleKeys={throttleVisibleKeys} onToggle={toggleThrottleCurve} onToggleAll={setThrottleAll} />
           </div>
         </div>
 
