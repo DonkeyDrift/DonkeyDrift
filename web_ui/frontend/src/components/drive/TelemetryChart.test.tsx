@@ -197,9 +197,10 @@ describe('TelemetryChart', () => {
     const legendLabels = screen
       .getAllByRole('checkbox')
       .map((cb) => cb.parentElement?.querySelector('span')?.textContent);
-    expect(legendLabels).toHaveLength(6);
+    // 非受控非 overlay 模式下图例左侧会多出一个「全选」勾选框
+    expect(legendLabels).toHaveLength(7);
     expect(legendLabels).toEqual(
-      expect.arrayContaining(['转向', '陀螺仪 Z', 'RC 转向', '陀螺仪 X', '陀螺仪 Y', 'Pilot 角度']),
+      expect.arrayContaining(['全选', '转向', '陀螺仪 Z', 'RC 转向', '陀螺仪 X', '陀螺仪 Y', 'Pilot 角度']),
     );
     expect(legendLabels).not.toEqual(expect.arrayContaining(['油门', 'RC 油门', '加速度 X']));
   });
@@ -223,6 +224,42 @@ describe('TelemetryChart', () => {
     expect(canvas).toBeTruthy();
     // title 在 DOM 顺序上位于 canvas 之后（即渲染在画布下方）
     expect(canvas!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('「全选」框：半选时点击→全选，已全选时点击→全不选', async () => {
+    useTelemetryStore.getState().push(sampleTelemetry());
+    render(<TelemetryChart group="steering" />);
+
+    await waitForChart();
+    // steering 组 6 条曲线全部 defaultOn=true，初始全选
+    expect(latestChart().data.datasets).toHaveLength(6);
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    const selectAll = checkboxes.find((cb) => cb.parentElement?.querySelector('span')?.textContent === '全选') as HTMLInputElement;
+    expect(selectAll.checked).toBe(true);
+
+    // 取消一条曲线 → 半选：全选框 indeterminate、unchecked，曲线数 5
+    const gyroX = checkboxes.find((cb) => cb.parentElement?.querySelector('span')?.textContent === '陀螺仪 X') as HTMLInputElement;
+    fireEvent.click(gyroX);
+    await waitFor(() => {
+      expect(selectAll.indeterminate).toBe(true);
+    });
+    expect(selectAll.checked).toBe(false);
+    expect(latestChart().data.datasets).toHaveLength(5);
+
+    // 半选时点击全选 → 全选（6 条），全选框 checked
+    fireEvent.click(selectAll);
+    await waitFor(() => {
+      expect(latestChart().data.datasets).toHaveLength(6);
+      expect(selectAll.checked).toBe(true);
+    });
+
+    // 已全选时点击全选 → 全不选（0 条）
+    fireEvent.click(selectAll);
+    await waitFor(() => {
+      expect(latestChart().data.datasets).toHaveLength(0);
+      expect(selectAll.checked).toBe(false);
+    });
   });
 
 });

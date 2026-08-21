@@ -89,6 +89,8 @@ interface TelemetryLegendProps {
   visibleKeys: Set<string>;
   /** 切换某条曲线显隐。 */
   onToggle: (key: string) => void;
+  /** 全选/全不选本组曲线（select=true 全选、false 全不选）；不传则不渲染「全选」项。 */
+  onToggleAll?: (select: boolean) => void;
   /** 只渲染指定分组的曲线；不传则渲染全部曲线。 */
   group?: CurveGroup;
   className?: string;
@@ -98,14 +100,35 @@ interface TelemetryLegendProps {
 export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
   visibleKeys,
   onToggle,
+  onToggleAll,
   group,
   className = '',
 }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const curves = group ? curvesByGroup(group) : CURVES;
+  const selectedCount = curves.reduce((n, c) => (visibleKeys.has(c.key as string) ? n + 1 : n), 0);
+  const allSelected = curves.length > 0 && selectedCount === curves.length;
+  // 半选（部分勾选）时全选框显示 indeterminate 横杠
+  const someSelected = selectedCount > 0 && !allSelected;
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
+  }, [someSelected]);
   return (
     <div className={cn('flex flex-wrap gap-x-3 gap-y-1', className)}>
+      {onToggleAll && (
+        <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-slate-300 hover:text-slate-100">
+          <input
+            ref={selectAllRef}
+            type="checkbox"
+            checked={allSelected}
+            onChange={() => onToggleAll(!allSelected)}
+            className="accent-slate-400"
+          />
+          <span>{t('driveViz.selectAll')}</span>
+        </label>
+      )}
       {curves.map((c) => {
         const on = visibleKeys.has(c.key as string);
         const color = curveColor(c, theme);
@@ -345,6 +368,11 @@ export const TelemetryChart = React.memo(function TelemetryChart({
     });
   }, [onToggleCurve]);
 
+  // 全选/全不选本组曲线（仅非受控时内部自管；受控时父组件自行渲染全选，这里不重复提供）
+  const toggleAll = useCallback((select: boolean) => {
+    setInternalVisibleKeys(select ? new Set(curves.map((c) => c.key as string)) : new Set());
+  }, [curves]);
+
   return (
     <div
       className={cn(
@@ -365,7 +393,13 @@ export const TelemetryChart = React.memo(function TelemetryChart({
         </div>
       </div>
       {!overlay && (
-        <TelemetryLegend group={group} visibleKeys={visibleKeys} onToggle={toggleCurve} className="mt-2" />
+        <TelemetryLegend
+          group={group}
+          visibleKeys={visibleKeys}
+          onToggle={toggleCurve}
+          onToggleAll={controlledVisibleKeys ? undefined : toggleAll}
+          className="mt-2"
+        />
       )}
     </div>
   );

@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-21 (142)
+
+- feat(drive): 遥测曲线图例左侧加「全选」、全屏放大键挪到视频画面右下角
+  - 背景：两个需求——① 两张遥测曲线底部勾选区各加一个「全选」：半选（部分勾选）时点击→全选，已全选时点击→全不选；② 全屏/放大键从原来避让遥测框的上方位置挪到整个视频画面的右下角。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：`TelemetryLegend` 新增可选 `onToggleAll(select:boolean)`；左侧渲染「全选」勾选框——已全选时 `checked`、半选时用 ref 设 `indeterminate` 横杠、点击调 `onToggleAll(!allSelected)`（全选→全不选、半选/全不选→全选）。`TelemetryChart` 内部（非受控时）提供 `toggleAll` 给自身图例；受控时不渲染（由父组件处理）。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `setSteeringAll`/`setThrottleAll`（一次性把整组 key 设为显示或隐藏）传给两个 `TelemetryLegend`；全屏按钮位置由 `fullscreen ? 'bottom-60' : 'bottom-44'` 改为固定 `bottom-3`（与遥测浮层同 `right-3/bottom-3` inset，叠在曲线之上 z-30），即整个视频画面右下角。
+  - i18n：`driveviz.ts` 新增 `driveViz.selectAll`（zh「全选」/en「Select All」）。
+  - 测试同步：`TelemetryChart.test.tsx` group 模式勾选框计数 6→7（含「全选」）；新增回归「半选时点击→全选、已全选时点击→全不选」（覆盖 indeterminate）。`npx vitest run TelemetryChart` 11 项、`npx vitest run` 22 文件 126 项、`tsc -b --noEmit`、`npm run build` 全部通过。
+  - 验证：临时预览端口实测——全屏按钮位于右下角（距视频右边/下边各 12px，与遥测浮层对齐）；两组图例各 1 个「全选」（共 2 个 + 12 条曲线勾选框 = 14 个）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (141)
 
 - fix(launcher): avahi AAAA 防护改用 0.8 正确键名 publish-aaaa-on-ipv4/use-ipv6（publish-aaaa-on-ipv6 不存在，误写会导致 avahi-daemon 拒绝启动、mDNS 全停）
