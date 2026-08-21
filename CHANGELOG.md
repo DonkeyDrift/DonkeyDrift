@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (109)
+
+- fix(launcher): DD 内嵌 Donkey 的「当前工作目录」只去框、保留文字（上一轮误删整块）
+  - 背景：上一轮把 `.cwdBar` 与 `.panel` 一起去框时，误将 `.cwdBar` 放进 `display:none` 隐藏列表，导致「当前工作目录」文字与路径在内嵌视图里整块消失；用户要求只删框、不删文字。
+  - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .cwdBar, .sectionTitle` 改为 `.logoLink, .ghLink, .sectionTitle`（`.cwdBar` 不再隐藏）；去框循环由单个 `.panel` 改为 `['panel', 'cwdBar']`，对两者只做 `background/border/padding` 清零，保留 `display:flex` 与文字内容（label「当前工作目录」+ 路径）。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新——隐藏选择器不含 `.cwdBar`、去框选择器为 `['panel', 'cwdBar']`，并新增 `cwd-path` / `cwd.label` 仍在的断言；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-21 (108)
 
 - fix(drive): 整屏放大键再上移，避开下方油门/加速度曲线框
