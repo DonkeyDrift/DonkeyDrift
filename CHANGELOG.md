@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (116)
+
+- fix(drive): 摄像头画面去掉整框（边框+圆角矩形），改为四角圆弧取景框，避免无画面时四角出现黑角
+  - 背景：视频流容器此前是 `bg-zinc-950 border border-zinc-800 rounded-lg` 的整块圆角矩形；摄像头未连接时，圆角矩形边框与圆角裁切在四角留下黑角，观感突兀。用户要求只显示四角圆弧、不显示整框。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：根容器 className 去掉 `border border-zinc-800 rounded-lg`（保留 `bg-zinc-950 overflow-hidden`）；新增 4 个 `absolute` 角标 `<span>`（`top/left`、`top/right`、`bottom/left`、`bottom/right`，`h-6 w-6`、`border-2 border-zinc-700`、`rounded-*-lg`、`z-40 pointer-events-none`），只画圆角弧线、不画整框。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (115)
 
 - fix(launcher): DD 内嵌 Donkey 删除「Donkey」标题，版本号移到「当前工作目录」右侧
