@@ -46,10 +46,10 @@ issue #168（打开后是"全新状态"）的三处约束：
   浏览器解析入口 host 时若选中 IPv6（部分浏览器优先 IPv6，或残留旧
   临时地址缓存），TCP 连不上也不会立刻失败——黑洞等 30s 后 KCW 前端
   abort，报"无法连接到 Kimi 服务器"（fetch AbortError）。因此入口
-  host 只有在 avahi 不发布 AAAA（publish-aaaa-on-ipv6=no，浏览器只
-  拿到 A 记录）时才用 mDNS 主机名；否则回退局域网 IPv4 IP，保证入口
-  一定可达。可达性优先于 origin 稳定性，但配上 avahi 的 AAAA 关闭
-  后两者兼得。
+  host 只有在 avahi 不发布 AAAA（``publish-aaaa-on-ipv4=no`` 且
+  ``use-ipv6=no``，浏览器只拿到 A 记录）时才用 mDNS 主机名；否则回退
+  局域网 IPv4 IP，保证入口一定可达。可达性优先于 origin 稳定性，但
+  配上 avahi 的 AAAA 关闭后两者兼得。
 - 入口 URL 注入 ``?kimi_origin=<origin>``：KCW 0.36.1 前端把 API 基地址
   判定为 URL 的 ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]``
   → ``window.location.origin``；launcher 显式写 ``kimi_origin`` 后，即使
@@ -249,14 +249,22 @@ def _mdns_hostname():
 
 
 def _avahi_publishes_ipv6(conf_path=None):
-    """avahi 是否在给本机 mDNS 名发布 AAAA（IPv6 地址）记录。
+    """avahi 是否可能让浏览器拿到本机 mDNS 名的 AAAA（IPv6 地址）记录。
 
-    kimi web 只监听 IPv4（``--host 0.0.0.0``）。avahi 发布 AAAA 时，
-    浏览器解析入口 host 可能选中 IPv6——连到本机 IPv6 地址但 58640
-    没有 IPv6 监听，或缓存了已轮换掉的临时地址，连接黑洞直到 KCW
-    前端 30s 超时报"无法连接到 Kimi 服务器"。入口 host 选择必须知道
-    avahi 的发布策略：读 ``publish-aaaa-on-ipv6``（默认 yes；显式
-    ``no`` 才不发布）。配置文件缺失/不可读/未显式关闭一律视为"发布"
+    kimi web 只监听 IPv4（``--host 0.0.0.0``）。浏览器解析入口 host 若
+    拿到 AAAA 并选中 IPv6——连到本机 IPv6 地址但 58640 没有 IPv6 监听，
+    或 IPv6 路径黑洞——连接拖到 KCW 前端 30s 超时报“无法连接到 Kimi
+    服务器”。入口 host 选择必须知道 avahi 的发布策略，读三个键
+    （avahi 0.8 的 avahi-daemon.conf(5)）：
+
+    - ``publish-aaaa-on-ipv4``（默认 yes）：IPv4 mDNS 应答是否带 AAAA；
+    - ``use-ipv6``（默认 yes）：是否启用 IPv6 传输（IPv6 应答恒带 AAAA，
+      无独立开关）；
+    - ``publish-addresses``（默认 yes）：是否发布地址记录。
+
+    只有 ``publish-aaaa-on-ipv4=no`` 且 ``use-ipv6=no`` 才完全无 AAAA；
+    ``publish-addresses=no`` 连 A 都不发（mDNS 名解析不出地址、入口必然
+    回退 IP，也算安全）。配置文件缺失/不可读/未显式关闭一律视为“发布”
     （保守，回退 IPv4 局域网 IP，保证入口可达）。
     """
     conf_path = conf_path or _AVAHI_CONF
@@ -264,6 +272,9 @@ def _avahi_publishes_ipv6(conf_path=None):
         text = Path(conf_path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return True
+    publish_aaaa_on_ipv4 = True
+    use_ipv6 = True
+    publish_addresses = True
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith(("#", ";")):
@@ -271,9 +282,17 @@ def _avahi_publishes_ipv6(conf_path=None):
         if "=" not in line:
             continue
         key, _, val = line.partition("=")
-        if key.strip().lower() == "publish-aaaa-on-ipv6":
-            return val.strip().lower() not in ("no", "false", "0")
-    return True
+        k = key.strip().lower()
+        v = val.strip().lower() not in ("no", "false", "0")
+        if k == "publish-aaaa-on-ipv4":
+            publish_aaaa_on_ipv4 = v
+        elif k == "use-ipv6":
+            use_ipv6 = v
+        elif k == "publish-addresses":
+            publish_addresses = v
+    if not publish_addresses:
+        return False
+    return publish_aaaa_on_ipv4 or use_ipv6
 
 
 def _entry_host():
@@ -290,8 +309,9 @@ def _entry_host():
     只监听 IPv4，浏览器选中 IPv6（优先 IPv6 的浏览器或残留旧临时地址
     缓存）会连接黑洞、30s 后 KCW 前端报"无法连接到 Kimi 服务器"
     （fetch AbortError）。avahi 发布 AAAA（默认）时回退局域网 IPv4 IP，
-    可达性优先于 origin 稳定性；配置 ``publish-aaaa-on-ipv6=no`` 后
-    mDNS 名重新成为首选（两者都会写进 ``--allowed-host``，均能过 40301）。
+    可达性优先于 origin 稳定性；配置 ``publish-aaaa-on-ipv4=no`` 且
+    ``use-ipv6=no``（avahi 0.8 正确键名，``publish-aaaa-on-ipv6`` 不存在）
+    后 mDNS 名重新成为首选（两者都会写进 ``--allowed-host``，均能过 40301）。
     """
     fqdn = _mdns_hostname()
     if fqdn and not _avahi_publishes_ipv6():
