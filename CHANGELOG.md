@@ -2,6 +2,14 @@
 
 
 
+## 2026-08-21 (147)
+
+- fix(drive): 遥测图例「全选」框在全选状态下变蓝
+  - 背景：上一轮 (142) 加的「全选」勾选框固定用 `accent-slate-400`（灰色），全选时没有「已全选」的视觉反馈；用户希望全选状态下勾选框被勾上且变蓝。
+  - `web_ui/frontend/src/components/drive/TelemetryChart.tsx`：「全选」`input` 的 `className` 从固定 `accent-slate-400` 改为 `allSelected ? 'accent-blue-500' : 'accent-slate-400'`——全选时蓝色勾、半选/未选时灰色（半选仍显示 indeterminate 横杠）。
+  - 验证：`npx vitest run src/components/drive/TelemetryChart.test.tsx` 11 项通过、`npm run build` 通过；临时预览端口实测两个「全选」框在全选态 `checked:true`、`accent-color: rgb(59,130,246)`（blue-500）。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (146)
 
 - fix(frontend): 移除 DD 标签栏「C Code」入口按钮及其全部配套代码（后端路由 / launcher 端点 / 前端组件 / i18n / 测试），恢复为 Kimi Code Web + DeepSeek Harness 两个弱化入口
