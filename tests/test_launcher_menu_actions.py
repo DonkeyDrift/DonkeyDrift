@@ -442,17 +442,20 @@ class TestFrontendWiring:
 
     def test_embedded_hides_topbar_chrome(self):
         # 用户指示：DD 内嵌（?embedded=1）时隐藏与顶栏/标题重复的 chrome——
-        # Donkey 图标、GitHub 图标、深浅色切换、中英文切换、「Donkey」标题、
-        # 「菜单」标题；菜单外层 panel 与「当前工作目录」bar 只去框（背景/边框/
-        # 内边距清零），文字内容（menu-grid / cwd label+路径）保留；版本号移到
-        # 「当前工作目录」右侧。单独打开 Donkey（:8090）时这些元素仍完整保留。
+        # Donkey 图标、GitHub 图标、深浅色切换、中英文切换、「Donkey」标题
+        # （连同整个 headerRow，去掉其下边距）、「菜单」标题；菜单外层 panel 与
+        # 「当前工作目录」bar 只去框（背景/边框/内边距清零），文字内容（menu-grid
+        # / cwd label+路径）保留；再去掉 body 上边距；版本号移到「当前工作目录」
+        # 右侧。单独打开 Donkey（:8090）时这些元素仍完整保留。
         assert "if (isEmbedded) {" in MENU_HTML
-        assert ".logoLink, .ghLink, .headerRow h1, .sectionTitle" in MENU_HTML
+        assert ".logoLink, .ghLink, .headerRow, .sectionTitle" in MENU_HTML
         assert "'themeBtn', 'langBtn'" in MENU_HTML
         assert "['panel', 'cwdBar']" in MENU_HTML
         assert "box.style.background = 'none';" in MENU_HTML
         assert "box.style.border = 'none';" in MENU_HTML
         assert "box.style.padding = '0';" in MENU_HTML
+        # 去掉 body 上边距，让「当前工作目录」贴近 DD 标题栏
+        assert "document.body.style.marginTop = '0';" in MENU_HTML
         # 版本号移到当前工作目录右侧
         assert "var badge = document.querySelector('.versionBadge');" in MENU_HTML
         assert "cwdBar.appendChild(badge);" in MENU_HTML
