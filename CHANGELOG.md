@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (115)
+
+- fix(launcher): DD 内嵌 Donkey 删除「Donkey」标题，版本号移到「当前工作目录」右侧
+  - 背景：内嵌视图精简到只剩菜单后，页头还残留「Donkey」标题与版本号；用户要求删掉标题、把版本号挪到当前工作目录那一行右侧。
+  - `donkeycar/launcher/server.py`：`isEmbedded` 清理逻辑中，隐藏选择器由 `.logoLink, .ghLink, .sectionTitle` 扩展为 `.logoLink, .ghLink, .headerRow h1, .sectionTitle`（删掉「Donkey」标题）；新增 `var badge = document.querySelector('.versionBadge')` 并 `cwdBar.appendChild(badge)`，把版本号移到 `.cwdBar` 末尾（label/路径右侧）；单独打开 Donkey（:8090）时标题与版本号位置均保持不变。
+  - 测试同步：`tests/test_launcher_menu_actions.py` 的 `test_embedded_hides_topbar_chrome` 断言同步更新（隐藏选择器含 `.headerRow h1`、版本号移动 `cwdBar.appendChild`、`titleLink`/`versionBadge` 仍在 HTML）；`python -m pytest tests/test_launcher*.py -q` → 143 passed。
+  - 注：仅 launcher 改动，Firmware 无改动、无需 OTA；前端无改动、无需重建 dist。
+
 ## 2026-08-21 (114)
 
 - fix(connector): Car Connector「车辆设置」改为只嵌车端 DC 的设置视图（`?embedded=1&settings=1`），不再把整个 DC 主页（Mode/Park/Drift/电池等显示卡）塞进来
