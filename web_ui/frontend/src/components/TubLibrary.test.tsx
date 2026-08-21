@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TubLibrary } from './TubLibrary';
 import { useStore } from '../store/useStore';
-import { getSessionRecords, listTubSessions } from '../services/api';
+import { getSessionRecords, listTubSessions, downloadTubSession } from '../services/api';
 
 // 回归测试：进入录制视频库后自动选中最新一条录制（sessions[0]，API 已按
 // 最新在前排序），无需手动点击列表。
@@ -16,6 +16,7 @@ vi.mock('../services/api', () => ({
   listTubSessions: vi.fn(),
   getSessionRecords: vi.fn(),
   deleteTubSession: vi.fn(),
+  downloadTubSession: vi.fn(),
   loadTub: vi.fn(),
 }));
 
@@ -153,5 +154,47 @@ describe('TubLibrary pin to top', () => {
     order = await listOrder();
     expect(order).toEqual([newestLabel, oldestLabel]);
     expect(localStorage.getItem('tubLibrary.pinned./tmp/tub')).toBe(JSON.stringify([]));
+  });
+});
+
+describe('TubLibrary download button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: [
+        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+      ],
+    });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+    });
+  });
+
+  it('renders an enabled download button when a session with records is selected', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    const downloadButton = await screen.findByRole('button', { name: /下载/ });
+    expect(downloadButton).not.toBeDisabled();
+  });
+
+  it('calls downloadTubSession when the download button is clicked', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    const downloadButton = await screen.findByRole('button', { name: /下载/ });
+    fireEvent.click(downloadButton);
+
+    await waitFor(() => {
+      expect(downloadTubSession).toHaveBeenCalledWith(
+        '/tmp/tub',
+        '26-08-16_1',
+        sessions[0].start_time_ms,
+      );
+    });
   });
 });

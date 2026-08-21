@@ -6,6 +6,7 @@ import { Button } from './ui/Button';
 import { useStore, type TubRecord as StoreTubRecord } from '../store/useStore';
 import {
   deleteTubSession,
+  downloadTubSession,
   getApiErrorMessage,
   getImageUrl,
   getSessionRecords,
@@ -22,6 +23,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Clapperboard,
+  Download,
   Pause,
   Pin,
   Play,
@@ -137,6 +139,7 @@ export const TubLibrary: React.FC = () => {
   const [frame, setFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TubSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
@@ -491,6 +494,19 @@ export const TubLibrary: React.FC = () => {
     setFrame(idx);
   }, []);
 
+  const handleDownload = useCallback(async () => {
+    if (!selected || !tubPath) return;
+    setIsDownloading(true);
+    setError(null);
+    try {
+      await downloadTubSession(tubPath, selected.session_id, selected.start_time_ms);
+    } catch (err) {
+      setError(getApiErrorMessage(err, t('tubLibrary.downloadFailed')));
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [selected, tubPath, t]);
+
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete || !tubPath) return;
     setDeleting(true);
@@ -775,6 +791,18 @@ export const TubLibrary: React.FC = () => {
                   onClick={requestTubRefresh}
                 >
                   <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label={t('tubLibrary.downloadAria')}
+                  title={t('tubLibrary.downloadAria')}
+                  disabled={!hasRecords || isDownloading}
+                  onClick={() => void handleDownload()}
+                >
+                  {isDownloading
+                    ? <><Download className="w-4 h-4 animate-bounce" /> <span className="ml-1 text-xs">{t('tubLibrary.downloading')}</span></>
+                    : <><Download className="w-4 h-4" /> <span className="ml-1 text-xs">{t('tubLibrary.download')}</span></>}
                 </Button>
                 <Button
                   size="sm"

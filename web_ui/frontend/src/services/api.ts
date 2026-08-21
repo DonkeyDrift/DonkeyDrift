@@ -189,6 +189,33 @@ export const deleteTubSession = async (tubPath: string, sessionId: string) => {
   };
 };
 
+export const downloadTubSession = async (
+  tubPath: string,
+  sessionId: string,
+  start_time_ms: number | null,
+) => {
+  const response = await api.get('/tub/download_session', {
+    params: { tubPath, sessionId },
+    responseType: 'blob',
+  });
+  const filename = (() => {
+    if (start_time_ms !== null && !Number.isNaN(start_time_ms)) {
+      const d = new Date(start_time_ms);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `recording_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}.tar.gz`;
+    }
+    return `recording_${sessionId}.tar.gz`;
+  })();
+  const url = window.URL.createObjectURL(response.data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
 export const getImageUrl = (path: string, tubPath?: string) => {
   let url = `${API_URL}/tub/image?path=${encodeURIComponent(path)}`;
   if (tubPath) {

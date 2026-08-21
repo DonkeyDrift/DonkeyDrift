@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-21 (126)
+
+- feat(tub-library): 录制视频库新增下载视频到浏览器功能，打包为 tar.gz
+  - 背景：用户在 TubLibrary 浏览录制会话时，需要把整条录制的图片帧下载到本地浏览器，此前没有对应入口。
+  - `web_ui/backend/routers/tub.py`：新增 `GET /tub/download_session` 端点——以 read_only 打开 tub，按 `sessionId` 过滤 records，从 `tub_path/images/` 读取每条 record 的 JPEG，用 `tarfile.open(fileobj=buf, mode='w:gz')` 内存打包，`StreamingResponse` 返回；文件名用 session 的 `start_time_ms` 格式化为 `recording_YYYY-MM-DD_HH_MM_SS.tar.gz`。
+  - `web_ui/frontend/src/i18n/messages/tublibrary.ts`：zh/en 各新增 `download`/`downloadAria`/`downloading`/`downloadFailed` 四个键。
+  - `web_ui/frontend/src/services/api.ts`：新增 `downloadTubSession` 函数——axios `responseType:'blob'` 请求端点，`createObjectURL` + `<a>` 标签触发浏览器下载，文件名在前端用 `start_time_ms` 格式化。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：import `downloadTubSession` + `Download`（lucide-react）；新增 `isDownloading` state 与 `handleDownload` callback；在 Refresh 与 Delete 按钮之间加 Download 按钮（variant=secondary, size=sm, disabled=`!hasRecords || isDownloading`）。
+  - 测试同步：`TubLibrary.test.tsx` mock 加 `downloadTubSession: vi.fn()`，新增 `describe('TubLibrary download button')` 两个测试（按钮存在且 enabled、点击调用 `downloadTubSession`）；`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过。
+  - 注：仅 DD 改动（后端 + 前端），Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
+
 ## 2026-08-21 (124)
 
 - fix(tub): TM 报错 `len should return >= 0`——`Manifest.__len__()` 在删除全部记录后返回负数
