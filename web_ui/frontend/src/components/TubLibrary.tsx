@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from './ui/Card';
 import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
-import { useStore } from '../store/useStore';
+import { useStore, type TubRecord as StoreTubRecord } from '../store/useStore';
 import {
   deleteTubSession,
   getApiErrorMessage,
@@ -128,6 +128,7 @@ export const TubLibrary: React.FC = () => {
   const isLoading = useStore((state) => state.isLoading);
   const requestTubRefresh = useStore((state) => state.requestTubRefresh);
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
+  const setActiveSession = useStore((state) => state.setActiveSession);
   const driveLoopHz = Number(config?.DRIVE_LOOP_HZ) || 60;
 
   const [sessions, setSessions] = useState<TubSession[]>([]);
@@ -253,12 +254,13 @@ export const TubLibrary: React.FC = () => {
     setIsPlaying(false);
     setPinned(tubPath ? loadPinned(tubPath) : []);
     imageCacheRef.current.clear();
+    setActiveSession(null, []);
     if (tubPath) {
       void refreshSessions(tubPath);
     } else {
       setSessions([]);
     }
-  }, [tubPath, refreshSessions]);
+  }, [tubPath, refreshSessions, setActiveSession]);
 
   // Stop playback when the selected session changes
   useEffect(() => {
@@ -268,7 +270,10 @@ export const TubLibrary: React.FC = () => {
     setImageError(false);
     setRecords([]);
     imageCacheRef.current.clear();
-    if (!selected || !tubPath) return;
+    if (!selected || !tubPath) {
+      setActiveSession(null, []);
+      return;
+    }
 
     let cancelled = false;
     (async () => {
@@ -276,6 +281,7 @@ export const TubLibrary: React.FC = () => {
         const data = await getSessionRecords(tubPath, selected.session_id);
         if (cancelled) return;
         setRecords(data.records || []);
+        setActiveSession(selected.session_id, (data.records || []) as StoreTubRecord[]);
       } catch (err) {
         if (!cancelled) {
           setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
@@ -285,19 +291,18 @@ export const TubLibrary: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selected, tubPath, t]);
+  }, [selected, tubPath, t, setActiveSession]);
 
-  // 全局图表联动（原 Tub 导航器职责）：库内换帧/播放时把绝对索引写入全局
-  // currentIndex，让 Tub Editor 的 Data Graph 红色竖线跟随；播放期间按 ~30fps
-  // 节流写回，避免 60fps 全局 re-render。
+  // 全局图表联动（原 Tub 导航器职责）：库内换帧/播放时把当前帧下标写入全局
+  // currentIndex（帧下标），让 Tub Editor 的 Data Graph 红色竖线跟随；播放期间
+  // 按 ~30fps 节流写回，避免 60fps 全局 re-render。
   useEffect(() => {
-    const rec = records[frame];
-    if (!rec || typeof rec._index !== 'number') return;
+    if (!records.length) return;
     const now = performance.now();
     if (isPlayingRef.current && now - lastIndexSyncRef.current < 30) return;
     lastIndexSyncRef.current = now;
-    if (useStore.getState().currentIndex !== rec._index) {
-      setCurrentIndex(rec._index);
+    if (useStore.getState().currentIndex !== frame) {
+      setCurrentIndex(frame);
     }
   }, [frame, records, setCurrentIndex]);
 
@@ -308,14 +313,11 @@ export const TubLibrary: React.FC = () => {
       if (isPlayingRef.current) return;
       const recs = recordsRef.current;
       if (!recs.length) return;
-      const first = recs[0]._index;
-      const last = recs[recs.length - 1]._index;
       if (typeof state.currentIndex !== 'number') return;
-      if (state.currentIndex < first || state.currentIndex > last) return;
-      const target = recs.findIndex((r) => r._index === state.currentIndex);
-      if (target >= 0 && target !== frameRef.current) {
-        frameRef.current = target;
-        setFrame(target);
+      if (state.currentIndex < 0 || state.currentIndex >= recs.length) return;
+      if (state.currentIndex !== frameRef.current) {
+        frameRef.current = state.currentIndex;
+        setFrame(state.currentIndex);
       }
     });
     return unsubscribe;

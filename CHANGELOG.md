@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-21 (122)
+
+- feat(tub-editor): Tub 编辑器只显示录制视频库当前浏览视频的遥测曲线
+  - 背景：Tub Editor 的 Data Graph 此前始终绘制整个 tub 全部记录的 steering/throttle 曲线；用户在录制视频库（TubLibrary）浏览某条录制时，下方编辑器仍把所有录制混在一起，无法专注查看当前视频的遥测。
+  - `web_ui/frontend/src/store/useStore.ts`：新增 `activeSessionId` / `activeSessionRecords` 状态与 `setActiveSession` action；`setTub` 时清空会话态；导出 `TubRecord` 类型供跨模块类型断言。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：选中会话后把该会话 records 写入 store；`currentIndex` 联动语义从「物理 `_index`」统一为「当前会话帧下标」（正向写 `frame`、反向按帧下标跳帧），与编辑器自洽。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：派生 `records = activeSessionId != null ? activeSessionRecords : 全局 records`，图表/缩放/选区/删除恢复随当前会话切换；删除/恢复后刷新会话 records；底部滑块已删除红条与选区绿条在会话作用域下按会话物理 `_index` 跨度定位。
+  - 测试同步：`TubLibrary.test.tsx` 新增「选中会话 records 写入 store」断言；`npx vitest run` 21 文件 115 项、`npx tsc -b --noEmit`、`npm run build` 全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (121)
 
 - fix(tub-library): 录制视频库播放帧率过低——播放循环绕过 React 状态直接画 canvas，节流 UI 更新

@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader } from './ui/Card';
 import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { useStore } from '../store/useStore';
-import { deleteRecords, getRecords, restoreRecords } from '../services/api';
+import { useStore, type TubRecord } from '../store/useStore';
+import { deleteRecords, getRecords, getSessionRecords, restoreRecords } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
 import {
@@ -47,7 +47,13 @@ export const TubEditor: React.FC = () => {
   // TM 页在 App 中常驻保活（#135）：据此在切走时屏蔽全局快捷键
   const isTubManagerRoute = useLocation().pathname === '/';
   const themeRef = useRef(theme);
-  const records = useStore((state) => state.records);
+  const globalRecords = useStore((state) => state.records);
+  const tubPath = useStore((state) => state.tubPath);
+  const activeSessionId = useStore((state) => state.activeSessionId);
+  const activeSessionRecords = useStore((state) => state.activeSessionRecords);
+  const setActiveSession = useStore((state) => state.setActiveSession);
+  // 录制视频库选中某条录制时，编辑器只显示/编辑该条录制的记录；未选中时回退到整个 tub
+  const records = activeSessionId != null ? activeSessionRecords : globalRecords;
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
   const currentIndex = useStore((state) => state.currentIndex);
@@ -373,6 +379,14 @@ export const TubEditor: React.FC = () => {
           actionResponse.total_physical_records,
           actionResponse.deleted_indexes
         );
+        if (activeSessionId && tubPath) {
+          try {
+            const sessionData = await getSessionRecords(tubPath, activeSessionId);
+            setActiveSession(activeSessionId, (sessionData.records || []) as TubRecord[]);
+          } catch {
+            // 会话级刷新尽力而为：全局 records 已更新，图表会在下次切换会话时重建
+          }
+        }
         setActionError(null);
         if (rememberAction) {
           setActionHistory((prev) => {
@@ -390,7 +404,7 @@ export const TubEditor: React.FC = () => {
         setProcessingMode(null);
       }
     },
-    [setAllRecords, t]
+    [setAllRecords, activeSessionId, tubPath, setActiveSession, t]
   );
 
   const handleAction = useCallback(async (mode: 'delete' | 'restore') => {
@@ -1336,8 +1350,18 @@ export const TubEditor: React.FC = () => {
     return null;
   }, [records.length, selectionDraft, selectionStartIndex, selectionEndIndex]);
 
+  // 会话作用域下，滑块的已删除红条/选区绿条改用会话自身的物理 _index 跨度定位；
+  // 未选中会话时沿用整个 tub 的 totalPhysicalRecords。
+  const isSessionScoped = activeSessionId != null;
+  const sessionFirstIndex = records.length > 0 ? records[0]._index : 0;
+  const sessionLastIndex = records.length > 0 ? records[records.length - 1]._index : 0;
+  const sliderSpan = isSessionScoped
+    ? Math.max(1, sessionLastIndex - sessionFirstIndex + 1)
+    : totalPhysicalRecords;
+  const sliderOffset = isSessionScoped ? sessionFirstIndex : 0;
+
   const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
-    if (!sliderSelectionRange || !records.length || !totalPhysicalRecords) {
+    if (!sliderSelectionRange || !records.length || !sliderSpan) {
       return null;
     }
 
@@ -1349,41 +1373,44 @@ export const TubEditor: React.FC = () => {
     const startXValue = startRecord ? startRecord._index : 0;
     const endXValue = endRecord ? endRecord._index + 1 : startXValue + 1;
 
-    const leftPercent = (startXValue / totalPhysicalRecords) * 100;
-    const widthPercent = ((endXValue - startXValue) / totalPhysicalRecords) * 100;
+    const leftPercent = ((startXValue - sliderOffset) / sliderSpan) * 100;
+    const widthPercent = ((endXValue - startXValue) / sliderSpan) * 100;
 
     return {
       left: `${leftPercent}%`,
       width: `max(${widthPercent}%, 2px)`,
     };
-  }, [records, totalPhysicalRecords, sliderSelectionRange]);
+  }, [records, sliderSpan, sliderOffset, sliderSelectionRange]);
 
   const sliderDeletedStyles = useMemo<{ left: string; width: string }[]>(() => {
-    if (!deletedIndexes.length || !totalPhysicalRecords) {
+    const inScopeIndexes = isSessionScoped
+      ? deletedIndexes.filter((i) => i >= sessionFirstIndex && i <= sessionLastIndex)
+      : deletedIndexes;
+    if (!inScopeIndexes.length || !sliderSpan) {
       return [];
     }
 
     // Group deleted indexes into contiguous ranges
     const ranges: { start: number; end: number }[] = [];
-    let start = deletedIndexes[0];
-    let end = deletedIndexes[0];
+    let start = inScopeIndexes[0];
+    let end = inScopeIndexes[0];
 
-    for (let i = 1; i < deletedIndexes.length; i++) {
-      if (deletedIndexes[i] === end + 1) {
-        end = deletedIndexes[i];
+    for (let i = 1; i < inScopeIndexes.length; i++) {
+      if (inScopeIndexes[i] === end + 1) {
+        end = inScopeIndexes[i];
       } else {
         ranges.push({ start, end });
-        start = deletedIndexes[i];
-        end = deletedIndexes[i];
+        start = inScopeIndexes[i];
+        end = inScopeIndexes[i];
       }
     }
     ranges.push({ start, end });
 
     return ranges.map(({ start, end }) => ({
-      left: `${(start / totalPhysicalRecords) * 100}%`,
-      width: `max(${((end - start + 1) / totalPhysicalRecords) * 100}%, 2px)`,
+      left: `${((start - sliderOffset) / sliderSpan) * 100}%`,
+      width: `max(${((end - start + 1) / sliderSpan) * 100}%, 2px)`,
     }));
-  }, [deletedIndexes, totalPhysicalRecords]);
+  }, [deletedIndexes, isSessionScoped, sessionFirstIndex, sessionLastIndex, sliderSpan, sliderOffset]);
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
