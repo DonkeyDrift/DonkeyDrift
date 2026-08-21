@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-21 (132)
+
+- fix(tub-library): Safari 点击下载后始终不触发下载——blob URL 过早回收
+  - 背景：`downloadTubSession` 在 `link.click()` 后立刻 `revokeObjectURL(url)`，Chrome 同步触发下载不受影响，但 Safari 下载是异步的——等 Safari 真正去取 blob 时 URL 已被回收，导致下载永远不开始（图标弹跳但无下载）。
+  - `web_ui/frontend/src/services/api.ts`：`createObjectURL` 改为显式构造 `new Blob([...], { type: 'application/gzip' })` 确保 MIME 类型正确；`removeChild` + `revokeObjectURL` 延迟到 `setTimeout(..., 150)` 执行，给 Safari 足够时间启动异步下载。
+  - 测试同步：`npx vitest run --root . src/components/TubLibrary.test.tsx` 6 项通过，`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署到 8000。
+
 ## 2026-08-21 (131)
 
 - fix(launcher): DD 内嵌 Donkey 去掉「当前工作目录」上方的多余间距（隐藏空 headerRow + 去 body 上边距）
