@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-08-21 (148)
+## 2026-08-21 (150)
 
 - feat(connector): Car Connector 内嵌完整配网板块（1:1 车端 DC），删除 postMessage 按钮式配网（Issue #234 续）
   - 背景：用户希望 Car Connector 像 Drifter Console 那样把完整配网板块（SSID / 扫描 / 密码 / 上位机配网 / 历史 / AP 前缀预览）直接铺在页面里，而不是只放「STA 配置 / AP 名称」两个按钮再 postMessage 打开 iframe 内的弹窗。
@@ -9,7 +9,25 @@
   - 依赖：配套车端固件 v1.8.33（`?wifi=1` 静态配网板块视图）须先 OTA 刷车，否则 iframe `&wifi=1` 被旧固件忽略、配网板块不显示。
   - 注：DD 前端改动，Firmware 侧见同日 v1.8.33 条目；收尾后重建 dist 并部署 8000。
 
-## 2026-08-21 (147)
+## 2026-08-21 (149)
+
+- perf(tub-library): 下载响应即时启动——所有 Tub I/O 移入后台线程，Safari 点击即弹下载通知
+  - 背景：上一轮 (147) 把 tar.gz 构建移入后台线程，但打开 Tub、遍历所有 record 找 session 的操作仍在主线程——大 Tub（几千条 record）仅遍历就要数秒，HTTP 响应在这期间不发送，Safari 迟迟不弹下载通知。
+  - `web_ui/backend/routers/tub.py`：Tub 打开、record 遍历、图片读取、gzip 压缩全部移入后台线程；HTTP 响应在 `os.pipe()` 创建后立即返回 `StreamingResponse`。新增 `startTimeMs` 查询参数——前端传入 session 的 `start_time_ms`，后端直接用其格式化文件名，无需读 Tub 取 `start_time_ms`。去掉响应前的 session 存在性校验（前端只会对已列出的 session 发起下载，不会请求不存在的 session）。
+  - `web_ui/frontend/src/services/api.ts`：`downloadTubSession` 恢复 `start_time_ms` 参数，作为 `startTimeMs` 查询参数传给后端。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：`handleDownload` 传回 `session.start_time_ms`。
+  - 测试同步：`TubLibrary.test.tsx` 断言恢复 `start_time_ms` 参数；后端 `pytest -q` 106 项通过；`npx vitest run` 6 项通过；`npx tsc -b --noEmit`、`npm run build` 通过。
+  - 注：DD 后端 + 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist + 重启 8000 后端部署。
+
+## 2026-08-21 (148)
+
+- fix(tub-manager): 修正一屏布局——视频画面放大、Tub 编辑器底部滑块不再被裁
+  - 背景：上一版（143）把录制视频库与 Tub 编辑器改为一屏并排，但视频 `max-h-[22vh]` 压得太小看不清，图表容器 `min-h-[12rem]`（192px）占满空间把底部滚滑块+选区/删除指示条挤出 `overflow-hidden` 可见区域。
+  - 修复：视频容器 `max-h-[22vh]`→`max-h-[30vh]`（1080p 下 237px→324px，画面明显更大）；图表容器 `min-h-[12rem]`→`min-h-[8rem]`（192px→128px，给底部滑块留足空间）。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：视频容器 max-h 调大。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：图表容器 min-h 调小。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。纯 CSS 改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
 
 - fix(tub-library): 下载 tar.gz 改为 pipe+线程流式响应，Safari 立即弹出下载通知
   - 背景：此前 `download_session` 端点先把整个 tar.gz 构建到 `BytesIO` 内存缓冲（遍历所有 record、读所有 JPEG、gzip 压缩），完成后才 `StreamingResponse` 开始发送。浏览器要等好几秒才收到第一个字节，Safari 不会在等待期间弹出下载通知。

@@ -268,13 +268,14 @@ async def get_session_records(tubPath: str, sessionId: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/download_session")
-async def download_session(tubPath: str, sessionId: str):
+async def download_session(tubPath: str, sessionId: str, startTimeMs: int | None = None):
     """Download a recording session's frames as a tar.gz archive.
 
-    Collects all JPEG images belonging to the session, packs them into a
-    tar.gz, and streams the archive to the browser via a pipe so that the
-    browser receives data immediately rather than waiting for the entire
-    archive to be built in memory.
+    Streams the archive to the browser via a pipe so that the browser
+    receives data immediately. All tub I/O (opening, iterating, reading
+    images, gzip compression) happens in a background thread; the HTTP
+    response starts instantly so Safari shows its download prompt
+    without delay.
     """
     path = os.path.expanduser(tubPath)
     if not os.path.exists(path):
@@ -282,53 +283,35 @@ async def download_session(tubPath: str, sessionId: str):
 
     images_dir = os.path.join(path, 'images')
 
-    try:
-        tub = Tub(path, read_only=True)
+    # Compute filename from startTimeMs (provided by the frontend) so we
+    # don't need to open the tub just to read the start timestamp.
+    if startTimeMs is not None:
+        from datetime import datetime
+        dt = datetime.fromtimestamp(startTimeMs / 1000)
+        filename = f"recording_{dt.strftime('%Y-%m-%d_%H_%M_%S')}.tar.gz"
+    else:
+        filename = f"recording_{sessionId}.tar.gz"
+
+    # Start streaming immediately — all tub I/O happens in the thread.
+    read_fd, write_fd = os.pipe()
+
+    def _build_tar():
         try:
-            # Find the image_array field key from the first record that has one
-            image_key = None
-            session_records = []
-            for record in tub:
-                sid = str(record.get('_session_id', ''))
-                if sid != sessionId:
-                    continue
-                session_records.append(record)
-                if image_key is None:
-                    for k in record:
-                        if k.endswith('image_array') and isinstance(record[k], str):
-                            image_key = k
-                            break
-        finally:
-            tub.close()
-
-        if not session_records:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session '{sessionId}' not found in tub",
-            )
-
-        # Build a readable filename from the session's start timestamp
-        start_ms = session_records[0].get('_timestamp_ms')
-        if start_ms is not None:
-            from datetime import datetime
-            dt = datetime.fromtimestamp(start_ms / 1000)
-            filename = f"recording_{dt.strftime('%Y-%m-%d_%H_%M_%S')}.tar.gz"
-        else:
-            filename = f"recording_{sessionId}.tar.gz"
-
-        # Stream the tar.gz via a pipe so the browser receives data
-        # immediately (Safari shows its download prompt right away)
-        # rather than waiting for the entire archive to finish.
-        read_fd, write_fd = os.pipe()
-
-        def _build_tar():
-            try:
-                with os.fdopen(write_fd, 'wb') as f:
-                    with tarfile.open(fileobj=f, mode='w:gz') as tar:
-                        for record in session_records:
-                            if image_key is None:
+            with os.fdopen(write_fd, 'wb') as f:
+                with tarfile.open(fileobj=f, mode='w:gz') as tar:
+                    tub = Tub(path, read_only=True)
+                    try:
+                        image_key = None
+                        for record in tub:
+                            sid = str(record.get('_session_id', ''))
+                            if sid != sessionId:
                                 continue
-                            img_name = record.get(image_key)
+                            if image_key is None:
+                                for k in record:
+                                    if k.endswith('image_array') and isinstance(record[k], str):
+                                        image_key = k
+                                        break
+                            img_name = record.get(image_key) if image_key else None
                             if not isinstance(img_name, str):
                                 continue
                             clean = img_name.replace('images/', '').replace('images\\', '')
@@ -344,33 +327,30 @@ async def download_session(tubPath: str, sessionId: str):
                             info = tarfile.TarInfo(name=clean)
                             info.size = len(data)
                             tar.addfile(info, io.BytesIO(data))
-            except Exception as e:
-                logger.error(f"Failed to build tar for session {sessionId} of tub {path}: {e}")
+                    finally:
+                        tub.close()
+        except Exception as e:
+            logger.error(f"Failed to build tar for session {sessionId} of tub {path}: {e}")
 
-        thread = threading.Thread(target=_build_tar, daemon=True)
-        thread.start()
+    thread = threading.Thread(target=_build_tar, daemon=True)
+    thread.start()
 
-        def _stream():
-            try:
-                with os.fdopen(read_fd, 'rb') as f:
-                    while True:
-                        chunk = f.read(65536)
-                        if not chunk:
-                            break
-                        yield chunk
-            finally:
-                thread.join()
+    def _stream():
+        try:
+            with os.fdopen(read_fd, 'rb') as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            thread.join()
 
-        return StreamingResponse(
-            _stream(),
-            media_type='application/gzip',
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to download session {sessionId} of tub {path}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return StreamingResponse(
+        _stream(),
+        media_type='application/gzip',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
 
 @router.post("/delete_session")
 async def delete_session(request: SessionDeleteRequest):
