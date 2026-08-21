@@ -250,29 +250,44 @@ class TestMdnsHostnameAndAllowedHosts:
 # IPv4，avahi 发布 AAAA 时入口回退局域网 IP，避免浏览器 IPv6 黑洞）
 # ===========================================================================
 class TestAvahiIpv6Entry:
-    def test_publish_disabled_returns_false(self, tmp_path):
+    def test_aaaa_off_both_keys_returns_false(self, tmp_path):
+        # avahi 0.8：publish-aaaa-on-ipv4=no + use-ipv6=no 才完全无 AAAA
         conf = tmp_path / "avahi-daemon.conf"
-        conf.write_text("[publish]\npublish-aaaa-on-ipv6=no\n",
+        conf.write_text("[server]\nuse-ipv6=no\n[publish]\npublish-aaaa-on-ipv4=no\n",
                         encoding="utf-8")
         assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is False
 
-    def test_publish_enabled_returns_true(self, tmp_path):
+    def test_aaaa_on_ipv4_off_only_returns_true(self, tmp_path):
+        # 仅关 publish-aaaa-on-ipv4：IPv6 传输应答仍带 AAAA，不安全
         conf = tmp_path / "avahi-daemon.conf"
-        conf.write_text("[publish]\npublish-aaaa-on-ipv6=yes\n",
+        conf.write_text("[publish]\npublish-aaaa-on-ipv4=no\n",
                         encoding="utf-8")
         assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
 
-    def test_default_when_key_absent_returns_true(self, tmp_path):
+    def test_use_ipv6_off_only_returns_true(self, tmp_path):
+        # 仅关 use-ipv6：IPv4 应答默认仍带 AAAA，不安全
+        conf = tmp_path / "avahi-daemon.conf"
+        conf.write_text("[server]\nuse-ipv6=no\n", encoding="utf-8")
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
+
+    def test_default_when_keys_absent_returns_true(self, tmp_path):
         # 未显式关闭 = 默认发布（保守回退局域网 IP）
         conf = tmp_path / "avahi-daemon.conf"
         conf.write_text("[publish]\nuse-ipv4=yes\n", encoding="utf-8")
         assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
 
-    def test_commented_key_ignored(self, tmp_path):
+    def test_commented_keys_ignored(self, tmp_path):
         conf = tmp_path / "avahi-daemon.conf"
-        conf.write_text("# publish-aaaa-on-ipv6=no\npublish-aaaa-on-ipv6=yes",
+        conf.write_text("# publish-aaaa-on-ipv4=no\nuse-ipv6=no\n"
+                        "[server]\nuse-ipv6=yes\n[publish]\npublish-aaaa-on-ipv4=yes\n",
                         encoding="utf-8")
         assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is True
+
+    def test_publish_addresses_off_returns_false(self, tmp_path):
+        # publish-addresses=no：连 A 都不发，mDNS 名解析不出地址（安全）
+        conf = tmp_path / "avahi-daemon.conf"
+        conf.write_text("[publish]\npublish-addresses=no\n", encoding="utf-8")
+        assert _ORIGINAL_AVAHI_PUBLISHES_IPV6(conf) is False
 
     def test_missing_conf_returns_true(self, tmp_path):
         # 配置缺失视为发布（保守）
