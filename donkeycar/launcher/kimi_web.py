@@ -34,12 +34,13 @@ issue #168（打开后是"全新状态"）的三处约束：
   localStorage，按 origin（含端口）隔离；复用路径可能挑到不同端口的
   实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
   首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
-- 入口 host 用本机局域网 IP 优先、mDNS 主机名兜底：origin 还含 host。
-  早期曾改为 mDNS 主机名优先以避免 DHCP 换 IP 漂移，但迁移到 mDNS
-  origin 时老 origin（局域网 IP）的 localStorage（置顶/权限模式等）不会
-  跟随，用户表现为"置顶全没了、自主模式变逐条确认"；回退 IP 优先可让老
-  origin 的偏好直接恢复，mDNS 仅在 IP 探测不到时兜底（两种入口都写进
-  ``--allowed-host``，仍能过 40301）。
+- 入口 host 用 mDNS 主机名优先、局域网 IP 兜底：origin 还含 host。本机
+  在家庭 Wi-Fi 下走 DHCP，实测一天内 IP 连续变化（192.168.3.57 → .103 →
+  .62），用 IP 做 origin 时每次换 IP 都会让 KCW 的 localStorage（置顶
+  ``kimi-web.pinned-sessions``/权限模式 ``kimi-web.permission``/收藏模型
+  ``kimi-web.starred-models`` 等）被"清空"，用户反复丢置顶、自主模式变
+  逐条确认；mDNS 主机名不随 IP 变化，是唯一稳定的 origin。IP 仅作 mDNS
+  探测不到时的兜底（两者都写进 ``--allowed-host``，均能过 40301）。
 - 入口 URL 注入 ``?kimi_origin=<origin>``：KCW 0.36.1 前端把 API 基地址
   判定为 URL 的 ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]``
   → ``window.location.origin``；launcher 显式写 ``kimi_origin`` 后，即使
@@ -210,9 +211,9 @@ def _mdns_hostname():
 
     浏览器把 KCW 的置顶/模式/语言主题等 UI 偏好存 localStorage、按 origin
     （协议+host+端口）隔离；host 用 DHCP 局域网 IP 时，IP 一变 origin 就
-    变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，作为
-    IP 探测不到时的兜底入口 host。仅当 mDNS 名能解析到本机局域网 IP 时
-    返回，否则 None（保持原有可达性）。
+    变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，是唯一
+    稳定的入口 origin，作为首选入口 host。仅当 mDNS 名能解析到本机局域网
+    IP 时返回，否则 None（保持原有可达性）。
 
     主机名统一小写化：浏览器会把 URL 里的 host 小写化后放进 Host 头，
     kimi 的 DNS-rebinding 栅栏按 Host 头比对 ``--allowed-host``，三者
@@ -236,18 +237,18 @@ def _mdns_hostname():
 
 
 def _entry_host():
-    """KCW 入口 URL 的入口 host：优先本机局域网 IP，其次 mDNS 主机名。
+    """KCW 入口 URL 的入口 host：优先 mDNS 主机名，其次本机局域网 IP。
 
-    issue #168 后续曾改为 mDNS 主机名优先，意图让 origin 不随 DHCP 换 IP
-    漂移；但迁移到 mDNS origin 时，浏览器里已存在的老 origin（局域网 IP）
-    localStorage（置顶 ``kimi-web.pinned-sessions``、权限模式
-    ``kimi-web.permission`` 等）不会跟随，用户表现为"置顶全没了、自主模式
-    变逐条确认"。回退为局域网 IP 优先：只要本机 IP 未变，入口 origin 就是
-    老 origin，浏览器里已有的置顶/模式偏好即可恢复；mDNS 主机名仅作为 IP
-    探测不到时的兜底（两者都会写进 ``--allowed-host``，两种入口都能过
-    40301）。
+    origin 含 host，而本机在家庭 Wi-Fi 下走 DHCP，IP 会随时变化（实测一天
+    内 192.168.3.57 → .103 → .62）。用 IP 做 origin 时，IP 每变一次，KCW
+    浏览器端的 localStorage（置顶 ``kimi-web.pinned-sessions``、权限模式
+    ``kimi-web.permission``、收藏模型 ``kimi-web.starred-models`` 等）就按
+    新 origin 重新隔离，用户表现为"置顶全没了、自主模式变逐条确认、收藏
+    被取消"。mDNS 主机名不随 IP 变化，是唯一稳定的 origin，因此优先使用；
+    局域网 IP 仅作为 mDNS 探测不到时的兜底（两者都会写进
+    ``--allowed-host``，两种入口都能过 40301）。
     """
-    return _lan_ip() or _mdns_hostname()
+    return _mdns_hostname() or _lan_ip()
 
 
 def _allowed_host_values():
@@ -283,7 +284,7 @@ def _is_loopback_host(host) -> bool:
 
 
 def _lan_url(url: str):
-    """把 URL 的 host 改写为入口 host（局域网 IP 优先，其次 mDNS 主机名）。
+    """把 URL 的 host 改写为入口 host（mDNS 主机名优先，其次局域网 IP）。
 
     回环/通配 host（``localhost``/``127.x``/``0.0.0.0``）必须改写为远程
     浏览器可达的地址（issue #125）；本机局域网 IP 也一并改写为入口 host，

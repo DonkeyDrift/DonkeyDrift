@@ -103,12 +103,15 @@ def _clean_spawned():
 def _fake_lan_ip(monkeypatch):
     """固定本机局域网 IP，隔离真实网络探测。
 
-    _lan_url 定义在 kimi_web 里、运行时查 kimi_web 自己的 _lan_ip，
-    所以这里必须 patch kimi_web 命名空间（不是 dsh_web 的重导出名）。
-    dsh_web 默认用 ``_mdns_hostname`` 派生 trusted-host，测试里默认关掉
-    mDNS（返回 None），需要覆盖时由用例显式传 ``mdns_fn=``。
+    _lan_url 定义在 kimi_web 里、运行时查 kimi_web 自己的 _lan_ip 与
+    _mdns_hostname（_entry_host 现在 mDNS 优先），所以这里必须把两者都
+    patch 到 kimi_web 命名空间（不是 dsh_web 的重导出名），否则
+    _entry_host() 会真去解析 mDNS、结果随本机网络漂移。dsh_web 另用
+    ``_mdns_hostname`` 派生 trusted-host，同样默认关掉 mDNS（返回 None），
+    需要覆盖时由用例显式传 ``mdns_fn=``。
     """
     monkeypatch.setattr(kimi_web, "_lan_ip", lambda: "192.168.3.10")
+    monkeypatch.setattr(kimi_web, "_mdns_hostname", lambda: None)
     monkeypatch.setattr(dsh_web, "_mdns_hostname", lambda: None)
 
 
