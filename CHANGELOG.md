@@ -1,7 +1,8 @@
 # 变更日志
 
 
-## 2026-08-21 (145)
+
+## 2026-08-21 (146)
 
 - fix(frontend): 移除 DD 标签栏「C Code」入口按钮及其全部配套代码（后端路由 / launcher 端点 / 前端组件 / i18n / 测试），恢复为 Kimi Code Web + DeepSeek Harness 两个弱化入口
   - 背景：C Code 入口（条目 (137) / PR #337 引入）经实际使用后用户决定移除；Claude Code 无官方 web UI，复用 launcher 网页终端的方案体验不佳，遂删除。
@@ -16,6 +17,16 @@
   - `web_ui/backend/tests/test_launch.py`：保留文件（仍覆盖 kimi / dsh 转发），删除 claude-code 用例、路由注册断言改回两条（kimi-code-web / dsh）。
   - 测试同步：`pytest web_ui/backend/tests/test_launch.py tests/test_launcher_kimi_web.py tests/test_launcher_dsh_web.py -q` → 108 passed；`npx vitest run src/components/EnterButtons.test.tsx` → 8 passed；`npx tsc --noEmit` 通过。
   - 注：配套固件侧 DC 头部 C Code 按钮移除在 Firmware 仓库 v1.8.32；收尾后部署 DD 到 8000 + OTA 刷车验证。
+
+
+## 2026-08-21 (145)
+
+- fix(layout): DD 左上角 logo 与 Drifter Console 图标同尺寸（box-sizing 改 content-box，总 34px）
+  - 背景：上一轮对齐了圆角与边框色，但 DD logo 仍比 DC 小一圈。根因：DC headerLogo 是 `width:32px` + `border:1px`（content-box，边框外凸，总 34px）；而 Tailwind preflight 把 `*` 默认设为 border-box，DD 的 `w-8 h-8`(32px) + 1px border 被算进 32px 内，图片只有 30px、整体 32px，比 DC 小 2px 且边框压在图内。
+  - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`.header-logo` 规则内新增 `box-sizing: content-box;`（与 DC 一致，32px 内容 + 1px 边框外凸 = 34px）；圆角 8px、边框色随主题不变。
+  - `web_ui/frontend/src/components/Layout.tsx`：注释同步更新为「32px 内容 + 1px 边框外凸（content-box，总 34px）」。
+  - 测试同步：`cd web_ui/frontend && npm run build`（tsc + vite）通过、`npx vitest run` → 22 文件 126 项全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
 
 
 ## 2026-08-21 (144)

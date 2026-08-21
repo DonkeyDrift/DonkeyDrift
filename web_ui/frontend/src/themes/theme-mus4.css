@@ -650,10 +650,12 @@ html.theme-mus4 .console-mute-btn[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px #5cc8ff;
   color: #5cc8ff;
 }
-/* 标题左侧 logo：对齐 Drifter Console headerLogo —— 圆角 8px、深色主题边框 #2b3441
+/* 标题左侧 logo：对齐 Drifter Console headerLogo —— 32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px，与 DC 一致）、圆角 8px、深色主题边框 #2b3441
    （圆角显式锁定 8px：上方 html.theme-mus4 .rounded-lg 会把 rounded-lg 改成 12px，
-     若 logo 用 rounded-lg 会与 DC 的 8px 不一致） */
+     若 logo 用 rounded-lg 会与 DC 的 8px 不一致；box-sizing 显式 content-box：Tailwind
+     preflight 默认 border-box 会让 border 占进 32px 内使图标比 DC 小一圈） */
 html.theme-mus4 .header-logo {
+  box-sizing: content-box;
   border-radius: 8px;
   border-color: #2b3441;
 }
