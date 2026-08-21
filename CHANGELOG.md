@@ -1,6 +1,12 @@
 # 变更日志
 
+## 2026-08-21 (147)
 
+- fix(tub-library): 下载 tar.gz 改为 pipe+线程流式响应，Safari 立即弹出下载通知
+  - 背景：此前 `download_session` 端点先把整个 tar.gz 构建到 `BytesIO` 内存缓冲（遍历所有 record、读所有 JPEG、gzip 压缩），完成后才 `StreamingResponse` 开始发送。浏览器要等好几秒才收到第一个字节，Safari 不会在等待期间弹出下载通知。
+  - `web_ui/backend/routers/tub.py`：改用 `os.pipe()` + `threading.Thread`——后台线程把 tar.gz 写入管道写端，`StreamingResponse` 的生成器从管道读端 `read(65536)` 逐块 yield。浏览器在第一张图片压缩完成时（毫秒级）就收到数据，立即弹出下载通知并显示进度条。新增 `import threading`。
+  - 测试同步：后端 `pytest -q` 106 项通过（无 download_session 专属测试，不涉及）。
+  - 注：仅 DD 后端改动，Firmware 无改动、无需 OTA；收尾后重启 8000 后端部署。
 
 ## 2026-08-21 (146)
 
