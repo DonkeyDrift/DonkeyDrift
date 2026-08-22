@@ -1,23 +1,27 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Gamepad2, RefreshCw } from 'lucide-react';
 import { Button } from './ui/Button';
 import { discoverConnectorConsoles } from '../services/api';
 import { useTranslation } from '@/i18n';
 
 /**
  * 车辆设置（Issue #234 后续）：设备发现/选择（连接）+ 内嵌车端 DC 的完整设置视图。
- * iframe 用 `?embedded=1&settings=1&wifi=1` 同屏呈现车端 1:1 的「调校（漂移 / Judge /
- * 手柄校准）」+「AP 名称配置」+「STA Wi-Fi 配置」三个板块——配网是完整板块（SSID /
- * 扫描 / 密码 / 上位机配网 / 历史 / AP 前缀预览），不再是点按弹窗的按钮；DEV / OTA
- * 不在该视图内。DonkeyDrifter 的 /console 入口保持不变。
+ * iframe 用 `?embedded=1&settings=1&wifi=1` 同屏呈现车端 1:1 的「漂移设置 / Judge 设置
+ * （子 iframe 默认展开）」+「AP 名称配置」+「STA Wi-Fi 配置」板块——配网是完整板块
+ * （SSID / 扫描 / 密码 / 上位机配网 / 历史 / AP 前缀预览），不再是点按弹窗的按钮；
+ * DEV / OTA 不在该视图内。DonkeyDrifter 的 /console 入口保持不变。
  * 外层不再套 Card 与「车辆设置」标题（CC 页整页即是车辆设置，避免与内嵌视图里的
  * 车端「车辆设置」标题重复）——直接渲染选择工具行 + 内嵌视图。
+ * 「手柄校准」按钮在本工具行（重新扫描右侧）：点击 postMessage(dd-open-joystick-cal)
+ * 到内嵌 iframe，由车端页面打开校准弹窗（沿用 DrifterConsolePage 静音同步同款通道），
+ * 因此内嵌视图里的「车辆设置」标题与「调校」行已被车端整行隐藏。
  */
 export const CarSettingsPanel: React.FC = () => {
   const { t } = useTranslation();
   const [devices, setDevices] = useState<{ ip: string; port: number; reachable: boolean }[]>([]);
   const [scanning, setScanning] = useState(false);
   const [selectedIp, setSelectedIp] = useState('');
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const discover = useCallback(async () => {
     setScanning(true);
@@ -36,6 +40,14 @@ export const CarSettingsPanel: React.FC = () => {
   useEffect(() => {
     void discover();
   }, [discover]);
+
+  const openJoystickCal = useCallback(() => {
+    if (!selectedIp) return;
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'dd-open-joystick-cal' },
+      `http://${selectedIp}`,
+    );
+  }, [selectedIp]);
 
   return (
     <div className="space-y-3">
@@ -62,11 +74,22 @@ export const CarSettingsPanel: React.FC = () => {
           <RefreshCw className={`h-4 w-4 ${scanning ? 'animate-spin' : ''}`} />
           {scanning ? t('console.scanning') : t('console.rescan')}
         </Button>
+        <Button
+          onClick={openJoystickCal}
+          disabled={!selectedIp}
+          variant="secondary"
+          size="sm"
+          title={t('connector.joystickCalHint')}
+        >
+          <Gamepad2 className="h-4 w-4" />
+          {t('connector.joystickCal')}
+        </Button>
       </div>
 
       {selectedIp ? (
         <div className="min-h-[70vh]">
           <iframe
+            ref={iframeRef}
             src={`http://${selectedIp}/?embedded=1&settings=1&wifi=1`}
             title={t('connector.carSettingsTitle')}
             className="h-[80vh] min-h-[560px] w-full rounded-md border-0 bg-zinc-950"

@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-22 (160)
+
+- feat(connector): CC 页顶栏「重新扫描」右侧新增「手柄校准」按钮——点击经 postMessage 让内嵌车端视图打开校准弹窗
+  - 背景：车端 v1.8.47 起漂移/Judge 设置在 CC 内嵌视图默认展开后，「调校」行只剩手柄校准一个按钮；用户要求把该按钮移到 CC 页顶部「重新扫描」右边，并删掉内嵌视图里的「车辆设置」标题与「调校」行框（车端 v1.8.49 已整行隐藏）。
+  - 改动（`web_ui/frontend/src/components/CarSettingsPanel.tsx`）：工具行新增「手柄校准」Button（Gamepad2 图标，未选设备时禁用）；点击 `iframeRef.current?.contentWindow?.postMessage({type:'dd-open-joystick-cal'}, 'http://<selectedIp>')`——沿用 DrifterConsolePage 静音同步的同款 postMessage 通道，车端页面监听后调用 `openJoystickCalModal()`，弹窗在内嵌 iframe 可视区内居中打开。iframe 加 `ref`。
+  - i18n：`web_ui/frontend/src/i18n/messages/connector.ts` 新增 `connector.joystickCal`（手柄校准 / Joystick Cal）与 `connector.joystickCalHint`（悬停提示，中英）两键。
+  - 测试同步：新增 `CarSettingsPanel.test.tsx`——按钮位于重新扫描右侧、点击后对 iframe contentWindow postMessage `{type:'dd-open-joystick-cal'}` 与正确 targetOrigin、无设备时禁用；`vitest run` 23 文件 125 项全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。需配合车端固件 v1.8.49+（含 `dd-open-joystick-cal` 监听分支与 setTitle/setRow 隐藏）。
+
 ## 2026-08-22 (159)
 
 - refactor(connector): CC 页删除「车辆设置」外层卡片框与标题——内容直接平铺，避免与内嵌车端视图的「车辆设置」标题重复
