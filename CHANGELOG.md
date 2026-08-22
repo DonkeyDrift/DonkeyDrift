@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-22 (158)
+
+- fix(tub-editor): 两次点击选择——锚点改模块级变量并在 mousedown 处理，修复选区恒为最左最右
+  - 背景：两次点击选择功能在连续多轮反馈中始终表现为「不管怎么点，选中的永远是最左和最右两个点」（如点 A→B→C→D 选 [A,D] 而非 [C,D]）。
+  - 根因：锚点存于组件内 `useRef`，且选择逻辑挂在 `onClick`——组件重挂载/事件时序问题导致锚点丢失或滞后，第二次以后的点击未按「上次点击点」为锚更新。
+  - 修复（`web_ui/frontend/src/components/TubEditor.tsx`，9 增 31 删）：
+    - 锚点从 `selectionAnchorIndexRef`（useRef）改为模块级变量 `globalSelectionAnchorIndex`，避免组件重新挂载时锚点被重置为 null；
+    - 选择逻辑从 `handleClick`（onClick）移入 `handleMouseDown`（mousedown 立即处理，不依赖 click 事件合成时序），删除 `handleClick` 与其 JSX 绑定；
+    - Escape 清锚点同步改用模块级变量。
+  - 验证：`tsc --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过；并用 geckodriver + 无头 Firefox 对 8000 在线实例做真实鼠标点击测试：单击（20%）无选区 → 50% 得 [2336,6212] → 65% 得 [6212,8143] → 80% 得 [8143,10081] → 回跳 30% 得 [3623,10081]——每一步都是「最近两次点击」的区间，含向前回跳场景。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾合入本地 Tony（efe0e943）后重建 dist 部署 8000 并复测通过。全程纯本地，未碰 GitHub。
+
 ## 2026-08-21 (154)
 
 - feat(tub-editor): 底部滑块改为帧位置滑块——始终激活、与录制库进度条同步、thumb 改椭圆白色
