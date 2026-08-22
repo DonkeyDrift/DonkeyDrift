@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-22 (158)
+
+- refactor(connector): CC 页删除「连接配置」「推送 Pilots」板块——页面精简为纯车辆设置中心
+  - 背景：与拉取 Tub 同批查证——连接器配置 `~/.donkeycar_web_connector.json` 从未创建（SSH 车端从未配置）；推送 Pilots 的源目录 `<backend cwd>/models` 在部署实例中不存在（真实模型在 `mycar/models`，均为模拟器产物）；整套 SSH 管线面向"车上跑 donkeycar 主机"架构，与当前 ESP32 真车 + 模拟器训练的实际工作流不符。用户决策：两个板块都删。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：页面精简为仅渲染 `CarSettingsPanel`（车辆设置）；删除全部 SSH 管线代码——连接配置卡、推送 Pilots 卡、`getConnectorConfig`/`setConnectorConfig`/`checkConnectorStatus`/`pushConnectorPilots` 引用、`useConnectorJob` 调用、相关 state 与图标。后端 `/connector/*` 接口与 `useConnectorJob` hook 文件保留不动，仅前端入口移除。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
 ## 2026-08-22 (157)
 
 - refactor(connector): CC 页删除「拉取 Tub」板块——实证从未使用（数据流全走模拟器）
