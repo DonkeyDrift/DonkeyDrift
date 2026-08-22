@@ -206,10 +206,12 @@ export const ConsoleOtaButton: React.FC = () => {
 };
 
 /** DEV 开关：与 OTA 同款文字胶囊按钮，开启时 cyan 高亮；每 5s 轮询同步。
- *  开启（当前为关）时先弹「开启开发模式」确认框，关闭则直接生效（对齐 DC 行为）。 */
+ *  开启（当前为关）时先弹「开启开发模式」确认框，关闭则直接生效（对齐 DC 行为）。
+ *  轮询失败（多为缓存 IP 失效）时使缓存失效并重新扫描；状态未知显示为不可达，
+ *  不伪装成「关」。 */
 export const ConsoleDevToggle: React.FC = () => {
   const { t } = useTranslation();
-  const { ip } = useConsoleDevice();
+  const { ip, refresh } = useConsoleDevice();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -221,8 +223,11 @@ export const ConsoleDevToggle: React.FC = () => {
       setEnabled(!!data.enabled);
     } catch {
       setEnabled(null);
+      // 缓存的车端 IP 可能已失效（切网 / DHCP 重租）：重扫后 ip 更新，
+      // fetchDevMode 随 ip 依赖重建，上面的 useEffect 会自动用新 IP 重取。
+      refresh();
     }
-  }, [ip]);
+  }, [ip, refresh]);
 
   useEffect(() => {
     fetchDevMode();
@@ -263,6 +268,8 @@ export const ConsoleDevToggle: React.FC = () => {
   };
 
   const unreachable = !ip;
+  // enabled === null：初次加载中或读取失败——显示为不可达，而不是伪装成「关」。
+  const unknown = !unreachable && enabled === null;
   const cls =
     'console-dev-toggle inline-flex items-center justify-center h-8 px-3 rounded-full border text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
   return (
@@ -273,9 +280,9 @@ export const ConsoleDevToggle: React.FC = () => {
           role="switch"
           aria-checked={!!enabled}
           aria-label={t('console.devModeTitle')}
-          disabled={unreachable || busy}
+          disabled={unreachable || unknown || busy}
           onClick={toggle}
-          title={unreachable ? t('console.unreachable') : undefined}
+          title={unreachable || unknown ? t('console.unreachable') : undefined}
           className={`${cls} ${
             enabled
               ? 'bg-[#5cc8ff]/25 border-[#5cc8ff] text-[#5cc8ff] shadow-[inset_0_0_0_1px_#5cc8ff]'
@@ -284,7 +291,7 @@ export const ConsoleDevToggle: React.FC = () => {
         >
           DEV
         </button>
-        {!unreachable && (
+        {!unreachable && !unknown && (
           <span className="pointer-events-none absolute right-0 top-full mt-2 w-72 rounded-lg border border-[#5cc8ff] bg-[#111820] px-2.5 py-2 text-xs font-semibold leading-relaxed text-[#dbeafe] opacity-0 transition-opacity group-hover:opacity-100 z-50">
             {t('console.devHint')}
           </span>

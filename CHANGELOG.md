@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-23 (160)
+
+- fix(console): DD 顶栏 DEV 开关显示与车端实际状态不一致——缓存 IP 失效不自愈 + 未知态误显示为「关」
+  - 背景：车端 Drifter Console 的 DEV 开关为开，但 DD 顶栏的 DEV 开关显示为关。实测车端 `/api/devmode` 直连、DD 后端 `/api/console/proxy` 代理、`/api/status` 的 `dev_mode=1` 三处均返回开——固件与后端代理链路无问题，根因在 DD 前端。
+  - 根因一（IP 缓存失效）：`web_ui/frontend/src/hooks/useConsoleDevice.ts` 把车端 IP 缓存进 `sessionStorage`（`donkeydrifter.console.ip`），整个 tab 会话内不再重扫；车端换 IP（车 AP 192.168.4.1 ↔ 家里 Wi-Fi 192.168.3.x、DHCP 重租）后轮询经代理 10s 超时失败。
+  - 根因二（未知态误显示）：`web_ui/frontend/src/components/ConsoleControls.tsx` 的 `ConsoleDevToggle` fetch 失败时 `setEnabled(null)`，而 `null` 与 `false` 走同一灰底「关」样式，且按钮可点但点击直接 return——用户无法区分「DEV 关」与「读不到状态」。
+  - 修复：
+    - `useConsoleDevice.ts`：新增导出 `invalidateConsoleDeviceCache()`（清 sessionStorage 与模块级缓存）与 hook 返回值 `refresh()`（失效缓存并重扫，`attempt` state 驱动 effect 重跑）；扫描不到车端时以 10s 慢速重试（`RETRY_SCAN_MS`），车重新上线自动恢复。顺带修掉一个随 refresh 暴露的潜伏 bug——`resolveConsoleIp` 里 `inFlight` 的清理原放在 IIFE 的 `finally` 中，同步完成路径（sessionStorage 命中、全程无 await）下 finally 先于 `inFlight = ...` 赋值执行，导致 inFlight 永久卡住为旧 promise、之后所有 resolve 都吃旧值；改为把清理回调挂在 promise 的 `.finally()` 上（微任务，时序安全）。
+    - `ConsoleControls.tsx`（仅 `ConsoleDevToggle`）：`fetchDevMode` 的 catch 分支除 `setEnabled(null)` 外调用 `refresh()`——ip 更新后 `fetchDevMode` 随依赖重建，既有 effect 自动用新 IP 重取，一个轮询周期内自愈；渲染上 `enabled === null`（含初次加载中）按「未知/不可达」处理——按钮 disabled、去 hover 高亮、title 复用既有 `console.unreachable` 词条，不再伪装成「关」。`ConsoleMuteButton`/`ConsoleOtaButton` 本次不动。
+  - 测试同步：`ConsoleControls.test.tsx` 三处 `useConsoleDevice` mock 补 `refresh` 字段，新增 2 用例（fetch 失败触发 refresh 重扫；未知态 disabled + unreachable title 而非「关」样式）；新增 `useConsoleDevice.test.ts` 4 用例（扫描缓存、sessionStorage 复用不重扫、refresh 失效旧 IP 重扫新 IP——覆盖 inFlight 修复、扫不到时慢速重试并自动恢复）。`npx tsc -b` 与 `vitest run`（23 文件 129 项）全绿。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；全程纯本地，未碰 GitHub。
+
 ## 2026-08-22 (159)
 
 - fix(launcher): 启动中转页标签标题由 "Donkey" 改为 "Donkey Drifter"——新标签页一开即显示最终名称
