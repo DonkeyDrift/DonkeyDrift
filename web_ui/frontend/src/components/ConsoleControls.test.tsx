@@ -23,10 +23,11 @@ const mockUseConsoleDevice = vi.mocked(useConsoleDevice);
 const mockGetJson = vi.mocked(consoleGetJson);
 const mockPostForm = vi.mocked(consolePostForm);
 const mockPostText = vi.mocked(consolePostText);
+const mockRefresh = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseConsoleDevice.mockReturnValue({ ip: '192.168.1.10', resolving: false });
+  mockUseConsoleDevice.mockReturnValue({ ip: '192.168.1.10', resolving: false, refresh: mockRefresh });
 });
 
 describe('ConsoleMuteButton', () => {
@@ -50,7 +51,7 @@ describe('ConsoleMuteButton', () => {
   });
 
   it('is disabled when the console is unreachable', () => {
-    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false });
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false, refresh: mockRefresh });
     render(<ConsoleMuteButton />);
     const btn = screen.getByRole('button');
     expect(btn).toBeDisabled();
@@ -116,7 +117,7 @@ describe('ConsoleOtaButton', () => {
   });
 
   it('renders disabled when the console is unreachable', () => {
-    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false });
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false, refresh: mockRefresh });
     render(<ConsoleOtaButton />);
     const btn = screen.getByRole('button', { name: 'OTA' });
     expect(btn).toBeDisabled();
@@ -188,9 +189,24 @@ describe('ConsoleDevToggle', () => {
   });
 
   it('is disabled when the console is unreachable', () => {
-    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false });
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false, refresh: mockRefresh });
     render(<ConsoleDevToggle />);
     const toggle = screen.getByRole('switch');
     expect(toggle).toBeDisabled();
+  });
+
+  it('re-scans for the console when the devmode fetch fails (stale cached IP)', async () => {
+    mockGetJson.mockRejectedValue(new Error('boom'));
+    render(<ConsoleDevToggle />);
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it('shows a disabled unreachable state instead of "off" while the devmode state is unknown', async () => {
+    mockGetJson.mockRejectedValue(new Error('boom'));
+    render(<ConsoleDevToggle />);
+    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    await waitFor(() => expect(toggle).toBeDisabled());
+    expect(toggle).toHaveAttribute('title', 'console.unreachable');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
 });
