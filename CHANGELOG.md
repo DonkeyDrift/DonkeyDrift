@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-22 (157)
+
+- refactor(connector): CC 页删除「拉取 Tub」板块——实证从未使用（数据流全走模拟器）
+  - 背景：用户要求评估拉取 Tub 是否用得上。查证：连接器配置 `~/.donkeycar_web_connector.json` 从未创建（SSH 车端从未配置，功能无从执行）；各部署 checkout 的后端 `./data` 落地目录全空（零拉取记录）；近期数据目录全为模拟器产物（`data_sim*`、`sim_collect_*`）。用户决策：只删拉取 Tub，保留连接配置与推送 Pilots。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：删除拉取 Tub 整卡及连带代码——`tubs`/`selectedTub`/`createNewDir` state、`loadRemoteLists`（远端 tub 列表只服务于该板块）、`refreshLocalTub`/`handlePullTub`、`pullConnectorTub`/`listConnectorTubs`/`loadTub`/`useStore`/`Download` 图标引用。后端 `/connector/tubs/*` 接口保留不动，仅 CC 前端移除入口。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
 ## 2026-08-22 (156)
 
 - refactor(connector): CC 页删除整个「远程驾驶」板块——DriveApiBridge 回连地址全自动配置，无需手动项

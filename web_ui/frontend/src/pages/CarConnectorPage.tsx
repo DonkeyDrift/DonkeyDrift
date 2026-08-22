@@ -2,21 +2,17 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardHeader, CardContent } from '../components/ui/Card';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 import { Button } from '../components/ui/Button';
-import { Download, Settings, Upload } from 'lucide-react';
+import { Settings, Upload } from 'lucide-react';
 import { Input } from '../components/ui/Input';
 import {
   getConnectorConfig,
   setConnectorConfig,
   checkConnectorStatus,
-  listConnectorTubs,
-  pullConnectorTub,
   pushConnectorPilots,
   getApiErrorMessage,
-  loadTub,
   type ConnectorConfig as ConnectorConfigType,
 } from '../services/api';
 import { useConnectorJob } from '../hooks/useConnectorJob';
-import { useStore } from '../store/useStore';
 import { useTranslation } from '@/i18n';
 import { CarSettingsPanel } from '../components/CarSettingsPanel';
 
@@ -31,7 +27,6 @@ const FORMAT_OPTIONS: { key: FormatOption; label: string }[] = [
 
 export const CarConnectorPage: React.FC = () => {
   const { t } = useTranslation();
-  const { setTub, setError } = useStore();
 
   // 连接配置
   const [config, setConfig] = useState<ConnectorConfigType>({
@@ -48,14 +43,10 @@ export const CarConnectorPage: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState('');
   const [checking, setChecking] = useState(false);
 
-  // 远端列表
-  const [tubs, setTubs] = useState<string[]>([]);
-  const [selectedTub, setSelectedTub] = useState('');
-  const [createNewDir, setCreateNewDir] = useState(false);
   const [selectedFormats, setSelectedFormats] = useState<Set<FormatOption>>(new Set(['tflite']));
 
   // 扫描车辆发现：车端 IP 的发现/配网由 DC（Drifter Console）负责（issue #177），CC 仅手动填写 host
-  // 远程驾驶启停已从本页移除：车辆的驾驶控制统一走 Drive 页面，DriveApiBridge 回连地址由车端自动注入，无需手动配置
+  // 远程驾驶启停、拉取 Tub 已从本页移除：驾驶控制统一走 Drive 页面（回连地址自动注入）；拉取 Tub 日常无使用（数据走模拟器）
 
   // 加载配置
   useEffect(() => {
@@ -92,49 +83,6 @@ export const CarConnectorPage: React.FC = () => {
       setChecking(false);
     }
   }, [t]);
-
-  // 加载远端列表
-  const loadRemoteLists = useCallback(async () => {
-    try {
-      const tubResult = await listConnectorTubs();
-      setTubs(tubResult.items);
-    } catch (error) {
-      setStatusMessage(getApiErrorMessage(error, t('connector.remoteListLoadFailed')));
-    }
-  }, [t]);
-
-  useEffect(() => {
-    if (online) loadRemoteLists();
-  }, [online, loadRemoteLists]);
-
-  const refreshLocalTub = useCallback(async (localTubPath: string) => {
-    try {
-      const data = await loadTub(localTubPath);
-      setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
-      setStatusMessage(t('connector.tubPulledAndRefreshed', { path: data.path }));
-    } catch (error) {
-      const message = getApiErrorMessage(error, t('connector.localTubRefreshFailed'));
-      setStatusMessage(t('connector.tubPulledButRefreshFailed', { message }));
-      setError(message);
-    }
-  }, [setTub, setError, t]);
-
-  // 拉取 Tub
-  const handlePullTub = useCallback(() => {
-    if (!selectedTub) return;
-    const localTubPath = createNewDir ? `./data/${selectedTub}` : './data';
-    startJob(
-      () =>
-        pullConnectorTub({
-          remote_tub: selectedTub,
-          local_data_path: './data',
-          create_new_dir: createNewDir,
-        }),
-      {
-        onCompleted: () => refreshLocalTub(localTubPath),
-      },
-    );
-  }, [selectedTub, createNewDir, refreshLocalTub, startJob]);
 
   const startPushPilotsJob = useCallback((formats: FormatOption[]) => {
     startJob(() =>
@@ -225,50 +173,6 @@ export const CarConnectorPage: React.FC = () => {
               </span>
             )}
           </div>
-        </CardContent>
-      </Card>
-
-      {/* 拉取 Tub */}
-      <Card>
-        <CardHeader>
-          <SectionCardTitle
-            icon={<Download className="w-5 h-5" />}
-            title={t('connector.pullTubTitle')}
-            subtitle={t('connector.pullTubTitleSubtitle')}
-          />
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">{t('connector.selectRemoteTubLabel')}</label>
-            <select
-              className="w-full h-10 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-              value={selectedTub}
-              onChange={(e) => setSelectedTub(e.target.value)}
-            >
-              <option value="">{t('connector.selectTubPlaceholder')}</option>
-              {tubs.map((tub) => (
-                <option key={tub} value={tub}>
-                  {tub}
-                </option>
-              ))}
-            </select>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={createNewDir}
-              onChange={(e) => setCreateNewDir(e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-800 text-cyan-500 focus:ring-cyan-500"
-            />
-            {t('connector.createNewDirLabel')}
-          </label>
-          <Button
-            onClick={handlePullTub}
-            disabled={!online || !selectedTub || isJobRunning}
-            size="sm"
-          >
-            {t('connector.pullTubButton', { tub: selectedTub || 'Tub' })}
-          </Button>
         </CardContent>
       </Card>
 
