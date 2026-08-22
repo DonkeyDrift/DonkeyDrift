@@ -1831,7 +1831,7 @@ export const TubEditor: React.FC = () => {
             </div>
           )}
         </div>
-        <div className="relative mt-3 h-4 shrink-0">
+        <div className="relative mt-3 h-6 shrink-0">
           <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-lg bg-zinc-700" />
           {sliderSelectionStyle && (
             <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2">
@@ -1858,10 +1858,10 @@ export const TubEditor: React.FC = () => {
             max={Math.max(0, records.length - 1)}
             step="1"
             value={currentIndex}
-            onChange={(e) => setCurrentIndex(parseInt(e.target.value))}
+            onChange={(e) => setCurrentIndex(e.target.valueAsNumber)}
             disabled={!records.length}
             aria-label={t('tubEditor.scrollAria')}
-            className="tub-editor-scroll-slider relative z-20 h-4 w-full appearance-none cursor-pointer bg-transparent accent-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+            className="tub-editor-scroll-slider relative z-20 h-6 w-full appearance-none cursor-pointer bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
           />
         </div>
       </CardContent>
