@@ -41,6 +41,9 @@ type RecordAction = {
   indexes: number[];
 };
 
+// 两次点击选择的锚点（模块级变量，避免组件重新挂载时 ref 重置导致锚点丢失）
+let globalSelectionAnchorIndex: number | null = null;
+
 export const TubEditor: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
@@ -88,8 +91,6 @@ export const TubEditor: React.FC = () => {
   const sliderRef = useRef<HTMLInputElement>(null);
   const sliderRafRef = useRef<number | null>(null);
   const sliderPendingValueRef = useRef<number | null>(null);
-  // 两次点击选择：记录第一次点击的帧下标（锚点），null 表示未设置
-  const selectionAnchorIndexRef = useRef<number | null>(null);
   const [tooltipData, setTooltipData] = useState<{ x: number; y: number; steering: number; throttle: number; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectionDraft, setSelectionDraft] = useState<{
@@ -831,43 +832,21 @@ export const TubEditor: React.FC = () => {
       requestChartRender();
 
       setCurrentIndex(clampedIndex);
-    },
-    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender]
-  );
 
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      if (!chartRef.current || !containerRef.current || !records.length) return;
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-
-      const chart = chartRef.current;
-      const chartArea = chart.chartArea;
-
-      if (x < chartArea.left || x > chartArea.right) return;
-      const clampedIndex = getIndexFromPointerX(x, chart);
-
-      // Update hover position so the red line can follow the mouse exactly
-      hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
-      requestChartRender();
-
-      setCurrentIndex(clampedIndex);
-
-      if (selectionAnchorIndexRef.current == null) {
+      // 两次点击选择：mousedown 时立即处理，不依赖 click 事件
+      if (globalSelectionAnchorIndex == null) {
         // 第一次点击：记录锚点，同时清除旧选区
-        selectionAnchorIndexRef.current = clampedIndex;
+        globalSelectionAnchorIndex = clampedIndex;
         clearSelectionRange();
         visualSelectionRef.current = null;
       } else {
         // 第二次及以后点击：选中锚点到当前点的范围，锚点更新为当前点
-        const anchor = selectionAnchorIndexRef.current;
+        const anchor = globalSelectionAnchorIndex;
         const startIndex = Math.min(anchor, clampedIndex);
         const endIndex = Math.max(anchor, clampedIndex) + 1;
         visualSelectionRef.current = { startIndex, endIndex };
         setSelectionRange(startIndex, endIndex);
-        selectionAnchorIndexRef.current = clampedIndex;
+        globalSelectionAnchorIndex = clampedIndex;
       }
 
       // 清除拖动预览
@@ -907,7 +886,7 @@ export const TubEditor: React.FC = () => {
       if (event.key === 'Escape') {
         event.preventDefault();
         clearSelectionRange();
-        selectionAnchorIndexRef.current = null;
+        globalSelectionAnchorIndex = null;
         selectionDraftRef.current = null;
         setSelectionDraft(null);
         return;
@@ -1768,7 +1747,6 @@ export const TubEditor: React.FC = () => {
           onMouseLeave={handleMouseLeave}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
-          onClick={handleClick}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
