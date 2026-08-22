@@ -85,6 +85,9 @@ export const TubEditor: React.FC = () => {
   const selectionAnimationUntilRef = useRef(0);
   const playbackActivityUntilRef = useRef(0);
   const preserveViewportOnRecordsChangeRef = useRef(false);
+  const sliderRef = useRef<HTMLInputElement>(null);
+  const sliderRafRef = useRef<number | null>(null);
+  const sliderPendingValueRef = useRef<number | null>(null);
   const [tooltipData, setTooltipData] = useState<{ x: number; y: number; steering: number; throttle: number; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectionDraft, setSelectionDraft] = useState<{
@@ -512,6 +515,40 @@ export const TubEditor: React.FC = () => {
 
     return unsubscribe;
   }, [requestChartRender]);
+
+  // 外部 currentIndex 变化时同步滑块位置（非受控组件，通过 ref 直接写 DOM 值）
+  useEffect(() => {
+    const slider = sliderRef.current;
+    if (slider && document.activeElement !== slider) {
+      slider.value = String(currentIndex);
+    }
+  }, [currentIndex]);
+
+  // 滑块拖动：requestAnimationFrame 节流 setCurrentIndex，避免高频 store 更新导致卡顿
+  const handleSliderChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      sliderPendingValueRef.current = e.target.valueAsNumber;
+      if (sliderRafRef.current == null) {
+        sliderRafRef.current = requestAnimationFrame(() => {
+          sliderRafRef.current = null;
+          if (sliderPendingValueRef.current != null) {
+            setCurrentIndex(sliderPendingValueRef.current);
+            sliderPendingValueRef.current = null;
+          }
+        });
+      }
+    },
+    [setCurrentIndex]
+  );
+
+  // 卸载时取消挂起的 rAF
+  useEffect(() => {
+    return () => {
+      if (sliderRafRef.current != null) {
+        cancelAnimationFrame(sliderRafRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!records.length || zoomPercent === MIN_ZOOM_PERCENT) return;
@@ -1853,12 +1890,13 @@ export const TubEditor: React.FC = () => {
             </div>
           ))}
           <input
+            ref={sliderRef}
             type="range"
             min="0"
             max={Math.max(0, records.length - 1)}
             step="1"
-            value={currentIndex}
-            onChange={(e) => setCurrentIndex(e.target.valueAsNumber)}
+            defaultValue={currentIndex}
+            onChange={handleSliderChange}
             disabled={!records.length}
             aria-label={t('tubEditor.scrollAria')}
             className="tub-editor-scroll-slider relative z-20 h-6 w-full appearance-none cursor-pointer bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
