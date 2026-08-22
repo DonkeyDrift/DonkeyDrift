@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-22 (156)
+
+- refactor(connector): CC 页删除整个「远程驾驶」板块——DriveApiBridge 回连地址全自动配置，无需手动项
+  - 背景：用户确认回连地址应自动配置（前端默认值本就取自浏览器访问地址、localhost 自动换本机网卡 IP），输入框无存在必要；删掉输入框后整个远程驾驶板块也随之删除。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：删除远程驾驶整卡（bridge URL 输入框、车辆在线状态、PID 显示、启动/停止驾驶、打开驾驶控制台按钮）及连带代码——`startConnectorDrive`/`stopConnectorDrive`/`getConnectorDriveStatus`/`getDriveCarWebSocketUrl`/`getConnectorLocalIps` 引用、`useDriveWebsocket`、`useNavigate`、`bridgeServerUrl`/`drivePid` state、bridge URL 自动修正 effect、`refreshDriveStatus`；`useConnectorJob` 改为无参调用（拉取/推送任务仍在用）。后端 `/connector/drive/*` 接口与 donkeycar 侧 `DRIVE_API_SERVER_URL` 自动注入逻辑保留不动，仅 CC 前端不再提供入口。
+  - 布局：右栏清空后移除两列 grid，剩余三卡（连接配置、拉取 Tub、推送 Pilots）整栏纵向堆叠，`CarSettingsPanel` 位置不变。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
 ## 2026-08-22 (155)
 
 - refactor(connector): CC 页删除「任务进度与日志」板块与远程驾驶「模型类型/Pilot」下拉（与 Drive 页重复）
