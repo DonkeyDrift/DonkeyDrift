@@ -2,14 +2,13 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardHeader, CardContent } from '../components/ui/Card';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 import { Button } from '../components/ui/Button';
-import { Car, Download, ScrollText, Settings, Upload } from 'lucide-react';
+import { Car, Download, Settings, Upload } from 'lucide-react';
 import { Input } from '../components/ui/Input';
 import {
   getConnectorConfig,
   setConnectorConfig,
   checkConnectorStatus,
   listConnectorTubs,
-  listConnectorModels,
   pullConnectorTub,
   pushConnectorPilots,
   startConnectorDrive,
@@ -37,17 +36,6 @@ const FORMAT_OPTIONS: { key: FormatOption; label: string }[] = [
   { key: 'trt', label: 'TensorRT' },
 ];
 
-const MODEL_TYPES = [
-  'tflite_linear',
-  'linear',
-  'categorical',
-  'rnn_lstm',
-  'imu',
-  '3dconv',
-  'latent',
-  'transformer',
-];
-
 export const CarConnectorPage: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -71,11 +59,8 @@ export const CarConnectorPage: React.FC = () => {
 
   // 远端列表
   const [tubs, setTubs] = useState<string[]>([]);
-  const [remoteModels, setRemoteModels] = useState<string[]>([]);
   const [selectedTub, setSelectedTub] = useState('');
   const [createNewDir, setCreateNewDir] = useState(false);
-  const [selectedPilot, setSelectedPilot] = useState('');
-  const [modelType, setModelType] = useState('tflite_linear');
   const [bridgeServerUrl, setBridgeServerUrl] = useState(() => getDriveCarWebSocketUrl());
   const [drivePid, setDrivePid] = useState<number | null>(null);
   const [selectedFormats, setSelectedFormats] = useState<Set<FormatOption>>(new Set(['tflite']));
@@ -125,14 +110,7 @@ export const CarConnectorPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const {
-    jobStatus,
-    jobProgress,
-    jobLogs,
-    isJobRunning,
-    startJob,
-    cancelJob,
-  } = useConnectorJob({
+  const { isJobRunning, startJob } = useConnectorJob({
     onDrivePid: setDrivePid,
     onFinished: refreshDriveStatus,
   });
@@ -165,12 +143,8 @@ export const CarConnectorPage: React.FC = () => {
   // 加载远端列表
   const loadRemoteLists = useCallback(async () => {
     try {
-      const [tubResult, modelResult] = await Promise.all([
-        listConnectorTubs(),
-        listConnectorModels(),
-      ]);
+      const tubResult = await listConnectorTubs();
       setTubs(tubResult.items);
-      setRemoteModels(modelResult.items);
     } catch (error) {
       setStatusMessage(getApiErrorMessage(error, t('connector.remoteListLoadFailed')));
     }
@@ -227,16 +201,14 @@ export const CarConnectorPage: React.FC = () => {
     startPushPilotsJob([]);
   }, [startPushPilotsJob]);
 
-  // 远程启动驾驶
+  // 远程启动驾驶（模型选择由 Drive 页面的 ModelSelector 负责，这里只负责启停）
   const handleDriveStart = useCallback(() => {
     startJob(() =>
       startConnectorDrive({
-        model_type: selectedPilot ? modelType : undefined,
-        pilot: selectedPilot || undefined,
         bridge_server_url: bridgeServerUrl.trim() || undefined,
       }),
     );
-  }, [selectedPilot, modelType, bridgeServerUrl, startJob]);
+  }, [bridgeServerUrl, startJob]);
 
   // 远程停止驾驶
   const handleDriveStop = useCallback(() => {
@@ -435,37 +407,6 @@ export const CarConnectorPage: React.FC = () => {
               />
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.modelTypeLabel')}</label>
-                  <select
-                    className="w-full h-10 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    value={modelType}
-                    onChange={(e) => setModelType(e.target.value)}
-                  >
-                    {MODEL_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-zinc-400 mb-1">{t('connector.selectPilotLabel')}</label>
-                  <select
-                    className="w-full h-10 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    value={selectedPilot}
-                    onChange={(e) => setSelectedPilot(e.target.value)}
-                  >
-                    <option value="">{t('connector.noPilot')}</option>
-                    {remoteModels.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">{t('connector.bridgeUrlLabel')}</label>
                 <Input
@@ -510,48 +451,6 @@ export const CarConnectorPage: React.FC = () => {
                 >
                   {t('connector.openDriveConsole')}
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 任务进度与日志 */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <SectionCardTitle
-                  icon={<ScrollText className="w-5 h-5" />}
-                  title={isJobRunning ? t('connector.jobRunning') : t('connector.jobLog')}
-                  subtitle={t('connector.jobLogSubtitle')}
-                />
-                {isJobRunning && (
-                  <Button onClick={cancelJob} variant="danger" size="sm">
-                    {t('connector.cancel')}
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {isJobRunning && (
-                <div className="w-full bg-zinc-800 rounded-full h-2">
-                  <div
-                    className="bg-cyan-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${jobProgress}%` }}
-                  />
-                </div>
-              )}
-              {jobStatus?.status === 'completed' && (
-                <div className="text-green-400 text-sm">{t('connector.jobCompleted')}</div>
-              )}
-              {jobStatus?.status === 'failed' && (
-                <div className="text-red-400 text-sm">{t('connector.jobFailed', { error: jobStatus.error ?? '' })}</div>
-              )}
-              <div className="max-h-64 overflow-y-auto space-y-0.5 font-mono text-xs text-zinc-400 bg-zinc-950 rounded p-3">
-                {jobLogs.length === 0 && (
-                  <div className="text-zinc-600">{t('connector.noLogs')}</div>
-                )}
-                {jobLogs.map((log, i) => (
-                  <div key={i} className="break-all">{log}</div>
-                ))}
               </div>
             </CardContent>
           </Card>

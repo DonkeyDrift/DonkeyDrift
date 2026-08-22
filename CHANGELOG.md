@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-22 (155)
+
+- refactor(connector): CC 页删除「任务进度与日志」板块与远程驾驶「模型类型/Pilot」下拉（与 Drive 页重复）
+  - 背景：用户精简 Car Connector 页面——任务日志板块从来用不上；远程驾驶卡里的模型类型与 Pilot 两个下拉在 Drive 页面已有同等功能（`ModelSelector` 组件 + `loadModelToCar`），属重复入口。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：
+    - 删除「任务进度与日志」整卡（进度条、完成/失败提示、日志滚动区、取消按钮）；`useConnectorJob` hook 保留（拉取/推送/启停任务仍靠它执行），仅解构精简为 `isJobRunning`/`startJob`，删除 `ScrollText` 图标引用。
+    - 删除远程驾驶卡「模型类型」「选择 Pilot」双下拉及连带死代码：`MODEL_TYPES` 常量、`modelType`/`selectedPilot`/`remoteModels` state、`listConnectorModels` 调用（`loadRemoteLists` 改为只拉 tub 列表）；`handleDriveStart` 简化为只发 `bridge_server_url`（后端 `startConnectorDrive` 的 `model_type`/`pilot` 本为可选参数，无后端改动）。
+    - i18n 键（`connector.modelTypeLabel`/`selectPilotLabel`/`jobLog` 等）保留不删，避免影响其它引用与 i18n 测试。
+  - 重复功能审查结论（其余板块均保留）：连接配置（车端 SSH host/user/port/car_dir/key，与 Trainer 页训练主机配置是另一用途）、拉取 Tub、推送 Pilots、远程驾驶启停 + bridge URL + 车辆设置（CarSettingsPanel）均为 CC 独有功能，其它页面无重复。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；改动文件 cp 到 dd-deploy 部署 worktree 重建 dist 部署 8000/8001。
+
 ## 2026-08-21 (154)
 
 - feat(tub-editor): 底部滑块改为帧位置滑块——始终激活、与录制库进度条同步、thumb 改椭圆白色
