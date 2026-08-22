@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-21 (153)
+
+- fix(tub-library): 点击播放不走的根因修复——播放循环启动时加初始预取，解除死锁
+  - 背景：用户在录制视频库点击播放按钮后，视频不播放、进度条不走。
+  - 根因：播放循环的 `step()` 在推进帧时检查下一帧图片是否已加载（`imageCacheRef.current.get(url)?.complete`），未加载则 `requestAnimationFrame(step); return;` 不推进帧。但预取（`prefetchFromIndex`）只在帧成功推进后才调用（每 6 帧一次），导致帧 1 图片永远不会被加载——预取等帧推进、帧推进等预取，形成死锁。
+  - 修复：`web_ui/frontend/src/components/TubLibrary.tsx` 播放循环启动 effect 中，在 RAF 循环开始前调用 `prefetchFromIndex(frameRef.current)` 做初始预取（60 帧窗口），让前 60 帧图片在播放循环需要它们之前就开始加载。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。TubLibrary 测试不覆盖播放逻辑，本次为时序 bug 修复，无需新增测试。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (152)
 
 - revert(tub-manager): 回退一屏并排布局改动（143/148/149），恢复原始纵向滚动布局

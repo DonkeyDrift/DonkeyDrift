@@ -392,6 +392,10 @@ export const TubLibrary: React.FC = () => {
   useEffect(() => {
     if (!isPlaying || !records.length) return;
 
+    // 播放启动时立即预取前 PREFETCH_AHEAD 帧——否则播放循环在帧 1 图片未加载时
+    // 死循环不推进（预取只在帧推进后才触发，形成死锁）。
+    prefetchFromIndex(frameRef.current);
+
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
 
