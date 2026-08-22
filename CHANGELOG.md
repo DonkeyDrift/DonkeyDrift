@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-08-22 (159)
+
+- refactor(connector): CC 页删除「车辆设置」外层卡片框与标题——内容直接平铺，避免与内嵌车端视图的「车辆设置」标题重复
+  - 背景：CC 页面精简后整页只剩车辆设置，外层 Card + 标题（扳手图标 +「车辆设置」+ 副标题）与内嵌 iframe 里车端的「车辆设置」标题重复，用户要求删掉外层标题和大框。
+  - 改动（`web_ui/frontend/src/components/CarSettingsPanel.tsx`）：移除 `Card`/`CardHeader`/`CardContent`/`SectionCardTitle`/`Wrench` 包装，根节点改为普通 `div.space-y-3`；内容（车辆选择下拉 + 重新扫描按钮 + `?embedded=1&settings=1&wifi=1` 内嵌视图）不变。
+  - 依赖说明：本次改动基于本会话早先的 wifi 配网板块版本（`Tony-issue234-wifi-panel` 分支 commit `ed8d77bb` 的 CarSettingsPanel.tsx 文件版本，经 `git checkout ed8d77bb -- <file>` 取入本分支），与线上 dd-deploy 部署的未提交版本对齐。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
 ## 2026-08-22 (158)
 
 - refactor(connector): CC 页删除「连接配置」「推送 Pilots」板块——页面精简为纯车辆设置中心
