@@ -795,18 +795,6 @@ export const TubEditor: React.FC = () => {
         };
       }
 
-      // 两次点击选择：锚点已设置时，鼠标移动实时更新预览选区
-      if (selectionAnchorIndexRef.current != null) {
-        const anchor = selectionAnchorIndexRef.current;
-        const nextDraft = {
-          startX: 0, // 仅用于兼容 selectionDraft 类型，预览用 index 计算
-          currentX: clampedX,
-          startIndex: anchor,
-          currentIndex: clampedIndex,
-        };
-        selectionDraftRef.current = nextDraft;
-        setSelectionDraft(nextDraft);
-      }
     },
     [getIndexFromPointerX, requestChartRender, updateTooltipPosition]
   );
@@ -1516,7 +1504,6 @@ export const TubEditor: React.FC = () => {
   const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
       if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
-      if (!selectionDraftRef.current) return;
       if (event.touches.length === 0) return;
 
       const touch = event.touches[0];
@@ -1529,19 +1516,6 @@ export const TubEditor: React.FC = () => {
 
       const clampedX = Math.max(chartArea.left, Math.min(x, chartArea.right));
       const clampedIndex = getIndexFromPointerX(clampedX, chart);
-
-      // 两次点击选择：锚点已设置时，触摸移动实时更新预览选区
-      if (selectionAnchorIndexRef.current != null) {
-        const anchor = selectionAnchorIndexRef.current;
-        const nextDraft = {
-          startX: 0,
-          currentX: clampedX,
-          startIndex: anchor,
-          currentIndex: clampedIndex,
-        };
-        selectionDraftRef.current = nextDraft;
-        setSelectionDraft(nextDraft);
-      }
 
       const currentRecords = recordsRef.current;
       const record = currentRecords[clampedIndex];
