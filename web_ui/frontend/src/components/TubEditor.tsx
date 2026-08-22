@@ -88,6 +88,8 @@ export const TubEditor: React.FC = () => {
   const sliderRef = useRef<HTMLInputElement>(null);
   const sliderRafRef = useRef<number | null>(null);
   const sliderPendingValueRef = useRef<number | null>(null);
+  // 两次点击选择：记录第一次点击的帧下标（锚点），null 表示未设置
+  const selectionAnchorIndexRef = useRef<number | null>(null);
   const [tooltipData, setTooltipData] = useState<{ x: number; y: number; steering: number; throttle: number; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectionDraft, setSelectionDraft] = useState<{
@@ -793,10 +795,13 @@ export const TubEditor: React.FC = () => {
         };
       }
 
-      if (selectionDraftRef.current) {
+      // 两次点击选择：锚点已设置时，鼠标移动实时更新预览选区
+      if (selectionAnchorIndexRef.current != null) {
+        const anchor = selectionAnchorIndexRef.current;
         const nextDraft = {
-          ...selectionDraftRef.current,
+          startX: 0, // 仅用于兼容 selectionDraft 类型，预览用 index 计算
           currentX: clampedX,
+          startIndex: anchor,
           currentIndex: clampedIndex,
         };
         selectionDraftRef.current = nextDraft;
@@ -817,36 +822,6 @@ export const TubEditor: React.FC = () => {
     requestChartRender();
   }, [requestChartRender]);
 
-  const handleInteraction = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (!chartRef.current || !containerRef.current || !records.length) return;
-
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-
-    const chart = chartRef.current;
-    const chartArea = chart.chartArea;
-
-    if (x < chartArea.left || x > chartArea.right) return;
-    const clampedIndex = getIndexFromPointerX(x, chart);
-
-    // Update hover position so the red line can follow the mouse exactly
-    hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
-    requestChartRender();
-
-    setCurrentIndex(clampedIndex);
-
-    if (selectionDraftRef.current) {
-      const nextDraft = {
-        ...selectionDraftRef.current,
-        currentX: x,
-        currentIndex: clampedIndex,
-      };
-      selectionDraftRef.current = nextDraft;
-      setSelectionDraft(nextDraft);
-    }
-  }, [getIndexFromPointerX, records, setCurrentIndex, requestChartRender]);
-
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!chartRef.current || !containerRef.current || !records.length) return;
@@ -861,17 +836,7 @@ export const TubEditor: React.FC = () => {
 
       if (x < chartArea.left || x > chartArea.right) return;
 
-      isSelectingRef.current = true;
       const clampedIndex = getIndexFromPointerX(x, chart);
-
-      const draft = {
-        startX: x,
-        currentX: x,
-        startIndex: clampedIndex,
-        currentIndex: clampedIndex,
-      };
-      selectionDraftRef.current = draft;
-      setSelectionDraft(draft);
 
       // Update hover position so the red line can follow the mouse exactly
       hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
@@ -884,35 +849,52 @@ export const TubEditor: React.FC = () => {
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (selectionDraftRef.current) return;
-      handleInteraction(event);
+      if (!chartRef.current || !containerRef.current || !records.length) return;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+
+      const chart = chartRef.current;
+      const chartArea = chart.chartArea;
+
+      if (x < chartArea.left || x > chartArea.right) return;
+      const clampedIndex = getIndexFromPointerX(x, chart);
+
+      // Update hover position so the red line can follow the mouse exactly
+      hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
+      requestChartRender();
+
+      setCurrentIndex(clampedIndex);
+
+      if (selectionAnchorIndexRef.current == null) {
+        // 第一次点击：记录锚点，同时清除旧选区
+        selectionAnchorIndexRef.current = clampedIndex;
+        clearSelectionRange();
+        visualSelectionRef.current = null;
+      } else {
+        // 第二次及以后点击：选中锚点到当前点的范围，锚点更新为当前点
+        const anchor = selectionAnchorIndexRef.current;
+        const startIndex = Math.min(anchor, clampedIndex);
+        const endIndex = Math.max(anchor, clampedIndex) + 1;
+        visualSelectionRef.current = { startIndex, endIndex };
+        setSelectionRange(startIndex, endIndex);
+        selectionAnchorIndexRef.current = clampedIndex;
+      }
+
+      // 清除拖动预览
+      selectionDraftRef.current = null;
+      setSelectionDraft(null);
     },
-    [handleInteraction]
+    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender, setSelectionRange, clearSelectionRange]
   );
 
   const handleMouseUp = useCallback(
     () => {
       isSelectingRef.current = false;
-      const draft = selectionDraftRef.current;
-      if (!draft || !records.length) {
-        selectionDraftRef.current = null;
-        setSelectionDraft(null);
-        return;
-      }
-
-      const startIndex = Math.min(draft.startIndex, draft.currentIndex);
-      const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
-
-      const pixelDelta = Math.abs(draft.currentX - draft.startX);
-      const finalStart = startIndex;
-      const finalEnd = pixelDelta < 3 ? startIndex + 1 : endIndex;
-
-      visualSelectionRef.current = { startIndex: finalStart, endIndex: finalEnd };
-      setSelectionRange(finalStart, finalEnd);
-      selectionDraftRef.current = null;
-      setSelectionDraft(null);
+      // 拖动选择已移除，mouseup 只清理 isSelecting 标记
     },
-    [setSelectionRange, records.length]
+    []
   );
 
   const isEditableTarget = (target: EventTarget | null) => {
@@ -937,6 +919,7 @@ export const TubEditor: React.FC = () => {
       if (event.key === 'Escape') {
         event.preventDefault();
         clearSelectionRange();
+        selectionAnchorIndexRef.current = null;
         selectionDraftRef.current = null;
         setSelectionDraft(null);
         return;
@@ -1517,19 +1500,9 @@ export const TubEditor: React.FC = () => {
 
       if (x < chartArea.left || x > chartArea.right) return;
 
-      isSelectingRef.current = true;
       const clampedIndex = getIndexFromPointerX(x, chart);
 
-      const draft = {
-        startX: x,
-        currentX: x,
-        startIndex: clampedIndex,
-        currentIndex: clampedIndex,
-      };
-      selectionDraftRef.current = draft;
-      setSelectionDraft(draft);
-
-      // Update hover position so the red line can follow the mouse exactly
+      // Update hover position so the red line can follow the touch exactly
       hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
       requestChartRender();
 
@@ -1557,10 +1530,13 @@ export const TubEditor: React.FC = () => {
       const clampedX = Math.max(chartArea.left, Math.min(x, chartArea.right));
       const clampedIndex = getIndexFromPointerX(clampedX, chart);
 
-      if (selectionDraftRef.current) {
+      // 两次点击选择：锚点已设置时，触摸移动实时更新预览选区
+      if (selectionAnchorIndexRef.current != null) {
+        const anchor = selectionAnchorIndexRef.current;
         const nextDraft = {
-          ...selectionDraftRef.current,
+          startX: 0,
           currentX: clampedX,
+          startIndex: anchor,
           currentIndex: clampedIndex,
         };
         selectionDraftRef.current = nextDraft;
@@ -1609,23 +1585,12 @@ export const TubEditor: React.FC = () => {
   const handleTouchEnd = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
       isSelectingRef.current = false;
-      const draft = selectionDraftRef.current;
-      if (!draft || !records.length) {
-        selectionDraftRef.current = null;
-        setSelectionDraft(null);
-        return;
-      }
-      
-      const startIndex = Math.min(draft.startIndex, draft.currentIndex);
-      const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
-
-      visualSelectionRef.current = { startIndex, endIndex };
-      setSelectionRange(startIndex, endIndex);
+      // 触摸轻触（tap）等效于点击——选择逻辑由 touchstart 中 preventDefault 后的 click 事件处理
+      // 这里只清理预览状态
       selectionDraftRef.current = null;
       setSelectionDraft(null);
-      event.preventDefault();
     },
-    [setSelectionRange, records.length]
+    []
   );
 
   const chartCardClassName = 'relative flex min-h-[clamp(20rem,48vh,34rem)] flex-col';
