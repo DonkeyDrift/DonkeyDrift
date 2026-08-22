@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-22 (159)
+
+- fix(launcher): 启动中转页标签标题由 "Donkey" 改为 "Donkey Drifter"——新标签页一开即显示最终名称
+  - 背景：Launcher 菜单 6 号「Donkey Drifter」点击后，新标签页先打开启动中转页 `LAUNCH_DRIVE_HTML`（转圈 + 轮询 + 跳转 DD），其 `<title>` 为 "Donkey"，跳转后才由 DD 前端 `DonkeyDrifter` 标题接管——标签页先显示 "Donkey" 过一会才变。
+  - 修复（`donkeycar/launcher/server.py`，1 行）：`LAUNCH_DRIVE_HTML` 的 `<title>Donkey</title>` 改为 `<title>Donkey Drifter</title>`，与菜单项名称一致；`MENU_HTML`（Launcher 菜单页自身标题）不在诉求范围，未动。
+  - 测试同步：`pytest tests/test_launcher_language_autodetect.py tests/test_launcher_menu_actions.py` 38 项全绿；无测试断言该 `<title>`，无需改测试。
+  - 注：仅 Launcher 后端页面改动，Firmware 无改动、无需 OTA；全程纯本地，未碰 GitHub。
+
 ## 2026-08-22 (158)
 
 - fix(tub-editor): 两次点击选择——锚点改模块级变量并在 mousedown 处理，修复选区恒为最左最右

@@ -1264,7 +1264,7 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<title>Donkey</title>
+<title>Donkey Drifter</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
 .box{text-align:center}
