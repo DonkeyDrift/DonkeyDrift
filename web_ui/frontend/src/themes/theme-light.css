@@ -453,37 +453,7 @@ html.theme-light .shadow-2xl {
   --tw-shadow-colored: 0 25px 50px -12px var(--tw-shadow-color);
 }
 
-/* ---------- Custom scroll slider (index.css, cyan hardcoded) ---------- */
-html.theme-light .tub-editor-scroll-slider::-webkit-slider-thumb {
-  border-color: #0c9bd6;
-  background: rgba(12, 155, 214, 0.45);
-}
-html.theme-light .tub-editor-scroll-slider:hover::-webkit-slider-thumb {
-  background: rgba(12, 155, 214, 0.65);
-  box-shadow: 0 0 0 4px rgba(12, 155, 214, 0.16), 0 0 12px rgba(12, 155, 214, 0.3);
-}
-html.theme-light .tub-editor-scroll-slider:active::-webkit-slider-thumb {
-  background: rgba(12, 155, 214, 0.9);
-  box-shadow: 0 0 0 5px rgba(12, 155, 214, 0.2), 0 0 16px rgba(12, 155, 214, 0.4);
-}
-html.theme-light .tub-editor-scroll-slider:disabled::-webkit-slider-thumb {
-  background: rgba(12, 155, 214, 0.25);
-}
-html.theme-light .tub-editor-scroll-slider::-moz-range-thumb {
-  border-color: #0c9bd6;
-  background: rgba(12, 155, 214, 0.45);
-}
-html.theme-light .tub-editor-scroll-slider:hover::-moz-range-thumb {
-  background: rgba(12, 155, 214, 0.65);
-  box-shadow: 0 0 0 4px rgba(12, 155, 214, 0.16), 0 0 12px rgba(12, 155, 214, 0.3);
-}
-html.theme-light .tub-editor-scroll-slider:active::-moz-range-thumb {
-  background: rgba(12, 155, 214, 0.9);
-  box-shadow: 0 0 0 5px rgba(12, 155, 214, 0.2), 0 0 16px rgba(12, 155, 214, 0.4);
-}
-html.theme-light .tub-editor-scroll-slider:disabled::-moz-range-thumb {
-  background: rgba(12, 155, 214, 0.25);
-}
+/* ---------- Custom scroll slider: thumb styled in index.css (white elliptical) ---------- */
 
 /* ======================================================================
  * Component-level refinements (signatures tied to specific components;

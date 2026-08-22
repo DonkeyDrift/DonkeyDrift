@@ -449,37 +449,7 @@ html.theme-mus4 .shadow-2xl {
   --tw-shadow-colored: 0 25px 50px -12px var(--tw-shadow-color);
 }
 
-/* ---------- Custom scroll slider (index.css, cyan hardcoded) ---------- */
-html.theme-mus4 .tub-editor-scroll-slider::-webkit-slider-thumb {
-  border-color: #3fa9e6;
-  background: rgba(92, 200, 255, 0.55);
-}
-html.theme-mus4 .tub-editor-scroll-slider:hover::-webkit-slider-thumb {
-  background: rgba(92, 200, 255, 0.8);
-  box-shadow: 0 0 0 4px rgba(92, 200, 255, 0.18), 0 0 12px rgba(92, 200, 255, 0.35);
-}
-html.theme-mus4 .tub-editor-scroll-slider:active::-webkit-slider-thumb {
-  background: rgba(92, 200, 255, 1);
-  box-shadow: 0 0 0 5px rgba(92, 200, 255, 0.24), 0 0 16px rgba(92, 200, 255, 0.45);
-}
-html.theme-mus4 .tub-editor-scroll-slider:disabled::-webkit-slider-thumb {
-  background: rgba(92, 200, 255, 0.3);
-}
-html.theme-mus4 .tub-editor-scroll-slider::-moz-range-thumb {
-  border-color: #3fa9e6;
-  background: rgba(92, 200, 255, 0.55);
-}
-html.theme-mus4 .tub-editor-scroll-slider:hover::-moz-range-thumb {
-  background: rgba(92, 200, 255, 0.8);
-  box-shadow: 0 0 0 4px rgba(92, 200, 255, 0.18), 0 0 12px rgba(92, 200, 255, 0.35);
-}
-html.theme-mus4 .tub-editor-scroll-slider:active::-moz-range-thumb {
-  background: rgba(92, 200, 255, 1);
-  box-shadow: 0 0 0 5px rgba(92, 200, 255, 0.24), 0 0 16px rgba(92, 200, 255, 0.45);
-}
-html.theme-mus4 .tub-editor-scroll-slider:disabled::-moz-range-thumb {
-  background: rgba(92, 200, 255, 0.3);
-}
+/* ---------- Custom scroll slider: thumb styled in index.css (white elliptical) ---------- */
 
 /* ======================================================================
  * Component-level refinements (signatures tied to specific components;

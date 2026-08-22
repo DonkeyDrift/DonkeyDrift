@@ -541,7 +541,7 @@ export const TubEditor: React.FC = () => {
   }, [records.length, zoomPercent]);
 
   useEffect(() => {
-    if (!isPlaying || !records.length || zoomPercent === MIN_ZOOM_PERCENT) {
+    if (!records.length || zoomPercent === MIN_ZOOM_PERCENT) {
       return;
     }
 
@@ -649,11 +649,6 @@ export const TubEditor: React.FC = () => {
     },
     []
   );
-
-  const handleScrollSliderChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const nextProgress = Number(event.target.value) / 1000;
-    setScrollProgress(Math.max(0, Math.min(1, nextProgress)));
-  }, []);
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
     if (!records.length) return;
@@ -1860,11 +1855,11 @@ export const TubEditor: React.FC = () => {
           <input
             type="range"
             min="0"
-            max="1000"
+            max={Math.max(0, records.length - 1)}
             step="1"
-            value={Math.round(scrollProgress * 1000)}
-            onChange={handleScrollSliderChange}
-            disabled={zoomPercent === MIN_ZOOM_PERCENT || records.length <= visibleRange.visibleCount}
+            value={currentIndex}
+            onChange={(e) => setCurrentIndex(parseInt(e.target.value))}
+            disabled={!records.length}
             aria-label={t('tubEditor.scrollAria')}
             className="tub-editor-scroll-slider relative z-20 h-4 w-full appearance-none cursor-pointer bg-transparent accent-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
           />

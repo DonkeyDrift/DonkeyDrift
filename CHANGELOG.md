@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-21 (154)
+
+- feat(tub-editor): 底部滑块改为帧位置滑块——始终激活、与录制库进度条同步、thumb 改椭圆白色
+  - 背景：TubEditor 底部滑块此前是缩放滚动条（`scrollProgress` 0~1），仅在图表放大时可用，用户无法用它快速定位帧；且 thumb 是圆形青色，与 Drive 页的椭圆白色不一致。
+  - 修复：
+    - `web_ui/frontend/src/components/TubEditor.tsx`：底部滑块从 `scrollProgress`（缩放滚动）改为 `currentIndex`（全局帧位置），`min=0 max=records.length-1 value=currentIndex onChange=setCurrentIndex`，`disabled` 条件从「未缩放时禁用」改为「无记录时禁用」——始终激活，拖动即定位帧；自动滚动 effect 从 `!isPlaying` 条件移除——非播放时拖滑块也自动滚动图表保持当前帧可见。删除不再使用的 `handleScrollSliderChange`。
+    - 同步：滑块拖动 → `setCurrentIndex` → TubEditor 竖线移动 + TubLibrary 订阅 store 反向同步 `frame` → 顶部进度条跟随。双向同步已有机制（TubLibrary L302 store→frame、L314 frame→store），无需新代码。
+    - `web_ui/frontend/src/index.css`：thumb 从 `width:16px height:16px` 圆形青色改为 `width:24px height:16px` 椭圆白色，与 Drive 页 ParameterPanel 滑块一致。
+    - `web_ui/frontend/src/themes/theme-mus4.css`、`theme-light.css`：删除主题级 thumb 覆盖（基础样式已统一为白色椭圆）。
+  - 测试同步：`tsc -b --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过。TubEditor 无单测（canvas/chart.js 组件），纯交互+样式改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾后重建 dist 并部署 8000。
+
 ## 2026-08-21 (153)
 
 - fix(tub-library): 点击播放不走的根因修复——播放循环启动时加初始预取，解除死锁
