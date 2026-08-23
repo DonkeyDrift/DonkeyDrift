@@ -1,5 +1,22 @@
 # 变更日志
 
+## 2026-08-23 (164)
+
+- feat(drive): Drive 页新增「模拟器采集」卡片——浏览器一键经后端 SSH 控制 Mac 上的 donkey_sim 跑采集，实时进度/cte/速度，完成后展示结果摘要
+  - 背景：8-23 已把"Linux 经 SSH 控制 Mac 上的 DonkeySim 采集数据"跑通为命令行管线（`mycar/collect_sim_mac.sh` + `mycar/collect_sim_data.py` 远程模式，1500 帧实锤）。本次将其包成 DD Web UI 功能，用户在浏览器 Drive 页点「开始采集」即自动完成 SSH 启停 Mac sim + 采集 + 数据落盘，无需命令行。
+  - 后端：
+    - `web_ui/backend/simcollect_engine.py`（新增）：`SimCollectJob` + 单例 `SimCollectJobManager`，仿 `connector_engine`；以 `asyncio.create_subprocess_exec("bash", collect_sim_mac.sh, env, start_new_session=True)` 启动编排脚本，逐行解析 `[collect] step i: ... cte=.. speed=..` → progress、`RESULT steps=.. mean_cte=.. max_cte=.. crashed=.. out=..` → done 结果、`[mac-collect] 错误: ..`/非零退出 → error；stop 用 `os.killpg(SIGTERM→SIGKILL)` 终止整组（让脚本 EXIT trap 完成 Mac 侧 sim/隧道清理）；同时只允许一个 running job。解析函数抽为模块级纯函数（parse_step_line/parse_result_line/parse_error_line）便于单测。
+    - `web_ui/backend/routers/simcollect.py`（新增）：`POST /api/simcollect/start`（steps/kp/kd/throttle/min_throttle/keep_sim，已有任务在跑 409）、`GET /api/simcollect/{job_id}/status`、`POST /api/simcollect/{job_id}/stop`、`GET /api/simcollect/{job_id}/events`（SSE，含 15s keep-alive 心跳）。
+    - `web_ui/backend/main.py`：挂载 simcollect router（`/api/simcollect`）。
+  - 前端：
+    - `web_ui/frontend/src/services/api.ts`：新增 `SimCollectStartParams`/`SimCollectJobState`/`SimCollectResult`/`SimCollectStatus` 类型与 `startSimCollect`/`getSimCollectStatus`/`stopSimCollect`/`createSimCollectEventStream` 四函数。
+    - `web_ui/frontend/src/hooks/useSimCollectJob.ts`（新增）：自包含 local state，SSE 优先推送 progress/log/status，SSE 断开且未到终态自动降级 2s 轮询 status 兜底；409 → 已有任务在跑提示。
+    - `web_ui/frontend/src/components/drive/SimCollectCard.tsx`（新增）：卡片 UI——标题/说明、步数输入、可折叠高级参数（KP/KD/油门/最低油门）、开始/停止按钮、运行中进度条+实时 cte/速度、完成结果摘要（步数/mean|cte|/max|cte|/是否冲出/输出目录）、出错信息+可展开日志；全文案走 i18n。
+    - `web_ui/frontend/src/pages/DrivePage.tsx`：根容器主 flex 行后插入 `<SimCollectCard />` 全宽卡片（最小侵入，未重排其它结构）。
+    - `web_ui/frontend/src/i18n/messages/drive.ts`：新增 `drive.simCollect*` 词条 25 条（zh/en 双份）。
+  - 测试同步：`web_ui/backend/tests/test_simcollect.py` 12 项（行解析纯函数 + start/status/stop/conflict 404/错误退出，子进程级 FakeProcess mock）；后端 `pytest tests/` 118 项全绿。前端 `SimCollectCard.test.tsx` 5 项（mock `useSimCollectJob` 控制 idle/running/done/error 状态断言文案与参数）；前端 `vitest run` 25 文件 138 项、`tsc -b`、`npm run build` 全绿。端到端实测：worktree 后端（8123）跑 `POST /simcollect/start {steps:20}` → SSH 启 Mac sim → 采 20 步 → status=done、result 正确解析、数据落 `mycar/sim_collect_20260823_141731`。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。采集编排脚本与采集脚本（`mycar/collect_sim_mac.sh`、`mycar/collect_sim_data.py`）为本机工作目录文件、非 git 仓库，不在本次 commit 范围（已在前序 mycar 工作中就绪）。全程纯本地，未碰 GitHub。
+
 ## 2026-08-23 (163)
 
 - fix(trainer): 修复 macOS 远端训练 loss 发散——createcar 模板 mixed_float16 加 macOS 门控 + createcar 成功后远程 sed 补丁立即生效；顺带修 train() comment 位置参数错落 bug
