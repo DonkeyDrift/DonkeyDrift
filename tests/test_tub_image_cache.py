@@ -10,7 +10,6 @@
 3. 响应带 Cache-Control，让浏览器 disk cache 参与重复播放；
 4. 缓存总量超过预算时按 LRU 淘汰最旧条目。
 """
-import asyncio
 import builtins
 import sys
 from pathlib import Path
@@ -32,7 +31,8 @@ def _make_tub(tmp_path: Path, name: str = "tub") -> Path:
 
 
 def _get_image(**kwargs):
-    return asyncio.run(tub.get_image(**kwargs))
+    # get_image 已改为同步路由（线程池执行），直接调用即可
+    return tub.get_image(**kwargs)
 
 
 def _make_request(headers: dict) -> Request:
