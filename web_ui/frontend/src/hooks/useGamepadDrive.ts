@@ -30,9 +30,8 @@ export const useGamepadDrive = ({
     return sign * ((Math.abs(v) - deadzone) / (1 - deadzone));
   }, [deadzone]);
 
+  // 连接检测常驻运行（不受 enabled 门控），否则切换菜单里手柄选项永远灰着
   useEffect(() => {
-    if (!enabled) return;
-
     const handleConnect = () => {
       setConnected(true);
     };
@@ -45,6 +44,14 @@ export const useGamepadDrive = ({
 
     window.addEventListener('gamepadconnected', handleConnect);
     window.addEventListener('gamepaddisconnected', handleDisconnect);
+    return () => {
+      window.removeEventListener('gamepadconnected', handleConnect);
+      window.removeEventListener('gamepaddisconnected', handleDisconnect);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
 
     const poll = () => {
       const gamepads = navigator.getGamepads();
@@ -74,8 +81,6 @@ export const useGamepadDrive = ({
     rafRef.current = requestAnimationFrame(poll);
 
     return () => {
-      window.removeEventListener('gamepadconnected', handleConnect);
-      window.removeEventListener('gamepaddisconnected', handleDisconnect);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [enabled, applyDeadzone, maxThrottle]);

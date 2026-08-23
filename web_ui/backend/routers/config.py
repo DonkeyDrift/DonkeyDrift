@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import json
 import os
 from donkeycar import load_config
 from donkeycar._version import __version__
@@ -80,6 +81,96 @@ async def select_directory():
         logger.error(f"Failed to select directory: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# 自动发现 mycar 项目时跳过的目录名（隐藏目录另行按前缀排除）
+PROJECT_SCAN_SKIP_DIRS = {'node_modules', 'venv', '.venv', '__pycache__', 'site-packages'}
+
+# 从扫描根算起向下最多再探几层（root/Projects/mycar 为 2 层）
+PROJECT_SCAN_MAX_DEPTH = 2
+
+
+def find_car_projects(root, max_depth=PROJECT_SCAN_MAX_DEPTH):
+    """广度优先扫描 root 下含 config.py 与 manage.py 的 mycar 项目目录。
+
+    命中的目录不再继续下钻；隐藏目录与 node_modules 等跳过。
+    """
+    projects = []
+    root = os.path.abspath(os.path.expanduser(root))
+    current = [root]
+    for _ in range(max_depth + 1):
+        next_level = []
+        for dir_path in current:
+            if os.path.isfile(os.path.join(dir_path, 'config.py')) and \
+                    os.path.isfile(os.path.join(dir_path, 'manage.py')):
+                projects.append(dir_path)
+                continue
+            try:
+                entries = os.listdir(dir_path)
+            except OSError:
+                continue
+            for name in entries:
+                if name.startswith('.') or name in PROJECT_SCAN_SKIP_DIRS:
+                    continue
+                sub = os.path.join(dir_path, name)
+                if os.path.isdir(sub):
+                    next_level.append(sub)
+        current = next_level
+        if not current:
+            break
+    projects.sort()
+    return projects
+
+
+# 记录“上次成功加载的 mycar 项目”的状态文件（跨浏览器/设备记忆，
+# 命名惯例参考 connector 的 ~/.donkeycar_web_connector.json）
+def _loader_state_path():
+    return os.path.join(os.path.expanduser("~"), ".donkeycar_web_loader.json")
+
+
+def _read_last_car_path():
+    try:
+        with open(_loader_state_path(), "r", encoding="utf-8") as f:
+            value = json.load(f).get("last_car_path")
+        return value if isinstance(value, str) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _write_last_car_path(path):
+    try:
+        with open(_loader_state_path(), "w", encoding="utf-8") as f:
+            json.dump({"last_car_path": path}, f)
+    except OSError as e:
+        logger.warning(f"Failed to persist last car path: {e}")
+
+
+@router.get("/discover_projects")
+async def discover_projects(root: str = None):
+    """扫描发现 mycar 项目（含 config.py 与 manage.py 的目录）。
+
+    默认从用户 home 目录扫描；last_project 为上次成功加载且仍然有效的
+    项目路径（供前端在多项目时自动选中上次用过的项目）。
+    """
+    scan_root = root if root else os.path.expanduser("~")
+    try:
+        projects = await run_in_threadpool(find_car_projects, scan_root)
+        last = _read_last_car_path()
+        if last and last not in projects and \
+                os.path.isfile(os.path.join(last, "config.py")) and \
+                os.path.isfile(os.path.join(last, "manage.py")):
+            # 上次项目在扫描根之外但仍有效，一并返回供前端参考
+            projects = sorted(projects + [last])
+        return {
+            "status": True,
+            "root": os.path.abspath(os.path.expanduser(scan_root)),
+            "projects": projects,
+            "count": len(projects),
+            "last_project": last,
+        }
+    except Exception as e:
+        logger.error(f"Failed to discover car projects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/browser")
 async def list_directories(path: str = None):
     """
@@ -121,7 +212,7 @@ async def load_config_route(request: ConfigLoadRequest):
     path = os.path.expanduser(request.path)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Directory not found")
-    
+
     config_path = os.path.join(path, 'config.py')
     if not os.path.exists(config_path):
         raise HTTPException(status_code=404, detail="config.py not found in directory")
@@ -134,6 +225,9 @@ async def load_config_route(request: ConfigLoadRequest):
                 val = getattr(cfg, key)
                 if isinstance(val, (str, int, float, bool, list, dict, tuple)) and not key.startswith('__'):
                     config_dict[key] = val
+
+        # 加载成功即记住该项目（供下次自动 Browse 上次项目）
+        _write_last_car_path(os.path.abspath(path))
 
         return {
             "status": True,

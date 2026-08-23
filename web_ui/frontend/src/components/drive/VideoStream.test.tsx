@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS, VideoStream } from './VideoStream';
+import { DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS, DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS, VideoStream } from './VideoStream';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 
 vi.mock('../../hooks/useDriveWebRtcVideo', () => ({
@@ -70,8 +70,8 @@ describe('VideoStream', () => {
     expect(screen.queryByText('P95 24ms')).not.toBeInTheDocument();
     expect(screen.queryByText('源 60')).not.toBeInTheDocument();
     expect(screen.queryByText('发 59')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('WebRTC camera feed')).toHaveClass('opacity-100');
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-0');
+    expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-100');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-0');
   });
 
   it('WebRTC 连接时通过 onLatencyChange 回传 P95 延迟', () => {
@@ -87,16 +87,16 @@ describe('VideoStream', () => {
 
     render(<VideoStream />);
 
-    expect(screen.getByLabelText('WebRTC camera feed')).toHaveClass('opacity-0');
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-100');
+    expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-0');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
     expect(screen.queryByText('非 60FPS 验收路径')).not.toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS - 1);
     });
 
-    expect(screen.getByLabelText('WebRTC camera feed')).toHaveClass('opacity-0');
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-100');
+    expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-0');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
     vi.useRealTimers();
   });
 
@@ -110,8 +110,8 @@ describe('VideoStream', () => {
       vi.advanceTimersByTime(DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS);
     });
 
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-100');
-    expect(screen.getByLabelText('WebRTC camera feed')).toHaveClass('opacity-0');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
+    expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-0');
     expect(screen.getByText('非 60FPS 验收路径')).toBeInTheDocument();
     vi.useRealTimers();
   });
@@ -124,21 +124,21 @@ describe('VideoStream', () => {
     act(() => {
       vi.advanceTimersByTime(DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS);
     });
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-100');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
 
     mockWebRtc.mockReturnValue(connectedState());
     rerender(<VideoStream />);
 
     // WebRTC 立即开始渐入
-    expect(screen.getByLabelText('WebRTC camera feed')).toHaveClass('opacity-100');
+    expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-100');
     // MJPEG 还在等待 500ms 延迟，等 WebRTC 完全显示后才开始淡出
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-100');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
     expect(screen.queryByText('非 60FPS 验收路径')).not.toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(500);
     });
-    expect(screen.getByAltText('Camera feed')).toHaveClass('opacity-0');
+    expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-0');
     vi.useRealTimers();
   });
 
@@ -147,8 +147,39 @@ describe('VideoStream', () => {
 
     expect(screen.getByText('MJPEG')).toBeInTheDocument();
     expect(screen.getByText('非 60FPS 验收路径')).toBeInTheDocument();
-    expect(screen.queryByLabelText('WebRTC camera feed')).not.toBeInTheDocument();
-    expect(screen.getByAltText('Camera feed')).toBeInTheDocument();
+    expect(screen.queryByLabelText('WebRTC 摄像头画面')).not.toBeInTheDocument();
+    expect(screen.getByAltText('摄像头画面')).toBeInTheDocument();
+  });
+
+  it('MJPEG 首帧超时后自动重试', async () => {
+    vi.useFakeTimers();
+    mockWebRtc.mockReturnValue(degradedState());
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      json: async () => ({ online: true, fps: 0, car_ws_connected: true, last_seen_age_sec: 0 }),
+    })));
+
+    render(<VideoStream transport="mjpeg" />);
+
+    // 首帧超时前仍显示连接中
+    await act(async () => {
+      vi.advanceTimersByTime(DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS - 1);
+    });
+    expect(screen.getByText('正在连接摄像头...')).toBeInTheDocument();
+
+    // 超时后按 onError 同路进入 error
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByText('摄像头未连接')).toBeInTheDocument();
+
+    // 2 秒后重试回到 loading
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getByText('正在连接摄像头...')).toBeInTheDocument();
+
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('车端离线且超过 fallback 延迟后显示 DriveApiBridge 连接诊断', async () => {

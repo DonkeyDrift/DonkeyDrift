@@ -1214,7 +1214,22 @@ class Arduino:
         # with Arduino.ard_lock:
         #     Arduino.ard_device.write(("%d:%d\n" % (self.PWM_steering, self.PWM_throttle)).encode('ascii'))
         # return
-    
+
+    def set_car_mode(self, mode: int):
+        """下发车控模式命令到 ESP32（Serial1 下行 MODE <m> 帧，m ∈ {0,1,2}）。
+
+        与 Firmware#111 的 RX 契约对齐：0=手动 / 1=半自动 / 2=全自动。
+        仅接受合法值；写串口在 ard_lock 下进行，异常吞掉并告警，不影响主循环。
+        """
+        if mode not in (0, 1, 2):
+            logger.warning("忽略非法车控模式命令: %r", mode)
+            return
+        try:
+            with Arduino.ard_lock:
+                Arduino.ard_device.write(f"MODE {mode}\n".encode('ascii'))
+        except Exception as exc:
+            logger.warning("下发车控模式命令失败: %s", exc)
+
     def _read_serial_bytes(self):
         """将串口可读字节全部读入 _rx_buf（持有 ard_lock）。"""
         with Arduino.ard_lock:
@@ -1653,3 +1668,70 @@ class ArdRc:
 
     def shutdown(self):
         self.running = False
+
+
+class ArdModeCmd:
+    """把 web UI 下发的车控模式命令写到 ESP32（Pi → ESP32 下行）。
+
+    上游 DriveApiBridge 通过 'car/mode_cmd' Memory 输出最后一条车控模式命令
+    （0=手动 / 1=半自动 / 2=全自动，尚无命令时为 None），本 Part 去重后调用
+    Arduino.set_car_mode() 写 Serial1 下行 MODE <m> 帧。与 ArdRc/ArdImu 共享同一
+    个 Arduino 控制器（同一串口连接）。
+
+    使用方式（须在 Arduino 控制器创建之后注册）：
+        mode_cmd = ArdModeCmd(controller=arduino_controller)
+        V.add(mode_cmd, inputs=['car/mode_cmd'])
+    """
+
+    def __init__(self, controller=None):
+        if controller is None:
+            raise ValueError("ArdModeCmd 需要一个 Arduino 控制器实例")
+        self.controller = controller
+        self.last_mode = None
+
+    def run(self, mode_cmd=None):
+        """mode_cmd 为 None 或与上次相同则不写，避免重复刷帧。"""
+        if mode_cmd is None or mode_cmd == self.last_mode:
+            return
+        self.last_mode = mode_cmd
+        self.controller.set_car_mode(mode_cmd)
+
+    def shutdown(self):
+        self.last_mode = None
+
+
+class RcRecordMerge:
+    """
+    RC 手动驾驶（固件 MANUAL 模式）时的录制通道合并器。
+
+    固件 MANUAL 模式下车由 RC 接收机直驱，Web/手柄通道的 user/angle、
+    user/throttle 全程为 0，而固件串口 T 帧上行的实际控制量已由 ArdRc
+    发布到 rc/steering、rc/throttle。该 Part 在 TubWriter 之前把两者合并：
+    仅 rc/mode==0（MANUAL）、非 park 锁定且 rc 值有效时，用 RC 实际值覆盖
+    user/angle、user/throttle 供录制；SEMI/FULL AUTO、park、rc/mode 未知
+    （仿真等）时原样透传，不改变既有录制行为——避免历史上"RC 怠速值
+    覆盖 user/angle 导致录制数据间歇跳 0"的问题复发。
+
+    使用方式（须在 ArdPWM*/ArdRc 之后、TubWriter 之前注册）：
+        V.add(RcRecordMerge(),
+              inputs=['user/angle', 'user/throttle',
+                      'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'],
+              outputs=['user/angle', 'user/throttle'])
+    """
+
+    RC_MODE_MANUAL = 0
+
+    def run(self, user_angle, user_throttle, rc_steering, rc_throttle,
+            rc_mode, rc_park):
+        """返回合并后的 (user_angle, user_throttle)。
+
+        仅 MANUAL 且非 park、且 rc 值均为有效数值时覆盖；否则原样透传。
+        """
+        if rc_mode == self.RC_MODE_MANUAL and not rc_park \
+                and self._valid(rc_steering) and self._valid(rc_throttle):
+            return rc_steering, rc_throttle
+        return user_angle, user_throttle
+
+    @staticmethod
+    def _valid(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)

@@ -9,10 +9,10 @@ import {
   Legend,
   Tooltip,
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
-import { Pause, Play, Trash2, Maximize2, Minimize2 } from 'lucide-react';
+import type { Chart, ChartDataset, ChartOptions } from 'chart.js';
 import { cn } from '../../lib/utils';
 import type { Telemetry } from '../../hooks/useDriveWebsocket';
+import { useTelemetryStore } from '../../store/useTelemetryStore';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
 
@@ -26,8 +26,17 @@ ChartJS.register(
   Tooltip,
 );
 
-/** 环形缓冲长度，与固件 WebConsole 对齐（约 2.6 秒 @100Hz）。 */
-const BUFFER_SIZE = 256;
+/** 环形缓冲长度（约 1.3 秒 @100Hz）。100Hz 遥测下曲线点数越少，重绘越便宜，
+ *  while 仍足以呈现转向/油门的实时趋势；#135 第八轮实测 chart.js 重绘是卡顿主因，
+ *  更小的缓冲配合 update('none') 可把每次重绘压到亚毫秒级。 */
+const BUFFER_SIZE = 128;
+
+/** chart.js 重绘节流间隔（~5fps）。遥测 100Hz，两张图若每帧全量 update 会占满主线程
+ *  （#135：点 Donkey/Drift Console 无响应）。5fps 足够看趋势，同时给路由切换留空闲。 */
+const CHART_REDRAW_INTERVAL_MS = 200;
+
+/** 曲线分组：左右分栏各管一组——转向/姿态 vs 油门/加速度。 */
+export type CurveGroup = 'steering' | 'throttle';
 
 /** 单条曲线的显示配置。 */
 interface CurveConfig {
@@ -39,6 +48,8 @@ interface CurveConfig {
   lightColor?: string;
   /** 从 Telemetry 取值的键。 */
   key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle' | 'rc_steering' | 'rc_throttle'>;
+  /** 所属分组。 */
+  group: CurveGroup;
   /** 是否默认显示。 */
   defaultOn: boolean;
   /**
@@ -52,158 +63,223 @@ interface CurveConfig {
 const curveColor = (c: CurveConfig, theme: ResolvedTheme): string =>
   theme === 'light' ? c.lightColor ?? c.color : c.color;
 
-/** 默认显示 5 条曲线（油门/转向/陀螺仪Z + RC 手柄输入），对齐固件 MUS4_FW Drifter Console。 */
-const CURVES: CurveConfig[] = [
-  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1fae6b', key: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0c9bd6', key: 'steering', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', key: 'gz', defaultOn: true, scale: 0.2 },
-  { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', defaultOn: true },
-  { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', key: 'gx', defaultOn: false, scale: 0.2 },
-  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', defaultOn: false, scale: 0.2 },
-  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', defaultOn: false, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', defaultOn: false },
-  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', defaultOn: false },
+/** 全部遥测曲线。分组：steering=转向/姿态（RC 转向、Pilot 角度、转向、陀螺仪三轴），
+ *  throttle=油门/加速度（RC 油门、Pilot 油门、油门、加速度三轴）。 */
+export const CURVES: CurveConfig[] = [
+  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1fae6b', key: 'throttle', group: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0c9bd6', key: 'steering', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', key: 'gz', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', group: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', key: 'gx', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', group: 'throttle', defaultOn: true },
 ];
 
-interface TelemetryChartProps {
-  /** 最新一帧遥测（由父组件通过 ref 持有，避免高频 setState）。 */
-  telemetry: Telemetry | null;
+/** 按分组取曲线子集（保持 CURVES 顺序）。 */
+export const curvesByGroup = (group: CurveGroup): CurveConfig[] =>
+  CURVES.filter((c) => c.group === group);
+
+interface TelemetryLegendProps {
+  /** 当前显示的曲线 key 集合。 */
+  visibleKeys: Set<string>;
+  /** 切换某条曲线显隐。 */
+  onToggle: (key: string) => void;
+  /** 全选/全不选本组曲线（select=true 全选、false 全不选）；不传则不渲染「全选」项。 */
+  onToggleAll?: (select: boolean) => void;
+  /** 只渲染指定分组的曲线；不传则渲染全部曲线。 */
+  group?: CurveGroup;
   className?: string;
+}
+
+/** 曲线显隐图例（复选框）。覆盖模式下由父组件放在视频画面外部渲染。 */
+export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
+  visibleKeys,
+  onToggle,
+  onToggleAll,
+  group,
+  className = '',
+}) => {
+  const { t } = useTranslation();
+  const theme = useResolvedTheme();
+  const curves = group ? curvesByGroup(group) : CURVES;
+  const selectedCount = curves.reduce((n, c) => (visibleKeys.has(c.key as string) ? n + 1 : n), 0);
+  const allSelected = curves.length > 0 && selectedCount === curves.length;
+  // 半选（部分勾选）时全选框显示 indeterminate 横杠
+  const someSelected = selectedCount > 0 && !allSelected;
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+  return (
+    <div className={cn('flex flex-wrap gap-x-3 gap-y-1', className)}>
+      {onToggleAll && (
+        <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-slate-300 hover:text-slate-100">
+          <input
+            ref={selectAllRef}
+            type="checkbox"
+            checked={allSelected}
+            onChange={() => onToggleAll(!allSelected)}
+            className={allSelected ? 'accent-blue-500' : 'accent-slate-400'}
+          />
+          <span>{t('driveViz.selectAll')}</span>
+        </label>
+      )}
+      {curves.map((c) => {
+        const on = visibleKeys.has(c.key as string);
+        const color = curveColor(c, theme);
+        return (
+          <label
+            key={c.key as string}
+            className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
+          >
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={() => onToggle(c.key as string)}
+              className="accent-[var(--curve-color)]"
+              style={{ ['--curve-color' as string]: color }}
+            />
+            <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+};
+
+interface TelemetryChartProps {
+  className?: string;
+  /** 所在 section 是否可见：不可见时停掉重绘与写入，避免滚走后空转（#178） */
+  active?: boolean;
+  /** 覆盖模式：贴在视频画面下方的半透明浮层（曲线开关由父组件在画面外部渲染） */
+  overlay?: boolean;
+  /** 受控：当前显示的曲线 key 集合；不传则组件内部自管 */
+  visibleKeys?: Set<string>;
+  /** 受控：切换曲线显隐；不传则组件内部自管 */
+  onToggleCurve?: (key: string) => void;
+  /** 面板标题 i18n key；缺省用 driveViz.chartTitle。 */
+  title?: string;
+  /** 本实例管理的曲线分组；不传则管理全部曲线。 */
+  group?: CurveGroup;
+  /** 内部曲线容器高度类，覆盖默认（overlay 下 h-28，否则 h-40）。 */
+  chartHeightClassName?: string;
 }
 
 /**
  * 实时遥测曲线图，移植自固件 Drifter Console。
- * - 256 点环形缓冲，requestAnimationFrame 节流重绘（上限 60fps），避免 100Hz 全量 setState
- * - 默认 5 条曲线（Throttle/Steering/GyroZ/RC Steering/RC Throttle），其余通过工具栏开关
+ *
+ * 性能关键（#135 第八轮）：不再用 react-chartjs-2 的 <Line>，因为后者每次 data 变化都会
+ * 重设 chart.options，触发 chart.js 的 _configure + Proxy 全量解析，100Hz 遥测下持续占满
+ * 主线程。这里改用原生 Chart.js 持有实例，重绘时直接改写 dataset 数据数组并调用
+ * chart.update('none')（跳过动画/布局/配置解析），使每次重绘降至亚毫秒级。
+ *
+ * - 128 点环形缓冲；有新遥测帧才写入，并按 ~5fps 节流触发重绘
  * - gyro(rad/s) 与 accel(m/s²) 按 CurveConfig.scale 缩放到 y 轴 [-1, 1] 量程
  * - 缺失字段（undefined）不写入缓冲，对应曲线自动隐藏
+ * - 暂停/清空/全屏等操作已移除：全屏由父组件统一管理整块画面（视频 + 曲线）
  */
-export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, className = '' }) => {
+export const TelemetryChart = React.memo(function TelemetryChart({
+  className = '',
+  active = true,
+  overlay = false,
+  visibleKeys: controlledVisibleKeys,
+  onToggleCurve,
+  title,
+  group,
+  chartHeightClassName,
+}: TelemetryChartProps) {
   const { t } = useTranslation();
-  // canvas/图表配色不受皮肤 CSS 控制，订阅主题以重建 chart 配置
   const theme = useResolvedTheme();
-  // 各曲线的环形缓冲：number[] 长度恒为 BUFFER_SIZE，未填满处为 NaN
+  // 本实例管理的曲线子集
+  const curves = useMemo(() => (group ? curvesByGroup(group) : CURVES), [group]);
+  // 各曲线的环形缓冲与显示缓冲：恒为 BUFFER_SIZE 的 number[]，未填满处为 NaN
   const buffersRef = useRef<Record<string, number[]>>({});
+  const displayRef = useRef<Record<string, number[]>>({});
   const writeIndexRef = useRef(0);
   const filledRef = useRef(0);
-  const pausedRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
-  const latestTelemetryRef = useRef<Telemetry | null>(null);
+  const lastRenderAtRef = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartRef = useRef<Chart<'line'> | null>(null);
+  // 当前 chart 内 dataset 对应的曲线（按 dataset 顺序），供 redraw 按索引定位缓冲。
+  const activeCurvesRef = useRef<CurveConfig[]>([]);
 
-  const [paused, setPaused] = useState(false);
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(
-    () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
+  const [internalVisibleKeys, setInternalVisibleKeys] = useState<Set<string>>(
+    () => new Set(curves.filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
-  const [fullscreen, setFullscreen] = useState(false);
-  // 用于触发 Line 重绘的版本号
-  const [renderTick, setRenderTick] = useState(0);
+  const visibleKeys = controlledVisibleKeys ?? internalVisibleKeys;
   const [hasData, setHasData] = useState(false);
 
-  // 初始化缓冲
+  // 初始化环形/显示缓冲（仅一次）
   if (Object.keys(buffersRef.current).length === 0) {
-    for (const c of CURVES) {
+    for (const c of curves) {
       buffersRef.current[c.key as string] = new Array(BUFFER_SIZE).fill(NaN);
+      displayRef.current[c.key as string] = new Array(BUFFER_SIZE).fill(NaN);
     }
   }
 
-  // 收到新遥测帧：写入环形缓冲（暂停时丢弃）
-  useEffect(() => {
-    if (!telemetry) return;
-    latestTelemetryRef.current = telemetry;
-    if (pausedRef.current) return;
+  const chartOptions = useMemo<ChartOptions<'line'>>(
+    () => ({
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      normalized: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        title: { display: false },
+      },
+      scales: {
+        x: { display: false },
+        // y 轴整体隐藏：去掉横向网格线与左侧刻度数字；min/max 仍决定 [-1,1] 量程，曲线铺满全宽
+        y: {
+          min: -1,
+          max: 1,
+          display: false,
+        },
+      },
+    }),
+    [theme],
+  );
 
+  // 把环形缓冲按“最旧→最新”顺序展开到显示缓冲（当前 active 曲线）。数据集持有同一数组引用，
+  // 重绘与“勾选新曲线”时都调用它，保证新开启的曲线立刻带上已有历史。
+  const syncDisplay = useCallback(() => {
     const buffers = buffersRef.current;
-    const idx = writeIndexRef.current;
-    let wroteAny = false;
-    for (const c of CURVES) {
-      const val = telemetry[c.key];
-      const buf = buffers[c.key as string];
-      if (typeof val === 'number' && Number.isFinite(val)) {
-        buf[idx] = val * (c.scale ?? 1);
-        wroteAny = true;
-      } else {
-        // 缺失字段不写入，该位置保持 NaN（曲线在此处断开）
-        buf[idx] = NaN;
-      }
-    }
-    if (wroteAny) {
-      writeIndexRef.current = (idx + 1) % BUFFER_SIZE;
-      filledRef.current = Math.min(filledRef.current + 1, BUFFER_SIZE);
-      setHasData(true);
-    }
-  }, [telemetry]);
-
-  // requestAnimationFrame 节流重绘：合并 100Hz 写入到 60fps 重绘
-  useEffect(() => {
-    const tick = () => {
-      setRenderTick((t) => (t + 1) % 1_000_000);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-      }
-    };
-  }, []);
-
-  const handlePauseToggle = useCallback(() => {
-    pausedRef.current = !pausedRef.current;
-    setPaused(pausedRef.current);
-  }, []);
-
-  const handleClear = useCallback(() => {
-    const buffers = buffersRef.current;
-    for (const c of CURVES) {
-      const buf = buffers[c.key as string];
-      buf.fill(NaN);
-    }
-    writeIndexRef.current = 0;
-    filledRef.current = 0;
-    setHasData(false);
-    setRenderTick((t) => (t + 1) % 1_000_000);
-  }, []);
-
-  const toggleCurve = useCallback((key: string) => {
-    setVisibleKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleFullscreen = useCallback(() => {
-    setFullscreen((f) => !f);
-  }, []);
-
-  // 构造 chart.js 数据：按写入顺序展开环形缓冲（最旧 -> 最新）
-  const chartData = useMemo(() => {
-    const buffers = buffersRef.current;
+    const display = displayRef.current;
     const writeIdx = writeIndexRef.current;
     const filled = filledRef.current;
-    const activeCurves = CURVES.filter((c) => visibleKeys.has(c.key as string));
-
-    const datasets = activeCurves.map((c) => {
+    const activeCurves = activeCurvesRef.current;
+    for (const c of activeCurves) {
       const buf = buffers[c.key as string];
-      let ordered: number[];
+      const out = display[c.key as string];
       if (filled < BUFFER_SIZE) {
-        // 未填满：取 [0, filled)
-        ordered = buf.slice(0, filled);
+        for (let i = 0; i < BUFFER_SIZE; i++) out[i] = i < filled ? buf[i] : NaN;
       } else {
-        // 已填满：从 writeIdx 开始环绕
-        ordered = buf.slice(writeIdx).concat(buf.slice(0, writeIdx));
+        for (let i = 0; i < BUFFER_SIZE; i++) out[i] = buf[(writeIdx + i) % BUFFER_SIZE];
       }
+    }
+  }, []);
+
+  // 创建/重建 chart 实例：仅当曲线集合、显隐、主题变化时重建（用户操作，低频）。
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const activeCurves = curves.filter((c) => visibleKeys.has(c.key as string));
+    activeCurvesRef.current = activeCurves;
+    const labels = Array.from({ length: BUFFER_SIZE }, (_, i) => i);
+    const datasets: ChartDataset<'line', number[]>[] = activeCurves.map((c) => {
       const color = curveColor(c, theme);
       return {
         label: t(c.labelKey),
-        data: ordered,
+        data: displayRef.current[c.key as string],
         borderColor: color,
         backgroundColor: color,
         pointRadius: 0,
@@ -213,102 +289,118 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({ telemetry, class
       };
     });
 
-    const labels = datasets[0]?.data.map((_, i) => i) ?? [];
-    return { labels, datasets };
-    // renderTick 驱动重绘；theme 变化时按新主题重建配色
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleKeys, renderTick, theme]);
+    chartRef.current?.destroy();
+    chartRef.current = new ChartJS(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: chartOptions,
+    });
+    // 新开启的曲线立刻填充已有历史（例如测试里勾选隐藏曲线后无需等下一帧）。
+    syncDisplay();
 
-  const chartOptions = useMemo(
-    () => ({
-      animation: { duration: 0 } as const,
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false },
-      },
-      scales: {
-        x: { display: false },
-        y: {
-          min: -1,
-          max: 1,
-          grid: { color: theme === 'light' ? '#dbe2ea' : 'rgba(255,255,255,0.06)' },
-          ticks: { color: theme === 'light' ? '#5b6b7d' : '#8fa1b5', font: { size: 10 } },
-        },
-      },
-    }),
-    [theme],
-  );
+    return () => {
+      chartRef.current?.destroy();
+      chartRef.current = null;
+    };
+  }, [curves, visibleKeys, theme, chartOptions, t, syncDisplay]);
+
+  // 从旁路遥测 feed 订阅新帧并写入环形缓冲；重绘直接改写 chart dataset，不再触发 React 渲染。
+  useEffect(() => {
+    if (!active) return;
+
+    const redraw = () => {
+      const chart = chartRef.current;
+      if (!chart) return;
+      syncDisplay();
+      chart.update('none');
+    };
+
+    const writeFrame = (frame: Telemetry) => {
+      const buffers = buffersRef.current;
+      const idx = writeIndexRef.current;
+      let wroteAny = false;
+      for (const c of curves) {
+        const val = frame[c.key];
+        const buf = buffers[c.key as string];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          buf[idx] = val * (c.scale ?? 1);
+          wroteAny = true;
+        } else {
+          // 缺失字段不写入，该位置保持 NaN（曲线在此处断开）
+          buf[idx] = NaN;
+        }
+      }
+      if (!wroteAny) return;
+      writeIndexRef.current = (idx + 1) % BUFFER_SIZE;
+      filledRef.current = Math.min(filledRef.current + 1, BUFFER_SIZE);
+      setHasData(true);
+      // 有新数据才重绘，并按 CHART_REDRAW_INTERVAL_MS 节流（~5fps）。
+      const now = performance.now();
+      if (now - lastRenderAtRef.current >= CHART_REDRAW_INTERVAL_MS) {
+        lastRenderAtRef.current = now;
+        redraw();
+      }
+    };
+
+    const unsubscribe = useTelemetryStore.subscribe((state) => {
+      if (state.latest) writeFrame(state.latest);
+    });
+    // 订阅时若已有最新帧，立即写入一次（便于测试/深链恢复后直接有数据）
+    const latest = useTelemetryStore.getState().latest;
+    if (latest) writeFrame(latest);
+
+    return unsubscribe;
+  }, [active, curves, syncDisplay]);
+
+  const toggleCurve = useCallback((key: string) => {
+    if (onToggleCurve) {
+      onToggleCurve(key);
+      return;
+    }
+    setInternalVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, [onToggleCurve]);
+
+  // 全选/全不选本组曲线（仅非受控时内部自管；受控时父组件自行渲染全选，这里不重复提供）
+  const toggleAll = useCallback((select: boolean) => {
+    setInternalVisibleKeys(select ? new Set(curves.map((c) => c.key as string)) : new Set());
+  }, [curves]);
 
   return (
     <div
       className={cn(
-        'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
-        fullscreen && 'fixed inset-0 z-50 rounded-none p-4 bg-slate-950',
+        overlay
+          ? 'p-2'
+          : 'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
         className,
       )}
     >
-      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <div className={cn('relative', chartHeightClassName ?? (overlay ? 'h-28' : 'h-40'))}>
+        <canvas ref={canvasRef} />
+      </div>
+      {/* 面板标题移到曲线画布下方（贴近画面下沿），左右位置不变 */}
+      <div className="flex items-center justify-between mt-2 gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wider text-slate-400">{t('driveViz.chartTitle')}</span>
+          <span className="text-xs uppercase tracking-wider text-slate-400">{t(title ?? 'driveViz.chartTitle')}</span>
           {!hasData && <span className="text-xs text-slate-500">{t('driveViz.waitingData')}</span>}
-          {paused && <span className="text-xs text-amber-400">{t('driveViz.paused')}</span>}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={handlePauseToggle}
-            className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
-            title={paused ? t('driveViz.resume') : t('driveViz.pause')}
-            aria-label={paused ? t('driveViz.resume') : t('driveViz.pause')}
-          >
-            {paused ? <Play size={14} /> : <Pause size={14} />}
-          </button>
-          <button
-            type="button"
-            onClick={handleClear}
-            className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
-            title={t('driveViz.clear')}
-            aria-label={t('driveViz.clear')}
-          >
-            <Trash2 size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="p-1.5 rounded hover:bg-slate-700 text-slate-300"
-            title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-            aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-          >
-            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
         </div>
       </div>
-      <div className={cn('relative', fullscreen ? 'h-[calc(100vh-100px)]' : 'h-48')}>
-        <Line data={chartData} options={chartOptions} />
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-        {CURVES.map((c) => {
-          const on = visibleKeys.has(c.key as string);
-          const color = curveColor(c, theme);
-          return (
-            <label
-              key={c.key as string}
-              className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
-            >
-              <input
-                type="checkbox"
-                checked={on}
-                onChange={() => toggleCurve(c.key as string)}
-                className="accent-[var(--curve-color)]"
-                style={{ ['--curve-color' as string]: color }}
-              />
-              <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
-            </label>
-          );
-        })}
-      </div>
+      {!overlay && (
+        <TelemetryLegend
+          group={group}
+          visibleKeys={visibleKeys}
+          onToggle={toggleCurve}
+          onToggleAll={controlledVisibleKeys ? undefined : toggleAll}
+          className="mt-2"
+        />
+      )}
     </div>
   );
-};
+});

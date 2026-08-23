@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
-import { TelemetryChart } from '../components/drive/TelemetryChart';
+import { TelemetryChart, TelemetryLegend, curvesByGroup } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
-import { DriveModeSelector, DriveMode } from '../components/drive/DriveModeSelector';
+import { DriveModeSelector, DriveMode, driveModeToRcMode, rcModeToDriveMode } from '../components/drive/DriveModeSelector';
 import { useDriveWebsocket, type WebRtcSignal, type Telemetry } from '../hooks/useDriveWebsocket';
 import { useDriveControlLoop } from '../hooks/useDriveControlLoop';
 import { useKeyboardDrive } from '../hooks/useKeyboardDrive';
@@ -13,22 +13,50 @@ import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
 import { ParameterPanel } from '../components/drive/ParameterPanel';
 import { InputSourceSelector, InputSource } from '../components/drive/InputSourceSelector';
 import { ModelSelector } from '../components/drive/ModelSelector';
+import { SimCollectCard } from '../components/drive/SimCollectCard';
 import { useDriveStore } from '../store/useDriveStore';
 import { useStore } from '../store/useStore';
+import { useTelemetryStore } from '../store/useTelemetryStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useTranslation } from '@/i18n';
-import { Circle } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { Circle, ChevronLeft, ChevronRight, Joystick, Maximize2, Minimize2 } from 'lucide-react';
+import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
-export const DrivePage: React.FC = () => {
-  const { t } = useTranslation();
+type DrivePageProps = {
+  /** 该 section 是否在视口内：滚走后停用全局快捷键/键盘驾驶，避免误触（#178） */
+  active?: boolean;
+};
+
+export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
+  const { t, lang } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
-  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const clientIdRef = useRef(createDriveClientId());
+  // 100Hz 遥测走旁路 feed，不落本组件 state（#135 第八轮）：只把 rc_mode/rc_park
+  // 这类低频字段在“值变化”时落一次 state，供驾驶模式跟随与 Park 锁定徽标使用。
+  const lastRcModeRef = useRef<number | null>(null);
+  const lastRcParkRef = useRef<number | null>(null);
+  const [rcMode, setRcMode] = useState<number | null>(null);
+  const [rcPark, setRcPark] = useState<number | null>(null);
+
+  const handleTelemetry = useCallback((t: Telemetry) => {
+    useTelemetryStore.getState().push(t);
+    if (typeof t.rc_mode === 'number' && t.rc_mode !== lastRcModeRef.current) {
+      lastRcModeRef.current = t.rc_mode;
+      setRcMode(t.rc_mode);
+    }
+    if (typeof t.rc_park === 'number' && t.rc_park !== lastRcParkRef.current) {
+      lastRcParkRef.current = t.rc_park;
+      setRcPark(t.rc_park);
+    }
+  }, []);
+
   const { connected, carState, send } = useDriveWebsocket({
+    enabled: active,
     onWebRtcSignal: setWebRtcSignal,
-    onTelemetry: setTelemetry,
+    onTelemetry: handleTelemetry,
     clientId: clientIdRef.current,
   });
 
@@ -49,8 +77,67 @@ export const DrivePage: React.FC = () => {
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
+  const [joystickOpen, setJoystickOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
+    () => new Set(curvesByGroup('steering').filter((c) => c.defaultOn).map((c) => c.key as string)),
+  );
+  const [throttleVisibleKeys, setThrottleVisibleKeys] = useState<Set<string>>(
+    () => new Set(curvesByGroup('throttle').filter((c) => c.defaultOn).map((c) => c.key as string)),
+  );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
+
+  const toggleSteeringCurve = useCallback((key: string) => {
+    setSteeringVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleThrottleCurve = useCallback((key: string) => {
+    setThrottleVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  // 全选/全不选：把整组曲线一次性设为显示或隐藏
+  const setSteeringAll = useCallback((select: boolean) => {
+    setSteeringVisibleKeys(select ? new Set(curvesByGroup('steering').map((c) => c.key as string)) : new Set());
+  }, []);
+
+  const setThrottleAll = useCallback((select: boolean) => {
+    setThrottleVisibleKeys(select ? new Set(curvesByGroup('throttle').map((c) => c.key as string)) : new Set());
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = videoContainerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen();
+    }
+  }, []);
+
+  // 原生全屏状态随浏览器 fullscreenchange 同步（含 ESC 退出），驱动图标与曲线高度。
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === videoContainerRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
 
   const { params, loadFromServer } = useDriveStore();
   const { configPath } = useStore();
@@ -78,7 +165,7 @@ export const DrivePage: React.FC = () => {
   }, [configPath]);
 
   useKeyboardDrive({
-    enabled: inputSource === 'keyboard',
+    enabled: active && inputSource === 'keyboard',
     params,
     onChange: (a, t) => {
       keyboardRef.current = { angle: a, throttle: t };
@@ -87,7 +174,7 @@ export const DrivePage: React.FC = () => {
   });
 
   const { connected: gamepadConnected } = useGamepadDrive({
-    enabled: inputSource === 'gamepad',
+    enabled: active && inputSource === 'gamepad',
     onChange: (a, t) => {
       gamepadRef.current = { angle: a, throttle: t };
       lastInputType.current = 'gamepad';
@@ -95,7 +182,7 @@ export const DrivePage: React.FC = () => {
   });
 
   const { permissionState, requestPermission } = useGyroDrive({
-    enabled: inputSource === 'gyro',
+    enabled: active && inputSource === 'gyro',
     onChange: (a, t) => {
       gyroRef.current = { angle: a, throttle: t };
       lastInputType.current = 'gyro';
@@ -139,15 +226,16 @@ export const DrivePage: React.FC = () => {
     getControl: getCurrentControl,
   });
 
-  // UI 显示无需驱动控制发送，按较低频率同步即可。
+  // UI 显示无需驱动控制发送，按较低频率同步即可；section 滚走后停表（#178）。
   useEffect(() => {
+    if (!active) return;
     const timer = setInterval(() => {
       const control = getCurrentControl();
       setAngle(control.angle);
       setThrottle(control.throttle);
     }, 50);
     return () => clearInterval(timer);
-  }, [getCurrentControl]);
+  }, [getCurrentControl, active]);
 
   // 录制时长计时器
   useEffect(() => {
@@ -176,9 +264,17 @@ export const DrivePage: React.FC = () => {
     }
   }, [carState.driveMode, carState.recording, recordStartTime]);
 
+  // 车端真实模式（ESP32 rc_mode）变化时，选择器跟随（遥控器/DC 端切换）。
+  // 仅接受 0/1/2；无遥测时由上面的 carState.driveMode 兜底。
+  useEffect(() => {
+    if (rcMode === 0 || rcMode === 1 || rcMode === 2) {
+      setMode(rcModeToDriveMode(rcMode));
+    }
+  }, [rcMode]);
+
   const handleModeChange = useCallback((newMode: DriveMode) => {
     setMode(newMode);
-    send({ drive_mode: newMode });
+    send({ drive_mode: newMode, car_mode: driveModeToRcMode(newMode) });
   }, [send]);
 
   const handleModelChange = useCallback((modelName: string) => {
@@ -216,8 +312,9 @@ export const DrivePage: React.FC = () => {
     }
   }, [recording, send]);
 
-  // 快捷键
+  // 快捷键（仅在 drive section 可见时启用，避免流程页其它区域误触 #178）
   useDriveHotkeys({
+    enabled: active,
     onToggleRecording: toggleRecording,
     onCycleMode: cycleMode,
     onSetModeUser: () => handleModeChange('user'),
@@ -233,102 +330,173 @@ export const DrivePage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* 顶部工具栏：窄屏允许换行，避免一排溢出 */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-zinc-200">{t('drive.title')}</h2>
-        <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-          <InputSourceSelector
-            value={inputSource}
-            onChange={setInputSource}
-            gamepadConnected={gamepadConnected}
-            gyroAvailable={permissionState !== 'unsupported'}
-          />
-          <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
-          <ModelSelector
-            value={currentModel}
-            options={models}
-            onChange={handleModelChange}
-            disabled={!carState.online || modelsLoading}
-          />
-          <button
-            onClick={toggleRecording}
-            disabled={!carState.online || recordingLock}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-              ${recording
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-              }
-              ${!carState.online || recordingLock ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-          >
-            {recording ? (
-              <Circle className="w-3.5 h-3.5 fill-current animate-pulse text-red-400" />
-            ) : (
-              <Circle className="w-3.5 h-3.5" />
-            )}
-            {recording ? t('drive.recording', { duration: formatDuration(recordDuration) }) : t('drive.record')}
-          </button>
-          <span className="text-xs text-zinc-500 whitespace-nowrap">
-            {t('drive.recordedCount', { count: carState.numRecords })}
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* 摄像头回传区 */}
-        <div className="lg:col-span-2">
-          <VideoStream className="w-full" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
-          {/* 固件模式 / Park 状态徽标（来自 ESP32 M<m>:P<p> 帧遥测） */}
-          {(telemetry?.rc_mode !== undefined || telemetry?.rc_park !== undefined) && (
-            <div className="mt-2 flex items-center gap-2 text-xs">
-              {telemetry?.rc_mode !== undefined && (
-                <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400" data-rc-mode={telemetry.rc_mode}>
-                  {t('drive.firmwareMode', {
-                    mode: [t('drive.modeUser'), t('drive.modeSemiAuto'), t('drive.modeFullAuto')][telemetry.rc_mode]
-                      ?? t('drive.unknownMode', { code: telemetry.rc_mode }),
-                  })}
-                </span>
-              )}
-              {telemetry?.rc_park === 1 && (
-                <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+      <SimCollectCard />
+      {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
+      <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">
+        {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
+        <div className="flex-1 min-w-0 flex flex-col lg:h-[calc(100vh-9rem)]">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
+            {/* 左：Park 状态 + 驾驶模式 + 模型 */}
+            <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+              {rcPark === 1 && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
+                  data-rc-park={rcPark}
+                >
                   {t('drive.parkLocked')}
                 </span>
               )}
+              <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
+              <ModelSelector
+                value={currentModel}
+                options={models}
+                onChange={handleModelChange}
+                disabled={!carState.online || modelsLoading}
+              />
             </div>
-          )}
-          <TelemetryChart telemetry={telemetry} className="mt-4" />
+            {/* 右：已录制条数 + 录制 */}
+            <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+              <span className="text-xs text-zinc-500 whitespace-nowrap">
+                {t('drive.recordedCount', { count: carState.numRecords })}
+              </span>
+              <button
+                onClick={toggleRecording}
+                disabled={!carState.online || recordingLock}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                  ${recording
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                  }
+                  ${!carState.online || recordingLock ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                {recording ? (
+                  <Circle className="w-3.5 h-3.5 fill-current animate-pulse text-red-400" />
+                ) : (
+                  <Circle className="w-3.5 h-3.5" />
+                )}
+                {recording ? t('drive.recording', { duration: formatDuration(recordDuration) }) : t('drive.record')}
+              </button>
+            </div>
+          </div>
+
+          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
+          <div
+            ref={videoContainerRef}
+            className={cn(
+              'relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black',
+              !fullscreen && 'rounded-lg overflow-hidden',
+            )}
+          >
+            {active ? (
+              <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+            ) : (
+              <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
+            )}
+            <div className="absolute inset-x-3 bottom-3 z-20 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <TelemetryChart
+                active={active}
+                overlay
+                title="driveViz.chartTitleSteering"
+                group="steering"
+                visibleKeys={steeringVisibleKeys}
+                onToggleCurve={toggleSteeringCurve}
+                chartHeightClassName={fullscreen ? 'h-44' : undefined}
+              />
+              <TelemetryChart
+                active={active}
+                overlay
+                title="driveViz.chartTitleThrottle"
+                group="throttle"
+                visibleKeys={throttleVisibleKeys}
+                onToggleCurve={toggleThrottleCurve}
+                chartHeightClassName={fullscreen ? 'h-44' : undefined}
+              />
+            </div>
+            {/* 全屏/放大：整个视频画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+              aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+              className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+            >
+              {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
+          </div>
+          {/* 曲线显隐图例：分左右两组放在视频画面外部（下方），不再遮挡画面；每组左侧带「全选」 */}
+          <div className="mt-3 shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <TelemetryLegend group="steering" visibleKeys={steeringVisibleKeys} onToggle={toggleSteeringCurve} onToggleAll={setSteeringAll} />
+            <TelemetryLegend group="throttle" visibleKeys={throttleVisibleKeys} onToggle={toggleThrottleCurve} onToggleAll={setThrottleAll} />
+          </div>
         </div>
 
-        {/* 控制区 */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col">
-          <div className="text-sm text-zinc-400 mb-4 flex items-center justify-between">
-            <span>{t('drive.virtualJoystick')}</span>
-            <span className="text-[10px] text-zinc-500">{t('drive.mouseTouchSupport')}</span>
-          </div>
-          <div className="flex-1 flex flex-col items-center gap-4">
-            <div className="grid grid-cols-[auto_220px] gap-6">
-              <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
-              <div className="flex flex-col items-center gap-2 w-[220px]">
-                <VirtualJoystick
-                  onChange={(a, t) => {
-                    joystickRef.current = { angle: a, throttle: t };
-                    lastInputType.current = 'joystick';
-                  }}
-                  size={220}
-                />
-                <ControlBars angle={angle} className="w-full" />
+        {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}
+        <aside className="z-40 lg:sticky lg:top-16 lg:shrink-0">
+          <div className="flex items-start gap-2">
+            {/* 面板内容：夹在视频画面与把手（展开开关）之间 */}
+            <div className={`${joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))] border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg will-change-[width] transition-[width] duration-300 ease-in-out`}>
+              <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <SectionCardTitle
+                    icon={<Joystick className="w-5 h-5" />}
+                    title={t('drive.virtualJoystick')}
+                    subtitle={t('drive.virtualJoystickSubtitle')}
+                    subtitleMarquee
+                  />
+                  <InputSourceSelector
+                    value={inputSource}
+                    onChange={setInputSource}
+                    gamepadConnected={gamepadConnected}
+                    gyroAvailable={permissionState !== 'unsupported'}
+                  />
+                </div>
+                <div className="flex flex-col items-center gap-4">
+                  <div className="grid grid-cols-[auto_220px] gap-6">
+                    <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+                    <div className="flex flex-col items-center gap-2 w-[220px]">
+                      <VirtualJoystick
+                        onChange={(a, t) => {
+                          joystickRef.current = { angle: a, throttle: t };
+                          lastInputType.current = 'joystick';
+                        }}
+                        size={220}
+                      />
+                      <ControlBars angle={angle} className="w-full" />
+                    </div>
+                  </div>
+                  <ProgrammableButtons className="w-full max-w-[240px]" />
+                  <ParameterPanel className="w-full max-w-[360px]" />
+                  <div className="text-[10px] text-zinc-500 text-center">
+                    {t('drive.hotkeysLine1')}<br />
+                    {t('drive.hotkeysLine2')}
+                  </div>
+                </div>
               </div>
             </div>
-            <ProgrammableButtons className="w-full max-w-[240px]" />
-            <ParameterPanel className="w-full max-w-[360px]" />
-            <div className="text-[10px] text-zinc-500 text-center">
-              {t('drive.hotkeysLine1')}<br />
-              {t('drive.hotkeysLine2')}
-            </div>
-          </div>
-        </div>
-      </div>
 
+            {/* 浮动触发把手：抽屉收起/展开开关；中文竖排、英文横排两行 */}
+            <button
+              onClick={() => setJoystickOpen(!joystickOpen)}
+              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
+              className="shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
+            >
+              {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+              {lang === 'en' ? (
+                <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
+                  {t('drive.virtualJoystick').split(' ').map((word) => (
+                    <span key={word}>{word}</span>
+                  ))}
+                </span>
+              ) : (
+                <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                  {t('drive.virtualJoystick')}
+                </span>
+              )}
+            </button>
+          </div>
+        </aside>
+      </div>
     </div>
   );
-};
+});

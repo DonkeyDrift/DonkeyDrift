@@ -48,7 +48,10 @@ class TrainingProgress:
 @dataclass
 class TrainingJob:
     id: str
-    mode: Literal['local', 'online']
+    # 'local' = on the machine running this backend; 'mypc' = on the user's
+    # own computer (SSH callback, config train_my_pc.conf); 'online' = on the
+    # configured cloud server (config train_online.conf).
+    mode: Literal['local', 'mypc', 'online']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
     log_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue())
     progress: TrainingProgress = field(default_factory=TrainingProgress)
@@ -72,7 +75,7 @@ class TrainingJobManager:
             cls._instance.jobs: Dict[str, TrainingJob] = {}
         return cls._instance
 
-    def create_job(self, mode: Literal['local', 'online']) -> TrainingJob:
+    def create_job(self, mode: Literal['local', 'mypc', 'online']) -> TrainingJob:
         job_id = str(uuid.uuid4())[:8]
         job = TrainingJob(id=job_id, mode=mode)
         self.jobs[job_id] = job
@@ -104,7 +107,7 @@ class TrainingJobManager:
                         pass
 
             asyncio.create_task(force_kill())
-        elif job.mode == 'online' and job.stop_event:
+        elif job.mode in ('mypc', 'online') and job.stop_event:
             job.stop_event.set()
 
         job.finished_at = datetime.now().isoformat()
@@ -207,7 +210,8 @@ class TrainingJobManager:
     # Online training
     # ------------------------------------------------------------------
     async def run_online(self, job: TrainingJob, config_file: str = "train_online.conf",
-                         working_dir: Optional[str] = None):
+                         working_dir: Optional[str] = None,
+                         ssh_credentials: Optional[dict] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
 
@@ -219,7 +223,8 @@ class TrainingJobManager:
                 trainer = WebOnlineTrainer(
                     config_file=config_file,
                     log_queue=thread_queue,
-                    working_dir=cwd
+                    working_dir=cwd,
+                    ssh_credentials=ssh_credentials
                 )
                 trainer.run(no_interactive=True)
             except Exception as e:
@@ -266,6 +271,21 @@ class TrainingJobManager:
 
         job.finished_at = datetime.now().isoformat()
         await job.log_queue.put({"type": "status", "status": job.status})
+
+    # ------------------------------------------------------------------
+    # My-PC training (SSH callback to the user's own computer)
+    # ------------------------------------------------------------------
+    async def run_mypc(self, job: TrainingJob, config_file: str = "train_my_pc.conf",
+                       working_dir: Optional[str] = None,
+                       ssh_credentials: Optional[dict] = None):
+        """Train on the user's own computer (the machine running the browser).
+
+        Same SSH pipeline as online training, but driven by a separate config
+        file (train_my_pc.conf) pointing at the user's machine instead of a
+        cloud server.
+        """
+        await self.run_online(job, config_file=config_file, working_dir=working_dir,
+                              ssh_credentials=ssh_credentials)
 
     # ------------------------------------------------------------------
     # Shared parsing

@@ -13,6 +13,7 @@ Options:
 """
 
 import os
+import sys
 
 # Set TensorFlow log level to reduce noise
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -51,11 +52,17 @@ configure_gpu_memory()
 from docopt import docopt
 from tensorflow.keras import mixed_precision
 
-# 3. Enable mixed precision training
+# 3. Enable mixed precision training only on non-macOS machines with a GPU.
+# On CPU or Apple Metal (macOS), mixed_float16 is slower and numerically
+# unstable (loss diverges), so keep the default float32 there.
 try:
-    policy = mixed_precision.Policy('mixed_float16')
-    mixed_precision.set_global_policy(policy)
-    print('Mixed precision policy set to mixed_float16')
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus and sys.platform != 'darwin':
+        policy = mixed_precision.Policy('mixed_float16')
+        mixed_precision.set_global_policy(policy)
+        print('Mixed precision policy set to mixed_float16')
+    else:
+        print('Skipping mixed_float16 (no GPU or macOS); using float32')
 except Exception as e:
     print(f"Error setting mixed precision: {e}")
 
@@ -70,7 +77,7 @@ def main():
     model = args['--model']
     model_type = args['--type']
     comment = args['--comment']
-    train(cfg, tubs, model, model_type, comment)
+    train(cfg, tubs, model, model_type, comment=comment)
 
 
 if __name__ == "__main__":

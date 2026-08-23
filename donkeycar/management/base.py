@@ -17,12 +17,18 @@ from donkeycar.management.joystick_creator import CreateJoystick
 from pathlib import Path
 
 from donkeycar.utils import normalize_image, load_image, math
+from donkeycar.webui_instance import (
+    find_live_instance,
+    write_instance,
+    remove_instance,
+    kill_previous_car_processes,
+    read_drive_pids,
+    write_drive_pids,
+    remove_drive_pid_file,
+)
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
-
-# PID 文件路径，与 tui.py 保持一致
-_DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
 
 
 def _ensure_display_and_backend():
@@ -81,55 +87,17 @@ def _detect_graphical_display():
 
 def _read_drive_pid_file():
     """读取上次 donkey drive 记录的进程 PID 列表。"""
-    if not _DRIVE_PID_FILE.exists():
-        return []
-    try:
-        with open(_DRIVE_PID_FILE, "r") as f:
-            return [int(line.strip()) for line in f if line.strip()]
-    except Exception:
-        return []
-
-
-def _write_drive_pid_file(pids):
-    """将当前 donkey drive 启动的进程 PID 写入记录文件。"""
-    _DRIVE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_DRIVE_PID_FILE, "w") as f:
-        for pid in pids:
-            f.write(f"{pid}\n")
-
-
-def _remove_drive_pid_file():
-    """删除 PID 记录文件。"""
-    try:
-        _DRIVE_PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
+    return read_drive_pids()
 
 
 def _kill_previous_drive_processes():
-    """读取 PID 文件，精确杀掉上一次 donkey drive 启动的进程。"""
-    pids = _read_drive_pid_file()
-    if not pids:
-        return
+    """杀掉上一次启动的车进程（manage.py drive），web 进程保留复用。
 
-    print("检测到上一次 donkey drive 的进程仍在运行，正在停止...")
+    详见 donkeycar/webui_instance.py（issue #127：多链路复用同一 Web UI
+    实例，不再全杀）。
+    """
+    kill_previous_car_processes()
 
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-
-    time.sleep(0.5)
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-    _remove_drive_pid_file()
-    print("上一次的进程已停止")
 HELP_CONFIG = 'location of config file to use. default: ./config.py'
 logger = logging.getLogger(__name__)
 
@@ -659,6 +627,167 @@ class ShowPredictionPlots(BaseCommand):
                               args.type, args.noshow)
 
 
+class Evaluate(BaseCommand):
+    """量化评估模型在 tub 上的 angle/throttle 预测误差。
+
+    输出与真实标签的相关系数 corr、MAE、RMSE、mean_err，用于客观判断模型是否
+    真正学到了转向/油门信号（corr 接近 0 即退化为"预测均值/预测多数类"）。
+    不传 --model 时只输出标签分布，便于判断数据是否均衡。
+    """
+
+    def parse_args(self, args):
+        parser = argparse.ArgumentParser(prog='evaluate',
+                                         usage='%(prog)s [options]')
+        parser.add_argument('--tub', nargs='+', help='tub data for evaluation')
+        parser.add_argument('--model', default=None, help='model to evaluate')
+        parser.add_argument('--type', default=None,
+                            help='model type, defaults to '
+                                 'config.DEFAULT_MODEL_TYPE')
+        parser.add_argument('--config', default='./config.py', help=HELP_CONFIG)
+        parser.add_argument('--out', default=None,
+                            help='path to write results as JSON')
+        parsed_args = parser.parse_args(args)
+        return parsed_args
+
+    def _metrics(self, y_true, y_pred):
+        import numpy as np
+        y_true = np.asarray(y_true, dtype=np.float64)
+        y_pred = np.asarray(y_pred, dtype=np.float64)
+        err = y_true - y_pred
+        corr = None
+        if np.std(y_true) > 0 and np.std(y_pred) > 0:
+            corr = float(np.corrcoef(y_true, y_pred)[0, 1])
+        return {
+            'count': int(len(y_true)),
+            'corr': corr,
+            'mae': float(np.mean(np.abs(err))),
+            'rmse': float(np.sqrt(np.mean(err ** 2))),
+            'mean_err': float(np.mean(err)),
+        }
+
+    @staticmethod
+    def _angle_health_warnings(stats):
+        """根据 angle 标签分布给出数据健康度告警。
+
+        阈值基于实测结论：当中间幅度转向样本不足、或左右转向严重失衡、或
+        直行帧占比过高时，angle 回归会退化为"预测均值/预测多数类"，最终
+        angle corr 会接近 0（实测：mid_ratio=3.2% / left_ratio=7.9% 时
+        corr≈0；重新采集均衡数据 mid_ratio=16% / left_ratio=37% 后
+        corr≈0.99）。返回告警文案列表，健康时为空列表。
+        """
+        warnings = []
+
+        mid = stats.get('mid_ratio')
+        if mid is not None and mid < 0.05:
+            warnings.append(
+                '数据健康度差：中间幅度转向样本 mid_ratio 仅 %.1f%%（<5%%），'
+                '模型会退化为"预测均值"，angle corr 会接近 0。'
+                '建议重新采集平滑连续转向数据，覆盖 0.05~0.5 的中间幅度。'
+                % (mid * 100))
+
+        left = stats.get('left_ratio')
+        right = stats.get('right_ratio')
+        if left is not None and right is not None and \
+                (left < 0.1 or right < 0.1):
+            warnings.append(
+                '数据健康度差：左右转向样本严重失衡（left=%.1f%%, '
+                'right=%.1f%%），一侧占比低于 10%%。建议双向均衡采集。'
+                % (left * 100, right * 100))
+
+        straight = stats.get('abs_lt_0.05_ratio')
+        if straight is not None and straight > 0.7:
+            warnings.append(
+                '数据健康度差：直行帧占比 %.1f%%（>70%%），有效转向样本过少。'
+                '建议提高转向帧比例。' % (straight * 100))
+
+        return warnings
+
+    def run(self, args):
+        args = self.parse_args(args)
+        args.tub = ','.join(args.tub)
+        cfg = load_config(args.config)
+
+        import numpy as np
+        from donkeycar.pipeline.types import TubDataset
+
+        model = None
+        model_type = args.type
+        if args.model:
+            if model_type is None:
+                model_type = cfg.DEFAULT_MODEL_TYPE
+            model = dk.utils.get_model_by_type(model_type, cfg)
+            model.load(os.path.expanduser(args.model))
+
+        tub_paths = [os.path.expanduser(t) for t in args.tub.split(',')]
+        dataset = TubDataset(config=cfg, tub_paths=tub_paths,
+                             seq_size=model.seq_size() if model else 0)
+        records = dataset.get_records()
+
+        user_angles = []
+        user_throttles = []
+        pilot_angles = []
+        pilot_throttles = []
+        for r in records:
+            user_angles.append(float(r.underlying['user/angle']))
+            user_throttles.append(float(r.underlying['user/throttle']))
+            if model:
+                img = r.image()
+                a, t = model.run(img)
+                pilot_angles.append(float(a))
+                pilot_throttles.append(float(t))
+        dataset.close()
+
+        result = {
+            'records': len(records),
+            'model': os.path.expanduser(args.model) if args.model else None,
+            'type': model_type,
+        }
+        if model:
+            result['angle'] = self._metrics(user_angles, pilot_angles)
+            result['throttle'] = self._metrics(user_throttles, pilot_throttles)
+            print(f"records: {result['records']}")
+            print(f"angle:   {result['angle']}")
+            print(f"throttle: {result['throttle']}")
+        else:
+            a = np.asarray(user_angles)
+            t = np.asarray(user_throttles)
+            abs_a = np.abs(a)
+            result['angle_stats'] = {
+                'mean': float(a.mean()), 'std': float(a.std()),
+                'min': float(a.min()), 'max': float(a.max()),
+                # 转向幅度三档占比（直行 / 中间幅度 / 大转向），三者相加为 1；
+                # 中间幅度缺失是"模型学不到连续转向"的典型数据问题。
+                'abs_lt_0.05_ratio': float(np.mean(abs_a < 0.05)),
+                'mid_ratio': float(np.mean((abs_a >= 0.05) & (abs_a <= 0.5))),
+                'hard_ratio': float(np.mean(abs_a > 0.5)),
+                # 左右对称性：left+right+zero 相加为 1，偏差过大说明转向样本左右不均衡。
+                'left_ratio': float(np.mean(a < 0)),
+                'right_ratio': float(np.mean(a > 0)),
+            }
+            result['throttle_stats'] = {
+                'mean': float(t.mean()), 'std': float(t.std()),
+                'min': float(t.min()), 'max': float(t.max()),
+            }
+            warnings = self._angle_health_warnings(result['angle_stats'])
+            if warnings:
+                result['warnings'] = warnings
+            print(f"records: {result['records']}")
+            print(f"user/angle stats:   {result['angle_stats']}")
+            print(f"user/throttle stats: {result['throttle_stats']}")
+            if warnings:
+                print("health warnings:")
+                for w in warnings:
+                    print(f"  - {w}")
+            else:
+                print("health warnings: none (数据分布健康)")
+
+        if args.out:
+            import json
+            with open(os.path.expanduser(args.out), 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            print(f"wrote {args.out}")
+
+
 class Train(BaseCommand):
 
     def parse_args(self, args):
@@ -757,14 +886,36 @@ class Web(BaseCommand):
                             help='启动后自动打开浏览器')
         parser.add_argument('--route', default='/',
                             help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')
+        parser.add_argument('--dev', action='store_true',
+                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
+                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
         parser.add_argument('--debug', action='store_true',
                             help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
         return parser.parse_args(args)
 
     def run(self, args):
         args = self.parse_args(args)
+
+        # 已有存活的 Web UI 实例则直接复用，不再重复拉起（issue #127）
+        inst = find_live_instance()
+        if inst:
+            print(f'检测到运行中的 Web UI 实例 '
+                  f'(backend=:{inst["backend_port"]} frontend=:{inst["frontend_port"]})，'
+                  '复用已有实例，不重复启动')
+            if args.open:
+                reuse_url = self._build_frontend_url(inst['frontend_port'], args.route)
+                self._open_browser_when_frontend_ready(inst['frontend_port'], reuse_url)
+            return
+
         frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
             self._launch_web_ui(args)
+
+        # 等后端就绪再登记，避免其它链路探测到"半启动"实例而误清登记
+        self._wait_for_port_ready(backend_port)
+
+        # 登记实例，供 donkey drive / launcher / TUI 等链路复用
+        my_pid = os.getpid()
+        write_instance(backend_port, frontend_port, pid=my_pid)
 
         if args.open:
             self._open_browser_when_frontend_ready(frontend_port, frontend_url)
@@ -781,7 +932,8 @@ class Web(BaseCommand):
 
         try:
             self._supervise_processes(
-                [('前端', frontend_proc), ('后端', backend_proc)],
+                [(name, proc) for name, proc in
+                 [('前端', frontend_proc), ('后端', backend_proc)] if proc is not None],
                 stop_requested,
             )
         finally:
@@ -789,6 +941,8 @@ class Web(BaseCommand):
             signal.signal(signal.SIGTERM, prev_sigterm)
             self._terminate_process(frontend_proc)
             self._terminate_process(backend_proc)
+            # 仅当登记仍属于本进程时清除，避免误删他人后来的登记
+            remove_instance(only_pid=my_pid)
 
     def _launch_web_ui(self, args):
         """解析 web_ui 路径、检查依赖、选择端口，并拉起前端+后端子进程。
@@ -810,14 +964,18 @@ class Web(BaseCommand):
         else:
             self._check_dependencies_or_warn(frontend_path)
 
-        frontend_bind_host = '0.0.0.0'
-        frontend_port = self._choose_available_port(frontend_bind_host, args.frontend_port)
         backend_port = self._choose_available_port(args.backend_host, args.backend_port)
-
-        if frontend_port != args.frontend_port:
-            print(f'前端端口 {args.frontend_port} 已被占用，已切换到 {frontend_port}')
         if backend_port != args.backend_port:
             print(f'后端端口 {args.backend_port} 已被占用，已切换到 {backend_port}')
+
+        # 前端端口仅开发模式需要（Vite 独立监听）；生产模式由后端托管 SPA，
+        # frontend_port 即 backend_port，无需单独选择（#135）。
+        frontend_port = args.frontend_port
+        if args.dev:
+            frontend_bind_host = '0.0.0.0'
+            frontend_port = self._choose_available_port(frontend_bind_host, args.frontend_port)
+            if frontend_port != args.frontend_port:
+                print(f'前端端口 {args.frontend_port} 已被占用，已切换到 {frontend_port}')
 
         npm_exe = shutil.which('npm')
         if not npm_exe:
@@ -830,26 +988,6 @@ class Web(BaseCommand):
                 '安装完成后运行: donkey installweb --path "{}"\n'
                 '然后再启动: donkey web'.format(web_ui_path)
             )
-        frontend_cmd = [npm_exe, 'run', 'dev', '--', '--host', '--port', str(frontend_port)]
-        backend_cmd = [
-            sys.executable, '-m', 'uvicorn', 'main:app',
-            '--host', str(args.backend_host),
-            '--port', str(backend_port),
-            '--reload',
-            '--log-level', 'debug' if args.debug else 'warning',
-        ]
-
-        print(f'Web UI 路径: {web_ui_path}')
-        # 开发模式下前端 SPA 由 Vite 提供（frontend_port），8000 仅在 npm run build 后才托管 dist。
-        # 因此自动打开的 URL 用 frontend_port，确保用户能直接看到页面。
-        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
-
-        print(f'Web UI:  http://localhost:{backend_port}/')
-        print(f'API 文档: http://localhost:{backend_port}/docs')
-        print(f'开发模式: http://localhost:{frontend_port}/ (Vite HMR 热更新)')
-        if args.open:
-            print(f'将打开: {frontend_url}')
-        print('按 Ctrl+C 停止前后端')
 
         popen_kwargs = {}
         if os.name == 'nt':
@@ -859,20 +997,109 @@ class Web(BaseCommand):
         else:
             popen_kwargs['start_new_session'] = True
 
-        frontend_env = os.environ.copy()
-        # 前端使用相对路径 /api，由 Vite 代理转发到后端。
-        # 必须显式指向 --backend-port 选定的端口，否则 Vite 用默认的 8000，
-        # 当后端不在 8000 时浏览器 /api 请求会 ECONNREFUSED。
-        frontend_env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{backend_port}'
-
         backend_env = os.environ.copy()
         if args.debug:
             backend_env["DRIVE_WEB_DEBUG"] = "1"
 
+        if args.dev:
+            # 开发模式：Vite dev 服务器提供前端（HMR 热更新），后端仅作 API。
+            # dev 模式跑的是未优化代码 + React dev 运行时，页面切换明显慢，
+            # 只适合前端开发调试，不适合日常使用（#135）。
+            frontend_cmd = [npm_exe, 'run', 'dev', '--', '--host', '--port', str(frontend_port)]
+            backend_cmd = [
+                sys.executable, '-m', 'uvicorn', 'main:app',
+                '--host', str(args.backend_host),
+                '--port', str(backend_port),
+                '--reload',
+                '--log-level', 'debug' if args.debug else 'warning',
+            ]
+
+            print(f'Web UI 路径: {web_ui_path}')
+            frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+            print(f'Web UI:  http://localhost:{backend_port}/')
+            print(f'API 文档: http://localhost:{backend_port}/docs')
+            print(f'开发模式: http://localhost:{frontend_port}/ (Vite HMR 热更新)')
+            if args.open:
+                print(f'将打开: {frontend_url}')
+            print('按 Ctrl+C 停止前后端')
+
+            frontend_env = os.environ.copy()
+            # 前端使用相对路径 /api，由 Vite 代理转发到后端。
+            # 必须显式指向 --backend-port 选定的端口，否则 Vite 用默认的 8000，
+            # 当后端不在 8000 时浏览器 /api 请求会 ECONNREFUSED。
+            frontend_env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{backend_port}'
+
+            backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
+            frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
+            return frontend_proc, backend_proc, frontend_port, backend_port, frontend_url
+
+        # 生产模式（默认）：前端构建为 dist 静态文件，由后端 uvicorn 直接托管，
+        # 不再起 Vite dev 服务器。前端与 API 同源（同一端口），导航切换速度
+        # 是 dev 模式的约 10 倍（实测 dev ~400-550ms vs 生产 ~43-63ms，#135）。
+        if self._frontend_needs_build(frontend_path):
+            print('正在构建前端生产包（首次启动或源码已更新，约 10-60 秒）...')
+            build_result = subprocess.run(
+                [npm_exe, 'run', 'build'],
+                cwd=frontend_path,
+                env=os.environ.copy(),
+            )
+            if build_result.returncode != 0 or not os.path.isfile(
+                os.path.join(frontend_path, 'dist', 'index.html')
+            ):
+                raise SystemExit('前端生产构建失败，无法启动生产模式 Web UI')
+
+        backend_cmd = [
+            sys.executable, '-m', 'uvicorn', 'main:app',
+            '--host', str(args.backend_host),
+            '--port', str(backend_port),
+            '--log-level', 'debug' if args.debug else 'warning',
+        ]
+
+        # SPA 由后端托管：前端端口即后端端口（launcher/TUI 跳转与实例登记
+        # 均以 frontend_port 为准，保持复用链路兼容）。
+        frontend_port = backend_port
+        frontend_proc = None
+        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+
+        print(f'Web UI 路径: {web_ui_path}')
+        print(f'Web UI:  http://localhost:{backend_port}/')
+        print(f'API 文档: http://localhost:{backend_port}/docs')
+        if args.open:
+            print(f'将打开: {frontend_url}')
+        print('按 Ctrl+C 停止')
+
         backend_proc = subprocess.Popen(backend_cmd, cwd=backend_path, env=backend_env, **popen_kwargs)
-        frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_path, env=frontend_env, **popen_kwargs)
 
         return frontend_proc, backend_proc, frontend_port, backend_port, frontend_url
+
+    def _frontend_needs_build(self, frontend_path):
+        """判断前端是否需要重新构建：dist 缺失，或源码比 dist/index.html 新。"""
+        dist_index = os.path.join(frontend_path, 'dist', 'index.html')
+        if not os.path.isfile(dist_index):
+            return True
+        dist_mtime = os.path.getmtime(dist_index)
+        checked_roots = ['src', 'public']
+        checked_files = [
+            'index.html', 'vite.config.ts', 'package.json', 'tsconfig.json',
+            'tsconfig.app.json', 'tsconfig.node.json', 'tailwind.config.js',
+            'postcss.config.js',
+        ]
+        for name in checked_files:
+            p = os.path.join(frontend_path, name)
+            if os.path.isfile(p) and os.path.getmtime(p) > dist_mtime:
+                return True
+        for root_name in checked_roots:
+            root = os.path.join(frontend_path, root_name)
+            if not os.path.isdir(root):
+                continue
+            for dirpath, _dirnames, filenames in os.walk(root):
+                if 'node_modules' in dirpath:
+                    continue
+                for filename in filenames:
+                    p = os.path.join(dirpath, filename)
+                    if os.path.getmtime(p) > dist_mtime:
+                        return True
+        return False
 
     def _supervise_processes(self, named_procs, stop_requested):
         """监督子进程：收到停止信号或任一进程退出时，终止全部并以 SystemExit 退出。
@@ -1063,6 +1290,9 @@ class Drive(Web):
                             help='启动后自动打开浏览器')
         parser.add_argument('--route', default='/drive',
                             help='自动打开的前端路由 (默认: /drive)')
+        parser.add_argument('--dev', action='store_true',
+                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
+                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
         parser.add_argument('--debug', action='store_true',
                             help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
         return parser.parse_args(args)
@@ -1071,18 +1301,34 @@ class Drive(Web):
         args = self.parse_args(args)
         car_path = self._resolve_car_path(args.car)
 
-        # 杀掉上一次 donkey drive 启动的进程，释放硬件资源
+        # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
         _kill_previous_drive_processes()
 
-        frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
-            self._launch_web_ui(args)
+        # 已有存活的 Web UI 实例则复用，只启动车进程
+        inst = find_live_instance()
+        my_pid = os.getpid()
+        owns_instance = False
+        frontend_proc = backend_proc = None
 
-        # 等待后端就绪后再启动车辆，避免车端 WS 先于后端启动导致连接失败重连风暴
-        if not self._wait_for_backend_ready(backend_port):
-            self._terminate_process(frontend_proc)
-            self._terminate_process(backend_proc)
-            _remove_drive_pid_file()
-            raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
+        if inst:
+            frontend_port = inst['frontend_port']
+            backend_port = inst['backend_port']
+            print(f'检测到运行中的 Web UI 实例 '
+                  f'(backend=:{backend_port} frontend=:{frontend_port})，'
+                  '复用已有实例，只启动车辆进程')
+        else:
+            frontend_proc, backend_proc, frontend_port, backend_port, frontend_url = \
+                self._launch_web_ui(args)
+
+            # 等待后端就绪后再启动车辆，避免车端 WS 先于后端启动导致连接失败重试风暴
+            if not self._wait_for_backend_ready(backend_port):
+                self._terminate_process(frontend_proc)
+                self._terminate_process(backend_proc)
+                raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
+
+            # 登记实例，供 donkey web / launcher / TUI 等链路复用
+            write_instance(backend_port, frontend_port, pid=my_pid)
+            owns_instance = True
 
         car_cmd = self._build_car_command(args)
         car_env = self._build_car_env(backend_port)
@@ -1100,10 +1346,14 @@ class Drive(Web):
             stdin=subprocess.DEVNULL, **popen_kwargs,
         )
 
-        # 记录本次启动的进程 PID，供下次启动时清理
-        _write_drive_pid_file([frontend_proc.pid, backend_proc.pid, car_proc.pid])
+        # 记录进程 PID，供下次启动时清理；复用实例时 web 进程不属于本进程管
+        if frontend_proc is not None:
+            write_drive_pids([frontend_proc.pid, backend_proc.pid, car_proc.pid])
+        else:
+            write_drive_pids([car_proc.pid])
 
         if args.open:
+            frontend_url = self._build_frontend_url(frontend_port, args.route)
             self._open_browser_when_frontend_ready(frontend_port, frontend_url)
         print('按 Ctrl+C 停止前端、后端与车辆进程')
 
@@ -1117,18 +1367,22 @@ class Drive(Web):
         signal.signal(signal.SIGINT, _handle_stop_signal)
         signal.signal(signal.SIGTERM, _handle_stop_signal)
 
+        supervised = [('车辆', car_proc)]
+        if frontend_proc is not None:
+            supervised = [('前端', frontend_proc), ('后端', backend_proc)] + supervised
         try:
-            self._supervise_processes(
-                [('前端', frontend_proc), ('后端', backend_proc), ('车辆', car_proc)],
-                stop_requested,
-            )
+            self._supervise_processes(supervised, stop_requested)
         finally:
             signal.signal(signal.SIGINT, prev_sigint)
             signal.signal(signal.SIGTERM, prev_sigterm)
-            self._terminate_process(frontend_proc)
-            self._terminate_process(backend_proc)
+            if frontend_proc is not None:
+                self._terminate_process(frontend_proc)
+                self._terminate_process(backend_proc)
             self._terminate_process(car_proc)
-            _remove_drive_pid_file()
+            remove_drive_pid_file()
+            if owns_instance:
+                # 仅当登记仍属于本进程时清除，避免误删他人后来的登记
+                remove_instance(only_pid=my_pid)
 
     # ------------------------------------------------------------------
     # 车辆子进程构造（纯逻辑，便于单测）
@@ -1326,6 +1580,7 @@ def execute_from_command_line():
         'calibrate': CalibrateCar,
         'tubplot': ShowPredictionPlots,
         'tubhist': ShowHistogram,
+        'evaluate': Evaluate,
         'makemovie': MakeMovieShell,
         'createjs': CreateJoystick,
         'cnnactivations': ShowCnnActivations,

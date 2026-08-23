@@ -7,6 +7,12 @@
   窗口大小调整（TIOCSWINSZ）、初始工作目录、exit 通知与会话清理
 - handle_terminal_ws：经真实 ThreadingHTTPServer + 原始 socket 客户端的
   端到端握手、binary 输入/输出桥接、close 帧应答
+- 内核 TCP keepalive（issue #173）：连接套接字启用 SO_KEEPALIVE + Linux
+  TCP_KEEP* 参数，NAT 保活与死链检测不再误伤"浏览器冻结但链路未死"；
+  空闲期间不主动 shutdown 断开
+- 会话保持与重连（issue #173）：连接断开后 PTY 会话进入宽限期不销毁，
+  ?session=<sid> 重连接回原会话并补发断线期间的输出；宽限期耗尽后由
+  清扫线程销毁
 """
 
 import json
@@ -92,8 +98,11 @@ def _wait_until(predicate, timeout=10.0, interval=0.05):
 @pytest.fixture
 def session():
     """起一个真实 bash PTY 会话，测试后确保关闭。"""
+    sess = TerminalSession()
+    with terminal._sessions_lock:
+        terminal._sessions[sess.sid] = sess
     writer = _FakeWriter()
-    sess = TerminalSession(writer)
+    sess.attach(writer)
     yield sess, writer
     sess.close()
 
@@ -225,9 +234,10 @@ def test_session_starts_in_default_cwd(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     projects = tmp_path / "projects"
     projects.mkdir()
-    writer = _FakeWriter()
-    sess = TerminalSession(writer)
+    sess = TerminalSession()
     try:
+        writer = _FakeWriter()
+        sess.attach(writer)
         sess.on_input(b"pwd\n")
         assert _wait_until(lambda: str(projects).encode() in writer.output())
     finally:
@@ -325,6 +335,97 @@ def test_terminal_ws_end_to_end():
         server.server_close()
 
 
+def _open_terminal_ws(session_id=None):
+    """启动真实 Launcher 服务器并完成 ws 握手。
+
+    Args:
+        session_id: 可选的重连会话 sid（?session=，issue #173）
+
+    Returns:
+        (server, sock, sock_file)；调用方负责关闭 sock 与 server
+    """
+    from donkeycar.launcher.server import LauncherHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LauncherHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    sock = socket.create_connection(("127.0.0.1", server.server_address[1]),
+                                    timeout=10)
+    key = "dGhlIHNhbXBsZSBub25jZQ=="
+    path = "/terminal/ws" + (f"?session={session_id}" if session_id else "")
+    request = (
+        f"GET {path} HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"
+    )
+    sock.sendall(request.encode("ascii"))
+    sock_file = sock.makefile("rb")
+    status = sock_file.readline().decode("latin-1")
+    assert "101" in status
+    while True:
+        if not sock_file.readline().decode("latin-1").strip():
+            break
+    return server, sock, sock_file
+
+
+def _read_json_control(sock_file, timeout=10.0):
+    """读到服务端下一条 text 控制帧并解析（跳过 binary/PING）。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        opcode, payload = _recv_server_frame(sock_file)
+        if opcode == OP_TEXT:
+            return json.loads(payload.decode("utf-8"))
+    pytest.fail("超时未收到 text 控制帧")
+
+
+def test_terminal_ws_idle_keeps_connection():
+    """空闲（无任何客户端帧，含 PONG）不再判死断连（issue #173）。
+
+    旧实现（issue #151）用应用层 PONG 超时判死，会把"浏览器冻结但链路
+    未死"误判为断线；改为内核 TCP keepalive 后，服务端空闲期间不主动
+    shutdown，命令仍能正常往返。
+    """
+    server, sock, sock_file = _open_terminal_ws()
+    try:
+        _read_json_control(sock_file)  # 收掉 session 帧
+        # 静默一段时间，不发送任何客户端帧（含 PONG）
+        time.sleep(0.5)
+        # 连接仍应存活：发一条命令能正常得到输出
+        sock.sendall(_masked_client_frame(b"echo alive-$((6*7))\n", OP_BINARY))
+        deadline = time.monotonic() + 5
+        output = b""
+        while time.monotonic() < deadline and b"alive-42" not in output:
+            opcode, payload = _recv_server_frame(sock_file)
+            if opcode == OP_BINARY:
+                output += payload
+        assert b"alive-42" in output, "空闲后连接被断开，命令无响应"
+    finally:
+        sock.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_enable_tcp_keepalive_sets_socket_options():
+    """_enable_tcp_keepalive 启用 SO_KEEPALIVE 并设置 Linux TCP_KEEP* 参数。"""
+    s = socket.socket()
+    try:
+        terminal._enable_tcp_keepalive(s)
+        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        try:
+            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == terminal._TCP_KEEP_IDLE
+            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == terminal._TCP_KEEP_INTVL
+            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == terminal._TCP_KEEP_CNT
+        except (OSError, AttributeError):
+            pass  # 非 Linux 或常量不可用，仅验证 SO_KEEPALIVE 已启用
+    finally:
+        s.close()
+
+
 def test_terminal_ws_rejects_bad_handshake():
     from donkeycar.launcher.server import LauncherHandler
 
@@ -340,6 +441,111 @@ def test_terminal_ws_rejects_bad_handshake():
             urllib.request.urlopen(f"http://127.0.0.1:{port}/terminal/ws",
                                    timeout=5)
         assert "400" in str(exc_info.value)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# ===========================================================================
+# 会话保持与重连（issue #173）
+# ===========================================================================
+def test_terminal_ws_sends_session_frame():
+    """新连接下发 session 控制帧：含 sid 且 reattached=False。"""
+    server, sock, sock_file = _open_terminal_ws()
+    try:
+        msg = _read_json_control(sock_file)
+        assert msg["type"] == "session"
+        assert msg["reattached"] is False
+        assert msg["id"]
+    finally:
+        sock.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_terminal_ws_reattach_preserves_session_and_replays_output():
+    """断线后 ?session=<sid> 重连接回原 PTY：会话现场保留 + 断线期间输出补发。"""
+    server, sock, sock_file = _open_terminal_ws()
+    sid = _read_json_control(sock_file)["id"]
+    # 会话现场：导出环境变量 + 起一个断线后才输出的后台任务
+    sock.sendall(_masked_client_frame(b"export SEED=73\n", OP_BINARY))
+    sock.sendall(_masked_client_frame(b"sleep 1; echo late-73\n", OP_BINARY))
+    # 等服务端收到输入后断开（不留 close 帧，模拟链路突然死亡）；
+    # 先关 makefile 派生流再关 socket，确保真正发 FIN
+    time.sleep(0.5)
+    sock_file.close()
+    sock.close()
+    server.shutdown()
+    server.server_close()
+
+    # 宽限期内重连：应接回原会话
+    server2, sock2, sock_file2 = None, None, None
+    try:
+        server2, sock2, sock_file2 = _open_terminal_ws(session_id=sid)
+        msg = _read_json_control(sock_file2)
+        assert msg["type"] == "session" and msg["id"] == sid
+        assert msg["reattached"] is True
+
+        # 断线期间（sleep 到点）的输出经回放缓冲补发；环境变量现场仍在
+        deadline = time.monotonic() + 15
+        output = b""
+        got_late = False
+        while time.monotonic() < deadline and not got_late:
+            opcode, payload = _recv_server_frame(sock_file2)
+            if opcode != OP_BINARY:
+                continue
+            output += payload
+            got_late = b"late-73" in output
+        assert got_late, "重连后未补发断线期间的输出"
+
+        sock2.sendall(_masked_client_frame(b"echo env-$SEED\n", OP_BINARY))
+        got_env = False
+        while time.monotonic() < deadline and not got_env:
+            opcode, payload = _recv_server_frame(sock_file2)
+            if opcode != OP_BINARY:
+                continue
+            output += payload
+            got_env = b"env-73" in output
+        assert got_env, "重连后会话现场（环境变量）丢失"
+        # 显式销毁，避免宽限期里的会话泄漏到其他测试
+        with terminal._sessions_lock:
+            sess = terminal._sessions.get(sid)
+        if sess:
+            sess.close()
+    finally:
+        if sock2:
+            sock2.close()
+        if server2:
+            server2.shutdown()
+            server2.server_close()
+
+
+def test_terminal_ws_grace_expiry_destroys_session(monkeypatch):
+    """宽限期耗尽仍无人重连的会话被清扫销毁（issue #173）。
+
+    直接调用 _sweep_once 验证销毁逻辑：清扫线程是进程级单例、休眠间隔
+    固定，monkeypatch 间隔无法叫醒已在 sleep 的旧线程（全量跑测试时该
+    线程已被先前用例以默认 30s 间隔启动）。
+    """
+    monkeypatch.setattr(terminal, "_SESSION_GRACE", 0.3)
+    server, sock, sock_file = _open_terminal_ws()
+    try:
+        sid = _read_json_control(sock_file)["id"]
+        # 先关 makefile 派生流再关 socket：sock_file 活着时 sock.close()
+        # 不会真正关闭 fd、不发 FIN，服务端就收不到 EOF（CPython _io_refs）
+        sock_file.close()
+        sock.close()
+        # 服务端 detach 是异步的，先等会话进入宽限期
+        assert _wait_until(
+            lambda: terminal._sessions.get(sid) is not None
+            and terminal._sessions[sid]._writer is None, timeout=5)
+        # 宽限期内清扫不销毁
+        terminal._sweep_once()
+        assert terminal._sessions.get(sid) is not None, "宽限期内会话被误销毁"
+        # 宽限期耗尽后清扫销毁
+        time.sleep(0.3)
+        terminal._sweep_once()
+        assert terminal._sessions.get(sid) is None, "宽限期耗尽后会话未被销毁"
     finally:
         server.shutdown()
         server.server_close()

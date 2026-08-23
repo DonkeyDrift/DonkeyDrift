@@ -1,8 +1,14 @@
 import React from 'react';
+import { Cloud } from 'lucide-react';
+import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useStore } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 
 interface RemoteConfigFormProps {
+  titleKey?: string;
+  hintKey?: string;
+  icon?: React.ReactNode;
+  subtitleKey?: string;
   host: string;
   onHostChange: (v: string) => void;
   user: string;
@@ -18,6 +24,10 @@ interface RemoteConfigFormProps {
 }
 
 export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
+  titleKey = 'trainer.cloudTraining',
+  hintKey,
+  icon = <Cloud className="w-5 h-5" />,
+  subtitleKey,
   host,
   onHostChange,
   user,
@@ -36,7 +46,12 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.cloudTraining')}</h3>
+      <SectionCardTitle
+        icon={icon}
+        title={t(titleKey)}
+        subtitle={subtitleKey ? t(subtitleKey) : undefined}
+      />
+      {hintKey && <p className="text-xs text-zinc-500">{t(hintKey)}</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -45,6 +60,9 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             type="text"
             value={host}
             onChange={(e) => onHostChange(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
           />
         </div>
@@ -54,6 +72,9 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             type="text"
             value={user}
             onChange={(e) => onUserChange(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
           />
         </div>
@@ -65,6 +86,10 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           type="password"
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
+          autoComplete="new-password"
+          data-1p-ignore="true"
+          data-lpignore="true"
+          data-form-type="other"
           className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
         />
       </div>

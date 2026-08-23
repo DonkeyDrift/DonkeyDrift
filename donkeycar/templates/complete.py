@@ -574,6 +574,19 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     tub_path = TubHandler(path=cfg.DATA_PATH).create_tub_path() if \
         cfg.AUTO_CREATE_NEW_TUB else cfg.DATA_PATH
     meta += getattr(cfg, 'METADATA', [])
+
+    # RC 手动驾驶（固件 MANUAL 模式）时，车辆实际执行的转向/油门经串口
+    # T 帧上行到 rc/steering、rc/throttle，而 Web 通道 user/angle、user/throttle
+    # 恒为 0。录制前按固件模式合并：仅 rc/mode==0（MANUAL）且非 park 时用 RC
+    # 实际值覆盖 user/angle、user/throttle；其它情况原样透传。不新增 tub 字段，
+    # 既有 tub schema（inputs/types 一致性断言）不受影响。须在 ArdPWM*/ArdRc
+    # 之后、TubWriter 之前注册；无 rc/* 键的传动链（如仿真）下为安全透传。
+    from donkeydrifter.parts.actuator import RcRecordMerge
+    V.add(RcRecordMerge(),
+          inputs=['user/angle', 'user/throttle',
+                  'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'],
+          outputs=['user/angle', 'user/throttle'])
+
     tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta)
     V.add(tub_writer, inputs=inputs, outputs=["tub/num_records"], run_condition='recording')
 
@@ -776,7 +789,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
                   'steering', 'throttle', 'pilot/angle', 'pilot/throttle']
     V.add(ctr,
           inputs=ctr_inputs,
-          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons'],
+          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
           threaded=True)
 
     #
@@ -879,7 +892,7 @@ def get_camera(cfg):
                            vflip=cfg.CAMERA_VFLIP, hflip=cfg.CAMERA_HFLIP)
         elif cfg.CAMERA_TYPE == "WEBCAM":
             from donkeydrifter.parts.camera import Webcam
-            cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, camera_index=cfg.CAMERA_INDEX)
+            cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, framerate=cfg.CAMERA_FRAMERATE, camera_index=cfg.CAMERA_INDEX)
         elif cfg.CAMERA_TYPE == "CVCAM":
             from donkeydrifter.parts.cv import CvCam
             cam = CvCam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, iCam=cfg.CAMERA_INDEX)
@@ -918,8 +931,8 @@ def add_camera(V, cfg, camera_type):
         if cfg.CAMERA_TYPE == "WEBCAM":
             from donkeydrifter.parts.camera import Webcam
 
-            camA = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, iCam = 0)
-            camB = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, iCam = 1)
+            camA = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, framerate=cfg.CAMERA_FRAMERATE, camera_index=0)
+            camB = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH, framerate=cfg.CAMERA_FRAMERATE, camera_index=1)
 
         elif cfg.CAMERA_TYPE == "CVCAM":
             from donkeydrifter.parts.cv import CvCam
@@ -1248,6 +1261,20 @@ def add_drivetrain(V, cfg):
             V.add(steering, inputs=['user/mode','steering_ard'], outputs=['user/mode','user/angle'], threaded=True)
             V.add(throttle, inputs=['user/mode','throttle_ard','user/throttle'], outputs=['user/throttle'])
             #V.add(throttle, inputs=['throttle'], threaded=True)
+
+            # RC 接收机（手柄）输入发布到 Memory，供遥测桥上行 web UI 遥测曲线，
+            # 及 RcRecordMerge 在 MANUAL 模式录制时合并进 user/* 通道。
+            # 输出独立 rc/* 键，不直接覆盖 user/angle，避免录制数据被 RC 怠速值污染。
+            # rc/mode、rc/park 来自固件 1Hz M<m>:P<p> 帧，用于 UI 显示 Park 锁定状态。
+            from donkeydrifter.parts.actuator import ArdRc
+            rc_input = ArdRc(controller=arduino_controller)
+            V.add(rc_input, outputs=['rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'])
+
+            # web UI 下发的车控模式命令（car/mode_cmd）经 Serial1 下行到 ESP32，
+            # 与遥控器 CH_MODE 双向同步（Issue #223 / Firmware#111）。去重写串口。
+            from donkeydrifter.parts.actuator import ArdModeCmd
+            mode_cmd = ArdModeCmd(controller=arduino_controller)
+            V.add(mode_cmd, inputs=['car/mode_cmd'])
 
             # 当启用 IMU 时，从 ESP32 串口读取 IMU 数据（ArdImu 共享 arduino_controller 的串口连接）
             if cfg.HAVE_IMU:

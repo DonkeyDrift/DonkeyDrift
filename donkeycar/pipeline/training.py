@@ -177,8 +177,8 @@ def train(cfg: Config, tub_paths: str, model: str = None,
     # Save loss metadata for web UI
     try:
         meta_path = f'{base_path}_meta.json'
-        loss_hist = [_to_native(v) for v in history.history.get('loss', [])]
-        val_loss_hist = [_to_native(v) for v in history.history.get('val_loss', [])]
+        loss_hist = [_to_native(v) for v in history.get('loss', [])]
+        val_loss_hist = [_to_native(v) for v in history.get('val_loss', [])]
         with open(meta_path, 'w') as f:
             json.dump({
                 'final_loss': loss_hist[-1] if loss_hist else None,

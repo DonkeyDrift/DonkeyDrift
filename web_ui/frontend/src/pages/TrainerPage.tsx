@@ -1,16 +1,24 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { getTrainerConfig, loadConfig, loadMyconfig, saveTrainingConfig } from '../services/api';
+import {
+  getTrainerConfig,
+  loadConfig,
+  loadMyconfig,
+  saveTrainingConfig,
+  listTrainerTubs,
+  type TrainerTub,
+} from '../services/api';
 import { ModeTabs } from '../components/trainer/ModeTabs';
 import { LocalConfigForm } from '../components/trainer/LocalConfigForm';
 import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
+import { MyPcProbePanel } from '../components/trainer/MyPcProbePanel';
 import { ProgressPanel } from '../components/trainer/ProgressPanel';
 import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
 import { useTrainingJob } from '../hooks/useTrainingJob';
 import { useTranslation } from '@/i18n';
-
-type TrainerMode = 'local' | 'online';
+import { Cpu } from 'lucide-react';
+import type { TrainerMode } from '../components/trainer/ModeTabs';
 
 const TRAINING_KEYS = [
   'BATCH_SIZE',
@@ -24,43 +32,113 @@ const TRAINING_KEYS = [
   'PRUNE_VAL_LOSS_DEGRADATION_LIMIT',
 ];
 
-export const TrainerPage: React.FC = () => {
+export const TrainerPage = React.memo(function TrainerPage() {
   const { t } = useTranslation();
   const [mode, setMode] = React.useState<TrainerMode>('local');
-  const { job, startLocal, startOnline, stopJob, isRunning } = useTrainingJob();
-  const { configPath, trainerOnlineConfig, setTrainerOnlineConfig, trainerLocalConfig, setTrainerLocalConfig } = useStore();
+  const { job, startLocal, startOnline, startMyPc, stopJob, isRunning } = useTrainingJob();
+  const {
+    configPath,
+    trainerOnlineConfig, setTrainerOnlineConfig,
+    trainerMyPcConfig, setTrainerMyPcConfig,
+    trainerLocalConfig, setTrainerLocalConfig,
+    tubPath,
+  } = useStore();
 
-  // Remote form state
-  const [host, setHost] = React.useState(trainerOnlineConfig.host);
-  const [user, setUser] = React.useState(trainerOnlineConfig.user);
-  const [password, setPassword] = React.useState(trainerOnlineConfig.password);
-  const [remoteDirBase, setRemoteDirBase] = React.useState(trainerOnlineConfig.remoteDirBase);
-  const [modelName, setModelName] = React.useState(trainerOnlineConfig.modelName);
-  const [pythonPath, setPythonPath] = React.useState(trainerOnlineConfig.pythonPath);
+  // Tub candidates for local training (fetched from /trainer/tubs)
+  const [tubCandidates, setTubCandidates] = React.useState<TrainerTub[]>([]);
+  const [currentTubPath, setCurrentTubPath] = React.useState('');
+  // Don't re-autofill after the user has manually edited the tub path
+  const tubManuallyEdited = useRef(false);
 
-  // Load remote config on mount
+  // Remote form state (one per SSH target: user's own computer / cloud)
+  const [onlineForm, setOnlineForm] = React.useState(trainerOnlineConfig);
+  const [myPcForm, setMyPcForm] = React.useState(trainerMyPcConfig);
+
+  // Load remote configs on mount
   useEffect(() => {
     getTrainerConfig('train_online.conf')
       .then((cfg) => {
-        setHost(cfg.host);
-        setUser(cfg.user);
-        setPassword(cfg.password);
-        setRemoteDirBase(cfg.remote_dir_base);
-        setModelName(cfg.model_name);
-        setPythonPath(cfg.python_path);
-        setTrainerOnlineConfig({
+        const next = {
           host: cfg.host,
           user: cfg.user,
           password: cfg.password,
           remoteDirBase: cfg.remote_dir_base,
           modelName: cfg.model_name,
           pythonPath: cfg.python_path,
-        });
+        };
+        setOnlineForm(next);
+        setTrainerOnlineConfig(next);
       })
       .catch(() => {
         // use defaults if file doesn't exist yet
       });
-  }, [setTrainerOnlineConfig]);
+    getTrainerConfig('train_my_pc.conf')
+      .then((cfg) => {
+        const next = {
+          host: cfg.host,
+          user: cfg.user,
+          password: cfg.password,
+          remoteDirBase: cfg.remote_dir_base,
+          modelName: cfg.model_name,
+          pythonPath: cfg.python_path,
+        };
+        setMyPcForm(next);
+        setTrainerMyPcConfig(next);
+      })
+      .catch(() => {
+        // use defaults if file doesn't exist yet
+      });
+  }, [setTrainerOnlineConfig, setTrainerMyPcConfig]);
+
+  // Load tub candidates and auto-select the right tub on mount / when paths change
+  useEffect(() => {
+    let cancelled = false;
+
+    listTrainerTubs(configPath || undefined)
+      .then((data) => {
+        if (cancelled) return;
+        const tubs = data.tubs || [];
+        setTubCandidates(tubs);
+        setCurrentTubPath(data.current_tub_path || '');
+
+        if (tubManuallyEdited.current) return;
+
+        const candidates = tubs.map((c) => c.relative_path);
+        let next: string | null = null;
+
+        // Prefer the tub currently loaded in Tub Manager / Tub Navigator
+        const loaded = tubPath || data.current_tub_path;
+        if (loaded) {
+          const match = tubs.find(
+            (c) => c.absolute_path === loaded || c.relative_path === loaded
+          );
+          if (match) {
+            next = match.relative_path;
+          }
+        }
+        // Otherwise pick ./data if it is a tub, or the sole candidate
+        if (next === null) {
+          if (candidates.includes('./data')) {
+            next = './data';
+          } else if (candidates.length === 1) {
+            next = candidates[0];
+          }
+        }
+
+        if (next !== null && next !== trainerLocalConfig.tub) {
+          setTrainerLocalConfig({ tub: next });
+        }
+      })
+      .catch(() => {
+        // Keep current value; tub path stays manually editable
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // trainerLocalConfig.tub intentionally omitted: only auto-fill, never fight user edits
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configPath, tubPath, setTrainerLocalConfig]);
 
   // Load training config from myconfig.py on mount / when configPath changes
   useEffect(() => {
@@ -131,31 +209,31 @@ export const TrainerPage: React.FC = () => {
   }, [trainerLocalConfig, configPath, startLocal]);
 
   const handleOnlineStart = useCallback(() => {
-    setTrainerOnlineConfig({
-      host,
-      user,
-      password,
-      remoteDirBase,
-      modelName,
-      pythonPath,
-    });
+    setTrainerOnlineConfig(onlineForm);
     startOnline();
-  }, [host, user, password, remoteDirBase, modelName, pythonPath, setTrainerOnlineConfig, startOnline]);
+  }, [onlineForm, setTrainerOnlineConfig, startOnline]);
+
+  const handleMyPcStart = useCallback(() => {
+    setTrainerMyPcConfig(myPcForm);
+    startMyPc();
+  }, [myPcForm, setTrainerMyPcConfig, startMyPc]);
 
   const handleAction = useCallback(() => {
     if (isRunning) {
       stopJob();
     } else if (mode === 'local') {
       handleLocalStart();
+    } else if (mode === 'mypc') {
+      handleMyPcStart();
     } else {
       handleOnlineStart();
     }
-  }, [isRunning, mode, stopJob, handleLocalStart, handleOnlineStart]);
+  }, [isRunning, mode, stopJob, handleLocalStart, handleMyPcStart, handleOnlineStart]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-zinc-100">{t('trainer.title')}</h1>
+      {/* 页内标题已上移到统一流程页的 section 头（#178），此处只保留模式切换 */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <ModeTabs mode={mode} onChange={setMode} />
       </div>
 
@@ -164,22 +242,59 @@ export const TrainerPage: React.FC = () => {
           {mode === 'local' ? (
             <LocalConfigForm
               config={trainerLocalConfig}
-              onConfigChange={setTrainerLocalConfig}
+              onConfigChange={(patch) => {
+                if (patch.tub !== undefined) {
+                  tubManuallyEdited.current = true;
+                }
+                setTrainerLocalConfig(patch);
+              }}
+              tubCandidates={tubCandidates}
+              currentTubPath={currentTubPath}
             />
+          ) : mode === 'mypc' ? (
+            <>
+              <RemoteConfigForm
+                titleKey="trainer.myPcTraining"
+                hintKey="trainer.myPcFirstUseHint"
+                icon={<Cpu className="w-5 h-5" />}
+                subtitleKey="trainer.myPcTrainingSubtitle"
+                host={myPcForm.host}
+                onHostChange={(v) => setMyPcForm((f) => ({ ...f, host: v }))}
+                user={myPcForm.user}
+                onUserChange={(v) => setMyPcForm((f) => ({ ...f, user: v }))}
+                password={myPcForm.password}
+                onPasswordChange={(v) => setMyPcForm((f) => ({ ...f, password: v }))}
+                remoteDirBase={myPcForm.remoteDirBase}
+                onRemoteDirBaseChange={(v) => setMyPcForm((f) => ({ ...f, remoteDirBase: v }))}
+                modelName={myPcForm.modelName}
+                onModelNameChange={(v) => setMyPcForm((f) => ({ ...f, modelName: v }))}
+                pythonPath={myPcForm.pythonPath}
+                onPythonPathChange={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+              />
+              <MyPcProbePanel
+                host={myPcForm.host}
+                user={myPcForm.user}
+                password={myPcForm.password}
+                remoteDirBase={myPcForm.remoteDirBase}
+                pythonPath={myPcForm.pythonPath}
+                onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+              />
+            </>
           ) : (
             <RemoteConfigForm
-              host={host}
-              onHostChange={setHost}
-              user={user}
-              onUserChange={setUser}
-              password={password}
-              onPasswordChange={setPassword}
-              remoteDirBase={remoteDirBase}
-              onRemoteDirBaseChange={setRemoteDirBase}
-              modelName={modelName}
-              onModelNameChange={setModelName}
-              pythonPath={pythonPath}
-              onPythonPathChange={setPythonPath}
+              subtitleKey="trainer.cloudTrainingSubtitle"
+              host={onlineForm.host}
+              onHostChange={(v) => setOnlineForm((f) => ({ ...f, host: v }))}
+              user={onlineForm.user}
+              onUserChange={(v) => setOnlineForm((f) => ({ ...f, user: v }))}
+              password={onlineForm.password}
+              onPasswordChange={(v) => setOnlineForm((f) => ({ ...f, password: v }))}
+              remoteDirBase={onlineForm.remoteDirBase}
+              onRemoteDirBaseChange={(v) => setOnlineForm((f) => ({ ...f, remoteDirBase: v }))}
+              modelName={onlineForm.modelName}
+              onModelNameChange={(v) => setOnlineForm((f) => ({ ...f, modelName: v }))}
+              pythonPath={onlineForm.pythonPath}
+              onPythonPathChange={(v) => setOnlineForm((f) => ({ ...f, pythonPath: v }))}
             />
           )}
 
@@ -201,6 +316,8 @@ export const TrainerPage: React.FC = () => {
               ? t('trainer.stopTraining')
               : mode === 'local'
               ? t('trainer.startLocalTraining')
+              : mode === 'mypc'
+              ? t('trainer.startMyPcTraining')
               : t('trainer.startCloudTraining')}
           </button>
 
@@ -209,4 +326,4 @@ export const TrainerPage: React.FC = () => {
       </div>
     </div>
   );
-};
+});

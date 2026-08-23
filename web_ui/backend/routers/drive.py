@@ -621,7 +621,7 @@ async def drive_ws(
                     continue
 
                 # 客户端发来的控制指令，转发给车端
-                control_fields = ["angle", "throttle", "drive_mode", "recording", "buttons"]
+                control_fields = ["angle", "throttle", "drive_mode", "recording", "buttons", "car_mode"]
                 if any(k in msg for k in control_fields):
                     if "angle" in msg:
                         drive_state.angle = float(msg["angle"])
@@ -656,31 +656,87 @@ async def drive_ws(
 # ------------------------------------------------------------------
 # MJPEG 视频流
 # ------------------------------------------------------------------
+PLACEHOLDER_FRAME_INTERVAL = 0.5  # 占位帧发送间隔（秒），2fps 足够
+
+
+def _make_placeholder_frame() -> Optional[bytes]:
+    """生成「等待车端画面」占位 JPEG。
+
+    车端在线但尚未推首帧时，/drive/video 必须尽快给出首帧，否则浏览器
+    <img> 既不触发 onLoad 也不触发 onError，前端会一直卡在「正在连接摄像头」。
+    该占位帧让 <img> 立即进入已加载状态，真实画面到达后无缝替换。
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return None
+    try:
+        width, height = 640, 360
+        image = Image.new("RGB", (width, height), (17, 24, 39))
+        draw = ImageDraw.Draw(image)
+        cx, cy = width // 2, height // 2
+        color = (100, 116, 139)
+        draw.ellipse([cx - 36, cy - 36, cx + 36, cy + 36], outline=color, width=3)
+        draw.line([cx - 52, cy, cx + 52, cy], fill=color, width=3)
+        draw.line([cx, cy - 52, cx, cy + 52], fill=color, width=3)
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=85)
+        return buffer.getvalue()
+    except Exception:
+        return None
+
+
+_PLACEHOLDER_FRAME: Optional[bytes] = _make_placeholder_frame()
+
+
+def _multipart_part(boundary: bytes, frame: bytes) -> bytes:
+    """构造单个 multipart 视频帧分片。"""
+    return (
+        boundary + b"\r\n"
+        b"Content-Type: image/jpeg\r\n"
+        b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
+        + frame + b"\r\n"
+    )
+
+
 async def _frame_generator():
-    """帧生成器，逐帧输出 multipart 分片"""
+    """帧生成器，逐帧输出 multipart 分片。
+
+    只要没有真实帧可推（车端离线，或在线但尚未推首帧），就推占位帧，
+    让浏览器 <img> 立即 onLoad——既避免前端一直卡在「正在连接摄像头」，
+    也避免长时间收不到任何字节被浏览器判为加载失败（onError →「摄像头未连接」）。
+    车端是否在线由 /drive/stats 与前端状态徽章另行呈现。
+    """
     boundary = b"--donkeyframe"
     last_sent_ts = 0.0
     min_interval = 1.0 / 25.0  # 最高 25fps 发送
 
     while True:
-        if drive_state.last_frame is None or not drive_state.car_online():
-            # 无帧时输出占位符（后续替换为默认占位图）
+        frame = drive_state.last_frame
+        online = drive_state.car_online()
+
+        # 有真实帧且车端在线：正常推流
+        if frame is not None and online:
+            now = time.time()
+            if now - last_sent_ts < min_interval:
+                await asyncio.sleep(min_interval / 2)
+                continue
+            last_sent_ts = now
+            yield _multipart_part(boundary, frame)
+            continue
+
+        # 占位帧生成失败时（如 Pillow 不可用）才静默，避免发送空分片。
+        if _PLACEHOLDER_FRAME is None:
             await asyncio.sleep(0.1)
             continue
 
+        # 车端离线或在线但还没有首帧：发送占位帧，让 <img> 立即 onLoad。
         now = time.time()
-        if now - last_sent_ts < min_interval:
-            await asyncio.sleep(min_interval / 2)
+        if now - last_sent_ts < PLACEHOLDER_FRAME_INTERVAL:
+            await asyncio.sleep(PLACEHOLDER_FRAME_INTERVAL / 2)
             continue
-
-        frame = drive_state.last_frame
         last_sent_ts = now
-        yield (
-            boundary + b"\r\n"
-            b"Content-Type: image/jpeg\r\n"
-            b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
-            + frame + b"\r\n"
-        )
+        yield _multipart_part(boundary, _PLACEHOLDER_FRAME)
 
 
 @router.get("/stats")

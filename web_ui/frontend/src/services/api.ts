@@ -116,6 +116,17 @@ export const browseDirectory = async (path?: string) => {
   return response.data;
 };
 
+export const discoverProjects = async (root?: string): Promise<{
+  status: boolean;
+  root: string;
+  projects: string[];
+  count: number;
+  last_project: string | null;
+}> => {
+  const response = await api.get('/config/discover_projects', { params: { root } });
+  return response.data;
+};
+
 export const loadTub = async (path: string) => {
   const response = await api.post('/tub/load', { path });
   return response.data;
@@ -136,6 +147,66 @@ export const restoreRecords = async (indexes: number[]) => {
   return response.data;
 };
 
+export interface TubSession {
+  session_id: string;
+  record_count: number;
+  first_index: number;
+  last_index: number;
+  start_time_ms: number | null;
+  end_time_ms: number | null;
+}
+
+export interface TubRecord {
+  [key: string]: unknown;
+  _index?: number;
+  _session_id?: string;
+  _timestamp_ms?: number;
+}
+
+export const listTubSessions = async (tubPath: string) => {
+  const response = await api.get('/tub/sessions', { params: { tubPath } });
+  return response.data as { status: boolean; path: string; sessions: TubSession[] };
+};
+
+export const getSessionRecords = async (tubPath: string, sessionId: string) => {
+  const response = await api.get('/tub/session_records', {
+    params: { tubPath, sessionId },
+  });
+  return response.data as { status: boolean; path: string; records: TubRecord[] };
+};
+
+export const deleteTubSession = async (tubPath: string, sessionId: string) => {
+  const response = await api.post('/tub/delete_session', {
+    tub_path: tubPath,
+    session_id: sessionId,
+  });
+  return response.data as {
+    status: boolean;
+    message: string;
+    deleted_count: number;
+    record_count: number | null;
+    deleted_indexes: number[] | null;
+  };
+};
+
+export const downloadTubSession = (
+  tubPath: string,
+  sessionId: string,
+  startTimeMs: number | null,
+) => {
+  const params = new URLSearchParams({ tubPath, sessionId });
+  if (startTimeMs != null) {
+    params.set('startTimeMs', String(startTimeMs));
+  }
+  const link = document.createElement('a');
+  link.href = `${API_URL}/tub/download_session?${params.toString()}`;
+  // Let the server set the filename via Content-Disposition
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 export const getImageUrl = (path: string, tubPath?: string) => {
   let url = `${API_URL}/tub/image?path=${encodeURIComponent(path)}`;
   if (tubPath) {
@@ -150,10 +221,16 @@ export const getImageUrl = (path: string, tubPath?: string) => {
 export interface TrainerConfig {
   host: string;
   user: string;
-  password: string;
   remote_dir_base: string;
   model_name: string;
   python_path: string;
+}
+
+export interface SSHCredentials {
+  host?: string;
+  user?: string;
+  password?: string;
+  key_filename?: string;
 }
 
 export const getTrainerConfig = async (configFile = 'train_online.conf') => {
@@ -163,6 +240,34 @@ export const getTrainerConfig = async (configFile = 'train_online.conf') => {
 
 export const setTrainerConfig = async (cfg: TrainerConfig, configFile = 'train_online.conf') => {
   const response = await api.post('/trainer/config', cfg, { params: { config_file: configFile } });
+  return response.data;
+};
+
+export interface MyPcProbeCheck {
+  name: string;
+  status: 'ok' | 'warn' | 'fail' | 'info';
+  message: string;
+  hint: string;
+}
+
+export interface MyPcProbeResult {
+  ok: boolean;
+  platform: string;
+  shell: string;
+  python_path: string;
+  checks: MyPcProbeCheck[];
+  suggestions: string[];
+}
+
+export const probeMyPc = async (cfg: {
+  host: string;
+  user: string;
+  password: string;
+  port?: number;
+  remote_dir_base?: string;
+  python_path?: string;
+}): Promise<MyPcProbeResult> => {
+  const response = await api.post('/trainer/mypc/probe', cfg);
   return response.data;
 };
 
@@ -251,6 +356,17 @@ export const listBackups = async (workingDir?: string) => {
   return response.data;
 };
 
+export interface TrainerTub {
+  name: string;
+  relative_path: string;
+  absolute_path: string;
+}
+
+export const listTrainerTubs = async (workingDir?: string): Promise<{ tubs: TrainerTub[]; current_tub_path: string }> => {
+  const response = await api.get('/trainer/tubs', { params: workingDir ? { working_dir: workingDir } : {} });
+  return response.data as { tubs: TrainerTub[]; current_tub_path: string };
+};
+
 export const startLocalTrain = async (params: {
   tub: string;
   model: string;
@@ -265,8 +381,18 @@ export const startLocalTrain = async (params: {
 export const startOnlineTrain = async (params: {
   config_file?: string;
   working_dir?: string;
+  ssh?: SSHCredentials;
 }) => {
   const response = await api.post('/trainer/train/online', params);
+  return response.data;
+};
+
+export const startMyPcTrain = async (params: {
+  config_file?: string;
+  working_dir?: string;
+  ssh?: SSHCredentials;
+}) => {
+  const response = await api.post('/trainer/train/mypc', params);
   return response.data;
 };
 
@@ -391,17 +517,6 @@ export const getConnectorLocalIps = async () => {
   return response.data as { ips: { ip: string; interface: string; priority: number }[]; count: number };
 };
 
-export const discoverConnectorCars = async () => {
-  const response = await api.post('/connector/discover');
-  return response.data as {
-    status: boolean;
-    found: { ip: string; port: number; latency_ms: number; reachable: boolean }[];
-    count: number;
-    scanned: number;
-    message: string;
-  };
-};
-
 export const discoverConnectorConsoles = async () => {
   const response = await api.post('/connector/discover_console');
   return response.data as {
@@ -430,6 +545,21 @@ export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKim
   });
   return response.data as LaunchKimiCodeWebResult;
 };
+
+export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
+  // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。
+  const response = await api.post('/launch/dsh', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
+// Donkey 菜单/启动页由 launcher（:8090）服务，与后端 launch.py 的
+// LAUNCHER_BASE_URL 约定一致；从浏览器侧按当前访问主机推导。
+export const getDonkeyUrl = (): string =>
+  `${window.location.protocol}//${window.location.hostname}:8090/`;
 
 // ------------------------------------------------------------------
 // Pilot Arena APIs
@@ -573,4 +703,60 @@ export const saveSimulatorConfig = async (payload: {
 }) => {
   const response = await api.post('/config/save_simulator', payload);
   return response.data as { status: boolean; message: string };
+};
+
+// ------------------------------------------------------------------
+// Sim Collect APIs（模拟器采集：后端 SSH 到 Mac 启动 DonkeySim 跑采集）
+// ------------------------------------------------------------------
+export interface SimCollectStartParams {
+  steps?: number;
+  kp?: number;
+  kd?: number;
+  throttle?: number;
+  min_throttle?: number;
+  keep_sim?: boolean;
+}
+
+export type SimCollectJobState = 'pending' | 'running' | 'done' | 'error' | 'stopped';
+
+export interface SimCollectResult {
+  steps: number;
+  mean_cte: number;
+  max_cte: number;
+  /** 0 = 未冲出赛道，1 = 冲出赛道 */
+  crashed: number;
+  result_out: string;
+}
+
+export interface SimCollectStatus {
+  job_id: string;
+  status: SimCollectJobState;
+  step: number;
+  steps_total: number;
+  cte: number | null;
+  speed: number | null;
+  result: SimCollectResult | null;
+  error: string | null;
+  /** 最后 200 行日志 */
+  logs: string[];
+}
+
+/** 启动采集；已有任务在跑时后端返回 409（调用方按 axios error 处理）。 */
+export const startSimCollect = async (params: SimCollectStartParams = {}) => {
+  const response = await api.post('/simcollect/start', params);
+  return response.data as { job_id: string; status: SimCollectJobState };
+};
+
+export const getSimCollectStatus = async (jobId: string) => {
+  const response = await api.get(`/simcollect/${jobId}/status`);
+  return response.data as SimCollectStatus;
+};
+
+export const stopSimCollect = async (jobId: string) => {
+  const response = await api.post(`/simcollect/${jobId}/stop`);
+  return response.data as { job_id: string; status: SimCollectJobState };
+};
+
+export const createSimCollectEventStream = (jobId: string) => {
+  return new EventSource(`${API_URL}/simcollect/${jobId}/events`);
 };

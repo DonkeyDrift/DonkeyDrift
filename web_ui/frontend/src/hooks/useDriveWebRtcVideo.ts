@@ -14,15 +14,17 @@ import type { WebRtcSignal } from './useDriveWebsocket';
 export type DriveVideoState = 'idle' | 'connecting' | 'connected' | 'unstable' | 'reconnecting' | 'degraded' | 'error';
 
 export const DRIVE_WEBRTC_NEGOTIATION_TIMEOUT_MS = 12000;
+export const DRIVE_WEBRTC_VIDEO_READY_TIMEOUT_MS = 8000;
 
 interface UseDriveWebRtcVideoOptions {
   incomingSignal?: WebRtcSignal | null;
   peerConnectionFactory?: () => RTCPeerConnection;
   negotiationTimeoutMs?: number;
   retryIntervalMs?: number;
+  videoReadyTimeoutMs?: number;
   disabled?: boolean;
   clientId?: string;
-  carOnline?: boolean;
+  carOnline?: boolean | null;
 }
 
 export interface DriveVideoMetrics {
@@ -132,6 +134,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     // retryIntervalMs is part of the public API but not yet wired internally
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     retryIntervalMs = 5000,
+    videoReadyTimeoutMs = DRIVE_WEBRTC_VIDEO_READY_TIMEOUT_MS,
     disabled = false,
     clientId,
     carOnline,
@@ -144,13 +147,17 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const frameTimestampsRef = useRef<number[]>([]);
   const frameCallbackRef = useRef<number | null>(null);
   const lastBrowserStatsSentAtRef = useRef(0);
+  const lastMetricsAtRef = useRef(0);
   const trackReceivedRef = useRef(false);
   const negotiationTimerRef = useRef<number | null>(null);
   const retryTimerRef = useRef<number | null>(null);
+  const videoReadyRef = useRef(false);
+  const videoReadyTimerRef = useRef<number | null>(null);
   const retryAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const attemptIdRef = useRef(0);
   const startInFlightRef = useRef(false);
+  const shouldRunRef = useRef(false);
 
   const startRef = useRef<() => void>(() => undefined);
 
@@ -172,6 +179,11 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       window.clearTimeout(negotiationTimerRef.current);
       negotiationTimerRef.current = null;
     }
+    if (videoReadyTimerRef.current !== null) {
+      window.clearTimeout(videoReadyTimerRef.current);
+      videoReadyTimerRef.current = null;
+    }
+    videoReadyRef.current = false;
     if (frameCallbackRef.current !== null && videoRef.current?.cancelVideoFrameCallback) {
       videoRef.current.cancelVideoFrameCallback(frameCallbackRef.current);
       frameCallbackRef.current = null;
@@ -205,7 +217,12 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
       frameTimestampsRef.current = [...frameTimestampsRef.current.slice(-119), metadata.presentationTime];
       const nextMetrics = calculateVideoMetrics(frameTimestampsRef.current);
-      setMetrics(nextMetrics);
+      // FPS/延迟徽标无需逐帧刷新：500ms 节流一次，避免 60fps 重渲染 VideoStream（#135）
+      const now = performance.now();
+      if (now - lastMetricsAtRef.current >= 500) {
+        lastMetricsAtRef.current = now;
+        setMetrics(nextMetrics);
+      }
       const sessionId = sessionIdRef.current;
       if (sessionId && nextMetrics.browserFps > 0 && metadata.presentationTime - lastBrowserStatsSentAtRef.current >= 1000) {
         lastBrowserStatsSentAtRef.current = metadata.presentationTime;
@@ -285,12 +302,26 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
         if (videoRef.current) {
           videoRef.current.srcObject = event.streams[0] ?? new MediaStream([event.track]);
           videoRef.current.onloadeddata = () => {
+            videoReadyRef.current = true;
+            if (videoReadyTimerRef.current !== null) {
+              window.clearTimeout(videoReadyTimerRef.current);
+              videoReadyTimerRef.current = null;
+            }
             if (mountedRef.current) {
               setVideoReady(true);
             }
           };
           scheduleFrameStats();
         }
+        // 收到 track 但首帧迟迟不解码时，超时降级重试，避免黑屏且遮罩卡死
+        videoReadyTimerRef.current = window.setTimeout(() => {
+          if (!videoReadyRef.current) {
+            setState('degraded');
+            setStats((current) => ({ ...current, degraded: true }));
+            closePeer();
+            scheduleRetry();
+          }
+        }, videoReadyTimeoutMs);
         setState('connected');
       };
 
@@ -333,19 +364,35 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       scheduleRetry();
       startInFlightRef.current = false;
     }
-  }, [closePeer, createPeer, disabled, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats, t]);
+  }, [closePeer, createPeer, disabled, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats, t, videoReadyTimeoutMs]);
 
   useEffect(() => {
     startRef.current = start;
   }, [start]);
 
+  // 挂载/卸载生命周期：只负责 mountedRef 与最终清理，不随 carOnline 变化重建
   useEffect(() => {
     mountedRef.current = true;
-    if (carOnline !== false) {
-      start();
-    }
     return () => {
       mountedRef.current = false;
+      attemptIdRef.current += 1;
+      startInFlightRef.current = false;
+      shouldRunRef.current = false;
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      closePeer();
+    };
+  }, [closePeer]);
+
+  // carOnline 门控：null 视为未知→乐观启动；false 停止；true 启动。
+  // 只在「应运行」状态真正翻转时才 start/stop，避免 null→true 触发整体重启竞态。
+  useEffect(() => {
+    const shouldRun = carOnline !== false;
+    if (shouldRun && !shouldRunRef.current) {
+      start();
+    } else if (!shouldRun && shouldRunRef.current) {
       attemptIdRef.current += 1;
       startInFlightRef.current = false;
       if (retryTimerRef.current !== null) {
@@ -353,8 +400,9 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
         retryTimerRef.current = null;
       }
       closePeer();
-    };
-  }, [closePeer, start, carOnline]);
+    }
+    shouldRunRef.current = shouldRun;
+  }, [carOnline, closePeer, start]);
 
   useEffect(() => {
     if (!incomingSignal || incomingSignal.session_id !== sessionIdRef.current || !peerRef.current) {

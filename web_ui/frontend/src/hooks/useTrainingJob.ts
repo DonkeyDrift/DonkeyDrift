@@ -3,6 +3,7 @@ import { useStore, TrainingJob } from '../store/useStore';
 import {
   startLocalTrain,
   startOnlineTrain,
+  startMyPcTrain,
   stopTrain,
   createLogStream,
   setTrainerConfig,
@@ -17,6 +18,7 @@ export function useTrainingJob() {
     finishTrainingJob,
     configPath,
     trainerOnlineConfig,
+    trainerMyPcConfig,
   } = useStore();
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -100,29 +102,40 @@ export function useTrainingJob() {
     connectSSE(job_id, job);
   }, [trainingJob, configPath, setTrainingJob, connectSSE]);
 
-  const startOnline = useCallback(async () => {
+  // Shared pipeline for SSH-based training ('online' = cloud server,
+  // 'mypc' = the user's own computer, reached via SSH callback).
+  const startSshTraining = useCallback(async (
+    mode: 'online' | 'mypc',
+    configFile: string,
+    cfg: typeof trainerOnlineConfig,
+    start: typeof startOnlineTrain,
+  ) => {
     if (trainingJob && trainingJob.status === 'running') {
       return;
     }
 
-    // Save config first
+    // 非敏感设置持久化到 conf；密码只在会话内随请求传递，不落盘。
     await setTrainerConfig({
-      host: trainerOnlineConfig.host,
-      user: trainerOnlineConfig.user,
-      password: trainerOnlineConfig.password,
-      remote_dir_base: trainerOnlineConfig.remoteDirBase,
-      model_name: trainerOnlineConfig.modelName,
-      python_path: trainerOnlineConfig.pythonPath,
-    }, 'train_online.conf');
+      host: cfg.host,
+      user: cfg.user,
+      remote_dir_base: cfg.remoteDirBase,
+      model_name: cfg.modelName,
+      python_path: cfg.pythonPath,
+    }, configFile);
 
-    const { job_id } = await startOnlineTrain({
-      config_file: 'train_online.conf',
+    const { job_id } = await start({
+      config_file: configFile,
       working_dir: configPath,
+      ssh: {
+        host: cfg.host,
+        user: cfg.user,
+        password: cfg.password,
+      },
     });
 
     const job: TrainingJob = {
       id: job_id,
-      mode: 'online',
+      mode,
       status: 'running',
       progress: {
         currentEpoch: 0,
@@ -138,7 +151,15 @@ export function useTrainingJob() {
 
     setTrainingJob(job);
     connectSSE(job_id, job);
-  }, [trainingJob, configPath, trainerOnlineConfig, setTrainingJob, connectSSE]);
+  }, [trainingJob, configPath, setTrainingJob, connectSSE]);
+
+  const startOnline = useCallback(() =>
+    startSshTraining('online', 'train_online.conf', trainerOnlineConfig, startOnlineTrain),
+  [startSshTraining, trainerOnlineConfig]);
+
+  const startMyPc = useCallback(() =>
+    startSshTraining('mypc', 'train_my_pc.conf', trainerMyPcConfig, startMyPcTrain),
+  [startSshTraining, trainerMyPcConfig]);
 
   const stopJob = useCallback(async () => {
     if (!trainingJob || trainingJob.status !== 'running') {
@@ -157,6 +178,7 @@ export function useTrainingJob() {
     isRunning: trainingJob?.status === 'running',
     startLocal,
     startOnline,
+    startMyPc,
     stopJob,
   };
 }

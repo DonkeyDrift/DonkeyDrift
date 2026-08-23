@@ -4,6 +4,32 @@ import { useResolvedTheme } from '@/lib/theme';
 
 export type DriveMode = 'user' | 'local_angle' | 'local';
 
+/** DriveMode -> ESP32 车控模式 rc_mode（0=手动 / 1=半自动 / 2=全自动）。 */
+export const driveModeToRcMode = (mode: DriveMode): number => {
+  switch (mode) {
+    case 'user':
+      return 0;
+    case 'local_angle':
+      return 1;
+    case 'local':
+      return 2;
+  }
+};
+
+/** ESP32 车控模式 rc_mode（0/1/2）-> DriveMode，非法值回退 'user'。 */
+export const rcModeToDriveMode = (rcMode: number): DriveMode => {
+  switch (rcMode) {
+    case 0:
+      return 'user';
+    case 1:
+      return 'local_angle';
+    case 2:
+      return 'local';
+    default:
+      return 'user';
+  }
+};
+
 interface DriveModeSelectorProps {
   value: DriveMode;
   onChange: (mode: DriveMode) => void;

@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
-import { DriveModeSelector } from './DriveModeSelector';
+import { DriveModeSelector, driveModeToRcMode, rcModeToDriveMode } from './DriveModeSelector';
 import { applyTheme } from '@/lib/theme';
 
 describe('DriveModeSelector', () => {
@@ -76,5 +76,21 @@ describe('DriveModeSelector', () => {
 
     fireEvent.click(button);
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('DriveMode mapping helpers', () => {
+  it('driveModeToRcMode 映射 user/local_angle/local 到 0/1/2', () => {
+    expect(driveModeToRcMode('user')).toBe(0);
+    expect(driveModeToRcMode('local_angle')).toBe(1);
+    expect(driveModeToRcMode('local')).toBe(2);
+  });
+
+  it('rcModeToDriveMode 映射 0/1/2 到 user/local_angle/local，非法值回退 user', () => {
+    expect(rcModeToDriveMode(0)).toBe('user');
+    expect(rcModeToDriveMode(1)).toBe('local_angle');
+    expect(rcModeToDriveMode(2)).toBe('local');
+    expect(rcModeToDriveMode(3)).toBe('user');
+    expect(rcModeToDriveMode(-1)).toBe('user');
   });
 });

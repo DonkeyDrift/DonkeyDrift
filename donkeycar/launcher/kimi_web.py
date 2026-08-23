@@ -3,8 +3,9 @@
 """POST /api/launch/kimi-code-web 的实现（适配 kimi ≥ 0.36）：
 
 优先复用已在运行的 kimi web 实例（kimi TUI 的内嵌 server 也算）；
-没有存活实例时才直接拉起 ``kimi web --no-open`` 子进程，从 stdout 的
-ready banner 里抓浏览器入口 URL。
+没有存活实例时才直接拉起 ``kimi web --no-open --host`` 子进程
+（绑 0.0.0.0 供局域网访问），从 stdout 的 ready banner 里抓浏览器
+入口 URL。
 
 背景与机制（0.36.0 起）：
 - TUI 不再进入 alternate-screen（``\\x1b[?1049h``），旧的"PTY 里注入
@@ -18,6 +19,43 @@ ready banner 里抓浏览器入口 URL。
   （token 在 # 片段里，由前端页面读取，不经过网络传输）。
 - 复用判定：登记条目 pid 存活 + 心跳新鲜 + 带 token 探测
   ``/api/v1/meta`` 返回 200。
+- 局域网可达性（issue #125）：消费方是用户电脑/手机上的浏览器，URL 里
+  的 ``localhost``/``127.0.0.1`` 指向浏览器自己当然打不开。因此冷启动
+  一律 ``--host 0.0.0.0`` 监听全部网卡，且两条路径返回前都把回环 host
+  改写为本机局域网 IP（复用配网模块的 ``detect_lan_ip``，保留端口与
+  ``#token=`` 片段）；只绑了回环的存活实例（如 TUI 内嵌 server）对
+  局域网 IP 探测不通时视为不可复用，由调用方另拉监听 0.0.0.0 的实例。
+
+issue #168（打开后是"全新状态"）的三处约束：
+- 复用路径校验实例运行目录：登记条目不带 cwd，改读 ``/proc/<pid>/cwd``
+  与请求的 cwd 比对；不是同一目录的实例（如在 mycar 里跑的 TUI 内嵌
+  server）不复用，另起目标目录的实例，KCW 才会进对工作区。
+- 冷启动绑固定端口：浏览器把置顶/模式/语言主题等 UI 偏好存在
+  localStorage，按 origin（含端口）隔离；复用路径可能挑到不同端口的
+  实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
+  首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
+- 入口 host 用 mDNS 主机名优先、局域网 IP 兜底：origin 还含 host。本机
+  在家庭 Wi-Fi 下走 DHCP，实测一天内 IP 连续变化（192.168.3.57 → .103 →
+  .62），用 IP 做 origin 时每次换 IP 都会让 KCW 的 localStorage（置顶
+  ``kimi-web.pinned-sessions``/权限模式 ``kimi-web.permission``/收藏模型
+  ``kimi-web.starred-models`` 等）被"清空"，用户反复丢置顶、自主模式变
+  逐条确认；mDNS 主机名不随 IP 变化，是唯一稳定的 origin。IP 仅作 mDNS
+  探测不到时的兜底（两者都写进 ``--allowed-host``，均能过 40301）。
+- 入口 host 的 IPv6/AAAA 防护（2026-08-21）：kimi web 只监听 IPv4
+  （0.0.0.0），而 avahi 默认会给 mDNS 名发布 AAAA（IPv6 地址）记录。
+  浏览器解析入口 host 时若选中 IPv6（部分浏览器优先 IPv6，或残留旧
+  临时地址缓存），TCP 连不上也不会立刻失败——黑洞等 30s 后 KCW 前端
+  abort，报"无法连接到 Kimi 服务器"（fetch AbortError）。因此入口
+  host 只有在 avahi 不发布 AAAA（``publish-aaaa-on-ipv4=no`` 且
+  ``use-ipv6=no``，浏览器只拿到 A 记录）时才用 mDNS 主机名；否则回退
+  局域网 IPv4 IP，保证入口一定可达。可达性优先于 origin 稳定性，但
+  配上 avahi 的 AAAA 关闭后两者兼得。
+- 入口 URL 注入 ``?kimi_origin=<origin>``：KCW 0.36.1 前端把 API 基地址
+  判定为 URL 的 ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]``
+  → ``window.location.origin``；launcher 显式写 ``kimi_origin`` 后，即使
+  浏览器残留旧 origin（如早期 mDNS 阶段的 ``tony007.local``）的
+  sessionStorage 也会被覆盖，避免任务执行时 ``/sessions/*/snapshot`` 等
+  请求打到连不上的 host（报 "TypeError: Load failed"）。
 """
 
 import json
@@ -25,10 +63,12 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -45,12 +85,20 @@ _POLL_S = 0.2
 INSTANCE_HEARTBEAT_MAX_AGE_S = 180.0
 # 复用探测（/api/v1/meta）的超时（秒）
 PROBE_TIMEOUT_S = 3.0
+# 冷启动绑定的固定端口（issue #168）：浏览器 localStorage 按 origin
+# （host+端口）隔离，端口漂移会让 KCW 每次像首次使用（置顶/模式/语言
+# 主题全丢）。不用 kimi 默认的 58627——TUI 内嵌 server 默认占它，撞上
+# 后 kimi 会自动顺延端口反而漂移；58640 是本 launcher 专属端口
+KIMI_WEB_PORT = 58640
 
 # kimi 用户目录下的固定位置
 KIMI_HOME = Path.home() / ".kimi-code"
 KIMI_BIN = KIMI_HOME / "bin" / "kimi"
 INSTANCES_DIR = KIMI_HOME / "server" / "instances"
 TOKEN_PATH = KIMI_HOME / "server.token"
+
+# avahi 发布策略配置（入口 host 的 IPv6/AAAA 防护，见 _avahi_publishes_ipv6）
+_AVAHI_CONF = Path("/etc/avahi/avahi-daemon.conf")
 
 # kimi web banner 里的失败特征 → 提前报错，不用傻等超时
 _SERVER_FAIL_MSG = "Failed to start server"
@@ -161,12 +209,300 @@ def _probe_server(host: str, port: int, token, timeout=PROBE_TIMEOUT_S) -> bool:
         return False
 
 
-def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
+def _lan_ip():
+    """本机局域网 IPv4（复用配网模块的 VPN/TUN 感知探测）；失败返回 None。"""
+    try:
+        from donkeycar.parts.provisioning import detect_lan_ip
+        return detect_lan_ip()
+    except Exception:
+        return None
+
+
+def _mdns_hostname():
+    """本机稳定 mDNS 主机名（如 ``tony007.local``），origin 不随 IP 漂移。
+
+    浏览器把 KCW 的置顶/模式/语言主题等 UI 偏好存 localStorage、按 origin
+    （协议+host+端口）隔离；host 用 DHCP 局域网 IP 时，IP 一变 origin 就
+    变、偏好被"清空"（issue #168 后续）。mDNS 主机名不随 IP 变化，是唯一
+    稳定的入口 origin，作为首选入口 host。仅当 mDNS 名能解析到本机局域网
+    IP 时返回，否则 None（保持原有可达性）。
+
+    主机名统一小写化：浏览器会把 URL 里的 host 小写化后放进 Host 头，
+    kimi 的 DNS-rebinding 栅栏按 Host 头比对 ``--allowed-host``，三者
+    （URL / Host 头 / allowed-host）保持同一小写形式才不会被 40301 拦下。
+    mDNS 名大小写不敏感、origin 的 host 也按小写归一，小写化不影响可达性
+    与 localStorage 的 origin 归属。
+    """
+    hostname = socket.gethostname()
+    if not hostname:
+        return None
+    fqdn = f"{hostname.split('.')[0].lower()}.local"
+    lan = _lan_ip()
+    if not lan:
+        return None
+    try:
+        infos = socket.getaddrinfo(fqdn, None, socket.AF_INET)
+    except (socket.gaierror, OSError):
+        return None
+    addrs = {info[4][0] for info in infos}
+    return fqdn if lan in addrs else None
+
+
+def _avahi_publishes_ipv6(conf_path=None):
+    """avahi 是否可能让浏览器拿到本机 mDNS 名的 AAAA（IPv6 地址）记录。
+
+    kimi web 只监听 IPv4（``--host 0.0.0.0``）。浏览器解析入口 host 若
+    拿到 AAAA 并选中 IPv6——连到本机 IPv6 地址但 58640 没有 IPv6 监听，
+    或 IPv6 路径黑洞——连接拖到 KCW 前端 30s 超时报“无法连接到 Kimi
+    服务器”。入口 host 选择必须知道 avahi 的发布策略，读三个键
+    （avahi 0.8 的 avahi-daemon.conf(5)）：
+
+    - ``publish-aaaa-on-ipv4``（默认 yes）：IPv4 mDNS 应答是否带 AAAA；
+    - ``use-ipv6``（默认 yes）：是否启用 IPv6 传输（IPv6 应答恒带 AAAA，
+      无独立开关）；
+    - ``publish-addresses``（默认 yes）：是否发布地址记录。
+
+    只有 ``publish-aaaa-on-ipv4=no`` 且 ``use-ipv6=no`` 才完全无 AAAA；
+    ``publish-addresses=no`` 连 A 都不发（mDNS 名解析不出地址、入口必然
+    回退 IP，也算安全）。配置文件缺失/不可读/未显式关闭一律视为“发布”
+    （保守，回退 IPv4 局域网 IP，保证入口可达）。
+    """
+    conf_path = conf_path or _AVAHI_CONF
+    try:
+        text = Path(conf_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True
+    publish_aaaa_on_ipv4 = True
+    use_ipv6 = True
+    publish_addresses = True
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        k = key.strip().lower()
+        v = val.strip().lower() not in ("no", "false", "0")
+        if k == "publish-aaaa-on-ipv4":
+            publish_aaaa_on_ipv4 = v
+        elif k == "use-ipv6":
+            use_ipv6 = v
+        elif k == "publish-addresses":
+            publish_addresses = v
+    if not publish_addresses:
+        return False
+    return publish_aaaa_on_ipv4 or use_ipv6
+
+
+def _entry_host():
+    """KCW 入口 URL 的入口 host：mDNS 主机名优先，其次本机局域网 IP。
+
+    origin 含 host，而本机在家庭 Wi-Fi 下走 DHCP，IP 会随时变化（实测一天
+    内 192.168.3.57 → .103 → .62）。用 IP 做 origin 时，IP 每变一次，KCW
+    浏览器端的 localStorage（置顶 ``kimi-web.pinned-sessions``、权限模式
+    ``kimi-web.permission``、收藏模型 ``kimi-web.starred-models`` 等）就按
+    新 origin 重新隔离，用户表现为"置顶全没了、自主模式变逐条确认、收藏
+    被取消"。mDNS 主机名不随 IP 变化，是唯一稳定的 origin，因此优先使用。
+
+    但 mDNS 名只有在 avahi 不发布 AAAA 时才是安全的入口 host：kimi web
+    只监听 IPv4，浏览器选中 IPv6（优先 IPv6 的浏览器或残留旧临时地址
+    缓存）会连接黑洞、30s 后 KCW 前端报"无法连接到 Kimi 服务器"
+    （fetch AbortError）。avahi 发布 AAAA（默认）时回退局域网 IPv4 IP，
+    可达性优先于 origin 稳定性；配置 ``publish-aaaa-on-ipv4=no`` 且
+    ``use-ipv6=no``（avahi 0.8 正确键名，``publish-aaaa-on-ipv6`` 不存在）
+    后 mDNS 名重新成为首选（两者都会写进 ``--allowed-host``，均能过 40301）。
+    """
+    fqdn = _mdns_hostname()
+    if fqdn and not _avahi_publishes_ipv6():
+        return fqdn
+    return _lan_ip()
+
+
+def _allowed_host_values():
+    """kimi web 需要放行的 Host 值（DNS-rebinding 栅栏，issue #168 后续）。
+
+    ``kimi web --host`` 绑定 0.0.0.0 时，浏览器用非回环 Host 访问会被
+    kimi 的 DNS-rebinding 检查拦下（40301 Invalid Host header）。本机接口
+    IP 会被 kimi 自动放行，但 mDNS 主机名是主机名而非接口 IP，不会被自动
+    放行——必须显式写进 ``--allowed-host``。这里收集 mDNS 主机名与局域网 IP
+    （两者都可能是入口 host，去重后返回），供冷启动命令使用。
+    """
+    hosts = []
+    fqdn = _mdns_hostname()
+    if fqdn and fqdn not in hosts:
+        hosts.append(fqdn)
+    lan = _lan_ip()
+    if lan and lan not in hosts:
+        hosts.append(lan)
+    return hosts
+
+
+def _is_loopback_host(host) -> bool:
+    """URL host 是否是上位机本机视角地址（远程浏览器打不开）。
+
+    ``localhost``/``127.x``/``::1`` 是回环；``0.0.0.0`` 是监听通配地址，
+    不是浏览器可打开的主机名，同样需要改写。
+    """
+    if not host:
+        return False
+    host = host.lower().strip("[]")
+    return (host == "localhost" or host == "0.0.0.0" or host == "::1"
+            or host.startswith("127."))
+
+
+def _lan_url(url: str):
+    """把 URL 的 host 改写为入口 host（mDNS 主机名优先，其次局域网 IP）。
+
+    回环/通配 host（``localhost``/``127.x``/``0.0.0.0``）必须改写为远程
+    浏览器可达的地址（issue #125）；本机局域网 IP 也一并改写为入口 host，
+    让入口 origin 稳定（issue #168 后续）。保留端口、路径与 ``#token=``
+    片段；探测不到局域网 IP 或 host 是其它远程地址时原样返回。
+    """
+    entry = _entry_host()
+    if not entry:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower().strip("[]")
+    lan = _lan_ip()
+    if not (_is_loopback_host(host) or (lan and host == lan)):
+        return url
+    netloc = f"{entry}:{parts.port}" if parts.port else entry
+    return urllib.parse.urlunsplit(
+        (parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def _mark_onboarded(url: str) -> str:
+    """给 KCW 入口 URL 追加 ``?kimi_onboarded=1``，跳过首次语言/主题欢迎页。
+
+    KCW 前端把 onboarding 完成态（欢迎页的选语言/主题）存 localStorage 键
+    ``kimi-web.onboarded``、按 origin 隔离。launcher 是受管入口——用户已在
+    Kimi 登录并使用过（有凭据/会话/置顶），不必再走欢迎页；入口 origin
+    变化（issue #168 后续）后，老 origin 的 onboarding 标记不会跟随，用户
+    会被欢迎页反复挡住、误以为"置顶又丢了"。URL 带 ``?kimi_onboarded=1``
+    时前端会把它写进当前 origin 的 localStorage 并直接进主界面，之后即使
+    不再带该参数也不会再弹欢迎页（等效于 KCW 自己的桌面→Web 迁移通道）。
+    """
+    parts = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    if not any(k == "kimi_onboarded" for k, _ in pairs):
+        pairs.append(("kimi_onboarded", "1"))
+    query = urllib.parse.urlencode(pairs)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+def _mark_origin(url: str) -> str:
+    """给 KCW 入口 URL 追加 ``?kimi_origin=<origin>``，钉住前端 API 基地址。
+
+    KCW 0.36.1 前端把 API 基地址的判定顺序写成：URL 查询参数
+    ``kimi_origin`` → ``sessionStorage["kimi-desktop-server-origin"]`` →
+    ``window.location.origin``（详见其 boot 包里的 ``g$()``/``Ike()``）。
+    桌面端把 ``kimi_origin`` 显式写进交接 URL，前端读到后还会把它写进
+    sessionStorage——即使浏览器里残留旧 origin（例如之前 mDNS 阶段的
+    ``tony007.local``）的 sessionStorage，也会被本次入口 origin 覆盖，
+    不会再让 ``/sessions/*/snapshot`` 等 API 请求打到一个浏览器连不上的
+    host（issue #168 后续：任务执行时报 "TypeError: Load failed"）。
+
+    origin 取当前 URL 的 scheme+netloc（即 ``_lan_url`` 改写后的稳定入口
+    host:port），保留路径、``kimi_onboarded`` 与 ``#token=`` 片段；同名
+    参数若已存在则先去掉再追加，保证唯一。
+    """
+    parts = urllib.parse.urlsplit(url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    pairs = [(k, v) for k, v in pairs if k != "kimi_origin"]
+    pairs.append(("kimi_origin", origin))
+    query = urllib.parse.urlencode(pairs)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+def _proc_cwd(pid: int):
+    """实例进程的运行目录（``/proc/<pid>/cwd`` 的真实路径）。
+
+    实例登记条目不带 cwd 字段，复用前用它校验实例跑在请求的目录里
+    （issue #168）；进程消失/无权限返回 None（视为不匹配，跳过）。
+    """
+    try:
+        return os.path.realpath(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+def _create_session(port, token, cwd_str, timeout=PROBE_TIMEOUT_S):
+    """通过 REST API 在已运行的 kimi web 实例上创建新会话。
+
+    ``POST /api/v1/sessions`` 创建新会话，返回 session ID；失败返回 None。
+    用 127.0.0.1 直连（launcher 与 kimi web 同机），不经 mDNS。
+
+    每次点击 KCW 入口时调用，确保用户拿到的是一个全新的会话，而非
+    上次遗留的旧会话——用户明确要求"不是搜索现在已经有的窗口，而是
+    直接重新开一个新的 Session"。
+    """
+    body = json.dumps(
+        {"metadata": {"cwd": cwd_str or str(Path.home())}}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/sessions",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("data", {}).get("id")
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return None
+
+
+def _ensure_session_url(url, cwd_str, create_session_fn=None):
+    """确保入口 URL 指向一个新会话，而非裸入口或旧会话。
+
+    URL 路径已是 ``/sessions/<id>`` 的（冷启动 banner 的 ``Session:`` 行
+    直达一个新会话）直接返回；裸入口（路径为 ``/``）的通过 REST API
+    创建新会话后插入路径 ``/sessions/<sid>``。创建失败时原样返回（裸入口
+    仍可用，浏览器显示会话列表，用户手动选）。
+
+    用户要求每次点击 KCW 都开新会话（"不是搜索现在已经有的窗口，而是
+    直接重新开一个新的 Session"）：复用路径返回的裸入口不带会话 ID，
+    浏览器会显示上次的旧会话；冷启动路径的 ``Session:`` 行已带新会话，
+    无需再创建。
+    """
+    create_session_fn = create_session_fn or _create_session
+    parts = urllib.parse.urlsplit(url)
+    if parts.path.startswith("/sessions/"):
+        return url  # 已带会话路径（冷启动 Session: 行直达新会话）
+    port = parts.port
+    if port is None:
+        return url
+    # token 在 #token= 片段里
+    fragment = parts.fragment or ""
+    token = None
+    if fragment.startswith("token="):
+        token = fragment[len("token="):]
+    sid = create_session_fn(port, token, cwd_str)
+    if not sid:
+        logger.warning("创建新会话失败，返回裸入口 URL（浏览器显示会话列表）")
+        return url
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, f"/sessions/{sid}",
+         parts.query, parts.fragment))
+
+
+def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH,
+                       cwd=None):
     """找已在运行的 kimi web 实例，返回带 ``#token=`` 的浏览器入口 URL。
 
-    判定链：登记条目心跳新鲜 → pid 存活 → 带持久 token 探测
-    ``/api/v1/meta`` 返回 200。找不到返回 None。
+    判定链：登记条目心跳新鲜 → pid 存活 → 运行目录匹配（cwd 给定时比对
+    ``/proc/<pid>/cwd``，issue #168）→ 带持久 token 探测 ``/api/v1/meta``
+    返回 200，且局域网可达（登记 host 是回环时需对本机局域网 IP 探测
+    通过）。找不到返回 None。
     """
+    cwd_real = os.path.realpath(cwd) if cwd else None
     token = _read_token(token_path)
     now_ms = time.time() * 1000
     max_age_ms = INSTANCE_HEARTBEAT_MAX_AGE_S * 1000
@@ -175,9 +511,34 @@ def _live_instance_url(instances_dir=INSTANCES_DIR, token_path=TOKEN_PATH):
             continue
         if not _pid_alive(inst["pid"]):
             continue
-        if not _probe_server(inst["host"], inst["port"], token):
+        if cwd_real is not None and _proc_cwd(inst["pid"]) != cwd_real:
             continue
-        url = f"http://{inst['host']}:{inst['port']}/"
+        host = inst["host"]
+        # 实例是否本机视角（回环/通配，或登记的就是本机局域网 IP）；
+        # 只有本机实例才值得改用 mDNS 稳定 origin（issue #168 后续）
+        is_local = _is_loopback_host(host) or (
+            _lan_ip() is not None and host == _lan_ip())
+        if _is_loopback_host(host):
+            # 只绑回环的实例（如 TUI 内嵌 server）远程浏览器访问不到；
+            # 对局域网 IP 再探一次：通了说明实际监听 0.0.0.0 只是登记
+            # 写的 127.0.0.1，改用局域网 host；不通则跳过
+            lan = _lan_ip()
+            if not lan or not _probe_server(lan, inst["port"], token):
+                continue
+            host = lan
+        if not _probe_server(host, inst["port"], token):
+            continue
+        if is_local:
+            entry = _entry_host() or host
+            # 复用前必须确认入口 host 真能过 kimi 的 DNS-rebinding 栅栏
+            # （issue #168 后续）：老实例可能没带 --allowed-host，对局域网
+            # IP 探测通、但对 mDNS 主机名 403，返回这种 URL 浏览器一打开就
+            # 报 Invalid Host header。入口 host 与已探测的 host 不同时再对
+            # 入口 host 探一次，不通则跳过该实例。
+            if entry != host and not _probe_server(entry, inst["port"], token):
+                continue
+            host = entry
+        url = f"http://{host}:{inst['port']}/"
         if token:
             url += f"#token={token}"
         return url
@@ -196,7 +557,8 @@ def _resolve_kimi_binary():
 
 
 def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
-    """拉起 ``kimi web --no-open`` 并等 ready banner 里的 URL。
+    """拉起 ``kimi web --no-open --host``（绑 0.0.0.0）并等 ready banner
+    里的 URL。
 
     返回 ``(proc, url, None)`` 或 ``(None, None, 错误原因)``；
     失败路径一律杀掉子进程，不留孤儿。
@@ -206,8 +568,19 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
     env["PATH"] = str(KIMI_BIN.parent) + os.pathsep + env.get("PATH", "")
     env.setdefault("HOME", str(Path.home()))
     try:
+        cmd = [binary, "web", "--no-open", "--host",
+               "--port", str(KIMI_WEB_PORT)]
+        # --allowed-host：绑定 0.0.0.0 后，浏览器用 mDNS 主机名/局域网 IP
+        # 访问会被 kimi 的 DNS-rebinding 栅栏 403 拦下（40301 Invalid Host
+        # header，issue #168 后续）；显式放行入口 host 与局域网 IP。
+        for allowed_host in _allowed_host_values():
+            cmd += ["--allowed-host", allowed_host]
         proc = popen_fn(
-            [binary, "web", "--no-open"],
+            # --host 裸传 = 绑 0.0.0.0：消费方是局域网内用户设备上的
+            # 浏览器（issue #125），只绑回环它们访问不到
+            # --port 固定专属端口：origin 稳定，KCW 的 localStorage 偏好
+            # （置顶/模式/语言主题）不再因端口漂移被清空（issue #168）
+            cmd,
             cwd=cwd_str,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -276,22 +649,33 @@ def _spawn_and_capture(binary: str, cwd_str, deadline: float, popen_fn=None):
 
 def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                          live_url_fn=None, resolve_binary_fn=None,
-                         popen_fn=None):
+                         popen_fn=None, create_session_fn=None):
     """打开 Kimi Code Web：优先复用存活实例，否则拉起 ``kimi web``。
+
+    无论复用还是冷启动，返回的 URL 都指向一个**新会话**（``/sessions/<id>``），
+    而非裸入口——用户要求"不是搜索现在已经有的窗口，而是直接重新
+    开一个新的 Session"：复用路径的裸入口不带会话 ID，浏览器会显示
+    上次的旧会话；通过 ``_ensure_session_url`` 在裸入口上创建新会话
+    并插入路径，每次点击都开新会话。冷启动路径的 ``Session:`` banner
+    已带新会话，无需再创建。
 
     Args:
         cwd: kimi 运行目录（绝对路径）；None 表示上位机用户主目录。
-            目录不存在直接报错，绝不回退到其它目录。
+            目录不存在直接报错，绝不回退到其它目录。复用路径只复用
+            运行目录与之匹配的存活实例（issue #168）。
         timeout_s: 整体超时（秒），默认 120；调用方客户端超时应 ≥120s。
             复用路径毫秒级返回，仅冷启动路径可能用满。
-        live_url_fn / resolve_binary_fn / popen_fn: 测试钩子，默认
-            ``_live_instance_url`` / ``_resolve_kimi_binary`` /
-            ``subprocess.Popen``。
+        live_url_fn / resolve_binary_fn / popen_fn / create_session_fn:
+            测试钩子，默认 ``_live_instance_url`` / ``_resolve_kimi_binary``
+            / ``subprocess.Popen`` / ``_create_session``；live_url_fn
+            以 cwd（规范化后，None 表示不限定）为参调用。
 
     Returns:
         成功 {"status": "ok", "url": <带 #token= 的入口 URL>}；
         失败 {"status": "error", "error": <原因>}。
-        成功拉起的子进程保持存活（杀它即关 web 服务）；失败路径杀净。
+        URL 的回环 host 已改写为本机局域网 IP（issue #125，远程浏览器
+        可达）；成功拉起的子进程保持存活（杀它即关 web 服务）；失败路径
+        杀净。
     """
     live_url_fn = live_url_fn or _live_instance_url
     resolve_binary_fn = resolve_binary_fn or _resolve_kimi_binary
@@ -306,10 +690,15 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             }
         cwd_str = str(cwd_path)
 
-    # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web）
-    url = live_url_fn()
+    # 快路径：已有 kimi 实例在跑（TUI 内嵌 server 或已启动的 kimi web），
+    # 且运行目录与请求一致（cwd=None 不限定，issue #168）；注意必须
+    # 关键字传参——_live_instance_url 首参是 instances_dir
+    url = live_url_fn(cwd=cwd_str)
     if url:
-        logger.info("复用已运行的 Kimi Code Web 实例: %s", url)
+        url = _mark_origin(_mark_onboarded(
+            _ensure_session_url(_lan_url(url), cwd_str,
+                                 create_session_fn=create_session_fn)))
+        logger.info("复用已运行的 Kimi Code Web 实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
 
     binary = resolve_binary_fn()
@@ -325,13 +714,19 @@ def launch_kimi_code_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                                           popen_fn=popen_fn)
     if url:
         _SPAWNED_PROCS.append(proc)
+        url = _mark_origin(_mark_onboarded(
+            _ensure_session_url(_lan_url(url), cwd_str,
+                                 create_session_fn=create_session_fn)))
         logger.info("Kimi Code Web 已启动: pid=%s url=%s", proc.pid, url)
         return {"status": "ok", "url": url}
 
     # 冷启动失败兜底：端口可能被登记滞后的存活实例占用，再试一次复用
-    url = live_url_fn()
+    url = live_url_fn(cwd=cwd_str)
     if url:
-        logger.info("冷启动未果，复用到已运行实例: %s", url)
+        url = _mark_origin(_mark_onboarded(
+            _ensure_session_url(_lan_url(url), cwd_str,
+                                 create_session_fn=create_session_fn)))
+        logger.info("冷启动未果，复用到已运行实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
     logger.warning("启动 Kimi Code Web 失败: %s", error)
     return {"status": "error", "error": error}

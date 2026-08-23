@@ -58,6 +58,20 @@ class TestTub(unittest.TestCase):
                             for rec_1, rec_2 in zip(it1, it2))), \
                     'Non continuous records found'
 
+    def test_delete_all_records_len(self):
+        """Deleting all records should make len(tub) return 0, not raise
+        TypeError: 'len()' should return >= 0."""
+        path = tempfile.mkdtemp()
+        try:
+            tub = Tub(path, ['input'], ['int'])
+            for i in range(5):
+                tub.write_record({'input': i})
+            tub.delete_records(list(range(5)))
+            self.assertEqual(len(tub), 0)
+            tub.close()
+        finally:
+            shutil.rmtree(path)
+
     def test_delete_last_n_records(self):
         start_len = len(self.tub)
         self.tub.delete_last_n_records(2)

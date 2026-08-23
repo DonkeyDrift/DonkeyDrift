@@ -1,10 +1,15 @@
 import React from 'react';
+import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useStore, type TrainerLocalConfig } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
+import type { TrainerTub } from '../../services/api';
 
 interface LocalConfigFormProps {
   config: TrainerLocalConfig;
   onConfigChange: (patch: Partial<TrainerLocalConfig>) => void;
+  tubCandidates: TrainerTub[];
+  currentTubPath: string;
 }
 
 const MODEL_TYPES = [
@@ -20,17 +25,45 @@ const MODEL_TYPES = [
 export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
   config,
   onConfigChange,
+  tubCandidates,
+  currentTubPath,
 }) => {
   const { t } = useTranslation();
   const { configPath } = useStore();
 
+  const candidatePaths = tubCandidates.map((c) => c.relative_path);
+  const selectedCandidate = candidatePaths.includes(config.tub) ? config.tub : '';
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{t('trainer.trainingConfig')}</h3>
+      <SectionCardTitle
+        icon={<SlidersHorizontal className="w-5 h-5" />}
+        title={t('trainer.trainingConfig')}
+        subtitle={t('trainer.trainingConfigSubtitle')}
+      />
 
       <div className="space-y-1">
         <label className="text-xs text-zinc-500">{t('trainer.tubPath')}</label>
         <div className="flex gap-2">
+          <select
+            value={selectedCandidate}
+            onChange={(e) => {
+              if (e.target.value) {
+                onConfigChange({ tub: e.target.value });
+              }
+            }}
+            className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+            aria-label={t('trainer.tubPath')}
+          >
+            <option value="">{t('trainer.tubPathManual')}</option>
+            {tubCandidates.map((c) => (
+              <option key={c.absolute_path} value={c.relative_path}>
+                {c.absolute_path === currentTubPath
+                  ? `${c.relative_path} (${t('trainer.tubLoaded')})`
+                  : c.relative_path}
+              </option>
+            ))}
+          </select>
           <input
             type="text"
             value={config.tub}
@@ -76,20 +109,20 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
         />
       </div>
 
-      {/* Advanced Options */}
+      {/* Advanced: collapsible row (expanded = advanced overrides active, same semantics as the old checkbox) */}
       <div className="pt-2 border-t border-zinc-800">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.advancedEnabled}
-            onChange={(e) => onConfigChange({ advancedEnabled: e.target.checked })}
-            className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-600 focus:ring-cyan-600"
-          />
-          <span className="text-sm font-medium text-zinc-300">{t('trainer.advancedOptions')}</span>
-        </label>
+        <button
+          type="button"
+          onClick={() => onConfigChange({ advancedEnabled: !config.advancedEnabled })}
+          aria-expanded={config.advancedEnabled}
+          className="w-full flex items-center justify-between text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+        >
+          <span className="font-medium">{t('trainer.advancedOptions')}</span>
+          {config.advancedEnabled ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
 
         {config.advancedEnabled && (
-          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs text-zinc-500">{t('trainer.batchSize')}</label>
               <input

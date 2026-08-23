@@ -510,3 +510,63 @@ def test_client_connect_does_not_request_car_state_when_offline(monkeypatch):
         pass
 
     assert {"type": "request_car_state"} not in sent_to_car
+
+
+def test_client_car_mode_command_forwards_to_car(monkeypatch):
+    client, drive = make_online_client()
+    sent_to_car = []
+
+    async def fake_send_to_car(payload):
+        sent_to_car.append(payload)
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
+
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        ws.send_json({"car_mode": 2})
+        time.sleep(0.1)
+
+    assert {"car_mode": 2} in sent_to_car
+
+
+async def _first_frame_part(drive):
+    gen = drive._frame_generator()
+    try:
+        return await gen.__anext__()
+    finally:
+        await gen.aclose()
+
+
+def test_video_stream_emits_placeholder_when_online_without_frame():
+    client, drive = make_client()
+    drive.drive_state.car_last_seen = datetime.now()
+    drive.drive_state.last_frame = None
+
+    part = asyncio.run(_first_frame_part(drive))
+
+    assert b"Content-Type: image/jpeg" in part
+    payload = part.split(b"\r\n\r\n", 1)[1]
+    assert payload.startswith(b"\xff\xd8")
+
+
+def test_video_stream_emits_real_frame_when_online():
+    client, drive = make_client()
+    drive.drive_state.car_last_seen = datetime.now()
+    drive.drive_state.last_frame = b"\xff\xd8REALJPEG\xff\xd9"
+
+    part = asyncio.run(_first_frame_part(drive))
+
+    assert b"REALJPEG" in part
+
+
+def test_video_stream_emits_placeholder_when_offline():
+    # 车端离线时也要立即推占位帧，否则 <img> 收不到首帧，前端会一直
+    # 卡在「正在连接摄像头」，甚至被浏览器判为 onError 显示「摄像头未连接」。
+    client, drive = make_client()
+    drive.drive_state.last_frame = None
+
+    part = asyncio.run(_first_frame_part(drive))
+
+    assert b"Content-Type: image/jpeg" in part
+    payload = part.split(b"\r\n\r\n", 1)[1]
+    assert payload.startswith(b"\xff\xd8")

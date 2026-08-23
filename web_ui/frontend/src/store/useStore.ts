@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 
 const MAX_SELECTION_HISTORY = 120;
 
-interface TubRecord {
+export interface TubRecord {
   _index: number;
   _timestamp_ms: number;
   [key: string]: unknown;
@@ -11,7 +11,7 @@ interface TubRecord {
 
 export interface TrainingJob {
   id: string;
-  mode: 'local' | 'online';
+  mode: 'local' | 'mypc' | 'online';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
   progress: {
     currentEpoch: number;
@@ -34,6 +34,10 @@ export interface TrainerOnlineConfig {
   modelName: string;
   pythonPath: string;
 }
+
+// Connection settings for training on the user's own computer (SSH callback
+// from the backend to the machine running the browser, config train_my_pc.conf).
+export type TrainerMyPcConfig = TrainerOnlineConfig;
 
 export interface TrainerLocalConfig {
   tub: string;
@@ -63,8 +67,12 @@ interface AppState {
   totalPhysicalRecords: number;
   deletedIndexes: number[];
   currentIndex: number;
+  activeSessionId: string | null;
+  activeSessionRecords: TubRecord[];
   fields: string[];
   isLoading: boolean;
+  loadedTubPath: string | null;
+  tubRefreshToken: number;
   isDragging: boolean;
   isPlaying: boolean;
   isLooping: boolean;
@@ -78,12 +86,15 @@ interface AppState {
   // Trainer state
   trainingJob: TrainingJob | null;
   trainerOnlineConfig: TrainerOnlineConfig;
+  trainerMyPcConfig: TrainerMyPcConfig;
   trainerLocalConfig: TrainerLocalConfig;
 
   setConfig: (config: Record<string, unknown>, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
+  requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
+  setActiveSession: (sessionId: string | null, records: TubRecord[]) => void;
   setDeletedIndexes: (deletedIndexes: number[], totalPhysicalRecords?: number) => void;
   setCurrentIndex: (index: number | ((prev: number) => number)) => void;
   setIsDragging: (isDragging: boolean) => void;
@@ -107,6 +118,7 @@ interface AppState {
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
   finishTrainingJob: (status: 'completed' | 'failed' | 'stopped') => void;
   setTrainerOnlineConfig: (cfg: Partial<TrainerOnlineConfig>) => void;
+  setTrainerMyPcConfig: (cfg: Partial<TrainerMyPcConfig>) => void;
   setTrainerLocalConfig: (cfg: Partial<TrainerLocalConfig>) => void;
 }
 
@@ -123,8 +135,12 @@ export const useStore = create<AppState>()(
       totalPhysicalRecords: 0,
       deletedIndexes: [],
       currentIndex: 0,
+      activeSessionId: null,
+      activeSessionRecords: [],
       fields: [],
       isLoading: false,
+      loadedTubPath: null,
+      tubRefreshToken: 0,
       isDragging: false,
       isPlaying: false,
       isLooping: false,
@@ -139,12 +155,20 @@ export const useStore = create<AppState>()(
       // Trainer defaults
       trainingJob: null,
       trainerOnlineConfig: {
-        host: 'haowenpi.com',
-        user: 'ubuntu',
-        password: 'dkc@2026',
+        host: '',
+        user: '',
+        password: '',
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',
+      },
+      trainerMyPcConfig: {
+        host: '',
+        user: '',
+        password: '',
+        remoteDirBase: '~/projects',
+        modelName: 'model',
+        pythonPath: '',
       },
       trainerLocalConfig: {
         tub: './data',
@@ -167,6 +191,7 @@ export const useStore = create<AppState>()(
       setTub: (path, records, fields, totalPhysicalRecords, deletedIndexes) =>
         set({
           tubPath: path,
+          loadedTubPath: path,
           records,
           originalRecords: records,
           totalRecords: records.length,
@@ -175,10 +200,15 @@ export const useStore = create<AppState>()(
           deletedIndexes: deletedIndexes ?? [],
           fields,
           currentIndex: records.length > 0 ? 0 : 0,
+          activeSessionId: null,
+          activeSessionRecords: [],
           error: null,
           activeDrawer: null,
           isPlaying: false,
         }),
+      // 手动刷新 Tub：清空已加载标记并递增令牌，让 TubManagerPage 重新全量拉取
+      requestTubRefresh: () =>
+        set((state) => ({ tubRefreshToken: state.tubRefreshToken + 1, loadedTubPath: null })),
       setRecords: (records) => set({ records, totalRecords: records.length }),
       setAllRecords: (records, totalPhysicalRecords, deletedIndexes) =>
         set((state) => ({
@@ -193,6 +223,8 @@ export const useStore = create<AppState>()(
               : 0,
           isPlaying: false,
         })),
+      setActiveSession: (sessionId, records) =>
+        set({ activeSessionId: sessionId, activeSessionRecords: records }),
       setCurrentIndex: (index) =>
         set((state) => ({
           currentIndex: typeof index === 'function' ? index(state.currentIndex) : index,
@@ -321,6 +353,10 @@ export const useStore = create<AppState>()(
         set((state) => ({
           trainerOnlineConfig: { ...state.trainerOnlineConfig, ...cfg },
         })),
+      setTrainerMyPcConfig: (cfg) =>
+        set((state) => ({
+          trainerMyPcConfig: { ...state.trainerMyPcConfig, ...cfg },
+        })),
       setTrainerLocalConfig: (cfg) =>
         set((state) => ({
           trainerLocalConfig: { ...state.trainerLocalConfig, ...cfg },
@@ -333,6 +369,7 @@ export const useStore = create<AppState>()(
         tubPath: state.tubPath,
         isLooping: state.isLooping,
         trainerOnlineConfig: state.trainerOnlineConfig,
+        trainerMyPcConfig: state.trainerMyPcConfig,
         trainerLocalConfig: state.trainerLocalConfig,
       }),
     }

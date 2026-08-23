@@ -64,6 +64,33 @@ class TestLinearUnbin(unittest.TestCase):
         assert res == -1.0
 
 
+class TestLinearUnbinSoftmax(unittest.TestCase):
+
+    def test_one_hot_matches_linear_unbin(self):
+        # 对 one-hot 输入，期望值解码退化为 argmax，结果应与 linear_unbin 一致
+        for idx in (0, 7, 14):
+            l = create_lbin(idx)
+            assert linear_unbin_softmax(l) == linear_unbin(l)
+
+    def test_uniform_distribution_returns_center(self):
+        # 15 个 angle 分箱均匀分布 -> 期望 bin=7 -> 0.0
+        arr = [1.0 / 15] * 15
+        assert linear_unbin_softmax(arr) == pytest.approx(0.0)
+
+    def test_skewed_distribution_returns_weighted_average(self):
+        # 0.5 权重在最左(0)与最右(14) -> 期望 bin=7 -> 0.0
+        arr = [0.0] * 15
+        arr[0] = 0.5
+        arr[14] = 0.5
+        assert linear_unbin_softmax(arr) == pytest.approx(0.0)
+
+    def test_throttle_expected_value(self):
+        # 20 个 throttle 分箱均匀分布，R=0.5 offset=0 -> 期望 bin=9.5 -> 0.2375
+        arr = [1.0 / 20] * 20
+        assert linear_unbin_softmax(arr, N=20, offset=0.0, R=0.5) == \
+            pytest.approx(0.2375)
+
+
 class TestMapping(unittest.TestCase):
 
     def test_positive(self):

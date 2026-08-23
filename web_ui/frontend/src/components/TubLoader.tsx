@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { AxiosError } from 'axios';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { Card, CardContent, CardHeader } from './ui/Card';
+import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
@@ -60,10 +61,11 @@ export const TubLoader: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Database className="w-5 h-5" />
-          {t('tub.loaderTitle')}
-        </CardTitle>
+        <SectionCardTitle
+          icon={<Database className="w-5 h-5" />}
+          title={t('tub.loaderTitle')}
+          subtitle={t('tub.loaderHoverSubtitle')}
+        />
         <p className="text-sm text-zinc-400">{t('tub.loaderSubtitle')}</p>
       </CardHeader>
       <CardContent>

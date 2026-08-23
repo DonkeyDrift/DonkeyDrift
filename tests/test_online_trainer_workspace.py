@@ -85,26 +85,34 @@ class TestOnlineTrainerWorkspace(unittest.TestCase):
         # 1. Check parent dir: success (exit 0)
         # 2. List dir: empty (return "")
         # 3. Create car: success (exit 0)
-        
+        # 4. uname -s: Linux (macOS 补丁检查，非 Darwin 直接跳过)
+
         stdout_ok = MagicMock(channel=MagicMock(recv_exit_status=lambda: 0))
         stdout_ls = MagicMock(read=lambda: b"")
-        
+        stdout_uname = MagicMock(read=lambda: b"Linux\n")
+
         self.trainer.ssh_client.exec_command.side_effect = [
             (None, stdout_ok, None), # check parent
             (None, stdout_ls, None), # ls
             (None, stdout_ok, None), # createcar
+            (None, stdout_uname, None), # uname -s
         ]
-        
+
         path = self.trainer.setup_remote_workspace()
-        
+
         # Verify path
         self.assertTrue(path.startswith("/home/user/projects/mycar-"))
         self.assertEqual(self.trainer.remote_work_dir, path)
-        
+
         # Verify createcar command was called with full path
-        args, _ = self.trainer.ssh_client.exec_command.call_args
-        self.assertIn("createcar --path", args[0])
-        self.assertIn(path, args[0])
+        calls = self.trainer.ssh_client.exec_command.call_args_list
+        createcar_cmd = calls[2][0][0]
+        self.assertIn("createcar --path", createcar_cmd)
+        self.assertIn(path, createcar_cmd)
+
+        # 非 macOS 远端不应执行 sed 补丁
+        all_cmds = [c[0][0] for c in calls]
+        self.assertFalse(any("sed -i" in cmd for cmd in all_cmds))
 
     @patch('donkeycar.management.train_online.console')
     def test_setup_remote_workspace_parent_fail(self, mock_console):
@@ -129,25 +137,28 @@ class TestOnlineTrainerWorkspace(unittest.TestCase):
         # 2. List dir: returns existing "mycar-..."
         # 3. Create car attempt 1: fail (File exists)
         # 4. Create car attempt 2: success
-        
+        # 5. uname -s: Linux (macOS 补丁检查)
+
         stdout_ok = MagicMock(channel=MagicMock(recv_exit_status=lambda: 0))
         stdout_ls = MagicMock(read=lambda: b"mycar-231027-001-AAAA")
         stdout_fail = MagicMock(channel=MagicMock(recv_exit_status=lambda: 1))
         stderr_exist = MagicMock(read=lambda: b"File exists")
-        
+        stdout_uname = MagicMock(read=lambda: b"Linux\n")
+
         self.trainer.ssh_client.exec_command.side_effect = [
             (None, stdout_ok, None), # check parent
             (None, stdout_ls, None), # ls
             (None, stdout_fail, stderr_exist), # createcar attempt 1
             (None, stdout_ok, None), # createcar attempt 2
+            (None, stdout_uname, None), # uname -s
         ]
-        
+
         path = self.trainer.setup_remote_workspace()
-        
+
         # Should succeed eventually
         self.assertIsNotNone(path)
-        # Verify exec_command called 4 times
-        self.assertEqual(self.trainer.ssh_client.exec_command.call_count, 4)
+        # Verify exec_command called 5 times
+        self.assertEqual(self.trainer.ssh_client.exec_command.call_count, 5)
 
     @patch('donkeycar.management.train_online.console')
     def test_setup_remote_workspace_max_retries_fail(self, mock_console):
@@ -156,7 +167,7 @@ class TestOnlineTrainerWorkspace(unittest.TestCase):
         stdout_ls = MagicMock(read=lambda: b"")
         stdout_fail = MagicMock(channel=MagicMock(recv_exit_status=lambda: 1))
         stderr_exist = MagicMock(read=lambda: b"File exists")
-        
+
         # check, ls, fail, fail, fail
         self.trainer.ssh_client.exec_command.side_effect = [
             (None, stdout_ok, None),
@@ -165,9 +176,57 @@ class TestOnlineTrainerWorkspace(unittest.TestCase):
             (None, stdout_fail, stderr_exist),
             (None, stdout_fail, stderr_exist),
         ]
-        
+
         with self.assertRaises(RuntimeError):
             self.trainer.setup_remote_workspace()
+
+    @patch('donkeycar.management.train_online.console')
+    def test_setup_remote_workspace_macos_patches_train_py(self, mock_console):
+        """macOS 远端：createcar 成功后对 train.py 执行 sed 禁用 mixed_float16"""
+        stdout_ok = MagicMock(channel=MagicMock(recv_exit_status=lambda: 0))
+        stdout_ls = MagicMock(read=lambda: b"")
+        stdout_uname = MagicMock(read=lambda: b"Darwin\n")
+
+        self.trainer.ssh_client.exec_command.side_effect = [
+            (None, stdout_ok, None), # check parent
+            (None, stdout_ls, None), # ls
+            (None, stdout_ok, None), # createcar
+            (None, stdout_uname, None), # uname -s
+            (None, stdout_ok, None), # sed patch
+        ]
+
+        path = self.trainer.setup_remote_workspace()
+
+        calls = self.trainer.ssh_client.exec_command.call_args_list
+        self.assertEqual(calls[3][0][0], "uname -s")
+        sed_cmd = calls[4][0][0]
+        self.assertIn("sed -i", sed_cmd)
+        self.assertIn("mixed_precision", sed_cmd)
+        self.assertIn("set_global_policy", sed_cmd)
+        self.assertIn(f"{path}/train.py", sed_cmd)
+        # 日志应有补丁记录
+        log_msgs = [c[0][0] for c in self.trainer._log.call_args_list]
+        self.assertTrue(any("disabled mixed_float16" in m for m in log_msgs))
+
+    @patch('donkeycar.management.train_online.console')
+    def test_setup_remote_workspace_macos_patch_failure_non_fatal(self, mock_console):
+        """macOS 远端 sed 补丁失败只记日志，不阻断训练流程"""
+        stdout_ok = MagicMock(channel=MagicMock(recv_exit_status=lambda: 0))
+        stdout_fail = MagicMock(channel=MagicMock(recv_exit_status=lambda: 1))
+        stderr_fail = MagicMock(read=lambda: b"sed: command not found")
+        stdout_ls = MagicMock(read=lambda: b"")
+        stdout_uname = MagicMock(read=lambda: b"Darwin\n")
+
+        self.trainer.ssh_client.exec_command.side_effect = [
+            (None, stdout_ok, None), # check parent
+            (None, stdout_ls, None), # ls
+            (None, stdout_ok, None), # createcar
+            (None, stdout_uname, None), # uname -s
+            (None, stdout_fail, stderr_fail), # sed patch fails
+        ]
+
+        path = self.trainer.setup_remote_workspace()
+        self.assertIsNotNone(path)
 
 if __name__ == '__main__':
     unittest.main()

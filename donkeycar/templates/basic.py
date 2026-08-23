@@ -92,7 +92,8 @@ def drive(cfg, model_path=None, model_type=None):
     elif cfg.CAMERA_TYPE == "WEBCAM":
         from donkeydrifter.parts.camera import Webcam
         cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H,
-                     image_d=cfg.IMAGE_DEPTH)
+                     image_d=cfg.IMAGE_DEPTH, framerate=cfg.CAMERA_FRAMERATE,
+                     camera_index=getattr(cfg, 'CAMERA_INDEX', 0))
     elif cfg.CAMERA_TYPE == "CVCAM":
         from donkeydrifter.parts.cv import CvCam
         cam = CvCam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H,

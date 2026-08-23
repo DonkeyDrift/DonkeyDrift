@@ -1,47 +1,25 @@
 import React, { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { discoverConnectorConsoles, launchKimiCodeWeb } from '@/services/api';
-import { useResolvedTheme } from '@/lib/theme';
+import { launchDsh, launchKimiCodeWeb } from '@/services/api';
 
-// consoleFirst=true 时 DrifterConsole 在左、Kimi Code Web 在右（手机版）；桌面默认 Kimi Code Web 在左
-export const EnterButtons: React.FC<{ consoleFirst?: boolean }> = ({ consoleFirst = false }) => {
+// 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
+// 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
+const useLauncherEntry = (
+  launch: (signal: AbortSignal) => Promise<{ status: string; url?: string; error?: string }>,
+  opts: { startingKey: string; failedKey: string; networkKey: string; timeoutMs: number },
+) => {
   const { t } = useTranslation();
-  const [scanning, setScanning] = useState(false);
-  const [kimiLaunching, setKimiLaunching] = useState(false);
-  // The fill + near-black text follow the ESP32 fill language in both themes;
-  // only the hover fill is JS-side and branches on the resolved theme.
-  const isLight = useResolvedTheme() === 'light';
-
-  const enterDrifterConsole = async () => {
-    if (scanning) return;
-    setScanning(true);
-    try {
-      const result = await discoverConnectorConsoles();
-      if (result.found && result.found.length > 0) {
-        window.open(`http://${result.found[0].ip}/`, '_blank', 'noopener,noreferrer');
-      } else {
-        alert(t('common.enterButtons.consoleNotFound'));
-      }
-    } catch {
-      alert(t('common.enterButtons.consoleNotFound'));
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  // 打开 Kimi Code Web：POST /api/launch/kimi-code-web（同源，后端转发到
-  // launcher :8090），拿到 url 后填入预先打开的空白标签页
-  const enterKimiCodeWeb = async () => {
-    if (kimiLaunching) return;
-    // 点击同步上下文先开空白页拿句柄：等异步拿到 URL 再 window.open
-    // 会被浏览器弹窗拦截
+  const [launching, setLaunching] = useState(false);
+  const enter = async () => {
+    if (launching) return;
     const win = window.open('about:blank', '_blank');
-    setKimiLaunching(true);
-    // kimi 冷启动可达数十秒，launcher 端整体超时 120s，客户端超时留足余量
+    setLaunching(true);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 125000);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
     try {
-      const data = await launchKimiCodeWeb(controller.signal);
+      const data = await launch(controller.signal);
       if (data.status === 'ok' && data.url) {
         if (win) {
           win.location.href = data.url;
@@ -50,44 +28,111 @@ export const EnterButtons: React.FC<{ consoleFirst?: boolean }> = ({ consoleFirs
         }
       } else {
         win?.close();
-        alert(t('common.enterButtons.kimiCodeWebFailed', { message: data.error || t('common.unknownError') }));
+        alert(t(opts.failedKey, { message: data.error || t('common.unknownError') }));
       }
     } catch {
       win?.close();
-      alert(t('common.enterButtons.kimiCodeWebFailed', { message: t('common.enterButtons.kimiCodeWebNetworkError') }));
+      alert(t(opts.failedKey, { message: t(opts.networkKey) }));
     } finally {
       clearTimeout(timer);
-      setKimiLaunching(false);
+      setLaunching(false);
     }
   };
+  return { launching, enter };
+};
 
-  // h-[34px] 与 LanguageSwitcher 整体高度一致（内部键 24px + 外壳 p-1×2 + border×2）
-  const cls = `flex items-center bg-[#5cc8ff] text-[#061019] border border-[#5cc8ff] font-extrabold text-[11px] px-2.5 h-[34px] rounded-full leading-none transition-colors ${isLight ? 'hover:bg-[#3eb6f0]' : 'hover:bg-[#8bdcff]'} cursor-pointer whitespace-nowrap`;
+// 高级入口的导航链接样式（Issue #175）：融入导航行、去掉胶囊外壳，但用
+// 更小字号 + 更淡颜色 + 图标做弱化处理，一眼可辨为不常用的高级选项；
+// 外链入口不做路由激活态；Car Connector 复用同一样式（见 Layout.tsx）。
+export const entryLinkCls =
+  'flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors whitespace-nowrap cursor-pointer py-2.5';
 
-  const kimiButton = (
-    <button type="button" onClick={enterKimiCodeWeb} disabled={kimiLaunching} title={t('common.enterButtons.kimiCodeWebTitle')} className={kimiLaunching ? `${cls} opacity-60 cursor-wait` : cls}>
-      {kimiLaunching ? t('common.enterButtons.kimiCodeWebStarting') : t('common.enterButtons.kimiCodeWeb')}
-    </button>
-  );
-  const consoleButton = (
-    <button type="button" onClick={enterDrifterConsole} disabled={scanning} title={t('common.enterButtons.drifterConsoleTitle')} className={scanning ? `${cls} opacity-60 cursor-wait` : cls}>
-      {scanning ? t('common.enterButtons.scanning') : t('common.enterButtons.drifterConsole')}
-    </button>
-  );
-
+export const DonkeyEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  const { pathname } = useLocation();
+  const active = pathname === '/donkey';
+  // Donkey 菜单（launcher :8090）改为在当前标签页内嵌显示，与 Drifter Console 一致；
+  // 处于 /donkey 时按流程导航的激活态高亮蓝色（text-cyan-500）。
   return (
-    <div className="flex items-center gap-2">
-      {consoleFirst ? (
-        <>
-          {consoleButton}
-          {kimiButton}
-        </>
-      ) : (
-        <>
-          {kimiButton}
-          {consoleButton}
-        </>
-      )}
-    </div>
+    <Link
+      to="/donkey"
+      title={t('common.enterButtons.donkeyTitle')}
+      className={
+        active
+          ? 'flex items-center gap-1 text-xs font-medium text-cyan-500 hover:text-cyan-400 transition-colors whitespace-nowrap cursor-pointer py-2.5'
+          : entryLinkCls
+      }
+    >
+      <Menu className="w-3.5 h-3.5 shrink-0" />
+      {t('common.enterButtons.donkey')}
+    </Link>
+  );
+};
+
+export const DrifterConsoleEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  const { pathname } = useLocation();
+  const active = pathname === '/console';
+  // Issue #234：改为在当前标签页内进入 DD 内嵌 Drifter Console 页面，不再跳新标签页；
+  // 处于 /console 时按流程导航的激活态高亮蓝色（text-cyan-500）。
+  return (
+    <Link
+      to="/console"
+      title={t('common.enterButtons.drifterConsoleTitle')}
+      className={
+        active
+          ? 'flex items-center gap-1 text-xs font-medium text-cyan-500 hover:text-cyan-400 transition-colors whitespace-nowrap cursor-pointer py-2.5'
+          : entryLinkCls
+      }
+    >
+      <SquareTerminal className="w-3.5 h-3.5 shrink-0" />
+      {t('common.enterButtons.drifterConsole')}
+    </Link>
+  );
+};
+
+export const KimiCodeWebEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  // kimi 冷启动可达数十秒，launcher 端整体超时 120s，客户端超时留足余量
+  const { launching, enter } = useLauncherEntry(launchKimiCodeWeb, {
+    startingKey: 'common.enterButtons.kimiCodeWebStarting',
+    failedKey: 'common.enterButtons.kimiCodeWebFailed',
+    networkKey: 'common.enterButtons.kimiCodeWebNetworkError',
+    timeoutMs: 125000,
+  });
+  return (
+    <button
+      type="button"
+      onClick={enter}
+      disabled={launching}
+      title={t('common.enterButtons.kimiCodeWebTitle')}
+      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
+    >
+      <Sparkles className="w-3.5 h-3.5 shrink-0" />
+      {launching ? t('common.enterButtons.kimiCodeWebStarting') : t('common.enterButtons.kimiCodeWeb')}
+    </button>
+  );
+};
+
+export const DshEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  // dsh 冷启动数秒、launcher 端整体超时 60s
+  const { launching, enter } = useLauncherEntry(launchDsh, {
+    startingKey: 'common.enterButtons.dshStarting',
+    failedKey: 'common.enterButtons.dshFailed',
+    networkKey: 'common.enterButtons.dshNetworkError',
+    timeoutMs: 65000,
+  });
+  return (
+    <button
+      type="button"
+      onClick={enter}
+      disabled={launching}
+      title={t('common.enterButtons.dshTitle')}
+      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
+    >
+      <FlaskConical className="w-3.5 h-3.5 shrink-0" />
+      {launching ? t('common.enterButtons.dshStarting') : t('common.enterButtons.dsh')}
+    </button>
   );
 };

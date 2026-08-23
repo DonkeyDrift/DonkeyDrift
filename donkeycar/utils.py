@@ -308,6 +308,25 @@ def linear_unbin(arr, N=15, offset=-1, R=2.0):
     return a
 
 
+def linear_unbin_softmax(arr, N=15, offset=-1, R=2.0):
+    '''
+    inverse linear_bin for a softmax probability distribution.
+
+    Unlike linear_unbin (which takes the argmax and collapses the distribution
+    to a single bin, producing step-like outputs), this computes the expected
+    bin index as the probability-weighted average and rescales it to the
+    original continuous range. This preserves the confidence information in the
+    softmax output and yields a continuous steering/throttle value.
+
+    For a one-hot input (sum == 1 with a single 1) this returns the same value
+    as linear_unbin.
+    '''
+    arr = np.asarray(arr, dtype=np.float64)
+    b = float(np.dot(arr, np.arange(N)))
+    a = b * (R / (N + offset)) + offset
+    return a
+
+
 def map_range(x, X_min, X_max, Y_min, Y_max):
     '''
     Linear mapping between two ranges of values
