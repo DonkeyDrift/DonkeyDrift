@@ -77,7 +77,60 @@
     - Escape 清锚点同步改用模块级变量。
   - 验证：`tsc --noEmit`、`vitest run`（22 文件 123 项）、`npm run build` 全部通过；并用 geckodriver + 无头 Firefox 对 8000 在线实例做真实鼠标点击测试：单击（20%）无选区 → 50% 得 [2336,6212] → 65% 得 [6212,8143] → 80% 得 [8143,10081] → 回跳 30% 得 [3623,10081]——每一步都是「最近两次点击」的区间，含向前回跳场景。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA；收尾合入本地 Tony（efe0e943）后重建 dist 部署 8000 并复测通过。全程纯本地，未碰 GitHub。
+# 2026-08-22 (170)
 
+- feat(connector): CC 页顶栏「重新扫描」右侧新增「手柄校准」按钮——点击经 postMessage 让内嵌车端视图打开校准弹窗
+  - 背景：车端 v1.8.47 起漂移/Judge 设置在 CC 内嵌视图默认展开后，「调校」行只剩手柄校准一个按钮；用户要求把该按钮移到 CC 页顶部「重新扫描」右边，并删掉内嵌视图里的「车辆设置」标题与「调校」行框（车端 v1.8.49 已整行隐藏）。
+  - 改动（`web_ui/frontend/src/components/CarSettingsPanel.tsx`）：工具行新增「手柄校准」Button（Gamepad2 图标，未选设备时禁用）；点击 `iframeRef.current?.contentWindow?.postMessage({type:'dd-open-joystick-cal'}, 'http://<selectedIp>')`——沿用 DrifterConsolePage 静音同步的同款 postMessage 通道，车端页面监听后调用 `openJoystickCalModal()`，弹窗在内嵌 iframe 可视区内居中打开。iframe 加 `ref`。
+  - i18n：`web_ui/frontend/src/i18n/messages/connector.ts` 新增 `connector.joystickCal`（手柄校准 / Joystick Cal）与 `connector.joystickCalHint`（悬停提示，中英）两键。
+  - 测试同步：新增 `CarSettingsPanel.test.tsx`——按钮位于重新扫描右侧、点击后对 iframe contentWindow postMessage `{type:'dd-open-joystick-cal'}` 与正确 targetOrigin、无设备时禁用；`vitest run` 23 文件 125 项全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。需配合车端固件 v1.8.49+（含 `dd-open-joystick-cal` 监听分支与 setTitle/setRow 隐藏）。
+
+## 2026-08-22 (169)
+
+- refactor(connector): CC 页删除「车辆设置」外层卡片框与标题——内容直接平铺，避免与内嵌车端视图的「车辆设置」标题重复
+  - 背景：CC 页面精简后整页只剩车辆设置，外层 Card + 标题（扳手图标 +「车辆设置」+ 副标题）与内嵌 iframe 里车端的「车辆设置」标题重复，用户要求删掉外层标题和大框。
+  - 改动（`web_ui/frontend/src/components/CarSettingsPanel.tsx`）：移除 `Card`/`CardHeader`/`CardContent`/`SectionCardTitle`/`Wrench` 包装，根节点改为普通 `div.space-y-3`；内容（车辆选择下拉 + 重新扫描按钮 + `?embedded=1&settings=1&wifi=1` 内嵌视图）不变。
+  - 依赖说明：本次改动基于本会话早先的 wifi 配网板块版本（`Tony-issue234-wifi-panel` 分支 commit `ed8d77bb` 的 CarSettingsPanel.tsx 文件版本，经 `git checkout ed8d77bb -- <file>` 取入本分支），与线上 dd-deploy 部署的未提交版本对齐。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
+## 2026-08-22 (168)
+
+- refactor(connector): CC 页删除「连接配置」「推送 Pilots」板块——页面精简为纯车辆设置中心
+  - 背景：与拉取 Tub 同批查证——连接器配置 `~/.donkeycar_web_connector.json` 从未创建（SSH 车端从未配置）；推送 Pilots 的源目录 `<backend cwd>/models` 在部署实例中不存在（真实模型在 `mycar/models`，均为模拟器产物）；整套 SSH 管线面向"车上跑 donkeycar 主机"架构，与当前 ESP32 真车 + 模拟器训练的实际工作流不符。用户决策：两个板块都删。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：页面精简为仅渲染 `CarSettingsPanel`（车辆设置）；删除全部 SSH 管线代码——连接配置卡、推送 Pilots 卡、`getConnectorConfig`/`setConnectorConfig`/`checkConnectorStatus`/`pushConnectorPilots` 引用、`useConnectorJob` 调用、相关 state 与图标。后端 `/connector/*` 接口与 `useConnectorJob` hook 文件保留不动，仅前端入口移除。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
+## 2026-08-22 (167)
+
+- refactor(connector): CC 页删除「拉取 Tub」板块——实证从未使用（数据流全走模拟器）
+  - 背景：用户要求评估拉取 Tub 是否用得上。查证：连接器配置 `~/.donkeycar_web_connector.json` 从未创建（SSH 车端从未配置，功能无从执行）；各部署 checkout 的后端 `./data` 落地目录全空（零拉取记录）；近期数据目录全为模拟器产物（`data_sim*`、`sim_collect_*`）。用户决策：只删拉取 Tub，保留连接配置与推送 Pilots。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：删除拉取 Tub 整卡及连带代码——`tubs`/`selectedTub`/`createNewDir` state、`loadRemoteLists`（远端 tub 列表只服务于该板块）、`refreshLocalTub`/`handlePullTub`、`pullConnectorTub`/`listConnectorTubs`/`loadTub`/`useStore`/`Download` 图标引用。后端 `/connector/tubs/*` 接口保留不动，仅 CC 前端移除入口。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
+## 2026-08-22 (166)
+
+- refactor(connector): CC 页删除整个「远程驾驶」板块——DriveApiBridge 回连地址全自动配置，无需手动项
+  - 背景：用户确认回连地址应自动配置（前端默认值本就取自浏览器访问地址、localhost 自动换本机网卡 IP），输入框无存在必要；删掉输入框后整个远程驾驶板块也随之删除。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：删除远程驾驶整卡（bridge URL 输入框、车辆在线状态、PID 显示、启动/停止驾驶、打开驾驶控制台按钮）及连带代码——`startConnectorDrive`/`stopConnectorDrive`/`getConnectorDriveStatus`/`getDriveCarWebSocketUrl`/`getConnectorLocalIps` 引用、`useDriveWebsocket`、`useNavigate`、`bridgeServerUrl`/`drivePid` state、bridge URL 自动修正 effect、`refreshDriveStatus`；`useConnectorJob` 改为无参调用（拉取/推送任务仍在用）。后端 `/connector/drive/*` 接口与 donkeycar 侧 `DRIVE_API_SERVER_URL` 自动注入逻辑保留不动，仅 CC 前端不再提供入口。
+  - 布局：右栏清空后移除两列 grid，剩余三卡（连接配置、拉取 Tub、推送 Pilots）整栏纵向堆叠，`CarSettingsPanel` 位置不变。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；cp 到 dd-deploy 重建 dist 部署 8000/8001。
+
+## 2026-08-22 (165)
+
+- refactor(connector): CC 页删除「任务进度与日志」板块与远程驾驶「模型类型/Pilot」下拉（与 Drive 页重复）
+  - 背景：用户精简 Car Connector 页面——任务日志板块从来用不上；远程驾驶卡里的模型类型与 Pilot 两个下拉在 Drive 页面已有同等功能（`ModelSelector` 组件 + `loadModelToCar`），属重复入口。
+  - 改动（`web_ui/frontend/src/pages/CarConnectorPage.tsx`）：
+    - 删除「任务进度与日志」整卡（进度条、完成/失败提示、日志滚动区、取消按钮）；`useConnectorJob` hook 保留（拉取/推送/启停任务仍靠它执行），仅解构精简为 `isJobRunning`/`startJob`，删除 `ScrollText` 图标引用。
+    - 删除远程驾驶卡「模型类型」「选择 Pilot」双下拉及连带死代码：`MODEL_TYPES` 常量、`modelType`/`selectedPilot`/`remoteModels` state、`listConnectorModels` 调用（`loadRemoteLists` 改为只拉 tub 列表）；`handleDriveStart` 简化为只发 `bridge_server_url`（后端 `startConnectorDrive` 的 `model_type`/`pilot` 本为可选参数，无后端改动）。
+    - i18n 键（`connector.modelTypeLabel`/`selectPilotLabel`/`jobLog` 等）保留不删，避免影响其它引用与 i18n 测试。
+  - 重复功能审查结论（其余板块均保留）：连接配置（车端 SSH host/user/port/car_dir/key，与 Trainer 页训练主机配置是另一用途）、拉取 Tub、推送 Pilots、远程驾驶启停 + bridge URL + 车辆设置（CarSettingsPanel）均为 CC 独有功能，其它页面无重复。
+  - 测试同步：`npm run build`（tsc + vite）、`vitest run`（22 文件 123 项）全部通过。
+  - 注：仅 DD 前端改动，Firmware 无改动；按用户要求全流程纯本地（本地功能分支 commit，不合 Tony、不碰 GitHub）；改动文件 cp 到 dd-deploy 部署 worktree 重建 dist 部署 8000/8001。
 ## 2026-08-21 (154)
 
 - feat(tub-editor): 底部滑块改为帧位置滑块——始终激活、与录制库进度条同步、thumb 改椭圆白色
