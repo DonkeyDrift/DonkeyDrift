@@ -60,6 +60,9 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             type="text"
             value={host}
             onChange={(e) => onHostChange(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
           />
         </div>
@@ -69,6 +72,9 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             type="text"
             value={user}
             onChange={(e) => onUserChange(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
           />
         </div>
@@ -80,6 +86,10 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           type="password"
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
+          autoComplete="new-password"
+          data-1p-ignore="true"
+          data-lpignore="true"
+          data-form-type="other"
           className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
         />
       </div>

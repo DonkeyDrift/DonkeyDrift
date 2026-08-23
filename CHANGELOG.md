@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-23 (161)
+
+- fix(trainer): 训练主机配置表单（本机/IP/密码）抑制苹果「存储密码？」与「强密码」建议——密码框声明 new-password + 密码管理器忽略属性，主机/用户名框 autocomplete=off
+  - 背景：Trainer 页训练主机配置（`RemoteConfigForm`，本机/车载电脑/云端三档共用）里主机 IP、用户名、密码三个输入框全无 autocomplete 属性；Safari/iOS 把「用户名 + type=password」组合识别为登录表单，输入密码后弹系统级「是否存储此密码」，并可能给出「强密码」建议——这里是 SSH 训练主机凭据，不是网站账号，提示无意义且打扰。ESP32 侧 STA 配网同款问题已在固件 v1.8.59 修复，本次对齐 DD 侧。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：密码框加 `autoComplete="new-password"`（声明为设置新密码而非登录凭据，Safari/Chrome 不弹保存提示）+ `data-1p-ignore` / `data-lpignore` / `data-form-type="other"`（1Password/LastPass/Dashlane 等忽略）；主机 IP 与用户名框加 `autoComplete="off" autoCapitalize="none" spellCheck={false}`（破除登录表单启发式，顺带关闭 iOS 首字母大写与拼写检查）。纯属性改动，无逻辑变化。
+  - 测试同步：新增 `web_ui/frontend/src/components/trainer/RemoteConfigForm.test.tsx`（2 项——密码框 new-password + 三个忽略属性；主机/用户名框 autocomplete=off/autocapitalize/spellcheck）。
+
 ## 2026-08-23 (160)
 
 - fix(console): DD 顶栏 DEV 开关显示与车端实际状态不一致——缓存 IP 失效不自愈 + 未知态误显示为「关」
