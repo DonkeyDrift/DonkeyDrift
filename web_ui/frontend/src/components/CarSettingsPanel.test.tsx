@@ -42,6 +42,9 @@ describe('CarSettingsPanel', () => {
     // v1.8.64 起不带 &wifi=1：配网板块不再出现在 CC 内嵌设置视图
     expect(iframe.src).toContain('http://192.168.3.46/?embedded=1&settings=1');
     expect(iframe.src).not.toContain('wifi=1');
+    // v1.8.65 起传 lang 与 theme（跟随 DD 当前语言/主题）
+    expect(iframe.src).toMatch(/[?&]lang=/);
+    expect(iframe.src).toMatch(/[?&]theme=(light|dark)/);
 
     const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
     fireEvent.click(calBtn);
