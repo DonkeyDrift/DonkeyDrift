@@ -13,6 +13,7 @@ import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
 import { ParameterPanel } from '../components/drive/ParameterPanel';
 import { InputSourceSelector, InputSource } from '../components/drive/InputSourceSelector';
 import { ModelSelector } from '../components/drive/ModelSelector';
+import { SimCollectCard } from '../components/drive/SimCollectCard';
 import { useDriveStore } from '../store/useDriveStore';
 import { useStore } from '../store/useStore';
 import { useTelemetryStore } from '../store/useTelemetryStore';
@@ -496,6 +497,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         </aside>
       </div>
 
+      <SimCollectCard />
     </div>
   );
 });
