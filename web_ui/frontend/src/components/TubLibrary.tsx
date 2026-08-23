@@ -45,6 +45,15 @@ const PREFETCH_CONCURRENCY = 6;
 // 避免每帧 re-render 整个组件树吃掉帧预算导致掉帧（#128）。
 const UI_UPDATE_EVERY_N_FRAMES = 6;
 
+// 墙钟播放调度（60fps 目标）：播放位置由「起点 + 经过的墙钟时间」推算，
+// 每个 rAF tick 把进度追平到墙钟目标——某帧图片还没加载完时跳过它画最新可用的，
+// 不再停摆等网络（旧逻辑一帧未 ready 整段播放冻住，且墙钟时间永久丢失）。
+// 单个 tick 最多推进的帧数：抖动恢复后按此速率追帧，避免单 tick 爆冲。
+const MAX_CATCHUP_FRAMES = 10;
+// 落后墙钟超过这么多帧（~1s）视为长停顿（切后台/网络卡死）：
+// 从当前帧重新对表继续 1x 播放，不追帧、不快进。
+const MAX_RESUME_LAG_FRAMES = 60;
+
 const formatDateTime = (ms: number | null) => {
   if (ms === null || ms === undefined) return null;
   const date = new Date(ms);
@@ -150,7 +159,9 @@ export const TubLibrary: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const rafRef = useRef<number>();
-  const lastFrameTimeRef = useRef<number>(0);
+  // 墙钟播放基准：进入播放的首个 tick 记录起点时间与起点帧
+  const playStartTimeRef = useRef<number>(0);
+  const playStartFrameRef = useRef<number>(0);
   const frameRef = useRef(0);
   const isPlayingRef = useRef(false);
   const recordsRef = useRef(records);
@@ -386,9 +397,10 @@ export const TubLibrary: React.FC = () => {
     }
   }, [currentImagePath, tubPath, theme, touchImageCache]);
 
-  // Playback loop: advance frames at DRIVE_LOOP_HZ, drawing directly to canvas
-  // and throttling React state updates to ~10fps to avoid per-frame re-renders
-  // that eat the frame budget and cause dropped frames (#128).
+  // Playback loop: wall-clock scheduled — position derives from elapsed time
+  // (start frame + elapsed/frameInterval), each rAF tick draws the newest
+  // ready frame up to the wall-clock target instead of stalling on a frame
+  // that hasn't loaded yet; React state updates stay throttled (#128, 60fps).
   useEffect(() => {
     if (!isPlaying || !records.length) return;
 
@@ -401,59 +413,80 @@ export const TubLibrary: React.FC = () => {
 
     const step = (time: number) => {
       if (!isPlayingRef.current) return;
-      if (lastFrameTimeRef.current === 0) {
-        lastFrameTimeRef.current = time;
+      if (playStartTimeRef.current === 0) {
+        playStartTimeRef.current = time;
+        playStartFrameRef.current = frameRef.current;
         fpsStartRef.current = time;
       }
-      if (time - lastFrameTimeRef.current >= frameInterval) {
-        lastFrameTimeRef.current = time - ((time - lastFrameTimeRef.current) % frameInterval);
-        const next = frameRef.current + 1;
-        if (next >= records.length) {
-          setIsPlaying(false);
-          setFrame(frameRef.current);
-          return;
+      const total = records.length;
+      const prevFrame = frameRef.current;
+      // 墙钟目标帧：起点帧 + 经过时间对应的帧数
+      let target =
+        playStartFrameRef.current +
+        Math.floor((time - playStartTimeRef.current) / frameInterval);
+      if (target > total - 1) target = total - 1;
+      const lag = target - prevFrame;
+      if (lag > MAX_RESUME_LAG_FRAMES) {
+        // 长停顿（切后台/网络卡死）：从当前帧重新对表，不追帧不快进
+        playStartFrameRef.current = prevFrame;
+        playStartTimeRef.current = time;
+        target = prevFrame + 1;
+      }
+      let next = prevFrame;
+      if (target > prevFrame) {
+        // 窗口内取最后一个可画帧（中间未 ready/损坏的帧跳过，不停摆）
+        const windowEnd = Math.min(prevFrame + MAX_CATCHUP_FRAMES, target);
+        let drawIndex = -1;
+        for (let i = prevFrame + 1; i <= windowEnd; i += 1) {
+          const url = imageUrlsRef.current[i];
+          const img = url ? imageCacheRef.current.get(url) : undefined;
+          if (img && img.complete && img.naturalWidth > 0) drawIndex = i;
         }
-        const url = imageUrlsRef.current[next];
-        if (url) {
-          const nextImg = imageCacheRef.current.get(url);
-          if (!nextImg || !nextImg.complete) {
-            rafRef.current = requestAnimationFrame(step);
-            return;
-          }
-          // 直接画到 canvas，不触发 React re-render
-          if (canvas && ctx) {
-            if (canvas.width !== nextImg.width || canvas.height !== nextImg.height) {
-              canvas.width = nextImg.width;
-              canvas.height = nextImg.height;
+        if (drawIndex >= 0) {
+          const img = imageCacheRef.current.get(imageUrlsRef.current[drawIndex]);
+          if (img && canvas && ctx) {
+            // 直接画到 canvas，不触发 React re-render
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
             }
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(nextImg, 0, 0);
+            ctx.drawImage(img, 0, 0);
           }
+          next = drawIndex;
+          // FPS 按实际换帧数累计（#128），画面冻结时角标跟随下降
+          fpsFramesRef.current += 1;
         }
+        // 窗口内没有任何可画帧：停在当前帧等下一轮（网络抖动自愈）
         frameRef.current = next;
 
-        // 预取节流：窗口 60 帧，每 6 帧发起一次仍有 54 帧余量
-        if (next % UI_UPDATE_EVERY_N_FRAMES === 0) {
+        // 预取节流 + 节流 UI 状态更新（帧计数器、进度条、统计、全局 index 联动）
+        if (
+          Math.floor(next / UI_UPDATE_EVERY_N_FRAMES) !==
+            Math.floor(prevFrame / UI_UPDATE_EVERY_N_FRAMES) ||
+          next >= total - 1
+        ) {
           prefetchFromIndex(next);
+          setFrame(next);
         }
 
         // FPS 按实际换帧数累计（#128），画面冻结时角标跟随下降
-        fpsFramesRef.current += 1;
         if (time - fpsStartRef.current >= 1000) {
           setActualFps(Math.round((fpsFramesRef.current * 1000) / (time - fpsStartRef.current)));
           fpsStartRef.current = time;
           fpsFramesRef.current = 0;
         }
-
-        // 节流 UI 状态更新（帧计数器、进度条、统计、全局 index 联动）
-        if (next % UI_UPDATE_EVERY_N_FRAMES === 0) {
-          setFrame(next);
-        }
+      }
+      if (next >= total - 1 && target >= total - 1) {
+        // 到尾：停止播放（最后一帧拿不到也停，不死等缺帧）
+        setIsPlaying(false);
+        setFrame(next);
+        return;
       }
       rafRef.current = requestAnimationFrame(step);
     };
 
-    lastFrameTimeRef.current = 0;
+    playStartTimeRef.current = 0;
     rafRef.current = requestAnimationFrame(step);
     return () => {
       if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);

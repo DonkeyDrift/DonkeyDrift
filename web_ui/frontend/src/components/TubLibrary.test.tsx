@@ -196,3 +196,122 @@ describe('TubLibrary download button', () => {
     );
   });
 });
+
+// 墙钟播放调度回归（60fps）：某一帧图片未加载完时播放不停摆——跳过该帧
+// 继续按墙钟推进；长时间停顿（切后台/网络卡死）后从当前帧继续播放，不快进。
+describe('TubLibrary wall-clock playback scheduling', () => {
+  const FRAME_COUNT = 100;
+  const readyUrls = new Set<string>();
+  const frameUrl = (i: number) => `http://localhost/img/cam_${i}.jpg`;
+
+  let rafQueue: FrameRequestCallback[];
+
+  class MockImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    complete = false;
+    naturalWidth = 0;
+    width = 160;
+    height = 120;
+    private url = '';
+    set src(v: string) {
+      this.url = v;
+      if (readyUrls.has(v)) {
+        this.complete = true;
+        this.naturalWidth = 160;
+        queueMicrotask(() => this.onload?.());
+      } else {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    get src() {
+      return this.url;
+    }
+  }
+
+  const pump = (t: number) => {
+    const cbs = rafQueue;
+    rafQueue = [];
+    cbs.forEach((cb) => cb(t));
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    readyUrls.clear();
+    for (let i = 0; i < FRAME_COUNT; i += 1) readyUrls.add(frameUrl(i));
+    rafQueue = [];
+    vi.stubGlobal('Image', MockImage);
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+
+    const records = Array.from({ length: FRAME_COUNT }, (_, i) => ({
+      _index: i,
+      _timestamp_ms: i * 16,
+      _session_id: '26-08-16_1',
+      'cam/image_array': `cam_${i}.jpg`,
+    }));
+    vi.mocked(listTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      sessions: [{ ...sessions[0], record_count: FRAME_COUNT }],
+    });
+    vi.mocked(getSessionRecords).mockResolvedValue({ status: true, path: '/tmp/tub', records });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('skips a frame whose image is not ready instead of stalling playback', async () => {
+    // 第 4 帧（index 3）永远加载不出来
+    readyUrls.delete(frameUrl(3));
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 100/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始播放' }));
+
+    // 墙钟推进 ~200ms（12 帧 @60Hz）
+    for (let k = 0; k <= 12; k += 1) {
+      pump(1000 + (k * 1000) / 60);
+    }
+
+    // 旧逻辑会冻在第 3 帧（index 2）；新逻辑跳过缺帧按墙钟推进到 ~12 帧
+    await waitFor(() => {
+      expect(screen.getByText(/1[0-9] \/ 100/)).toBeInTheDocument();
+    });
+  });
+
+  it('resumes from the current frame after a long stall instead of fast-forwarding', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 100/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始播放' }));
+
+    // 先正常播 10 帧，然后时间突跳 5s（模拟切后台/网络卡死）
+    for (let k = 0; k <= 10; k += 1) {
+      pump(1000 + (k * 1000) / 60);
+    }
+    const stallEnd = 1000 + (10 * 1000) / 60 + 5000;
+    pump(stallEnd);
+    // 再播 3 帧让节流 UI 越过 6 帧边界刷新计数器
+    for (let k = 1; k <= 3; k += 1) {
+      pump(stallEnd + (k * 1000) / 60);
+    }
+
+    // 重新对表继续 1x 播放：进度仍在 ~13 帧附近，而不是跳到 ~310 帧
+    await waitFor(() => {
+      expect(screen.getByText(/1[0-8] \/ 100/)).toBeInTheDocument();
+    });
+  });
+});

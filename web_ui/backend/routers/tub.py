@@ -24,20 +24,23 @@ logger = logging.getLogger(__name__)
 IMAGE_CACHE_MAX_BYTES = 128 * 1024 * 1024  # 128 MiB
 _image_cache: "OrderedDict[str, tuple[int, int, bytes]]" = OrderedDict()
 _image_cache_bytes = 0
+# /tub/image 改为同步 def 后由 Starlette 线程池并发执行，缓存读写需加锁
+_image_cache_lock = threading.Lock()
 
 
 def _cache_get(path: str, stat: os.stat_result) -> Optional[bytes]:
     """命中返回文件字节，否则 None；命中时把条目移到 LRU 最新端。"""
-    entry = _image_cache.get(path)
-    if entry is None:
-        return None
-    mtime_ns, size, data = entry
-    if mtime_ns != stat.st_mtime_ns or size != stat.st_size:
-        # 文件已变化，淘汰旧条目
-        _cache_evict(path)
-        return None
-    _image_cache.move_to_end(path)
-    return data
+    with _image_cache_lock:
+        entry = _image_cache.get(path)
+        if entry is None:
+            return None
+        mtime_ns, size, data = entry
+        if mtime_ns != stat.st_mtime_ns or size != stat.st_size:
+            # 文件已变化，淘汰旧条目
+            _cache_evict(path)
+            return None
+        _image_cache.move_to_end(path)
+        return data
 
 
 def _cache_evict(path: str) -> None:
@@ -51,11 +54,12 @@ def _cache_put(path: str, stat: os.stat_result, data: bytes) -> None:
     global _image_cache_bytes
     if len(data) > IMAGE_CACHE_MAX_BYTES:
         return  # 单文件超过总预算，不值得缓存
-    _cache_evict(path)
-    _image_cache[path] = (stat.st_mtime_ns, stat.st_size, data)
-    _image_cache_bytes += len(data)
-    while _image_cache_bytes > IMAGE_CACHE_MAX_BYTES and len(_image_cache) > 1:
-        _image_evict_oldest()
+    with _image_cache_lock:
+        _cache_evict(path)
+        _image_cache[path] = (stat.st_mtime_ns, stat.st_size, data)
+        _image_cache_bytes += len(data)
+        while _image_cache_bytes > IMAGE_CACHE_MAX_BYTES and len(_image_cache) > 1:
+            _image_evict_oldest()
 
 
 def _image_evict_oldest() -> None:
@@ -148,7 +152,9 @@ async def get_records(offset: int = 0, limit: int = 100):
     }
 
 @router.get("/image")
-async def get_image(path: str, tubPath: Optional[str] = None, request: Request = None):
+def get_image(path: str, tubPath: Optional[str] = None, request: Request = None):
+    # 同步 def（非 async）：Starlette 线程池执行，缓存未命中时的磁盘读不再
+    # 阻塞 uvicorn 事件循环——60fps 逐帧取图下，一次冷读会卡住全部并发帧请求。
     # path is relative to the tub images directory usually, or we assume it's the full path if we constructing it
     # In Tub v2, record contains "cam/image_array": "0_cam_image_array_.jpg"
     # And images are in tub_path/images/
