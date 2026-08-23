@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-08-23 (162)
+
+- perf(tub-library): 录制视频库回放改墙钟调度冲刺 60 FPS——帧未加载完跳过不停摆、抖动后自动追帧、长停顿原地续播；后端 /tub/image 改线程池执行消除事件循环阻塞
+  - 背景：回放帧率两轮优化（(121) 播放绕过 React 直画 canvas、(125) 去热路径多余 setState/去 backdrop-blur）后仍达不到 60 FPS。剩余瓶颈不在主线程开销，而在调度策略与逐帧取图：旧播放循环每 tick 最多推进 1 帧、下一帧图片未 ready 就整段停摆等它（且已消耗的墙钟时间永久丢失、不追帧），rAF 频率又恰好是 60Hz 零余量——任何网络/调度抖动都直接变成可见卡顿，FPS 角标（按实际换帧统计）随之跌落。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：
+    - 播放循环改为墙钟调度：目标帧 = 播放起点帧 + 经过时间 / 帧间隔（`playStartTimeRef`/`playStartFrameRef` 替代表述相位递增的 `lastFrameTimeRef`）；每个 rAF tick 在 `(当前帧, min(当前帧+MAX_CATCHUP_FRAMES=10, 目标帧)]` 窗口内画最后一个图片已 ready 的帧——中间未 ready/损坏的帧直接跳过（`img.complete && img.naturalWidth > 0` 判定，顺带消除旧逻辑对 404 破图 `drawImage` 抛异常中断播放的隐患），不再一帧未 ready 就停摆；网络恢复后按每 tick 最多 10 帧自动追平墙钟进度。
+    - 落后墙钟超过 `MAX_RESUME_LAG_FRAMES=60` 帧（~1s，切后台/网络卡死）时从当前帧重新对表继续 1x 播放，不快进不追帧爆冲。
+    - 预取与节流 UI 更新由「帧号取模」改为「越过 6 帧边界」判定（追帧跳号时不错过）；FPS 角标语义不变（每秒实际换帧数）。
+  - `web_ui/backend/routers/tub.py`：`GET /tub/image` 由 `async def` 改为同步 `def`（Starlette 线程池执行）——此前缓存未命中时在事件循环里同步 `open().read()` 整文件，一次冷读卡住全部并发帧请求与遥测；图像 LRU 缓存 `_cache_get`/`_cache_put` 加 `_image_cache_lock`（threading.Lock）保证线程池并发安全。
+  - 测试同步：`TubLibrary.test.tsx` 新增 2 项（手工泵 rAF + Mock Image 控制按 URL 就绪——缺帧跳过不停摆继续按墙钟推进；5s 突跳后原地续播不快进）；前端 `vitest run` 24 文件 133 项、`tsc -b`、`npm run build` 全绿；后端 `pytest` 106 项全绿。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；收尾后部署本机 8000。全程纯本地，未碰 GitHub。
+
 ## 2026-08-23 (161)
 
 - fix(trainer): 训练主机配置表单（本机/IP/密码）抑制苹果「存储密码？」与「强密码」建议——密码框声明 new-password + 密码管理器忽略属性，主机/用户名框 autocomplete=off
