@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -76,12 +76,24 @@ if os.path.isdir(FRONTEND_DIST):
     # 静态资源（JS/CSS/图片等）
     if os.path.isdir(FRONTEND_ASSETS):
         app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS), name="assets")
-    # favicon 等根目录静态文件与 SPA fallback
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
-        """SPA fallback：所有非 API/非静态文件路径返回 index.html"""
+        """根目录静态文件 + SPA fallback。
+
+        不能再用 app.mount("/", StaticFiles(html=True)) 处理根目录：它会拦截所有
+        路径，导致 /connector、/drive 等前端深链（无扩展名、非真实文件）被
+        StaticFiles 判为 404，刷新/直达时无法回退到 index.html。
+        这里改为：真实存在的根目录静态文件（favicon、robots.txt 等）直接返回，
+        其余一律回退到 index.html，交给前端路由处理。
+        """
+        if full_path:
+            # 不存在的 API 路径不参与前端回退，保持 404（避免被兜底成 index.html）
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not Found")
+            candidate = os.path.realpath(os.path.join(FRONTEND_DIST, full_path))
+            if candidate.startswith(FRONTEND_DIST + os.sep) and os.path.isfile(candidate):
+                return FileResponse(candidate)
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)
