@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-08-23 (163)
+
+- fix(trainer): 修复 macOS 远端训练 loss 发散——createcar 模板 mixed_float16 加 macOS 门控 + createcar 成功后远程 sed 补丁立即生效；顺带修 train() comment 位置参数错落 bug
+  - 背景（问题 8「训练 loss 上升」排查实锤）：同一批 12531 条数据、同一代码，本机（NVIDIA CUDA）训练收敛（val_loss→0.017），Mac（Apple Metal）3/3 发散（train loss 0.47→2.60、val 降）。createcar 生成的 `train.py` 无条件 `mixed_precision.set_global_policy('mixed_float16')`——CUDA 上正常，Metal/CPU 上数值不稳定导致发散。
+  - `donkeycar/templates/train.py`：mixed_float16 由无条件启用改为「非 macOS 且有 GPU」才启用（`if gpus and sys.platform != 'darwin':`，否则打印跳过原因）；`/home/dkc/projects/mycar/train.py`（本机工作目录副本，非 git 文件）同步补 macOS 门控——原仅有 GPU 门控，而 Metal 会被 `list_physical_devices('GPU')` 识别为 GPU 从而误开 fp16。
+  - `donkeycar/management/train_online.py`：`setup_remote_workspace()` 在 createcar 成功后调用新增 `_patch_remote_train_py_if_macos()`——远程 `uname -s` 检测为 Darwin 则对生成的 `train.py` 执行 `sed -i.bak 's/mixed_precision\.set_global_policy(policy)/pass …/'` 禁用混合精度（`-i.bak` 粘连形式 GNU/BSD sed 均兼容，已对旧/新两版模板干跑验证产出合法 Python；失败只记日志不阻断训练）。远程训练用的是远端 env 自带模板，模板修复要等远端更新 env 才生效，此补丁让修复立即到达 Mac；`WebOnlineTrainer` 经父类 `setup_remote_workspace` 覆盖，web 与 CLI 两路径全覆盖。
+  - 顺带修（8.21 已发现的潜伏 bug，与 loss 发散无关）：模板与 mycar/train.py 的 `train(cfg, tubs, model, model_type, comment)` 位置传参会错落到 `train(cfg, tub_paths, model, model_type, transfer, comment)` 的 `transfer`（仅传 `--comment` 时触发），均改为 `comment=comment` 关键字传参。
+  - 测试同步：`tests/test_online_trainer_workspace.py` 两个既有用例适配新增 uname 调用（createcar 断言改用 call_args_list），新增 2 用例（Darwin 远端收到指向 createcar 路径的 sed 补丁命令并记日志；sed 失败不阻断、仍返回工作目录）；新增 `tests/test_train_template_fp16.py` 3 项（darwin 门控存在、`set_global_policy(policy)` 仍保留、`comment=comment` 关键字传参）。另修复两个 Tony 上本就在失败的 stale 测试：`test_tub_image_cache.py`（(162) 把 `/tub/image` 改同步后遗留的 `asyncio.run` 调用）与 `test_tub_manager_auto_refresh.py`（#178 把自动刷新逻辑从 App.tsx 迁到 TubManagerPage.tsx 后未同步的断言目标）。`pytest tests/ web_ui/backend/tests` 374 项全绿。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；改动作用于远程训练链路，不影响本机 8000/8001 可见页面，无需重建 dist。远程补丁覆盖此后每次新建工作区的训练（含续训 import 的同一 train.py）；存量旧工作区的续训（断点续训功能仍在 dd-deploy 在制、未入 Tony）不在本次范围。Mac 远端 env 仍建议日后用本地 Tony 源码重装以彻底对齐。全程纯本地，未碰 GitHub。
+
 ## 2026-08-23 (162)
 
 - perf(tub-library): 录制视频库回放改墙钟调度冲刺 60 FPS——帧未加载完跳过不停摆、抖动后自动追帧、长停顿原地续播；后端 /tub/image 改线程池执行消除事件循环阻塞

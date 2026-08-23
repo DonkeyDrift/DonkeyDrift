@@ -388,6 +388,7 @@ class OnlineTrainer:
                 self.remote_work_dir = full_path
                 console.print(f"[green]成功创建远程工作目录: {full_path}[/green]")
                 self._log(f"Created remote workspace: {full_path}")
+                self._patch_remote_train_py_if_macos(full_path)
                 return full_path
             else:
                 err_msg = stderr.read().decode().strip()
@@ -400,6 +401,37 @@ class OnlineTrainer:
                     raise RuntimeError(f"创建远程目录失败: {err_msg}")
         
         raise RuntimeError(f"在 {retries} 次尝试后无法生成唯一的远程目录")
+
+    def _patch_remote_train_py_if_macos(self, remote_dir):
+        """macOS 远端禁用 createcar 生成的 train.py 里的 mixed_float16。
+
+        远程训练用的是远端 env 自带的 createcar 模板，模板修复要等远端更新
+        env 才生效；这里在每次 createcar 成功后直接给生成的 train.py 打补丁，
+        立即生效（续训功能 import 的同一个 train.py，一并覆盖）。
+        mixed_float16 在 Apple Metal/CPU 上数值不稳定，会导致训练 loss 发散。
+        任何失败只记日志，不阻断训练。
+        """
+        try:
+            stdin, stdout, stderr = self.ssh_client.exec_command("uname -s")
+            uname = stdout.read().decode().strip()
+            if uname != "Darwin":
+                return
+            train_py = f"{remote_dir}/train.py"
+            sed_cmd = (
+                "sed -i.bak "
+                "'s/mixed_precision\\.set_global_policy(policy)/"
+                "pass  # mixed_float16 disabled by DonkeyDrifter on macOS/' "
+                f"{train_py}"
+            )
+            stdin, stdout, stderr = self.ssh_client.exec_command(sed_cmd)
+            if stdout.channel.recv_exit_status() == 0:
+                console.print("[yellow]检测到 macOS 远端：已禁用 train.py 的 mixed_float16[/yellow]")
+                self._log("Patched remote train.py: disabled mixed_float16 (macOS)")
+            else:
+                err = stderr.read().decode().strip()
+                self._log(f"Failed to patch remote train.py (non-fatal): {err}", success=False)
+        except Exception as e:
+            self._log(f"macOS train.py patch check failed (non-fatal): {e}", success=False)
 
     def upload_data(self, local_path, remote_filename):
         # 确保工作目录已创建
