@@ -330,6 +330,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   return (
     <div className="space-y-4">
+      <SimCollectCard />
       {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">
         {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
@@ -496,8 +497,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           </div>
         </aside>
       </div>
-
-      <SimCollectCard />
     </div>
   );
 });
