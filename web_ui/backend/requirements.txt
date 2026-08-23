@@ -7,4 +7,4 @@ pillow
 websockets
 aiortc
 av
-httpx2
+httpx
