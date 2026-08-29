@@ -10,7 +10,7 @@ import logging
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Optional, List, Dict, Literal, Any
+from typing import Optional, List, Dict, Literal, Any, Callable
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -75,6 +75,9 @@ class DriveState:
         # 连接管理
         self.car_ws: Optional[WebSocket] = None
         self.client_ws: Dict[str, WebSocket] = {}
+
+        # 遥测进程内挂钩（第三视角漂移引擎等订阅方，广播前同步调用）
+        self.telemetry_hooks: List[Callable[[dict], None]] = []
 
         # 模拟器自动恢复任务
         self.sim_recovery_task: Optional[asyncio.Task] = None
@@ -518,6 +521,11 @@ async def drive_ws(
 
                 # 车端遥测曲线数据，原样广播给所有客户端（车端已按 100Hz 节流）
                 if msg.get("type") == "telemetry":
+                    for hook in list(drive_state.telemetry_hooks):
+                        try:
+                            hook(msg)
+                        except Exception as exc:
+                            logger.warning(f"遥测挂钩 {hook} 执行失败: {exc}")
                     await drive_state.broadcast_to_clients(msg)
                     continue
 
