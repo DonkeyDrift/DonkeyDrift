@@ -27,6 +27,15 @@ class SessionStartRequest(BaseModel):
     tub_path: Optional[str] = None
 
 
+class CameraStartRequest(BaseModel):
+    camera_index: int = 0
+    tag_id: int = 0
+    calibration_file: str = Field(..., description="单应性标定文件（.npz）路径")
+    width: int = 1280
+    height: int = 720
+    fps: int = 60
+
+
 @router.get("/state")
 async def drift_state():
     return drift_engine.snapshot()
@@ -67,6 +76,28 @@ async def overhead_frame():
     if frame is None:
         raise HTTPException(status_code=503, detail="俯拍相机未就绪")
     return Response(content=frame, media_type="image/jpeg")
+
+
+@router.post("/camera/start")
+async def camera_start(request: CameraStartRequest):
+    from drift_vision import AprilTagDetector, FieldHomography, USBCamera
+
+    try:
+        homography = FieldHomography.from_file(request.calibration_file)
+        camera = USBCamera(index=request.camera_index, width=request.width,
+                           height=request.height, fps=request.fps)
+        detector = AprilTagDetector()
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    drift_engine._calibration_file = request.calibration_file
+    drift_engine.start_camera_loop(camera, detector, homography, request.tag_id)
+    return {"ok": True}
+
+
+@router.post("/camera/stop")
+async def camera_stop():
+    drift_engine.stop_camera_loop()
+    return {"ok": True}
 
 
 def install_drive_hooks() -> None:

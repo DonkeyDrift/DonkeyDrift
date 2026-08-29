@@ -26,7 +26,7 @@ def client(tmp_path, monkeypatch):
     """独立 app + 重置引擎 + 假标定文件。"""
     app = FastAPI()
     app.include_router(router, prefix="/api/drift")
-    drift_engine.reset(calibration_file=str(tmp_path / "calib.npz"))
+    drift_engine.reset(calibration_file=str(tmp_path / "calib.npz"), tub_base_dir=str(tmp_path))
     (tmp_path / "calib.npz").write_bytes(b"")  # 标定文件存在
     return TestClient(app)
 

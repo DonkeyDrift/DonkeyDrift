@@ -35,7 +35,8 @@ _TELEM_FIELD_MAP = {
 
 
 class DriftEngine:
-    def __init__(self):
+    def __init__(self, tub_base_dir: Optional[str] = None):
+        self._tub_base_dir = tub_base_dir
         self._calibration_file: Optional[str] = None
         self.session = DriftSession(calibration_ready=self._calibration_ok)
         self.beta_estimator = BetaEstimator()
@@ -49,14 +50,18 @@ class DriftEngine:
         self.last_pose: Optional[Dict[str, float]] = None
         self.last_preview_jpeg: Optional[bytes] = None
         self._last_telemetry_t: Optional[float] = None
+        self._last_yaw_rate_dps: float = 0.0
         self._camera = None
         self._camera_thread: Optional[threading.Thread] = None
         self._running = False
 
     # ── 生命周期 ────────────────────────────────────────────
-    def reset(self, calibration_file: Optional[str] = None) -> None:
+    def reset(self, calibration_file: Optional[str] = None,
+              tub_base_dir: Optional[str] = None) -> None:
         if calibration_file is not None:
             self._calibration_file = calibration_file
+        if tub_base_dir is not None:
+            self._tub_base_dir = tub_base_dir
         self.session = DriftSession(calibration_ready=self._calibration_ok)
         self.beta_estimator = BetaEstimator()
         self.config = ControllerConfig()
@@ -69,6 +74,8 @@ class DriftEngine:
         self.last_beta_deg = None
         self.last_pose = None
         self._last_telemetry_t = None
+        self._last_yaw_rate_dps = 0.0
+        self._running = False
 
     def _calibration_ok(self) -> bool:
         return (self._calibration_file is not None
@@ -109,7 +116,7 @@ class DriftEngine:
             self._send({"car_mode": 0, "throttle": 0.0})
 
     def _default_tub_path(self) -> str:
-        base = Path("data") / "drift_tubs"
+        base = Path(self._tub_base_dir or "data/drift_tubs")
         base.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%y-%m-%d_%H-%M-%S")
         return str(base / f"overhead_{stamp}")
@@ -142,7 +149,69 @@ class DriftEngine:
                 v = float(msg[src])
                 fields[dst] = v * RAD2DEG if src == "gz" else v
         if fields:
+            if "imu/gyr_z" in fields:
+                self._last_yaw_rate_dps = fields["imu/gyr_z"]
             self.on_telemetry(time.monotonic(), fields)
+
+    # ── 相机循环（生产链路）──────────────────────────────────
+    def start_camera_loop(self, camera, detector, homography, tag_id: int,
+                          preview_every_n: int = 6) -> None:
+        """后台线程：相机→标签检测→位姿→β→process_camera_frame。"""
+        from drift_vision import PoseSolver, solve_tag_pose
+
+        self._running = True
+        solver = PoseSolver(homography)
+
+        def _loop() -> None:
+            import cv2
+            frame_count = 0
+            while self._running:
+                try:
+                    frame, t_s = camera.read()
+                except Exception:
+                    self.trigger_watchdog("相机读帧失败")
+                    break
+                detection = next((d for d in detector.detect(frame)
+                                  if d.tag_id == tag_id), None)
+                if detection is None:
+                    est = self.beta_estimator.update(None, self._last_yaw_rate_dps, t_s=t_s)
+                    self.process_camera_frame(frame, t_s, None, None,
+                                              self._last_yaw_rate_dps)
+                else:
+                    pose = solver.push(solve_tag_pose(homography, detection.corners, t_s))
+                    est = self.beta_estimator.update(
+                        PoseSample(x=pose.x, y=pose.y,
+                                   heading_deg=pose.heading_deg, t_s=t_s),
+                        self._last_yaw_rate_dps)
+                    self.process_camera_frame(
+                        frame, t_s, {"x": pose.x, "y": pose.y,
+                                     "heading_deg": pose.heading_deg},
+                        est.beta_deg, self._last_yaw_rate_dps)
+                frame_count += 1
+                if frame_count % preview_every_n == 0:
+                    try:
+                        ok, buf = cv2.imencode(".jpg", frame,
+                                               [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        if ok:
+                            self.last_preview_jpeg = buf.tobytes()
+                    except Exception:
+                        pass
+
+        self._camera_thread = threading.Thread(target=_loop, daemon=True,
+                                               name="drift-camera")
+        self._camera_thread.start()
+
+    def stop_camera_loop(self) -> None:
+        self._running = False
+        if self._camera_thread is not None:
+            self._camera_thread.join(timeout=2.0)
+            self._camera_thread = None
+        if self._camera is not None:
+            try:
+                self._camera.close()
+            except Exception:
+                pass
+            self._camera = None
 
     # ── 帧处理（相机循环 / 测试直调）─────────────────────────
     def process_camera_frame(self, frame: np.ndarray, t_s: float,

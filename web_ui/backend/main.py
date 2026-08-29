@@ -10,7 +10,7 @@ import logging
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect
+from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, drift
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -67,6 +67,12 @@ app.include_router(connector.router, prefix="/api/connector", tags=["connector"]
 app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
 app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
+app.include_router(drift.router, prefix="/api/drift", tags=["drift"])
+
+
+@app.on_event("startup")
+async def _install_drift_hooks():
+    drift.install_drive_hooks()
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(
