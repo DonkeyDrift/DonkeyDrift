@@ -24,14 +24,15 @@ class ControllerConfig:
     beta_target_deg: float = 25.0
     circle_center: Tuple[float, float] = (1.0, 1.0)
     circle_radius: float = 0.8
+    nominal_speed_mps: float = 2.0    # 定圆名义车速（前馈计算用）
     # 外环
-    k_beta: float = 4.0              # (β*−β)[°] → r_des[°/s]
+    k_beta: float = 4.0              # (β*−β)[°] → r_des 修正[°/s]
     max_yaw_rate_dps: float = 300.0
     k_radius_to_freq: float = 2.0    # 半径误差[m] → 频率修正[Hz]（方向见 update）
     # 内环
     k_yaw: float = 0.004             # yaw 误差[°/s] → steering
-    k_yaw_i: float = 0.00002
-    integral_limit: float = 0.4
+    k_yaw_i: float = 0.002           # 积分消稳态差（初值，明天按实车整定）
+    integral_limit: float = 0.6      # 须容纳定圆基准横摆所需的稳态转向量（v/R·r_max⁻¹）
     # 脉冲发生器初值（运行中由外环修正）
     pulse_freq_hz: float = 4.0
     pulse_duty: float = 0.5
@@ -133,9 +134,12 @@ class DriftController:
             dt = max(t_s - self._last_t, 0.0)
         self._last_t = t_s
 
-        # ── 外环：β 误差 → 期望横摆率 ──
+        # ── 外环：前馈（定圆所需基准横摆 = v/R）+ β 误差修正 ──
+        # 稳态漂移时总横摆必须等于航迹角速度 v/R（非零），修正量围绕该基准。
+        feedforward_dps = (self.cfg.nominal_speed_mps / self.cfg.circle_radius
+                           * 180.0 / math.pi)
         beta_err = self.cfg.beta_target_deg - beta_deg
-        r_des = self.cfg.k_beta * beta_err
+        r_des = feedforward_dps + self.cfg.k_beta * beta_err
         r_des = max(-self.cfg.max_yaw_rate_dps, min(self.cfg.max_yaw_rate_dps, r_des))
 
         # ── 外环：半径误差 → 脉冲频率修正（偏内增频=自旋强→半径收，

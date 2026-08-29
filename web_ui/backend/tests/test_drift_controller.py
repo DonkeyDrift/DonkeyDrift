@@ -91,9 +91,12 @@ class TestDriftController:
         assert out.desired_yaw_rate_dps > 0
 
     def test_beta_above_target_lowers_desired_yaw(self):
+        """β 超目标 → r_des 应比 β 不足时更低（围绕 v/R 前馈基准修正，非单纯变负）。"""
         c = self.make_controller()
-        out = c.update(beta_deg=40.0, yaw_rate_dps=0.0, pose=(1.0, 1.8), t_s=0.0)
-        assert out.desired_yaw_rate_dps < 0
+        out_low = c.update(beta_deg=10.0, yaw_rate_dps=0.0, pose=(1.0, 1.8), t_s=0.0)
+        c2 = self.make_controller()
+        out_high = c2.update(beta_deg=40.0, yaw_rate_dps=0.0, pose=(1.0, 1.8), t_s=0.0)
+        assert out_high.desired_yaw_rate_dps < out_low.desired_yaw_rate_dps
 
     def test_inner_loop_steering_tracks_yaw_error(self):
         """r 低于 r_des → 转向朝正方向修正；r 超过 r_des → 反向。"""
