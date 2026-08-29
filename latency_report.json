@@ -1,7 +1,0 @@
-{
-  "control_path": {
-    "samples": 120,
-    "p95_ms": 0.003,
-    "median_ms": 0.002
-  }
-}

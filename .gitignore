@@ -44,3 +44,4 @@ Package/
 # Trainer SSH 配置（用户本机/云端连接信息，不入库）
 web_ui/backend/train_my_pc.conf
 web_ui/backend/train_online.conf
+latency_report.json
