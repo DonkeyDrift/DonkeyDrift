@@ -124,7 +124,9 @@ class TestSyncRecorderTub:
         manifest = Path(tmp_path / "tub" / "manifest.json")
         assert manifest.exists()
         import json
-        inputs_list = json.loads(manifest.read_text(encoding="utf-8"))
+        # tub v2 的 manifest 是 JSONL：首行为 inputs 数组，后续为 session 元数据
+        first_line = manifest.read_text(encoding="utf-8").splitlines()[0]
+        inputs_list = json.loads(first_line)
         # tub v2 的 manifest 顶层即 inputs 数组
         for key in ["overhead/image_array", "pose/x", "pose/y", "pose/heading_deg",
                     "state/beta", "state/yaw_rate", "state/throttle_pulse_freq",
