@@ -14,6 +14,7 @@ import { ParameterPanel } from '../components/drive/ParameterPanel';
 import { InputSourceSelector, InputSource } from '../components/drive/InputSourceSelector';
 import { ModelSelector } from '../components/drive/ModelSelector';
 import { SimCollectCard } from '../components/drive/SimCollectCard';
+import { DriftCard } from '../components/drive/DriftCard';
 import { useDriveStore } from '../store/useDriveStore';
 import { useStore } from '../store/useStore';
 import { useTelemetryStore } from '../store/useTelemetryStore';
@@ -330,6 +331,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   return (
     <div className="space-y-4">
+      <DriftCard />
       <SimCollectCard />
       {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">

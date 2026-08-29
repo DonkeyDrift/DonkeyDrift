@@ -44,6 +44,7 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.steering': '转 向',
     'drive.turnRight': '右 转',
     // SimCollectCard
+    'drive.driftTitle': '第三视角漂移',
     'drive.simCollectTitle': '模拟器采集',
     'drive.simCollectHint': '通过 SSH 控制 Mac（dkc-mac）上的 donkey_sim 模拟器采集虚拟驾驶数据，结果落在本机。',
     'drive.simCollectSteps': '采集步数',
@@ -112,6 +113,7 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.steering': 'Steering',
     'drive.turnRight': 'Right',
     // SimCollectCard
+    'drive.driftTitle': 'Overhead Drift',
     'drive.simCollectTitle': 'Sim Collector',
     'drive.simCollectHint': 'Collects virtual driving data from the donkey_sim on your Mac (dkc-mac) over SSH; results are stored locally.',
     'drive.simCollectSteps': 'Steps',
