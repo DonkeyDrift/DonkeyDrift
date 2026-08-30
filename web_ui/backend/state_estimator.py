@@ -41,9 +41,11 @@ def wrap_deg(angle: float) -> float:
 
 
 class BetaEstimator:
-    def __init__(self, visual_weight: float = 0.3, min_step_m: float = 0.02):
+    def __init__(self, visual_weight: float = 0.3, min_step_m: float = 0.02,
+                 beta_decay_s: float = 0.3):
         self._alpha = visual_weight
         self._min_step_m = min_step_m
+        self._beta_decay_s = beta_decay_s
         self._prev: Optional[PoseSample] = None
         self._course_deg: Optional[float] = None
         self._last_raw_course: Optional[float] = None
@@ -86,6 +88,7 @@ class BetaEstimator:
                 self._heading_deg = wrap_deg(self._heading_deg + self._alpha * innovation)
 
         # 2) 航迹角差分（静止保护：位距不足不更新；半步外推消割线滞后）
+        stationary = False
         if pose is not None and self._prev is not None:
             dx, dy = pose.x - self._prev.x, pose.y - self._prev.y
             if math.hypot(dx, dy) >= self._min_step_m:
@@ -95,11 +98,17 @@ class BetaEstimator:
                     raw_course = wrap_deg(raw_course + rate * dt / 2.0)
                 self._last_raw_course = raw_course
                 self._course_deg = raw_course
+            else:
+                stationary = True
 
-        # 3) β = 融合 heading − 航迹角
+        # 3) β = 融合 heading − 航迹角；静止时速度≈0 无侧滑可言，
+        #    冻结的旧 β 按时间常数衰减到 0（防误读与 AUTO 误触发接管）
         if pose is not None:
             self._prev = pose
-        if self._heading_deg is not None and self._course_deg is not None:
+        if stationary and self._course_deg is not None:
+            decay = math.exp(-dt / self._beta_decay_s) if dt > 0 else 0.0
+            self._beta_deg = self._beta_deg * decay
+        elif self._heading_deg is not None and self._course_deg is not None:
             self._beta_deg = wrap_deg(self._heading_deg - self._course_deg)
 
         return BetaEstimate(beta_deg=self._beta_deg,

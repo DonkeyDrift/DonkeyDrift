@@ -210,7 +210,9 @@ export const DriftCard: React.FC = () => {
           </div>
           <div>
             <div className="text-xs text-zinc-400">朝向 (°)</div>
-            <div className="font-medium">{state?.pose ? state.pose.heading_deg.toFixed(1) : '—'}</div>
+            <div className="font-medium">
+              {state?.pose ? ((((state.pose.heading_deg % 360) + 360) % 360).toFixed(1)) : '—'}
+            </div>
           </div>
           <div>
             <div className="text-xs text-zinc-400">遥测/已录帧</div>

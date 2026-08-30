@@ -63,6 +63,42 @@ class TestBetaEstimation:
         assert math.isfinite(out.beta_deg)
         assert abs(out.beta_deg) < 1.0
 
+    def test_stationary_decays_frozen_beta(self):
+        """斜推后停住：冻结的旧 β（非零侧滑残影）应随静止时间衰减到 0，
+        否则 AUTO 观察态会被冻结 β 误触发接管。"""
+        est = BetaEstimator()
+        # 沿 +x 直推但车头偏 -30°（β=-30° 的侧滑姿态），随后原地停住
+        est.update(PoseSample(x=1.0, y=1.0, heading_deg=-30.0, t_s=0.0), yaw_rate_dps=0.0)
+        for i in range(1, 16):
+            est.update(PoseSample(x=1.0 + 0.03 * i, y=1.0, heading_deg=-30.0,
+                                  t_s=0.05 * i), yaw_rate_dps=0.0)
+        assert abs(est.update(PoseSample(x=1.45, y=1.0, heading_deg=-30.0, t_s=0.8),
+                              yaw_rate_dps=0.0).beta_deg) > 15.0  # 运动中 β 确实非零
+        t = 0.85
+        for _ in range(40):  # 静止 2 秒（位距不足，course 冻结）
+            out = est.update(PoseSample(x=1.45, y=1.0, heading_deg=-30.0, t_s=t),
+                             yaw_rate_dps=0.0)
+            t += 0.05
+        assert abs(out.beta_deg) < 1.0, "静止 2s 后 β 应衰减到 0 附近"
+
+    def test_moving_after_stationarity_recovers_beta(self):
+        """静止衰减后恢复运动：β 立即回到新的 heading−course 差分，无残留。"""
+        est = BetaEstimator()
+        est.update(PoseSample(x=1.0, y=1.0, heading_deg=-30.0, t_s=0.0), yaw_rate_dps=0.0)
+        for i in range(1, 11):  # 建立 β=-30
+            est.update(PoseSample(x=1.0 + 0.03 * i, y=1.0, heading_deg=-30.0,
+                                  t_s=0.05 * i), yaw_rate_dps=0.0)
+        t = 0.55
+        for _ in range(20):  # 静止衰减
+            est.update(PoseSample(x=1.3, y=1.0, heading_deg=-30.0, t_s=t), yaw_rate_dps=0.0)
+            t += 0.05
+        # 恢复直行（heading=0 且沿 +x 移动 → β≈0）
+        for i in range(1, 11):
+            out = est.update(PoseSample(x=1.3 + 0.03 * i, y=1.0, heading_deg=0.0, t_s=t),
+                             yaw_rate_dps=0.0)
+            t += 0.05
+        assert abs(out.beta_deg) < 2.0, "恢复运动后 β 应反映新姿态，而非残留"
+
     def test_beta_wraps_across_180(self):
         """β 接近 ±180 边界时按最短角差处理，不出现 359° 之类的伪值。"""
         est = BetaEstimator()
