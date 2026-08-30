@@ -1,5 +1,27 @@
 # 变更日志
 
+## 2026-08-30 (171)
+
+- feat(drift): 俯拍漂移监控系统全量落地——方案 C 状态估计+反馈控制整链实现，M0 相机链路收官（60fps），分支 `feat/overhead-drift-control` 合并入 main
+  - 背景与架构：笔记本（FastAPI :8000 + React 前端 + USB 俯拍相机）检测车顶 AprilTag（tag36h11 ID 0）→ 场地坐标位姿 → β 估计 → 级联 PID + 油门脉冲发生器 → ws 下发控制；车端 SBC 主动回连上报 rc/IMU 遥测；**人工控制始终走 RC 遥控器（ESP32 本地），笔记本只接管、随时可夺回**。里程碑 M0（相机链路）✅ 收官，M1（人工漂移录制）/M2（点动机理验证）待实车实操。
+  - 设计与文档：`docs/Rfc/overhead-drift-control.md`（总设计 13 节）、`docs/plan/overhead-drift-control-implementation.md`（M0~M5 里程碑与验收门禁）、`docs/guide/overhead-drift-first-run.md`（实操手册）、`docs/guide/overhead-drift-handoff.md`（状态交接+踩坑记录）。
+  - 后端模块（`web_ui/backend/`，全部 TDD 先红后绿）：
+    - `drift_vision.py`：场地单应性/位姿解算（heading_offset_deg 贴标朝向补偿）；PoseSolver 跳变拒绝+持续离群（5 帧一致）恢复；USBCamera 手动曝光（DSHOW log2 秒语义，重构废弃错误的 exposure_us）；检测=半分辨率快速路径+decode 锐化 0.6+全分辨率自适应重试；叠加绘制=加粗绿框/车头红箭/2s 速度着色轨迹（绿→黄→红）/深蓝 β 航迹箭（0.2s 割线基线抗噪）。
+    - `state_estimator.py`：β 估计 heading 域互补滤波（视觉割线+陀螺 gz 积分），静止 0.3s 时间常数衰减归零（消除残影与 AUTO 误触发）。
+    - `drift_controller.py`：级联 PID + 油门脉冲发生器（频率/占空比/幅值）+ delta 限幅 + 看门狗（丢帧/断线零油门）。
+    - `drift_session.py`：会话状态机（观察 → β 稳定 → 接管）。
+    - `sync_recorder.py`：以相机帧时戳为基准对齐 ws 遥测流（rc 60Hz/imu 100Hz）线性插值，在线提取点动特征，tub v2 写入。
+    - `throttle_analysis.py`：点动机理离线分析（相关性+低/中/高分档参数表）。
+    - `drift_engine.py`：相机循环编排，分段计时诊断（read_ms/detect_ms/camera_fps），display_frame 逐帧透传+检测成功叠加，frames_total/tag_hits 命中率计数。
+    - `routers/drive.py`：AUTO（观察/接管）期间浏览器控制字段服务端仲裁——一律丢弃并回发 `control_rejected`。
+    - `drift_webrtc.py`：aiortc 60fps 推流（运动画面降 360p 编码），MJPEG 自动兜底。
+  - 前端：`DriftCard.tsx`「第三视角漂移」卡片——WebRTC 预览/MJPEG 兜底/相机接入表单/模式控制/参数面板，启动参数 localStorage 持久化回填；朝向/β/速度实时数值格。
+  - 脚本：`generate_apriltag.py`（tag36h11 打印件，螺旋位序，官方检测器 hamming=0 闭环验证）、`calibrate_field_homography.py`、`calibrate_overhead_camera.py`、`measure_loop_latency.py`、`analyze_throttle_pulses.py`、`simulate_drift_controller.py`（离线闭环仿真 β 收敛 25.00°/极差 0.01°）。
+  - 实操验收（M0）：1.0×1.0m 场地四点单应性标定完成（仓库根 `field_homography.npz`）；处理循环 60fps 稳定（read≈16.7ms、detect≈8ms@360p）；运动丢检测四层排障闭环——显示帧逐帧透传/PoseSolver 跳变恢复/锐化+全分辨率重试/**相机曝光 1/400s 根治运动拖影**（物理层根因）。
+  - README：新增「俯拍漂移监控系统 (Overhead Drift Control)」章节（架构链路/核心能力/模块地图/文档链接），Features 与 Documentation 列表同步补充。
+  - 测试：`web_ui/backend` pytest **254 项全绿**（基线 199→254，+55）；前端 build 验证通过。
+  - 注：仅 DD 改动；M0~M5 详细状态与运维纪律（Windows 僵尸进程清场、热重载不可信、五链路帧率定位法）见交接文档 §4。
+
 ## 2026-08-23 (164)
 
 - feat(drive): Drive 页新增「模拟器采集」卡片——浏览器一键经后端 SSH 控制 Mac 上的 donkey_sim 跑采集，实时进度/cte/速度，完成后展示结果摘要
