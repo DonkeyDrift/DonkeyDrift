@@ -102,23 +102,23 @@ def draw_tag_overlay(frame: np.ndarray, homography: "FieldHomography",
                      course_deg: Optional[float] = None) -> np.ndarray:
     """在预览帧上叠加识别结果：标签四角绿框 + 车头方向红箭头。
 
-    箭头按含贴标补偿的 heading（场地系）从标签中心前伸 8cm，
+    箭头按含贴标补偿的 heading（场地系）从标签中心前伸 15cm，
     经单应性投回图像坐标绘制。course_deg（航迹角=速度方向，β=车头-航迹
-    的视觉呈现）给定时先画青色细箭、红箭压底——两箭对齐（β≈0）时只见
-    红箭，漂移时张开夹角即 β。
+    的视觉呈现）给定时先画深蓝色细箭、红箭压底——两箭对齐（β≈0）时
+    只见红箭，漂移时张开夹角即 β。
     """
     import cv2
     pts = np.array(corners, dtype=np.int32).reshape(-1, 2)
     cv2.polylines(frame, [pts], True, (0, 255, 0), 4)
     x0, y0 = homography.field_to_image(pose.x, pose.y)
     if course_deg is not None:
-        cdx = 0.08 * math.cos(math.radians(course_deg))
-        cdy = 0.08 * math.sin(math.radians(course_deg))
+        cdx = 0.15 * math.cos(math.radians(course_deg))
+        cdy = 0.15 * math.sin(math.radians(course_deg))
         cx1, cy1 = homography.field_to_image(pose.x + cdx, pose.y + cdy)
         cv2.arrowedLine(frame, (int(x0), int(y0)), (int(cx1), int(cy1)),
-                        (255, 255, 0), 3, tipLength=0.25)
-    dx = 0.08 * math.cos(math.radians(pose.heading_deg))
-    dy = 0.08 * math.sin(math.radians(pose.heading_deg))
+                        (139, 0, 0), 3, tipLength=0.25)  # 深蓝
+    dx = 0.15 * math.cos(math.radians(pose.heading_deg))
+    dy = 0.15 * math.sin(math.radians(pose.heading_deg))
     x1, y1 = homography.field_to_image(pose.x + dx, pose.y + dy)
     cv2.arrowedLine(frame, (int(x0), int(y0)), (int(x1), int(y1)),
                     (0, 0, 255), 5, tipLength=0.25)
@@ -147,6 +147,15 @@ class TrajectoryTrail:
         return list(self._points)
 
 
+def _baseline_index(points: List[Tuple[float, float, float]], i: int,
+                    baseline_s: float) -> int:
+    """点 i 的差分基线下标：最近的满足跨度 ≥baseline_s 的前序点，无则取 0。"""
+    for k in range(i - 1, -1, -1):
+        if points[i][0] - points[k][0] >= baseline_s:
+            return k
+    return 0
+
+
 def trail_speeds(points: List[Tuple[float, float, float]],
                  baseline_s: float = 0.2) -> List[float]:
     """逐点线速度（m/s）：以 baseline_s 前的点为差分基线抑制位姿噪声。
@@ -156,17 +165,36 @@ def trail_speeds(points: List[Tuple[float, float, float]],
     """
     speeds: List[float] = []
     for i, (t, x, y) in enumerate(points):
-        j = 0
-        for k in range(i - 1, -1, -1):
-            if t - points[k][0] >= baseline_s:
-                j = k
-                break
+        j = _baseline_index(points, i, baseline_s)
         dt = t - points[j][0]
         if i == 0 or dt < 0.05:
             speeds.append(0.0)
         else:
             speeds.append(math.hypot(x - points[j][1], y - points[j][2]) / dt)
     return speeds
+
+
+def trail_course_deg(points: List[Tuple[float, float, float]],
+                     baseline_s: float = 0.2,
+                     min_step_m: float = 0.02) -> Optional[float]:
+    """轨迹切线方向（航迹角）：末点与 baseline_s 前点的割线方向，(-180,180]。
+
+    用于绘制 β 航迹箭头。不用 BetaEstimator 的逐帧差分 course_deg：低速时
+    逐帧位移卡在 2cm 阈值附近，超阈帧对被位姿噪声主导，方向随机（实车
+    现象：箭头垂直于真实运动方向）；0.2s 割线基线把噪声摊薄一个量级，
+    且与屏幕上轨迹线天然相切。位移不足 min_step_m（静止/噪声级）或
+    点不足时返回 None——调用方不画箭头。
+    """
+    if len(points) < 2:
+        return None
+    i = len(points) - 1
+    j = _baseline_index(points, i, baseline_s)
+    t0, x0, y0 = points[j]
+    t1, x1, y1 = points[i]
+    dx, dy = x1 - x0, y1 - y0
+    if t1 - t0 < 0.05 or math.hypot(dx, dy) < min_step_m:
+        return None
+    return math.degrees(math.atan2(dy, dx))
 
 
 def speed_to_bgr(speed_mps: float, max_mps: float = 2.0) -> Tuple[int, int, int]:

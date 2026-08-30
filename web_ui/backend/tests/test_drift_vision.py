@@ -455,7 +455,7 @@ class TestDrawTrajectory:
 
 
 class TestOverlayEmphasis:
-    """加粗加大与 β 朝向箭头（青色，与红色车头箭头区分）。"""
+    """加粗加长与 β 朝向箭头（深蓝色，与红色车头箭头区分）。"""
 
     def _corners_at_center(self, homography):
         """场地 (1,1) 处朝东的 8cm 标签四角（与 TestOverlayDrawing 同构造）。"""
@@ -469,7 +469,7 @@ class TestOverlayEmphasis:
         return int(mask_fn(b).sum())
 
     def test_overlay_lines_are_bold(self, homography):
-        """绿框/红箭头加粗：像素数显著高于旧 2px/6cm 绘制（绿>300，红>100）。"""
+        """加粗加长：绿框 4px；红箭头 5px/15cm（红像素显著高于 8cm 版本 ~160）。"""
         from drift_vision import Pose, draw_tag_overlay
         frame = np.full((480, 640, 3), 255, dtype=np.uint8)
         pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
@@ -478,18 +478,18 @@ class TestOverlayEmphasis:
         green = self._count(out, lambda b: (b[:, 1] > 200) & (b[:, 0] < 100) & (b[:, 2] < 100))
         red = self._count(out, lambda b: (b[:, 2] > 200) & (b[:, 0] < 100) & (b[:, 1] < 100))
         assert green > 300, f"绿框应加粗，绿像素 {green}"
-        assert red > 100, f"红箭头应加粗加长，红像素 {red}"
+        assert red > 320, f"红箭头应加粗加长（15cm；8cm 版实测 269），红像素 {red}"
 
-    def test_course_arrow_drawn_in_cyan(self, homography):
-        """传 course_deg 时绘制青色航迹箭头（β=车头-航迹的视觉呈现）。"""
+    def test_course_arrow_drawn_in_dark_blue(self, homography):
+        """传 course_deg 时绘制深蓝色航迹箭头（β=车头-航迹的视觉呈现）。"""
         from drift_vision import Pose, draw_tag_overlay
         frame = np.full((480, 640, 3), 255, dtype=np.uint8)
         pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
         out = draw_tag_overlay(frame, homography,
                                self._corners_at_center(homography), pose,
                                course_deg=90.0)
-        cyan = self._count(out, lambda b: (b[:, 0] > 200) & (b[:, 1] > 200) & (b[:, 2] < 100))
-        assert cyan > 30, f"应画出青色航迹箭头，青像素 {cyan}"
+        blue = self._count(out, lambda b: (b[:, 0] > 100) & (b[:, 1] < 100) & (b[:, 2] < 100))
+        assert blue > 60, f"应画出深蓝色航迹箭头，蓝像素 {blue}"
 
     def test_course_arrow_omitted_by_default(self, homography):
         from drift_vision import Pose, draw_tag_overlay
@@ -497,5 +497,35 @@ class TestOverlayEmphasis:
         pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
         out = draw_tag_overlay(frame, homography,
                                self._corners_at_center(homography), pose)
-        cyan = self._count(out, lambda b: (b[:, 0] > 200) & (b[:, 1] > 200) & (b[:, 2] < 100))
-        assert cyan == 0, "未传 course_deg 不应出现青色箭头"
+        blue = self._count(out, lambda b: (b[:, 0] > 100) & (b[:, 1] < 100) & (b[:, 2] < 100))
+        assert blue == 0, "未传 course_deg 不应出现蓝色箭头"
+
+
+class TestTrailCourse:
+    """轨迹切线方向（航迹角）：末点与 0.2s 基线前点的割线方向。
+
+    替代 BetaEstimator 逐帧差分的 course_deg 做箭头绘制——低速时逐帧位移
+    卡在 2cm 阈值附近，超阈帧对被噪声主导，方向随机（实车现象：箭头垂直
+    于真实运动方向）；割线基线把噪声摊薄一个量级。
+    """
+
+    def test_east_motion_gives_zero_deg(self):
+        from drift_vision import trail_course_deg
+        pts = [(i * 0.05, i * 0.05, 1.0) for i in range(10)]  # 0.45s 匀速向东
+        assert trail_course_deg(pts) == pytest.approx(0.0, abs=1e-6)
+
+    def test_north_east_motion_gives_45_deg(self):
+        from drift_vision import trail_course_deg
+        pts = [(i * 0.05, 1.0 + i * 0.03, 1.0 + i * 0.03) for i in range(10)]
+        assert trail_course_deg(pts) == pytest.approx(45.0, abs=1e-6)
+
+    def test_stationary_returns_none(self):
+        """位移不足 2cm（静止/噪声级）不给出方向——此时不应画箭头。"""
+        from drift_vision import trail_course_deg
+        pts = [(i * 0.05, 1.0 + i * 0.001, 1.0) for i in range(10)]  # 9mm 总位移
+        assert trail_course_deg(pts) is None
+
+    def test_insufficient_points_return_none(self):
+        from drift_vision import trail_course_deg
+        assert trail_course_deg([]) is None
+        assert trail_course_deg([(0.0, 1.0, 1.0)]) is None

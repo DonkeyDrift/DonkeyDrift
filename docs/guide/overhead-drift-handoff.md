@@ -1,6 +1,6 @@
 # 俯拍漂移项目：状态交接与后续工作（供后续 AI/开发者继续开展）
 
-> 更新：2026-08-30 深夜（运动丢检测排障闭环，相机链路复验通过；overlay 加粗+速度着色轨迹+β 朝向箭头）｜分支 `feat/overhead-drift-control`（未合并 main）｜测试基线 **250 passed**（`cd web_ui/backend && python -m pytest tests/ -q`）
+> 更新：2026-08-30 深夜（运动丢检测排障闭环，相机链路复验通过；overlay 加粗加长+速度着色轨迹+深蓝 β 航迹箭；当日成果/经验/教训总结见 §8）｜分支 `feat/overhead-drift-control`（未合并 main）｜测试基线 **254 passed**（`cd web_ui/backend && python -m pytest tests/ -q`；TestCameraLoopSmoke 在重负载机器上偶发调度超时为既有抖动，deselect 新测试后仍复现）
 
 ## 0. 文档地图
 
@@ -93,12 +93,13 @@ cd C:\Dev\DDC\DonkeyDrift\web_ui\backend && python main.py
 
 **当前特性（勿误判为回退）**：短曝光下 360p 快路径命中率低（标签 39px 本就在分辨率下限，quadrilateral 阶段经 quad\_decimate=2 仅 \~19px），难帧几乎全靠 720p 重试兜底——快推段表现为 detect≈40ms、处理 fps≈20、累计命中率 ≈86%（含车出画面的时段）。跟踪质量已过目测验收；若第 1 步延迟实测超标，候选优化：直接 720p 检测（\~36ms 恒定）或 360p+quad\_decimate=1（\~34ms，四边像素翻倍），二选一实测后再动。
 
-### 4.4 可视化增强（2026-08-30 晚，TDD 16 例全绿）
+### 4.4 可视化增强（2026-08-30 晚，TDD 20 例）
 
-- **加粗加大**：绿框线宽 2→4，车头红箭线宽 2→5、长度 6cm→8cm（720p 预览上原尺寸太细）。
+- **加粗加长**：绿框线宽 2→4；车头红箭线宽 2→5、长度 6cm→**15cm**（720p 预览上原尺寸太细太短）。
 - **中心轨迹**：`TrajectoryTrail` 2s 滑窗记录位姿中心点，逐段按线速度着色——0=绿、1m/s=黄、≥2m/s=红（`speed_to_bgr` 线性插值），最新点画实心圆点。不动时轨迹始终是一个点；超窗旧点动态消失；**检测丢失帧轨迹仍叠加**（不再纯透传），检测缺口期间轨迹不闪断。
-- **β 朝向箭头**：青色航迹（course）箭（复用 `BetaEstimator.course_deg`），先画青后画红——两箭对齐即 β≈0，张开的夹角即 β；末段速度 <0.05m/s（静止）时不画，避免噪声朝向误导。
-- 逐点速度用 0.2s 差分基线平滑（`trail_speeds`），抑制位姿噪声导致的颜色闪烁；轨迹/箭头随 display\_frame 走 WebRTC 与 MJPEG 双通道，前端零改动。
+- **β 朝向箭头**：深蓝色航迹箭（BGR 139,0,0），先画蓝后画红——两箭对齐即 β≈0，张开的夹角即 β。箭头方向取**轨迹割线**（`trail_course_deg`：末点与 0.2s 基线前点），与屏幕上的轨迹线天然相切；位移 <2cm（静止/噪声级）时不画。
+- **β 箭头曾乱指（甚至垂直于运动方向）的根因**：初版直接画 `BetaEstimator.course_deg`——逐帧差分+2cm 位移阈值，低速时每帧真实位移卡在阈值附近，能超阈的帧对被 ±1\~2cm 位姿噪声主导，方向随机。换 0.2s 割线基线后噪声摊薄一个量级。**注意**：控制链路（session/控制器）的 `BetaEstimator.course_deg` 未改动，M4 前需评估（见 §6）。
+- 逐点速度同样用 0.2s 差分基线平滑（`trail_speeds`），抑制颜色闪烁；轨迹/箭头随 display\_frame 走 WebRTC 与 MJPEG 双通道，前端零改动。
 
 ## 5. 下一步工作（按序执行，含命令与验收标准）
 
@@ -146,12 +147,13 @@ python scripts\analyze_throttle_pulses.py data\drift_tubs\overhead_<时间戳> -
 - [x] 服务端多 client 仲裁（AUTO 期间其他浏览器标签页仍可能发控制）——已实现服务端门禁：AUTO（观察/接管）期间浏览器控制字段在 drive ws 一律丢弃并回发 `control_rejected`（routers/drive.py + `drift_engine.auto_active()`，测试 tests/test\_drift\_control\_arbitration.py），待实车核对
 - [ ] MODE 0→2 固件跳变实车核对
 - [ ] 分支未合并 main
+- [ ] `BetaEstimator.course_deg`（控制链路）仍是逐帧差分+半步外推，低速段被位姿噪声主导（§4.4 同款根因）；M4 闭环前评估换 0.2s 割线基线（显示链路已换 `trail_course_deg`）
 
 ## 7. 代码地图
 
 | 模块                                                   | 职责                                                                        | 测试                           |
 | ---------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------- |
-| `web_ui/backend/drift_vision.py`                     | 单应性/位姿解算(heading\_offset)/PoseSolver(跳变拒绝+恢复)/USBCamera(手动曝光)/FrameSource 泵/检测(降采样+锐化+全分辨率重试)/叠加绘制(加粗框箭+轨迹滑窗着色+β 青箭) | test\_drift\_vision.py       |
+| `web_ui/backend/drift_vision.py`                     | 单应性/位姿解算(heading\_offset)/PoseSolver(跳变拒绝+恢复)/USBCamera(手动曝光)/FrameSource 泵/检测(降采样+锐化+全分辨率重试)/叠加绘制(加粗框箭+轨迹滑窗着色+β 深蓝航迹箭/trail\_course\_deg 割线方向) | test\_drift\_vision.py       |
 | `web_ui/backend/state_estimator.py`                  | β 估计（heading 域互补滤波+静止衰减）                                                  | test\_state\_estimator.py    |
 | `web_ui/backend/drift_controller.py`                 | 级联 PID+油门脉冲发生器+看门狗                                                        | test\_drift\_controller.py   |
 | `web_ui/backend/drift_session.py`                    | 会话状态机（观察→β 稳定→接管）                                                         | test\_drift\_session.py      |
@@ -163,5 +165,32 @@ python scripts\analyze_throttle_pulses.py data\drift_tubs\overhead_<时间戳> -
 | `web_ui/frontend/src/components/drive/DriftCard.tsx` | 前端卡片（WebRTC 预览+MJPEG 兜底+参数面板+localStorage）                                | —（build 验证）                  |
 | `scripts/generate_apriltag.py`                       | tag36h11 打印件生成（螺旋位序！）                                                     | test\_apriltag\_generator.py |
 | `scripts/simulate_drift_controller.py`               | 离线闭环仿真（β=25.00°/极差 0.01°）                                                 | —                            |
+
+## 8. 当日成果、经验与教训（2026-08-30）
+
+### 8.1 成果（一天闭环）
+
+1. **M0 相机链路正式收官**：复验通过（§2.2），60fps 稳定，甩动车壳全程锁定；§5 第 0 步 ✅。
+2. **运动丢检测排障链闭环**（§4.3）：四层症状四个独立根因，逐层修复——显示帧逐帧透传 / PoseSolver 跳变恢复 / 锐化 0.6+720p 自适应重试 / 相机曝光 1/400s（物理根因）。
+3. **可视化增强上线**（§4.4）：框箭加粗加长、2s 速度着色轨迹（绿→黄→红）、深蓝 β 航迹箭（轨迹割线方向）。
+4. **服务端多 client 仲裁门禁**：AUTO 期间浏览器控制字段一律丢弃并回发 `control_rejected`（§6 已勾，待实车核对）。
+5. **测试基线 217 → 254**（+37 例，全部 TDD 先红后绿）；新增 `frames_total`/`tag_hits` 命中率计数，M0 丢帧率验收有了直接数据源。
+
+### 8.2 经验（可复用方法论）
+
+1. **分链路定位，逐层取证**（§4.2 五链路法）："预览卡"与"处理掉帧"是两回事，采集/处理/编码/推流/显示各有独立指标，先看数据再动手。本次四个症状四个根因——不要指望一个修复解决全部。
+2. **物理层优先于算法层**：运动模糊的根因是相机曝光（1/100s 在 1m/s 下拖影 20\~40%），锐化/降采样/重试只能兜底。遇到"算法怎么调都差点意思"时，回头查物理参数（曝光/对焦/光照）。
+3. **数据显示健康而观感异常 → 查显示/传输边界**：采集处理编码全程健康时的"卡顿"，根因在 `_display_frame` 只在检测成功时更新。
+4. **任何"离群拒绝"逻辑都必须配"持续离群即采信"的逃逸通道**，否则滤波器永久冻结（PoseSolver 教训）。
+5. **差分类估计要拉长基线**：逐帧差分+阈值门限在信号贴近阈值时被噪声主导（β 箭头垂直于运动方向的根因）；0.2s 割线基线把噪声摊薄一个量级。宁要稳定的滞后，不要噪声的"领先"。
+6. **观测先行**：`camera_fps`/`read_ms`/`detect_ms`/`tag_hits` 这些计数器把"感觉卡"变成可量化验收（<5% 丢帧率），排障全程靠它们定位层位。
+
+### 8.3 教训（踩坑清单）
+
+1. **重启后端必须清场**（§4.1）：Git Bash 杀不干净 python 子进程，残骸持有相机句柄 → 黑屏。相机异常先查 `tasklist | grep -i python` 再怀疑代码。
+2. **热重载不可信**：相机后台线程阻塞 uvicorn reload 优雅退出，改后端代码必须整体重启。
+3. **假硬件泵要节流**：`FakeCamera` 自由空转吃满单核，重负载机器上全量测试偶发调度超时（`TestCameraLoopSmoke`）。处置：宽限 3s→10s + 对照实验（deselect 全部新测试仍挂 → 证明非回归）才放行；后续可把 FakeCamera 加上节拍 sleep 彻底根治。
+4. **DSHOW 曝光语义是 log2 秒，不是微秒**：旧 `exposure_us` 参数语义错误且从未接线——删掉重构比保留兼容更安全。
+5. **叠加绘制参数（线宽/箭头长度）须在真实 720p 预览上目测验收**：像素数阈值测试只能防回退，"太细太短"这种问题只有眼睛能发现。
 
 **协作纪律**（用户强调）：不臆测、不懂就问、对齐后动手；TDD 红-绿-重构；诚实区分物理保证与实验结论；改行为先写失败测试；所有回复/注释/提交信息简体中文。

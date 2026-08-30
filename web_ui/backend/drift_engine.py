@@ -206,7 +206,8 @@ class DriftEngine:
         处理循环只消费最新帧（丢旧不排队）；泵线程死亡触发看门狗。
         """
         from drift_vision import (FrameSource, PoseSolver, TrajectoryTrail,
-                                  solve_tag_pose, trail_speeds)
+                                  solve_tag_pose, trail_course_deg,
+                                  trail_speeds)
 
         self._running = True
         source = FrameSource(camera)
@@ -262,8 +263,9 @@ class DriftEngine:
                                      "heading_deg": pose.heading_deg},
                         est.beta_deg, self._last_yaw_rate_dps)
                 try:  # 显示帧逐帧更新：轨迹（2s 滑窗、按速度着色）始终叠加；
-                    # 检测成功再叠绿框+车头红箭+航迹青箭；无轨迹且未检出时
-                    # 透传原始帧——检测缺口期间推流不得发旧帧（预览卡顿）。
+                    # 检测成功再叠绿框+车头红箭+深蓝航迹箭（方向取轨迹割线，
+                    # 静止/噪声级位移时为 None 不画）；无轨迹且未检出时透传
+                    # 原始帧——检测缺口期间推流不得发旧帧（预览卡顿）。
                     points = trail.snapshot(t_s)
                     speeds = trail_speeds(points)
                     vis = None
@@ -273,10 +275,9 @@ class DriftEngine:
                     if detection is not None and last_pose is not None:
                         if vis is None:
                             vis = frame.copy()
-                        cur_speed = speeds[-1] if speeds else 0.0
-                        course = est.course_deg if cur_speed >= 0.05 else None
                         draw_tag_overlay(vis, homography, detection.corners,
-                                         last_pose, course_deg=course)
+                                         last_pose,
+                                         course_deg=trail_course_deg(points))
                     self._display_frame = vis if vis is not None else frame
                 except Exception:
                     self._display_frame = frame

@@ -145,7 +145,7 @@ class TestCameraLoopSmoke:
 
 class TestCameraLoopTrajectory:
     def test_trail_drawn_and_persists_through_detection_loss(self):
-        """轨迹叠加接线：运动中画面含彩色像素（轨迹+加粗箭头+青色 β 箭头）；
+        """轨迹叠加接线：运动中画面含彩色像素（轨迹+加粗箭头+深蓝 β 箭头）；
         检测丢失后 2s 滑窗内轨迹仍叠加在最新帧上（不再纯透传）。"""
         import numpy as np
         from drift_vision import FieldHomography, TagDetection
@@ -185,12 +185,12 @@ class TestCameraLoopTrajectory:
             return bool(((f[:, :, 0] != f[:, :, 1])
                          | (f[:, :, 1] != f[:, :, 2])).any())
 
-        def _cyan(f):
+        def _blue(f):
             b = f.reshape(-1, 3).astype(np.int32)
-            return bool(((b[:, 0] > 200) & (b[:, 1] > 200) & (b[:, 2] < 100)).any())
+            return bool(((b[:, 0] > 100) & (b[:, 1] < 100) & (b[:, 2] < 100)).any())
 
         try:
-            # 运动阶段：轨迹 + 车头红箭 + 航迹青箭都已上屏
+            # 运动阶段：轨迹 + 车头红箭 + 深蓝色航迹箭都已上屏
             deadline = time.time() + 5.0
             while time.time() < deadline \
                     and engine.snapshot()["tag_hits"] < 12:
@@ -199,7 +199,7 @@ class TestCameraLoopTrajectory:
             assert snap["tag_hits"] >= 12, "运动阶段应积累足够命中"
             f = engine.display_frame
             assert f is not None and _colored(f), "运动阶段应绘制轨迹与箭头"
-            assert _cyan(f), "运动中应绘制青色航迹箭头（β 朝向）"
+            assert _blue(f), "运动中应绘制深蓝色航迹箭头（β 朝向=轨迹切线）"
             # 丢失阶段：检测丢失后，2s 滑窗内轨迹仍叠加在最新帧上
             deadline = time.time() + 5.0
             lost_overlay = False
