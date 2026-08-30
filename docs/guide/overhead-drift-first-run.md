@@ -85,7 +85,8 @@ python scripts\analyze_throttle_pulses.py data\drift_tubs\overhead_<时间戳> -
 
 ## 已知遗留（不阻塞，注意即可）
 
-- `test_trainer_tubs.py::test_list_tubs_finds_data_dir_and_subtubs` 为存量失败（干净 main 上同样失败，与本次无关）
+- 2026-08-30 实操记录：标签打印被缩放（100mm 标尺实测 95mm）——**无需重打**，位姿尺度来自场地单应性而非标签物理尺寸，`tag_size_m` 未进入解算链路
+- 2026-08-30 实操记录：棋盘格标定板未到货，2.1 内参标定延后（用户自行补做）；跳过不影响单应性与标签位姿
 - AprilTag 角序（pupil_apriltags corners 顺序 ↔ 车体系[前左,前右,后右,后左]）需在标定时用已知朝向验证一次
 - 服务端多 client 仲裁：AUTO 期间请勿在浏览器手动开车（卡片已禁用冲突按钮，但其他标签页 ws 仍可能发控制——明天如出现状态互踩再做服务端互斥）
 - `dsc` 遥测字段语义核对（第二阶段前）
