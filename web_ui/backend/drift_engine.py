@@ -69,6 +69,9 @@ class DriftEngine:
         self.last_pose: Optional[Dict[str, float]] = None
         self.last_preview_jpeg: Optional[bytes] = None
         self.camera_fps: float = 0.0
+        self.read_ema_ms: float = 0.0
+        self.detect_ema_ms: float = 0.0
+        self._frame_source = None
         self._last_telemetry_t: Optional[float] = None
         self._last_yaw_rate_dps: float = 0.0
         self._camera = None
@@ -94,6 +97,9 @@ class DriftEngine:
         self.last_beta_deg = None
         self.last_pose = None
         self.camera_fps = 0.0
+        self.read_ema_ms = 0.0
+        self.detect_ema_ms = 0.0
+        self._frame_source = None
         self._last_telemetry_t = None
         self._last_yaw_rate_dps = 0.0
         self._running = False
@@ -178,10 +184,17 @@ class DriftEngine:
     def start_camera_loop(self, camera, detector, homography, tag_id: int,
                           heading_offset_deg: float = 0.0,
                           preview_hz: float = 15.0) -> None:
-        """后台线程：相机→标签检测→位姿→β→process_camera_frame。"""
-        from drift_vision import PoseSolver, solve_tag_pose
+        """后台线程：泵读帧→标签检测→位姿→β→process_camera_frame。
+
+        读帧与处理分线程（FrameSource）：采集速率不受检测耗时拖累，
+        处理循环只消费最新帧（丢旧不排队）；泵线程死亡触发看门狗。
+        """
+        from drift_vision import FrameSource, PoseSolver, solve_tag_pose
 
         self._running = True
+        source = FrameSource(camera)
+        source.start()
+        self._frame_source = source
         solver = PoseSolver(homography)
         fps_meter = FpsMeter()
         preview_min_interval = 1.0 / preview_hz if preview_hz > 0 else 0.0
@@ -191,15 +204,24 @@ class DriftEngine:
             from drift_vision import draw_tag_overlay
             last_preview_t = 0.0
             last_pose = None
+            last_seq = -1
             while self._running:
-                try:
-                    frame, t_s = camera.read()
-                except Exception:
-                    self.trigger_watchdog("相机读帧失败")
-                    break
+                got = source.latest()
+                if got is None or got[2] == last_seq:
+                    if not source.alive:
+                        self.trigger_watchdog("相机读帧失败")
+                        break
+                    time.sleep(0.001)  # 等新帧
+                    continue
+                frame, t_s, seq = got
+                last_seq = seq
                 self.camera_fps = fps_meter.tick(t_s)
+                t0 = time.perf_counter()
                 detection = next((d for d in detector.detect(frame)
                                   if d.tag_id == tag_id), None)
+                detect_ms = (time.perf_counter() - t0) * 1000.0
+                self.detect_ema_ms += 0.1 * (detect_ms - self.detect_ema_ms)
+                self.read_ema_ms = source.read_ema_ms
                 if detection is None:
                     est = self.beta_estimator.update(None, self._last_yaw_rate_dps, t_s=t_s)
                     self.process_camera_frame(frame, t_s, None, None,
@@ -222,7 +244,7 @@ class DriftEngine:
                         preview_frame = frame
                         if detection is not None and last_pose is not None:
                             preview_frame = draw_tag_overlay(
-                                frame, homography, detection.corners, last_pose)
+                                frame.copy(), homography, detection.corners, last_pose)
                         ok, buf = cv2.imencode(".jpg", preview_frame,
                                                [cv2.IMWRITE_JPEG_QUALITY, 70])
                         if ok:
@@ -230,6 +252,7 @@ class DriftEngine:
                             last_preview_t = t_s
                     except Exception:
                         pass
+            source.stop()
 
         self._camera_thread = threading.Thread(target=_loop, daemon=True,
                                                name="drift-camera")
@@ -240,6 +263,9 @@ class DriftEngine:
         if self._camera_thread is not None:
             self._camera_thread.join(timeout=2.0)
             self._camera_thread = None
+        if self._frame_source is not None:
+            self._frame_source.stop()
+            self._frame_source = None
         if self._camera is not None:
             try:
                 self._camera.close()
@@ -287,6 +313,8 @@ class DriftEngine:
             "pose": self.last_pose,
             "telemetry_count": self.telemetry_count,
             "camera_fps": round(self.camera_fps, 1),
+            "read_ms": round(self.read_ema_ms, 1),
+            "detect_ms": round(self.detect_ema_ms, 1),
             "frames_written": self.recorder.frames_written if self.recorder else 0,
             "events": [{"kind": e.kind, "detail": e.detail, "t_s": e.t_s}
                        for e in list(self.session.events)[-20:]],

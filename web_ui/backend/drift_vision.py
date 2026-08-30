@@ -15,6 +15,7 @@
 驱动纯几何逻辑测试，明天实机联调只替换实现、不动几何代码。
 """
 import math
+import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, Tuple
@@ -186,6 +187,56 @@ class USBCamera:
         self._cap.release()
 
 
+class FrameSource:
+    """读帧/处理分离：后台线程持续取帧只留最新，处理循环不被采集阻塞。
+
+    消费者 latest() 返回 (frame, t_s, seq)；seq 是帧序号，消费者可据此
+    跳过重复帧（处理比采集快时不重复处理同一帧）。
+    """
+
+    def __init__(self, camera):
+        self._camera = camera
+        self._lock = threading.Lock()
+        self._latest: Optional[Tuple[np.ndarray, float, int]] = None
+        self._seq = 0
+        self._running = False
+        self.alive = False          # 泵线程存活标志（死亡供消费者触发看门狗）
+        self.read_ema_ms = 0.0      # 相机读帧耗时指数滑动均值（诊断）
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        self._running = True
+        self.alive = True
+        self._thread = threading.Thread(target=self._pump, daemon=True,
+                                        name="drift-frame-pump")
+        self._thread.start()
+
+    def _pump(self) -> None:
+        import time as _time
+        while self._running:
+            try:
+                t0 = _time.perf_counter()
+                frame, t_s = self._camera.read()
+                read_ms = (_time.perf_counter() - t0) * 1000.0
+            except Exception:
+                break
+            self.read_ema_ms += 0.1 * (read_ms - self.read_ema_ms)
+            with self._lock:
+                self._seq += 1
+                self._latest = (frame, t_s, self._seq)
+        self.alive = False
+
+    def latest(self) -> Optional[Tuple[np.ndarray, float, int]]:
+        with self._lock:
+            return self._latest
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+
 class FakeCamera:
     """合成相机：黑帧 + 严格单调时戳，驱动无硬件环境下的逻辑测试。"""
 
@@ -216,20 +267,31 @@ class AprilTagDetector:
     （必要时重排）在明天实机标定时用一次已知朝向验证完成。
     """
 
-    def __init__(self, families: str = "tag36h11", tag_size_m: float = 0.08):
+    def __init__(self, families: str = "tag36h11", tag_size_m: float = 0.08,
+                 downscale: int = 1):
         if not _PUPIL_APRILTAGS_AVAILABLE:
             raise RuntimeError(
                 "AprilTag 后端 pupil-apriltags 未安装：pip install pupil-apriltags "
                 "（Windows 编译受阻时改用 WSL 或备选 pyapriltags，二进制 ABI 一致）")
         self._det = _PupilDetector(families=families)
         self.tag_size_m = tag_size_m
+        self.downscale = max(1, int(downscale))
 
     def detect(self, frame: np.ndarray) -> List[TagDetection]:
         import cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if self.downscale > 1:
+            gray = cv2.resize(gray, (gray.shape[1] // self.downscale,
+                                     gray.shape[0] // self.downscale),
+                              interpolation=cv2.INTER_AREA)
         results = self._det.detect(gray)
-        return [TagDetection(tag_id=r.tag_id, corners=np.asarray(r.corners, dtype=np.float32))
-                for r in results]
+        detections = []
+        for r in results:
+            corners = np.asarray(r.corners, dtype=np.float32)
+            if self.downscale > 1:
+                corners = corners * self.downscale
+            detections.append(TagDetection(tag_id=r.tag_id, corners=corners))
+        return detections
 
 
 class FakeTagDetector:

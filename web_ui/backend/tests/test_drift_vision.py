@@ -6,8 +6,10 @@
 """
 import math
 import sys
+import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -16,6 +18,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from drift_vision import (
+    FakeCamera,
     FieldHomography,
     PoseSolver,
     solve_tag_pose,
@@ -159,3 +162,56 @@ class TestOverlayDrawing:
         has_red = ((b[:, 2] > 200) & (b[:, 0] < 100) & (b[:, 1] < 100)).any()
         assert has_green, "应画出绿色标签框"
         assert has_red, "应画出红色车头箭头"
+
+
+class TestDetectorDownscale:
+    """检测降分辨率：速度优化的坐标正确性保障。"""
+
+    def _synth_scene(self) -> np.ndarray:
+        """白底 720p 场景中央放一个 tag36h11 ID0（每模块 12px）。"""
+        import sys as _sys
+        scripts = Path(__file__).resolve().parents[3] / "scripts"
+        if str(scripts) not in _sys.path:
+            _sys.path.insert(0, str(scripts))
+        from generate_apriltag import load_codes, render_tag_grid
+        tag = render_tag_grid(load_codes(scripts / "data" / "tag36h11_codes.txt")[0], 12)
+        scene = np.full((720, 1280), 255, dtype=np.uint8)
+        h, w = tag.shape
+        scene[300:300 + h, 500:500 + w] = tag
+        return cv2.cvtColor(scene, cv2.COLOR_GRAY2BGR)
+
+    def test_downscale_keeps_fullres_coordinates(self):
+        pytest.importorskip("pupil_apriltags")
+        from drift_vision import AprilTagDetector
+        frame = self._synth_scene()
+        det1 = AprilTagDetector()
+        det2 = AprilTagDetector(downscale=2)
+        full = [d for d in det1.detect(frame) if d.tag_id == 0]
+        half = [d for d in det2.detect(frame) if d.tag_id == 0]
+        assert len(full) == 1 and len(half) == 1
+        # 降采样检测的角点应还原到全分辨率坐标（±3px）
+        assert np.allclose(full[0].corners, half[0].corners, atol=3.0)
+
+
+class TestFrameSource:
+    def test_consumer_gets_latest_frame_without_queueing(self):
+        """读帧线程持续推进，慢消费者每次拿最新帧（丢旧不排队）。"""
+        from drift_vision import FrameSource
+        cam = FakeCamera(shape=(480, 640, 3))
+        src = FrameSource(cam)
+        src.start()
+        try:
+            deadline = time.time() + 2.0  # 等泵线程产出首帧
+            while src.latest() is None and time.time() < deadline:
+                time.sleep(0.01)
+            seen = []
+            for _ in range(20):
+                got = src.latest()
+                if got is not None:
+                    _, _, seq = got
+                    if not seen or seq > seen[-1]:
+                        seen.append(seq)
+                time.sleep(0.01)
+            assert seen and seen[-1] > seen[0], "帧序号应持续推进"
+        finally:
+            src.stop()

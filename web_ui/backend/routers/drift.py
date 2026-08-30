@@ -114,7 +114,8 @@ async def camera_start(request: CameraStartRequest):
         homography = FieldHomography.from_file(request.calibration_file)
         camera = USBCamera(index=request.camera_index, width=request.width,
                            height=request.height, fps=request.fps)
-        detector = AprilTagDetector()
+        detector = AprilTagDetector(downscale=2)  # 半分辨率检测：720p→360p 提速约 4 倍
+        drift_engine._camera = camera  # 显式持有，stop 时释放（不靠 GC）
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     drift_engine._calibration_file = request.calibration_file
