@@ -27,7 +27,7 @@
 
 ```powershell
 pip install pupil-apriltags    # Windows 编译失败时：WSL 下装，或换 pyapriltags
-cd web_ui\backend && python -m pytest tests/ -q    # 期望 193 passed（trainer_tubs 1 项存量失败与本工作无关）
+cd web_ui\backend && python -m pytest tests/ -q    # 期望 199 passed 全绿
 python scripts\simulate_drift_controller.py        # 期望 ✅ β 收敛 25.00°
 ```
 

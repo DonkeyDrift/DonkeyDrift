@@ -187,6 +187,8 @@ async def list_tubs(working_dir: Optional[str] = None):
     def _add_tub(full_path: str):
         rel = os.path.relpath(full_path, cwd)
         display = "./" + rel if not rel.startswith(".") else rel
+        # Windows 下 os.path 用反斜杠，统一为正斜杠保证前端展示与测试断言一致
+        display = display.replace(os.sep, "/")
         tubs.append({
             "name": os.path.basename(full_path) or full_path,
             "relative_path": display,
