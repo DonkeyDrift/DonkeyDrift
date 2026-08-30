@@ -168,6 +168,11 @@ class DriftEngine:
         self.session.watchdog_trigger(reason)
         self._send({"car_mode": 0, "throttle": 0.0})
 
+    def auto_active(self) -> bool:
+        """AUTO 期间（观察/接管）为 True：浏览器控制须被服务端门禁拦截。"""
+        return self.session.state in (DriftSessionState.AUTO_OBSERVE,
+                                      DriftSessionState.AUTO_ENGAGED)
+
     # ── 遥测上行（drive_state.telemetry_hooks 注入）──────────
     def on_telemetry(self, t_s: float, fields: Dict[str, float]) -> None:
         self.telemetry_count += 1

@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from drift_engine import drift_engine
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -631,6 +633,18 @@ async def drive_ws(
                 # 客户端发来的控制指令，转发给车端
                 control_fields = ["angle", "throttle", "drive_mode", "recording", "buttons", "car_mode"]
                 if any(k in msg for k in control_fields):
+                    # 漂移 AUTO（观察/接管）期间服务端仲裁：浏览器控制一律丢弃，
+                    # 避免与 drift_engine 经 send_sink 下发的控制打架
+                    # （RFC 第 11 节风险表；引擎自身下发不经此通道，不受影响）。
+                    if drift_engine.auto_active():
+                        logger.warning(
+                            f"漂移 AUTO 期间丢弃客户端 {client_id} 的控制字段: "
+                            f"{sorted(k for k in msg if k in control_fields)}")
+                        await websocket.send_text(json.dumps({
+                            "type": "control_rejected",
+                            "reason": "drift_auto_active",
+                        }))
+                        continue
                     if "angle" in msg:
                         drive_state.angle = float(msg["angle"])
                     if "throttle" in msg:
