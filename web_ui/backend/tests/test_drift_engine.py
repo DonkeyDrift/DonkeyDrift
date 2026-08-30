@@ -141,3 +141,76 @@ class TestCameraLoopSmoke:
             assert engine.read_ema_ms >= 0.0 and engine.detect_ema_ms >= 0.0
         finally:
             engine.stop_camera_loop()
+
+
+class TestCameraLoopTrajectory:
+    def test_trail_drawn_and_persists_through_detection_loss(self):
+        """轨迹叠加接线：运动中画面含彩色像素（轨迹+加粗箭头+青色 β 箭头）；
+        检测丢失后 2s 滑窗内轨迹仍叠加在最新帧上（不再纯透传）。"""
+        import numpy as np
+        from drift_vision import FieldHomography, TagDetection
+        from drift_engine import DriftEngine
+
+        class _PacedCamera:
+            """5ms 节拍的灰帧相机（真实单调时戳，轨迹窗口按真实时间修剪）。"""
+            def read(self):
+                time.sleep(0.005)
+                return np.full((480, 640, 3), 200, np.uint8), time.monotonic()
+
+            def close(self):
+                pass
+
+        class _MovingThenLostDetector:
+            """前 30 次调用：标签车头向北、每帧向东移 8px；之后检测丢失。"""
+            def __init__(self):
+                self._n = 0
+
+            def detect(self, frame):
+                self._n += 1
+                if self._n > 30:
+                    return []
+                k = self._n * 8
+                corners = np.float32([[340 + k, 200], [340 + k, 160],
+                                      [300 + k, 160], [300 + k, 200]])
+                return [TagDetection(tag_id=0, corners=corners)]
+
+        img = np.float32([[30, 40], [600, 40], [600, 440], [30, 440]])
+        field = np.float32([[0, 2], [2, 2], [2, 0], [0, 0]])
+        homography = FieldHomography.from_correspondences(img, field)
+        engine = DriftEngine(tub_base_dir=None)
+        engine.start_camera_loop(_PacedCamera(), _MovingThenLostDetector(),
+                                 homography, tag_id=0)
+
+        def _colored(f):
+            return bool(((f[:, :, 0] != f[:, :, 1])
+                         | (f[:, :, 1] != f[:, :, 2])).any())
+
+        def _cyan(f):
+            b = f.reshape(-1, 3).astype(np.int32)
+            return bool(((b[:, 0] > 200) & (b[:, 1] > 200) & (b[:, 2] < 100)).any())
+
+        try:
+            # 运动阶段：轨迹 + 车头红箭 + 航迹青箭都已上屏
+            deadline = time.time() + 5.0
+            while time.time() < deadline \
+                    and engine.snapshot()["tag_hits"] < 12:
+                time.sleep(0.02)
+            snap = engine.snapshot()
+            assert snap["tag_hits"] >= 12, "运动阶段应积累足够命中"
+            f = engine.display_frame
+            assert f is not None and _colored(f), "运动阶段应绘制轨迹与箭头"
+            assert _cyan(f), "运动中应绘制青色航迹箭头（β 朝向）"
+            # 丢失阶段：检测丢失后，2s 滑窗内轨迹仍叠加在最新帧上
+            deadline = time.time() + 5.0
+            lost_overlay = False
+            while time.time() < deadline:
+                snap = engine.snapshot()
+                f = engine.display_frame
+                if snap["frames_total"] - snap["tag_hits"] > 5 \
+                        and f is not None and _colored(f):
+                    lost_overlay = True
+                    break
+                time.sleep(0.02)
+            assert lost_overlay, "检测丢失后滑窗内轨迹应继续叠加（不得纯透传）"
+        finally:
+            engine.stop_camera_loop()

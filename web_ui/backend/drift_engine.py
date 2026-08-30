@@ -205,19 +205,21 @@ class DriftEngine:
         读帧与处理分线程（FrameSource）：采集速率不受检测耗时拖累，
         处理循环只消费最新帧（丢旧不排队）；泵线程死亡触发看门狗。
         """
-        from drift_vision import FrameSource, PoseSolver, solve_tag_pose
+        from drift_vision import (FrameSource, PoseSolver, TrajectoryTrail,
+                                  solve_tag_pose, trail_speeds)
 
         self._running = True
         source = FrameSource(camera)
         source.start()
         self._frame_source = source
         solver = PoseSolver(homography)
+        trail = TrajectoryTrail(window_s=2.0)
         fps_meter = FpsMeter()
         preview_min_interval = 1.0 / preview_hz if preview_hz > 0 else 0.0
 
         def _loop() -> None:
             import cv2
-            from drift_vision import draw_tag_overlay
+            from drift_vision import draw_tag_overlay, draw_trajectory
             last_preview_t = 0.0
             last_pose = None
             last_seq = -1
@@ -250,6 +252,7 @@ class DriftEngine:
                         homography, detection.corners, t_s,
                         heading_offset_deg=heading_offset_deg))
                     last_pose = pose
+                    trail.add(t_s, pose.x, pose.y)
                     est = self.beta_estimator.update(
                         PoseSample(x=pose.x, y=pose.y,
                                    heading_deg=pose.heading_deg, t_s=t_s),
@@ -258,13 +261,23 @@ class DriftEngine:
                         frame, t_s, {"x": pose.x, "y": pose.y,
                                      "heading_deg": pose.heading_deg},
                         est.beta_deg, self._last_yaw_rate_dps)
-                try:  # 显示帧逐帧更新：检测成功叠加绿框+红箭头；失败透传
-                    # 原始帧——否则检测缺口期间推流持续发旧帧（预览卡顿）。
-                    self._display_frame = (
-                        draw_tag_overlay(frame.copy(), homography,
-                                         detection.corners, last_pose)
-                        if detection is not None and last_pose is not None
-                        else frame)
+                try:  # 显示帧逐帧更新：轨迹（2s 滑窗、按速度着色）始终叠加；
+                    # 检测成功再叠绿框+车头红箭+航迹青箭；无轨迹且未检出时
+                    # 透传原始帧——检测缺口期间推流不得发旧帧（预览卡顿）。
+                    points = trail.snapshot(t_s)
+                    speeds = trail_speeds(points)
+                    vis = None
+                    if points:
+                        vis = frame.copy()
+                        draw_trajectory(vis, homography, points, speeds)
+                    if detection is not None and last_pose is not None:
+                        if vis is None:
+                            vis = frame.copy()
+                        cur_speed = speeds[-1] if speeds else 0.0
+                        course = est.course_deg if cur_speed >= 0.05 else None
+                        draw_tag_overlay(vis, homography, detection.corners,
+                                         last_pose, course_deg=course)
+                    self._display_frame = vis if vis is not None else frame
                 except Exception:
                     self._display_frame = frame
                 if t_s - last_preview_t >= preview_min_interval:

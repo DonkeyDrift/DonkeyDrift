@@ -351,3 +351,151 @@ class TestFrameSource:
             assert seen and seen[-1] > seen[0], "帧序号应持续推进"
         finally:
             src.stop()
+
+
+# ── 可视化增强：加粗箭头 / 速度着色轨迹 / β 朝向箭头 ──────
+class TestSpeedToBgr:
+    """轨迹速度着色约定：0=绿，max/2(1m/s)=黄，≥max(2m/s)=红（BGR）。"""
+
+    def test_zero_speed_is_green(self):
+        from drift_vision import speed_to_bgr
+        assert speed_to_bgr(0.0) == (0, 255, 0)
+
+    def test_half_max_speed_is_yellow(self):
+        from drift_vision import speed_to_bgr
+        assert speed_to_bgr(1.0) == (0, 255, 255)
+
+    def test_max_speed_is_red(self):
+        from drift_vision import speed_to_bgr
+        assert speed_to_bgr(2.0) == (0, 0, 255)
+
+    def test_over_max_speed_clamps_to_red(self):
+        from drift_vision import speed_to_bgr
+        assert speed_to_bgr(5.0) == (0, 0, 255)
+
+
+class TestTrajectoryTrail:
+    """轨迹滑窗：只保留最近 window_s 秒的小车中心点（场地坐标）。"""
+
+    def test_snapshot_prunes_points_older_than_window(self):
+        from drift_vision import TrajectoryTrail
+        trail = TrajectoryTrail(window_s=2.0)
+        trail.add(0.0, 0.0, 0.0)
+        trail.add(1.0, 0.1, 0.0)
+        trail.add(2.5, 0.2, 0.0)
+        pts = trail.snapshot(2.5)
+        assert [p[0] for p in pts] == [1.0, 2.5]
+
+    def test_stationary_points_accumulate_on_single_spot(self):
+        """小车不动时新点持续落在同一位置：轨迹视觉上始终是一个点。"""
+        from drift_vision import TrajectoryTrail
+        trail = TrajectoryTrail(window_s=2.0)
+        for i in range(10):
+            trail.add(i * 0.1, 1.0, 1.0)
+        pts = trail.snapshot(0.9)
+        assert len(pts) == 10
+        assert all((p[1], p[2]) == (1.0, 1.0) for p in pts)
+
+
+class TestTrailSpeeds:
+    """逐点速度差分：以 baseline_s 前的点为基线抑制位姿噪声。"""
+
+    def test_empty_returns_empty(self):
+        from drift_vision import trail_speeds
+        assert trail_speeds([]) == []
+
+    def test_stationary_speeds_are_zero(self):
+        from drift_vision import trail_speeds
+        pts = [(i * 0.1, 1.0, 1.0) for i in range(10)]
+        assert trail_speeds(pts) == [0.0] * 10
+
+    def test_constant_speed_recovery(self):
+        """0.1s 间隔、每步 0.2m → 2 m/s；首点无基线记 0，其后一致。"""
+        from drift_vision import trail_speeds
+        pts = [(i * 0.1, i * 0.2, 0.0) for i in range(10)]
+        speeds = trail_speeds(pts, baseline_s=0.2)
+        assert speeds[0] == 0.0
+        for v in speeds[1:]:
+            assert v == pytest.approx(2.0, abs=1e-6)
+
+
+class TestDrawTrajectory:
+    """轨迹绘制：逐段按速度着色（绿→黄→红），最新点画实心圆点。"""
+
+    def _project(self, homography, x, y):
+        px, py = homography.field_to_image(x, y)
+        return int(px), int(py)
+
+    def test_segments_colored_by_speed(self, homography):
+        from drift_vision import draw_trajectory
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        points = [(0.0, 0.5, 1.0), (0.5, 0.8, 1.0), (1.0, 1.4, 1.0)]
+        speeds = [0.0, 0.0, 2.0]
+        draw_trajectory(frame, homography, points, speeds)
+        sx, sy = self._project(homography, 0.65, 1.0)  # 慢速段中点
+        fx, fy = self._project(homography, 1.1, 1.0)   # 快速段中点
+        b, g, r = (int(v) for v in frame[sy, sx])
+        assert g > 200 and r < 100, f"慢速段应为绿色，实际 {frame[sy, sx]}"
+        b, g, r = (int(v) for v in frame[fy, fx])
+        assert r > 200 and g < 100, f"快速段应为红色，实际 {frame[fy, fx]}"
+
+    def test_single_point_draws_dot(self, homography):
+        from drift_vision import draw_trajectory
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        draw_trajectory(frame, homography, [(0.0, 1.0, 1.0)], [0.0])
+        px, py = self._project(homography, 1.0, 1.0)
+        b, g, r = (int(v) for v in frame[py, px])
+        assert g > 200 and r < 100, f"静止轨迹点应为绿色圆点，实际 {frame[py, px]}"
+
+    def test_empty_points_leave_frame_unchanged(self, homography):
+        from drift_vision import draw_trajectory
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        out = draw_trajectory(frame, homography, [], [])
+        assert np.array_equal(out, np.full((480, 640, 3), 255, dtype=np.uint8))
+
+
+class TestOverlayEmphasis:
+    """加粗加大与 β 朝向箭头（青色，与红色车头箭头区分）。"""
+
+    def _corners_at_center(self, homography):
+        """场地 (1,1) 处朝东的 8cm 标签四角（与 TestOverlayDrawing 同构造）。"""
+        body = np.array([[-0.04, -0.04], [0.04, -0.04], [0.04, 0.04], [-0.04, 0.04]])
+        corners = np.float32([
+            homography.field_to_image(*p) for p in (body + np.array([1.0, 1.0]))])
+        return corners
+
+    def _count(self, out, mask_fn):
+        b = out.reshape(-1, 3).astype(np.int32)
+        return int(mask_fn(b).sum())
+
+    def test_overlay_lines_are_bold(self, homography):
+        """绿框/红箭头加粗：像素数显著高于旧 2px/6cm 绘制（绿>300，红>100）。"""
+        from drift_vision import Pose, draw_tag_overlay
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
+        out = draw_tag_overlay(frame, homography,
+                               self._corners_at_center(homography), pose)
+        green = self._count(out, lambda b: (b[:, 1] > 200) & (b[:, 0] < 100) & (b[:, 2] < 100))
+        red = self._count(out, lambda b: (b[:, 2] > 200) & (b[:, 0] < 100) & (b[:, 1] < 100))
+        assert green > 300, f"绿框应加粗，绿像素 {green}"
+        assert red > 100, f"红箭头应加粗加长，红像素 {red}"
+
+    def test_course_arrow_drawn_in_cyan(self, homography):
+        """传 course_deg 时绘制青色航迹箭头（β=车头-航迹的视觉呈现）。"""
+        from drift_vision import Pose, draw_tag_overlay
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
+        out = draw_tag_overlay(frame, homography,
+                               self._corners_at_center(homography), pose,
+                               course_deg=90.0)
+        cyan = self._count(out, lambda b: (b[:, 0] > 200) & (b[:, 1] > 200) & (b[:, 2] < 100))
+        assert cyan > 30, f"应画出青色航迹箭头，青像素 {cyan}"
+
+    def test_course_arrow_omitted_by_default(self, homography):
+        from drift_vision import Pose, draw_tag_overlay
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
+        out = draw_tag_overlay(frame, homography,
+                               self._corners_at_center(homography), pose)
+        cyan = self._count(out, lambda b: (b[:, 0] > 200) & (b[:, 1] > 200) & (b[:, 2] < 100))
+        assert cyan == 0, "未传 course_deg 不应出现青色箭头"

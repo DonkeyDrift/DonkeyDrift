@@ -1,6 +1,6 @@
 # 俯拍漂移项目：状态交接与后续工作（供后续 AI/开发者继续开展）
 
-> 更新：2026-08-30 晚（实车调试日结束）｜分支 `feat/overhead-drift-control`（未合并 main）｜测试基线 **222 passed**（`cd web_ui/backend && python -m pytest tests/ -q`）
+> 更新：2026-08-30 深夜（运动丢检测排障闭环，相机链路复验通过；overlay 加粗+速度着色轨迹+β 朝向箭头）｜分支 `feat/overhead-drift-control`（未合并 main）｜测试基线 **250 passed**（`cd web_ui/backend && python -m pytest tests/ -q`）
 
 ## 0. 文档地图
 
@@ -34,9 +34,10 @@
 | 数值刷新         | 10Hz；state 含 `camera_fps/read_ms/detect_ms` 分段诊断                                                                |
 | 前端表单         | 相机 index/TagID/朝向偏移/标定文件启动成功后存 localStorage 自动回填                                                                |
 
-### 2.2 待用户验证（清僵尸进程后未再实测）⚠️
+### 2.2 复验结果（2026-08-30 深夜，清僵尸进程后）✅
 
-- 启动相机 → 预览出画面、fps≈60、推车不掉帧（黑屏事件后尚未复验，见 §4.1）
+- 预览出画面、干净帧 60fps、慢推/快推不掉帧不卡——通过
+- 快推丢检测根因是相机自动曝光拖影；曝光压到 **1/400s** 后甩动车壳全程锁定（完整排障链见 §4.3）
 
 ### 2.3 关键运行参数（实测确定，勿改）
 
@@ -47,6 +48,7 @@
 | heading\_offset\_deg | **180**                    | 贴标方向与角序约定差 180°                  |
 | 场地                   | 1.0×1.0 m                  | 西南原点                             |
 | 分辨率/帧率               | 1280×720\@60 MJPG          | 检测 downscale=2（360p 检测、角点还原全分辨率） |
+| 曝光                   | **1/400s（≈2.5ms）**         | 运动模糊根治参数：驱动/厂商工具设置，或卡片"曝光"框填 **-8/-9**（DSHOW log2 秒，后端已接线）；自动曝光下快推必丢检测 |
 
 ## 3. 坐标与符号约定（重要，别搞反）
 
@@ -76,10 +78,31 @@ cd C:\Dev\DDC\DonkeyDrift\web_ui\backend && python main.py
 - 前端改动后 `cd web_ui/frontend && npm run build`（dist 在 .gitignore，不入库）；用户浏览器需 Ctrl+F5
 - 帧率问题**分五条链路定位**：采集(read\_ms)→处理(camera\_fps+detect\_ms)→推流编码→浏览器显示→数值轮询。`/api/drift/state` 已暴露前两者；预览卡≠处理掉帧，先看数据再动手
 - H.264 软编码运动画面 20\~35ms/帧超 60fps 预算——推流必须 360p（检测不受影响，仍在 720p 全分辨率帧上做）
+- 相机循环冒烟测试 `test_loop_runs_and_reports_stage_timing` 对 CPU 调度敏感：机器重负载（如视频会议）下 3s 宽限必挂，已调至 10s（验证内容不变）；全量测试尽量在空闲机器上跑
+
+### 4.3 运动丢检测排障链（2026-08-30 深夜，已闭环）
+
+按 §4.2 五链路法逐层取证，四层症状各有独立根因，逐层修复（全程 TDD，每层先写失败测试）：
+
+1. **"静止流畅、运动卡顿"** → 数据显示采集/处理/编码全程健康（60fps、detect≈8ms、360p 编码实测 2\~5ms），根因在显示帧更新逻辑：`_display_frame` 只在检测成功时更新，运动模糊的检测缺口期间推流持续发旧帧。**修复**：显示帧逐帧透传原始帧、检测成功才叠加（drift\_engine.py；测试 TestDisplayFrameFreshness）。
+2. **"绿框在、红箭头跟不上"** → `PoseSolver` 跳变拒绝（>0.5m）无恢复机制：检测缺口期间车真实移过 0.5m 后，新位姿被当中值离群**永久拒绝**（绿框走原始角点故正常）。**修复**：连续 window(5) 帧一致被拒即判定真实位移、采信并重置窗（drift\_vision.py；测试 test\_sustained\_jump\_recovers）。
+3. **"快推丢检测"（软件层兜底）** → `decode_sharpening` 0.25→**0.6** + 半分辨率未检出时**全分辨率自适应重试**（好帧 8ms\@360p 保 60fps，难帧 +\~30ms\@720p；测试 TestAdaptiveDetection）。评估过 `quad_decimate=1.0` 并**弃用**：720p 下单帧 210ms 会压垮管线。修复后慢推紧贴，但快推命中率仍只有 0\~50%。
+4. **根因（物理层）**：USB 相机自动曝光在 60fps 下实测默认只有 \~1/100s（10ms），1m/s 快推把 78px\@720p 标签拖出 20\~40% 涂抹，**任何分辨率/锐化都无解**。**最终参数：曝光 1/400s（≈2.5ms），甩动车壳全程锁定**。设置途径：驱动/厂商工具设 1/400s；或卡片"曝光"框填 **-8/-9**（DirectShow log2 秒；后端链路已接线：USBCamera 先关自动曝光再设值 / API 字段 `exposure` / 前端表单 localStorage 回填；旧 `exposure_us` 参数语义对 DSHOW 是错的且从未接线，已重构）。
+
+副产品：引擎状态新增 `frames_total`/`tag_hits` 命中率计数（M0 丢帧率验收的直接数据源）。
+
+**当前特性（勿误判为回退）**：短曝光下 360p 快路径命中率低（标签 39px 本就在分辨率下限，quadrilateral 阶段经 quad\_decimate=2 仅 \~19px），难帧几乎全靠 720p 重试兜底——快推段表现为 detect≈40ms、处理 fps≈20、累计命中率 ≈86%（含车出画面的时段）。跟踪质量已过目测验收；若第 1 步延迟实测超标，候选优化：直接 720p 检测（\~36ms 恒定）或 360p+quad\_decimate=1（\~34ms，四边像素翻倍），二选一实测后再动。
+
+### 4.4 可视化增强（2026-08-30 晚，TDD 16 例全绿）
+
+- **加粗加大**：绿框线宽 2→4，车头红箭线宽 2→5、长度 6cm→8cm（720p 预览上原尺寸太细）。
+- **中心轨迹**：`TrajectoryTrail` 2s 滑窗记录位姿中心点，逐段按线速度着色——0=绿、1m/s=黄、≥2m/s=红（`speed_to_bgr` 线性插值），最新点画实心圆点。不动时轨迹始终是一个点；超窗旧点动态消失；**检测丢失帧轨迹仍叠加**（不再纯透传），检测缺口期间轨迹不闪断。
+- **β 朝向箭头**：青色航迹（course）箭（复用 `BetaEstimator.course_deg`），先画青后画红——两箭对齐即 β≈0，张开的夹角即 β；末段速度 <0.05m/s（静止）时不画，避免噪声朝向误导。
+- 逐点速度用 0.2s 差分基线平滑（`trail_speeds`），抑制位姿噪声导致的颜色闪烁；轨迹/箭头随 display\_frame 走 WebRTC 与 MJPEG 双通道，前端零改动。
 
 ## 5. 下一步工作（按序执行，含命令与验收标准）
 
-### 第 0 步：复验相机链路（清僵尸进程后）
+### 第 0 步：复验相机链路（清僵尸进程后）✅ 已通过（2026-08-30 深夜，含曝光修复，见 §4.3）
 
 浏览器刷新 → 启动相机。验收：预览出画面、相机 fps≈60、来回推车不掉帧。过了即 **M0 正式收官**。
 
@@ -118,7 +141,7 @@ python scripts\analyze_throttle_pulses.py data\drift_tubs\overhead_<时间戳> -
 ## 6. 遗留与风险清单
 
 - [ ] 棋盘格标定板未到货：2.1 内参标定**用户明确说自己下次做**（跳过不影响单应性/标签位姿）
-- [x] 检测降采样余量：360p 检测下标签约 39px 接近 AprilTag 下限——若实测丢帧率升高，回退 `AprilTagDetector(downscale=1)`（routers/drift.py camera\_start）
+- [x] 检测降采样余量：360p 检测下标签约 39px 接近 AprilTag 下限——**已实锤并由 §4.3 链路解决**（锐化 0.6 + 720p 自适应重试 + 曝光 1/400s）；残余优化候选见 §4.3 末段
 - [ ] `dsc` 遥测字段语义核对（第二阶段蒸馏前）
 - [x] 服务端多 client 仲裁（AUTO 期间其他浏览器标签页仍可能发控制）——已实现服务端门禁：AUTO（观察/接管）期间浏览器控制字段在 drive ws 一律丢弃并回发 `control_rejected`（routers/drive.py + `drift_engine.auto_active()`，测试 tests/test\_drift\_control\_arbitration.py），待实车核对
 - [ ] MODE 0→2 固件跳变实车核对
@@ -128,12 +151,13 @@ python scripts\analyze_throttle_pulses.py data\drift_tubs\overhead_<时间戳> -
 
 | 模块                                                   | 职责                                                                        | 测试                           |
 | ---------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------- |
-| `web_ui/backend/drift_vision.py`                     | 单应性/位姿解算(heading\_offset)/PoseSolver/USBCamera/FrameSource 泵/检测(降采样)/叠加绘制 | test\_drift\_vision.py       |
+| `web_ui/backend/drift_vision.py`                     | 单应性/位姿解算(heading\_offset)/PoseSolver(跳变拒绝+恢复)/USBCamera(手动曝光)/FrameSource 泵/检测(降采样+锐化+全分辨率重试)/叠加绘制(加粗框箭+轨迹滑窗着色+β 青箭) | test\_drift\_vision.py       |
 | `web_ui/backend/state_estimator.py`                  | β 估计（heading 域互补滤波+静止衰减）                                                  | test\_state\_estimator.py    |
 | `web_ui/backend/drift_controller.py`                 | 级联 PID+油门脉冲发生器+看门狗                                                        | test\_drift\_controller.py   |
 | `web_ui/backend/drift_session.py`                    | 会话状态机（观察→β 稳定→接管）                                                         | test\_drift\_session.py      |
 | `web_ui/backend/sync_recorder.py`                    | 遥测插值对齐+tub v2 录制                                                          | test\_sync\_recorder.py      |
-| `web_ui/backend/drift_engine.py`                     | 编排：相机循环/FpsMeter/分段计时/display\_frame                                      | test\_drift\_engine.py       |
+| `web_ui/backend/drift_engine.py`                     | 编排：相机循环/FpsMeter/分段计时/display\_frame（逐帧透传+轨迹滑窗叠加）/命中率计数                                      | test\_drift\_engine.py       |
+| `web_ui/backend/routers/drive.py`                    | 驾驶 ws/控制转发（AUTO 期间浏览器控制门禁，回发 control\_rejected）                                          | test\_drive.py + test\_drift\_control\_arbitration.py |
 | `web_ui/backend/drift_webrtc.py`                     | aiortc 60fps 推流（DisplayFrameTrack 360p）                                   | test\_drift\_router.py       |
 | `web_ui/backend/routers/drift.py`                    | API：state/session/camera/config/frame.jpg/frame.mjpg/webrtc/offer         | test\_drift\_router.py       |
 | `web_ui/frontend/src/components/drive/DriftCard.tsx` | 前端卡片（WebRTC 预览+MJPEG 兜底+参数面板+localStorage）                                | —（build 验证）                  |

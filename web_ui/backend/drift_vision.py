@@ -17,8 +17,9 @@
 import math
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import List, Optional, Protocol, Tuple
+from typing import Deque, List, Optional, Protocol, Tuple
 
 import numpy as np
 
@@ -97,21 +98,103 @@ def solve_tag_pose(homography: FieldHomography, corners: np.ndarray,
 
 
 def draw_tag_overlay(frame: np.ndarray, homography: "FieldHomography",
-                     corners: np.ndarray, pose: "Pose") -> np.ndarray:
+                     corners: np.ndarray, pose: "Pose",
+                     course_deg: Optional[float] = None) -> np.ndarray:
     """在预览帧上叠加识别结果：标签四角绿框 + 车头方向红箭头。
 
-    箭头按含贴标补偿的 heading（场地系）从标签中心前伸 6cm，
-    经单应性投回图像坐标绘制。
+    箭头按含贴标补偿的 heading（场地系）从标签中心前伸 8cm，
+    经单应性投回图像坐标绘制。course_deg（航迹角=速度方向，β=车头-航迹
+    的视觉呈现）给定时先画青色细箭、红箭压底——两箭对齐（β≈0）时只见
+    红箭，漂移时张开夹角即 β。
     """
     import cv2
     pts = np.array(corners, dtype=np.int32).reshape(-1, 2)
-    cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
-    dx = 0.06 * math.cos(math.radians(pose.heading_deg))
-    dy = 0.06 * math.sin(math.radians(pose.heading_deg))
+    cv2.polylines(frame, [pts], True, (0, 255, 0), 4)
     x0, y0 = homography.field_to_image(pose.x, pose.y)
+    if course_deg is not None:
+        cdx = 0.08 * math.cos(math.radians(course_deg))
+        cdy = 0.08 * math.sin(math.radians(course_deg))
+        cx1, cy1 = homography.field_to_image(pose.x + cdx, pose.y + cdy)
+        cv2.arrowedLine(frame, (int(x0), int(y0)), (int(cx1), int(cy1)),
+                        (255, 255, 0), 3, tipLength=0.25)
+    dx = 0.08 * math.cos(math.radians(pose.heading_deg))
+    dy = 0.08 * math.sin(math.radians(pose.heading_deg))
     x1, y1 = homography.field_to_image(pose.x + dx, pose.y + dy)
     cv2.arrowedLine(frame, (int(x0), int(y0)), (int(x1), int(y1)),
-                    (0, 0, 255), 2, tipLength=0.3)
+                    (0, 0, 255), 5, tipLength=0.25)
+    return frame
+
+
+# ── 小车中心轨迹（2s 滑窗，按速度绿→黄→红着色）────────────
+class TrajectoryTrail:
+    """小车中心轨迹滑窗：只保留最近 window_s 秒的点（场地坐标，米）。
+
+    小车不动时新点持续落在同一位置——轨迹视觉上始终是一个点；
+    超过窗口的旧点在 snapshot 时修剪（动态消失）。
+    """
+
+    def __init__(self, window_s: float = 2.0):
+        self._window_s = window_s
+        self._points: Deque[Tuple[float, float, float]] = deque()
+
+    def add(self, t_s: float, x: float, y: float) -> None:
+        self._points.append((t_s, x, y))
+
+    def snapshot(self, now_s: float) -> List[Tuple[float, float, float]]:
+        """修剪过期点并返回当前窗口内的 [(t_s, x, y), ...]。"""
+        while self._points and now_s - self._points[0][0] > self._window_s:
+            self._points.popleft()
+        return list(self._points)
+
+
+def trail_speeds(points: List[Tuple[float, float, float]],
+                 baseline_s: float = 0.2) -> List[float]:
+    """逐点线速度（m/s）：以 baseline_s 前的点为差分基线抑制位姿噪声。
+
+    窗口早期无满基线点时回退到最早点（跨度 <0.05s 记 0，防除零噪声）；
+    首点恒为 0。
+    """
+    speeds: List[float] = []
+    for i, (t, x, y) in enumerate(points):
+        j = 0
+        for k in range(i - 1, -1, -1):
+            if t - points[k][0] >= baseline_s:
+                j = k
+                break
+        dt = t - points[j][0]
+        if i == 0 or dt < 0.05:
+            speeds.append(0.0)
+        else:
+            speeds.append(math.hypot(x - points[j][1], y - points[j][2]) / dt)
+    return speeds
+
+
+def speed_to_bgr(speed_mps: float, max_mps: float = 2.0) -> Tuple[int, int, int]:
+    """速度→颜色（BGR）：0=绿，max/2=黄，≥max=红，区间线性插值。"""
+    t = min(max(speed_mps / max_mps, 0.0), 1.0)
+    if t <= 0.5:
+        return (0, 255, int(round(510.0 * t)))
+    return (0, int(round(510.0 * (1.0 - t))), 255)
+
+
+def draw_trajectory(frame: np.ndarray, homography: "FieldHomography",
+                    points: List[Tuple[float, float, float]],
+                    speeds: List[float], max_mps: float = 2.0) -> np.ndarray:
+    """轨迹叠加：逐段按速度着色画线（绿→黄→红），最新点画实心圆点。
+
+    检测丢失的帧也可单独调用（无绿框/箭头时轨迹不闪断）。
+    """
+    import cv2
+    if not points:
+        return frame
+    px = [homography.field_to_image(x, y) for _, x, y in points]
+    for i in range(1, len(points)):
+        color = speed_to_bgr(speeds[i] if i < len(speeds) else 0.0, max_mps)
+        cv2.line(frame, (int(px[i - 1][0]), int(px[i - 1][1])),
+                 (int(px[i][0]), int(px[i][1])), color, 3)
+    tail_speed = speeds[-1] if speeds else 0.0
+    cv2.circle(frame, (int(px[-1][0]), int(px[-1][1])), 5,
+               speed_to_bgr(tail_speed, max_mps), -1)
     return frame
 
 
