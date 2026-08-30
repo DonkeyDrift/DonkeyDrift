@@ -110,6 +110,50 @@ class TestConfigApi:
         assert r.status_code == 422
 
 
+class TestCameraStartApi:
+    """camera/start 契约：曝光等参数透传到 USBCamera 构造。"""
+
+    @staticmethod
+    def _patch_camera_deps(monkeypatch, captured):
+        import drift_engine as engine_mod
+        import drift_vision
+        from types import SimpleNamespace
+
+        class FakeUSBCamera:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(drift_vision, "USBCamera", FakeUSBCamera)
+        monkeypatch.setattr(drift_vision, "FieldHomography",
+                            SimpleNamespace(from_file=lambda p: object()))
+        monkeypatch.setattr(drift_vision, "AprilTagDetector",
+                            lambda downscale: object())
+        monkeypatch.setattr(engine_mod.drift_engine, "start_camera_loop",
+                            lambda *a, **k: None)
+
+    def test_exposure_passthrough(self, client, monkeypatch):
+        captured = {}
+        self._patch_camera_deps(monkeypatch, captured)
+        r = client.post("/api/drift/camera/start", json={
+            "camera_index": 1, "tag_id": 0,
+            "calibration_file": "whatever.npz", "exposure": -7.0})
+        assert r.status_code == 200
+        assert captured["index"] == 1
+        assert captured["exposure"] == -7.0, "曝光参数必须透传到 USBCamera"
+
+    def test_exposure_default_is_none(self, client, monkeypatch):
+        """不传曝光字段时以 None 透传（USBCamera 保持自动曝光）。"""
+        captured = {}
+        self._patch_camera_deps(monkeypatch, captured)
+        r = client.post("/api/drift/camera/start", json={
+            "camera_index": 1, "tag_id": 0, "calibration_file": "whatever.npz"})
+        assert r.status_code == 200
+        assert captured.get("exposure") is None
+
+
 class TestTelemetryHook:
     def test_telemetry_push_reaches_recorder(self, client):
         client.post("/api/drift/session/start", json={"mode": "record"})

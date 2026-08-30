@@ -59,11 +59,12 @@ export const DriftCard: React.FC = () => {
     } catch {
       return {};
     }
-  })() as Partial<{ cameraIndex: string; tagId: string; headingOffset: string; calibFile: string }>;
+  })() as Partial<{ cameraIndex: string; tagId: string; headingOffset: string; calibFile: string; exposure: string }>;
   const [cameraIndex, setCameraIndex] = useState(saved.cameraIndex ?? '0');
   const [tagId, setTagId] = useState(saved.tagId ?? '0');
   const [headingOffset, setHeadingOffset] = useState(saved.headingOffset ?? '0');
   const [calibFile, setCalibFile] = useState(saved.calibFile ?? 'field_homography.npz');
+  const [exposure, setExposure] = useState(saved.exposure ?? '');
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
   const [webrtcFailed, setWebrtcFailed] = useState(false);
@@ -144,12 +145,13 @@ export const DriftCard: React.FC = () => {
       tag_id: Number(tagId),
       calibration_file: calibFile,
       heading_offset_deg: Number(headingOffset) || 0,
+      exposure: exposure.trim() === '' ? undefined : Number(exposure),
     });
     setCameraOn(true);
     try {
       window.localStorage.setItem(
         'donkeydrifter_drift_camera_config',
-        JSON.stringify({ cameraIndex, tagId, headingOffset, calibFile }),
+        JSON.stringify({ cameraIndex, tagId, headingOffset, calibFile, exposure }),
       );
     } catch {
       /* localStorage 不可用时静默跳过持久化 */
@@ -188,7 +190,7 @@ export const DriftCard: React.FC = () => {
       </CardHeader>
       <CardContent className="space-y-3">
         {/* 相机接入 */}
-        <div className="grid grid-cols-[1fr_1fr_1fr_2fr_auto] gap-2 items-end">
+        <div className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr_auto] gap-2 items-end">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">相机 index</label>
             <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} />
@@ -200,6 +202,10 @@ export const DriftCard: React.FC = () => {
           <div>
             <label className="block text-xs text-zinc-400 mb-1">朝向偏移 (°)</label>
             <Input value={headingOffset} onChange={(e) => setHeadingOffset(e.target.value)} disabled={cameraOn} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">曝光 (log2秒，空=自动)</label>
+            <Input value={exposure} placeholder="如 -7" onChange={(e) => setExposure(e.target.value)} disabled={cameraOn} />
           </div>
           <div>
             <label className="block text-xs text-zinc-400 mb-1">单应性标定文件</label>

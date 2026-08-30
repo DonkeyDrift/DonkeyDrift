@@ -126,6 +126,22 @@ class TestPoseSolverSmoothing:
             last = solver.push(Pose(x=1.0 + 0.01 * i, y=1.0, heading_deg=10.0, t_s=0.1 * i))
         assert last.x == pytest.approx(1.09, abs=0.05)
 
+    def test_sustained_jump_recovers(self, homography):
+        """检测缺口期间车真实移过 0.5m：连续 window 帧一致的新位姿必须
+        被采信恢复跟踪，否则位姿/箭头会永久冻结在缺口前的中值上
+        （实车现象：快推后红箭头跟不上，绿框正常）。"""
+        from drift_vision import Pose
+        solver = PoseSolver(homography, window=5, max_jump_m=0.5)
+        for i in range(5):
+            solver.push(Pose(x=1.0, y=1.0, heading_deg=10.0, t_s=0.1 * i))
+        # 检测缺口后恢复：车已在 1.2m 外，且新位姿连续稳定出现
+        out = None
+        for i in range(5):
+            out = solver.push(Pose(x=2.2, y=1.0, heading_deg=10.0,
+                                   t_s=0.6 + 0.1 * i))
+        assert out.x == pytest.approx(2.2, abs=0.05), \
+            "持续一致的新位姿必须被采信，不得永久锁定在旧中值"
+
 
 class TestCameraAbstraction:
     def test_fake_camera_yields_monotonic_timestamps(self):
@@ -140,6 +156,126 @@ class TestCameraAbstraction:
         monkeypatch.setattr(drift_vision, "_PUPIL_APRILTAGS_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="pupil-apriltags"):
             drift_vision.AprilTagDetector()
+
+
+class TestUSBCameraExposure:
+    """手动曝光链路（运动模糊的根因控制）：快推时 16ms 曝光把标签拖成
+    20~40% 涂抹，任何分辨率/锐化都救不回；必须把曝光压到 ~1/250s。
+
+    DirectShow 语义：CAP_PROP_EXPOSURE 的值是 log2(秒)（-7=1/128s），
+    且必须先关自动曝光（DSHOW 约定 0.25=手动、0.75=自动），否则手动值
+    被驱动忽略。旧的 exposure_us 参数语义与 DSHOW 不符，已重构。
+    """
+
+    @staticmethod
+    def _fake_capture(monkeypatch):
+        import cv2
+        calls = []
+
+        class FakeCap:
+            def __init__(self, index, backend):
+                pass
+
+            def set(self, prop, value):
+                calls.append((prop, value))
+                return True
+
+            def isOpened(self):
+                return True
+
+        monkeypatch.setattr(cv2, "VideoCapture", FakeCap)
+        return calls, cv2
+
+    def test_manual_exposure_disables_auto_first(self, monkeypatch):
+        """手动曝光：先关自动，再设曝光值（顺序错误会被驱动忽略）。"""
+        calls, cv2 = self._fake_capture(monkeypatch)
+        from drift_vision import USBCamera
+        USBCamera(index=1, exposure=-7.0)
+        auto_idx = next(i for i, (p, v) in enumerate(calls)
+                        if p == cv2.CAP_PROP_AUTO_EXPOSURE)
+        exp_idx = next(i for i, (p, v) in enumerate(calls)
+                       if p == cv2.CAP_PROP_EXPOSURE)
+        assert calls[auto_idx][1] == 0.25, "DSHOW 手动曝光约定值 0.25"
+        assert calls[exp_idx][1] == -7.0
+        assert auto_idx < exp_idx, "必须先关自动曝光再设曝光值"
+
+    def test_default_keeps_auto_exposure(self, monkeypatch):
+        """不传曝光：完全不动曝光属性（行为与旧版一致）。"""
+        calls, cv2 = self._fake_capture(monkeypatch)
+        from drift_vision import USBCamera
+        USBCamera(index=1)
+        assert not any(p in (cv2.CAP_PROP_AUTO_EXPOSURE, cv2.CAP_PROP_EXPOSURE)
+                       for p, _ in calls)
+
+
+class TestAdaptiveDetection:
+    """运动模糊下的检测余量：decode_sharpening + 半分辨率未检出时全分辨率重试。
+
+    实车现象：快推时 360p 下标签 ~39px 接近 AprilTag 检测下限，模糊帧
+    检测丢失/解出垃圾朝向；720p 下标签 78px 余量翻倍。好帧仍走半分辨率
+    保持 60fps，只有难帧付全分辨率检测的 ~30ms 代价。
+    """
+
+    @staticmethod
+    def _fake_pupil(monkeypatch, hit_shapes, recorded):
+        """造一个 pupil Detector 替身：仅当灰度图尺寸命中 hit_shapes 时检出。"""
+        import drift_vision
+
+        class FakePupil:
+            def __init__(self, families, **kwargs):
+                recorded["init_kwargs"] = kwargs
+
+            def detect(self, gray):
+                recorded["shapes"].append(gray.shape)
+                if gray.shape[:2] in hit_shapes:
+                    from types import SimpleNamespace
+                    return [SimpleNamespace(
+                        tag_id=0,
+                        corners=np.array([[10, 10], [20, 10], [20, 20], [10, 20]],
+                                         dtype=np.float32))]
+                return []
+
+        monkeypatch.setattr(drift_vision, "_PupilDetector", FakePupil)
+
+    def test_sharpening_passed_to_backend(self, monkeypatch):
+        """decode_sharpening 提升模糊标签解码率，默认必须高于库默认 0.25。"""
+        import drift_vision
+        recorded = {"shapes": []}
+        self._fake_pupil(monkeypatch, set(), recorded)
+        det = drift_vision.AprilTagDetector(downscale=2)
+        assert recorded["init_kwargs"].get("decode_sharpening", 0) > 0.25
+        assert det is not None
+
+    def test_half_res_hit_skips_full_res(self, monkeypatch):
+        """半分辨率命中时不做全分辨率重试，角点按倍率还原。"""
+        import drift_vision
+        recorded = {"shapes": []}
+        self._fake_pupil(monkeypatch, {(360, 640)}, recorded)
+        det = drift_vision.AprilTagDetector(downscale=2)
+        dets = det.detect(np.zeros((720, 1280, 3), np.uint8))
+        assert len(dets) == 1
+        assert recorded["shapes"] == [(360, 640)], "好帧不得付出全分辨率代价"
+        assert dets[0].corners[1, 0] == pytest.approx(40.0)  # 20 × 2 还原
+
+    def test_full_res_retry_on_miss(self, monkeypatch):
+        """半分辨率未检出时用全分辨率重试，命中角点不再缩放。"""
+        import drift_vision
+        recorded = {"shapes": []}
+        self._fake_pupil(monkeypatch, {(720, 1280)}, recorded)
+        det = drift_vision.AprilTagDetector(downscale=2)
+        dets = det.detect(np.zeros((720, 1280, 3), np.uint8))
+        assert len(dets) == 1
+        assert recorded["shapes"] == [(360, 640), (720, 1280)]
+        assert dets[0].corners[1, 0] == pytest.approx(20.0)  # 全分辨率原始坐标
+
+    def test_miss_at_both_scales_returns_empty(self, monkeypatch):
+        """两级都未检出返回空列表（调用方按检测失败处理）。"""
+        import drift_vision
+        recorded = {"shapes": []}
+        self._fake_pupil(monkeypatch, set(), recorded)
+        det = drift_vision.AprilTagDetector(downscale=2)
+        assert det.detect(np.zeros((720, 1280, 3), np.uint8)) == []
+        assert recorded["shapes"] == [(360, 640), (720, 1280)]
 
 
 class TestOverlayDrawing:

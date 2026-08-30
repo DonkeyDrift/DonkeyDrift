@@ -71,6 +71,8 @@ class DriftEngine:
         self.camera_fps: float = 0.0
         self.read_ema_ms: float = 0.0
         self.detect_ema_ms: float = 0.0
+        self.frames_total: int = 0   # 处理帧总数（命中率分母）
+        self.tag_hits: int = 0       # 检测命中帧数（M0 验收：丢失率 <5%）
         self._frame_source = None
         self._display_frame: Optional[np.ndarray] = None  # 最新叠加帧（WebRTC/MJPEG 共用）
         self._last_telemetry_t: Optional[float] = None
@@ -100,6 +102,8 @@ class DriftEngine:
         self.camera_fps = 0.0
         self.read_ema_ms = 0.0
         self.detect_ema_ms = 0.0
+        self.frames_total = 0
+        self.tag_hits = 0
         self._frame_source = None
         self._display_frame = None
         self._last_telemetry_t = None
@@ -234,6 +238,9 @@ class DriftEngine:
                 detect_ms = (time.perf_counter() - t0) * 1000.0
                 self.detect_ema_ms += 0.1 * (detect_ms - self.detect_ema_ms)
                 self.read_ema_ms = source.read_ema_ms
+                self.frames_total += 1
+                if detection is not None:
+                    self.tag_hits += 1
                 if detection is None:
                     est = self.beta_estimator.update(None, self._last_yaw_rate_dps, t_s=t_s)
                     self.process_camera_frame(frame, t_s, None, None,
@@ -251,12 +258,15 @@ class DriftEngine:
                         frame, t_s, {"x": pose.x, "y": pose.y,
                                      "heading_deg": pose.heading_deg},
                         est.beta_deg, self._last_yaw_rate_dps)
-                if detection is not None and last_pose is not None:
-                    try:  # 显示帧随检测逐帧更新叠加（绘制微秒级）
-                        self._display_frame = draw_tag_overlay(
-                            frame.copy(), homography, detection.corners, last_pose)
-                    except Exception:
-                        self._display_frame = frame.copy()
+                try:  # 显示帧逐帧更新：检测成功叠加绿框+红箭头；失败透传
+                    # 原始帧——否则检测缺口期间推流持续发旧帧（预览卡顿）。
+                    self._display_frame = (
+                        draw_tag_overlay(frame.copy(), homography,
+                                         detection.corners, last_pose)
+                        if detection is not None and last_pose is not None
+                        else frame)
+                except Exception:
+                    self._display_frame = frame
                 if t_s - last_preview_t >= preview_min_interval:
                     try:
                         preview_frame = (self._display_frame if self._display_frame is not None
@@ -331,6 +341,8 @@ class DriftEngine:
             "camera_fps": round(self.camera_fps, 1),
             "read_ms": round(self.read_ema_ms, 1),
             "detect_ms": round(self.detect_ema_ms, 1),
+            "frames_total": self.frames_total,
+            "tag_hits": self.tag_hits,
             "frames_written": self.recorder.frames_written if self.recorder else 0,
             "events": [{"kind": e.kind, "detail": e.detail, "t_s": e.t_s}
                        for e in list(self.session.events)[-20:]],

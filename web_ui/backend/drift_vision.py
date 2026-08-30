@@ -120,6 +120,8 @@ class PoseSolver:
 
     新位姿与当前窗中值的距离超过 max_jump_m 时拒绝该帧（返回窗中值），
     防止标签瞬时误检把控制器输入打飞；窗未填满时原样通过。
+    检测缺口（运动模糊）后的真实位移会被误判为连续离群：连续 window 帧
+    一致被拒即采信当前位姿并重置窗——否则位姿会永久冻结在缺口前位置。
     """
 
     def __init__(self, homography: FieldHomography, window: int = 5,
@@ -128,16 +130,24 @@ class PoseSolver:
         self._window = window
         self._max_jump_m = max_jump_m
         self._history: List[Pose] = []
+        self._reject_streak = 0  # 连续被拒帧数（识别"真实位移" vs "单帧误检"）
 
     def push(self, pose: Pose) -> Pose:
         if len(self._history) < self._window:
             self._history.append(pose)
+            self._reject_streak = 0
             return pose
         xs = np.median([p.x for p in self._history])
         ys = np.median([p.y for p in self._history])
         if math.hypot(pose.x - xs, pose.y - ys) > self._max_jump_m:
+            self._reject_streak += 1
+            if self._reject_streak >= self._window:
+                self._history = [pose]
+                self._reject_streak = 0
+                return pose
             return Pose(x=float(xs), y=float(ys),
                         heading_deg=self._circular_median_heading(), t_s=pose.t_s)
+        self._reject_streak = 0
         self._history.append(pose)
         self._history = self._history[-self._window:]
         return pose
@@ -160,20 +170,23 @@ class CameraSource(Protocol):
 class USBCamera:
     """UVC 相机实现（OpenCV VideoCapture，MJPG，曝光/帧率可配）。
 
-    硬件明天到位后实例化；曝光以 CAP_PROP_EXPOSURE 设置（-directshow
-    后端下的行为明天实测，失败则改用 v4l2/显式属性名）。
+    exposure：手动曝光，DirectShow 语义为 log2(秒)（-6=1/64s、-7=1/128s、
+    -8=1/256s），None 保持自动。运动模糊是快推丢检测的根因：60fps 下自动
+    曝光最长 16ms，1m/s 推移即把 78px 标签拖出 20%~40% 涂抹，必须把曝光
+    压短；设值前必须先关自动曝光（DSHOW 约定 0.25=手动），否则被忽略。
     """
 
     def __init__(self, index: int = 0, width: int = 1280, height: int = 720,
-                 fps: int = 60, exposure_us: Optional[int] = None):
+                 fps: int = 60, exposure: Optional[float] = None):
         import cv2
         self._cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self._cap.set(cv2.CAP_PROP_FPS, fps)
-        if exposure_us is not None:
-            self._cap.set(cv2.CAP_PROP_EXPOSURE, exposure_us)
+        if exposure is not None:
+            self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 手动
+            self._cap.set(cv2.CAP_PROP_EXPOSURE, float(exposure))
         if not self._cap.isOpened():
             raise RuntimeError(f"无法打开相机 index={index}")
 
@@ -268,28 +281,40 @@ class AprilTagDetector:
     """
 
     def __init__(self, families: str = "tag36h11", tag_size_m: float = 0.08,
-                 downscale: int = 1):
+                 downscale: int = 1, decode_sharpening: float = 0.6):
         if not _PUPIL_APRILTAGS_AVAILABLE:
             raise RuntimeError(
                 "AprilTag 后端 pupil-apriltags 未安装：pip install pupil-apriltags "
                 "（Windows 编译受阻时改用 WSL 或备选 pyapriltags，二进制 ABI 一致）")
-        self._det = _PupilDetector(families=families)
+        # decode_sharpening 取高于库默认 0.25：提升运动模糊标签的解码率
+        self._det = _PupilDetector(families=families,
+                                   decode_sharpening=decode_sharpening)
         self.tag_size_m = tag_size_m
         self.downscale = max(1, int(downscale))
 
     def detect(self, frame: np.ndarray) -> List[TagDetection]:
         import cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        if self.downscale > 1:
-            gray = cv2.resize(gray, (gray.shape[1] // self.downscale,
-                                     gray.shape[0] // self.downscale),
-                              interpolation=cv2.INTER_AREA)
+        if self.downscale <= 1:
+            return self._detect_gray(gray, scale=1)
+        small = cv2.resize(gray, (gray.shape[1] // self.downscale,
+                                  gray.shape[0] // self.downscale),
+                           interpolation=cv2.INTER_AREA)
+        detections = self._detect_gray(small, scale=self.downscale)
+        if detections:
+            return detections
+        # 半分辨率未检出→全分辨率重试：运动模糊下 360p 标签 ~39px 接近
+        # AprilTag 检测下限，720p 余量翻倍。代价只落在难帧上（~30ms），
+        # 好帧保持半分辨率 60fps 路径。
+        return self._detect_gray(gray, scale=1)
+
+    def _detect_gray(self, gray: np.ndarray, scale: int) -> List[TagDetection]:
         results = self._det.detect(gray)
         detections = []
         for r in results:
             corners = np.asarray(r.corners, dtype=np.float32)
-            if self.downscale > 1:
-                corners = corners * self.downscale
+            if scale > 1:
+                corners = corners * scale
             detections.append(TagDetection(tag_id=r.tag_id, corners=corners))
         return detections
 

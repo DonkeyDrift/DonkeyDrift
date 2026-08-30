@@ -36,6 +36,9 @@ class CameraStartRequest(BaseModel):
     fps: int = 60
     heading_offset_deg: float = Field(
         0.0, description="贴标旋转补偿（°）：标签贴反 180° 填 180，转 90° 填 ±90")
+    exposure: Optional[float] = Field(
+        None, description="手动曝光（DirectShow log2 秒：-6=1/64s、-7=1/128s、"
+        "-8=1/256s）；留空自动。快推丢检测（运动模糊）时压短曝光")
 
 
 @router.get("/state")
@@ -113,7 +116,8 @@ async def camera_start(request: CameraStartRequest):
     try:
         homography = FieldHomography.from_file(request.calibration_file)
         camera = USBCamera(index=request.camera_index, width=request.width,
-                           height=request.height, fps=request.fps)
+                           height=request.height, fps=request.fps,
+                           exposure=request.exposure)
         detector = AprilTagDetector(downscale=2)  # 半分辨率检测：720p→360p 提速约 4 倍
         drift_engine._camera = camera  # 显式持有，stop 时释放（不靠 GC）
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
