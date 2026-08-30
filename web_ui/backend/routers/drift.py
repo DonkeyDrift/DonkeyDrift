@@ -127,7 +127,26 @@ async def camera_start(request: CameraStartRequest):
 @router.post("/camera/stop")
 async def camera_stop():
     drift_engine.stop_camera_loop()
+    try:
+        import drift_webrtc
+        await drift_webrtc.close_all()  # 预览流随相机关闭
+    except ImportError:
+        pass
     return {"ok": True}
+
+
+@router.post("/webrtc/offer")
+async def webrtc_offer(request: dict):
+    """WebRTC 预览信令：浏览器 offer → answer（drift_webrtc 推 60fps 流）。"""
+    try:
+        import drift_webrtc
+        return await drift_webrtc.handle_offer(
+            request.get("sdp", ""), request.get("type", "offer"),
+            lambda: drift_engine.display_frame)
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=f"aiortc 未安装: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"WebRTC 协商失败: {exc}")
 
 
 def install_drive_hooks() -> None:

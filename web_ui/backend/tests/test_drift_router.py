@@ -125,3 +125,29 @@ class TestMjpegStream:
         resp = asyncio.run(overhead_frame_mjpg())
         assert resp.status_code == 200
         assert resp.media_type.startswith("multipart/x-mixed-replace")
+
+
+class TestWebrtcOffer:
+    """WebRTC 预览信令：浏览器 offer → 后端 answer。"""
+
+    def test_offer_returns_answer(self, client):
+        aiortc = pytest.importorskip("aiortc")
+
+        async def _make_offer():
+            pc = aiortc.RTCPeerConnection()
+            pc.addTransceiver("video", direction="recvonly")
+            offer = await pc.createOffer()
+            await pc.close()
+            return offer
+
+        offer = asyncio.run(_make_offer())
+        r = client.post("/api/drift/webrtc/offer",
+                        json={"sdp": offer.sdp, "type": offer.type})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["type"] == "answer" and "sdp" in body
+
+    def test_garbage_sdp_rejected(self, client):
+        r = client.post("/api/drift/webrtc/offer",
+                        json={"sdp": "not-a-valid-sdp", "type": "offer"})
+        assert r.status_code == 400

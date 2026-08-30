@@ -72,6 +72,7 @@ class DriftEngine:
         self.read_ema_ms: float = 0.0
         self.detect_ema_ms: float = 0.0
         self._frame_source = None
+        self._display_frame: Optional[np.ndarray] = None  # 最新叠加帧（WebRTC/MJPEG 共用）
         self._last_telemetry_t: Optional[float] = None
         self._last_yaw_rate_dps: float = 0.0
         self._camera = None
@@ -100,9 +101,15 @@ class DriftEngine:
         self.read_ema_ms = 0.0
         self.detect_ema_ms = 0.0
         self._frame_source = None
+        self._display_frame = None
         self._last_telemetry_t = None
         self._last_yaw_rate_dps = 0.0
         self._running = False
+
+    @property
+    def display_frame(self) -> Optional[np.ndarray]:
+        """最新叠加显示帧（WebRTC 轨道取帧用）。"""
+        return self._display_frame
 
     def _calibration_ok(self) -> bool:
         return (self._calibration_file is not None
@@ -239,12 +246,16 @@ class DriftEngine:
                         frame, t_s, {"x": pose.x, "y": pose.y,
                                      "heading_deg": pose.heading_deg},
                         est.beta_deg, self._last_yaw_rate_dps)
+                if detection is not None and last_pose is not None:
+                    try:  # 显示帧随检测逐帧更新叠加（绘制微秒级）
+                        self._display_frame = draw_tag_overlay(
+                            frame.copy(), homography, detection.corners, last_pose)
+                    except Exception:
+                        self._display_frame = frame.copy()
                 if t_s - last_preview_t >= preview_min_interval:
                     try:
-                        preview_frame = frame
-                        if detection is not None and last_pose is not None:
-                            preview_frame = draw_tag_overlay(
-                                frame.copy(), homography, detection.corners, last_pose)
+                        preview_frame = (self._display_frame if self._display_frame is not None
+                                         else frame)
                         ok, buf = cv2.imencode(".jpg", preview_frame,
                                                [cv2.IMWRITE_JPEG_QUALITY, 70])
                         if ok:

@@ -66,7 +66,10 @@ export const DriftCard: React.FC = () => {
   const [calibFile, setCalibFile] = useState(saved.calibFile ?? 'field_homography.npz');
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
+  const [webrtcFailed, setWebrtcFailed] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -84,6 +87,42 @@ export const DriftCard: React.FC = () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
   }, [refresh]);
+
+  // WebRTC 60fps 预览：相机开启即协商；失败自动回退 MJPEG 轮询流
+  useEffect(() => {
+    if (!cameraOn) {
+      pcRef.current?.close();
+      pcRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    setWebrtcFailed(false);
+    (async () => {
+      try {
+        const pc = new RTCPeerConnection();
+        pcRef.current = pc;
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.ontrack = (e) => {
+          if (videoRef.current) videoRef.current.srcObject = e.streams[0];
+        };
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        const res = await api.post('/drift/webrtc/offer', {
+          sdp: offer.sdp,
+          type: offer.type,
+        });
+        if (cancelled) return;
+        await pc.setRemoteDescription(res.data);
+      } catch {
+        if (!cancelled) setWebrtcFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      pcRef.current?.close();
+      pcRef.current = null;
+    };
+  }, [cameraOn]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -177,8 +216,17 @@ export const DriftCard: React.FC = () => {
           )}
         </div>
 
-        {/* 俯拍预览（MJPEG 流直连，无轮询） */}
-        {cameraOn && (
+        {/* 俯拍预览：WebRTC 60fps 优先，失败回退 MJPEG */}
+        {cameraOn && !webrtcFailed && (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full rounded border border-zinc-700 bg-zinc-900 object-contain max-h-64"
+          />
+        )}
+        {cameraOn && webrtcFailed && (
           <img
             src="/api/drift/frame.mjpg"
             alt="俯拍预览"
