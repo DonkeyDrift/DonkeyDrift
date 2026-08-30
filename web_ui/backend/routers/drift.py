@@ -34,6 +34,8 @@ class CameraStartRequest(BaseModel):
     width: int = 1280
     height: int = 720
     fps: int = 60
+    heading_offset_deg: float = Field(
+        0.0, description="贴标旋转补偿（°）：标签贴反 180° 填 180，转 90° 填 ±90")
 
 
 @router.get("/state")
@@ -90,7 +92,8 @@ async def camera_start(request: CameraStartRequest):
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     drift_engine._calibration_file = request.calibration_file
-    drift_engine.start_camera_loop(camera, detector, homography, request.tag_id)
+    drift_engine.start_camera_loop(camera, detector, homography, request.tag_id,
+                                   heading_offset_deg=request.heading_offset_deg)
     return {"ok": True}
 
 

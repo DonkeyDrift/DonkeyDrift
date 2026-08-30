@@ -89,6 +89,20 @@ class TestPoseSolving:
         assert abs(dh) < 1.0
         assert -180.0 <= pose.heading_deg <= 180.0
 
+    @pytest.mark.parametrize("offset,heading", [
+        (180.0, 0.0), (180.0, 90.0), (90.0, -45.0), (-90.0, 120.0),
+    ])
+    def test_heading_offset_compensates_tag_mount_rotation(
+            self, homography, offset, heading):
+        """标签贴上车顶时整体旋转了 offset 度：用 heading_offset_deg
+        补偿后，解算朝向应恢复"视觉前边方向 = 真朝向 + offset"。"""
+        corners = self._make_tag_corners(homography, 1.0, 1.0, heading)
+        pose = solve_tag_pose(homography, corners,
+                              heading_offset_deg=offset)
+        dh = (pose.heading_deg - (heading + offset) + 180) % 360 - 180
+        assert abs(dh) < 1.0
+        assert -180.0 <= pose.heading_deg <= 180.0
+
 
 class TestPoseSolverSmoothing:
     def test_outlier_is_rejected(self, homography):

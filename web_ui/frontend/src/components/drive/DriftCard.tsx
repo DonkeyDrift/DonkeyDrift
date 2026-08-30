@@ -52,6 +52,7 @@ export const DriftCard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [cameraIndex, setCameraIndex] = useState('0');
   const [tagId, setTagId] = useState('0');
+  const [headingOffset, setHeadingOffset] = useState('0');
   const [calibFile, setCalibFile] = useState('field_homography.npz');
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
@@ -100,6 +101,7 @@ export const DriftCard: React.FC = () => {
       camera_index: Number(cameraIndex),
       tag_id: Number(tagId),
       calibration_file: calibFile,
+      heading_offset_deg: Number(headingOffset) || 0,
     });
     setCameraOn(true);
   });
@@ -136,7 +138,7 @@ export const DriftCard: React.FC = () => {
       </CardHeader>
       <CardContent className="space-y-3">
         {/* 相机接入 */}
-        <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
+        <div className="grid grid-cols-[1fr_1fr_1fr_2fr_auto] gap-2 items-end">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">相机 index</label>
             <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} />
@@ -144,6 +146,10 @@ export const DriftCard: React.FC = () => {
           <div>
             <label className="block text-xs text-zinc-400 mb-1">AprilTag ID</label>
             <Input value={tagId} onChange={(e) => setTagId(e.target.value)} disabled={cameraOn} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">朝向偏移 (°)</label>
+            <Input value={headingOffset} onChange={(e) => setHeadingOffset(e.target.value)} disabled={cameraOn} />
           </div>
           <div>
             <label className="block text-xs text-zinc-400 mb-1">单应性标定文件</label>

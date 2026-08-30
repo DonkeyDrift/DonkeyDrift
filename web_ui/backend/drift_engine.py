@@ -155,6 +155,7 @@ class DriftEngine:
 
     # ── 相机循环（生产链路）──────────────────────────────────
     def start_camera_loop(self, camera, detector, homography, tag_id: int,
+                          heading_offset_deg: float = 0.0,
                           preview_every_n: int = 6) -> None:
         """后台线程：相机→标签检测→位姿→β→process_camera_frame。"""
         from drift_vision import PoseSolver, solve_tag_pose
@@ -178,7 +179,9 @@ class DriftEngine:
                     self.process_camera_frame(frame, t_s, None, None,
                                               self._last_yaw_rate_dps)
                 else:
-                    pose = solver.push(solve_tag_pose(homography, detection.corners, t_s))
+                    pose = solver.push(solve_tag_pose(
+                        homography, detection.corners, t_s,
+                        heading_offset_deg=heading_offset_deg))
                     est = self.beta_estimator.update(
                         PoseSample(x=pose.x, y=pose.y,
                                    heading_deg=pose.heading_deg, t_s=t_s),

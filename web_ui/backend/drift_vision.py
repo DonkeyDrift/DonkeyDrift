@@ -75,20 +75,23 @@ class Pose:
 
 
 def solve_tag_pose(homography: FieldHomography, corners: np.ndarray,
-                   t_s: float = 0.0) -> Pose:
+                   t_s: float = 0.0,
+                   heading_offset_deg: float = 0.0) -> Pose:
     """由标签四角（图像坐标）解出车位姿。
 
     位置 = 四角场地坐标均值；朝向 = 前边（corner[0]→corner[1]）在场地系
     的方向。对单应性的非线性在小标签（~8cm）尺度下引入的误差远小于
     1cm/1° 验收容差（测试 TestPoseSolving 覆盖）。
+
+    heading_offset_deg：补偿标签贴上车顶时相对车头的整体旋转
+    （贴反 180° 填 180，转 90° 填 ±90），叠加后按 ±180° 环回。
     """
     pts_field = np.array([homography.image_to_field(*c) for c in corners])
     cx = float(pts_field[:, 0].mean())
     cy = float(pts_field[:, 1].mean())
     front = pts_field[1] - pts_field[0]
     heading_deg = math.degrees(math.atan2(front[1], front[0]))
-    if heading_deg <= -180.0:
-        heading_deg += 360.0
+    heading_deg = (heading_deg + heading_offset_deg + 180.0) % 360.0 - 180.0
     return Pose(x=cx, y=cy, heading_deg=heading_deg, t_s=t_s)
 
 
