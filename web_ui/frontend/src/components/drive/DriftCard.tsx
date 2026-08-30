@@ -79,7 +79,7 @@ export const DriftCard: React.FC = () => {
 
   useEffect(() => {
     refresh();
-    pollRef.current = window.setInterval(refresh, 2000);
+    pollRef.current = window.setInterval(refresh, 250);
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };

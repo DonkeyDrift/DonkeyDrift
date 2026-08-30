@@ -95,6 +95,25 @@ def solve_tag_pose(homography: FieldHomography, corners: np.ndarray,
     return Pose(x=cx, y=cy, heading_deg=heading_deg, t_s=t_s)
 
 
+def draw_tag_overlay(frame: np.ndarray, homography: "FieldHomography",
+                     corners: np.ndarray, pose: "Pose") -> np.ndarray:
+    """在预览帧上叠加识别结果：标签四角绿框 + 车头方向红箭头。
+
+    箭头按含贴标补偿的 heading（场地系）从标签中心前伸 6cm，
+    经单应性投回图像坐标绘制。
+    """
+    import cv2
+    pts = np.array(corners, dtype=np.int32).reshape(-1, 2)
+    cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+    dx = 0.06 * math.cos(math.radians(pose.heading_deg))
+    dy = 0.06 * math.sin(math.radians(pose.heading_deg))
+    x0, y0 = homography.field_to_image(pose.x, pose.y)
+    x1, y1 = homography.field_to_image(pose.x + dx, pose.y + dy)
+    cv2.arrowedLine(frame, (int(x0), int(y0)), (int(x1), int(y1)),
+                    (0, 0, 255), 2, tipLength=0.3)
+    return frame
+
+
 class PoseSolver:
     """滑动窗中值 + 跳变拒绝的位姿平滑器（防单帧误检跳变）。
 

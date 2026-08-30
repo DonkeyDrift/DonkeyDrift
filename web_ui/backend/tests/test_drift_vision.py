@@ -137,3 +137,25 @@ class TestCameraAbstraction:
         monkeypatch.setattr(drift_vision, "_PUPIL_APRILTAGS_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="pupil-apriltags"):
             drift_vision.AprilTagDetector()
+
+
+class TestOverlayDrawing:
+    def test_draw_tag_overlay_marks_frame(self, homography):
+        """叠加绘制应在帧上画出标签框（绿）与车头箭头（红）。"""
+        from drift_vision import Pose, draw_tag_overlay
+        import cv2
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        corners = self._mk(homography) if False else None
+        # 在场地 (1.0,1.0) 处朝东的标签四角（复用位姿测试的构造）
+        h = math.radians(0.0)
+        body = np.array([[-0.04, -0.04], [0.04, -0.04], [0.04, 0.04], [-0.04, 0.04]])
+        rot = np.array([[math.cos(h), -math.sin(h)], [math.sin(h), math.cos(h)]])
+        corners = np.float32([
+            homography.field_to_image(*p) for p in (body @ rot.T + np.array([1.0, 1.0]))])
+        pose = Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.0)
+        out = draw_tag_overlay(frame, homography, corners, pose)
+        b = out.reshape(-1, 3)
+        has_green = ((b[:, 1] > 200) & (b[:, 0] < 100) & (b[:, 2] < 100)).any()
+        has_red = ((b[:, 2] > 200) & (b[:, 0] < 100) & (b[:, 1] < 100)).any()
+        assert has_green, "应画出绿色标签框"
+        assert has_red, "应画出红色车头箭头"

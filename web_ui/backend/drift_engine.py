@@ -188,7 +188,9 @@ class DriftEngine:
 
         def _loop() -> None:
             import cv2
+            from drift_vision import draw_tag_overlay
             last_preview_t = 0.0
+            last_pose = None
             while self._running:
                 try:
                     frame, t_s = camera.read()
@@ -206,6 +208,7 @@ class DriftEngine:
                     pose = solver.push(solve_tag_pose(
                         homography, detection.corners, t_s,
                         heading_offset_deg=heading_offset_deg))
+                    last_pose = pose
                     est = self.beta_estimator.update(
                         PoseSample(x=pose.x, y=pose.y,
                                    heading_deg=pose.heading_deg, t_s=t_s),
@@ -216,7 +219,11 @@ class DriftEngine:
                         est.beta_deg, self._last_yaw_rate_dps)
                 if t_s - last_preview_t >= preview_min_interval:
                     try:
-                        ok, buf = cv2.imencode(".jpg", frame,
+                        preview_frame = frame
+                        if detection is not None and last_pose is not None:
+                            preview_frame = draw_tag_overlay(
+                                frame, homography, detection.corners, last_pose)
+                        ok, buf = cv2.imencode(".jpg", preview_frame,
                                                [cv2.IMWRITE_JPEG_QUALITY, 70])
                         if ok:
                             self.last_preview_jpeg = buf.tobytes()
