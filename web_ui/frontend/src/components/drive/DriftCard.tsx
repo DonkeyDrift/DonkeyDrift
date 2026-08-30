@@ -60,7 +60,7 @@ export const DriftCard: React.FC = () => {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.get<DriftState>('/api/drift/state');
+      const res = await api.get<DriftState>('/drift/state');
       setState(res.data);
     } catch {
       /* 后端未就绪时静默重试 */
@@ -96,7 +96,7 @@ export const DriftCard: React.FC = () => {
   };
 
   const startCamera = () => run(async () => {
-    await api.post('/api/drift/camera/start', {
+    await api.post('/drift/camera/start', {
       camera_index: Number(cameraIndex),
       tag_id: Number(tagId),
       calibration_file: calibFile,
@@ -105,14 +105,14 @@ export const DriftCard: React.FC = () => {
   });
 
   const stopCamera = () => run(async () => {
-    await api.post('/api/drift/camera/stop');
+    await api.post('/drift/camera/stop');
     setCameraOn(false);
   });
 
   const startSession = (mode: 'record' | 'auto') =>
-    run(() => api.post('/api/drift/session/start', { mode }).then(() => undefined));
+    run(() => api.post('/drift/session/start', { mode }).then(() => undefined));
 
-  const stopSession = () => run(() => api.post('/api/drift/session/stop').then(() => undefined));
+  const stopSession = () => run(() => api.post('/drift/session/stop').then(() => undefined));
 
   const saveParams = () => run(async () => {
     const updates: Record<string, number> = {};
@@ -121,7 +121,7 @@ export const DriftCard: React.FC = () => {
       if (Number.isFinite(v)) updates[key] = v;
     }
     if (Object.keys(updates).length > 0) {
-      await api.post('/api/drift/config', updates);
+      await api.post('/drift/config', updates);
     }
     setParamDraft({});
   });
