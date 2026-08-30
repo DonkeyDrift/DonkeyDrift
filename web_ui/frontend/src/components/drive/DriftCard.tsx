@@ -170,7 +170,7 @@ export const DriftCard: React.FC = () => {
         )}
 
         {/* 实时状态 */}
-        <div className="grid grid-cols-4 gap-2 text-center text-sm">
+        <div className="grid grid-cols-5 gap-2 text-center text-sm">
           <div>
             <div className="text-xs text-zinc-400">状态</div>
             <div className="font-medium">{STATE_LABEL[s]}</div>
@@ -184,6 +184,10 @@ export const DriftCard: React.FC = () => {
             <div className="font-medium">
               {state?.pose ? `${state.pose.x.toFixed(2)},${state.pose.y.toFixed(2)}` : '—'}
             </div>
+          </div>
+          <div>
+            <div className="text-xs text-zinc-400">朝向 (°)</div>
+            <div className="font-medium">{state?.pose ? state.pose.heading_deg.toFixed(1) : '—'}</div>
           </div>
           <div>
             <div className="text-xs text-zinc-400">遥测/已录帧</div>
