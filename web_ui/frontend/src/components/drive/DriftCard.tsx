@@ -50,10 +50,19 @@ export const DriftCard: React.FC = () => {
   const [cameraOn, setCameraOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cameraIndex, setCameraIndex] = useState('0');
-  const [tagId, setTagId] = useState('0');
-  const [headingOffset, setHeadingOffset] = useState('0');
-  const [calibFile, setCalibFile] = useState('field_homography.npz');
+
+  // 相机接入表单持久化：启动成功后存 localStorage，下次进页自动回填
+  const saved = (() => {
+    try {
+      return JSON.parse(window.localStorage.getItem('donkeydrifter_drift_camera_config') ?? '{}');
+    } catch {
+      return {};
+    }
+  })() as Partial<{ cameraIndex: string; tagId: string; headingOffset: string; calibFile: string }>;
+  const [cameraIndex, setCameraIndex] = useState(saved.cameraIndex ?? '0');
+  const [tagId, setTagId] = useState(saved.tagId ?? '0');
+  const [headingOffset, setHeadingOffset] = useState(saved.headingOffset ?? '0');
+  const [calibFile, setCalibFile] = useState(saved.calibFile ?? 'field_homography.npz');
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
   const [previewStamp, setPreviewStamp] = useState(0);
@@ -104,6 +113,14 @@ export const DriftCard: React.FC = () => {
       heading_offset_deg: Number(headingOffset) || 0,
     });
     setCameraOn(true);
+    try {
+      window.localStorage.setItem(
+        'donkeydrifter_drift_camera_config',
+        JSON.stringify({ cameraIndex, tagId, headingOffset, calibFile }),
+      );
+    } catch {
+      /* localStorage 不可用时静默跳过持久化 */
+    }
   });
 
   const stopCamera = () => run(async () => {
