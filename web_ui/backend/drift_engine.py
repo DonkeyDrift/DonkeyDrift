@@ -15,8 +15,9 @@ car_mode=2；看门狗触发时 car_mode=0 + 零油门交还人工。
 import math
 import threading
 import time
+from collections import deque
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Deque, Dict, List, Optional
 
 import numpy as np
 
@@ -34,6 +35,24 @@ _TELEM_FIELD_MAP = {
 }
 
 
+class FpsMeter:
+    """滑动窗帧率计量：真实处理循环频率的观测器（诊断相机/检测瓶颈）。"""
+
+    def __init__(self, window_s: float = 2.0):
+        self._window_s = window_s
+        self._stamps: Deque[float] = deque()
+
+    def tick(self, t_s: float) -> float:
+        self._stamps.append(t_s)
+        while self._stamps and t_s - self._stamps[0] > self._window_s:
+            self._stamps.popleft()
+        if len(self._stamps) >= 2:
+            span = self._stamps[-1] - self._stamps[0]
+            if span > 0:
+                return (len(self._stamps) - 1) / span
+        return 0.0
+
+
 class DriftEngine:
     def __init__(self, tub_base_dir: Optional[str] = None):
         self._tub_base_dir = tub_base_dir
@@ -49,6 +68,7 @@ class DriftEngine:
         self.last_beta_deg: Optional[float] = None
         self.last_pose: Optional[Dict[str, float]] = None
         self.last_preview_jpeg: Optional[bytes] = None
+        self.camera_fps: float = 0.0
         self._last_telemetry_t: Optional[float] = None
         self._last_yaw_rate_dps: float = 0.0
         self._camera = None
@@ -73,6 +93,7 @@ class DriftEngine:
         self.telemetry_count = 0
         self.last_beta_deg = None
         self.last_pose = None
+        self.camera_fps = 0.0
         self._last_telemetry_t = None
         self._last_yaw_rate_dps = 0.0
         self._running = False
@@ -162,6 +183,7 @@ class DriftEngine:
 
         self._running = True
         solver = PoseSolver(homography)
+        fps_meter = FpsMeter()
 
         def _loop() -> None:
             import cv2
@@ -172,6 +194,7 @@ class DriftEngine:
                 except Exception:
                     self.trigger_watchdog("相机读帧失败")
                     break
+                self.camera_fps = fps_meter.tick(t_s)
                 detection = next((d for d in detector.detect(frame)
                                   if d.tag_id == tag_id), None)
                 if detection is None:
@@ -255,6 +278,7 @@ class DriftEngine:
             "beta_deg": self.last_beta_deg,
             "pose": self.last_pose,
             "telemetry_count": self.telemetry_count,
+            "camera_fps": round(self.camera_fps, 1),
             "frames_written": self.recorder.frames_written if self.recorder else 0,
             "events": [{"kind": e.kind, "detail": e.detail, "t_s": e.t_s}
                        for e in list(self.session.events)[-20:]],

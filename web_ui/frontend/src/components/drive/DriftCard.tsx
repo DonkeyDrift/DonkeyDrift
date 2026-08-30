@@ -14,6 +14,7 @@ interface DriftState {
   beta_deg: number | null;
   pose: { x: number; y: number; heading_deg: number } | null;
   telemetry_count: number;
+  camera_fps: number;
   frames_written: number;
   events: Array<{ kind: string; detail: Record<string, unknown>; t_s: number }>;
   config: Record<string, number>;
@@ -87,7 +88,7 @@ export const DriftCard: React.FC = () => {
 
   useEffect(() => {
     if (!cameraOn) return;
-    const id = window.setInterval(() => setPreviewStamp(Date.now()), 1000);
+    const id = window.setInterval(() => setPreviewStamp(Date.now()), 150);
     return () => window.clearInterval(id);
   }, [cameraOn]);
 
@@ -193,7 +194,7 @@ export const DriftCard: React.FC = () => {
         )}
 
         {/* 实时状态 */}
-        <div className="grid grid-cols-5 gap-2 text-center text-sm">
+        <div className="grid grid-cols-6 gap-2 text-center text-sm">
           <div>
             <div className="text-xs text-zinc-400">状态</div>
             <div className="font-medium">{STATE_LABEL[s]}</div>
@@ -213,6 +214,10 @@ export const DriftCard: React.FC = () => {
             <div className="font-medium">
               {state?.pose ? ((((state.pose.heading_deg % 360) + 360) % 360).toFixed(1)) : '—'}
             </div>
+          </div>
+          <div>
+            <div className="text-xs text-zinc-400">相机 fps</div>
+            <div className="font-medium">{cameraOn ? (state?.camera_fps ?? 0).toFixed(0) : '—'}</div>
           </div>
           <div>
             <div className="text-xs text-zinc-400">遥测/已录帧</div>
