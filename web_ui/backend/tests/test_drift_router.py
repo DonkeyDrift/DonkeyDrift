@@ -115,3 +115,13 @@ class TestTelemetryHook:
         client.post("/api/drift/session/start", json={"mode": "record"})
         drift_engine.on_telemetry(t_s=0.0, fields={"rc/throttle": 0.5, "imu/gyr_z": 0.1})
         assert drift_engine.telemetry_count >= 1
+
+
+class TestMjpegStream:
+    def test_frame_mjpg_returns_multipart_stream(self):
+        """预览 MJPEG 端点应返回 multipart/x-mixed-replace 流式响应。"""
+        from routers.drift import overhead_frame_mjpg
+
+        resp = asyncio.run(overhead_frame_mjpg())
+        assert resp.status_code == 200
+        assert resp.media_type.startswith("multipart/x-mixed-replace")

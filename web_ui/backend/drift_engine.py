@@ -177,17 +177,18 @@ class DriftEngine:
     # ── 相机循环（生产链路）──────────────────────────────────
     def start_camera_loop(self, camera, detector, homography, tag_id: int,
                           heading_offset_deg: float = 0.0,
-                          preview_every_n: int = 6) -> None:
+                          preview_hz: float = 15.0) -> None:
         """后台线程：相机→标签检测→位姿→β→process_camera_frame。"""
         from drift_vision import PoseSolver, solve_tag_pose
 
         self._running = True
         solver = PoseSolver(homography)
         fps_meter = FpsMeter()
+        preview_min_interval = 1.0 / preview_hz if preview_hz > 0 else 0.0
 
         def _loop() -> None:
             import cv2
-            frame_count = 0
+            last_preview_t = 0.0
             while self._running:
                 try:
                     frame, t_s = camera.read()
@@ -213,13 +214,13 @@ class DriftEngine:
                         frame, t_s, {"x": pose.x, "y": pose.y,
                                      "heading_deg": pose.heading_deg},
                         est.beta_deg, self._last_yaw_rate_dps)
-                frame_count += 1
-                if frame_count % preview_every_n == 0:
+                if t_s - last_preview_t >= preview_min_interval:
                     try:
                         ok, buf = cv2.imencode(".jpg", frame,
                                                [cv2.IMWRITE_JPEG_QUALITY, 70])
                         if ok:
                             self.last_preview_jpeg = buf.tobytes()
+                            last_preview_t = t_s
                     except Exception:
                         pass
 

@@ -66,7 +66,6 @@ export const DriftCard: React.FC = () => {
   const [calibFile, setCalibFile] = useState(saved.calibFile ?? 'field_homography.npz');
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
-  const [previewStamp, setPreviewStamp] = useState(0);
   const pollRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -85,12 +84,6 @@ export const DriftCard: React.FC = () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
   }, [refresh]);
-
-  useEffect(() => {
-    if (!cameraOn) return;
-    const id = window.setInterval(() => setPreviewStamp(Date.now()), 150);
-    return () => window.clearInterval(id);
-  }, [cameraOn]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -184,10 +177,10 @@ export const DriftCard: React.FC = () => {
           )}
         </div>
 
-        {/* 俯拍预览 */}
+        {/* 俯拍预览（MJPEG 流直连，无轮询） */}
         {cameraOn && (
           <img
-            src={`/api/drift/frame.jpg?_=${previewStamp}`}
+            src="/api/drift/frame.mjpg"
             alt="俯拍预览"
             className="w-full rounded border border-zinc-700 bg-zinc-900 object-contain max-h-64"
           />

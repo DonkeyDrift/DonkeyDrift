@@ -80,6 +80,32 @@ async def overhead_frame():
     return Response(content=frame, media_type="image/jpeg")
 
 
+# MJPEG 预览流帧率上限（与引擎预览编码节流一致，防空转）
+_MJPEG_PUSH_HZ = 15.0
+
+
+@router.get("/frame.mjpg")
+async def overhead_frame_mjpg():
+    """俯拍预览 MJPEG 流：浏览器 <img> 直连，取代轮询换图。"""
+    import asyncio
+
+    async def _stream():
+        boundary = b"--frame\r\n"
+        interval = 1.0 / _MJPEG_PUSH_HZ
+        while True:
+            jpeg = drift_engine.last_preview_jpeg
+            if jpeg is not None:
+                yield (boundary
+                       + b"Content-Type: image/jpeg\r\n"
+                       + f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                       + jpeg + b"\r\n")
+            await asyncio.sleep(interval)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(_stream(),
+                             media_type="multipart/x-mixed-replace; boundary=frame")
+
+
 @router.post("/camera/start")
 async def camera_start(request: CameraStartRequest):
     from drift_vision import AprilTagDetector, FieldHomography, USBCamera
