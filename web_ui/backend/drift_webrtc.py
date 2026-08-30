@@ -49,6 +49,14 @@ class DisplayFrameTrack(VideoStreamTrack):
         frame = self._get_frame()
         if frame is None:
             frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        h, w = frame.shape[:2]
+        if w > 640:
+            # 推流编码降半分辨率：运动画面 H.264 软编码 20~35ms 超 60fps
+            # 的 16.6ms 预算（实测 api_latency 尖峰），÷4 后 60fps 稳定。
+            # 检测仍在全分辨率帧上进行，精度不受影响。
+            import cv2
+            frame = cv2.resize(frame, (w // 2, h // 2),
+                               interpolation=cv2.INTER_AREA)
         vf = VideoFrame.from_ndarray(frame, format="bgr24")
         vf.pts = pts
         vf.time_base = time_base

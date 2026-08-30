@@ -151,3 +151,19 @@ class TestWebrtcOffer:
         r = client.post("/api/drift/webrtc/offer",
                         json={"sdp": "not-a-valid-sdp", "type": "offer"})
         assert r.status_code == 400
+
+
+class TestDisplayFrameTrack:
+    def test_track_downscales_for_encoding(self):
+        """推流轨道应输出半分辨率帧：运动画面 H.264 编码 20~35ms 超
+        60fps 预算，降分辨率编码是显示链路不掉帧的关键。"""
+        aiortc = pytest.importorskip("aiortc")
+        import numpy as np
+        from drift_webrtc import DisplayFrameTrack
+
+        async def _recv():
+            track = DisplayFrameTrack(lambda: np.zeros((720, 1280, 3), np.uint8))
+            return await asyncio.wait_for(track.recv(), timeout=2.0)
+
+        vf = asyncio.run(_recv())
+        assert vf.width == 640 and vf.height == 360
