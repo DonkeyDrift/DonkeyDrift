@@ -147,3 +147,41 @@ class TestEventHistory:
         s.watchdog_trigger("测试原因")
         reasons = [e.detail.get("reason") for e in s.events if e.kind == "watchdog"]
         assert "测试原因" in reasons
+
+
+class TestDetectionGap:
+    """E5：观察期丢检测帧不计入 β 稳定计时。"""
+
+    def test_gap_clears_beta_stability_anchor(self):
+        """β 超阈 100ms 后丢检测 400ms，恢复后接管计时必须重新起算：
+        恢复首帧不得立即接管。"""
+        s = make_session()
+        s.start_auto()
+        s.update_auto_observation(beta_deg=20.0, t_s=0.0)
+        s.update_auto_observation(beta_deg=22.0, t_s=0.1)   # 已稳定 100ms
+        s.note_detection_gap()                               # 丢检测 400ms
+        s.update_auto_observation(beta_deg=20.0, t_s=0.5)   # 恢复：重新锚定 0.5
+        s.update_auto_observation(beta_deg=20.0, t_s=0.9)   # 仅持续 0.4s
+        assert s.state == DriftSessionState.AUTO_OBSERVE, \
+            "检测缺口不得计入 β 稳定计时"
+        s.update_auto_observation(beta_deg=20.0, t_s=1.05)  # 满 0.55s
+        assert s.state == DriftSessionState.AUTO_ENGAGED
+
+    def test_gap_outside_observe_is_harmless(self):
+        """非观察期调用 note_detection_gap 是幂等无操作（不炸、不改状态）。"""
+        s = make_session()
+        s.note_detection_gap()
+        assert s.state == DriftSessionState.IDLE
+
+
+class TestStopGuard:
+    """E5：/session/stop（HTTP 线程）与相机线程的状态转换竞态守卫语义。"""
+
+    def test_update_after_stop_never_engages(self):
+        """stop 后迟到的观察帧不得把会话抬回 ENGAGED。"""
+        s = make_session()
+        s.start_auto()
+        s.update_auto_observation(beta_deg=20.0, t_s=0.0)
+        s.stop_auto()
+        assert s.update_auto_observation(beta_deg=25.0, t_s=10.0) is False
+        assert s.state == DriftSessionState.IDLE

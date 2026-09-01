@@ -28,7 +28,10 @@ class ControllerConfig:
     # 外环
     k_beta: float = 4.0              # (β*−β)[°] → r_des 修正[°/s]
     max_yaw_rate_dps: float = 300.0
-    k_radius_to_freq: float = 2.0    # 半径误差[m] → 频率修正[Hz]（方向见 update）
+    k_radius_to_freq: float = 2.0    # 半径误差[m] → 频率修正[Hz]（方向由 radius_freq_sign 定）
+    radius_freq_sign: float = -1.0   # 半径环符号：-1=按 RFC §7.3 机理负反馈
+                                     # （偏内→降频→自旋弱→扩半径）；M2 实证若
+                                     # 机理相反，置 +1 翻转
     # 内环
     k_yaw: float = 0.004             # yaw 误差[°/s] → steering
     k_yaw_i: float = 0.002           # 积分消稳态差（初值，明天按实车整定）
@@ -39,9 +42,22 @@ class ControllerConfig:
     pulse_amplitude: float = 0.6
     pulse_base: float = 0.1
     # 保护
+    # 转向摆速限幅 [/s]：每步上限 = rate × dt（节率=相机帧率 20~60fps 可变，
+    # 按 tick 固定限幅会让摆速随帧率漂移）。None=沿用旧字段 ×60 兼容映射。
+    max_steering_rate_per_s: Optional[float] = None
+    # deprecated：每 tick 限幅量纲，仅在未设置 max_steering_rate_per_s 时
+    # 按 ×60 映射为摆速（0.05×60=3.0/s，保持 60fps 下行为一致）
     max_steering_delta_per_tick: float = 0.05
     throttle_min: float = -1.0
     throttle_max: float = 1.0
+
+    @property
+    def effective_max_steering_rate_per_s(self) -> float:
+        """生效的转向摆速上限：新字段优先；未设置时旧字段（deprecated）×60 映射。
+        控制律与 /config 展示共用此口径，避免两处各自映射不一致。"""
+        if self.max_steering_rate_per_s is not None:
+            return self.max_steering_rate_per_s
+        return self.max_steering_delta_per_tick * 60.0
 
 
 @dataclass
@@ -128,6 +144,14 @@ class DriftController:
 
     def update(self, beta_deg: float, yaw_rate_dps: float,
                pose: Tuple[float, float], t_s: float) -> ControlOutput:
+        # NaN/inf 防线：非有限输入直接抛错，由编排层捕获走看门狗路径；
+        # 控制器绝不消化 NaN（比较语义下限幅/积分会被钉死在边界）
+        if not (math.isfinite(beta_deg) and math.isfinite(yaw_rate_dps)
+                and math.isfinite(t_s)
+                and math.isfinite(pose[0]) and math.isfinite(pose[1])):
+            raise ValueError(
+                f"控制器输入含 NaN/inf：beta_deg={beta_deg!r} "
+                f"yaw_rate_dps={yaw_rate_dps!r} pose={pose!r} t_s={t_s!r}")
         self._watchdog.feed(t_s)
         dt = 0.0
         if self._last_t is not None:
@@ -142,13 +166,15 @@ class DriftController:
         r_des = feedforward_dps + self.cfg.k_beta * beta_err
         r_des = max(-self.cfg.max_yaw_rate_dps, min(self.cfg.max_yaw_rate_dps, r_des))
 
-        # ── 外环：半径误差 → 脉冲频率修正（偏内增频=自旋强→半径收，
-        #    偏外降频；方向为初版约定，明天按 M2 参数表整定）──
+        # ── 外环：半径误差 → 脉冲频率修正。RFC §7.3 机理：频率高→自旋强→
+        #    半径小；故负反馈为 偏内→降频→扩半径（radius_freq_sign=-1）。
+        #    M2 实证若机理相反，把 radius_freq_sign 置 +1 整体翻转。──
         dx = pose[0] - self.cfg.circle_center[0]
         dy = pose[1] - self.cfg.circle_center[1]
         dist = math.hypot(dx, dy)
         radius_err = self.cfg.circle_radius - dist  # >0=车偏内（需扩半径）
-        freq_adjust = self.cfg.k_radius_to_freq * radius_err
+        freq_adjust = (self.cfg.radius_freq_sign
+                       * self.cfg.k_radius_to_freq * radius_err)
         if freq_adjust > 1e-9:
             freq_sign = 1
         elif freq_adjust < -1e-9:
@@ -156,7 +182,12 @@ class DriftController:
         else:
             freq_sign = 0
         new_freq = min(12.0, max(0.0, self.cfg.pulse_freq_hz + freq_adjust))
-        self._pulse.set_parameters(frequency_hz=new_freq)
+        # 四参数每拍全量下发：Web 面板热改 duty/amplitude/base 当拍生效
+        # （PulseGenerator 相位连续，改参数无半周期毛刺）
+        self._pulse.set_parameters(frequency_hz=new_freq,
+                                   duty=self.cfg.pulse_duty,
+                                   amplitude=self.cfg.pulse_amplitude,
+                                   base=self.cfg.pulse_base)
 
         # ── 内环：yaw-rate 误差 → 转向（P + 抗饱和 I）──
         yaw_err = r_des - yaw_rate_dps
@@ -166,8 +197,10 @@ class DriftController:
         steering_raw = self.cfg.k_yaw * yaw_err + self._yaw_integral
         steering = min(1.0, max(-1.0, steering_raw))
 
-        # delta 限幅（补偿固件无 slew 限幅）；首帧从 0 起步同样限幅
-        max_step = self.cfg.max_steering_delta_per_tick
+        # delta 限幅 dt 化（补偿固件无 slew 限幅）：摆速上限 × 本拍 dt。
+        # 首帧 dt=0 沿用 1/60 名义步长：从 0 起步同样限幅。
+        rate = self.cfg.effective_max_steering_rate_per_s
+        max_step = rate * (dt if dt > 0 else 1.0 / 60.0)
         steering = min(self._last_steering + max_step,
                        max(self._last_steering - max_step, steering))
         self._last_steering = steering

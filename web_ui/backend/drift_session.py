@@ -13,9 +13,11 @@
 本模块只管状态与判定，不做 I/O——相机、遥测、控制下发由调用方
 （routers/drift.py 编排层）在状态回调里接线。
 """
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, List, Optional
+import threading
+from typing import Callable, Deque, List, Optional
 
 
 class DriftSessionState(Enum):
@@ -40,7 +42,12 @@ DEFAULT_ENGAGE_STABLE_S = 0.5
 
 
 class DriftSession:
-    """漂转会话状态机。所有时间参数单位为秒，角度为度。"""
+    """漂转会话状态机。所有时间参数单位为秒，角度为度。
+
+    状态迁移由 threading.Lock 保护：/session/stop（HTTP 线程）与
+    update_auto_observation（相机线程）并发时转换原子化——
+    已停止的会话不会再被迟到的观察帧抬回 ENGAGED。
+    """
 
     def __init__(
         self,
@@ -53,8 +60,10 @@ class DriftSession:
         self._engage_beta_deg = engage_beta_deg
         self._engage_stable_s = engage_stable_s
         self._clock = clock or self._default_clock
+        self._lock = threading.Lock()
         self._state = DriftSessionState.IDLE
-        self.events: List[SessionEvent] = []
+        # 有界事件历史：watchdog 反复触发不致内存无界增长（snapshot 只露尾部）
+        self.events: Deque[SessionEvent] = deque(maxlen=500)
         # β 稳定计时的锚点：进入"超阈值"区间的时刻；None 表示当前未超阈值
         self._beta_over_since: Optional[float] = None
 
@@ -81,33 +90,38 @@ class DriftSession:
         self.events.append(SessionEvent(kind=kind, detail=detail, t_s=self._clock()))
 
     def start_calibration(self) -> None:
-        self._require_state(DriftSessionState.IDLE, "开始标定")
-        self._state = DriftSessionState.CALIBRATE
-        self._record("start_calibration")
+        with self._lock:
+            self._require_state(DriftSessionState.IDLE, "开始标定")
+            self._state = DriftSessionState.CALIBRATE
+            self._record("start_calibration")
 
     def finish_calibration(self, ok: bool) -> None:
-        self._require_state(DriftSessionState.CALIBRATE, "结束标定")
-        self._state = DriftSessionState.IDLE
-        self._record("finish_calibration", ok=ok)
+        with self._lock:
+            self._require_state(DriftSessionState.CALIBRATE, "结束标定")
+            self._state = DriftSessionState.IDLE
+            self._record("finish_calibration", ok=ok)
 
     def start_recording(self) -> None:
-        self._require_state(DriftSessionState.IDLE, "开始录制")
-        self._require_calibration()
-        self._state = DriftSessionState.RECORD
-        self._record("start_recording")
+        with self._lock:
+            self._require_state(DriftSessionState.IDLE, "开始录制")
+            self._require_calibration()
+            self._state = DriftSessionState.RECORD
+            self._record("start_recording")
 
     def stop_recording(self) -> None:
-        self._require_state(DriftSessionState.RECORD, "停止录制")
-        self._state = DriftSessionState.IDLE
-        self._record("stop_recording")
+        with self._lock:
+            self._require_state(DriftSessionState.RECORD, "停止录制")
+            self._state = DriftSessionState.IDLE
+            self._record("stop_recording")
 
     # ── AUTO 分阶段控制流（RFC 阶段 1→2）──────────────────────
     def start_auto(self) -> None:
-        self._require_state(DriftSessionState.IDLE, "启动自动模式")
-        self._require_calibration()
-        self._state = DriftSessionState.AUTO_OBSERVE
-        self._beta_over_since = None
-        self._record("start_auto")
+        with self._lock:
+            self._require_state(DriftSessionState.IDLE, "启动自动模式")
+            self._require_calibration()
+            self._state = DriftSessionState.AUTO_OBSERVE
+            self._beta_over_since = None
+            self._record("start_auto")
 
     def update_auto_observation(self, beta_deg: float, t_s: float) -> bool:
         """观察期喂数据：返回是否在本次调用中触发接管。
@@ -115,32 +129,46 @@ class DriftSession:
         β 使用外部统一时基 t_s（由调用方传入，保证与视觉/遥测管道同源），
         判定逻辑：|β| 超阈值则开始/维持计时，回落则清零。
         """
-        if self._state != DriftSessionState.AUTO_OBSERVE:
+        with self._lock:
+            if self._state != DriftSessionState.AUTO_OBSERVE:
+                return False
+            if abs(beta_deg) >= self._engage_beta_deg:
+                if self._beta_over_since is None:
+                    self._beta_over_since = t_s
+                elif t_s - self._beta_over_since >= self._engage_stable_s:
+                    self._state = DriftSessionState.AUTO_ENGAGED
+                    self._record("engage", beta_deg=beta_deg, t_s=t_s)
+                    return True
+            else:
+                self._beta_over_since = None
             return False
-        if abs(beta_deg) >= self._engage_beta_deg:
-            if self._beta_over_since is None:
-                self._beta_over_since = t_s
-            elif t_s - self._beta_over_since >= self._engage_stable_s:
-                self._state = DriftSessionState.AUTO_ENGAGED
-                self._record("engage", beta_deg=beta_deg, t_s=t_s)
-                return True
-        else:
+
+    def note_detection_gap(self) -> None:
+        """观察期丢检测帧：清 β 稳定锚点——缺口时长不计入接管计时，
+        恢复检测后从首帧重新起算（防"超阈 100ms + 丢 400ms + 恢复即接管"）。
+        其他状态下为幂等无操作。"""
+        with self._lock:
             self._beta_over_since = None
-        return False
 
     def stop_auto(self) -> None:
-        if self._state not in (DriftSessionState.AUTO_OBSERVE,
-                               DriftSessionState.AUTO_ENGAGED):
-            raise RuntimeError("当前不在自动模式，无法停止")
-        was_engaged = self._state == DriftSessionState.AUTO_ENGAGED
-        self._state = DriftSessionState.IDLE
-        self._record("stop_auto", was_engaged=was_engaged)
-
-    def watchdog_trigger(self, reason: str) -> None:
-        """看门狗：丢帧/ws 断线/β 失稳等异常，一律退回 IDLE 交还人工。"""
-        if self._state in (DriftSessionState.AUTO_OBSERVE,
-                           DriftSessionState.AUTO_ENGAGED):
+        with self._lock:
+            if self._state not in (DriftSessionState.AUTO_OBSERVE,
+                                   DriftSessionState.AUTO_ENGAGED):
+                raise RuntimeError("当前不在自动模式，无法停止")
             was_engaged = self._state == DriftSessionState.AUTO_ENGAGED
             self._state = DriftSessionState.IDLE
-            self._beta_over_since = None
+            self._record("stop_auto", was_engaged=was_engaged)
+
+    def watchdog_trigger(self, reason: str) -> None:
+        """看门狗：丢帧/ws 断线/β 失稳等异常，一律退回 IDLE 交还人工。
+
+        非 AUTO 状态不做状态迁移，但仍记录事件留痕供事后排查
+        （是否下发车控由引擎侧按 auto_active() 门禁决定）。
+        """
+        with self._lock:
+            was_engaged = self._state == DriftSessionState.AUTO_ENGAGED
+            if self._state in (DriftSessionState.AUTO_OBSERVE,
+                               DriftSessionState.AUTO_ENGAGED):
+                self._state = DriftSessionState.IDLE
+                self._beta_over_since = None
             self._record("watchdog", reason=reason, was_engaged=was_engaged)
