@@ -12,7 +12,6 @@
         [--cols 9] [--rows 6] [--out calibration_intrinsics.npz]
 """
 import argparse
-import sys
 from pathlib import Path
 
 import cv2
@@ -49,7 +48,7 @@ def main() -> int:
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-4)
 
     print(f"手持棋盘格（{args.cols}×{args.rows} 内角点，格距 {args.square*1000:.0f}mm）"
-          f"在画面各区域改变姿态，空格采集（目标 ≥{args.min_images} 张），ESC 结束并求解")
+          f"在画面各区域改变姿态，空格采集（目标 ≥{args.min_images} 张），ESC/回车结束并求解")
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -63,12 +62,12 @@ def main() -> int:
                 gray, corners, (11, 11), (-1, -1), criteria)
             cv2.drawChessboardCorners(display, (args.cols, args.rows),
                                       corners_refined, found)
-        cv2.putText(display, f"captured: {len(img_points)}  [SPACE=capture ESC=finish]",
+        cv2.putText(display, f"captured: {len(img_points)}  [SPACE=capture ESC/ENTER=finish]",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                     (0, 255, 0) if found else (0, 0, 255), 2)
         cv2.imshow("calibrate", display)
         key = cv2.waitKey(1) & 0xFF
-        if key == 27:
+        if key == 27 or key == 13:  # ESC 或回车结束（与文档一致）
             break
         if key == ord(" ") and found:
             obj_points.append(objp.copy())

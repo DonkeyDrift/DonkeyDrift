@@ -18,13 +18,24 @@ from throttle_analysis import correlate, parameter_table, rows_from_tub
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):  # GBK 控制台防 ✅/❌ UnicodeEncodeError
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="点动油门机理分析（M2）")
     parser.add_argument("tub", help="SyncRecorder 录制的 tub 目录")
     parser.add_argument("--center", default="1.0,1.0", help="定圆 圆心 x,y（米）")
     args = parser.parse_args()
 
-    cx, cy = (float(v) for v in args.center.split(","))
-    rows = rows_from_tub(args.tub, center=(cx, cy))
+    try:
+        cx, cy = (float(v) for v in args.center.split(","))
+    except ValueError:
+        parser.error(f"--center 格式错误：{args.center!r}，应为 \"x,y\"（如 1.0,1.0）")
+
+    tub_dir = Path(args.tub)
+    if not tub_dir.is_dir():
+        print(f"错误：tub 目录不存在：{tub_dir}")
+        return 1
+
+    rows = rows_from_tub(str(tub_dir), center=(cx, cy))
     if len(rows) < 60:
         print(f"样本过少（{len(rows)} 行，需 ≥60）：请至少录制 1 分钟漂移")
         return 1

@@ -5,7 +5,7 @@
 1. 地面按顺时针贴四个标记（西北/东北/东南/西南角），卷尺量出
    场地宽 W、高 H（米），西南角为原点（x 东 y 北）
 2. 运行脚本，按提示依次点击四个角（图像窗口内鼠标点击），
-   顺序必须与上述一致
+   顺序必须与上述一致；r 键重置，ESC 随时退出（满 4 点才保存）
 3. 输出 .npz 单应性文件，供 drift camera/start 使用
 
 用法：
@@ -13,14 +13,17 @@
         --field-width 2.0 --field-height 2.0 --out field_homography.npz
 """
 import argparse
-import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-PROMPTS = ["点击【西北角】（图像左上对应场地）", "点击【东北角】",
-           "点击【东南角】", "点击【西南角】（场地原点）"]
+# cv2.putText 仅支持 ASCII：屏幕提示必须用英文（中文会渲染为 ???），
+# 详细操作步骤在控制台以中文 print
+PROMPTS = ["Click NW corner (image top-left)",
+           "Click NE corner (image top-right)",
+           "Click SE corner (image bottom-right)",
+           "Click SW corner (field origin)"]
 
 
 def main() -> int:
@@ -47,7 +50,6 @@ def main() -> int:
         [args.field_width, 0.0], [0.0, 0.0]])
 
     clicked = []
-    state = {"frame": None}
 
     def on_mouse(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and len(clicked) < 4:
@@ -56,26 +58,34 @@ def main() -> int:
     cv2.namedWindow("homography", cv2.WINDOW_NORMAL)
     cv2.setMouseCallback("homography", on_mouse)
 
-    print("确认四角标记均在画面内后依次点击；r 键重置，ESC 完成")
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            continue
-        state["frame"] = frame
-        for i, (px, py) in enumerate(clicked):
-            cv2.circle(frame, (px, py), 8, (0, 0, 255), 2)
-            cv2.putText(frame, str(i + 1), (px + 10, py - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        prompt = PROMPTS[len(clicked)] if len(clicked) < 4 else "已完成四点，ESC 保存退出"
-        cv2.putText(frame, prompt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.imshow("homography", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("r"):
-            clicked.clear()
-        if key == 27 and len(clicked) == 4:
-            break
-    cv2.destroyAllWindows()
-    cap.release()
+    print("确认四角标记均在画面内后，按顺序点击：西北角 → 东北角 → 东南角 → 西南角（场地原点）")
+    print("点错可按 r 键重置；ESC 随时退出——凑满 4 点才保存，未满不保存")
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            for i, (px, py) in enumerate(clicked):
+                cv2.circle(frame, (px, py), 8, (0, 0, 255), 2)
+                cv2.putText(frame, str(i + 1), (px + 10, py - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            prompt = (PROMPTS[len(clicked)] if len(clicked) < 4
+                      else "4 points set - ESC to save & exit, R to reset")
+            cv2.putText(frame, prompt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, (0, 255, 0), 2)
+            cv2.imshow("homography", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("r"):
+                clicked.clear()
+            elif key == 27:  # ESC：任何时刻都可退出
+                break
+    finally:
+        cv2.destroyAllWindows()
+        cap.release()
+
+    if len(clicked) < 4:
+        print(f"仅点击 {len(clicked)}/4 点，未保存：请重新运行并凑满四点")
+        return 1
 
     image_pts = np.float32(clicked)
     h, _ = cv2.findHomography(image_pts, field_pts)

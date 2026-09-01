@@ -55,6 +55,8 @@ def simulate(cfg: ControllerConfig, duration_s: float = 10.0, dt: float = 1.0 / 
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):  # GBK 控制台防 ✅/❌ UnicodeEncodeError
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="漂移控制器离线仿真（M3）")
     parser.add_argument("--beta-target", type=float, default=25.0)
     parser.add_argument("--duration", type=float, default=10.0)
