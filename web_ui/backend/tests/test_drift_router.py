@@ -95,8 +95,9 @@ class TestAutoFlow:
         client.post("/api/drift/session/start", json={"mode": "auto"})
         for i in range(5):  # β 未稳定
             feed_beta_sequence(20.0 if i % 2 else 5.0, t_s=0.05 * i)
-        assert all(m.get("angle") is None for m in captured if "angle" in m), (
-            "观察期不得下发转向控制（人 RC 在开）")
+        assert client.get("/api/drift/state").json()["state"] == "auto_observe"
+        offending = [m for m in captured if "angle" in m or "throttle" in m]
+        assert offending == [], "观察期不得下发任何转向/油门控制（人 RC 在开）"
 
 
 class TestConfigApi:
@@ -192,9 +193,17 @@ class TestWebrtcOffer:
         assert body["type"] == "answer" and "sdp" in body
 
     def test_garbage_sdp_rejected(self, client):
-        r = client.post("/api/drift/webrtc/offer",
-                        json={"sdp": "not-a-valid-sdp", "type": "offer"})
-        assert r.status_code == 400
+        pytest.importorskip("aiortc")
+        import drift_webrtc
+        before = len(drift_webrtc._pcs)
+        for _ in range(3):
+            r = client.post("/api/drift/webrtc/offer",
+                            json={"sdp": "not-a-valid-sdp", "type": "offer"})
+            assert r.status_code == 400
+        # 协商失败的 RTCPeerConnection 必须 close 并移出 _pcs：
+        # 失败路径泄漏会让 pc 随垃圾请求数无界堆积
+        assert len(drift_webrtc._pcs) == before, (
+            "垃圾 SDP 协商失败后 pc 不得残留在 _pcs（泄漏）")
 
 
 class TestDisplayFrameTrack:
@@ -211,3 +220,92 @@ class TestDisplayFrameTrack:
 
         vf = asyncio.run(_recv())
         assert vf.width == 640 and vf.height == 360
+
+
+class TestConfigApiValidation:
+    """E8：/config 非法值映射 422（而非裸穿 500 或静默落配置）。"""
+
+    def test_nan_rejected_422(self, client):
+        # httpx 的 json= 序列化器拒绝 nan，用原始 body 模拟客户端直发 NaN
+        # （服务端 json.loads 默认接受 NaN/Infinity，必须显式门禁）
+        r = client.post("/api/drift/config", content=b'{"k_beta": NaN}',
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 422
+
+    def test_inf_rejected_422(self, client):
+        r = client.post("/api/drift/config", content=b'{"k_yaw": -Infinity}',
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 422
+
+    def test_negative_duty_rejected_422(self, client):
+        """占空比负值无物理意义 → 422。"""
+        r = client.post("/api/drift/config", json={"pulse_duty": -0.5})
+        assert r.status_code == 422
+
+    def test_non_numeric_rejected_422(self, client):
+        r = client.post("/api/drift/config", json={"k_beta": {"x": 1}})
+        assert r.status_code == 422
+
+    def test_valid_update_unaffected(self, client):
+        r = client.post("/api/drift/config", json={"k_beta": 2.5})
+        assert r.status_code == 200
+        assert client.get("/api/drift/state").json()["config"]["k_beta"] == 2.5
+
+
+class TestCameraStartFailure:
+    """E8/E3：detector 构造失败必须 close 已打开的相机（DSHOW 句柄不泄漏）。"""
+
+    def test_detector_failure_closes_camera(self, client, monkeypatch):
+        import drift_vision
+        from types import SimpleNamespace
+
+        closed = []
+
+        class FakeUSBCamera:
+            def __init__(self, **kwargs):
+                pass
+
+            def close(self):
+                closed.append(True)
+
+        def _boom_detector(downscale):
+            raise RuntimeError("apriltags 后端缺失（合成）")
+
+        monkeypatch.setattr(drift_vision, "USBCamera", FakeUSBCamera)
+        monkeypatch.setattr(drift_vision, "FieldHomography",
+                            SimpleNamespace(from_file=lambda p: object()))
+        monkeypatch.setattr(drift_vision, "AprilTagDetector", _boom_detector)
+        r = client.post("/api/drift/camera/start", json={
+            "camera_index": 0, "tag_id": 0, "calibration_file": "x.npz"})
+        assert r.status_code == 409
+        assert closed, "detector 构造失败时必须 close 已打开的相机"
+
+
+class TestInstallDriveHooks:
+    """E8：install_drive_hooks 幂等——重复调用不得重复 append 遥测 hook。"""
+
+    def test_idempotent_no_duplicate_telemetry_hook(self, monkeypatch):
+        import routers.drive as drive_mod
+        import routers.drift as drift_mod
+
+        hooks = []
+        monkeypatch.setattr(drive_mod.drive_state, "telemetry_hooks", hooks)
+        monkeypatch.setattr(drift_mod, "_drive_hooks_installed", False)
+        monkeypatch.setattr(asyncio, "get_event_loop", lambda: object())
+        drift_mod.install_drive_hooks()
+        drift_mod.install_drive_hooks()
+        assert len(hooks) == 1, "重复安装不得让遥测翻倍"
+
+
+class TestAppLifecycle:
+    """E4：应用关闭必须释放俯拍相机（DirectShow 句柄）。"""
+
+    def test_shutdown_stops_camera_loop(self, monkeypatch):
+        import main as main_mod
+
+        calls = []
+        monkeypatch.setattr(main_mod.drift.drift_engine, "stop_camera_loop",
+                            lambda: calls.append(True))
+        with TestClient(main_mod.app):
+            pass
+        assert calls, "shutdown 钩子必须调用 drift_engine.stop_camera_loop"

@@ -31,16 +31,18 @@ class DisplayFrameTrack(VideoStreamTrack):
     def __init__(self, get_frame: Callable[[], Optional[np.ndarray]]):
         super().__init__()
         self._get_frame = get_frame
+        self._black: Optional[np.ndarray] = None  # 缓存静态黑帧，无帧时复用
 
     async def next_timestamp(self) -> tuple:
         if self.readyState != "live":
             raise MediaStreamError
         if hasattr(self, "_timestamp"):
             self._timestamp += int(VIDEO_PTIME_60 * VIDEO_CLOCK_RATE)
-            wait = self._start + (self._timestamp / VIDEO_CLOCK_RATE) - time.time()
+            # 节拍用单调钟：墙钟（NTP 校时/手动改时间）跳变会打乱推流节奏
+            wait = self._start + (self._timestamp / VIDEO_CLOCK_RATE) - time.monotonic()
             await asyncio.sleep(max(0.0, wait))
         else:
-            self._start = time.time()
+            self._start = time.monotonic()
             self._timestamp = 0
         return self._timestamp, VIDEO_TIME_BASE
 
@@ -48,7 +50,10 @@ class DisplayFrameTrack(VideoStreamTrack):
         pts, time_base = await self.next_timestamp()
         frame = self._get_frame()
         if frame is None:
-            frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            # 无帧时复用缓存黑帧：每 tick 新分配 2.6MB 会加剧 GC 压力
+            if self._black is None:
+                self._black = np.zeros((720, 1280, 3), dtype=np.uint8)
+            frame = self._black
         h, w = frame.shape[:2]
         if w > 640:
             # 推流编码降半分辨率：运动画面 H.264 软编码 20~35ms 超 60fps
@@ -73,13 +78,23 @@ async def handle_offer(sdp: str, type_: str, get_frame) -> dict:
 
     @pc.on("connectionstatechange")
     def _on_state():
-        if pc.connectionState in ("failed", "closed"):
+        # disconnected 同样清理：对端断网/页面关闭后连接不会再到 failed
+        if pc.connectionState in ("failed", "closed", "disconnected"):
             _pcs.discard(pc)
 
     pc.addTrack(DisplayFrameTrack(get_frame))
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=type_))
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
+    try:
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=type_))
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+    except Exception:
+        # 协商失败（如非法 SDP）：必须关闭并移出 _pcs，否则 pc 随
+        # 垃圾请求无界泄漏（pc 永不触发 connectionstatechange 清理）
+        try:
+            await pc.close()
+        finally:
+            _pcs.discard(pc)
+        raise
     return {"sdp": pc.localDescription.sdp, "type": "answer"}
 
 

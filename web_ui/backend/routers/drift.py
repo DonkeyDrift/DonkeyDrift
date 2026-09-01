@@ -15,6 +15,7 @@ import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from drift_engine import drift_engine
@@ -72,6 +73,9 @@ async def update_config(request: dict):
         drift_engine.update_config(request)
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except (ValueError, TypeError) as exc:
+        # 非有限值（nan/inf）、物理无意义负值、不可转数值类型 → 422
+        raise HTTPException(status_code=422, detail=str(exc))
     return {"ok": True, "config": drift_engine.snapshot()["config"]}
 
 
@@ -90,7 +94,6 @@ _MJPEG_PUSH_HZ = 15.0
 @router.get("/frame.mjpg")
 async def overhead_frame_mjpg():
     """俯拍预览 MJPEG 流：浏览器 <img> 直连，取代轮询换图。"""
-    import asyncio
 
     async def _stream():
         boundary = b"--frame\r\n"
@@ -104,7 +107,6 @@ async def overhead_frame_mjpg():
                        + jpeg + b"\r\n")
             await asyncio.sleep(interval)
 
-    from fastapi.responses import StreamingResponse
     return StreamingResponse(_stream(),
                              media_type="multipart/x-mixed-replace; boundary=frame")
 
@@ -113,16 +115,28 @@ async def overhead_frame_mjpg():
 async def camera_start(request: CameraStartRequest):
     from drift_vision import AprilTagDetector, FieldHomography, USBCamera
 
-    try:
+    def _build():
+        """DSHOW 打开相机可达秒级：放工作线程，不阻塞事件循环。
+
+        detector 构造失败时立即 close 相机，防 DirectShow 句柄泄漏。
+        """
         homography = FieldHomography.from_file(request.calibration_file)
         camera = USBCamera(index=request.camera_index, width=request.width,
                            height=request.height, fps=request.fps,
                            exposure=request.exposure)
-        detector = AprilTagDetector(downscale=2)  # 半分辨率检测：720p→360p 提速约 4 倍
-        drift_engine._camera = camera  # 显式持有，stop 时释放（不靠 GC）
+        try:
+            detector = AprilTagDetector(downscale=2)  # 半分辨率检测：720p→360p 提速约 4 倍
+        except Exception:
+            camera.close()
+            raise
+        return homography, camera, detector
+
+    try:
+        homography, camera, detector = await asyncio.to_thread(_build)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     drift_engine._calibration_file = request.calibration_file
+    # 相机由 start_camera_loop 显式持有，stop_camera_loop 时释放（不靠 GC）
     drift_engine.start_camera_loop(camera, detector, homography, request.tag_id,
                                    heading_offset_deg=request.heading_offset_deg)
     return {"ok": True}
@@ -130,7 +144,8 @@ async def camera_start(request: CameraStartRequest):
 
 @router.post("/camera/stop")
 async def camera_stop():
-    drift_engine.stop_camera_loop()
+    # join 最长 2s：放工作线程，不阻塞事件循环
+    await asyncio.to_thread(drift_engine.stop_camera_loop)
     try:
         import drift_webrtc
         await drift_webrtc.close_all()  # 预览流随相机关闭
@@ -153,8 +168,17 @@ async def webrtc_offer(request: dict):
         raise HTTPException(status_code=400, detail=f"WebRTC 协商失败: {exc}")
 
 
+_drive_hooks_installed = False
+
+
 def install_drive_hooks() -> None:
-    """进程内接线：把引擎挂到 drive 通路上（main.py 启动时调用一次）。"""
+    """进程内接线：把引擎挂到 drive 通路上（main.py 启动时调用一次）。
+
+    幂等：重复调用不重复 append 遥测 hook（否则遥测上报翻倍）。
+    """
+    global _drive_hooks_installed
+    if _drive_hooks_installed:
+        return
     import routers.drive as drive_mod
 
     loop = asyncio.get_event_loop()
@@ -168,3 +192,4 @@ def install_drive_hooks() -> None:
         drift_engine.ingest_telemetry_msg(msg)
 
     drive_mod.drive_state.telemetry_hooks.append(_telemetry_hook)
+    _drive_hooks_installed = True
