@@ -4,13 +4,15 @@ import { Card, CardContent, CardHeader } from '../ui/Card';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { api } from '../../services/api';
+import { api, API_URL } from '../../services/api';
 import { useTranslation } from '@/i18n';
 
 /** 漂移会话状态快照（GET /api/drift/state）。 */
 interface DriftState {
   state: 'idle' | 'calibrate' | 'record' | 'auto_observe' | 'auto_engaged';
   calibration_ready: boolean;
+  /** 后端相机线程是否在跑（引擎模块级单例，页面刷新后仍在运行）。 */
+  camera_running: boolean;
   beta_deg: number | null;
   pose: { x: number; y: number; heading_deg: number } | null;
   telemetry_count: number;
@@ -20,25 +22,59 @@ interface DriftState {
   config: Record<string, number>;
 }
 
-const STATE_LABEL: Record<DriftState['state'], string> = {
-  idle: '空闲',
-  calibrate: '标定中',
-  record: '录制中',
-  auto_observe: '自动·观察（人 RC 起漂）',
-  auto_engaged: '自动·已接管',
+/** 状态轮询间隔（10Hz）。 */
+export const DRIFT_STATE_POLL_MS = 100;
+/** 轮询请求超时：防止后端慢时请求悬挂堆积。 */
+export const DRIFT_API_TIMEOUT_MS = 3000;
+/** 连续失败多少次后亮离线徽标（容忍单次抖动）。 */
+export const DRIFT_OFFLINE_THRESHOLD = 3;
+/** aiortc 非 trickle：等 ICE gathering 完成的最长时间，超时用现有 SDP 继续。 */
+export const DRIFT_WEBRTC_ICE_GATHER_TIMEOUT_MS = 2000;
+/** 协商后等待首轨（ontrack）的最长时间，超时回退 MJPEG。 */
+export const DRIFT_WEBRTC_TRACK_TIMEOUT_MS = 5000;
+
+const CAMERA_CONFIG_STORAGE_KEY = 'donkeydrifter_drift_camera_config';
+
+type SavedCameraConfig = Partial<{
+  cameraIndex: string;
+  tagId: string;
+  headingOffset: string;
+  calibFile: string;
+  exposure: string;
+}>;
+
+/** 相机接入表单持久化读取（localStorage 不可用时返回空）。 */
+const readSavedCameraConfig = (): SavedCameraConfig => {
+  try {
+    return JSON.parse(window.localStorage.getItem(CAMERA_CONFIG_STORAGE_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
 };
 
 /** 可编辑参数（提交 POST /api/drift/config）。 */
-const EDITABLE_PARAMS: Array<{ key: string; label: string; step: number }> = [
-  { key: 'beta_target_deg', label: '目标侧滑角 β* (°)', step: 1 },
-  { key: 'k_beta', label: 'β 环增益', step: 0.5 },
-  { key: 'k_yaw', label: '横摆环增益', step: 0.001 },
-  { key: 'pulse_freq_hz', label: '点动频率 f (Hz)', step: 0.5 },
-  { key: 'pulse_duty', label: '占空比 D', step: 0.05 },
-  { key: 'pulse_amplitude', label: '脉冲幅值 A', step: 0.05 },
-  { key: 'pulse_base', label: '基础油门 T_base', step: 0.05 },
-  { key: 'max_steering_delta_per_tick', label: '转向变化率限幅', step: 0.01 },
+const EDITABLE_PARAMS: Array<{ key: string; labelKey: string; step: number }> = [
+  { key: 'beta_target_deg', labelKey: 'drive.driftParamBetaTarget', step: 1 },
+  { key: 'k_beta', labelKey: 'drive.driftParamKBeta', step: 0.5 },
+  { key: 'k_yaw', labelKey: 'drive.driftParamKYaw', step: 0.001 },
+  { key: 'pulse_freq_hz', labelKey: 'drive.driftParamPulseFreq', step: 0.5 },
+  { key: 'pulse_duty', labelKey: 'drive.driftParamPulseDuty', step: 0.05 },
+  { key: 'pulse_amplitude', labelKey: 'drive.driftParamPulseAmplitude', step: 0.05 },
+  { key: 'pulse_base', labelKey: 'drive.driftParamPulseBase', step: 0.05 },
+  { key: 'max_steering_delta_per_tick', labelKey: 'drive.driftParamMaxSteeringDelta', step: 0.01 },
 ];
+
+/** 参数物理域 clamp：[下限, 上限]。占空比/幅值 [0,1]，基础油门 [-1,1]，PID 增益 ≥0。 */
+const PARAM_CLAMP: Record<string, [number, number]> = {
+  k_beta: [0, Number.POSITIVE_INFINITY],
+  k_yaw: [0, Number.POSITIVE_INFINITY],
+  pulse_duty: [0, 1],
+  pulse_amplitude: [0, 1],
+  pulse_base: [-1, 1],
+};
+
+/** 启动表单数值字段（非法时标红）。 */
+type CameraField = 'cameraIndex' | 'tagId' | 'headingOffset' | 'exposure';
 
 /**
  * 「第三视角漂移」卡片（RFC docs/Rfc/overhead-drift-control.md）：
@@ -51,45 +87,61 @@ export const DriftCard: React.FC = () => {
   const [cameraOn, setCameraOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
 
-  // 相机接入表单持久化：启动成功后存 localStorage，下次进页自动回填
-  const saved = (() => {
-    try {
-      return JSON.parse(window.localStorage.getItem('donkeydrifter_drift_camera_config') ?? '{}');
-    } catch {
-      return {};
-    }
-  })() as Partial<{ cameraIndex: string; tagId: string; headingOffset: string; calibFile: string; exposure: string }>;
-  const [cameraIndex, setCameraIndex] = useState(saved.cameraIndex ?? '0');
-  const [tagId, setTagId] = useState(saved.tagId ?? '0');
-  const [headingOffset, setHeadingOffset] = useState(saved.headingOffset ?? '0');
-  const [calibFile, setCalibFile] = useState(saved.calibFile ?? 'field_homography.npz');
-  const [exposure, setExposure] = useState(saved.exposure ?? '');
+  // 相机接入表单持久化：启动成功后存 localStorage，下次进页惰性回填
+  const [cameraIndex, setCameraIndex] = useState(() => readSavedCameraConfig().cameraIndex ?? '0');
+  const [tagId, setTagId] = useState(() => readSavedCameraConfig().tagId ?? '0');
+  const [headingOffset, setHeadingOffset] = useState(() => readSavedCameraConfig().headingOffset ?? '0');
+  const [calibFile, setCalibFile] = useState(() => readSavedCameraConfig().calibFile ?? 'field_homography.npz');
+  const [exposure, setExposure] = useState(() => readSavedCameraConfig().exposure ?? '');
+  const [invalidFields, setInvalidFields] = useState<CameraField[]>([]);
+  const [formError, setFormError] = useState<string | null>(null);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
   const [webrtcFailed, setWebrtcFailed] = useState(false);
-  const pollRef = useRef<number | null>(null);
+  const failCountRef = useRef(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.get<DriftState>('/drift/state');
+      const res = await api.get<DriftState>('/drift/state', { timeout: DRIFT_API_TIMEOUT_MS });
       setState(res.data);
+      // 相机运行状态以后端为准：相机线程是引擎单例，页面刷新后仍在跑
+      if (typeof res.data.camera_running === 'boolean') {
+        setCameraOn(res.data.camera_running);
+      }
+      failCountRef.current = 0;
+      setOffline(false);
     } catch {
-      /* 后端未就绪时静默重试 */
+      // 连续失败达阈值才亮离线徽标，避免单次抖动误报
+      failCountRef.current += 1;
+      if (failCountRef.current >= DRIFT_OFFLINE_THRESHOLD) setOffline(true);
     }
   }, []);
 
+  // 串行轮询：上一次请求 settle 后才排下一次，后端慢也不堆积
   useEffect(() => {
-    refresh();
-    pollRef.current = window.setInterval(refresh, 100);
+    let cancelled = false;
+    let timer: number | null = null;
+    const loop = async () => {
+      await refresh();
+      if (cancelled) return;
+      timer = window.setTimeout(() => {
+        void loop();
+      }, DRIFT_STATE_POLL_MS);
+    };
+    void loop();
     return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [refresh]);
 
-  // WebRTC 60fps 预览：相机开启即协商；失败自动回退 MJPEG 轮询流
+  // WebRTC 60fps 预览：相机开启即协商；失败自动回退 MJPEG 流。
+  // drift 后端是 aiortc（无 trickle ICE 端点）：必须等 ICE gathering 完成、
+  // 候选全部并入 SDP 后再 POST localDescription，否则协商必败。
   useEffect(() => {
     if (!cameraOn) {
       pcRef.current?.close();
@@ -97,29 +149,67 @@ export const DriftCard: React.FC = () => {
       return;
     }
     let cancelled = false;
+    let trackTimer: number | null = null;
     setWebrtcFailed(false);
+    const fail = () => {
+      if (cancelled) return;
+      if (trackTimer !== null) {
+        window.clearTimeout(trackTimer);
+        trackTimer = null;
+      }
+      pcRef.current?.close();
+      pcRef.current = null;
+      setWebrtcFailed(true);
+    };
     (async () => {
       try {
         const pc = new RTCPeerConnection();
         pcRef.current = pc;
         pc.addTransceiver('video', { direction: 'recvonly' });
         pc.ontrack = (e) => {
+          if (trackTimer !== null) {
+            window.clearTimeout(trackTimer);
+            trackTimer = null;
+          }
           if (videoRef.current) videoRef.current.srcObject = e.streams[0];
         };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') fail();
+        };
+        // 首轨超时：协商后迟迟无 ontrack 视为失败，回退 MJPEG
+        trackTimer = window.setTimeout(fail, DRIFT_WEBRTC_TRACK_TIMEOUT_MS);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        if (pc.iceGatheringState !== 'complete') {
+          await new Promise<void>((resolve) => {
+            const timer = window.setTimeout(() => {
+              pc.onicegatheringstatechange = null;
+              resolve(); // 兜底：gathering 事件缺失时也继续，用现有 SDP
+            }, DRIFT_WEBRTC_ICE_GATHER_TIMEOUT_MS);
+            pc.onicegatheringstatechange = () => {
+              if (pc.iceGatheringState === 'complete') {
+                window.clearTimeout(timer);
+                pc.onicegatheringstatechange = null;
+                resolve();
+              }
+            };
+          });
+        }
+        if (cancelled) return;
+        const local = pc.localDescription;
         const res = await api.post('/drift/webrtc/offer', {
-          sdp: offer.sdp,
-          type: offer.type,
+          sdp: local?.sdp ?? offer.sdp,
+          type: local?.type ?? offer.type,
         });
         if (cancelled) return;
         await pc.setRemoteDescription(res.data);
       } catch {
-        if (!cancelled) setWebrtcFailed(true);
+        fail();
       }
     })();
     return () => {
       cancelled = true;
+      if (trackTimer !== null) window.clearTimeout(trackTimer);
       pcRef.current?.close();
       pcRef.current = null;
     };
@@ -139,49 +229,81 @@ export const DriftCard: React.FC = () => {
     }
   };
 
-  const startCamera = () => run(async () => {
-    await api.post('/drift/camera/start', {
-      camera_index: Number(cameraIndex),
-      tag_id: Number(tagId),
-      calibration_file: calibFile,
-      heading_offset_deg: Number(headingOffset) || 0,
+  const startCamera = () => {
+    const parsed: Record<CameraField, number | undefined> = {
+      cameraIndex: Number(cameraIndex),
+      tagId: Number(tagId),
+      headingOffset: Number(headingOffset),
       exposure: exposure.trim() === '' ? undefined : Number(exposure),
+    };
+    const invalid = (Object.keys(parsed) as CameraField[]).filter((key) => {
+      const v = parsed[key];
+      // exposure 留空（undefined）合法表示自动；其余字段必须是有限数值
+      return key === 'exposure' ? v !== undefined && !Number.isFinite(v) : !Number.isFinite(v);
     });
-    setCameraOn(true);
-    try {
-      window.localStorage.setItem(
-        'donkeydrifter_drift_camera_config',
-        JSON.stringify({ cameraIndex, tagId, headingOffset, calibFile, exposure }),
-      );
-    } catch {
-      /* localStorage 不可用时静默跳过持久化 */
+    setInvalidFields(invalid);
+    if (invalid.length > 0) {
+      setFormError(t('drive.driftInvalidNumber'));
+      return;
     }
-  });
+    setFormError(null);
+    run(async () => {
+      await api.post('/drift/camera/start', {
+        camera_index: parsed.cameraIndex,
+        tag_id: parsed.tagId,
+        calibration_file: calibFile,
+        heading_offset_deg: parsed.headingOffset,
+        exposure: parsed.exposure,
+      });
+      setCameraOn(true);
+      try {
+        window.localStorage.setItem(
+          CAMERA_CONFIG_STORAGE_KEY,
+          JSON.stringify({ cameraIndex, tagId, headingOffset, calibFile, exposure }),
+        );
+      } catch {
+        /* localStorage 不可用时静默跳过持久化 */
+      }
+    });
+  };
 
   const stopCamera = () => run(async () => {
     await api.post('/drift/camera/stop');
     setCameraOn(false);
   });
 
-  const startSession = (mode: 'record' | 'auto') =>
+  const startSession = (mode: 'calibrate' | 'record' | 'auto') =>
     run(() => api.post('/drift/session/start', { mode }).then(() => undefined));
 
   const stopSession = () => run(() => api.post('/drift/session/stop').then(() => undefined));
 
   const saveParams = () => run(async () => {
     const updates: Record<string, number> = {};
+    const submitted: string[] = [];
     for (const [key, value] of Object.entries(paramDraft)) {
       const v = parseFloat(value);
-      if (Number.isFinite(v)) updates[key] = v;
+      if (!Number.isFinite(v)) continue; // 非法值拒绝发送
+      const clamp = PARAM_CLAMP[key];
+      updates[key] = clamp ? Math.min(clamp[1], Math.max(clamp[0], v)) : v;
+      submitted.push(key);
     }
-    if (Object.keys(updates).length > 0) {
+    if (submitted.length > 0) {
       await api.post('/drift/config', updates);
     }
-    setParamDraft({});
+    // 只清已提交的 key：POST 进行中又敲的草稿保留
+    setParamDraft((draft) => {
+      const next = { ...draft };
+      for (const key of submitted) delete next[key];
+      return next;
+    });
   });
+
+  const fieldClass = (field: CameraField) =>
+    invalidFields.includes(field) ? 'border-red-500' : undefined;
 
   const s = state?.state ?? 'idle';
   const active = s !== 'idle';
+  const calibrationReady = state?.calibration_ready ?? false;
 
   return (
     <Card>
@@ -192,35 +314,36 @@ export const DriftCard: React.FC = () => {
         {/* 相机接入 */}
         <div className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr_auto] gap-2 items-end">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">相机 index</label>
-            <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} />
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCameraIndex')}</label>
+            <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} className={fieldClass('cameraIndex')} />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">AprilTag ID</label>
-            <Input value={tagId} onChange={(e) => setTagId(e.target.value)} disabled={cameraOn} />
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftTagId')}</label>
+            <Input value={tagId} onChange={(e) => setTagId(e.target.value)} disabled={cameraOn} className={fieldClass('tagId')} />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">朝向偏移 (°)</label>
-            <Input value={headingOffset} onChange={(e) => setHeadingOffset(e.target.value)} disabled={cameraOn} />
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftHeadingOffset')}</label>
+            <Input value={headingOffset} onChange={(e) => setHeadingOffset(e.target.value)} disabled={cameraOn} className={fieldClass('headingOffset')} />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">曝光 (log2秒，空=自动)</label>
-            <Input value={exposure} placeholder="如 -7" onChange={(e) => setExposure(e.target.value)} disabled={cameraOn} />
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftExposure')}</label>
+            <Input value={exposure} placeholder={t('drive.driftExposurePlaceholder')} onChange={(e) => setExposure(e.target.value)} disabled={cameraOn} className={fieldClass('exposure')} />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">单应性标定文件</label>
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCalibFile')}</label>
             <Input value={calibFile} onChange={(e) => setCalibFile(e.target.value)} disabled={cameraOn} />
           </div>
           {cameraOn ? (
             <Button variant="secondary" onClick={stopCamera} disabled={busy}>
-              <Octagon className="h-4 w-4" /> 关相机
+              <Octagon className="h-4 w-4" /> {t('drive.driftStopCamera')}
             </Button>
           ) : (
             <Button onClick={startCamera} disabled={busy}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} 启动相机
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} {t('drive.driftStartCamera')}
             </Button>
           )}
         </div>
+        {formError && <div className="text-xs text-red-400">{formError}</div>}
 
         {/* 俯拍预览：WebRTC 60fps 优先，失败回退 MJPEG */}
         {cameraOn && !webrtcFailed && (
@@ -234,8 +357,8 @@ export const DriftCard: React.FC = () => {
         )}
         {cameraOn && webrtcFailed && (
           <img
-            src="/api/drift/frame.mjpg"
-            alt="俯拍预览"
+            src={`${API_URL}/drift/frame.mjpg`}
+            alt={t('drive.driftPreviewAlt')}
             className="w-full rounded border border-zinc-700 bg-zinc-900 object-contain max-h-64"
           />
         )}
@@ -243,59 +366,62 @@ export const DriftCard: React.FC = () => {
         {/* 实时状态 */}
         <div className="grid grid-cols-6 gap-2 text-center text-sm">
           <div>
-            <div className="text-xs text-zinc-400">状态</div>
-            <div className="font-medium">{STATE_LABEL[s]}</div>
+            <div className="text-xs text-zinc-400">{t('drive.driftStateLabel')}</div>
+            <div className="font-medium">{t(`drive.driftState.${s}`)}</div>
           </div>
           <div>
             <div className="text-xs text-zinc-400">β (°)</div>
             <div className="font-medium">{state?.beta_deg?.toFixed(1) ?? '—'}</div>
           </div>
           <div>
-            <div className="text-xs text-zinc-400">位姿 (x,y)</div>
+            <div className="text-xs text-zinc-400">{t('drive.driftPose')}</div>
             <div className="font-medium">
               {state?.pose ? `${state.pose.x.toFixed(2)},${state.pose.y.toFixed(2)}` : '—'}
             </div>
           </div>
           <div>
-            <div className="text-xs text-zinc-400">朝向 (°)</div>
+            <div className="text-xs text-zinc-400">{t('drive.driftHeading')}</div>
             <div className="font-medium">
               {state?.pose ? ((((state.pose.heading_deg % 360) + 360) % 360).toFixed(1)) : '—'}
             </div>
           </div>
           <div>
-            <div className="text-xs text-zinc-400">相机 fps</div>
+            <div className="text-xs text-zinc-400">{t('drive.driftCameraFps')}</div>
             <div className="font-medium">{cameraOn ? (state?.camera_fps ?? 0).toFixed(0) : '—'}</div>
           </div>
           <div>
-            <div className="text-xs text-zinc-400">遥测/已录帧</div>
+            <div className="text-xs text-zinc-400">{t('drive.driftTelemetryFrames')}</div>
             <div className="font-medium">{state?.telemetry_count ?? 0} / {state?.frames_written ?? 0}</div>
           </div>
         </div>
 
-        {/* 模式控制 */}
+        {/* 模式控制：录制/自动要求标定就绪（否则后端必 409） */}
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => startSession('record')} disabled={busy || active || !cameraOn}>
-            <Video className="h-4 w-4" /> 录制（人 RC 漂移）
+          <Button variant="secondary" onClick={() => startSession('calibrate')} disabled={busy || active || !cameraOn}>
+            <CircleDot className="h-4 w-4" /> {t('drive.driftCalibrate')}
           </Button>
-          <Button onClick={() => startSession('auto')} disabled={busy || active || !cameraOn}>
-            <CircleDot className="h-4 w-4" /> 自动漂移
+          <Button variant="secondary" onClick={() => startSession('record')} disabled={busy || active || !cameraOn || !calibrationReady}>
+            <Video className="h-4 w-4" /> {t('drive.driftRecord')}
+          </Button>
+          <Button onClick={() => startSession('auto')} disabled={busy || active || !cameraOn || !calibrationReady}>
+            <CircleDot className="h-4 w-4" /> {t('drive.driftAuto')}
           </Button>
           <Button variant="danger" onClick={stopSession} disabled={busy || !active}>
-            <Octagon className="h-4 w-4" /> 停止 / 交还人工
+            <Octagon className="h-4 w-4" /> {t('drive.driftStopSession')}
           </Button>
         </div>
 
         {/* 参数面板 */}
         <div>
           <button className="text-xs text-zinc-400 underline" onClick={() => setParamsOpen(!paramsOpen)}>
-            {paramsOpen ? '收起' : '展开'}控制器参数
+            {paramsOpen ? t('drive.driftParamsCollapse') : t('drive.driftParamsExpand')}
           </button>
           {paramsOpen && state && (
             <div className="mt-2 space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                {EDITABLE_PARAMS.map(({ key, label, step }) => (
+                {EDITABLE_PARAMS.map(({ key, labelKey, step }) => (
                   <div key={key}>
-                    <label className="block text-xs text-zinc-400 mb-1">{label}</label>
+                    <label className="block text-xs text-zinc-400 mb-1">{t(labelKey)}</label>
                     <Input
                       type="number"
                       step={step}
@@ -306,7 +432,7 @@ export const DriftCard: React.FC = () => {
                 ))}
               </div>
               <Button size="sm" onClick={saveParams} disabled={busy || Object.keys(paramDraft).length === 0}>
-                保存参数
+                {t('drive.driftSaveParams')}
               </Button>
             </div>
           )}
@@ -325,8 +451,9 @@ export const DriftCard: React.FC = () => {
         )}
 
         {error && <div className="text-xs text-red-400">{error}</div>}
-        {!state?.calibration_ready && (
-          <div className="text-xs text-amber-400">标定文件未就绪：先运行 scripts/calibrate_field_homography.py</div>
+        {offline && <div className="text-xs text-red-400">{t('drive.driftOffline')}</div>}
+        {state && !state.calibration_ready && (
+          <div className="text-xs text-amber-400">{t('drive.driftCalibrationNotReady')}</div>
         )}
       </CardContent>
     </Card>
