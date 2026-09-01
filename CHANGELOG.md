@@ -1,5 +1,33 @@
 # 变更日志
 
+## 2026-09-01 (173)
+
+- fix(drift): 俯拍系统全量夜间审计与加固——5 领域并行审计 40+ 发现，安全链路/线程安全/NaN 防线/WebRTC 协议/脚本可靠性全面修复，后端测试 257→345 全绿
+  - **安全链路（最高优先）**：
+    - 相机循环异常护栏（`drift_engine.py`）：核心链路（检测/解算/估计/控制/落盘）整体 try/except——异常即计数+日志+看门狗+干净退出（finally 停泵），此前任一异常杀线程且句柄泄漏、看门狗不触发。
+    - 看门狗三链路补齐（RFC 第 9 节）：ENGAGED 期 检测丢失>0.2s（按相机时戳）/遥测停滞>0.5s/控制下发连续失败≥3 均触发交还人工；此前仅泵线程死亡一项落地，`Watchdog.expired()` 是无人调用的结构僵尸。`trigger_watchdog` 修正为仅 AUTO 期间才下发车控（非 AUTO 只记事件——预览毛刺不再误动车辆）。
+    - NaN 全链路防线：估计器非有限输入按丢帧处理（`nan_dropped` 计数）；控制器非有限输入抛 ValueError 走护栏；`PoseSolver.push` 拒收非有限位姿（可返回 None，引擎按丢帧兜底）；单应 `from_file` 校验 shape/有限性/行列式，`_map` 除零显式报错。此前 `min/max` 顺序使单帧 NaN 退化为满舵+积分永久钉满幅、估计器不可恢复。
+    - 引擎 stop 竞态：泵线程卡死（DSHOW 僵尸句柄）时跳过 `camera.close()`（并发 release 是 UB，泄漏给 OS 更安全）；`main.py` 加 shutdown 钩子+atexit 兜底释放相机；`/camera/start` 重入守卫（幂等停旧启新）+ 检测器构造失败关闭相机句柄。
+  - **线程安全**：`TelemetryBuffer`/`ThrottlePulseAnalyzer` 加锁（push 在事件循环线程、interpolate/features 在相机线程，两段 insert 非原子可致 IndexError/错配）；遥测缓冲 30s 前缀裁剪（原 maxlen 是死代码，小时级会话可涨 150MB+）；`DriftSession` 状态迁移加锁 + `events` 有界（500）；`install_drive_hooks` 幂等。
+  - **控制器**：delta 限幅 dt 化（新键 `max_steering_rate_per_s`，旧 per-tick 键 ×60 兼容映射，`effective_max_steering_rate_per_s` 统一口径）；脉冲 duty/amp/base 热更新生效（原仅频率每拍回写，面板改其余三参数无效）；半径环符号配置化 `radius_freq_sign`（默认 −1 按 RFC §7.3 机理负反馈：偏内→降频——原实现偏内增频按 RFC 机理是正反馈，M2 实证相反则置 +1）。
+  - **估计器**：割线基线取点修正（取**最新**满足跨度的点，稳态跨度回到设计值 0.2s，此前取窗内最旧点使 0.5s 窗长成为实际基线）；dt=0 静止衰减冻结而非清零笔误修复；`anchor()` 补清 `_last_t`。
+  - **WebRTC 两端**：前端 `DriftCard.tsx` 等 ICE gathering 完成再 POST 且用 `pc.localDescription`（原实现 POST 零候选的旧 offer.sdp，aiortc 无 trickle → 60fps 路径必败永远回退 MJPEG）；连接态监控+首轨 5s 超时回退。后端 `handle_offer` 协商失败清理 pc（原垃圾 SDP 每次泄漏一个 RTCPeerConnection）；节拍换 monotonic；黑帧缓存复用；disconnected 态清理。
+  - **前端 DriftCard 重写**：cameraOn 以后端快照 `camera_running` 为权威（刷新/多标签不再脱钩）；i18n 全量（`drive.drift*` 38 词条 zh/en）；轮询改串行+3s 超时+连续失败离线徽标；「标定」按钮补齐、按钮 gating 对齐后端 `calibration_ready` 守卫；输入 Number.isFinite 校验+物理域 clamp；saveParams 竞态/lazy localStorage/MJPEG 走 API_URL。新增 `DriftCard.test.tsx` 16 例。
+  - **脚本（明早验收链路）**：三脚本 `sys.stdout.reconfigure(utf-8)` 根治 GBK 控制台 ✅ 打印崩溃（原崩在写报告文件**之前**）；`measure_loop_latency.py` 排空 ws 初始推送（原首两个 RTT 样本是假的）+视觉段复用生产检测器配置（downscale=2/锐化 0.6/`--exposure`）+无有效样本不误报超预算+超预算退出码 1+报告先落盘后打印；`analyze_throttle_pulses.py` 参数/tub 路径中文错误提示；`calibrate_field_homography.py` ESC 随时可退+try/finally 释放相机+屏幕提示改英文（putText 不支持中文）；`build_drift_clip.py` 多 tub 独立段拼接（原单段早退致时戳可回退为负）+Windows 反斜杠路径文件名修复+speed 校验。
+  - **测试**：新增 `test_drift_engine_watchdog.py`（6 例）/`test_drift_engine_integration.py`（8 例）/`test_measure_loop_latency.py`（12 例）/`test_analyze_throttle_pulses.py`（3 例）/`test_simulate_drift_controller.py`/`DriftCard.test.tsx`（16 例）；修复两处空洞断言（观察期零下发语义化、smoke EMA 恒真改 >0）。全部 TDD 先红后绿。
+  - 验证：后端 pytest **345 全绿**；前端 vitest 156 全绿 + `tsc -b` + `npm run build` 通过；离线仿真 β=24.72°/极差 0.47° 收敛；脚本实跑退出码正确。仓库根 tests/ 的 4 收集错误（fcntl）+3 失败（SIGKILL/前端构建判定）为本机 Windows 平台既有问题，与本次无关。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；未做 git 提交（工作区待用户 review）；全程纯本地。审计全量发现与遗留实车核对项见交接文档 §9。
+
+## 2026-09-01 (172)
+
+- fix(drift): 控制链路航迹角换 0.2s 割线基线（M4 前最后软件遗留项清零）+ FakeCamera 节拍根治测试抖动 + 交接文档状态核实
+  - `web_ui/backend/state_estimator.py`：`BetaEstimator` 航迹角由逐帧差分+半步外推改为 **0.2s 割线基线 + 陀螺横摆率半程外推**（割线代表基线中点时刻方向，β̇≈0 假设下外推 span/2 消滞后）——低速段逐帧位移贴近 2cm 阈值被位姿噪声主导、方向随机（§4.4 实车 β 箭头乱指同款根因，显示链路此前已换 `trail_course_deg`，本次控制链路对齐）。新增构造参数 `course_baseline_s=0.2`/`pose_window_s=0.5`；位姿滑窗 deque 取代单点 `_prev`；`anchor()` 清窗。对外接口不变（`drift_engine.py` 调用点零改动）。
+  - 测试（TDD 先红后绿）：`test_state_estimator.py` 新增 `TestSecantBaselineCourse` 2 例——低速噪声直行（0.5m/s@60fps + σ8mm 位姿噪声）β 均值收敛 25°±4° 且 std<8°（旧实现实测红：std 60°）；爬行 0.15m/s 航迹角正常解算（旧实现 course 恒 None、β 卡 0）。
+  - `web_ui/backend/drift_vision.py`：`FakeCamera.read` 加 60fps 节拍 sleep，根治泵线程自由空转吃满单核致 `TestCameraLoopSmoke` 重载抖动（交接文档 §8.3 教训 3）；`test_drift_vision.py` 新增 `test_fake_camera_read_is_paced` 固化。
+  - 交接文档 `docs/guide/overhead-drift-handoff.md`：§6「分支未合并 main」核实为**已合并**（tip 3bbc3d03 同为 `feat/overhead-drift-control` 与 `main` 分支头）并勾销；§6 course_deg 遗留项勾销（M4 前软件遗留清零，剩余全是实车核对项）；§7 代码地图与 §8.3 同步。
+  - 验证：后端 pytest **257 项全绿**（254→257）；离线仿真 `simulate_drift_controller.py` 复跑 β=24.72°/极差 0.47° 仍收敛（β\*=25°）。仓库根 `tests/` 的 4 个收集错误（launcher 依赖 Unix `fcntl`）与 3 个失败（`signal.SIGKILL` Windows 不存在、前端构建新旧判定）为本机 Windows 平台既有问题，与本次改动无关（改动仅 5 文件：docs 1 + backend 4）。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；全程纯本地，未碰 GitHub。
+
 ## 2026-08-30 (171)
 
 - feat(drift): 俯拍漂移监控系统全量落地——方案 C 状态估计+反馈控制整链实现，M0 相机链路收官（60fps），分支 `feat/overhead-drift-control` 合并入 main
