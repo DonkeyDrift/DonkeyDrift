@@ -57,6 +57,76 @@ class TestFieldHomography:
         assert fy_top > fy_bottom
 
 
+class TestNanGuards:
+    """NaN/inf 防线：非有限位姿不得进入平滑窗或流向估计器。"""
+
+    def test_pose_solver_rejects_nonfinite_pose(self, homography):
+        """NaN 位姿按拒收处理：返回窗中值，不进历史、不计跳变连击。"""
+        from drift_vision import Pose
+        solver = PoseSolver(homography, window=5, max_jump_m=0.5)
+        for i in range(5):
+            solver.push(Pose(x=1.0, y=1.0, heading_deg=10.0, t_s=0.1 * i))
+        out = solver.push(Pose(x=float("nan"), y=1.0, heading_deg=10.0, t_s=0.5))
+        assert out is not None and math.isfinite(out.x)
+        assert out.x == pytest.approx(1.0, abs=0.05)
+        # 连续非有限帧不得触发"持续跳变采信"路径（否则 NaN 会被采信入窗）
+        for i in range(6):
+            out = solver.push(Pose(x=float("nan"), y=float("nan"),
+                                   heading_deg=float("nan"), t_s=0.6 + 0.1 * i))
+            assert out is not None and math.isfinite(out.x)
+            assert out.x == pytest.approx(1.0, abs=0.05)
+
+    def test_pose_solver_empty_history_returns_none(self, homography):
+        """历史为空时没有可回退的中值：返回 None（调用方按丢帧处理）。"""
+        from drift_vision import Pose
+        solver = PoseSolver(homography)
+        assert solver.push(Pose(x=float("nan"), y=1.0, heading_deg=0.0,
+                                t_s=0.0)) is None
+        # 之后的正常位姿不受影响
+        out = solver.push(Pose(x=1.0, y=1.0, heading_deg=0.0, t_s=0.1))
+        assert out is not None and out.x == pytest.approx(1.0)
+
+
+class TestHomographyValidation:
+    """标定文件与单应映射的合法性校验：坏标定统一 ValueError，
+    防 NaN/inf 位姿流入估计器。"""
+
+    def _write(self, tmp_path, matrix):
+        path = tmp_path / "h.npz"
+        np.savez(path, h=matrix)
+        return str(path)
+
+    def test_from_file_round_trip(self, homography, tmp_path):
+        path = self._write(tmp_path, np.array([[2.0, 0.0, 0.0],
+                                               [0.0, 2.0, 0.0],
+                                               [0.0, 0.0, 1.0]]))
+        h = FieldHomography.from_file(path)
+        fx, fy = h.image_to_field(10.0, 20.0)
+        assert fx == pytest.approx(20.0) and fy == pytest.approx(40.0)
+
+    def test_from_file_rejects_bad_shape(self, tmp_path):
+        with pytest.raises(ValueError):
+            FieldHomography.from_file(self._write(tmp_path, np.eye(2)))
+
+    def test_from_file_rejects_nonfinite(self, tmp_path):
+        m = np.eye(3)
+        m[0, 0] = float("nan")
+        with pytest.raises(ValueError):
+            FieldHomography.from_file(self._write(tmp_path, m))
+
+    def test_from_file_rejects_singular(self, tmp_path):
+        with pytest.raises(ValueError):
+            FieldHomography.from_file(self._write(tmp_path, np.zeros((3, 3))))
+
+    def test_map_rejects_degenerate_denominator(self):
+        """射影除法分母 |w2|≈0（点在无穷远）时显式报错，不得产出 inf 位姿。"""
+        h = FieldHomography(np.array([[1.0, 0.0, 0.0],
+                                      [0.0, 1.0, 0.0],
+                                      [0.0, 0.0, 1e-13]]))
+        with pytest.raises(ValueError):
+            h.image_to_field(0.0, 0.0)
+
+
 class TestPoseSolving:
     def _make_tag_corners(self, homography, cx, cy, heading_deg, size_m=0.08):
         """在场地 (cx,cy) 处构造朝向 heading 的车顶标签四角（图像坐标）。
@@ -149,6 +219,18 @@ class TestCameraAbstraction:
         cam = FakeCamera()
         stamps = [cam.read()[1] for _ in range(5)]
         assert all(b > a for a, b in zip(stamps, stamps[1:])), "时间戳必须严格单调"
+
+    def test_fake_camera_read_is_paced(self):
+        """FakeCamera 必须带节拍 sleep：泵线程自由空转会吃满单核，
+        重负载机器上消费者线程调度饥饿（TestCameraLoopSmoke 偶发超时根因，
+        交接文档 §8.3 教训 3）。3 次读在 60fps 节拍下应耗 ≥20ms。"""
+        import time
+        from drift_vision import FakeCamera
+        cam = FakeCamera()
+        t0 = time.monotonic()
+        for _ in range(3):
+            cam.read()
+        assert time.monotonic() - t0 >= 0.02, "FakeCamera.read 应有 60fps 节拍"
 
     def test_detector_backend_missing_raises_clearly(self, monkeypatch):
         """pupil-apriltags 不可用时，构造 AprilTagDetector 应报清晰错误而非静默降级。"""

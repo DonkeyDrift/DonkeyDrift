@@ -14,6 +14,7 @@
 相机与检测器均为可注入抽象：今晚无硬件时用 FakeCamera/FakeTagDetector
 驱动纯几何逻辑测试，明天实机联调只替换实现、不动几何代码。
 """
+import logging
 import math
 import threading
 import time
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 from typing import Deque, List, Optional, Protocol, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:  # AprilTag 检测后端（明天实机联调；缺失时构造函数显式报错）
     from pupil_apriltags import Detector as _PupilDetector
@@ -50,7 +53,16 @@ class FieldHomography:
     @classmethod
     def from_file(cls, path: str) -> "FieldHomography":
         data = np.load(path)
-        return cls(data["h"])
+        h = np.asarray(data["h"], dtype=float)
+        # 坏标定统一 ValueError：形状错误 / 非有限 / 奇异矩阵都会在
+        # 映射时产出 NaN/inf 位姿，顺链路污染 β 估计器与控制器
+        if h.shape != (3, 3):
+            raise ValueError(f"单应矩阵形状应为 (3,3)，实际 {h.shape}")
+        if not np.all(np.isfinite(h)):
+            raise ValueError("单应矩阵含 NaN/inf：标定文件损坏")
+        if abs(float(np.linalg.det(h))) < 1e-12:
+            raise ValueError("单应矩阵奇异（行列式≈0）：标定点退化")
+        return cls(h)
 
     def to_file(self, path: str) -> None:
         np.savez(path, h=self._h)
@@ -58,6 +70,9 @@ class FieldHomography:
     def _map(self, matrix: np.ndarray, x: float, y: float) -> Tuple[float, float]:
         v = np.array([x, y, 1.0])
         w = matrix @ v
+        if abs(float(w[2])) < 1e-12:
+            # 射影除法分母≈0：点映射到无穷远，除零会产出 inf/NaN 位姿
+            raise ValueError("单应映射分母≈0（点映射到无穷远）：检查标定矩阵")
         return float(w[0] / w[2]), float(w[1] / w[2])
 
     def image_to_field(self, px: float, py: float) -> Tuple[float, float]:
@@ -243,7 +258,18 @@ class PoseSolver:
         self._history: List[Pose] = []
         self._reject_streak = 0  # 连续被拒帧数（识别"真实位移" vs "单帧误检"）
 
-    def push(self, pose: Pose) -> Pose:
+    def push(self, pose: Pose) -> Optional[Pose]:
+        # 非有限位姿直接拒收：不进历史、不计跳变连击（否则连续 NaN 会
+        # 触发"持续跳变采信"把 NaN 写进窗）。有历史时与跳变拒绝同语义
+        # 返回窗中值；历史为空无值可回退，返回 None（调用方按丢帧处理）。
+        if not (math.isfinite(pose.x) and math.isfinite(pose.y)
+                and math.isfinite(pose.heading_deg) and math.isfinite(pose.t_s)):
+            if not self._history:
+                return None
+            return Pose(x=float(np.median([p.x for p in self._history])),
+                        y=float(np.median([p.y for p in self._history])),
+                        heading_deg=self._circular_median_heading(),
+                        t_s=self._history[-1].t_s)
         if len(self._history) < self._window:
             self._history.append(pose)
             self._reject_streak = 0
@@ -343,8 +369,13 @@ class FrameSource:
                 frame, t_s = self._camera.read()
                 read_ms = (_time.perf_counter() - t0) * 1000.0
             except Exception:
+                logger.exception("相机泵读帧异常，泵线程退出（alive 转 False 供看门狗判定）")
                 break
-            self.read_ema_ms += 0.1 * (read_ms - self.read_ema_ms)
+            if self._seq == 0:
+                # 首样本直接赋值：避免 EMA 从 0 冷启动的系统性偏低
+                self.read_ema_ms = read_ms
+            else:
+                self.read_ema_ms += 0.1 * (read_ms - self.read_ema_ms)
             with self._lock:
                 self._seq += 1
                 self._latest = (frame, t_s, self._seq)
@@ -362,13 +393,17 @@ class FrameSource:
 
 
 class FakeCamera:
-    """合成相机：黑帧 + 严格单调时戳，驱动无硬件环境下的逻辑测试。"""
+    """合成相机：黑帧 + 严格单调时戳 + 60fps 节拍 sleep。
+
+    节拍防泵线程自由空转吃满单核——重负载机器上消费者线程调度饥饿
+    （TestCameraLoopSmoke 偶发超时根因，交接文档 §8.3 教训 3）。"""
 
     def __init__(self, shape=(480, 640, 3)):
         self._shape = shape
         self._t = time.monotonic()
 
     def read(self) -> Tuple[np.ndarray, float]:
+        time.sleep(1.0 / 60.0)
         self._t += 1.0 / 60.0
         return np.zeros(self._shape, dtype=np.uint8), self._t
 
