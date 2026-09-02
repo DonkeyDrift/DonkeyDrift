@@ -8,6 +8,7 @@
 | ---------------------------------------------------- | ------------------------- |
 | `docs/Rfc/overhead-drift-control.md`                 | 总体设计（方案 C：状态估计+反馈控制，13 节） |
 | `docs/plan/overhead-drift-control-implementation.md` | M0\~M5 里程碑实施计划            |
+| `docs/plan/overhead-drift-test-plan.md`              | **实车测试执行清单（2026-09-02 用）**   |
 | `docs/guide/overhead-drift-first-run.md`             | 实操手册（7 步操作清单）             |
 | **本文档**                                              | 当前状态 + 下一步工作 + 踩坑记录       |
 
