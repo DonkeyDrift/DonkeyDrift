@@ -28,7 +28,7 @@
     - `web_ui/frontend/src/services/api.ts`：新增 `SimCollectStartParams`/`SimCollectJobState`/`SimCollectResult`/`SimCollectStatus` 类型与 `startSimCollect`/`getSimCollectStatus`/`stopSimCollect`/`createSimCollectEventStream` 四函数。
     - `web_ui/frontend/src/hooks/useSimCollectJob.ts`（新增）：自包含 local state，SSE 优先推送 progress/log/status，SSE 断开且未到终态自动降级 2s 轮询 status 兜底；409 → 已有任务在跑提示。
     - `web_ui/frontend/src/components/drive/SimCollectCard.tsx`（新增）：卡片 UI——标题/说明、步数输入、可折叠高级参数（KP/KD/油门/最低油门）、开始/停止按钮、运行中进度条+实时 cte/速度、完成结果摘要（步数/mean|cte|/max|cte|/是否冲出/输出目录）、出错信息+可展开日志；全文案走 i18n。
-    - `web_ui/frontend/src/pages/DrivePage.tsx`：根容器主 flex 行后插入 `<SimCollectCard />` 全宽卡片（最小侵入，未重排其它结构）。
+    - `web_ui/frontend/src/pages/DrivePage.tsx`：`<SimCollectCard />` 放在页面最顶部（视频区上方），进入 Drive 页即可见；初始版本放在视频区下方，因桌面端视频占 `calc(100vh-9rem)` 导致卡片在视口外不可见，后修正移至顶部。
     - `web_ui/frontend/src/i18n/messages/drive.ts`：新增 `drive.simCollect*` 词条 25 条（zh/en 双份）。
   - 测试同步：`web_ui/backend/tests/test_simcollect.py` 12 项（行解析纯函数 + start/status/stop/conflict 404/错误退出，子进程级 FakeProcess mock）；后端 `pytest tests/` 118 项全绿。前端 `SimCollectCard.test.tsx` 5 项（mock `useSimCollectJob` 控制 idle/running/done/error 状态断言文案与参数）；前端 `vitest run` 25 文件 138 项、`tsc -b`、`npm run build` 全绿。端到端实测：worktree 后端（8123）跑 `POST /simcollect/start {steps:20}` → SSH 启 Mac sim → 采 20 步 → status=done、result 正确解析、数据落 `mycar/sim_collect_20260823_141731`。
   - 注：仅 DD 改动，Firmware 无改动、无需 OTA。采集编排脚本与采集脚本（`mycar/collect_sim_mac.sh`、`mycar/collect_sim_data.py`）为本机工作目录文件、非 git 仓库，不在本次 commit 范围（已在前序 mycar 工作中就绪）。全程纯本地，未碰 GitHub。
