@@ -26,7 +26,11 @@ class Seekable(object):
         self.method = 'r' if read_only else 'a+'
         self.file = open(file, self.method, newline=NEWLINE)
         # If file is read only improve performance by memory mapping the file.
-        if self.method == 'r':
+        # An empty file cannot be mmapped ("cannot mmap an empty file"), and
+        # empty catalogs are a legitimate state: they are created at catalog
+        # roll-over before the first record lands, and stay 0-byte when a
+        # recording stops without writing (or crashes).
+        if self.method == 'r' and os.path.getsize(file) > 0:
             self.file = mmap.mmap(self.file.fileno(), length=0,
                                   access=mmap.ACCESS_READ)
         self.total_length = 0

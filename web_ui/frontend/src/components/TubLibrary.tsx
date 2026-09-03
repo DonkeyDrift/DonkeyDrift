@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from './ui/Card';
 import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
@@ -128,12 +127,12 @@ const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => {
   );
 });
 
-export const TubLibrary: React.FC = () => {
+export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   const tubPath = useStore((state) => state.tubPath);
-  // TM 页在 App 中常驻保活（#135）：据此在切走时停播并屏蔽全局快捷键
-  const isTubManagerRoute = useLocation().pathname === '/';
+  // TM 并入统一流程大页面（#178）：section 在视口内（active）时才响应全局快捷键
+  const isTubManagerActive = active;
   const setTub = useStore((state) => state.setTub);
   const config = useStore((state) => state.config);
   const isLoading = useStore((state) => state.isLoading);
@@ -497,7 +496,7 @@ export const TubLibrary: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return;
-      if (!isTubManagerRoute) return;
+      if (!isTubManagerActive) return;
       const active = document.activeElement;
       if (
         active instanceof HTMLTextAreaElement ||
@@ -515,15 +514,15 @@ export const TubLibrary: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isTubManagerRoute]);
+  }, [isTubManagerActive]);
 
   // 切走时自动停止回放，避免常驻保活后后台持续拉帧占资源
   useEffect(() => {
-    if (!isTubManagerRoute) {
+    if (!isTubManagerActive) {
       isPlayingRef.current = false;
       setIsPlaying(false);
     }
-  }, [isTubManagerRoute]);
+  }, [isTubManagerActive]);
 
   const jumpToFrame = useCallback((idx: number) => {
     setIsPlaying(false);
