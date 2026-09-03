@@ -1,9 +1,11 @@
 import importlib
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -102,6 +104,40 @@ def test_load_car_config_merges_base_config_and_myconfig(tmp_path):
     assert cfg.IMAGE_H == 240
     assert cfg.IMAGE_W == 160
     assert cfg.IMAGE_DEPTH == 3
+
+
+def test_load_car_config_reuses_config_until_files_change(monkeypatch, tmp_path):
+    (tmp_path / "config.py").write_text("IMAGE_H = 120\nIMAGE_W = 160\nIMAGE_DEPTH = 3\n")
+    (tmp_path / "myconfig.py").write_text("IMAGE_H = 240\n")
+    os.utime(tmp_path / "config.py", (1_600_000_000, 1_600_000_000))
+    os.utime(tmp_path / "myconfig.py", (1_600_000_001, 1_600_000_001))
+
+    from routers import arena
+
+    calls = {"count": 0}
+    real_load_config = arena.load_config
+
+    def counting_load_config(config_file):
+        calls["count"] += 1
+        return real_load_config(config_file)
+
+    monkeypatch.setattr(arena, "load_config", counting_load_config)
+
+    cfg1 = arena.load_car_config(str(tmp_path))
+    cfg2 = arena.load_car_config(str(tmp_path))
+
+    assert cfg1 is cfg2  # 文件未变化时复用同一 Config 对象，不重复解析
+    assert cfg1.IMAGE_H == 240
+    assert calls["count"] == 1
+
+    # myconfig.py 变化 → 下次调用重新加载
+    (tmp_path / "myconfig.py").write_text("IMAGE_H = 300\n")
+    os.utime(tmp_path / "myconfig.py", (1_700_000_000, 1_700_000_000))
+
+    cfg3 = arena.load_car_config(str(tmp_path))
+
+    assert calls["count"] == 2
+    assert cfg3.IMAGE_H == 300
 
 
 def test_load_and_unload_pilot(monkeypatch, tmp_path):
@@ -385,3 +421,79 @@ def test_unload_pilot_clears_prediction_cache(monkeypatch, tmp_path):
 
     assert client.post(f"/api/arena/pilots/{second_pilot_id}/predict", json=payload).status_code == 200
     assert FakePilot.run_count == 2
+
+
+def test_compute_prediction_metrics_reports_user_pilot_deviation():
+    from routers import arena
+
+    points = [
+        {"index": 0, "user_angle": 0.0, "user_throttle": 0.2, "pilot_angle": 0.1, "pilot_throttle": 0.5},
+        {"index": 1, "user_angle": 0.5, "user_throttle": -0.2, "pilot_angle": 0.6, "pilot_throttle": -0.3},
+        {"index": 2, "user_angle": -0.5, "user_throttle": 0.0, "pilot_angle": -0.4, "pilot_throttle": 0.1},
+    ]
+
+    summary = arena.compute_prediction_metrics(points)
+
+    angle = summary["angle"]
+    assert angle["count"] == 3
+    assert angle["bias"] == pytest.approx(0.1)       # mean(pilot - user) = (0.1+0.1+0.1)/3
+    assert angle["mae"] == pytest.approx(0.1)
+    assert angle["rmse"] == pytest.approx(0.1)
+    assert angle["max_abs_error"] == pytest.approx(0.1)
+
+    throttle = summary["throttle"]                   # errors: +0.3, -0.1, +0.1
+    assert throttle["count"] == 3
+    assert throttle["bias"] == pytest.approx(0.1)
+    assert throttle["mae"] == pytest.approx(0.5 / 3)
+    assert throttle["rmse"] == pytest.approx(((0.09 + 0.01 + 0.01) / 3) ** 0.5)
+    assert throttle["max_abs_error"] == pytest.approx(0.3)
+
+
+def test_compute_prediction_metrics_excludes_non_finite_values():
+    from routers import arena
+
+    points = [
+        # throttle 对含 NaN/Inf 的帧不参与统计
+        {"index": 0, "user_angle": 0.0, "user_throttle": float("nan"), "pilot_angle": 0.1, "pilot_throttle": 0.2},
+        {"index": 1, "user_angle": 0.5, "user_throttle": 0.1, "pilot_angle": 0.6, "pilot_throttle": float("inf")},
+        {"index": 2, "user_angle": -0.5, "user_throttle": 0.3, "pilot_angle": -0.4, "pilot_throttle": 0.4},
+    ]
+
+    summary = arena.compute_prediction_metrics(points)
+
+    assert summary["angle"]["count"] == 3
+    assert summary["throttle"]["count"] == 1       # 仅 index 2 两值均有限
+    assert summary["throttle"]["bias"] == pytest.approx(0.1)
+
+    empty = arena.compute_prediction_metrics([])
+    assert empty["angle"] is None
+    assert empty["throttle"] is None
+
+
+def test_predictions_response_includes_summary_metrics(monkeypatch, tmp_path):
+    client, _ = make_client(monkeypatch)
+    model_path = tmp_path / "pilot.tflite"
+    model_path.write_text("model")
+
+    load_response = client.post(
+        "/api/arena/pilots/load",
+        json={
+            "model_path": str(model_path),
+            "model_type": "tflite_linear",
+            "config_path": str(tmp_path),
+        },
+    )
+    pilot_id = load_response.json()["pilot"]["id"]
+
+    response = client.post(
+        f"/api/arena/pilots/{pilot_id}/predictions",
+        json={"start": 0, "limit": 1, "config_path": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    # FakePilot 恒返回 (0.25, 0.5)；record user = (0.1, 0.2) → 误差 (0.15, 0.30)
+    assert summary["angle"]["mae"] == pytest.approx(0.15)
+    assert summary["angle"]["bias"] == pytest.approx(0.15)
+    assert summary["throttle"]["mae"] == pytest.approx(0.3)
+    assert summary["throttle"]["count"] == 1

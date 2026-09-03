@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-04 (175)
+
+- perf(frontend, backend) + feat(web-ui): Pilot Arena 推理链路优化（config 按 mtime 缓存 + 评估节流 250ms→逐帧）+ 批量预测新增「模型贴合摘要」
+  - **背景（实测分解）**：DKG-1.tflite(120×160 float32) 裸 TFLite 推理 1.24ms(≈807FPS)、`pilot.run` 1.33ms(≈750FPS)，模型本身非瓶颈；真瓶颈是 ① `web_ui/backend/routers/arena.py` 每次 predict 重新 `load_config()` 编译执行 config.py+myconfig.py ≈**75~80ms/帧**（占 97%，且每帧刷两行 `INFO:donkeycar.config` 日志）② 前端 `PilotArenaPage.tsx` 评估节流硬下限 250ms → 观察到的"4~5FPS"。
+  - **后端**：`arena.load_car_config` 按 (config.py, myconfig.py) mtime 缓存（线程锁 + 变化即重载；`arena.py` 模块级 `_car_config_cache`）。效果：单帧预测（缓存 config+磁盘读图+解码+TFLite）**79ms → 1.72ms（≈580FPS）**；config INFO 日志仅在首次/配置保存后出现一次。全部调用点（predict/preview/批量/load）共享缓存，无行为回归（mtime 变化即失效）。
+  - **前端**：推理评估节流下限 250→**16ms**（与图像加载一致，评估节奏=逐帧播放 `DRIVE_LOOP_HZ`，60Hz 时每播放帧一次推理）；新增 config 旋钮 `ARENA_PREDICTION_INTERVAL_MS`（可调大限流）；`ARENA_INFERENCE_CONCURRENCY` 上限 2→4。inference 徽标预期从 ~4 提升到接近播放帧率（受 DRIVE_LOOP_HZ=60 约束 ≈60）。
+  - **新功能（规划 §3.3「模型性能指标摘要」）**：`POST /api/arena/pilots/{id}/predictions` 响应新增 `summary`——角度/油门两序列各自的 MAE/RMSE/平均偏差(bias=pilot−user)/max|err|/count，非有限值所在帧自动剔除；纯函数 `compute_prediction_metrics`（arena.py）+ 前端 Tub Plot 图下「贴合摘要」展示区（i18n zh/en 各 10 词条）。批量 200 帧含摘要 330ms（≈606FPS 当量）；摘要计算 ~0.27µs/点（20 万点 53ms），开销可忽略；全缓存命中重跑 1.1ms。
+  - **测试**：`test_arena.py` +4 例（config 缓存语义 1 + 摘要 3，TDD 先红后绿）。后端 `pytest tests/` **340 passed + 2 skipped**；其中 `test_drift_vision.py::TestAdaptiveDetection` 4 例失败为**本机(Linux)既有环境问题**——`drift_vision.py:30` try 导入 `pupil_apriltags` 不在此环境（无 `_PupilDetector` 属性），与本次改动无关（未触碰 drift 链路文件）；Windows 基线 345 全绿无此问题。前端 vitest **158 passed**（27 文件）+ `tsc -b` + `npm run build` 全绿。
+  - 注：仅 DD 改动（arena 后端/前端 6 文件 + 测试 + 本日志），未 git 提交（工作区待用户 review）；浏览器端 FPS 徽标提升与真机多 viewer 并发负载待明早人工确认。
+
 ## 2026-09-03 (174)
 
 - chore(security): 隐私防漏加固与泄露清理——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则；移除被旧分支合并复活的 `AGENTS.md`/`CLAUDE.md` 跟踪

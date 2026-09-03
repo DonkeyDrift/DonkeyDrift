@@ -1,4 +1,6 @@
+import math
 import os
+import threading
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -83,6 +85,12 @@ loaded_pilots: dict[str, LoadedPilot] = {}
 prediction_cache: OrderedDict[tuple[Any, ...], dict[str, float]] = OrderedDict()
 PREDICTION_CACHE_LIMIT_PER_PILOT = 1500
 
+# Car config 按文件内容(mtime)缓存：推理热路径每帧调用 load_car_config，
+# 而 load_config 每次都会重新编译执行整份 config.py + myconfig.py(实测约 75ms)。
+# 只有当两个文件实际发生变化时才重载，避免每帧重复解析与日志刷屏。
+_car_config_cache: dict[str, tuple[tuple[float, float], Any]] = {}
+_car_config_lock = threading.Lock()
+
 
 def _serialise_pilot(pilot: LoadedPilot) -> dict[str, Any]:
     return {
@@ -110,13 +118,27 @@ def _format_for_path(path: str) -> str:
     return suffix or "savedmodel"
 
 
+def _config_stamp(config_file: str) -> tuple[float, float]:
+    myconfig_file = os.path.join(os.path.dirname(config_file), "myconfig.py")
+    myconfig_mtime = os.path.getmtime(myconfig_file) if os.path.exists(myconfig_file) else 0.0
+    return os.path.getmtime(config_file), myconfig_mtime
+
+
 def load_car_config(config_path: Optional[str] = None):
     if not config_path:
         return None
     config_file = os.path.join(config_path, "config.py") if os.path.isdir(config_path) else config_path
     if not os.path.exists(config_file):
         raise HTTPException(status_code=404, detail="Config file not found")
-    return load_config(config_file)
+
+    stamp = _config_stamp(config_file)
+    with _car_config_lock:
+        cached = _car_config_cache.get(config_file)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        cfg = load_config(config_file)
+        _car_config_cache[config_file] = (stamp, cfg)
+        return cfg
 
 
 def _get_record(record_index: int) -> dict[str, Any]:
@@ -244,6 +266,43 @@ def draw_control_line(angle: float, throttle: float, image: np.ndarray, color: t
         y = int(start_y + (end_y - start_y) * ratio)
         if 0 <= x < width and 0 <= y < height:
             image[y, x] = color
+
+
+def _series_summary(errors: List[float]) -> Optional[dict[str, float]]:
+    """单序列误差统计；errors 为空(无有限样本)返回 None。"""
+    if not errors:
+        return None
+    count = len(errors)
+    mae = sum(abs(error) for error in errors) / count
+    rmse = math.sqrt(sum(error * error for error in errors) / count)
+    bias = sum(errors) / count
+    max_abs_error = max(abs(error) for error in errors)
+    return {
+        "count": count,
+        "mae": mae,
+        "rmse": rmse,
+        "bias": bias,
+        "max_abs_error": max_abs_error,
+    }
+
+
+def compute_prediction_metrics(points: List[dict[str, Any]]) -> dict[str, Any]:
+    """批量预测点的模型贴合度摘要。
+
+    误差口径：pilot − user（正偏差=模型输出大于人工操作）。
+    非有限值(user 或 pilot 侧)所在帧不计入对应序列统计。
+    """
+    def errors(user_key: str, pilot_key: str) -> List[float]:
+        return [
+            point[pilot_key] - point[user_key]
+            for point in points
+            if math.isfinite(point[user_key]) and math.isfinite(point[pilot_key])
+        ]
+
+    return {
+        "angle": _series_summary(errors("user_angle", "pilot_angle")),
+        "throttle": _series_summary(errors("user_throttle", "pilot_throttle")),
+    }
 
 
 def _predict_loaded_pilot(pilot_id: str, request: PredictRequest) -> tuple[dict[str, float], dict[str, float]]:
@@ -444,4 +503,5 @@ async def predict_pilot_records(pilot_id: str, request: PredictionsRequest):
             "pilot_throttle": pilot["throttle"],
         })
 
-    return {"status": True, "limit": request.limit, "points": points}
+    return {"status": True, "limit": request.limit, "points": points,
+            "summary": compute_prediction_metrics(points)}
