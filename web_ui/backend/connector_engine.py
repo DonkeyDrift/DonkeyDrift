@@ -14,6 +14,7 @@ from remote_car_client import (
     build_remote_drive_stop_command,
     build_remote_rsync_check_command,
     parse_rsync_progress,
+    parse_rsync_stats,
 )
 
 
@@ -29,6 +30,8 @@ class ConnectorJob:
     finished_at: Optional[str] = None
     process: Optional[asyncio.subprocess.Process] = None
     error_message: Optional[str] = None
+    # 本次 rsync 传输统计（--stats 解析结果），仅 pull_tub/push_pilots 任务会有
+    transfer_stats: Optional[dict] = None
 
 
 class ConnectorJobManager:
@@ -39,6 +42,8 @@ class ConnectorJobManager:
             cls._instance = super().__new__(cls)
             cls._instance.jobs: Dict[str, ConnectorJob] = {}
             cls._instance.drive_pid: Optional[int] = None
+            # 自动同步防抖：记录正在自动同步的连接 key（同一连接不重复触发）
+            cls._instance.auto_sync_keys: set[str] = set()
         return cls._instance
 
     def create_job(self, kind: Literal["pull_tub", "push_pilots", "drive_start", "drive_stop"]) -> ConnectorJob:
@@ -48,6 +53,37 @@ class ConnectorJobManager:
 
     def get_job(self, job_id: str) -> Optional[ConnectorJob]:
         return self.jobs.get(job_id)
+
+    def has_active_pull_job(self) -> bool:
+        return any(job.kind == "pull_tub" and job.status in {"pending", "running"} for job in self.jobs.values())
+
+    def try_begin_auto_sync(self, key: str) -> bool:
+        """自动同步防抖：同一连接正在自动同步、或已有 pull 任务在跑时，不重复触发。"""
+        if key in self.auto_sync_keys or self.has_active_pull_job():
+            return False
+        self.auto_sync_keys.add(key)
+        return True
+
+    def end_auto_sync(self, key: str) -> None:
+        self.auto_sync_keys.discard(key)
+
+    async def run_auto_sync(
+        self,
+        key: str,
+        config: ConnectorConfig,
+        remote_tub: str,
+        local_data_path: str,
+        on_finished=None,
+    ) -> ConnectorJob:
+        """自动同步入口：连接建立后增量拉取 Tub 数据，结束后回调 on_finished(job) 供持久化结果。"""
+        job = self.create_job("pull_tub")
+        try:
+            await self.run_pull_tub(job, config, remote_tub, local_data_path, False)
+        finally:
+            self.end_auto_sync(key)
+        if on_finished is not None:
+            on_finished(job)
+        return job
 
     async def stop_job(self, job_id: str):
         job = self.jobs.get(job_id)
@@ -195,6 +231,8 @@ class ConnectorJobManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
+            stats_lines: list[str] = []
+            in_stats = False
             while True:
                 line = await job.process.stdout.readline()
                 if not line:
@@ -208,8 +246,20 @@ class ConnectorJobManager:
                 if progress is not None:
                     job.progress = progress
                     await job.log_queue.put({"type": "progress", "progress": progress})
+                # rsync --stats 输出以 "Number of files:" 开头，收集到结束用于统计
+                if text.startswith("Number of files:"):
+                    in_stats = True
+                if in_stats:
+                    stats_lines.append(text)
 
             await job.process.wait()
+            stats = parse_rsync_stats(stats_lines)
+            job.transfer_stats = {
+                "transferred_files": stats.transferred_files,
+                "total_files": stats.total_files,
+                "transferred_bytes": stats.transferred_bytes,
+                "total_size": stats.total_size,
+            }
             if job.status == "stopped":
                 return
             if job.process.returncode == 0:

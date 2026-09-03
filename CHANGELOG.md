@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-03 (166)
+
+- feat(connector): Car Connector 三任务——局域网自动发现小车单测补齐、小车 Tub 数据自动同步到笔记本、笔记本一键安装训练依赖（2026-08-26 开发于 session-3task，本次收尾合入）
+  - 自动发现（补单测）：`donkeycar/tests/test_dc_discovery.py` 新增 13 用例、`web_ui/backend/tests/test_network_utils.py` 新增 16 用例。
+  - 自动同步：`web_ui/backend/remote_car_client.py`——`build_ssh_base` 加 `-o StrictHostKeyChecking=accept-new`（修新设备首连 host key 校验卡死）、`build_pull_tub_command` 加 `--update --stats`（增量同步+统计）、新增 `RsyncTransferStats`/`parse_rsync_stats()`（按 rsync 3.x 真实输出匹配，兼容老版措辞）；`web_ui/backend/connector_engine.py`——`ConnectorJob.transfer_stats`、`_run_rsync` 收集 stats 段、`has_active_pull_job()/try_begin_auto_sync()/end_auto_sync()` 防抖与 `run_auto_sync()` 入口；`web_ui/backend/routers/connector.py`——`ConnectorConfigPayload` 扩展 `auto_sync/auto_sync_tub/auto_sync_local_path/last_sync_at/last_sync_result`、`POST /status` 连接成功且开自动同步时自动入队、新增 `POST /auto_sync` 开关、`_record_last_sync()` 写回结果；前端新增 `web_ui/frontend/src/components/AutoSyncPanel.tsx`（开关 + 最近同步时间/结果，开启后 10s 轮询）挂载 `CarConnectorPage.tsx`。
+  - 一键安装：`web_ui/backend/mypc_installer.py`（新建，paramiko SSH 流式执行 `pip install --upgrade "donkeydrifter[pc]"`，get_pty 逐行、ANSI 清洗、1h 超时、stop_event）；`web_ui/backend/mypc_probe.py`——`_open_ssh` 支持可选 `key_path`、无密码时回退默认密钥/agent，缺包提示修正为 `pip install "donkeydrifter[pc]"`；`web_ui/backend/trainer_engine.py` mypc_install job 模式 + `run_mypc_install()`；`web_ui/backend/routers/trainer.py` 新增 `POST /api/trainer/mypc/install`、probe/install 透传 `key_path`；前端 `MyPcProbePanel.tsx` 一键安装按钮 + SSE 实时日志尾部、`RemoteConfigForm.tsx` 新增 SSH 私钥输入框、`useTrainingJob.ts`/`useStore.ts`/`api.ts` 透传 `key_path` 与 auto_sync 字段；i18n `connector.ts` +5 条、`trainer.ts` +8 条中英文。
+  - 测试同步：`test_connector.py` +9 用例（rsync 真实格式/防抖/自动触发/持久化）、`test_trainer_mypc.py`/`test_trainer_mypc_probe.py` mock 签名同步、新建 `test_trainer_mypc_installer.py`（13 用例）、`AutoSyncPanel.test.tsx`（4）、`MyPcProbePanel.test.tsx`（7）、`CarSettingsPanel.test.tsx` +2。实测：后端 `pytest tests/` 156 passed、`donkeycar/tests/test_dc_discovery.py` 13 passed、前端 `vitest run` 28 文件 153 passed、`tsc -b` 无错、`npm run build` 通过。端到端实测（2026-08-26 临时 8025 实例）：真机发现 2.6s 扫出真车、localhost 模拟车端验证自动同步增量 rsync 统计正确（重复触发 0 传输）、一键安装成功/失败两路径真实验证。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。`[pc]` 全家桶未在本机完整安装（/tmp tmpfs 与根分区容量限制），属环境限制非代码问题。
+
 ## 2026-09-03 (165)
 
 - chore(security): 隐私防漏加固——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则（配合 Firmware 侧隐私泄露清理）

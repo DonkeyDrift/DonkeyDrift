@@ -20,6 +20,39 @@ beforeEach(() => {
 });
 
 describe('CarSettingsPanel', () => {
+  it('挂载后自动扫描一次（无需手动点击重新扫描）', async () => {
+    mockDiscover.mockResolvedValue({ found: [] } as never);
+    render(<CarSettingsPanel />);
+
+    await waitFor(() => {
+      expect(mockDiscover).toHaveBeenCalledTimes(1);
+    });
+    // 扫描结束（scanning=false）后也不再重复扫描
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'console.rescan' })).toBeEnabled();
+    });
+    expect(mockDiscover).toHaveBeenCalledTimes(1);
+  });
+
+  it('挂载自动扫描失败时静默跳过，不渲染错误且可手动重扫', async () => {
+    mockDiscover.mockRejectedValue(new Error('network down'));
+    render(<CarSettingsPanel />);
+
+    await waitFor(() => {
+      expect(mockDiscover).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole('button', { name: 'console.rescan' })).toBeEnabled();
+    expect(screen.getAllByText('console.noDevice').length).toBeGreaterThan(0);
+
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+    } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'console.rescan' }));
+    await waitFor(() => {
+      expect(mockDiscover).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('手柄校准按钮位于重新扫描右侧，点击后 postMessage(dd-open-joystick-cal) 到内嵌车端 iframe', async () => {
     mockDiscover.mockResolvedValue({
       found: [{ ip: '192.168.3.46', port: 80, reachable: true }],

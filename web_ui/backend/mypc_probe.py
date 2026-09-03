@@ -45,19 +45,29 @@ class ProbeResult:
 # ----------------------------------------------------------------------
 # Low-level SSH helpers (kept small so tests can patch them easily)
 # ----------------------------------------------------------------------
-def _open_ssh(host: str, user: str, password: str, port: int = 22, timeout: int = 10):
+def _open_ssh(host: str, user: str, password: str, port: int = 22, timeout: int = 10, key_path: str = ""):
     """Open a Paramiko SSH client with host-key checking disabled (same as
     the training pipeline) and no interactive auth fallbacks."""
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    connect_kwargs = {}
+    if key_path:
+        # 显式指定私钥（与 Car Connector 的 key_path 用法对齐）
+        connect_kwargs["key_filename"] = os.path.expanduser(key_path)
+    elif not password:
+        # 未提供密码时回退到默认密钥 / ssh-agent（~/.ssh/id_rsa 等）
+        connect_kwargs["look_for_keys"] = True
+        connect_kwargs["allow_agent"] = True
+    else:
+        connect_kwargs["allow_agent"] = False
+        connect_kwargs["look_for_keys"] = False
     client.connect(
         host,
         port=port,
         username=user,
         password=password,
         timeout=timeout,
-        allow_agent=False,
-        look_for_keys=False,
+        **connect_kwargs,
     )
     return client
 
@@ -122,13 +132,14 @@ def probe_mypc_environment(
     python_path: str = "",
     port: int = 22,
     ssh_timeout: int = 10,
+    key_path: str = "",
 ) -> ProbeResult:
     """Connect to the user's computer and diagnose its training readiness."""
     result = ProbeResult(ok=False)
 
     # 1. SSH connectivity
     try:
-        ssh = _open_ssh(host, user, password, port=port, timeout=ssh_timeout)
+        ssh = _open_ssh(host, user, password, port=port, timeout=ssh_timeout, key_path=key_path)
     except Exception as exc:  # noqa: BLE001 - surface a clean hint, not a stack
         result.checks.append(ProbeCheck(
             name="ssh",
@@ -270,7 +281,7 @@ def _check_donkeycar(ssh, result: ProbeResult):
             name="donkeycar",
             status="fail",
             message="Python 可用，但未检测到 donkeycar 包。",
-            hint="请在目标电脑运行: pip install donkeycar（或本仓库的安装方式）。",
+            hint='请在目标电脑运行: pip install "donkeydrifter[pc]"（本项目的训练依赖安装方式）。',
         ))
 
     code, _, err = _run_remote(ssh, _donkey_cli_probe(result.python_path, result.python_path))

@@ -31,7 +31,7 @@ def _patchers(commands, ssh_ok=True):
     """Create patchers for _open_ssh and _run_remote for one probe call."""
     ssh = FakeSsh()
 
-    def _open(host, user, password, port=22, timeout=10):
+    def _open(host, user, password, port=22, timeout=10, key_path=""):
         if not ssh_ok:
             raise ConnectionError("connection refused")
         return ssh

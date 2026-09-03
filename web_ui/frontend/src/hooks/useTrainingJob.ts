@@ -121,6 +121,7 @@ export function useTrainingJob() {
       remote_dir_base: cfg.remoteDirBase,
       model_name: cfg.modelName,
       python_path: cfg.pythonPath,
+      key_path: cfg.keyPath,
     }, configFile);
 
     const { job_id } = await start({

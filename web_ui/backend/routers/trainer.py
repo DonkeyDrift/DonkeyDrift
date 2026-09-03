@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from trainer_engine import job_manager
 from mypc_probe import probe_mypc_environment
-
 router = APIRouter()
 
 # ------------------------------------------------------------------
@@ -63,6 +62,17 @@ class MyPcProbeRequest(BaseModel):
     port: int = 22
     remote_dir_base: str = "~/projects"
     python_path: str = ""
+    key_path: str = ""
+
+
+class MyPcInstallRequest(BaseModel):
+    """一键安装训练依赖：需要 probe 探测到的 python 路径。"""
+    host: str
+    user: str
+    password: str = ""
+    port: int = 22
+    python_path: str
+    key_path: str = ""
 
 
 class StopRequest(BaseModel):
@@ -138,6 +148,7 @@ async def probe_mypc(request: MyPcProbeRequest):
         remote_dir_base=request.remote_dir_base,
         python_path=request.python_path,
         port=request.port,
+        key_path=request.key_path,
     )
     return {
         "ok": result.ok,
@@ -155,6 +166,36 @@ async def probe_mypc(request: MyPcProbeRequest):
         ],
         "suggestions": result.suggestions,
     }
+
+
+@router.post("/mypc/install")
+async def install_mypc(request: MyPcInstallRequest):
+    """One-click dependency install for 'This Computer' (mypc) training.
+
+    Requires a python path discovered by a prior /mypc/probe call; runs
+    ``<python> -m pip install --upgrade "donkeydrifter[pc]"`` over SSH as a
+    job whose logs stream through the shared /train/{job_id}/logs SSE
+    endpoint (the job mode is 'mypc_install').
+    """
+    if not request.python_path or not request.python_path.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="缺少 Python 解释器路径，请先运行环境检测。",
+        )
+
+    job = job_manager.create_job("mypc_install")
+    asyncio.create_task(
+        job_manager.run_mypc_install(
+            job,
+            host=request.host,
+            user=request.user,
+            password=request.password,
+            python_path=request.python_path,
+            port=request.port,
+            key_path=request.key_path,
+        )
+    )
+    return {"job_id": job.id, "status": job.status}
 
 
 # ------------------------------------------------------------------

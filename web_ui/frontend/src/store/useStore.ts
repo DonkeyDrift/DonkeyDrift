@@ -33,6 +33,8 @@ export interface TrainerOnlineConfig {
   remoteDirBase: string;
   modelName: string;
   pythonPath: string;
+  /** SSH 私钥路径（可选，与 Car Connector 的 key_path 对齐；留空时用密码认证） */
+  keyPath: string;
 }
 
 // Connection settings for training on the user's own computer (SSH callback
@@ -161,6 +163,7 @@ export const useStore = create<AppState>()(
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',
+        keyPath: '',
       },
       trainerMyPcConfig: {
         host: '',
@@ -169,6 +172,7 @@ export const useStore = create<AppState>()(
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '',
+        keyPath: '',
       },
       trainerLocalConfig: {
         tub: './data',

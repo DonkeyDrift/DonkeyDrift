@@ -49,9 +49,11 @@ class TrainingProgress:
 class TrainingJob:
     id: str
     # 'local' = on the machine running this backend; 'mypc' = on the user's
-    # own computer (SSH callback, config train_my_pc.conf); 'online' = on the
-    # configured cloud server (config train_online.conf).
-    mode: Literal['local', 'mypc', 'online']
+    # own computer (SSH callback, config train_my_pc.conf); 'mypc_install' =
+    # dependency install job on the user's computer (pip install
+    # "donkeydrifter[pc]"); 'online' = on the configured cloud server
+    # (config train_online.conf).
+    mode: Literal['local', 'mypc', 'mypc_install', 'online']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
     log_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue())
     progress: TrainingProgress = field(default_factory=TrainingProgress)
@@ -75,7 +77,7 @@ class TrainingJobManager:
             cls._instance.jobs: Dict[str, TrainingJob] = {}
         return cls._instance
 
-    def create_job(self, mode: Literal['local', 'mypc', 'online']) -> TrainingJob:
+    def create_job(self, mode: Literal['local', 'mypc', 'mypc_install', 'online']) -> TrainingJob:
         job_id = str(uuid.uuid4())[:8]
         job = TrainingJob(id=job_id, mode=mode)
         self.jobs[job_id] = job
@@ -107,7 +109,7 @@ class TrainingJobManager:
                         pass
 
             asyncio.create_task(force_kill())
-        elif job.mode in ('mypc', 'online') and job.stop_event:
+        elif job.mode in ('mypc', 'mypc_install', 'online') and job.stop_event:
             job.stop_event.set()
 
         job.finished_at = datetime.now().isoformat()
@@ -233,7 +235,14 @@ class TrainingJobManager:
         job.trainer_thread = threading.Thread(target=run_trainer, daemon=True)
         job.trainer_thread.start()
 
-        # Bridge thread_queue -> async job.log_queue
+        await self._pump_thread_queue(job, thread_queue)
+
+    async def _pump_thread_queue(self, job: TrainingJob, thread_queue: "queue.Queue"):
+        """Bridge a worker-thread queue into the async job.log_queue.
+
+        Shared by online/mypc training and mypc dependency install: relays
+        log / progress / error events until the worker thread exits.
+        """
         try:
             while job.trainer_thread.is_alive() or not thread_queue.empty():
                 if job.stop_event.is_set():
@@ -286,6 +295,49 @@ class TrainingJobManager:
         """
         await self.run_online(job, config_file=config_file, working_dir=working_dir,
                               ssh_credentials=ssh_credentials)
+
+    # ------------------------------------------------------------------
+    # My-PC dependency install (pip install "donkeydrifter[pc]")
+    # ------------------------------------------------------------------
+    async def run_mypc_install(self, job: TrainingJob, host: str, user: str,
+                               password: str, python_path: str, port: int = 22,
+                               key_path: str = ""):
+        """Install training dependencies on the user's own computer.
+
+        Runs ``mypc_installer.install_mypc_environment`` in a worker thread
+        (Paramiko is blocking) and streams its log events into the job queue,
+        so the install job reuses the training job status / SSE endpoints.
+        """
+        job.status = 'running'
+
+        thread_queue: queue.Queue = queue.Queue()
+        job.stop_event = threading.Event()
+
+        def run_installer():
+            try:
+                from mypc_installer import install_mypc_environment
+                code = install_mypc_environment(
+                    host=host,
+                    user=user,
+                    password=password,
+                    python_path=python_path,
+                    port=port,
+                    log_queue=thread_queue,
+                    stop_event=job.stop_event,
+                    key_path=key_path,
+                )
+                if code != 0 and not job.stop_event.is_set():
+                    thread_queue.put({
+                        "type": "error",
+                        "message": f"pip install 失败，退出码: {code}",
+                    })
+            except Exception as e:
+                thread_queue.put({"type": "error", "message": str(e)})
+
+        job.trainer_thread = threading.Thread(target=run_installer, daemon=True)
+        job.trainer_thread.start()
+
+        await self._pump_thread_queue(job, thread_queue)
 
     # ------------------------------------------------------------------
     # Shared parsing

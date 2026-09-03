@@ -21,6 +21,9 @@ interface RemoteConfigFormProps {
   onModelNameChange: (v: string) => void;
   pythonPath: string;
   onPythonPathChange: (v: string) => void;
+  /** SSH 私钥路径（可选，留空用密码认证） */
+  keyPath?: string;
+  onKeyPathChange?: (v: string) => void;
 }
 
 export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
@@ -40,6 +43,8 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
   onModelNameChange,
   pythonPath,
   onPythonPathChange,
+  keyPath = '',
+  onKeyPathChange,
 }) => {
   const { t } = useTranslation();
   const { configPath } = useStore();
@@ -121,6 +126,17 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           value={pythonPath}
           onChange={(e) => onPythonPathChange(e.target.value)}
           className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+        />
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs text-zinc-500">{t('trainer.keyPath')}</label>
+        <input
+          type="text"
+          value={keyPath}
+          placeholder="~/.ssh/id_rsa"
+          onChange={(e) => onKeyPathChange(e.target.value)}
+          className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-cyan-600"
         />
       </div>
 

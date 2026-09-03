@@ -224,6 +224,8 @@ export interface TrainerConfig {
   remote_dir_base: string;
   model_name: string;
   python_path: string;
+  /** SSH 私钥路径（可选，留空用密码认证） */
+  key_path?: string;
 }
 
 export interface SSHCredentials {
@@ -266,9 +268,22 @@ export const probeMyPc = async (cfg: {
   port?: number;
   remote_dir_base?: string;
   python_path?: string;
+  key_path?: string;
 }): Promise<MyPcProbeResult> => {
   const response = await api.post('/trainer/mypc/probe', cfg);
   return response.data;
+};
+
+export const installMyPc = async (cfg: {
+  host: string;
+  user: string;
+  password: string;
+  port?: number;
+  python_path: string;
+  key_path?: string;
+}) => {
+  const response = await api.post('/trainer/mypc/install', cfg);
+  return response.data as { job_id: string; status: string };
 };
 
 export const listModels = async (workingDir?: string) => {
@@ -419,6 +434,11 @@ export interface ConnectorConfig {
   port: number;
   car_dir: string;
   key_path?: string | null;
+  auto_sync?: boolean;
+  auto_sync_tub?: string;
+  auto_sync_local_path?: string;
+  last_sync_at?: string | null;
+  last_sync_result?: string | null;
 }
 
 export type ConnectorJobState = 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -446,7 +466,20 @@ export const setConnectorConfig = async (config: ConnectorConfig) => {
 
 export const checkConnectorStatus = async () => {
   const response = await api.post('/connector/status');
-  return response.data as { online: boolean; message: string };
+  return response.data as {
+    online: boolean;
+    message: string;
+    auto_sync: { enabled: boolean; triggered: boolean };
+    last_sync: { at: string | null; result: string | null };
+  };
+};
+
+export const setConnectorAutoSync = async (enabled: boolean) => {
+  const response = await api.post('/connector/auto_sync', { enabled });
+  return response.data as {
+    auto_sync: { enabled: boolean };
+    last_sync: { at: string | null; result: string | null };
+  };
 };
 
 export const listConnectorTubs = async () => {
