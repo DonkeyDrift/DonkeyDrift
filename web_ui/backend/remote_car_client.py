@@ -12,6 +12,22 @@ _VALID_FORMATS = {"h5", "savedmodel", "tflite", "trt"}
 
 
 @dataclass
+class RsyncTransferStats:
+    """rsync --stats 输出中提取的本次传输统计（增量同步结果摘要）。"""
+
+    transferred_files: int = 0
+    total_files: int = 0
+    transferred_bytes: int = 0
+    total_size: int = 0
+
+    def summary(self) -> str:
+        return (
+            f"已传输 {self.transferred_files}/{self.total_files} 个文件，"
+            f"{self.transferred_bytes}/{self.total_size} 字节"
+        )
+
+
+@dataclass
 class ConnectorConfig:
     host: str
     user: str
@@ -53,7 +69,8 @@ def remote_join(*parts: str) -> str:
 
 
 def build_ssh_base(config: ConnectorConfig) -> list[str]:
-    command = ["ssh", "-p", str(config.port), "-o", "ConnectTimeout=3"]
+    # accept-new：首次连接新车自动接受 host key（否则自动同步流程必被卡住），key 变更时仍拒绝以防中间人
+    command = ["ssh", "-p", str(config.port), "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new"]
     if config.key_path:
         command.extend(["-i", os.path.expanduser(config.key_path)])
     command.append(config.target)
@@ -76,6 +93,9 @@ def build_pull_tub_command(
         "-rv",
         "--progress",
         "--partial",
+        # 增量同步：跳过本地已存在且未变更的文件，避免每次拉全量
+        "--update",
+        "--stats",
         f"{config.target}:{remote_path}",
         local_data_path,
     ]
@@ -174,6 +194,30 @@ def parse_rsync_progress(line: str) -> Optional[float]:
     if total == 0:
         return 100.0
     return 100.0 * (1.0 - remaining / total)
+
+
+def parse_rsync_stats(output_lines: Iterable[str]) -> RsyncTransferStats:
+    """从 rsync --stats 输出提取传输统计；缺失的字段保持 0。"""
+    stats = RsyncTransferStats()
+    for line in output_lines:
+        text = line.strip()
+        match = re.match(r"(Number of regular files transferred|Number of files transferred)\s*:\s*([\d,]+)", text)
+        if match:
+            stats.transferred_files = int(match.group(2).replace(",", ""))
+            continue
+        match = re.match(r"Number of files\s*:\s*([\d,]+)", text)
+        if match:
+            stats.total_files = int(match.group(1).replace(",", ""))
+            continue
+        # rsync 3.x 输出 "Total transferred file size"，老版本为 "Total transferred size"
+        match = re.match(r"Total transferred (?:file )?size\s*:\s*([\d,]+)", text)
+        if match:
+            stats.transferred_bytes = int(match.group(1).replace(",", ""))
+            continue
+        match = re.match(r"Total file size\s*:\s*([\d,]+)", text)
+        if match:
+            stats.total_size = int(match.group(1).replace(",", ""))
+    return stats
 
 
 class RemoteCarClient:

@@ -72,7 +72,7 @@ def test_mypc_probe_route():
     from mypc_probe import ProbeCheck, ProbeResult
 
     def fake_probe(host, user, password, remote_dir_base="~/projects",
-                   python_path="", port=22):
+                   python_path="", port=22, key_path=""):
         return ProbeResult(
             ok=True,
             platform="linux",

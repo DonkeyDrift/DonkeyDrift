@@ -65,6 +65,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
           remoteDirBase: cfg.remote_dir_base,
           modelName: cfg.model_name,
           pythonPath: cfg.python_path,
+          keyPath: cfg.key_path ?? '',
         };
         setOnlineForm(next);
         setTrainerOnlineConfig(next);
@@ -81,6 +82,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
           remoteDirBase: cfg.remote_dir_base,
           modelName: cfg.model_name,
           pythonPath: cfg.python_path,
+          keyPath: cfg.key_path ?? '',
         };
         setMyPcForm(next);
         setTrainerMyPcConfig(next);
@@ -270,6 +272,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
                 onModelNameChange={(v) => setMyPcForm((f) => ({ ...f, modelName: v }))}
                 pythonPath={myPcForm.pythonPath}
                 onPythonPathChange={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+                keyPath={myPcForm.keyPath}
+                onKeyPathChange={(v) => setMyPcForm((f) => ({ ...f, keyPath: v }))}
               />
               <MyPcProbePanel
                 host={myPcForm.host}
@@ -277,6 +281,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
                 password={myPcForm.password}
                 remoteDirBase={myPcForm.remoteDirBase}
                 pythonPath={myPcForm.pythonPath}
+                keyPath={myPcForm.keyPath}
                 onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
               />
             </>
@@ -295,6 +300,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
               onModelNameChange={(v) => setOnlineForm((f) => ({ ...f, modelName: v }))}
               pythonPath={onlineForm.pythonPath}
               onPythonPathChange={(v) => setOnlineForm((f) => ({ ...f, pythonPath: v }))}
+              keyPath={onlineForm.keyPath}
+              onKeyPathChange={(v) => setOnlineForm((f) => ({ ...f, keyPath: v }))}
             />
           )}
 

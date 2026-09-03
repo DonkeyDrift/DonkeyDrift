@@ -75,8 +75,48 @@ def test_build_pull_tub_command_uses_argument_array():
     )
 
     assert command[:4] == ["rsync", "-rv", "--progress", "--partial"]
+    # 增量同步：--update 跳过本地已存在文件，--stats 输出传输统计
+    assert "--update" in command
+    assert "--stats" in command
     assert command[-2] == "pi@car.local:~/mycar/data/"
     assert command[-1] == "./data"
+
+
+def test_parse_rsync_stats_extracts_transfer_summary():
+    from remote_car_client import parse_rsync_stats
+
+    lines = [
+        "Number of files: 12 (reg: 10, dir: 2)",
+        "Number of regular files transferred: 8",
+        "Total file size: 1,024,576 bytes",
+        "Total transferred file size: 512,000 bytes",
+    ]
+
+    stats = parse_rsync_stats(lines)
+
+    assert stats.total_files == 12
+    assert stats.transferred_files == 8
+    assert stats.total_size == 1024576
+    assert stats.transferred_bytes == 512000
+    assert "8/12" in stats.summary()
+
+
+def test_parse_rsync_stats_supports_legacy_transferred_size_wording():
+    from remote_car_client import parse_rsync_stats
+
+    # 老版 rsync 输出 "Total transferred size"（无 file 一词），也应正确解析
+    stats = parse_rsync_stats(["Total transferred size: 300 bytes"])
+
+    assert stats.transferred_bytes == 300
+
+
+def test_parse_rsync_stats_handles_empty_output():
+    from remote_car_client import parse_rsync_stats
+
+    stats = parse_rsync_stats([])
+
+    assert stats.transferred_files == 0
+    assert stats.total_files == 0
 
 
 def test_build_push_pilots_command_filters_selected_formats():
@@ -228,7 +268,8 @@ def test_status_uses_remote_client(monkeypatch, tmp_path):
     response = client.post("/api/connector/status")
 
     assert response.status_code == 200
-    assert response.json() == {"online": True, "message": "Connected"}
+    assert response.json()["online"] is True
+    assert response.json()["message"] == "Connected"
 
 
 def test_pull_tub_job_fails_when_command_building_fails():
@@ -425,3 +466,235 @@ def test_discover_console_endpoint_empty(monkeypatch, tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert data["count"] == 0
+
+
+def _install_auto_sync_fakes(monkeypatch, connector):
+    """为自动同步测试打桩：记录 run_auto_sync 触发情况，不让真实任务跑起来。"""
+    triggered = []
+
+    async def fake_run_auto_sync(key, config, remote_tub, local_data_path, on_finished=None):
+        triggered.append({"key": key, "remote_tub": remote_tub})
+
+    monkeypatch.setattr(connector.connector_job_manager, "run_auto_sync", fake_run_auto_sync)
+    return triggered
+
+
+def test_status_auto_sync_triggers_once_when_online(monkeypatch, tmp_path):
+    client, connector = make_client(monkeypatch, tmp_path)
+    triggered = _install_auto_sync_fakes(monkeypatch, connector)
+
+    class FakeRemoteCarClient:
+        def __init__(self, config):
+            self.config = config
+
+        def check_connection(self):
+            return True, "Connected"
+
+    monkeypatch.setattr(connector, "RemoteCarClient", FakeRemoteCarClient)
+    client.post(
+        "/api/connector/config",
+        json={"host": "car.local", "user": "pi", "port": 22, "car_dir": "~/mycar", "auto_sync": True},
+    )
+
+    # 第一次状态检查：连接成功 + auto_sync 开启 → 触发一次自动同步
+    response = client.post("/api/connector/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["online"] is True
+    assert data["auto_sync"] == {"enabled": True, "triggered": True}
+    assert data["last_sync"] == {"at": None, "result": None}
+
+    # 第二次状态检查：同一连接防抖，不再重复触发
+    response = client.post("/api/connector/status")
+    data = response.json()
+    assert data["auto_sync"]["triggered"] is False
+    assert len(triggered) == 1
+    assert triggered[0]["remote_tub"] == "data"
+
+
+def test_status_auto_sync_not_triggered_when_disabled_or_offline(monkeypatch, tmp_path):
+    client, connector = make_client(monkeypatch, tmp_path)
+    triggered = _install_auto_sync_fakes(monkeypatch, connector)
+
+    class FakeRemoteCarClient:
+        def __init__(self, config):
+            self.config = config
+
+        def check_connection(self):
+            return False, "unreachable"
+
+    monkeypatch.setattr(connector, "RemoteCarClient", FakeRemoteCarClient)
+    client.post(
+        "/api/connector/config",
+        json={"host": "car.local", "user": "pi", "port": 22, "car_dir": "~/mycar", "auto_sync": True},
+    )
+
+    # 离线：即使 auto_sync 开启也不触发
+    response = client.post("/api/connector/status")
+    assert response.json()["auto_sync"]["triggered"] is False
+    assert len(triggered) == 0
+
+
+def test_status_auto_sync_skipped_when_pull_job_running(monkeypatch, tmp_path):
+    client, connector = make_client(monkeypatch, tmp_path)
+    _install_auto_sync_fakes(monkeypatch, connector)
+
+    class FakeRemoteCarClient:
+        def __init__(self, config):
+            self.config = config
+
+        def check_connection(self):
+            return True, "Connected"
+
+    monkeypatch.setattr(connector, "RemoteCarClient", FakeRemoteCarClient)
+    client.post(
+        "/api/connector/config",
+        json={"host": "car.local", "user": "pi", "port": 22, "car_dir": "~/mycar", "auto_sync": True},
+    )
+
+    # 已有 pull 任务在跑 → 不自动入队
+    manager = connector.connector_job_manager
+    existing = manager.create_job("pull_tub")
+    try:
+        response = client.post("/api/connector/status")
+        assert response.json()["auto_sync"]["triggered"] is False
+    finally:
+        manager.jobs.pop(existing.id, None)
+
+
+def test_try_begin_auto_sync_debounce_and_end():
+    import connector_engine
+
+    manager = connector_engine.ConnectorJobManager()
+    manager.auto_sync_keys = set()
+    manager.jobs = {}
+
+    # 同一 key 第二次触发被防抖拒绝
+    assert manager.try_begin_auto_sync("pi@car:22:~/mycar") is True
+    assert manager.try_begin_auto_sync("pi@car:22:~/mycar") is False
+
+    # 结束后可再次触发
+    manager.end_auto_sync("pi@car:22:~/mycar")
+    assert manager.try_begin_auto_sync("pi@car:22:~/mycar") is True
+    manager.end_auto_sync("pi@car:22:~/mycar")
+
+    # 有 pull 任务在跑时拒绝
+    job = manager.create_job("pull_tub")
+    try:
+        assert manager.try_begin_auto_sync("other") is False
+    finally:
+        manager.jobs.pop(job.id, None)
+
+
+def test_run_auto_sync_records_stats_and_calls_callback(monkeypatch):
+    import asyncio
+
+    import connector_engine
+    from connector_engine import ConnectorJobManager
+    from remote_car_client import ConnectorConfig
+
+    class FakeStatsStdout:
+        def __init__(self):
+            self.lines = [
+                b"Number of files: 5 (reg: 4, dir: 1)",
+                b"Number of regular files transferred: 2",
+                b"Total file size: 1000 bytes",
+                b"Total transferred file size: 400 bytes",
+                b"",
+            ]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    class FakeStatsProcess:
+        stdout = FakeStatsStdout()
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+    async def create_process(*args, **kwargs):
+        return FakeStatsProcess()
+
+    async def fake_ensure_rsync(job, config):
+        return True
+
+    results = []
+
+    async def run_job():
+        manager = ConnectorJobManager()
+        monkeypatch.setattr(connector_engine.asyncio, "create_subprocess_exec", create_process)
+        monkeypatch.setattr(manager, "_ensure_rsync_available", fake_ensure_rsync)
+
+        job = await manager.run_auto_sync(
+            "pi@car:22:~/mycar",
+            ConnectorConfig(host="car.local", user="pi", car_dir="~/mycar"),
+            "data",
+            "./data",
+            on_finished=lambda j: results.append((j.status, j.transfer_stats)),
+        )
+        return manager, job
+
+    manager, job = asyncio.run(run_job())
+
+    assert job.status == "completed"
+    assert job.transfer_stats == {
+        "transferred_files": 2,
+        "total_files": 5,
+        "transferred_bytes": 400,
+        "total_size": 1000,
+    }
+    assert results == [("completed", job.transfer_stats)]
+    # 自动同步结束后防抖 key 已释放
+    assert "pi@car:22:~/mycar" not in manager.auto_sync_keys
+
+
+def test_auto_sync_endpoint_round_trip(monkeypatch, tmp_path):
+    client, _ = make_client(monkeypatch, tmp_path)
+
+    # 默认关闭
+    loaded = client.get("/api/connector/config")
+    assert loaded.json()["config"]["auto_sync"] is False
+
+    # 打开开关
+    response = client.post("/api/connector/auto_sync", json={"enabled": True})
+    assert response.status_code == 200
+    assert response.json()["auto_sync"]["enabled"] is True
+    assert response.json()["last_sync"] == {"at": None, "result": None}
+
+    # 开关状态随配置持久化
+    loaded = client.get("/api/connector/config")
+    assert loaded.json()["config"]["auto_sync"] is True
+
+    # 关闭开关
+    response = client.post("/api/connector/auto_sync", json={"enabled": False})
+    assert response.json()["auto_sync"]["enabled"] is False
+
+
+def test_record_last_sync_persists_result(monkeypatch, tmp_path):
+    from connector_engine import ConnectorJobManager
+
+    client, connector = make_client(monkeypatch, tmp_path)
+    client.post(
+        "/api/connector/config",
+        json={"host": "car.local", "user": "pi", "port": 22, "car_dir": "~/mycar"},
+    )
+
+    manager = ConnectorJobManager()
+    job = manager.create_job("pull_tub")
+    job.status = "completed"
+    job.transfer_stats = {"transferred_files": 3, "total_files": 4, "transferred_bytes": 100, "total_size": 200}
+    connector._record_last_sync(job)
+
+    loaded = client.get("/api/connector/config").json()["config"]
+    assert loaded["last_sync_at"] is not None
+    assert "同步成功" in loaded["last_sync_result"]
+    assert "3/4" in loaded["last_sync_result"]
+
+    failed = manager.create_job("pull_tub")
+    failed.status = "failed"
+    failed.error_message = "rsync 退出码: 23"
+    connector._record_last_sync(failed)
+    loaded = client.get("/api/connector/config").json()["config"]
+    assert "同步失败" in loaded["last_sync_result"]
+    assert "rsync 退出码: 23" in loaded["last_sync_result"]

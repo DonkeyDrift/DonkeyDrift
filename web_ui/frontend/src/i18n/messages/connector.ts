@@ -63,6 +63,11 @@ export const connector: { zh: Record<string, string>; en: Record<string, string>
     'connector.pushPilotsTitleSubtitle': '把本地模型推送到车端',
     'connector.remoteDriveTitleSubtitle': '在车端远程启动驾驶',
     'connector.jobLogSubtitle': '查看任务进度与实时日志',
+    'connector.autoSyncTitle': '自动同步 Tub 数据',
+    'connector.autoSyncSubtitle': '连接建立后自动增量拉取车端数据到本地',
+    'connector.autoSyncToggle': '自动同步 Tub 数据',
+    'connector.autoSyncLast': '最近一次同步',
+    'connector.autoSyncNever': '尚未同步过',
   },
   en: {
     'connector.configTitle': 'Connection Config',
@@ -125,5 +130,10 @@ export const connector: { zh: Record<string, string>; en: Record<string, string>
     'connector.pushPilotsTitleSubtitle': 'Push local models to the car',
     'connector.remoteDriveTitleSubtitle': 'Start driving remotely on the car',
     'connector.jobLogSubtitle': 'View job progress and live logs',
+    'connector.autoSyncTitle': 'Auto Sync Tub Data',
+    'connector.autoSyncSubtitle': 'Incrementally pull car data to local after connection is established',
+    'connector.autoSyncToggle': 'Auto sync Tub data',
+    'connector.autoSyncLast': 'Last sync',
+    'connector.autoSyncNever': 'Never synced',
   },
 };
