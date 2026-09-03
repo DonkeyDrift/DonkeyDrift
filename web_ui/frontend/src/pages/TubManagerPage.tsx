@@ -6,7 +6,7 @@ import { getApiErrorMessage, loadTub } from '../services/api';
 import { useTranslation } from '@/i18n';
 
 /** Tub Manager 页面本体（TubLibrary + TubEditor），从 App.tsx 迁出（#178） */
-export const TubManagerPage = memo(function TubManagerPage() {
+export const TubManagerPage = memo(function TubManagerPage({ active }: { active: boolean }) {
   const { t } = useTranslation();
   const { isLoading, error, tubPath, setTub, setLoading, setError } = useStore();
   const loadedTubPath = useStore((state) => state.loadedTubPath);
@@ -64,9 +64,9 @@ export const TubManagerPage = memo(function TubManagerPage() {
         </div>
       )}
 
-      <div className="space-y-6">
-        <TubLibrary />
-        <TubEditor />
+      <div className="space-y-6 max-w-[640px] mx-auto">
+        <TubLibrary active={active} />
+        <TubEditor active={active} />
       </div>
     </>
   );
