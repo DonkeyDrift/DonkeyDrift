@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-09-03 (165)
+
+- chore(security): 隐私防漏加固——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则（配合 Firmware 侧隐私泄露清理）
+  - 背景：两仓库安全审计（GitHub 均为公开）确认本仓库当前树与文件内容无实质泄露——无 .env/私钥/token 被跟踪，文件内容（含全历史）从未出现用户邮箱；仅提交元数据含私人邮箱（git 固有，无法经删文件去除）与历史 agent 文档（已于 2026-08-02 f1c88aad 移出版本控制）。本次补上 `.gitignore` 缺口，防止未来误提交。
+  - `.gitignore` 新增：`.env`/`.env.*`、`*.pem`/`*.key`/`id_rsa*`/`known_hosts`/`*.ovpn`/`*.p12`/`*.keystore`/`credentials*`/`secrets*`、`*.log`、`.claude/`/`.agents/`。经 `git ls-files` 确认当前无被这些规则命中的已跟踪文件。
+  - 无代码行为变化、无需本机部署（纯仓库卫生）；Firmware 侧配套清理见 `Firmware/MUS4_FW/CHANGELOG.md` v1.8.66（解除真实 Wi-Fi 凭据与本机 agent 目录的跟踪）。
+
 ## 2026-08-23 (164)
 
 - feat(drive): Drive 页新增「模拟器采集」卡片——浏览器一键经后端 SSH 控制 Mac 上的 donkey_sim 跑采集，实时进度/cte/速度，完成后展示结果摘要
