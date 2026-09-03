@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-09-03 (174)
+
+- chore(security): 隐私防漏加固与泄露清理——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则；移除被旧分支合并复活的 `AGENTS.md`/`CLAUDE.md` 跟踪
+  - 背景：两仓库安全审计（GitHub 均为公开）确认本仓库文件内容（含全历史）无密钥/邮箱实质泄露；但发现 main 尖端被旧分支（eed2e4d4 "init"/27dbd9e1 "Rename to DonkeyDrift" 经今日合并）复活了 `AGENTS.md`/`CLAUDE.md` 的跟踪——内容为旧版开发指南、无凭据，但按约定 agent 说明文件不入库，本次重新解除跟踪（本地文件保留，`.gitignore` 的 `/AGENTS.md`、`/CLAUDE.md` 规则本已存在、此前被跟踪导致无效）。**注意：旧基点分支合并进 main 会复活早已移除的文件，合并前务必检查 diff。**
+  - `.gitignore` 新增：`.env`/`.env.*`、`*.pem`/`*.key`/`id_rsa*`/`known_hosts`/`*.ovpn`/`*.p12`/`*.keystore`/`credentials*`/`secrets*`、`*.log`、`.claude/`/`.agents/`。经 `git ls-files` 确认无被这些规则命中的其余已跟踪文件。
+  - 无代码行为变化、无需本机部署（纯仓库卫生）；Tony 分支同等改动见 2026-09-03 (165)；Firmware 侧配套清理见 `Firmware/MUS4_FW/CHANGELOG.md` v1.8.66。
+
 ## 2026-09-01 (173)
 
 - fix(drift): 俯拍系统全量夜间审计与加固——5 领域并行审计 40+ 发现，安全链路/线程安全/NaN 防线/WebRTC 协议/脚本可靠性全面修复，后端测试 257→345 全绿
