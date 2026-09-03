@@ -24,6 +24,8 @@ export interface TrainingJob {
   logs: string[];
   startedAt: string;
   finishedAt?: string;
+  // 失败时的真实原因（SSE status 消息的 error 字段），completed/stopped 为 null
+  errorMessage?: string | null;
 }
 
 export interface TrainerOnlineConfig {
@@ -118,7 +120,7 @@ interface AppState {
   setTrainingJob: (job: TrainingJob | null) => void;
   appendTrainingLog: (lines: string[]) => void;
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
-  finishTrainingJob: (status: 'completed' | 'failed' | 'stopped') => void;
+  finishTrainingJob: (status: 'completed' | 'failed' | 'stopped', errorMessage?: string | null) => void;
   setTrainerOnlineConfig: (cfg: Partial<TrainerOnlineConfig>) => void;
   setTrainerMyPcConfig: (cfg: Partial<TrainerMyPcConfig>) => void;
   setTrainerLocalConfig: (cfg: Partial<TrainerLocalConfig>) => void;
@@ -342,7 +344,7 @@ export const useStore = create<AppState>()(
             },
           };
         }),
-      finishTrainingJob: (status) =>
+      finishTrainingJob: (status, errorMessage) =>
         set((state) => {
           if (!state.trainingJob) return state;
           return {
@@ -350,6 +352,7 @@ export const useStore = create<AppState>()(
               ...state.trainingJob,
               status,
               finishedAt: new Date().toISOString(),
+              errorMessage: errorMessage ?? null,
             },
           };
         }),

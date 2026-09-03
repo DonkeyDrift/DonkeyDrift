@@ -16,6 +16,7 @@ from typing import Dict, Optional, Literal
 from fastapi import HTTPException
 
 from web_online_trainer import WebOnlineTrainer
+from trainer_session import load_session
 
 
 # Regex to strip ANSI escape codes (colour, cursor movement, etc.)
@@ -63,6 +64,9 @@ class TrainingJob:
     finished_at: Optional[str] = None
     process: Optional[asyncio.subprocess.Process] = None
     trainer_thread: Optional[threading.Thread] = None
+    # mypc/online 模式的 WebOnlineTrainer 实例（训练线程启动后挂入），
+    # stop_job 通过它杀远程训练进程（abort_remote）
+    trainer: Optional[object] = None
     stop_event: Optional[threading.Event] = None
     error_message: Optional[str] = None
 
@@ -111,6 +115,13 @@ class TrainingJobManager:
             asyncio.create_task(force_kill())
         elif job.mode in ('mypc', 'mypc_install', 'online') and job.stop_event:
             job.stop_event.set()
+            # 同时杀掉远程训练进程：否则「停止」只是断开监听，
+            # 远程 train.py 变孤儿继续占算力（再点「继续」会双训练并发）
+            if job.trainer is not None:
+                try:
+                    job.trainer.abort_remote()
+                except Exception:
+                    pass
 
         job.finished_at = datetime.now().isoformat()
 
@@ -206,14 +217,15 @@ class TrainingJobManager:
                 job.error_message = str(e)
         finally:
             job.finished_at = datetime.now().isoformat()
-            await job.log_queue.put({"type": "status", "status": job.status})
+            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
 
     # ------------------------------------------------------------------
     # Online training
     # ------------------------------------------------------------------
     async def run_online(self, job: TrainingJob, config_file: str = "train_online.conf",
                          working_dir: Optional[str] = None,
-                         ssh_credentials: Optional[dict] = None):
+                         ssh_credentials: Optional[dict] = None,
+                         tub: Optional[str] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
 
@@ -226,9 +238,16 @@ class TrainingJobManager:
                     config_file=config_file,
                     log_queue=thread_queue,
                     working_dir=cwd,
-                    ssh_credentials=ssh_credentials
+                    ssh_credentials=ssh_credentials,
+                    tub=tub,
                 )
+                job.trainer = trainer  # stop_job 据此杀远程进程
                 trainer.run(no_interactive=True)
+            except SystemExit as e:
+                # SystemExit 不是 Exception 的子类：OnlineTrainer.run() 失败时会
+                # sys.exit(1)，必须单独捕获，否则线程静默死掉、任务被误标 completed
+                if e.code:
+                    thread_queue.put({"type": "error", "message": f"Training flow exited abnormally (code {e.code}) — see the error line above for the reason"})
             except Exception as e:
                 thread_queue.put({"type": "error", "message": str(e)})
 
@@ -279,14 +298,15 @@ class TrainingJobManager:
                 job.status = 'completed'
 
         job.finished_at = datetime.now().isoformat()
-        await job.log_queue.put({"type": "status", "status": job.status})
+        await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
 
     # ------------------------------------------------------------------
     # My-PC training (SSH callback to the user's own computer)
     # ------------------------------------------------------------------
     async def run_mypc(self, job: TrainingJob, config_file: str = "train_my_pc.conf",
                        working_dir: Optional[str] = None,
-                       ssh_credentials: Optional[dict] = None):
+                       ssh_credentials: Optional[dict] = None,
+                       tub: Optional[str] = None):
         """Train on the user's own computer (the machine running the browser).
 
         Same SSH pipeline as online training, but driven by a separate config
@@ -294,7 +314,56 @@ class TrainingJobManager:
         cloud server.
         """
         await self.run_online(job, config_file=config_file, working_dir=working_dir,
-                              ssh_credentials=ssh_credentials)
+                              ssh_credentials=ssh_credentials, tub=tub)
+
+    async def run_mypc_resume(self, job: TrainingJob, config_file: str = "train_my_pc.conf",
+                              working_dir: Optional[str] = None,
+                              ssh_credentials: Optional[dict] = None,
+                              tub: Optional[str] = None):
+        """mypc 断点续训：有历史会话则从上次最佳权重继续训练，否则回退全新训练。"""
+        cwd = working_dir or os.getcwd()
+        session = load_session(cwd, config_file)
+        if not session or session.get("tub") != tub:
+            fallback_log = "没有可续训的历史训练（或训练数据已变化），改为全新训练"
+            job.logs.append(fallback_log)
+            await job.log_queue.put({
+                "type": "log",
+                "line": fallback_log,
+                "level": "info",
+                "timestamp": datetime.now().isoformat(),
+            })
+            await self.run_online(job, config_file=config_file, working_dir=working_dir,
+                                  ssh_credentials=ssh_credentials, tub=tub)
+            return
+
+        job.status = 'running'
+
+        thread_queue: queue.Queue = queue.Queue()
+        job.stop_event = threading.Event()
+
+        def run_trainer():
+            try:
+                trainer = WebOnlineTrainer(
+                    config_file=config_file,
+                    log_queue=thread_queue,
+                    working_dir=cwd,
+                    ssh_credentials=ssh_credentials,
+                    tub=tub,
+                )
+                job.trainer = trainer  # stop_job 据此杀远程进程
+                trainer.run_resume(session)
+            except SystemExit as e:
+                # SystemExit 不是 Exception 的子类，必须单独捕获，
+                # 否则线程静默死掉、任务被误标 completed
+                if e.code:
+                    thread_queue.put({"type": "error", "message": f"Training flow exited abnormally (code {e.code}) — see the error line above for the reason"})
+            except Exception as e:
+                thread_queue.put({"type": "error", "message": str(e)})
+
+        job.trainer_thread = threading.Thread(target=run_trainer, daemon=True)
+        job.trainer_thread.start()
+
+        await self._pump_thread_queue(job, thread_queue)
 
     # ------------------------------------------------------------------
     # My-PC dependency install (pip install "donkeydrifter[pc]")
@@ -355,7 +424,8 @@ class TrainingJobManager:
                 job.progress.total_epochs = int(epoch_match.group(2))
                 return
 
-            step_match = re.match(r"^\s*(\d+)/(\d+)\s+\[", line)
+            # 兼容 Keras 2 的 [====>...] 与 Keras 3 的 ━━━ Unicode 粗线进度条
+            step_match = re.match(r"^\s*(\d+)/(\d+)\s+[\[━]", line)
             if step_match:
                 job.progress.current_step = int(step_match.group(1))
                 job.progress.total_steps = int(step_match.group(2))
