@@ -1,9 +1,10 @@
 import { useCallback, useRef } from 'react';
-import { useStore, TrainingJob } from '../store/useStore';
+import { useStore, TrainingJob, TrainerOnlineConfig, TrainerMyPcConfig } from '../store/useStore';
 import {
   startLocalTrain,
   startOnlineTrain,
   startMyPcTrain,
+  resumeMyPcTrain,
   stopTrain,
   createLogStream,
   setTrainerConfig,
@@ -17,8 +18,6 @@ export function useTrainingJob() {
     updateTrainingProgress,
     finishTrainingJob,
     configPath,
-    trainerOnlineConfig,
-    trainerMyPcConfig,
   } = useStore();
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -46,9 +45,12 @@ export function useTrainingJob() {
             loss: d.loss ?? null,
             globalPercent: d.globalPercent ?? 0,
           });
+        } else if (msg.type === 'error') {
+          // 后端训练流程异常时推送的 error 消息，显示到日志面板，避免静默失败
+          appendTrainingLog([msg.message || 'Unknown error']);
         } else if (msg.type === 'status') {
           if (['completed', 'failed', 'stopped'].includes(msg.status)) {
-            finishTrainingJob(msg.status);
+            finishTrainingJob(msg.status, msg.error ?? null);
             es.close();
             eventSourceRef.current = null;
           }
@@ -96,6 +98,7 @@ export function useTrainingJob() {
       },
       logs: [],
       startedAt: new Date().toISOString(),
+      errorMessage: null,
     };
 
     setTrainingJob(job);
@@ -104,10 +107,11 @@ export function useTrainingJob() {
 
   // Shared pipeline for SSH-based training ('online' = cloud server,
   // 'mypc' = the user's own computer, reached via SSH callback).
+  // cfg 由调用方传入（而非读 store），避免闭包拿到旧的 store 值。
   const startSshTraining = useCallback(async (
     mode: 'online' | 'mypc',
     configFile: string,
-    cfg: typeof trainerOnlineConfig,
+    cfg: TrainerOnlineConfig & { tub?: string },
     start: typeof startOnlineTrain,
   ) => {
     if (trainingJob && trainingJob.status === 'running') {
@@ -127,6 +131,7 @@ export function useTrainingJob() {
     const { job_id } = await start({
       config_file: configFile,
       working_dir: configPath,
+      tub: cfg.tub || undefined,
       ssh: {
         host: cfg.host,
         user: cfg.user,
@@ -148,19 +153,24 @@ export function useTrainingJob() {
       },
       logs: [],
       startedAt: new Date().toISOString(),
+      errorMessage: null,
     };
 
     setTrainingJob(job);
     connectSSE(job_id, job);
   }, [trainingJob, configPath, setTrainingJob, connectSSE]);
 
-  const startOnline = useCallback(() =>
-    startSshTraining('online', 'train_online.conf', trainerOnlineConfig, startOnlineTrain),
-  [startSshTraining, trainerOnlineConfig]);
+  const startOnline = useCallback(async (cfg: TrainerOnlineConfig) =>
+    startSshTraining('online', 'train_online.conf', cfg, startOnlineTrain),
+  [startSshTraining]);
 
-  const startMyPc = useCallback(() =>
-    startSshTraining('mypc', 'train_my_pc.conf', trainerMyPcConfig, startMyPcTrain),
-  [startSshTraining, trainerMyPcConfig]);
+  const startMyPc = useCallback(async (cfg: TrainerMyPcConfig) =>
+    startSshTraining('mypc', 'train_my_pc.conf', cfg, startMyPcTrain),
+  [startSshTraining]);
+
+  const resumeMyPc = useCallback(async (cfg: TrainerMyPcConfig) =>
+    startSshTraining('mypc', 'train_my_pc.conf', cfg, resumeMyPcTrain),
+  [startSshTraining]);
 
   const stopJob = useCallback(async () => {
     if (!trainingJob || trainingJob.status !== 'running') {
@@ -180,6 +190,7 @@ export function useTrainingJob() {
     startLocal,
     startOnline,
     startMyPc,
+    resumeMyPc,
     stopJob,
   };
 }

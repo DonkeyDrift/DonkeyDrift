@@ -397,6 +397,7 @@ export const startOnlineTrain = async (params: {
   config_file?: string;
   working_dir?: string;
   ssh?: SSHCredentials;
+  tub?: string;
 }) => {
   const response = await api.post('/trainer/train/online', params);
   return response.data;
@@ -406,8 +407,20 @@ export const startMyPcTrain = async (params: {
   config_file?: string;
   working_dir?: string;
   ssh?: SSHCredentials;
+  tub?: string;
 }) => {
   const response = await api.post('/trainer/train/mypc', params);
+  return response.data;
+};
+
+// mypc 断点续训：请求体/响应结构与 startMyPcTrain 完全一致
+export const resumeMyPcTrain = async (params: {
+  config_file?: string;
+  working_dir?: string;
+  ssh?: SSHCredentials;
+  tub?: string;
+}) => {
+  const response = await api.post('/trainer/train/mypc/resume', params);
   return response.data;
 };
 

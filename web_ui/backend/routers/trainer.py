@@ -53,6 +53,7 @@ class MyPcTrainRequest(BaseModel):
     config_file: str = "train_my_pc.conf"
     working_dir: Optional[str] = None
     ssh: Optional[SSHCredentials] = None
+    tub: Optional[str] = None
 
 
 class MyPcProbeRequest(BaseModel):
@@ -442,6 +443,27 @@ async def start_mypc_train(request: MyPcTrainRequest):
             config_file=request.config_file,
             working_dir=request.working_dir,
             ssh_credentials=request.ssh.model_dump() if request.ssh else None,
+            tub=request.tub,
+        )
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/train/mypc/resume")
+async def start_mypc_resume_train(request: MyPcTrainRequest):
+    """mypc 断点续训：从上次训练留下的最优权重继续训练（train_my_pc.conf）。
+
+    请求体与响应结构与 /train/mypc 完全一致；没有可续训的历史训练
+    （或训练数据已变化）时自动回退为全新训练。
+    """
+    job = job_manager.create_job("mypc")
+    asyncio.create_task(
+        job_manager.run_mypc_resume(
+            job,
+            config_file=request.config_file,
+            working_dir=request.working_dir,
+            ssh_credentials=request.ssh.model_dump() if request.ssh else None,
+            tub=request.tub,
         )
     )
     return {"job_id": job.id, "status": job.status}
