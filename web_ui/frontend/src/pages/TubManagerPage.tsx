@@ -64,7 +64,7 @@ export const TubManagerPage = memo(function TubManagerPage({ active }: { active:
         </div>
       )}
 
-      <div className="space-y-6 max-w-[640px] mx-auto">
+      <div className="space-y-6">
         <TubLibrary active={active} />
         <TubEditor active={active} />
       </div>
