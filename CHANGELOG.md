@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-04 (179)
+
+- fix(trainer): 修复训练中刷新页面后看不到训练进度
+  - 根因：训练任务状态（job_id/进度/日志）只存在前端 zustand 内存 `trainingJob`，`partialize` 只持久化配置、不含当前任务；刷新后 React 重新挂载，`trainingJob` 回到 null，前端既不知道有在跑任务、也不重连 SSE，`ProgressPanel` 显示「空闲」。后端 `job_manager` 是内存单例（页面刷新不影响）、`/trainer/train/{id}/status` 本就返回完整进度快照，故最小修复落在前端。
+  - `web_ui/frontend/src/store/useStore.ts`：新增持久化字段 `activeTraining: { id: string; mode: TrainingJob['mode'] } | null` + `setActiveTraining`/`clearActiveTraining`；`finishTrainingJob` 同步清空 `activeTraining`；`partialize` 白名单加入 `activeTraining`（刷新后可读回正在训练的任务 id+模式）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：新增挂载恢复 effect（ref 防 StrictMode 双跑）——读 `activeTraining`，`getJobStatus` 拉进度快照重建 `TrainingJob`（logs 先置空），`status === 'running'` 时 `connectSSE` 重连继续收实时事件，否则清空 `activeTraining` 展示终态；请求失败则清掉失效 id 回到空闲态。`startLocal`/`startSshTraining` 拿到 `job_id` 后 `setActiveTraining` 记录，供下次刷新恢复。
+  - 测试：`web_ui/frontend/src/store/useStore.test.ts` 新增 3 例（setActiveTraining / clearActiveTraining / finishTrainingJob 同步清空）；新建 `web_ui/frontend/src/hooks/useTrainingJob.test.ts` 4 例（running 恢复+重连 SSE / 终态展示并清空 / 失效清空 / 无 activeTraining 不请求）。
+  - 实测：`tsc -b --noEmit` 无错、`vitest run` 34 文件 183 passed（含新增 7 例）。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (177)
 
 - fix(frontend): 修复老用户点击侧边「加载器」抽屉无反应——缺陷链同时吞掉配置自动加载，全新浏览器不触发故长期未察觉

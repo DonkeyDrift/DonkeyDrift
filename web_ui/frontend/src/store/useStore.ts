@@ -96,6 +96,8 @@ interface AppState {
 
   // Trainer state
   trainingJob: TrainingJob | null;
+  // 当前正在训练的任务（id + 模式），持久化以支持刷新后恢复进度
+  activeTraining: { id: string; mode: TrainingJob['mode'] } | null;
   trainerMode: TrainerMode;
   trainerOnlineConfig: TrainerOnlineConfig;
   trainerMyPcConfig: TrainerMyPcConfig;
@@ -126,6 +128,8 @@ interface AppState {
 
   // Trainer actions
   setTrainingJob: (job: TrainingJob | null) => void;
+  setActiveTraining: (id: string, mode: TrainingJob['mode']) => void;
+  clearActiveTraining: () => void;
   setTrainerMode: (mode: TrainerMode) => void;
   appendTrainingLog: (lines: string[]) => void;
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
@@ -168,6 +172,7 @@ export const useStore = create<AppState>()(
 
       // Trainer defaults
       trainingJob: null,
+      activeTraining: null,
       trainerMode: 'local',
       trainerOnlineConfig: {
         host: '',
@@ -342,6 +347,8 @@ export const useStore = create<AppState>()(
 
       // Trainer actions
       setTrainingJob: (job) => set({ trainingJob: job }),
+      setActiveTraining: (id, mode) => set({ activeTraining: { id, mode } }),
+      clearActiveTraining: () => set({ activeTraining: null }),
       setTrainerMode: (mode) => set({ trainerMode: mode }),
       appendTrainingLog: (lines) =>
         set((state) => {
@@ -373,6 +380,7 @@ export const useStore = create<AppState>()(
               finishedAt: new Date().toISOString(),
               errorMessage: errorMessage ?? null,
             },
+            activeTraining: null,
           };
         }),
       setTrainerOnlineConfig: (cfg) =>
@@ -398,6 +406,7 @@ export const useStore = create<AppState>()(
         trainerMyPcConfig: state.trainerMyPcConfig,
         trainerLocalConfig: state.trainerLocalConfig,
         trainerMode: state.trainerMode,
+        activeTraining: state.activeTraining,
       }),
     }
   )
