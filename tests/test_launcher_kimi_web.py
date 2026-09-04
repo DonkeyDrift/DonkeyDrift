@@ -29,6 +29,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -785,8 +786,9 @@ def test_endpoint_ok_with_cors_header(http_server):
                                    "url": "https://kimi.example/w"}
     # DC（ESP32 origin）跨域 fetch 依赖这个头
     assert headers.get("Access-Control-Allow-Origin") == "*"
-    # 缺省 cwd 是 Projects 工作区，不再落用户主目录（issue #168）
-    assert state["cwd"] == "/home/dkc/projects"
+    # 缺省 cwd 是 Projects 工作区（Path.home() 动态推导，非硬编码串），
+    # 不再落用户主目录（issue #168）
+    assert state["cwd"] == str(Path.home() / "projects")
 
 
 def test_endpoint_explicit_cwd_wins(http_server):
@@ -802,9 +804,10 @@ def test_endpoint_empty_body_uses_projects_default(http_server):
     base, state = http_server
     code, _headers, _payload = _post(
         base + "/api/launch/kimi-code-web", b"")
-    # DC 按钮的空体 POST（Content-Length=0）也落到 Projects（issue #168）
+    # DC 按钮的空体 POST（Content-Length=0）也落到 Projects（issue #168）；
+    # 缺省值 Path.home() 动态推导，不是硬编码串
     assert code == 200
-    assert state["cwd"] == "/home/dkc/projects"
+    assert state["cwd"] == str(Path.home() / "projects")
 
 
 def test_endpoint_rejects_non_json_with_cors(http_server):
