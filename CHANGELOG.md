@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-04 (176)
+
+- fix(trainer): Trainer 三档训练目标命名第四次定稿——「本机」→「局域网主机」（Lan Host）、「车载电脑」→「本机」（Local Host），视角约定写死为「以车上操作视角为准」（docs/issues/006）
+  - 背景：「本机 / 车载电脑」命名与实际含义颠倒——「本机」档实际要求填写 SSH 连接信息、指远程开发电脑，「车载电脑」档实际指运行 Web UI 的本机/车端。该命名此前已翻转三次（2026-08-18 (19)、(28) 等），本次为第四次并定稿：**以车上操作视角为准，「本机」= 手边这台跑 Web UI 的车端电脑**，约定已写入用户手册与 `trainer.ts` 文件头注释，避免再次翻转。
+  - 改动范围（只动显示字符串，内部枚举 `mypc` / `local` / `online`、i18n key 名、API 路径 `/train/mypc` 等一律不变）：
+    - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc` 本机→局域网主机、`tabLocal` 车载电脑→本机、`startMyPcTraining`→「在局域网主机上训练」、`startLocalTraining`→「在本机上训练」、`myPcTraining`→「局域网主机训练」、`myPcFirstUseHint` / `myPcProbeReady` / `myPcTrainingSubtitle` 等派生文案同步；en 同步 `Lan Host / Local Host / Train on Lan Host / Train on Local Host / Lan Host Training`。文件头新增命名约定注释（key 名与显示语方向相反属可接受的内部债务）。
+    - `web_ui/backend/mypc_probe.py`：直出文案「环境就绪，可以开始本机训练。」→「…局域网主机训练。」、Windows WSL 建议文案同步；`routers/trainer.py` mypc 探测路由 docstring 术语同步。
+    - 测试同步：`ModeTabs.test.tsx` 三档渲染与点击断言、`test_trainer_mypc.py` 探测建议断言。
+    - 文档：`docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」章节改为「局域网主机训练（Lan Host）」并在章首写入视角约定。
+  - 注：语义独立的「本机」（`network_utils.py`、`routers/connector.py`、`drive.ts`、手册快速开始章节的「本机场景」）未动。Firmware 无改动，无需 OTA。
+
 ## 2026-09-04 (175)
 
 - perf(frontend, backend) + feat(web-ui): Pilot Arena 推理链路优化（config 按 mtime 缓存 + 评估节流 250ms→逐帧）+ 批量预测新增「模型贴合摘要」

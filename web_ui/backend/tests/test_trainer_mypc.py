@@ -79,7 +79,7 @@ def test_mypc_probe_route():
             shell="posix",
             checks=[ProbeCheck(name="ssh", status="ok", message="connected")],
             python_path="/usr/bin/python3",
-            suggestions=["环境就绪，可以开始本机训练。"],
+            suggestions=["环境就绪，可以开始局域网主机训练。"],
         )
 
     with _build_client() as client, \

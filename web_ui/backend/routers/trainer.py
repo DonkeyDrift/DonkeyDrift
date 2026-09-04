@@ -123,7 +123,7 @@ async def set_trainer_config(cfg: TrainerConfig, config_file: str = "train_onlin
 
 @router.post("/mypc/probe")
 async def probe_mypc(request: MyPcProbeRequest):
-    """Pre-flight check for 'This Computer' (mypc) training.
+    """Pre-flight check for 'Lan Host' (mypc) training.
 
     Connects to the user's computer over SSH and reports whether the target
     OS, Python interpreter, and donkeycar environment are ready, returning
