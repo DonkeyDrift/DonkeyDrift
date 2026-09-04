@@ -29,6 +29,7 @@ except:
 
 import sys
 import os
+import json
 import subprocess
 import threading
 import webbrowser
@@ -59,6 +60,32 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
+def _selected_model_from_disk():
+    """无 --model 启动时回退读取 Web UI 持久化的所选模型（selected_model.json）。
+
+    Web UI 侧（routers/drive.py）在用户选择模型后写入该文件；本函数仅读取，
+    使「选模型后要求带模型重启」在重启车端进程时真正生效。读取失败静默回退 None。
+    """
+    candidates = []
+    car_dir = os.environ.get("DONKEY_CAR_DIR", "").strip()
+    if car_dir:
+        candidates.append(os.path.join(os.path.expanduser(car_dir), "selected_model.json"))
+    candidates.append(os.path.expanduser("~/mycar/selected_model.json"))
+
+    for path in candidates:
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                model_path = data.get("model_path")
+                if model_path:
+                    logger.info("从 %s 读取所选模型：%s", path, model_path)
+                    return model_path
+        except Exception as e:
+            logger.warning("读取所选模型失败 %s: %s", path, e)
+    return None
+
+
 def drive(cfg, model_path=None, use_joystick=False, model_type=None,
           camera_type='single', meta=[]):
     """
@@ -71,6 +98,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     requesting the same named input.
     """
     logger.info(f'PID: {os.getpid()}')
+    if model_path is None:
+        model_path = _selected_model_from_disk()
     if cfg.DONKEY_GYM:
         #the simulator will use cuda and then we usually run out of resources
         #if we also try to use cuda. so disable for donkey_gym.

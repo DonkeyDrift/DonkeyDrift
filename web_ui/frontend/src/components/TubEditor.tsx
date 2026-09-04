@@ -35,6 +35,8 @@ const MAX_ZOOM_PERCENT = 1000;
 const ZOOM_STEP_PERCENT = 100;
 const MAX_UNDO_HISTORY = 10;
 const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
+const DRAG_SELECTION_THRESHOLD_PX = 5;
+const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
 type RecordAction = {
   mode: 'delete' | 'restore';
@@ -76,6 +78,8 @@ export const TubEditor: React.FC = () => {
   const lineDashOffsetRef = useRef(0);
   const visualSelectionRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
   const isSelectingRef = useRef(false);
+  const dragStartRef = useRef<{ x: number; index: number } | null>(null);
+  const isDragSelectingRef = useRef(false);
   const currentIndexRef = useRef(useStore.getState().currentIndex);
   const selectionRangeRef = useRef<{ startIndex: number | null; endIndex: number | null }>({
     startIndex: useStore.getState().selectionStartIndex,
@@ -770,6 +774,35 @@ export const TubEditor: React.FC = () => {
       const clampedX = Math.max(chartArea.left, Math.min(x, chartArea.right));
       const clampedIndex = getIndexFromPointerX(clampedX, chart);
 
+      // 拖拽框选：按下点与当前点水平位移超过阈值才进入拖拽态，否则维持「移动播放头 + 两次点击锚点」
+      const dragStart = dragStartRef.current;
+      if (dragStart) {
+        const deltaX = Math.abs(clampedX - dragStart.x);
+        if (!isDragSelectingRef.current && deltaX >= DRAG_SELECTION_THRESHOLD_PX) {
+          isDragSelectingRef.current = true;
+          globalSelectionAnchorIndex = null;
+          clearSelectionRange();
+          visualSelectionRef.current = null;
+          const draft = {
+            startX: dragStart.x,
+            currentX: clampedX,
+            startIndex: dragStart.index,
+            currentIndex: clampedIndex,
+          };
+          selectionDraftRef.current = draft;
+          setSelectionDraft(draft);
+          requestChartRender();
+        } else if (isDragSelectingRef.current) {
+          const prevDraft = selectionDraftRef.current;
+          if (prevDraft) {
+            const nextDraft = { ...prevDraft, currentX: clampedX, currentIndex: clampedIndex };
+            selectionDraftRef.current = nextDraft;
+            setSelectionDraft(nextDraft);
+            requestChartRender();
+          }
+        }
+      }
+
       const currentRecords = recordsRef.current;
       const record = currentRecords[clampedIndex];
       const steering = (record?.['user/angle'] as number) ?? 0;
@@ -805,10 +838,25 @@ export const TubEditor: React.FC = () => {
       }
 
     },
-    [getIndexFromPointerX, requestChartRender, updateTooltipPosition]
+    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange]
   );
 
   const handleMouseLeave = useCallback(() => {
+    // 拖拽框选中离开图表：提交当前草稿选区（坐标已由最后一次 mousemove 收敛到图表区）
+    if (isDragSelectingRef.current && dragStartRef.current) {
+      const draft = selectionDraftRef.current;
+      if (draft && records.length) {
+        const startIndex = Math.min(draft.startIndex, draft.currentIndex);
+        const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
+        queueSelectionRangeUpdate(startIndex, endIndex);
+        globalSelectionAnchorIndex = null;
+      }
+    }
+    isDragSelectingRef.current = false;
+    dragStartRef.current = null;
+    selectionDraftRef.current = null;
+    setSelectionDraft(null);
+
     if (!hoverPositionRef.current && !tooltipDataRef.current) {
       return;
     }
@@ -817,7 +865,7 @@ export const TubEditor: React.FC = () => {
     tooltipDataRef.current = null;
     setTooltipData(null);
     requestChartRender();
-  }, [requestChartRender]);
+  }, [requestChartRender, queueSelectionRangeUpdate, records.length]);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -834,6 +882,10 @@ export const TubEditor: React.FC = () => {
       if (x < chartArea.left || x > chartArea.right) return;
 
       const clampedIndex = getIndexFromPointerX(x, chart);
+
+      // 记录按下点，供 mousemove 用水平位移阈值判定是否进入拖拽框选
+      dragStartRef.current = { x, index: clampedIndex };
+      isDragSelectingRef.current = false;
 
       // Update hover position so the red line can follow the mouse exactly
       hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
@@ -867,9 +919,23 @@ export const TubEditor: React.FC = () => {
   const handleMouseUp = useCallback(
     () => {
       isSelectingRef.current = false;
-      // 拖动选择已移除，mouseup 只清理 isSelecting 标记
+
+      if (isDragSelectingRef.current) {
+        const draft = selectionDraftRef.current;
+        if (draft && records.length) {
+          const startIndex = Math.min(draft.startIndex, draft.currentIndex);
+          const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
+          queueSelectionRangeUpdate(startIndex, endIndex);
+          globalSelectionAnchorIndex = null;
+        }
+      }
+
+      isDragSelectingRef.current = false;
+      dragStartRef.current = null;
+      selectionDraftRef.current = null;
+      setSelectionDraft(null);
     },
-    []
+    [queueSelectionRangeUpdate, records.length]
   );
 
   const isEditableTarget = (target: EventTarget | null) => {
@@ -895,6 +961,8 @@ export const TubEditor: React.FC = () => {
         event.preventDefault();
         clearSelectionRange();
         globalSelectionAnchorIndex = null;
+        isDragSelectingRef.current = false;
+        dragStartRef.current = null;
         selectionDraftRef.current = null;
         setSelectionDraft(null);
         return;
@@ -1265,21 +1333,22 @@ export const TubEditor: React.FC = () => {
             const endX = currentSelectionDraft.currentX;
             const minX = Math.min(startX, endX);
             const maxX = Math.max(startX, endX);
+            const draftWidth = Math.max(maxX - minX, MIN_SELECTION_DRAFT_WIDTH_PX);
 
-            if (!isNaN(minX) && !isNaN(maxX) && maxX > minX) {
+            if (!isNaN(minX) && !isNaN(maxX) && maxX >= minX) {
                 ctx.save();
                 ctx.beginPath();
-                ctx.rect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.rect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
                 ctx.clip();
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
                 ctx.fillStyle = selectionFillColor;
                 ctx.strokeStyle = selectionColor;
 
-                ctx.fillRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.fillRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
-                ctx.strokeRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.strokeRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
                 ctx.restore();
             }
         } else if (visualSelectionRef.current) {
@@ -1830,6 +1899,7 @@ export const TubEditor: React.FC = () => {
       <CardContent className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={containerRef}
+          data-testid="tub-editor-chart"
           className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
