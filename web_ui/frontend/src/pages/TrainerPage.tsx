@@ -97,6 +97,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
           password: cfg.password,
           remoteDirBase: cfg.remote_dir_base,
           modelName: cfg.model_name,
+          modelType: cfg.model_type ?? 'linear',
           pythonPath: cfg.python_path,
           keyPath: cfg.key_path ?? '',
         };
@@ -116,6 +117,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
             password: cfg.password,
             remoteDirBase: cfg.remote_dir_base,
             modelName: cfg.model_name,
+            modelType: cfg.model_type ?? f.modelType,
             pythonPath: cfg.python_path,
             keyPath: cfg.key_path ?? '',
           };
@@ -371,6 +373,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
                 onRemoteDirBaseChange={(v) => setMyPcForm((f) => ({ ...f, remoteDirBase: v }))}
                 modelName={myPcForm.modelName}
                 onModelNameChange={(v) => setMyPcForm((f) => ({ ...f, modelName: v }))}
+                modelType={myPcForm.modelType}
+                onModelTypeChange={(v) => setMyPcForm((f) => ({ ...f, modelType: v }))}
                 pythonPath={myPcForm.pythonPath}
                 onPythonPathChange={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
                 keyPath={myPcForm.keyPath}
@@ -425,6 +429,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
               onRemoteDirBaseChange={(v) => setOnlineForm((f) => ({ ...f, remoteDirBase: v }))}
               modelName={onlineForm.modelName}
               onModelNameChange={(v) => setOnlineForm((f) => ({ ...f, modelName: v }))}
+              modelType={onlineForm.modelType}
+              onModelTypeChange={(v) => setOnlineForm((f) => ({ ...f, modelType: v }))}
               pythonPath={onlineForm.pythonPath}
               onPythonPathChange={(v) => setOnlineForm((f) => ({ ...f, pythonPath: v }))}
               keyPath={onlineForm.keyPath}

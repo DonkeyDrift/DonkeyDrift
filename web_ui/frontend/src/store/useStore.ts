@@ -35,6 +35,8 @@ export interface TrainerOnlineConfig {
   password: string;
   remoteDirBase: string;
   modelName: string;
+  /** 模型类型（linear/categorical/...），写入 conf 的 model_type */
+  modelType: string;
   pythonPath: string;
   /** SSH 私钥路径（可选，与 Car Connector 的 key_path 对齐；留空时用密码认证） */
   keyPath: string;
@@ -180,6 +182,7 @@ export const useStore = create<AppState>()(
         password: '',
         remoteDirBase: '~/projects',
         modelName: 'model',
+        modelType: 'linear',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',
         keyPath: '',
       },
@@ -189,6 +192,7 @@ export const useStore = create<AppState>()(
         password: '',
         remoteDirBase: '~/projects',
         modelName: 'model',
+        modelType: 'linear',
         pythonPath: '',
         keyPath: '',
         tub: './data',

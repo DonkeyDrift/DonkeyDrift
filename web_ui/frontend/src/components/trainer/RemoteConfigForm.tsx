@@ -4,6 +4,7 @@ import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useStore } from '../../store/useStore';
 import { getMyPcClientInfo, getMyPcKnownHosts } from '../../services/api';
 import { useTranslation } from '@/i18n';
+import { MODEL_TYPES } from './modelTypes';
 
 interface RemoteConfigFormProps {
   titleKey?: string;
@@ -22,6 +23,9 @@ interface RemoteConfigFormProps {
   onRemoteDirBaseChange: (v: string) => void;
   modelName: string;
   onModelNameChange: (v: string) => void;
+  /** 模型类型（linear/categorical/...），远程训练命令 --type 参数 */
+  modelType: string;
+  onModelTypeChange: (v: string) => void;
   pythonPath: string;
   onPythonPathChange: (v: string) => void;
   /** SSH 私钥路径（可选，留空用密码认证） */
@@ -47,6 +51,8 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
   onRemoteDirBaseChange,
   modelName,
   onModelNameChange,
+  modelType,
+  onModelTypeChange,
   pythonPath,
   onPythonPathChange,
   keyPath = '',
@@ -252,16 +258,6 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs text-zinc-500">{t('trainer.modelName')}</label>
-            <input
-              type="text"
-              value={modelName}
-              onChange={(e) => onModelNameChange(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
-            />
-          </div>
-
-          <div className="space-y-1">
             <label className="text-xs text-zinc-500">{t('trainer.pythonPath')}</label>
             <input
               type="text"
@@ -272,6 +268,32 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           </div>
         </>
       )}
+
+      {/* 模型配置：compact（我这台电脑）与完整（云端）模式都显示 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs text-zinc-500">{t('trainer.modelName')}</label>
+          <input
+            type="text"
+            value={modelName}
+            onChange={(e) => onModelNameChange(e.target.value)}
+            placeholder={t('trainer.modelNamePlaceholder')}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-cyan-600"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-zinc-500">{t('trainer.modelType')}</label>
+          <select
+            value={modelType}
+            onChange={(e) => onModelTypeChange(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+          >
+            {MODEL_TYPES.map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div className="text-xs text-zinc-600">{t('trainer.workingDir', { path: configPath })}</div>
     </div>

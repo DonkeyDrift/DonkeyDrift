@@ -173,6 +173,7 @@ export function useTrainingJob() {
       user: cfg.user,
       remote_dir_base: cfg.remoteDirBase,
       model_name: cfg.modelName,
+      model_type: cfg.modelType,
       python_path: cfg.pythonPath,
       key_path: cfg.keyPath,
     }, configFile);

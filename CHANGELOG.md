@@ -1,5 +1,20 @@
 # 变更日志
 
+## 2026-09-04 (184)
+
+- fix(trainer): 远程训练补齐模型配置——「我这台电脑」(Mac/mypc) 模式恢复模型名称输入并新增模型类型选择，云端模式同步获得
+  - 背景：用户反馈 Mac 上训练时没有选择模型配置的地方（输入模型名称、选择类型）。根因有二：① (171) myPC 体验包给 `RemoteConfigForm` 引入 `compact` 模式时把「模型名称」连同 remoteDirBase/pythonPath 一起藏进了 `!compact` 块，mypc 模式下模型名称无处可填；② 远程训练命令的模型类型一直硬编码 `--type linear`，前端没有任何远程模式可选类型。
+  - `web_ui/frontend/src/components/trainer/modelTypes.ts`（新建）：抽出 `MODEL_TYPES` 共享常量（linear/categorical/rnn/imu/behavior/localizer/3d），`LocalConfigForm.tsx` 删除本地同名常量改为引用，杜绝两份列表漂移。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：「模型名称」输入框移出 `!compact` 块（compact 与完整模式都显示，带占位符），旁新增「模型类型」下拉（两列 grid）；新增必填 props `modelType`/`onModelTypeChange`；remoteDirBase/pythonPath 维持仅完整（云端）模式显示不变（mypc 由环境探测自动填 pythonPath）。i18n 复用既有 `trainer.modelName`/`trainer.modelType` 键，无新增文案。
+  - `web_ui/frontend/src/store/useStore.ts`：`TrainerOnlineConfig`（`TrainerMyPcConfig` 继承之）新增 `modelType: string`，online/mypc 两处默认值 `'linear'`，随 persist 持久化。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mypc 与 online 两个 `RemoteConfigForm` 实例接线 `modelType`；挂载加载 `getTrainerConfig` 回填 `model_type`（mypc 侧保留用户已改值）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：`startSshTraining` 持久化 conf 时带上 `model_type: cfg.modelType`；`services/api.ts` 的 `TrainerConfig` 接口同步可选 `model_type`。
+  - `web_ui/backend/routers/trainer.py`：`TrainerConfig` 模型新增 `model_type: str = "linear"`；GET `/api/trainer/config` 返回 `model_type`（缺省 linear），POST 写入 `[Remote] model_type`。
+  - `web_ui/backend/web_online_trainer.py`：`run_remote_training` 与 `run_resume` 的训练/续训命令 `--type` 改为读 conf 的 `model_type`（缺省 `linear`），替换两处硬编码；`remote_resume_train.py` 本就支持 `--type` 无需改。
+  - `web_ui/backend/train_my_pc.conf.example`：`[Remote]` 增加 `model_type = linear` 示例行。
+  - 兼容性：不配置时默认 `linear`，与既有命令逐字一致；旧 conf 无 `model_type` 键不受影响。
+  - 测试同步：后端新建 `tests/test_trainer_model_type.py`（5 例：训练命令用配置类型 / 缺省 linear / 续训命令用配置类型且 `--transfer` 正确 / config 端点 model_type 读写回路 / 旧配置缺键回退 linear）；前端 `RemoteConfigForm.test.tsx` 补 compact 模式 3 例（模型名称输入联动 / 模型类型下拉选项与联动 / compact 不显示远程目录）。实测：后端 `pytest tests/ -q` 220 passed；前端 `vitest run` 32 文件 173 passed、`npm run build`（`tsc -b`）通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (183)
 
 - perf(tub-library): 录制视频库回放第四轮冲刺 60 FPS——同页 TubEditor 播放期零 chart 重绘 + 零 re-render（播放竖线改 DOM 叠加层），预取图片 decode 预解码
