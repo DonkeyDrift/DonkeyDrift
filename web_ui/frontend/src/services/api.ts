@@ -602,6 +602,15 @@ export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWeb
   return response.data as LaunchKimiCodeWebResult;
 };
 
+export const launchZcode = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // zcode 端点不启动子进程、只返回 /terminal?cmd=zcode URL，毫秒级响应
+  const response = await api.post('/launch/zcode', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
 // Donkey 菜单/启动页由 launcher（:8090）服务，与后端 launch.py 的
 // LAUNCHER_BASE_URL 约定一致；从浏览器侧按当前访问主机推导。
 export const getDonkeyUrl = (): string =>

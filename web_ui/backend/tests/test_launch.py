@@ -28,6 +28,7 @@ def test_main_registers_launch_router():
     routes = collect_route_paths(main.app.routes)
     assert "/api/launch/kimi-code-web" in routes
     assert "/api/launch/dsh" in routes
+    assert "/api/launch/zcode" in routes
 
 
 def test_post_to_launcher_posts_body_and_preserves_timeout(monkeypatch):
@@ -100,6 +101,28 @@ def test_forward_launch_kimi_code_web_returns_launcher_json(monkeypatch):
     assert resp.status_code == 200
     assert json.loads(resp.body) == {
         "status": "ok", "url": "http://localhost:8081/"}
+
+
+def test_forward_launch_zcode_returns_launcher_json(monkeypatch):
+    launch = importlib.import_module("routers.launch")
+    captured = {}
+
+    def fake_post(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return 200, json.dumps(
+            {"status": "ok",
+             "url": "http://192.0.2.10:8090/terminal?cmd=zcode"}).encode()
+
+    monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
+
+    resp = asyncio.run(launch.launch_zcode(_FakeRequest()))
+
+    assert captured["path"] == "/api/launch/zcode"
+    assert captured["body"] == b"{}"
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {
+        "status": "ok", "url": "http://192.0.2.10:8090/terminal?cmd=zcode"}
 
 
 def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
