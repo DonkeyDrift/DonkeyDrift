@@ -420,6 +420,14 @@ class DriveApiBridge:
         if msg.get("type") == "reconnect_simulator":
             self.reconnect_simulator = True
             return
+        if msg.get("type") == "restart_with_model":
+            # 选模型后要求带模型重启：车端运行时无法热切换模型，仅记录并提示，
+            # 由人工/看门狗重启车端进程后按 selected_model.json 加载所选模型。
+            logger.info(
+                "收到带模型重启请求（model_path=%s），请重启车端进程使其生效",
+                msg.get("model_path"),
+            )
+            return
         if msg.get("type") == "request_car_state":
             self._send_car_state(self.last_num_records)
             return
@@ -715,6 +723,7 @@ class DriveApiBridge:
             "drift_yaw_error": "dye",
             "drift_steering_correction": "dsc",
             "drift_throttle_mode": "dtm",
+            "sim_connected": "sim_connected",
         }
         payload = {"type": "telemetry", "t": int(now * 1000)}
         for arg_name, value in fields.items():
@@ -731,7 +740,7 @@ class DriveApiBridge:
     def update(self):
         return None
 
-    def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None,
+    def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None, sim_connected=None,
                     imu_gz=None, imu_gx=None, imu_gy=None,
                     imu_ax=None, imu_ay=None, imu_az=None,
                     steering=None, throttle=None,
@@ -783,7 +792,8 @@ class DriveApiBridge:
                                    rc_mode=rc_mode, rc_park=rc_park,
                                    drift_yaw_error=drift_yaw_error,
                                    drift_steering_correction=drift_steering_correction,
-                                   drift_throttle_mode=drift_throttle_mode)
+                                   drift_throttle_mode=drift_throttle_mode,
+                                   sim_connected=sim_connected)
 
         if mode is not None:
             self.mode = mode

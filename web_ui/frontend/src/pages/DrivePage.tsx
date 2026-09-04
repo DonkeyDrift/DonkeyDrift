@@ -40,6 +40,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const lastRcParkRef = useRef<number | null>(null);
   const [rcMode, setRcMode] = useState<number | null>(null);
   const [rcPark, setRcPark] = useState<number | null>(null);
+  const [simConnected, setSimConnected] = useState(true);
 
   const handleTelemetry = useCallback((t: Telemetry) => {
     useTelemetryStore.getState().push(t);
@@ -50,6 +51,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     if (typeof t.rc_park === 'number' && t.rc_park !== lastRcParkRef.current) {
       lastRcParkRef.current = t.rc_park;
       setRcPark(t.rc_park);
+    }
+    if (typeof t.sim_connected === 'boolean') {
+      setSimConnected(t.sim_connected);
     }
   }, []);
 
@@ -74,6 +78,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [recordingLock, setRecordingLock] = useState(false);
   const recordingLockRef = useRef(false);
   const [currentModel, setCurrentModel] = useState<string>('');
+  const [modelRestartRequired, setModelRestartRequired] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
@@ -279,11 +284,17 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   const handleModelChange = useCallback((modelName: string) => {
     setCurrentModel(modelName);
+    setModelRestartRequired(false);
     if (modelName && configPath) {
       const modelPath = `./models/${modelName}`;
-      loadModelToCar(modelPath, configPath).catch((err) => {
-        console.warn('加载模型到车端失败:', getApiErrorMessage(err));
-      });
+      loadModelToCar(modelPath, configPath)
+        .then((res) => {
+          // 后端现在只记录选择，需重启车端后生效（#362）
+          setModelRestartRequired(Boolean(res?.restart_required));
+        })
+        .catch((err) => {
+          console.warn('加载模型到车端失败:', getApiErrorMessage(err));
+        });
     }
   }, [configPath]);
 
@@ -346,6 +357,14 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                   {t('drive.parkLocked')}
                 </span>
               )}
+              {simConnected === false && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  data-sim-connected={simConnected}
+                >
+                  {t('drive.simOfflineReconnecting')}
+                </span>
+              )}
               <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
               <ModelSelector
                 value={currentModel}
@@ -353,6 +372,14 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                 onChange={handleModelChange}
                 disabled={!carState.online || modelsLoading}
               />
+              {modelRestartRequired && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  data-model-restart-required="true"
+                >
+                  {t('drive.modelRestartRequired')}
+                </span>
+              )}
             </div>
             {/* 右：已录制条数 + 录制 */}
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
