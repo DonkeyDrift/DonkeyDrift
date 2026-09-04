@@ -13,7 +13,7 @@ import threading
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -688,6 +688,48 @@ async def delete_model(path: str = Query(..., description="Absolute path to the 
                 pass
 
     return {"status": True, "path": path}
+
+
+@router.post("/models/import")
+async def import_model(
+    file: UploadFile = File(...),
+    working_dir: Optional[str] = Form(None),
+):
+    """Import (upload) a .tflite model into <working_dir>/models.
+
+    Mirrors list_models' working_dir resolution so the uploaded file lands in
+    exactly the directory the Trainer page lists. Rejects non-.tflite files
+    and duplicate names (no silent overwrite).
+    """
+    filename = os.path.basename(file.filename or "")
+    if not filename:
+        raise HTTPException(status_code=400, detail="No file selected")
+    if not filename.lower().endswith(".tflite"):
+        raise HTTPException(status_code=400, detail="Only .tflite model files are supported")
+
+    cwd = working_dir or os.getcwd()
+    models_dir = os.path.join(cwd, "models")
+    os.makedirs(models_dir, exist_ok=True)
+
+    dest = os.path.join(models_dir, filename)
+    if os.path.exists(dest):
+        raise HTTPException(status_code=409, detail=f"Model already exists: {filename}")
+
+    size = 0
+    with open(dest, "wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+            size += len(chunk)
+
+    return {
+        "status": True,
+        "name": filename,
+        "path": os.path.abspath(dest),
+        "size": size,
+    }
 
 
 @router.get("/backups")

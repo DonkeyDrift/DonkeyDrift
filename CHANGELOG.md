@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-04 (180)
+
+- feat(trainer): 「已训练模型」卡片新增「导入模型」按钮——上传本地 .tflite 模型到当前项目 models/ 目录，列表自动刷新后可下载 / 加载到车端
+  - 背景：模型卡片已有「下载 / 加载到车端 / 复制路径 / 删除」，唯独缺「导入（上传）」，本地模型只能手工拷文件。
+  - 后端 `web_ui/backend/routers/trainer.py`：新增 `POST /api/trainer/models/import`（`UploadFile` + `working_dir` Form），`os.path.basename` 去路径防目录穿越、仅允许 `.tflite`、自动创建 `models/`、同名返回 409 不静默覆盖、分块落盘，返回 `{status,name,path,size}`；`working_dir` 解析与 `list_models` 一致，保证上传位置 = 列表读取位置；fastapi import 增补 `UploadFile/File/Form`。
+  - 前端 `web_ui/frontend/src/services/api.ts`：新增 `importModel(file, workingDir?)`，`FormData` 传 `file` + `working_dir`，不手动设 Content-Type（axios 对 FormData 在浏览器侧自动补 multipart boundary）。
+  - 前端 `web_ui/frontend/src/components/trainer/ModelsList.tsx`：头部新增「导入模型」按钮（Upload 图标）+ 隐藏 `<input type="file" accept=".tflite">`，选择后调 `importModel` 并 `refresh`；导入中禁用按钮、失败 `alert` 后端 detail。
+  - i18n `web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.importModel` / `trainer.importing` / `trainer.importFailed` 中英文案。
+  - 测试同步：后端新增 `web_ui/backend/tests/test_trainer_models.py`（4 例：成功落盘 / 拒绝非 .tflite / 重名 409 且原文件不覆盖 / 路径穿越文件名净化）。
+  - 实测：后端 `pytest tests/test_trainer*.py tests/test_connector.py -q` 122 passed；前端 `npm run check`（tsc -b）无错、`npm run build` 通过。仅 DD 后端/前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (177)
 
 - fix(frontend): 修复老用户点击侧边「加载器」抽屉无反应——缺陷链同时吞掉配置自动加载，全新浏览器不触发故长期未察觉

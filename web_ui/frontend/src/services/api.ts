@@ -332,6 +332,18 @@ export const deleteModel = async (path: string) => {
   return response.data;
 };
 
+export const importModel = async (file: File, workingDir?: string) => {
+  const form = new FormData();
+  form.append('file', file);
+  if (workingDir) {
+    form.append('working_dir', workingDir);
+  }
+  // 不手动设置 Content-Type：axios 对 FormData 会在浏览器侧自动设置
+  // multipart/form-data 边界，手动设置反而会丢失 boundary。
+  const response = await api.post('/trainer/models/import', form);
+  return response.data;
+};
+
 export const loadModelToCar = async (modelPath: string, workingDir?: string) => {
   const response = await api.post('/drive/load_model', { model_path: modelPath, working_dir: workingDir });
   return response.data;
