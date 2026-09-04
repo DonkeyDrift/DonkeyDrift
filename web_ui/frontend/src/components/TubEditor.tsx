@@ -100,6 +100,14 @@ export const TubEditor: React.FC = () => {
     currentIndex: number;
   } | null>(null);
   const selectionDraftRef = useRef(selectionDraft);
+  // 底部滑条首尾三角手柄拖拽预览：拖拽中只更新显示，松手才一次性提交 setSelectionRange
+  const [handleDrag, setHandleDrag] = useState<{
+    edge: 'start' | 'end';
+    startIndex: number;
+    endIndex: number;
+  } | null>(null);
+  const handleDragRef = useRef<{ edge: 'start' | 'end'; startIndex: number; endIndex: number } | null>(null);
+  const sliderContainerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const hoverPositionRef = useRef<{ x: number; y: number; dataIndex: number } | null>(null);
   const recordsRef = useRef(records);
@@ -1350,6 +1358,11 @@ export const TubEditor: React.FC = () => {
       return null;
     }
 
+    // 三角手柄拖拽预览优先，让绿条与手柄实时跟随
+    if (handleDrag) {
+      return { startIndex: handleDrag.startIndex, endIndex: handleDrag.endIndex };
+    }
+
     if (selectionDraft) {
       const startIndex = Math.min(selectionDraft.startIndex, selectionDraft.currentIndex);
       const endIndex = Math.max(selectionDraft.startIndex, selectionDraft.currentIndex) + 1;
@@ -1364,7 +1377,7 @@ export const TubEditor: React.FC = () => {
     }
 
     return null;
-  }, [records.length, selectionDraft, selectionStartIndex, selectionEndIndex]);
+  }, [records.length, handleDrag, selectionDraft, selectionStartIndex, selectionEndIndex]);
 
   // 滑块（底部概览条）与图表共用同一坐标：会话视图用「会话内数组下标」(0..N-1)，
   // 全局视图用整个 tub 的物理 _index。选区绿条 / 已删除红条都按此坐标定位。
@@ -1388,7 +1401,8 @@ export const TubEditor: React.FC = () => {
     [records]
   );
 
-  const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
+  // 选区在底部滑条上的起止百分比（数值），绿条样式与三角手柄定位共用同一换算
+  const sliderSelectionPercents = useMemo<{ startPct: number; endPct: number } | null>(() => {
     if (!sliderSelectionRange || !records.length || !sliderSpan) {
       return null;
     }
@@ -1407,14 +1421,21 @@ export const TubEditor: React.FC = () => {
         ? endRecord._index + 1
         : startXValue + 1;
 
-    const leftPercent = (startXValue / sliderSpan) * 100;
-    const widthPercent = ((endXValue - startXValue) / sliderSpan) * 100;
-
     return {
-      left: `${leftPercent}%`,
-      width: `max(${widthPercent}%, 2px)`,
+      startPct: (startXValue / sliderSpan) * 100,
+      endPct: (endXValue / sliderSpan) * 100,
     };
   }, [records, isSessionScoped, sliderSpan, sliderSelectionRange]);
+
+  const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
+    if (!sliderSelectionPercents) {
+      return null;
+    }
+    return {
+      left: `${sliderSelectionPercents.startPct}%`,
+      width: `max(${sliderSelectionPercents.endPct - sliderSelectionPercents.startPct}%, 2px)`,
+    };
+  }, [sliderSelectionPercents]);
 
   const sliderDeletedStyles = useMemo<{ left: string; width: string }[]>(() => {
     const inScopeIndexes = isSessionScoped
@@ -1451,6 +1472,73 @@ export const TubEditor: React.FC = () => {
       };
     });
   }, [deletedIndexes, isSessionScoped, sessionFirstIndex, sessionLastIndex, sliderSpan, physicalToArrayPos]);
+
+  // 底部滑条 x 坐标 → 数组下标（endIndex 排他语义，取值 0..records.length）。
+  // 与 sliderSelectionPercents 同一坐标系：会话视图=数组下标，全局视图=物理 _index 经 physicalToArrayPos 反算。
+  const indexFromSliderClientX = useCallback(
+    (clientX: number): number => {
+      const container = sliderContainerRef.current;
+      if (!container || !records.length || !sliderSpan) {
+        return 0;
+      }
+      const rect = container.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const xValue = pct * sliderSpan;
+      const idx = isSessionScoped ? Math.round(xValue) : physicalToArrayPos(Math.round(xValue));
+      return Math.max(0, Math.min(records.length, idx));
+    },
+    [records.length, sliderSpan, isSessionScoped, physicalToArrayPos]
+  );
+
+  // 首尾三角手柄拖拽：Pointer Events 统一鼠标/触控板/触屏；
+  // 拖拽中只更新预览（滑条绿条 + 图表选区矩形），松手才一次性 setSelectionRange（一条撤销历史）
+  const handleSelectionHandlePointerDown = useCallback(
+    (edge: 'start' | 'end') => (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !sliderSelectionRange) return;
+      event.stopPropagation();
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const initial = {
+        edge,
+        startIndex: sliderSelectionRange.startIndex,
+        endIndex: sliderSelectionRange.endIndex,
+      };
+      handleDragRef.current = initial;
+      setHandleDrag(initial);
+    },
+    [sliderSelectionRange]
+  );
+
+  const handleSelectionHandlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const prev = handleDragRef.current;
+      if (!prev) return;
+      event.stopPropagation();
+      const idx = indexFromSliderClientX(event.clientX);
+      // 两端不可交叉，选区至少保留 1 条记录（endIndex 排他）
+      const next =
+        prev.edge === 'start'
+          ? { ...prev, startIndex: Math.max(0, Math.min(idx, prev.endIndex - 1)) }
+          : { ...prev, endIndex: Math.min(records.length, Math.max(idx, prev.startIndex + 1)) };
+      handleDragRef.current = next;
+      setHandleDrag(next);
+      visualSelectionRef.current = { startIndex: next.startIndex, endIndex: next.endIndex };
+      requestChartRender();
+    },
+    [indexFromSliderClientX, records.length, requestChartRender]
+  );
+
+  const handleSelectionHandlePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const prev = handleDragRef.current;
+      if (!prev) return;
+      event.stopPropagation();
+      handleDragRef.current = null;
+      setHandleDrag(null);
+      setSelectionRange(prev.startIndex, prev.endIndex);
+    },
+    [setSelectionRange]
+  );
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
@@ -1785,7 +1873,7 @@ export const TubEditor: React.FC = () => {
             </div>
           )}
         </div>
-        <div className="relative mt-3 h-6 shrink-0">
+        <div ref={sliderContainerRef} className="relative mt-3 h-6 shrink-0">
           <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-lg bg-zinc-700" />
           {sliderSelectionStyle && (
             <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2">
@@ -1818,6 +1906,49 @@ export const TubEditor: React.FC = () => {
             aria-label={t('tubEditor.scrollAria')}
             className="tub-editor-scroll-slider relative z-20 h-6 w-full appearance-none cursor-pointer bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
           />
+          {sliderSelectionPercents && sliderSelectionRange && (
+            <>
+              {/* 选区首尾三角手柄：z-30 压过播放头滑块，24×24 命中区方便触控板点选 */}
+              <div
+                role="slider"
+                aria-label={t('tubEditor.selectionStartHandleAria')}
+                aria-valuemin={0}
+                aria-valuemax={records.length}
+                aria-valuenow={sliderSelectionRange.startIndex}
+                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+                style={{ left: `${sliderSelectionPercents.startPct}%` }}
+                onPointerDown={handleSelectionHandlePointerDown('start')}
+                onPointerMove={handleSelectionHandlePointerMove}
+                onPointerUp={handleSelectionHandlePointerUp}
+                onPointerCancel={handleSelectionHandlePointerUp}
+              >
+                <div
+                  className={`h-0 w-0 border-y-[6px] border-l-[9px] border-y-transparent transition-transform ${
+                    handleDrag?.edge === 'start' ? 'scale-125 border-l-emerald-300' : 'border-l-emerald-400'
+                  }`}
+                />
+              </div>
+              <div
+                role="slider"
+                aria-label={t('tubEditor.selectionEndHandleAria')}
+                aria-valuemin={0}
+                aria-valuemax={records.length}
+                aria-valuenow={sliderSelectionRange.endIndex}
+                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+                style={{ left: `${sliderSelectionPercents.endPct}%` }}
+                onPointerDown={handleSelectionHandlePointerDown('end')}
+                onPointerMove={handleSelectionHandlePointerMove}
+                onPointerUp={handleSelectionHandlePointerUp}
+                onPointerCancel={handleSelectionHandlePointerUp}
+              >
+                <div
+                  className={`h-0 w-0 border-y-[6px] border-r-[9px] border-y-transparent transition-transform ${
+                    handleDrag?.edge === 'end' ? 'scale-125 border-r-emerald-300' : 'border-r-emerald-400'
+                  }`}
+                />
+              </div>
+            </>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -1,5 +1,19 @@
 # 变更日志
 
+## 2026-09-04 (176)
+
+- feat(TE): Tub 编辑器底部滑条新增选区首尾三角箭头手柄——点击/拖拽直接调整选区范围，方便 Mac 触控板操作
+  - 背景：选区只能靠图表上「两次点击」框选，Mac 触控板操控不便；底部概览滑条上的绿色选区条两端原无任何可交互手柄（全部 `pointer-events-none`，唯一的原生 range input 只控制播放头）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：
+    - 新增 `handleDrag` state + `handleDragRef` + `sliderContainerRef`——拖拽中只更新预览（滑条绿条与手柄位置、图表选区矩形经 `visualSelectionRef` + `requestChartRender()` 实时跟随），松手才一次性 `setSelectionRange`（只产生一条撤销历史，避免逐帧刷 history）。
+    - `sliderSelectionRange` useMemo 增加 `handleDrag` 优先分支；`sliderSelectionStyle` 重构为 `sliderSelectionPercents`（数值型 startPct/endPct）+ 薄样式包装，绿条与手柄定位共用同一换算、杜绝两套坐标漂移。
+    - 新增 `indexFromSliderClientX`——滑条容器 x 坐标 → 数组下标，与绿条同一坐标系（会话视图=数组下标，全局视图=物理 `_index` 经既有 `physicalToArrayPos` 反算），clamp 到 `[0, records.length]`。
+    - 新增 Pointer Events 拖拽回调（鼠标/触控板/触屏通吃）：pointerdown `stopPropagation` + `setPointerCapture` 并记录拖拽边；pointermove 按边更新，两端不可交叉、选区至少保留 1 条记录（endIndex 排他语义）；pointerup/pointercancel 提交一次 `setSelectionRange`。
+    - 滑条 JSX：有选区时在绿条首尾渲染两个 z-30 手柄（左 `▶` / 右 `◀` CSS border 三角，emerald 配色与选区一致），24×24 透明命中区方便触控板点选，`cursor-ew-resize`、`touch-none`，拖拽中放大高亮；`role="slider"` + aria 属性。
+  - i18n：`web_ui/frontend/src/i18n/messages/tubeditor.ts` 新增 `tubEditor.selectionStartHandleAria` / `tubEditor.selectionEndHandleAria` 中英文案。
+  - 未改动：图表「两次点击」框选逻辑、播放头 range input 行为；无选区时不显示手柄。
+  - 实测：`npm run build`（`tsc -b` + vite）通过、`vitest run` 32 文件 170 passed；eslint 仅一条 `handleTouchEnd` 未用参数报错，为 Tony 侧既有问题、与本次无关。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (171)
 
 - feat(trainer): mypc 首用体验五连——tub 选择 / 探测门禁 / known-hosts 连接记忆 / client-info 一键获取 / trainerMode 上 store（2026-08-23 开发于 dd-deploy，本次由 wrap-mypc-ux 移植收尾合入，含两处安全设计偏差）
