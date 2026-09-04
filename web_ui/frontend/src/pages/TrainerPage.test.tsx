@@ -89,6 +89,7 @@ beforeEach(() => {
       password: 'pw',
       remoteDirBase: '~/projects',
       modelName: 'model',
+      modelType: 'linear',
       pythonPath: '',
       keyPath: '',
       tub: './data',

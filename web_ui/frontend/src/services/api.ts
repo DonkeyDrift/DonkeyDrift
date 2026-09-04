@@ -224,6 +224,8 @@ export interface TrainerConfig {
   remote_dir_base: string;
   model_name: string;
   python_path: string;
+  /** 模型类型（linear/categorical/...），远程训练命令 --type 参数 */
+  model_type?: string;
   /** SSH 私钥路径（可选，留空用密码认证） */
   key_path?: string;
 }

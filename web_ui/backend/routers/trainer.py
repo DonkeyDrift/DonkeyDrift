@@ -31,6 +31,7 @@ class TrainerConfig(BaseModel):
     remote_dir_base: str
     model_name: str
     python_path: str
+    model_type: str = "linear"
 
 
 class SSHCredentials(BaseModel):
@@ -122,6 +123,7 @@ async def get_trainer_config(config_file: str = "train_online.conf"):
         "remote_dir_base": config["Remote"].get("remote_dir_base", "~/projects"),
         "model_name": config["Remote"].get("model_name", "model"),
         "python_path": config["Remote"].get("python_path", "~/miniconda3/envs/donkey/bin/python"),
+        "model_type": config["Remote"].get("model_type", "linear"),
     }
 
 
@@ -140,6 +142,7 @@ async def set_trainer_config(cfg: TrainerConfig, config_file: str = "train_onlin
     config.set("Remote", "remote_dir_base", cfg.remote_dir_base)
     config.set("Remote", "model_name", cfg.model_name)
     config.set("Remote", "python_path", cfg.python_path)
+    config.set("Remote", "model_type", cfg.model_type)
 
     with open(path, "w") as f:
         config.write(f)

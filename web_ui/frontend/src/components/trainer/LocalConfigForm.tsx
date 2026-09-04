@@ -5,6 +5,7 @@ import { TubSelector } from './TubSelector';
 import { useStore, type TrainerLocalConfig } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 import type { TrainerTub } from '../../services/api';
+import { MODEL_TYPES } from './modelTypes';
 
 interface LocalConfigFormProps {
   config: TrainerLocalConfig;
@@ -12,16 +13,6 @@ interface LocalConfigFormProps {
   tubCandidates: TrainerTub[];
   currentTubPath: string;
 }
-
-const MODEL_TYPES = [
-  'linear',
-  'categorical',
-  'rnn',
-  'imu',
-  'behavior',
-  'localizer',
-  '3d',
-];
 
 export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
   config,
