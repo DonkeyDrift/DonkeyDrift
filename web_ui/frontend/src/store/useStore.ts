@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { TrainerMode } from '../components/trainer/ModeTabs';
 
 const MAX_SELECTION_HISTORY = 120;
 
@@ -41,7 +42,10 @@ export interface TrainerOnlineConfig {
 
 // Connection settings for training on the user's own computer (SSH callback
 // from the backend to the machine running the browser, config train_my_pc.conf).
-export type TrainerMyPcConfig = TrainerOnlineConfig;
+// 比 online 多一个 tub 字段：训练打包哪个 tub（相对 working_dir 的路径）。
+export interface TrainerMyPcConfig extends TrainerOnlineConfig {
+  tub: string;
+}
 
 export interface TrainerLocalConfig {
   tub: string;
@@ -89,6 +93,7 @@ interface AppState {
 
   // Trainer state
   trainingJob: TrainingJob | null;
+  trainerMode: TrainerMode;
   trainerOnlineConfig: TrainerOnlineConfig;
   trainerMyPcConfig: TrainerMyPcConfig;
   trainerLocalConfig: TrainerLocalConfig;
@@ -118,6 +123,7 @@ interface AppState {
 
   // Trainer actions
   setTrainingJob: (job: TrainingJob | null) => void;
+  setTrainerMode: (mode: TrainerMode) => void;
   appendTrainingLog: (lines: string[]) => void;
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
   finishTrainingJob: (status: 'completed' | 'failed' | 'stopped', errorMessage?: string | null) => void;
@@ -158,6 +164,7 @@ export const useStore = create<AppState>()(
 
       // Trainer defaults
       trainingJob: null,
+      trainerMode: 'local',
       trainerOnlineConfig: {
         host: '',
         user: '',
@@ -175,6 +182,7 @@ export const useStore = create<AppState>()(
         modelName: 'model',
         pythonPath: '',
         keyPath: '',
+        tub: './data',
       },
       trainerLocalConfig: {
         tub: './data',
@@ -324,6 +332,7 @@ export const useStore = create<AppState>()(
 
       // Trainer actions
       setTrainingJob: (job) => set({ trainingJob: job }),
+      setTrainerMode: (mode) => set({ trainerMode: mode }),
       appendTrainingLog: (lines) =>
         set((state) => {
           if (!state.trainingJob) return state;
@@ -378,6 +387,7 @@ export const useStore = create<AppState>()(
         trainerOnlineConfig: state.trainerOnlineConfig,
         trainerMyPcConfig: state.trainerMyPcConfig,
         trainerLocalConfig: state.trainerLocalConfig,
+        trainerMode: state.trainerMode,
       }),
     }
   )

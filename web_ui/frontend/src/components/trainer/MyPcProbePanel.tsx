@@ -13,20 +13,25 @@ import {
   createLogStream,
   getJobStatus,
   installMyPc,
-  probeMyPc,
   type MyPcProbeResult,
 } from '../../services/api';
 import { useTranslation } from '@/i18n';
 
 interface MyPcProbePanelProps {
+  // 一键安装仍需连接凭据（探测状态由父组件受控传入，见下方四个 props）
   host: string;
   user: string;
   password: string;
-  remoteDirBase: string;
   pythonPath: string;
   /** SSH 私钥路径（可选，与表单 keyPath 一致；留空时后端回退默认密钥/密码认证） */
   keyPath?: string;
   onApplyPythonPath: (path: string) => void;
+  // 受控探测状态：父组件（TrainerPage）持有 useMyPcProbe，
+  // 「开始训练」前的环境门禁与本面板共用同一份结果
+  result: MyPcProbeResult | null;
+  loading: boolean;
+  error: string | null;
+  onRunProbe: () => void;
 }
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
@@ -40,15 +45,15 @@ export const MyPcProbePanel: React.FC<MyPcProbePanelProps> = ({
   host,
   user,
   password,
-  remoteDirBase,
   pythonPath,
   keyPath,
   onApplyPythonPath,
+  result,
+  loading,
+  error,
+  onRunProbe,
 }) => {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<MyPcProbeResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   // 一键安装训练依赖（pip install "donkeydrifter[pc]"）状态
   const [installing, setInstalling] = useState(false);
@@ -62,29 +67,6 @@ export const MyPcProbePanel: React.FC<MyPcProbePanelProps> = ({
     esRef.current?.close();
     esRef.current = null;
   }, []);
-
-  const runProbe = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const data = await probeMyPc({
-        host,
-        user,
-        password,
-        remote_dir_base: remoteDirBase,
-        python_path: pythonPath,
-        key_path: keyPath || undefined,
-      });
-      setResult(data);
-    } catch (e) {
-      setError(t('trainer.myPcProbeFailed', {
-        message: e instanceof Error ? e.message : String(e),
-      }));
-    } finally {
-      setLoading(false);
-    }
-  }, [host, user, password, remoteDirBase, pythonPath, keyPath, t]);
 
   const canApplyPython =
     !!result?.python_path && result.python_path !== pythonPath;
@@ -180,10 +162,10 @@ export const MyPcProbePanel: React.FC<MyPcProbePanelProps> = ({
           <p className="text-xs text-zinc-500 mt-1">{t('trainer.myPcProbeHint')}</p>
         </div>
         <button
-          onClick={runProbe}
-          disabled={loading || !host || !user}
+          onClick={onRunProbe}
+          disabled={loading}
           className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${
-            loading || !host || !user
+            loading
               ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
               : 'bg-cyan-600 hover:bg-cyan-700 text-white'
           }`}

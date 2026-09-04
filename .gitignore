@@ -33,6 +33,8 @@ web_ui/frontend/node_modules/
 .ssh-tmp/
 .worktrees/
 start_test.sh
+# mypc 连接记忆（含内网主机信息，本机私有，不入库）
+mypc_known_hosts.json
 
 # 本机 agent 说明文件与工作目录（用户私人文件，不入库）
 /AGENTS.md

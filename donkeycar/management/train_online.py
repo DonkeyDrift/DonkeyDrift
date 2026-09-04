@@ -60,6 +60,7 @@ class OnlineTrainer:
         self.sftp_client = None
         self.remote_work_dir = None  # 用于存储动态生成的远程工作目录
         self.log_file = os.path.join("logs", "train_online.log")
+        self.data_dir = "./data"  # 训练数据目录，子类可覆盖为指定 tub 路径
 
     def _log(self, message, success=True):
         timestamp = datetime.now().isoformat()
@@ -186,9 +187,9 @@ class OnlineTrainer:
         return self.config["Remote"].get(key)
 
     def package_data(self):
-        data_dir = "./data"
+        data_dir = self.data_dir
         if not os.path.exists(data_dir):
-            raise FileNotFoundError("Local ./data directory not found")
+            raise FileNotFoundError(f"Local data directory not found: {data_dir}")
 
         # 1. Check and create cache dir
         cache_dir = "./data_cache"

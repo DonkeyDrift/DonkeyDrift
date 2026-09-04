@@ -4,13 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { LanguageProvider } from '@/i18n';
 import { MyPcProbePanel } from './MyPcProbePanel';
-const probeMyPcMock = vi.hoisted(() => vi.fn());
+import type { MyPcProbeResult } from '../../services/api';
+
 const installMyPcMock = vi.hoisted(() => vi.fn());
 const createLogStreamMock = vi.hoisted(() => vi.fn());
 const getJobStatusMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../services/api', () => ({
-  probeMyPc: probeMyPcMock,
   installMyPc: installMyPcMock,
   createLogStream: createLogStreamMock,
   getJobStatus: getJobStatusMock,
@@ -27,16 +27,20 @@ createLogStreamMock.mockImplementation(() => {
   return es;
 });
 
+// 探测状态由父组件（TrainerPage）受控持有：本组件只消费 result/loading/error
+// 并通过 onRunProbe 请求重新检测，自身不再调用 probeMyPc
 const baseProps = {
-  host: '192.168.1.10',
-  user: 'u',
-  password: 'p',
-  remoteDirBase: '~/projects',
+  host: '192.0.2.10',
+  user: 'tester',
+  password: 'pw',
   pythonPath: '',
   onApplyPythonPath: vi.fn(),
+  loading: false,
+  error: null as string | null,
+  onRunProbe: vi.fn(),
 };
 
-const readyResult = {
+const readyResult: MyPcProbeResult = {
   ok: true,
   platform: 'linux',
   shell: 'posix',
@@ -50,7 +54,7 @@ const readyResult = {
   suggestions: [],
 };
 
-const missingDonkeycarResult = {
+const missingDonkeycarResult: MyPcProbeResult = {
   ...readyResult,
   ok: false,
   checks: [
@@ -60,10 +64,10 @@ const missingDonkeycarResult = {
   ],
 };
 
-function renderPanel() {
+function renderPanel(result: MyPcProbeResult | null = null) {
   return render(
     <LanguageProvider>
-      <MyPcProbePanel {...baseProps} />
+      <MyPcProbePanel {...baseProps} result={result} />
     </LanguageProvider>,
   );
 }
@@ -78,12 +82,35 @@ const LOCALE_RE = {
   probeButton: /检测环境|Run Check/,
 };
 
-async function runProbe(result: typeof readyResult) {
-  probeMyPcMock.mockResolvedValueOnce(result);
-  fireEvent.click(screen.getByRole('button', { name: LOCALE_RE.probeButton }));
-  // 探测结果可能是就绪或未就绪，等待任意一种结论出现
-  await screen.findByText(/环境就绪|环境未就绪|Environment ready|Environment not ready/);
-}
+describe('MyPcProbePanel 受控探测状态', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    es = null;
+    window.localStorage.clear();
+  });
+
+  it('点击「检测环境」调用父组件传入的 onRunProbe（自身不发起探测请求）', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: LOCALE_RE.probeButton }));
+    expect(baseProps.onRunProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it('探测结果就绪/未就绪文案跟随受控 result 渲染', () => {
+    const { rerender } = render(
+      <LanguageProvider>
+        <MyPcProbePanel {...baseProps} result={readyResult} />
+      </LanguageProvider>,
+    );
+    expect(screen.getByText(LOCALE_RE.ready)).toBeInTheDocument();
+
+    rerender(
+      <LanguageProvider>
+        <MyPcProbePanel {...baseProps} result={missingDonkeycarResult} />
+      </LanguageProvider>,
+    );
+    expect(screen.getByText(LOCALE_RE.notReady)).toBeInTheDocument();
+  });
+});
 
 describe('MyPcProbePanel 一键安装训练依赖', () => {
   beforeEach(() => {
@@ -101,8 +128,7 @@ describe('MyPcProbePanel 一键安装训练依赖', () => {
   });
 
   it('探测完成且缺 donkeycar 时显示安装按钮，并优先使用探测到的 python', async () => {
-    renderPanel();
-    await runProbe(missingDonkeycarResult);
+    renderPanel(missingDonkeycarResult);
     expect(screen.getByTestId('mypc-install-button')).toBeInTheDocument();
     expect(screen.getByText(LOCALE_RE.rerunHint)).toBeInTheDocument();
 
@@ -111,30 +137,23 @@ describe('MyPcProbePanel 一键安装训练依赖', () => {
     await waitFor(() => expect(installMyPcMock).toHaveBeenCalledTimes(1));
     expect(installMyPcMock).toHaveBeenCalledWith(expect.objectContaining({
       python_path: '/usr/bin/python3', // probe 结果优先于空表单值
-      host: '192.168.1.10',
+      host: '192.0.2.10',
     }));
   });
 
-  it('环境就绪时也允许主动安装（用户主动重装/升级）', async () => {
-    renderPanel();
-    await runProbe(readyResult);
+  it('环境就绪时也允许主动安装（用户主动重装/升级）', () => {
+    renderPanel(readyResult);
     expect(screen.getByTestId('mypc-install-button')).toBeInTheDocument();
   });
 
-  it('探测失败（无 python）时不显示安装按钮', async () => {
-    renderPanel();
-    probeMyPcMock.mockResolvedValueOnce({
-      ...missingDonkeycarResult,
-      python_path: '',
-    });
-    fireEvent.click(screen.getByRole('button', { name: LOCALE_RE.probeButton }));
-    await screen.findByText(LOCALE_RE.notReady);
+  it('探测失败（无 python）时不显示安装按钮', () => {
+    renderPanel({ ...missingDonkeycarResult, python_path: '' });
+    expect(screen.getByText(LOCALE_RE.notReady)).toBeInTheDocument();
     expect(screen.queryByTestId('mypc-install-button')).toBeNull();
   });
 
   it('安装中显示运行状态与实时日志尾部，完成后提示重新检测', async () => {
-    renderPanel();
-    await runProbe(missingDonkeycarResult);
+    renderPanel(missingDonkeycarResult);
 
     installMyPcMock.mockResolvedValueOnce({ job_id: 'job1', status: 'running' });
     fireEvent.click(screen.getByTestId('mypc-install-button'));
@@ -156,8 +175,7 @@ describe('MyPcProbePanel 一键安装训练依赖', () => {
   });
 
   it('安装失败（HTTP 报错）时显示失败信息', async () => {
-    renderPanel();
-    await runProbe(missingDonkeycarResult);
+    renderPanel(missingDonkeycarResult);
 
     installMyPcMock.mockRejectedValueOnce(new Error('connection refused'));
     fireEvent.click(screen.getByTestId('mypc-install-button'));
@@ -167,8 +185,7 @@ describe('MyPcProbePanel 一键安装训练依赖', () => {
   });
 
   it('任务失败（SSE status=failed）时显示失败信息', async () => {
-    renderPanel();
-    await runProbe(missingDonkeycarResult);
+    renderPanel(missingDonkeycarResult);
 
     installMyPcMock.mockResolvedValueOnce({ job_id: 'job1', status: 'running' });
     fireEvent.click(screen.getByTestId('mypc-install-button'));

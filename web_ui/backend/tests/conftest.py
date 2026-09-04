@@ -1,4 +1,27 @@
 """Shared helpers for backend contract tests."""
+import sys
+from pathlib import Path
+
+import pytest
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mypc_history(tmp_path, monkeypatch):
+    """Redirect the mypc known-hosts history file into a per-test tmp dir.
+
+    Route tests trigger save_known_host() hooks (probe / train start); this
+    keeps those writes out of the real checkout.
+    """
+    import mypc_history
+
+    monkeypatch.setattr(
+        mypc_history, "_history_path",
+        lambda: str(tmp_path / "mypc_known_hosts.json"),
+    )
 
 
 def collect_route_paths(routes, prefix=""):

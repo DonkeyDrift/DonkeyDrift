@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
+import { TubSelector } from './TubSelector';
 import { useStore, type TrainerLocalConfig } from '../../store/useStore';
 import { useTranslation } from '@/i18n';
 import type { TrainerTub } from '../../services/api';
@@ -31,9 +32,6 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
   const { t } = useTranslation();
   const { configPath } = useStore();
 
-  const candidatePaths = tubCandidates.map((c) => c.relative_path);
-  const selectedCandidate = candidatePaths.includes(config.tub) ? config.tub : '';
-
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
       <SectionCardTitle
@@ -43,34 +41,12 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
       />
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">{t('trainer.tubPath')}</label>
-        <div className="flex gap-2">
-          <select
-            value={selectedCandidate}
-            onChange={(e) => {
-              if (e.target.value) {
-                onConfigChange({ tub: e.target.value });
-              }
-            }}
-            className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
-            aria-label={t('trainer.tubPath')}
-          >
-            <option value="">{t('trainer.tubPathManual')}</option>
-            {tubCandidates.map((c) => (
-              <option key={c.absolute_path} value={c.relative_path}>
-                {c.absolute_path === currentTubPath
-                  ? `${c.relative_path} (${t('trainer.tubLoaded')})`
-                  : c.relative_path}
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={config.tub}
-            onChange={(e) => onConfigChange({ tub: e.target.value })}
-            className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
-          />
-        </div>
+        <TubSelector
+          tub={config.tub}
+          onTubChange={(v) => onConfigChange({ tub: v })}
+          tubCandidates={tubCandidates}
+          currentTubPath={currentTubPath}
+        />
         <div className="text-xs text-zinc-600">{t('trainer.workingDir', { path: configPath })}</div>
       </div>
 
