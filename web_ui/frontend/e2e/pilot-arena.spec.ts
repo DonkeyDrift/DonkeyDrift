@@ -14,7 +14,11 @@ const summary = {
   throttle: { count: 1, mae: 0.3, rmse: 0.3, bias: 0.3, max_abs_error: 0.3 },
 };
 
+// 记录 /predictions 请求体，验证前端发送的 start + limit 区间契约
+let predictionsBody: unknown;
+
 test.beforeEach(async ({ page }) => {
+  predictionsBody = undefined;
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     let body: unknown;
@@ -76,6 +80,7 @@ test.beforeEach(async ({ page }) => {
         pilot: { angle: 0.25, throttle: 0.5 },
       };
     } else if (pathname.endsWith('/arena/pilots/pilot-1/predictions')) {
+      predictionsBody = route.request().postDataJSON();
       body = {
         points: [
           { index: 0, user_angle: 0.1, user_throttle: 0.2, pilot_angle: 0.25, pilot_throttle: 0.5 },
@@ -123,6 +128,10 @@ test('加载 Tub → 加载模型 → 生成曲线 → 展示模型贴合摘要'
   });
   await plotSelect.selectOption('pilot-1');
   await page.getByRole('button', { name: '生成曲线' }).click();
+
+  // 区间契约（routers/arena.py:70-81 PredictionsRequest）：单条记录 Tub 默认
+  // 全区间 → start: 0, limit: 1
+  expect(predictionsBody).toMatchObject({ start: 0, limit: 1 });
 
   await expect(page.getByText('模型贴合摘要（误差 = pilot − 用户）')).toBeVisible();
   await expect(page.getByText('MAE 0.150').first()).toBeVisible();

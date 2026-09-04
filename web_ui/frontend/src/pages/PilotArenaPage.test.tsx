@@ -122,7 +122,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function loadPilotAndGeneratePlot() {
+async function loadPilotAndSelectPlotPilot() {
   render(<PilotArenaPage />);
   const loadButton = await screen.findByRole('button', { name: 'arena.loadAndPredict' });
   await waitFor(() => expect(loadButton).toBeEnabled());
@@ -135,6 +135,10 @@ async function loadPilotAndGeneratePlot() {
   );
   if (!plotSelect) throw new Error('未找到曲线 pilot 选择器');
   fireEvent.change(plotSelect, { target: { value: 'pilot-1' } });
+}
+
+async function loadPilotAndGeneratePlot() {
+  await loadPilotAndSelectPlotPilot();
   fireEvent.click(screen.getByRole('button', { name: 'arena.generatePlot' }));
   await waitFor(() => expect(api.getArenaPredictions).toHaveBeenCalled());
 }
@@ -152,7 +156,7 @@ describe('PilotArenaPage 模型贴合摘要', () => {
 
     expect(api.getArenaPredictions).toHaveBeenCalledWith(
       'pilot-1',
-      expect.objectContaining({ config_path: '/tmp/tub', limit: 200 }),
+      expect.objectContaining({ config_path: '/tmp/tub', start: 0, limit: 1 }),
     );
     expect(await screen.findByText('arena.plotSummary')).toBeInTheDocument();
     expect(screen.getByText('arena.metricMae:0.150')).toBeInTheDocument();
@@ -175,5 +179,69 @@ describe('PilotArenaPage 模型贴合摘要', () => {
     expect(await screen.findByText('arena.plotSummary')).toBeInTheDocument();
     expect(screen.getByText('arena.metricAngle: arena.metricNoData')).toBeInTheDocument();
     expect(screen.getByText('arena.metricMae:0.300')).toBeInTheDocument();
+  });
+});
+
+describe('PilotArenaPage 帧区间切片', () => {
+  it('按首尾帧滑块设定的区间发送 start + limit 请求', async () => {
+    useStore.setState({
+      records: Array.from({ length: 10 }, (_, i) => ({
+        _index: i,
+        _timestamp_ms: i * 100,
+        'cam/image_array': `${i}_cam_image_array_.jpg`,
+        'user/angle': 0.1,
+        'user/throttle': 0.2,
+      })),
+    });
+    vi.mocked(api.getArenaPredictions).mockResolvedValue({
+      points: [],
+      summary: null,
+    } as unknown as Awaited<ReturnType<typeof api.getArenaPredictions>>);
+
+    await loadPilotAndSelectPlotPilot();
+
+    // 默认区间为全部记录：0..9
+    expect(screen.getByText('arena.plotStartFrame:0')).toBeInTheDocument();
+    expect(screen.getByText('arena.plotEndFrame:9')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/arena\.plotStartFrame/), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText(/arena\.plotEndFrame/), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'arena.generatePlot' }));
+
+    await waitFor(() => expect(api.getArenaPredictions).toHaveBeenCalled());
+    expect(api.getArenaPredictions).toHaveBeenCalledWith(
+      'pilot-1',
+      expect.objectContaining({ config_path: '/tmp/tub', start: 3, limit: 5 }),
+    );
+  });
+
+  it('首帧滑块不允许超过末帧（钳制在末帧处）', async () => {
+    useStore.setState({
+      records: Array.from({ length: 10 }, (_, i) => ({
+        _index: i,
+        _timestamp_ms: i * 100,
+        'cam/image_array': `${i}_cam_image_array_.jpg`,
+        'user/angle': 0.1,
+        'user/throttle': 0.2,
+      })),
+    });
+    vi.mocked(api.getArenaPredictions).mockResolvedValue({
+      points: [],
+      summary: null,
+    } as unknown as Awaited<ReturnType<typeof api.getArenaPredictions>>);
+
+    await loadPilotAndSelectPlotPilot();
+
+    fireEvent.change(screen.getByLabelText(/arena\.plotEndFrame/), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText(/arena\.plotStartFrame/), { target: { value: '8' } });
+
+    // 首帧被钳制到末帧 4
+    expect(screen.getByText('arena.plotStartFrame:4')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'arena.generatePlot' }));
+    await waitFor(() => expect(api.getArenaPredictions).toHaveBeenCalled());
+    expect(api.getArenaPredictions).toHaveBeenCalledWith(
+      'pilot-1',
+      expect.objectContaining({ start: 4, limit: 1 }),
+    );
   });
 });

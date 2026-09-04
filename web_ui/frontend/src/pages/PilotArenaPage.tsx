@@ -175,7 +175,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const [preTransformations, setPreTransformations] = useState<string[]>([]);
   const [postTransformations, setPostTransformations] = useState<string[]>([]);
   const [plotPilotId, setPlotPilotId] = useState('');
-  const [plotLimit, setPlotLimit] = useState(200);
+  const [plotStart, setPlotStart] = useState(0);
+  const [plotEnd, setPlotEnd] = useState<number | null>(null);
   const [plotPoints, setPlotPoints] = useState<ArenaPredictionPoint[]>([]);
   const [plotSummary, setPlotSummary] = useState<ArenaPredictionsSummary | null>(null);
   const [plotError, setPlotError] = useState<string | null>(null);
@@ -217,6 +218,9 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const displayUserControl = getRecordUserControl(displayRecord);
   const hasRecords = records.length > 0;
   const maxIndex = Math.max(0, records.length - 1);
+  // 帧区间按记录位置（0..N-1）语义；plotEnd 为 null 表示跟随末帧
+  const plotRangeEnd = Math.min(plotEnd ?? maxIndex, maxIndex);
+  const plotRangeStart = Math.min(plotStart, plotRangeEnd);
   const playbackSpeed = 1000 / Math.max(1, Number(config?.DRIVE_LOOP_HZ) || 60);
   const predictionMinIntervalMs = Math.max(
     ARENA_IMAGE_MIN_INTERVAL_MS,
@@ -768,8 +772,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     try {
       const data = await getArenaPredictions(plotPilotId, {
         config_path: configPath,
-        start: 0,
-        limit: plotLimit,
+        start: plotRangeStart,
+        limit: plotRangeEnd - plotRangeStart + 1,
       });
       setPlotPoints(data.points);
       setPlotSummary(data.summary ?? null);
@@ -1124,7 +1128,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           />
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_140px_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_2fr_auto]">
             <select
               value={plotPilotId}
               onChange={(event) => setPlotPilotId(event.target.value)}
@@ -1135,14 +1139,31 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 <option key={viewer.pilot.id} value={viewer.pilot.id}>{viewer.pilot.name}</option>
               ))}
             </select>
-            <input
-              type="number"
-              min="1"
-              max={Math.max(1, records.length)}
-              value={plotLimit}
-              onChange={(event) => setPlotLimit(Number(event.target.value))}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
-            />
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-xs text-zinc-400">
+                <span className="w-24 shrink-0 font-mono">{t('arena.plotStartFrame', { value: plotRangeStart })}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={maxIndex}
+                  value={plotRangeStart}
+                  onChange={(event) => setPlotStart(Math.min(Number(event.target.value), plotRangeEnd))}
+                  className="w-full accent-cyan-500"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-zinc-400">
+                <span className="w-24 shrink-0 font-mono">{t('arena.plotEndFrame', { value: plotRangeEnd })}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={maxIndex}
+                  value={plotRangeEnd}
+                  onChange={(event) => setPlotEnd(Math.max(Number(event.target.value), plotRangeStart))}
+                  className="w-full accent-cyan-500"
+                />
+              </label>
+              <p className="text-xs text-zinc-600">{t('arena.plotRangeHint', { value: maxIndex })}</p>
+            </div>
             <Button onClick={loadPlot} disabled={plotLoading || !plotPilotId || !hasRecords}>
               {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
             </Button>

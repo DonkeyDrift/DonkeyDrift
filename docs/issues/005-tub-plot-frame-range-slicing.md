@@ -1,6 +1,6 @@
 # Issue 005: Tub 曲线图只能定量生成，希望支持首尾帧切片分析
 
-- 状态: open
+- 状态: fixed（2026-09-04）
 - 记录日期: 2026-09-04
 - 页面: Pilot Arena → Tub 曲线图
 - 类型: enhancement
