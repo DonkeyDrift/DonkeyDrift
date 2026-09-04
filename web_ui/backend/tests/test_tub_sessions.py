@@ -59,6 +59,33 @@ def test_list_sessions_groups_records_by_session(tmp_path):
         assert session["end_time_ms"] is not None
 
 
+def test_list_sessions_tolerates_empty_rollover_catalog(tmp_path):
+    """Regression: a 0-byte catalog (created at roll-over before any record
+    lands) used to make the read-only open fail with
+    "cannot mmap an empty file", so the list endpoint 500'd."""
+    from donkeycar.parts.tub_v2 import Tub
+
+    run = Tub(
+        str(tmp_path),
+        inputs=['cam/image_array', 'user/angle', 'user/throttle'],
+        types=['image_array', 'float', 'float'],
+    )
+    for i in range(3):
+        run.write_record({'user/angle': 0.1 * i, 'user/throttle': 0.5})
+    # Roll over to a fresh catalog and stop without writing into it
+    run.manifest._add_catalog()
+    run.close()
+
+    client = _build_client()
+    response = client.get("/api/tub/sessions", params={"tubPath": str(tmp_path)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] is True
+    assert len(payload["sessions"]) == 1
+    assert payload["sessions"][0]["record_count"] == 3
+
+
 def test_get_session_records_returns_only_that_session(tmp_path):
     _make_tub(tmp_path)
     client = _build_client()

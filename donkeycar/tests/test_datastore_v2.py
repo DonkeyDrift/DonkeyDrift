@@ -82,6 +82,29 @@ class TestDatastore(unittest.TestCase):
 
         self.assertEqual(10, read_records)
 
+    def test_read_only_manifest_with_empty_catalog(self):
+        # A recording that stops right after a catalog roll-over (or crashes
+        # before its first record) leaves a 0-byte catalog registered in the
+        # manifest. Opening such a datastore read-only must not crash —
+        # mmap of an empty file raises "cannot mmap an empty file".
+        manifest = Manifest(self._path, max_len=2)
+        for i in range(3):
+            manifest.write_record(self._newRecord())
+        # Simulate a roll-over where no record lands: the next catalog is
+        # created and registered but stays 0-byte.
+        manifest._add_catalog()
+        manifest.close()
+
+        manifest_2 = Manifest(self._path, read_only=True)
+        try:
+            read_records = 0
+            for _ in manifest_2:
+                read_records += 1
+        finally:
+            manifest_2.close()
+
+        self.assertEqual(3, read_records)
+
     def tearDown(self):
         shutil.rmtree(self._path)
 

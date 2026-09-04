@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-04 (180)
+
+- fix(datastore, web_ui): 修复 tub sessions 列表只读打开 0 字节 rollover catalog 触发 `cannot mmap an empty file` 崩溃（main 侧登记的"待后续跟进"项，参考 main ac863a99 的修法移植到 Tony，非 cherry-pick）
+  - 根因：录制在 catalog roll-over 后、第一条记录落盘前就停止（或崩溃）时，会留下已登记进 manifest 的 0 字节 `catalog_N.catalog`；`donkeycar/parts/datastore_v2.py` 的 `Seekable.__init__` 在只读模式下无条件 `mmap.mmap(fileno, length=0)`，空文件抛 `ValueError: cannot mmap an empty file`。`GET /api/tub/sessions`（`web_ui/backend/routers/tub.py` 以 `Tub(path, read_only=True)` 打开并迭代全部 catalog）因此整个接口 500。
+  - 修复：`datastore_v2.py` `Seekable.__init__` 改为仅当 `os.path.getsize(file) > 0` 才做 mmap——Tony 侧全部只读打开路径（`Manifest.__init__` 打开最后 catalog、`ManifestIterator` 逐个打开 catalog、底层 `Catalog`/`CatalogMetadata`）都经 `Seekable` 这一个 mmap 点，一处修复即覆盖所有打开路径；空文件回退为普通文本文件读取，`_read_contents`/`readline` 对 0 行内容处理不变。
+  - 测试同步（等价移植 main ac863a99 的两个回归测试，Tony 侧接口相同原样适用）：`web_ui/backend/tests/test_tub_sessions.py` 新增 `test_list_sessions_tolerates_empty_rollover_catalog`（写 3 条记录后 `_add_catalog()` 留下空 catalog 再关 tub，sessions 列表须 200 且返回 1 个会话、3 条记录）；`donkeycar/tests/test_datastore_v2.py` 新增 `test_read_only_manifest_with_empty_catalog`（read_only 打开含空 catalog 的 manifest 并迭代不崩溃、读出 3 条记录）。
+  - 实测：修复前两个新测试均复现 `ValueError: cannot mmap an empty file`（sessions 端点 500）；修复后 `web_ui/backend` 全套 `pytest tests/ -q` 221 passed、`donkeycar/tests/test_datastore_v2.py + test_tub_v2.py` 9 passed、根 `tests/test_tub_image_cache.py + test_tub_manager_auto_refresh.py` 6 passed。仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (179)
 
 - fix(launcher): dsh/kimi-code-web 启动端点缺省 cwd 去硬编码本机路径——动态推导 `str(Path.home() / "projects")`，内嵌前端不再发送该路径（ZCode 入口 PR #359 收尾时登记的「待单修」项）
