@@ -170,3 +170,29 @@ def test_car_mode_command_rejects_invalid_values():
     outputs = bridge.run_threaded(img_arr=None)
     assert outputs[6] is None
 
+
+
+def test_sim_connected_included_in_telemetry(monkeypatch):
+    """sim_connected=False 应写入 telemetry 消息（False 不是 None，不可省略）。"""
+    bridge = _make_bridge()
+    sent = []
+    monkeypatch.setattr(bridge, "_send_json", sent.append)
+
+    bridge.run_threaded(img_arr=None, sim_connected=False)
+
+    telemetry_msgs = [m for m in sent if m.get("type") == "telemetry"]
+    assert len(telemetry_msgs) == 1
+    assert telemetry_msgs[0]["sim_connected"] is False
+
+
+def test_sim_connected_omitted_when_none(monkeypatch):
+    """未接 sim_connected 输入（如实车模板）时不应在消息中出现该字段。"""
+    bridge = _make_bridge()
+    sent = []
+    monkeypatch.setattr(bridge, "_send_json", sent.append)
+
+    bridge.run_threaded(img_arr=None, throttle=0.2)
+
+    telemetry_msgs = [m for m in sent if m.get("type") == "telemetry"]
+    assert len(telemetry_msgs) == 1
+    assert "sim_connected" not in telemetry_msgs[0]

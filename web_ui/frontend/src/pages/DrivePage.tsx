@@ -41,6 +41,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const lastRcParkRef = useRef<number | null>(null);
   const [rcMode, setRcMode] = useState<number | null>(null);
   const [rcPark, setRcPark] = useState<number | null>(null);
+  // 模拟器连接状态：null = 非模拟器模式或未上报；false = 离线重连中
+  const [simConnected, setSimConnected] = useState<boolean | null>(null);
 
   const handleTelemetry = useCallback((t: Telemetry) => {
     useTelemetryStore.getState().push(t);
@@ -51,6 +53,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     if (typeof t.rc_park === 'number' && t.rc_park !== lastRcParkRef.current) {
       lastRcParkRef.current = t.rc_park;
       setRcPark(t.rc_park);
+    }
+    if (typeof t.sim_connected === 'boolean') {
+      const connected = t.sim_connected;
+      setSimConnected((prev) => (prev === connected ? prev : connected));
     }
   }, []);
 
@@ -346,6 +352,14 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                   data-rc-park={rcPark}
                 >
                   {t('drive.parkLocked')}
+                </span>
+              )}
+              {simConnected === false && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap animate-pulse"
+                  data-sim-connected="false"
+                >
+                  {t('drive.simOfflineReconnecting')}
                 </span>
               )}
               <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />

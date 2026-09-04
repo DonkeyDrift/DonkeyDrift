@@ -40,6 +40,8 @@ export interface Telemetry {
   rc_mode?: number;
   /** 固件 Park 手刹状态（1=锁定，油门被钳 0），来自 M<m>:P<p> 帧 */
   rc_park?: number;
+  /** 模拟器连接状态（仅模拟器模板上报）；false = 模拟器离线、车端正尝试重连 */
+  sim_connected?: boolean;
 }
 
 interface UseDriveWebsocketOptions {

@@ -241,3 +241,81 @@ def test_run_threaded_reconnect_closes_env(mock_gym_make):
 
     gym_env.shutdown()
     thread.join(timeout=2.0)
+
+
+class WedgedEnv(FakeEnv):
+    """模拟 observe() 永久自旋：若干步后 step() 永不返回。"""
+
+    def step(self, action):
+        self.step_count += 1
+        if self.step_count > 2:
+            while True:
+                time.sleep(0.05)
+        obs = np.zeros((120, 160, 3), dtype=np.uint8)
+        return obs, 0.0, False, False, {}
+
+
+def test_watchdog_closes_env_when_frames_stall(mock_gym_make):
+    """
+    模拟器断连且 step() 卡死（gym_donkeycar observe 自旋）时，
+    主循环侧的看门狗应检测到帧时间戳过旧并强制关闭 env，
+    使 update 线程在 step 返回后进入重连逻辑。
+    """
+    wedged_env = WedgedEnv(fail_after=10**12)
+    mock_gym_make.return_value = wedged_env
+
+    gym_env = DonkeyGymEnv(
+        sim_path="remote",
+        host="127.0.0.1",
+        port=9091,
+        env_name="donkey-generated-track-v0",
+        conf={"img_h": 120, "img_w": 160},
+    )
+    gym_env.watchdog_sec = 0.2
+
+    thread = threading.Thread(target=gym_env.update, daemon=True)
+    thread.start()
+
+    # 等 update 线程进入卡死的 step
+    time.sleep(0.3)
+
+    # 模拟 Vehicle 主循环周期性调用 run_threaded
+    for _ in range(40):
+        gym_env.run_threaded(0.0, 0.0)
+        if gym_env.env is None:
+            break
+        time.sleep(0.05)
+
+    assert wedged_env.closed, "看门狗应强制 close() 卡死的 env"
+    assert gym_env.env is None, "看门狗触发后 env 应被设为 None"
+    assert gym_env.connected is False, "看门狗触发后 connected 应为 False"
+
+    gym_env.shutdown()
+
+
+def test_watchdog_does_not_fire_on_healthy_env(mock_gym_make):
+    """帧持续更新时看门狗不应误触发。"""
+    fake_env = FakeEnv(fail_after=10**12)
+    mock_gym_make.return_value = fake_env
+
+    gym_env = DonkeyGymEnv(
+        sim_path="remote",
+        host="127.0.0.1",
+        port=9091,
+        env_name="donkey-generated-track-v0",
+        conf={"img_h": 120, "img_w": 160},
+    )
+    gym_env.watchdog_sec = 0.3
+
+    thread = threading.Thread(target=gym_env.update, daemon=True)
+    thread.start()
+
+    for _ in range(20):
+        gym_env.run_threaded(0.0, 0.0)
+        time.sleep(0.05)
+
+    assert gym_env.env is fake_env, "健康 env 不应被看门狗关闭"
+    assert not fake_env.closed
+
+    gym_env.shutdown()
+    thread.join(timeout=2.0)

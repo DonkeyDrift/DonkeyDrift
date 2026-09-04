@@ -1,6 +1,6 @@
 # Issue 004: 模拟器断连后自动重连不成功
 
-- 状态: open
+- 状态: fixed（2026-09-04）
 - 记录日期: 2026-09-04
 - 页面: 连接器（Connector）→ DonkeySim 模拟器配置
 - 类型: bug
@@ -38,3 +38,15 @@
 ## 备注
 
 根因 A、B 位于 editable 安装的 `gym_donkeycar`（`/home/dkc/projects/gym-donkeycar`，v1.3.1），修复需要改该仓库或在本仓库侧用看门狗（建议 4）规避。
+
+## 修复记录（2026-09-04）
+
+五条修复全部落地：
+
+1. **模板接线**：`donkeycar/templates/simulator.py` ctr outputs 补齐为 7 元组全量键（`... 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'`），与 `DriveApiBridge.run_threaded` 返回值和 cam 输入键对齐；`test_template_simulator_recovery.py` 重写为 AST 级解析 `V.add` inputs/outputs 配对与返回值数量。
+2. **observe() 超时**（gym-donkeycar 仓库 `donkey_sim.py`）：连接中止或超过 `observe_timeout_sec`（默认 2s，可经 GYM_CONF 配置）无新遥测时抛 `ConnectionError`，`dgym.py` 异常路径生效。
+3. **is_connected 语义**（gym-donkeycar `core/client.py`）：优雅关闭与 ConnectionResetError 分支均置 `aborted=True`；补 `import threading` 消除 `stop()` 的 NameError。
+4. **车端看门狗**（`donkeycar/parts/dgym.py`）：记录最近一次 `env.step` 成功返回时间戳，主循环侧 `run_threaded` 检测超过 `watchdog_sec`（默认 5s）无新帧即强制 `_close_env()` 触发重连，不依赖 gym_donkeycar 内部状态。
+5. **UI 反馈**：`simulator.py` 新增 `SimConnectionState` 发布 `sim/connected` → bridge 遥测透传 `sim_connected` 字段 → 后端原样广播 → Drive 页显示「模拟器离线，重连中…」琥珀色徽章（`drive.simOfflineReconnecting`，中英双语）。
+
+测试：DonkeyDrifter 新增/重写 7 个用例（模板接线 3、看门狗 2、遥测 2）；gym-donkeycar 新增 `tests/test_sim_disconnect.py` 5 个用例。

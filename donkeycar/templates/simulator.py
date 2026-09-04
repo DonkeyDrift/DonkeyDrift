@@ -71,6 +71,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     V.add(cam, inputs=inputs, outputs=['cam/image_array'], threaded=threaded)
 
+    # 把模拟器连接状态发布到 Memory，供 DriveApiBridge 遥测上报（Drive 页离线提示）
+    class SimConnectionState:
+        def run(self):
+            return cam.connected
+
+    V.add(SimConnectionState(), outputs=['sim/connected'])
+
     server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
     if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
         #modify max_throttle closer to 1.0 to have more power
@@ -116,9 +123,21 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
             webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
         )
+        # outputs 顺序必须与 DriveApiBridge.run_threaded 的 7 元组返回值严格一致
+        # (Vehicle/Memory 按位置配对)：少写或错序会导致重连标志被静默丢弃。
+        # inputs 顺序必须与 run_threaded 签名严格一致（Vehicle 按位置解包），
+        # 尾部 sim/connected 由上面的 SimConnectionState 提供；中间键在模拟器
+        # 模式下不存在时 Memory.get 返回 None，遥测自动省略对应字段。
+        ctr_inputs = ['cam/image_array', 'tub/num_records', 'user/mode', 'recording',
+                      'imu/gyr_z', 'imu/gyr_x', 'imu/gyr_y',
+                      'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+                      'steering', 'throttle', 'pilot/angle', 'pilot/throttle',
+                      'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park',
+                      'drift/yaw_error', 'drift/steering_correction', 'drift/throttle_mode',
+                      'sim/connected']
         V.add(ctr,
-              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
-              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'reconnect_simulator_requested'],
+              inputs=ctr_inputs,
+              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
               threaded=True)
 
     #this throttle filter will allow one tap back for esc reverse
