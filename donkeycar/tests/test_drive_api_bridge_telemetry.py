@@ -6,6 +6,8 @@
 - 100Hz（10ms）节流：节流窗口内多次调用只发一次
 - 旧调用方不传遥测参数 -> 向后兼容，不报错
 """
+import asyncio
+import json
 import time
 
 import numpy as np
@@ -196,3 +198,57 @@ def test_sim_connected_omitted_when_none(monkeypatch):
     telemetry_msgs = [m for m in sent if m.get("type") == "telemetry"]
     assert len(telemetry_msgs) == 1
     assert "sim_connected" not in telemetry_msgs[0]
+
+
+def test_send_json_serializes_numpy_scalars(monkeypatch):
+    """_send_json 必须能序列化 numpy 标量：json.dumps 只认精确内建类型，
+    np.float32（模拟器/推理输出的 pilot/angle 等）曾抛
+    TypeError: Object of type float32 is not JSON serializable，
+    从 run_threaded 穿透导致整车进程崩溃（issue #003 全自动复现）。"""
+    bridge = _make_bridge()
+    sent = []
+
+    class _FakeWs:
+        def send(self, text):
+            sent.append(text)
+
+    bridge.loop = object()
+    bridge.ws = _FakeWs()
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe",
+                        lambda coro, loop: None)
+
+    bridge._send_json({
+        "type": "telemetry",
+        "pilot_angle": np.float32(0.5),
+        "pilot_throttle": np.float32(0.0),
+        "gz": np.float64(1.5),
+        "ax": np.int32(3),
+        "t": 123,
+        "sim_connected": True,
+    })
+
+    assert len(sent) == 1
+    msg = json.loads(sent[0])
+    assert msg["pilot_angle"] == 0.5
+    assert msg["pilot_throttle"] == 0.0
+    assert msg["gz"] == 1.5
+    assert msg["ax"] == 3
+    assert msg["t"] == 123
+    assert msg["sim_connected"] is True
+
+
+def test_telemetry_send_failure_does_not_propagate(monkeypatch):
+    """遥测发送异常不得穿透 run_threaded 杀死车辆循环——帧发送已有同款
+    防护（logger.debug 吞掉），遥测缺失曾让 TypeError 从 run_threaded
+    抛出导致 vehicle 停机、小车从模拟器消失。"""
+    bridge = _make_bridge()
+
+    def boom(payload):
+        raise RuntimeError("send boom")
+
+    monkeypatch.setattr(bridge, "_send_json", boom)
+    monkeypatch.setattr(time, "time", lambda: 2000.0)
+    bridge.last_heartbeat = 2000.0
+    bridge.last_car_state = 2000.0
+
+    bridge.run_threaded(img_arr=None, pilot_angle=0.1)  # 不抛异常即通过
