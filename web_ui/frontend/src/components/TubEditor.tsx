@@ -34,6 +34,10 @@ const MAX_ZOOM_PERCENT = 1000;
 const ZOOM_STEP_PERCENT = 100;
 const MAX_UNDO_HISTORY = 10;
 const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
+// 拖拽框选：水平位移超过该阈值才进入拖拽态，否则按「移动播放头 + 两次点击」处理
+const DRAG_SELECTION_THRESHOLD_PX = 5;
+// 草稿框最小可见宽度（吸取 #130 教训，与底部滑块 max(..., 2px) 一致）
+const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
 type RecordAction = {
   mode: 'delete' | 'restore';
@@ -75,6 +79,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const lineDashOffsetRef = useRef(0);
   const visualSelectionRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
   const isSelectingRef = useRef(false);
+  // 拖拽框选：mousedown 只记录按下点，mousemove 中位移超阈值才进入拖拽态
+  const dragStartRef = useRef<{ x: number; index: number } | null>(null);
+  const isDragSelectingRef = useRef(false);
   const currentIndexRef = useRef(useStore.getState().currentIndex);
   const selectionRangeRef = useRef<{ startIndex: number | null; endIndex: number | null }>({
     startIndex: useStore.getState().selectionStartIndex,
@@ -748,6 +755,39 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       const chart = chartRef.current;
       const chartArea = chart.chartArea;
 
+      // 拖拽框选：按下后水平位移超过阈值才进入拖拽态，否则保持「移动播放头 + 两次点击」
+      const dragStart = dragStartRef.current;
+      if (dragStart) {
+        const dragX = Math.max(chartArea.left, Math.min(x, chartArea.right));
+        if (!isDragSelectingRef.current) {
+          if (Math.abs(dragX - dragStart.x) >= DRAG_SELECTION_THRESHOLD_PX) {
+            // 进入拖拽态：撤销 mousedown 的锚点/选区处理，避免与两次点击冲突
+            isDragSelectingRef.current = true;
+            isSelectingRef.current = true;
+            globalSelectionAnchorIndex = null;
+            clearSelectionRange();
+            visualSelectionRef.current = null;
+            const draft = {
+              startX: dragStart.x,
+              currentX: dragX,
+              startIndex: dragStart.index,
+              currentIndex: getIndexFromPointerX(dragX, chart),
+            };
+            selectionDraftRef.current = draft;
+            setSelectionDraft(draft);
+          }
+        } else {
+          const nextDraft = {
+            startX: dragStart.x,
+            currentX: dragX,
+            startIndex: dragStart.index,
+            currentIndex: getIndexFromPointerX(dragX, chart),
+          };
+          selectionDraftRef.current = nextDraft;
+          setSelectionDraft(nextDraft);
+        }
+      }
+
       if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) {
         if (hoverPositionRef.current || tooltipDataRef.current) {
           hoverPositionRef.current = null;
@@ -796,19 +836,41 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       }
 
     },
-    [getIndexFromPointerX, requestChartRender, updateTooltipPosition]
+    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange]
   );
 
-  const handleMouseLeave = useCallback(() => {
-    if (!hoverPositionRef.current && !tooltipDataRef.current) {
-      return;
-    }
+  const handleMouseLeave = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // 拖拽中移出图表：提交到离开点（坐标按图表区收敛）
+      if (isDragSelectingRef.current && dragStartRef.current && chartRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const chartArea = chartRef.current.chartArea;
+        const clampedX = Math.max(chartArea.left, Math.min(event.clientX - rect.left, chartArea.right));
+        const leaveIndex = getIndexFromPointerX(clampedX, chartRef.current);
+        const startIndex = Math.min(dragStartRef.current.index, leaveIndex);
+        const endIndex = Math.max(dragStartRef.current.index, leaveIndex) + 1;
+        queueSelectionRangeUpdate(startIndex, endIndex);
+      }
 
-    hoverPositionRef.current = null;
-    tooltipDataRef.current = null;
-    setTooltipData(null);
-    requestChartRender();
-  }, [requestChartRender]);
+      isDragSelectingRef.current = false;
+      isSelectingRef.current = false;
+      dragStartRef.current = null;
+      if (selectionDraftRef.current) {
+        selectionDraftRef.current = null;
+        setSelectionDraft(null);
+      }
+
+      if (!hoverPositionRef.current && !tooltipDataRef.current) {
+        return;
+      }
+
+      hoverPositionRef.current = null;
+      tooltipDataRef.current = null;
+      setTooltipData(null);
+      requestChartRender();
+    },
+    [getIndexFromPointerX, queueSelectionRangeUpdate, requestChartRender]
+  );
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -831,6 +893,10 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       requestChartRender();
 
       setCurrentIndex(clampedIndex);
+
+      // 拖拽框选起点：仅记录，是否进入拖拽态由 mousemove 的位移阈值决定
+      dragStartRef.current = { x, index: clampedIndex };
+      isDragSelectingRef.current = false;
 
       // 两次点击选择：mousedown 时立即处理，不依赖 click 事件
       if (globalSelectionAnchorIndex == null) {
@@ -858,9 +924,28 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const handleMouseUp = useCallback(
     () => {
       isSelectingRef.current = false;
-      // 拖动选择已移除，mouseup 只清理 isSelecting 标记
+      dragStartRef.current = null;
+
+      // 非拖拽态：保持「移动播放头 + 两次点击」语义，mouseup 不做额外处理
+      if (!isDragSelectingRef.current) {
+        return;
+      }
+      isDragSelectingRef.current = false;
+
+      const draft = selectionDraftRef.current;
+      selectionDraftRef.current = null;
+      setSelectionDraft(null);
+
+      if (!draft || !recordsRef.current.length) {
+        return;
+      }
+
+      // 拖拽态：提交选区（锚点已在进入拖拽态时清除）
+      const startIndex = Math.min(draft.startIndex, draft.currentIndex);
+      const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
+      queueSelectionRangeUpdate(startIndex, endIndex);
     },
-    []
+    [queueSelectionRangeUpdate]
   );
 
   const isEditableTarget = (target: EventTarget | null) => {
@@ -886,6 +971,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         event.preventDefault();
         clearSelectionRange();
         globalSelectionAnchorIndex = null;
+        isDragSelectingRef.current = false;
+        isSelectingRef.current = false;
+        dragStartRef.current = null;
         selectionDraftRef.current = null;
         setSelectionDraft(null);
         return;
@@ -1258,19 +1346,21 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             const maxX = Math.max(startX, endX);
 
             if (!isNaN(minX) && !isNaN(maxX) && maxX > minX) {
+                // 窄选区可见性兜底（#130）：不足 2px 时按最小可见宽度绘制
+                const draftWidth = Math.max(maxX - minX, MIN_SELECTION_DRAFT_WIDTH_PX);
                 ctx.save();
                 ctx.beginPath();
-                ctx.rect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.rect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
                 ctx.clip();
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
                 ctx.fillStyle = selectionFillColor;
                 ctx.strokeStyle = selectionColor;
 
-                ctx.fillRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.fillRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
-                ctx.strokeRect(minX, chartArea.top, maxX - minX, chartArea.bottom - chartArea.top);
+                ctx.strokeRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
                 ctx.restore();
             }
         } else if (visualSelectionRef.current) {
@@ -1535,7 +1625,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   );
 
   const handleTouchEnd = useCallback(
-    (event: React.TouchEvent<HTMLDivElement>) => {
+    () => {
       isSelectingRef.current = false;
       // 触摸轻触（tap）等效于点击——选择逻辑由 touchstart 中 preventDefault 后的 click 事件处理
       // 这里只清理预览状态

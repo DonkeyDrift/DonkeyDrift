@@ -1,6 +1,6 @@
 # Issue 002: Tub 编辑器无法直接在图表上框选一段数据
 
-- 状态: open
+- 状态: fixed（2026-09-04）
 - 记录日期: 2026-09-04
 - 页面: Tub 编辑器（转向/油门曲线图）
 - 类型: enhancement（恢复被移除的能力）
@@ -26,3 +26,15 @@ Tub 编辑器图表上无法拖拽框选一段数据，目前只能通过右上�
 3. 窄选区可见性：吸取 #130 教训，绘制端 `max(maxX - minX, 2px)` 兜底（底部滑块 `:1449` 已有先例）。
 4. `handleMouseLeave` 中处于拖拽态时提交到离开点；Escape 清理逻辑（`:885-891`）已覆盖 draft。
 5. 触屏分流工作量大，首版建议只恢复鼠标拖拽。
+
+## 修复记录（2026-09-04）
+
+按上述方案实现，全部改动在 `web_ui/frontend/src/components/TubEditor.tsx`：
+
+1. **拖动阈值分流**：新增 `DRAG_SELECTION_THRESHOLD_PX = 5`。`handleMouseDown` 只把按下点记入 `dragStartRef`（锚点逻辑保持不变）；`handleMouseMove` 中水平位移超阈值才进入拖拽态（`isDragSelectingRef`），进入时撤销 mousedown 的锚点/选区提交（清锚点 + `clearSelectionRange`），随后持续更新 `selectionDraftRef` 草稿框。
+2. `handleMouseUp` 分流：拖拽态用 `queueSelectionRangeUpdate` 提交选区；非拖拽不做事，两次点击语义不变。
+3. 窄选区可见性：草稿框绘制按 `max(宽度, MIN_SELECTION_DRAFT_WIDTH_PX=2px)` 兜底。
+4. `handleMouseLeave` 拖拽态提交到离开点（坐标按图表区收敛）；Escape 清理逻辑补充了拖拽态标记与 `dragStartRef`。
+5. 触屏未做分流，维持现状。
+
+测试：新增 `web_ui/frontend/src/components/TubEditor.test.tsx` 4 例（拖拽提交、阈值下视为点击、mouseleave 提交、Escape 取消），前端 vitest 30 文件 172 例全过，`tsc -b --noEmit` 与 eslint 干净。
