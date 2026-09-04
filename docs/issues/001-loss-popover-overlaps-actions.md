@@ -1,6 +1,6 @@
 # Issue 001: 模型 loss 曲线浮窗遮挡操作按钮
 
-- 状态: open
+- 状态: fixed（2026-09-04）
 - 记录日期: 2026-09-04
 - 页面: Trainer（训练器）→ 已训练模型列表
 - 类型: bug / UI
@@ -29,3 +29,13 @@
 ## 备注
 
 用户描述为「点击 loss 曲线图标」，实际当前没有独立图标按钮，触发区是整行。若按建议 1 改造，可顺势把触发收敛到 loss 徽章上，交互语义更贴合预期。
+
+## 修复记录（2026-09-04）
+
+按建议 1 实施，全部改动在 `web_ui/frontend`：
+
+- `src/components/trainer/ModelsList.tsx`：删除 fixed 定位 popover（`getPopoverStyle`、悬停/整行点击触发、延时关闭定时器），改为与删除确认一致的 modal（`fixed inset-0` 遮罩 + 居中面板 + 点击遮罩 / X 按钮 / Esc 关闭）；触发收敛为 loss 徽章按钮（仅在有 `previewPath` 时渲染，带 `aria-label`）。
+- `src/i18n/messages/trainer.ts`：新增 `trainer.viewLossChart`、`trainer.close` 中英文案。
+- `src/components/trainer/ModelsList.test.tsx`（新增）：6 条回归测试——悬停不弹出、点击徽章打开 modal、遮罩/Esc/X 关闭、操作按钮不误触。
+
+验证：`vitest run` 168/168 通过，`tsc -b --noEmit`、`eslint`、`vite build` 均通过。
