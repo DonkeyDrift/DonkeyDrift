@@ -74,7 +74,7 @@ function renderPanel(result: MyPcProbeResult | null = null) {
 
 // 测试环境默认英文 locale，断言文案时同时兼容中英文
 const LOCALE_RE = {
-  ready: /环境就绪，可以开始本机训练。|Environment ready\./,
+  ready: /环境就绪，可以开始局域网主机训练。|Environment ready\./,
   notReady: /环境未就绪，请按下方提示修复后重试。|Environment not ready\./,
   rerunHint: /安装完成后请点击「检测环境」重新检测。|After installation, click "Run Check" to probe again\./,
   installDone: /训练依赖安装完成，请重新运行环境检测确认。|Training dependencies installed\./,

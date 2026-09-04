@@ -40,6 +40,13 @@ class DonkeyGymEnv(object):
         img_w = self._conf.get("img_w", 160)
         self._empty_frame = np.zeros((img_h, img_w, 3), dtype=np.uint8)
 
+        # 看门狗：记录最近一次 env.step() 成功返回的时间戳。底层 gym_donkeycar 的
+        # observe() 在模拟器断连后会无限自旋（无超时），update() 线程会被卡死在
+        # step() 内部。主循环侧 run_threaded() 据此检测「长时间无新帧」并强制重连，
+        # 不依赖 gym_donkeycar 内部状态。
+        self._watchdog_sec = float(self._conf.get("watchdog_sec", 5.0))
+        self._last_frame_ts = time.time()
+
         # 初始化环境
         self._try_connect()
 
@@ -88,6 +95,7 @@ class DonkeyGymEnv(object):
             self.env = gym.make(self._env_name, conf=conf)
             self.frame, _ = self.env.reset()
             self.connected = True
+            self._last_frame_ts = time.time()
             print(f"[DonkeyGymEnv] 已连接到模拟器 {self._host}:{self._port}")
         except Exception as e:
             self.env = None
@@ -212,6 +220,7 @@ class DonkeyGymEnv(object):
                 else:
                     step_result = self.env.step(self.action)
                     self.frame, _, _, _, self.info = step_result
+                self._last_frame_ts = time.time()
             except Exception as e:
                 print(f"[DonkeyGymEnv] 模拟器连接异常: {e}")
                 self._close_env()
@@ -220,6 +229,15 @@ class DonkeyGymEnv(object):
     def run_threaded(self, steering, throttle, brake=None, reconnect=False):
         if reconnect:
             self._request_reconnect()
+
+        # 看门狗：env.step() 卡死（如 observe() 无限自旋）时主循环侧强制重连。
+        if (
+            self.env is not None
+            and self.connected
+            and (time.time() - self._last_frame_ts) > self._watchdog_sec
+        ):
+            print(f"[DonkeyGymEnv] 看门狗：超过 {self._watchdog_sec:.1f}s 无新帧，强制重连")
+            self._close_env()
 
         if steering is None or throttle is None:
             steering = 0.0

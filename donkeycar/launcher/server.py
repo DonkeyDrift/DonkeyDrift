@@ -1045,9 +1045,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         """POST /api/launch/kimi-code-web：启动/复用 kimi web，回 URL。
 
         请求体可选 JSON {"cwd": "/abs/path"} 指定 kimi 运行目录，缺省为
-        Projects 工作区 ``/home/dkc/projects``（issue #168：DC 按钮空体
-        POST 不带 cwd，之前落到用户主目录，打开的 KCW 进的是工作区列表
-        而非 Projects；DD 菜单显式传同一目录，不受影响）；cwd 不存在
+        Projects 工作区（``Path.home() / "projects"`` 动态推导，避免
+        硬编码本机路径入库；issue #168：DC 按钮空体 POST 不带 cwd，
+        之前落到用户主目录，打开的 KCW 进的是工作区列表而非 Projects；
+        DD 菜单同样不传 cwd，走同一缺省）；cwd 不存在
         直接报错，绝不回退到其它目录。复用路径只复用运行目录匹配的
         存活实例，冷启动绑固定端口（origin 稳定，localStorage 偏好不
         丢），详见 kimi_web.py。
@@ -1081,9 +1082,11 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                     code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
                 )
                 return
-        # 缺省 cwd：Projects 工作区（issue #168），不落回用户主目录
+        # 缺省 cwd：Projects 工作区（issue #168），不落回用户主目录；
+        # Path.home() 动态推导，避免硬编码本机路径入库
+        # （与 _handle_launch_zcode 的写法同款）
         if cwd is None:
-            cwd = "/home/dkc/projects"
+            cwd = str(Path.home() / "projects")
         result = launch_kimi_code_web(cwd=cwd)
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
@@ -1093,8 +1096,9 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         """POST /api/launch/dsh：启动/复用 dsh web（DeepSeek Harness），回 URL。
 
         请求体可选 JSON {"cwd": "/abs/path"} 指定 dsh 运行目录，缺省为
-        /home/dkc/projects（与 kimi-code-web 同目录；dsh 以进程 cwd 作为
-        新会话/工作区默认目录，见 dsh-host-apiproxy 的 process.cwd()）；
+        Projects 工作区（``Path.home() / "projects"`` 动态推导，与
+        kimi-code-web 同目录；dsh 以进程 cwd 作为新会话/工作区默认目录，
+        见 dsh-host-apiproxy 的 process.cwd()）；
         cwd 不存在直接报错，绝不回退到其它目录。
         返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理）。
         长请求：dsh 冷启动数秒，服务端整体超时 60s，
@@ -1127,9 +1131,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
                 )
                 return
         if cwd is None:
-            # 缺省与 kimi-code-web 同目录；dsh 以进程 cwd 作为新会话/
-            # 工作区默认目录（dsh-host-apiproxy 的 process.cwd()）
-            cwd = "/home/dkc/projects"
+            # 缺省与 kimi-code-web 同目录（Path.home() 动态推导，避免
+            # 硬编码本机路径入库）；dsh 以进程 cwd 作为新会话/工作区
+            # 默认目录（dsh-host-apiproxy 的 process.cwd()）
+            cwd = str(Path.home() / "projects")
         result = launch_dsh_web(cwd=cwd)
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
@@ -2097,7 +2102,8 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
 
         // 打开 Kimi Code Web（菜单 11 号）：POST /api/launch/kimi-code-web，
-        // cwd 固定 /home/dkc/projects（issue 要求先进入 projects 主文件夹再
+        // 不传 cwd（空 JSON 体），由服务端缺省为 Projects 工作区（Path.home()
+        // 动态推导，不硬编码本机路径；issue 要求先进入 projects 主文件夹再
         // 执行 kimi；目录不存在服务端会报错）。kimi 冷启动可达数十秒，
         // 服务端整体超时 120s，浏览器 fetch 默认无超时、耐心等待即可；
         // 拿到 URL 后当前标签页跳转。
@@ -2113,7 +2119,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 const resp = await fetch('/api/launch/kimi-code-web', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({cwd: '/home/dkc/projects'})
+                    body: JSON.stringify({})
                 });
                 const data = await resp.json();
                 if (resp.ok && data.status === 'ok' && data.url) {
@@ -2138,7 +2144,8 @@ MENU_HTML = r"""<!DOCTYPE html>
         }
 
         // 打开 DeepSeek Harness（菜单 12 号，issue #164）：POST
-        // /api/launch/dsh，cwd 固定 /home/dkc/projects（与 kimi 同目录）。
+        // /api/launch/dsh，不传 cwd（空 JSON 体），由服务端缺省为
+        // Projects 工作区（与 kimi 同目录，Path.home() 动态推导）。
         // 服务端整体超时 60s，浏览器 fetch 默认无超时、耐心等待即可；
         // 拿到 URL 后当前标签页跳转。
         async function launchDshWeb() {
@@ -2153,7 +2160,7 @@ MENU_HTML = r"""<!DOCTYPE html>
                 const resp = await fetch('/api/launch/dsh', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({cwd: '/home/dkc/projects'})
+                    body: JSON.stringify({})
                 });
                 const data = await resp.json();
                 if (resp.ok && data.status === 'ok' && data.url) {
@@ -2422,10 +2429,13 @@ MENU_HTML = r"""<!DOCTYPE html>
                 'menu.train.openTerminal');
         }
 
-        // 当前项目路径：fetchStatus 已缓存的 cwd-path，兜底 /home/dkc/projects
+        // 当前项目路径：fetchStatus 已缓存的 cwd-path（初始值由服务端渲染
+        // 为 launcher 当前目录，正常不为空）；兜底 '.' 即终端会话当前目录
+        // （terminal.py _default_cwd()：~/projects，不存在时 ~），不硬编码
+        // 本机路径
         function currentProjectPath() {
             const p = document.getElementById('cwd-path').textContent;
-            return (p && p.trim()) || '/home/dkc/projects';
+            return (p && p.trim()) || '.';
         }
 
         // 显示错误提示

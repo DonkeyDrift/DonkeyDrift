@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-04 (179)
+## 2026-09-04 (180)
 
 - fix(trainer): 修复训练中刷新页面后看不到训练进度
   - 根因：训练任务状态（job_id/进度/日志）只存在前端 zustand 内存 `trainingJob`，`partialize` 只持久化配置、不含当前任务；刷新后 React 重新挂载，`trainingJob` 回到 null，前端既不知道有在跑任务、也不重连 SSE，`ProgressPanel` 显示「空闲」。后端 `job_manager` 是内存单例（页面刷新不影响）、`/trainer/train/{id}/status` 本就返回完整进度快照，故最小修复落在前端。
@@ -8,6 +8,27 @@
   - `web_ui/frontend/src/hooks/useTrainingJob.ts`：新增挂载恢复 effect（ref 防 StrictMode 双跑）——读 `activeTraining`，`getJobStatus` 拉进度快照重建 `TrainingJob`（logs 先置空），`status === 'running'` 时 `connectSSE` 重连继续收实时事件，否则清空 `activeTraining` 展示终态；请求失败则清掉失效 id 回到空闲态。`startLocal`/`startSshTraining` 拿到 `job_id` 后 `setActiveTraining` 记录，供下次刷新恢复。
   - 测试：`web_ui/frontend/src/store/useStore.test.ts` 新增 3 例（setActiveTraining / clearActiveTraining / finishTrainingJob 同步清空）；新建 `web_ui/frontend/src/hooks/useTrainingJob.test.ts` 4 例（running 恢复+重连 SSE / 终态展示并清空 / 失效清空 / 无 activeTraining 不请求）。
   - 实测：`tsc -b --noEmit` 无错、`vitest run` 34 文件 183 passed（含新增 7 例）。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (179)
+
+- fix(launcher): dsh/kimi-code-web 启动端点缺省 cwd 去硬编码本机路径——动态推导 `str(Path.home() / "projects")`，内嵌前端不再发送该路径（ZCode 入口 PR #359 收尾时登记的「待单修」项）
+  - 根因：`donkeycar/launcher/server.py` 的 `_handle_launch_kimi_code_web` 与 `_handle_launch_dsh` 缺省 cwd 硬编码真实本机用户名绝对路径（公开仓库，入库即泄露）；MENU_HTML 内嵌 JS 的 `launchKimiCodeWeb()`/`launchDshWeb()` 请求体与 `currentProjectPath()` 兜底同样硬编码该串。
+  - `donkeycar/launcher/server.py`：两处端点缺省 cwd 字面量 → `cwd = str(Path.home() / "projects")`（与同文件 `_handle_launch_zcode` 的 `Path.home()` 写法同款），两处 docstring/注释同步改写；cwd 不存在仍直接报错、绝不回退的语义不变，issue #168 空体 POST 缺省路径不变。
+  - 同文件 MENU_HTML 内嵌 JS：两个启动请求体改为 `JSON.stringify({})`（不传 cwd，由后端动态缺省生效）；`currentProjectPath()` 兜底改为 `'.'`（终端会话当前目录，即 `terminal.py _default_cwd()` 的 `~/projects` 语义，不硬编码本机路径）。
+  - 明确未改：`_find_mycar_project` 的 `known_path` mycar 已知搜索路径（属另一问题）与 `donkeycar/launcher/donkeydrifter-launcher.service`（部署模板）。
+  - 测试同步：`tests/test_launcher_kimi_web.py`、`tests/test_launcher_dsh_web.py` 缺省 cwd 断言由硬编码串改为 `str(Path.home() / "projects")` 动态比对；新建 `tests/test_launcher_no_hardcoded_paths.py`——逐行扫描 `server.py`，除保留的 `projects/mycar` 已知路径外任何行出现 `/home/<用户>/` 形态本机路径即失败（防回归栅栏，含 MENU_HTML 内嵌 JS；栅栏自身用正则描述、不写入真实用户名）。
+  - 实测：`pytest` launcher 相关 10 个测试文件 174 passed（151 + 23，含新增栅栏 1 例）；`python -m py_compile donkeycar/launcher/server.py` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (178)
+
+- fix(workflow): 一次收尾修复 DonkeyDrift 侧剩余 6 个 open issue（#360–#365），全部合入 Tony、逐一关闭
+  - **#360 ModelsList loss 浮窗→modal**：`web_ui/frontend/src/components/trainer/ModelsList.tsx` 把 loss 曲线从 hover 浮窗改为点击「查看损失曲线」徽章按钮触发的 modal（`data-testid="loss-chart-overlay"`）；`i18n/messages/trainer.ts` 加 `viewLossChart`/`close` 中英。新建 `ModelsList.test.tsx`（6 例全过）。
+  - **#361 TubEditor 拖拽框选**：`web_ui/frontend/src/components/TubEditor.tsx` 新增 `DRAG_SELECTION_THRESHOLD_PX=5`、`MIN_SELECTION_DRAFT_WIDTH_PX=2`、`dragStartRef`/`isDragSelectingRef`；mousedown 记按下点、mousemove 超阈值进入拖拽、mouseup/mouseleave 提交、Escape 清理、草稿绘制最小宽；容器加 `data-testid="tub-editor-chart"`。新建 `TubEditor.test.tsx`（4 例全过，需 `useStore.setState({ totalRecords })` 否则 `setSelectionRange` 按默认 0 clamp）。
+  - **#362 选模型后带模型重启**：`web_ui/backend/routers/drive.py` 拆出 `_get_config_dir/_get_params_path/_get_selected_model_path`，新增 `_validate_model_path`（拒绝绝对路径/`..`/非 `models/` 前缀），重写 `POST /load_model` 为「校验→写 `selected_model.json`→车端在线则 best-effort 下发 `restart_with_model`→返回 `restart_required`」；`donkeycar/parts/drive_api_bridge.py` 加 `restart_with_model` 分支（只 log 不自动重启）；`donkeycar/templates/complete.py` 加 `_selected_model_from_disk()`（读 `$DONKEY_CAR_DIR/selected_model.json` 或 `~/mycar/selected_model.json`），`drive()` 无 `--model` 时回退读取；前端 `DrivePage.tsx` 新增 `modelRestartRequired` 状态，选模型后显示「模型已记录，需重启车端后生效」琥珀徽章（`drive.modelRestartRequired` 中英）。后端 `test_drive.py` 新增 5 例（校验×3 + 持久化 + 在线通知），全套 30 例过。
+  - **#363 DonkeySim 断连重连**：`donkeycar/templates/simulator.py` ctr outputs 从 5 键补齐为与 `DriveApiBridge.run_threaded` 7 元组一一对应（`web/buttons`、`reconnect_simulator`、`car/mode_cmd`），键名 `reconnect_simulator` 与 cam 输入对齐；新增 `SimConnectionState` part 发布 `sim/connected`，bridge inputs 加 `sim/connected`。`donkeycar/parts/dgym.py` 加看门狗（`_watchdog_sec` 默认 5s、`_last_frame_ts`，`run_threaded` 检测超时无新帧强制 `_close_env`）。`donkeycar/parts/drive_api_bridge.py` 遥测透传 `sim_connected` 字段；`useDriveWebsocket.ts` Telemetry 加 `sim_connected`，`DrivePage.tsx` 显示「模拟器离线，重连中…」琥珀徽章（`drive.simOfflineReconnecting` 中英）。重写 `test_template_simulator_recovery.py` 为 AST 级解析 inputs/outputs 配对（4 例），`test_dgym_reconnect.py` 加看门狗 2 例、`test_drive_api_bridge_telemetry.py` 加遥测 2 例。配套环境补丁（非本仓库）：editable 安装的 `gym_donkeycar` 1.3.1 中 `envs/donkey_sim.py` `observe()` 加超时（默认 2s，可经 GYM_CONF `observe_timeout_sec` 配置）、`core/client.py` 优雅关闭/`ConnectionAbortedError` 均置 `aborted=True`，使根因 A/B 真正闭环。
+  - **#364 Pilot Arena 首尾帧双滑块**：`web_ui/frontend/src/pages/PilotArenaPage.tsx` 用 `plotStart`/`plotEnd` 状态替换单一 `plotLimit`，`loadPlot` 改发 `{ start: plotStart, limit: plotEnd - plotStart + 1 }`；UI 把单个帧数输入框换成两个原生 `input[type=range]` 双滑块 + 起止帧数值显示（`data-testid="plot-start-slider"/"plot-end-slider"`，`plotStart <= plotEnd` 约束），并加「按记录位置（0..max）选择切片」提示。`i18n/messages/arena.ts` 加 `plotStartFrame`/`plotEndFrame`/`plotRangeHint` 中英。后端 `PredictionsRequest` 已有 start/limit，未改契约。
+  - **#365 Trainer 命名颠倒**：`i18n/messages/trainer.ts` `tabMyPc` 本机→局域网主机（This Computer→Lan Host）、`tabLocal` 车载电脑→本机（Car Computer→Local Host），并同步 `myPcTraining`/`myPcProbeReady`/`myPcTrainingSubtitle` 派生文案 + 文件头加 key↔显示语映射约定注释；`web_ui/backend/mypc_probe.py` 两处直出文案「本机训练」→「局域网主机训练」；同步 `ModeTabs.test.tsx`、`MyPcProbePanel.test.tsx`、`test_trainer_mypc.py`、`RemoteConfigForm.tsx` 注释与 `docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」→「局域网主机训练（Lan Host）」。
+  - 实测：前端 `vitest run` 35 文件 186 passed、`tsc -b --noEmit` 无错、`vite build` 通过；后端 `pytest tests/test_drive.py tests/test_arena.py tests/test_trainer_mypc.py` 51 passed、`pytest donkeycar/tests/test_template_simulator_recovery.py test_dgym_reconnect.py test_drive_api_bridge_telemetry.py` 20 passed。仅 DD 改动（gym_donkeycar 环境补丁为依赖侧），Firmware 无改动、无需 OTA。
 
 ## 2026-09-04 (177)
 
