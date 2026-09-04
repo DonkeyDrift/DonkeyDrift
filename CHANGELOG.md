@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-05 (186)
+
+- feat(models): 收录实车训练模型 DKG-1（TFLite）——仓库内归档分发，供 Pilot Arena opt-in 真实模型集成测试等环境取用
+  - 背景：`DKG-1.tflite` 为 linear 双头 pilot（输入 120×160×3 RGB，两个 [1,1] 输出头分别给方向/油门，3,273,072 字节），此前仅存于本机 `mycar/models/`（非 git 管理）；main 分支 opt-in 集成测试 `web_ui/backend/tests/integration/test_arena_real_model.py` 依赖本机存在该模型，换机/新环境无从获取。应用户要求收录进仓库归档。
+  - `models/DKG-1.tflite`（新建 `models/` 目录）：与本机 `mycar/models/DKG-1.tflite` 逐字节一致（md5 `39270f5baab386be59f51312f1e3277e`）。
+  - 隐私自查：`strings` 扫描仅含 TFLite 元数据与层名（`TFL3`/`serving_default`/`img_in`/`n_outputs0`/`n_outputs1`、`min_runtime_version 2.15.1`），无 SSID/密码/内网 IP/本机绝对路径/真实邮箱。
+  - 说明：该模型为外部提供的训练产物、不含训练 history，故无配套 loss 曲线图与 `_meta.json`；DD 训练页模型列表中不显示 loss 预览属预期（`trainer.py` 的 `list_models` 按同名 `.png`/`_meta.json` 关联）。
+  - 测试同步：纯二进制归档、无代码改动，无需新增测试。
+  - 注：仅 DD 仓库改动，Firmware 无改动、无需 OTA；不触及 web 前后端运行代码，无需本机部署。
+
 ## 2026-09-04 (185)
 
 - feat(trainer): 「已训练模型」卡片新增「导入模型」按钮——上传本地 .tflite 模型到当前项目 models/ 目录，列表自动刷新后可下载 / 加载到车端
