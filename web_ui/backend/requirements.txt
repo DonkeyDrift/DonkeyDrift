@@ -8,3 +8,4 @@ websockets
 aiortc
 av
 httpx2
+zeroconf

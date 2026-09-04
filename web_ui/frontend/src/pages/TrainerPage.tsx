@@ -1,7 +1,8 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import {
   getTrainerConfig,
+  getMyPcKnownHosts,
   loadConfig,
   loadMyconfig,
   saveTrainingConfig,
@@ -9,17 +10,18 @@ import {
   type TrainerTub,
 } from '../services/api';
 import { AdvancedOptions } from '../components/trainer/AdvancedOptions';
-import { ModeTabs } from '../components/trainer/ModeTabs';
 import { LocalConfigForm } from '../components/trainer/LocalConfigForm';
 import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
 import { MyPcProbePanel } from '../components/trainer/MyPcProbePanel';
+import { TubSelector } from '../components/trainer/TubSelector';
+import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 import { ProgressPanel } from '../components/trainer/ProgressPanel';
 import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
 import { useTrainingJob } from '../hooks/useTrainingJob';
+import { useMyPcProbe } from '../hooks/useMyPcProbe';
 import { useTranslation } from '@/i18n';
-import { Cpu, SlidersHorizontal } from 'lucide-react';
-import type { TrainerMode } from '../components/trainer/ModeTabs';
+import { Cpu, Database, SlidersHorizontal } from 'lucide-react';
 
 const TRAINING_KEYS = [
   'BATCH_SIZE',
@@ -35,7 +37,9 @@ const TRAINING_KEYS = [
 
 export const TrainerPage = React.memo(function TrainerPage() {
   const { t } = useTranslation();
-  const [mode, setMode] = React.useState<TrainerMode>('local');
+  // 训练模式挂全局 store：ModeTabs 在 FlowPage 的 trainer section 头（#178），
+  // 切走再切回、或从其它入口进来时模式都保持
+  const mode = useStore((s) => s.trainerMode);
   const { job, startLocal, startOnline, startMyPc, resumeMyPc, stopJob, isRunning } = useTrainingJob();
   const {
     configPath,
@@ -50,10 +54,38 @@ export const TrainerPage = React.memo(function TrainerPage() {
   const [currentTubPath, setCurrentTubPath] = React.useState('');
   // Don't re-autofill after the user has manually edited the tub path
   const tubManuallyEdited = useRef(false);
+  // Don't overwrite mypc host/user/password once the user has typed anything
+  const myPcEditedRef = useRef(false);
+  // Don't re-autofill the mypc tub once the user has picked one manually
+  const myPcTubEditedRef = useRef(false);
 
   // Remote form state (one per SSH target: user's own computer / cloud)
   const [onlineForm, setOnlineForm] = React.useState(trainerOnlineConfig);
   const [myPcForm, setMyPcForm] = React.useState(trainerMyPcConfig);
+
+  // mypc env readiness: null = 未检测过, false = 检测未就绪, true = 已就绪
+  const [myPcEnvReady, setMyPcEnvReady] = useState<boolean | null>(null);
+  const myPcProbe = useMyPcProbe();
+
+  // 跑一次环境检测并把结果显示到高级选项里的环境检测面板；
+  // 检测通过且后端发现更合适的 python 时自动应用到表单
+  const runMyPcProbe = useCallback(async () => {
+    const data = await myPcProbe.runProbe({
+      host: myPcForm.host,
+      user: myPcForm.user,
+      password: myPcForm.password,
+      remoteDirBase: myPcForm.remoteDirBase,
+      pythonPath: myPcForm.pythonPath,
+      keyPath: myPcForm.keyPath,
+    });
+    if (data) {
+      setMyPcEnvReady(data.ok);
+      if (data.ok && data.python_path && data.python_path !== myPcForm.pythonPath) {
+        setMyPcForm((f) => ({ ...f, pythonPath: data.python_path }));
+      }
+    }
+    return data;
+  }, [myPcForm, myPcProbe]);
 
   // Load remote configs on mount
   useEffect(() => {
@@ -76,20 +108,46 @@ export const TrainerPage = React.memo(function TrainerPage() {
       });
     getTrainerConfig('train_my_pc.conf')
       .then((cfg) => {
-        const next = {
-          host: cfg.host,
-          user: cfg.user,
-          password: cfg.password,
-          remoteDirBase: cfg.remote_dir_base,
-          modelName: cfg.model_name,
-          pythonPath: cfg.python_path,
-          keyPath: cfg.key_path ?? '',
-        };
-        setMyPcForm(next);
-        setTrainerMyPcConfig(next);
+        setMyPcForm((f) => {
+          const next = {
+            ...f,
+            host: cfg.host,
+            user: cfg.user,
+            password: cfg.password,
+            remoteDirBase: cfg.remote_dir_base,
+            modelName: cfg.model_name,
+            pythonPath: cfg.python_path,
+            keyPath: cfg.key_path ?? '',
+          };
+          setTrainerMyPcConfig(next);
+          return next;
+        });
       })
       .catch(() => {
         // use defaults if file doesn't exist yet
+      })
+      .then(() => getMyPcKnownHosts())
+      .then((hosts) => {
+        // 连接记忆自动填充：填「最近使用且当前在线」的电脑
+        // （host/user/python_path/remote_dir_base）。
+        // 安全约束：历史记录不存密码，密码永远由用户手填。
+        const rec = (hosts || []).find((h) => h.reachable);
+        if (!rec || myPcEditedRef.current) return;
+        setMyPcForm((f) => {
+          if (myPcEditedRef.current) return f;
+          const next = {
+            ...f,
+            host: rec.host,
+            user: rec.user,
+            pythonPath: rec.python_path || f.pythonPath,
+            remoteDirBase: rec.remote_dir_base || f.remoteDirBase,
+          };
+          setTrainerMyPcConfig(next);
+          return next;
+        });
+      })
+      .catch(() => {
+        // no known hosts or history read failed — leave the form as-is
       });
   }, [setTrainerOnlineConfig, setTrainerMyPcConfig]);
 
@@ -131,6 +189,13 @@ export const TrainerPage = React.memo(function TrainerPage() {
         if (next !== null && next !== trainerLocalConfig.tub) {
           setTrainerLocalConfig({ tub: next });
         }
+        if (next !== null && !myPcTubEditedRef.current) {
+          setMyPcForm((f) => {
+            if (f.tub === next) return f;
+            setTrainerMyPcConfig({ tub: next });
+            return { ...f, tub: next };
+          });
+        }
       })
       .catch(() => {
         // Keep current value; tub path stays manually editable
@@ -141,7 +206,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
     };
     // trainerLocalConfig.tub intentionally omitted: only auto-fill, never fight user edits
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configPath, tubPath, setTrainerLocalConfig]);
+  }, [configPath, tubPath, setTrainerLocalConfig, setTrainerMyPcConfig]);
 
   // Load training config from myconfig.py on mount / when configPath changes
   useEffect(() => {
@@ -216,28 +281,48 @@ export const TrainerPage = React.memo(function TrainerPage() {
     startOnline(onlineForm);
   }, [onlineForm, setTrainerOnlineConfig, startOnline]);
 
-  const handleMyPcStart = useCallback(() => {
-    setTrainerMyPcConfig(myPcForm);
-    startMyPc(myPcForm);
-  }, [myPcForm, setTrainerMyPcConfig, startMyPc]);
+  const handleMyPcStart = useCallback(async () => {
+    let cfg = myPcForm;
+    if (myPcEnvReady !== true) {
+      // 还没检测过（或上次未就绪）：先自动跑环境检测，通过才开始训练
+      const data = await runMyPcProbe();
+      if (!data) return; // 检测请求失败，错误已显示在环境检测面板
+      if (data.python_path && data.python_path !== cfg.pythonPath) {
+        cfg = { ...cfg, pythonPath: data.python_path }; // 用检测到的正确路径开始训练
+      }
+      if (!data.ok) return; // 未就绪：结果显示在环境检测面板，不开始训练
+    }
+    setTrainerMyPcConfig(cfg);
+    startMyPc(cfg);
+  }, [myPcForm, myPcEnvReady, runMyPcProbe, setTrainerMyPcConfig, startMyPc]);
 
-  // 断点续训：镜像 handleMyPcStart，但走后端续训接口
-  const handleMyPcResume = useCallback(() => {
-    setTrainerMyPcConfig(myPcForm);
-    resumeMyPc(myPcForm);
-  }, [myPcForm, setTrainerMyPcConfig, resumeMyPc]);
+  // 断点续训：镜像 handleMyPcStart（含环境检测门槛），但走后端续训接口
+  const handleMyPcResume = useCallback(async () => {
+    let cfg = myPcForm;
+    if (myPcEnvReady !== true) {
+      // 还没检测过（或上次未就绪）：先自动跑环境检测，通过才继续训练
+      const data = await runMyPcProbe();
+      if (!data) return; // 检测请求失败，错误已显示在环境检测面板
+      if (data.python_path && data.python_path !== cfg.pythonPath) {
+        cfg = { ...cfg, pythonPath: data.python_path }; // 用检测到的正确路径继续训练
+      }
+      if (!data.ok) return; // 未就绪：结果显示在环境检测面板，不继续训练
+    }
+    setTrainerMyPcConfig(cfg);
+    resumeMyPc(cfg);
+  }, [myPcForm, myPcEnvReady, runMyPcProbe, setTrainerMyPcConfig, resumeMyPc]);
 
-  const handleAction = useCallback(() => {
+  const handleAction = useCallback(async () => {
     if (isRunning) {
       stopJob();
     } else if (mode === 'local') {
       handleLocalStart();
     } else if (mode === 'mypc') {
-      // mypc 下已停止的任务「继续」走断点续训；其它模式维持全新开始
+      // mypc 下已停止的任务「继续」走断点续训；其它模式的「继续」维持全新开始
       if (job?.status === 'stopped') {
-        handleMyPcResume();
+        await handleMyPcResume();
       } else {
-        handleMyPcStart();
+        await handleMyPcStart();
       }
     } else {
       handleOnlineStart();
@@ -246,11 +331,6 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
   return (
     <div className="space-y-6">
-      {/* 页内标题已上移到统一流程页的 section 头（#178），此处只保留模式切换 */}
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <ModeTabs mode={mode} onChange={setMode} />
-      </div>
-
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="space-y-6">
           {mode === 'local' ? (
@@ -269,15 +349,24 @@ export const TrainerPage = React.memo(function TrainerPage() {
             <>
               <RemoteConfigForm
                 titleKey="trainer.myPcTraining"
-                hintKey="trainer.myPcFirstUseHint"
                 icon={<Cpu className="w-5 h-5" />}
                 subtitleKey="trainer.myPcTrainingSubtitle"
+                compact
                 host={myPcForm.host}
-                onHostChange={(v) => setMyPcForm((f) => ({ ...f, host: v }))}
+                onHostChange={(v) => {
+                  myPcEditedRef.current = true;
+                  setMyPcForm((f) => ({ ...f, host: v }));
+                }}
                 user={myPcForm.user}
-                onUserChange={(v) => setMyPcForm((f) => ({ ...f, user: v }))}
+                onUserChange={(v) => {
+                  myPcEditedRef.current = true;
+                  setMyPcForm((f) => ({ ...f, user: v }));
+                }}
                 password={myPcForm.password}
-                onPasswordChange={(v) => setMyPcForm((f) => ({ ...f, password: v }))}
+                onPasswordChange={(v) => {
+                  myPcEditedRef.current = true;
+                  setMyPcForm((f) => ({ ...f, password: v }));
+                }}
                 remoteDirBase={myPcForm.remoteDirBase}
                 onRemoteDirBaseChange={(v) => setMyPcForm((f) => ({ ...f, remoteDirBase: v }))}
                 modelName={myPcForm.modelName}
@@ -292,14 +381,33 @@ export const TrainerPage = React.memo(function TrainerPage() {
                 title={t('trainer.advancedOptions')}
                 externalOpen={job?.status === 'running'}
               >
+                <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-4">
+                  <SectionCardTitle
+                    icon={<Database className="w-5 h-5" />}
+                    title={t('trainer.trainingData')}
+                    subtitle={t('trainer.trainingDataSubtitle')}
+                  />
+                  <TubSelector
+                    tub={myPcForm.tub}
+                    onTubChange={(v) => {
+                      myPcTubEditedRef.current = true;
+                      setMyPcForm((f) => ({ ...f, tub: v }));
+                    }}
+                    tubCandidates={tubCandidates}
+                    currentTubPath={currentTubPath}
+                  />
+                </div>
                 <MyPcProbePanel
                   host={myPcForm.host}
                   user={myPcForm.user}
                   password={myPcForm.password}
-                  remoteDirBase={myPcForm.remoteDirBase}
                   pythonPath={myPcForm.pythonPath}
                   keyPath={myPcForm.keyPath}
                   onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+                  result={myPcProbe.result}
+                  loading={myPcProbe.loading}
+                  error={myPcProbe.error}
+                  onRunProbe={runMyPcProbe}
                 />
                 <LogPanel job={job} />
               </AdvancedOptions>
@@ -332,7 +440,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
           <button
             onClick={handleAction}
-            className={`w-full px-4 py-2 rounded-md font-medium transition-colors text-white ${
+            disabled={mode === 'mypc' && !isRunning && myPcProbe.loading}
+            className={`w-full px-4 py-2 rounded-md font-medium transition-colors text-white disabled:opacity-60 disabled:cursor-not-allowed ${
               isRunning
                 ? 'bg-red-600 hover:bg-red-700'
                 : 'bg-cyan-600 hover:bg-cyan-700'
@@ -340,13 +449,11 @@ export const TrainerPage = React.memo(function TrainerPage() {
           >
             {isRunning
               ? t('trainer.stopTraining')
-              : mode === 'local'
-              ? t('trainer.startLocalTraining')
-              : mode === 'mypc'
-              ? job?.status === 'stopped'
-                ? t('trainer.resumeTraining')
-                : t('trainer.startMyPcTraining')
-              : t('trainer.startCloudTraining')}
+              : mode === 'mypc' && myPcProbe.loading
+              ? t('trainer.myPcProbeRunning')
+              : mode === 'mypc' && job?.status === 'stopped'
+              ? t('trainer.resumeTraining')
+              : t('trainer.startTraining')}
           </button>
 
           <ModelsList />

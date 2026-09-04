@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { TubManagerPage } from './TubManagerPage';
 import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
+import { useStore } from '../store/useStore';
+import { ModeTabs } from '../components/trainer/ModeTabs';
 import { useTranslation } from '@/i18n';
 
 
@@ -77,6 +79,8 @@ export function FlowPage() {
   const location = useLocation();
   const { pathname, key: locationKey } = location;
   const setActiveSection = useFlowStore((s) => s.setActiveSection);
+  const trainerMode = useStore((s) => s.trainerMode);
+  const setTrainerMode = useStore((s) => s.setTrainerMode);
   const rootRef = useRef<HTMLDivElement>(null);
   const ratiosRef = useRef<Partial<Record<FlowSectionId, number>>>({});
   const firstScrollRef = useRef(true);
@@ -366,7 +370,10 @@ export function FlowPage() {
       </section>
 
       <section id="trainer" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
-        <FlowSectionHeader step={3} meta={SECTIONS[2]} />
+        <div className="flex items-center justify-between gap-3">
+          <FlowSectionHeader step={3} meta={SECTIONS[2]} />
+          <ModeTabs mode={trainerMode} onChange={setTrainerMode} />
+        </div>
         <React.Suspense fallback={<SectionFallback />}>
           <TrainerPage />
         </React.Suspense>

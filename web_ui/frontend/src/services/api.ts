@@ -274,6 +274,38 @@ export const probeMyPc = async (cfg: {
   return response.data;
 };
 
+export interface MyPcClientInfo {
+  ip: string;
+  is_loopback: boolean;
+  hostname: string;
+  username: string;
+  verified: boolean;
+  ssh: string; // '' | 'ok' | 'auth_failed' | 'unreachable'
+}
+
+export async function getMyPcClientInfo(password?: string): Promise<MyPcClientInfo> {
+  // POST + JSON body（而非 GET query）：密码绝不进访问日志
+  const response = await api.post('/trainer/mypc/client-info', {
+    password: password || '',
+  });
+  return response.data;
+}
+
+export interface MyPcKnownHost {
+  host: string;
+  user: string;
+  python_path: string;
+  remote_dir_base: string;
+  last_used_at: number;
+  reachable: boolean;
+  // 安全约束：历史记录不含密码，前端永远不要从这里取密码
+}
+
+export async function getMyPcKnownHosts(): Promise<MyPcKnownHost[]> {
+  const response = await api.get('/trainer/mypc/known-hosts');
+  return response.data.hosts;
+}
+
 export const installMyPc = async (cfg: {
   host: string;
   user: string;
