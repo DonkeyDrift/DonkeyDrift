@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-04 (180)
+## 2026-09-04 (182)
 
 - fix(trainer): 修复训练中刷新页面后看不到训练进度
   - 根因：训练任务状态（job_id/进度/日志）只存在前端 zustand 内存 `trainingJob`，`partialize` 只持久化配置、不含当前任务；刷新后 React 重新挂载，`trainingJob` 回到 null，前端既不知道有在跑任务、也不重连 SSE，`ProgressPanel` 显示「空闲」。后端 `job_manager` 是内存单例（页面刷新不影响）、`/trainer/train/{id}/status` 本就返回完整进度快照，故最小修复落在前端。
@@ -8,6 +8,23 @@
   - `web_ui/frontend/src/hooks/useTrainingJob.ts`：新增挂载恢复 effect（ref 防 StrictMode 双跑）——读 `activeTraining`，`getJobStatus` 拉进度快照重建 `TrainingJob`（logs 先置空），`status === 'running'` 时 `connectSSE` 重连继续收实时事件，否则清空 `activeTraining` 展示终态；请求失败则清掉失效 id 回到空闲态。`startLocal`/`startSshTraining` 拿到 `job_id` 后 `setActiveTraining` 记录，供下次刷新恢复。
   - 测试：`web_ui/frontend/src/store/useStore.test.ts` 新增 3 例（setActiveTraining / clearActiveTraining / finishTrainingJob 同步清空）；新建 `web_ui/frontend/src/hooks/useTrainingJob.test.ts` 4 例（running 恢复+重连 SSE / 终态展示并清空 / 失效清空 / 无 activeTraining 不请求）。
   - 实测：`tsc -b --noEmit` 无错、`vitest run` 34 文件 183 passed（含新增 7 例）。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (181)
+
+- fix(tui): TUI Drive 复用已有 Web UI 实例时自动打开浏览器，并修正车进程提示 URL 端口
+  - 背景：复用实例路径（issue #127）`web_cmd=None` 不经过 `donkey web --open`，TUI 自身也无任何 `webbrowser.open`，导致用户选 Drive 后浏览器不弹出（新起实例路径正常）。车进程 `manage.py drive` 打印的「请打开浏览器访问」提示又因 `DriveApiBridge.web_console_url()` 在未设 `DRIVE_WEB_CONSOLE_URL` 时硬编码回落 `:5188`，指向无人监听的端口（生产模式前端由后端托管，实际在 :8000）。
+  - `donkeycar/management/tui.py`（`DriveCommand.execute`）：复用实例时由 TUI 直接 `webbrowser.open` 打开 `http://localhost:<frontend_port>/#/drive`（实例刚经 `find_live_instance()` 探测存活，端口必在监听，无需再等待）；新起实例路径保持不变（仍由 `donkey web --open` 打开，TUI 不重复打开）。车进程环境新增注入 `DRIVE_WEB_CONSOLE_URL=http://localhost:<frontend_port>`（复用路径取实例登记端口，新起路径生产模式取后端端口；用户已显式设置时不覆盖，`setdefault` 语义），使打印的提示与实际监听端口一致。
+  - 测试同步（`donkeycar/tests/test_tui_drive.py`）：新增 autouse 隔离 fixture——本机可能有存活实例登记（`~/.donkeycar/webui.json`）与运行中车进程（`~/.donkeycar/drive.pid`），不隔离时测试会误杀真实车进程、误删 PID 记录，且「新起实例」断言会被复用路径顶掉；fixture 将 `find_live_instance` 默认置 None、`kill_previous_car_processes`/`write_drive_pids`/`remove_drive_pid_file` 置空，需要复用路径的用例自行覆盖。新增 3 例：复用实例打开正确 URL 且只起车进程、注入正确的 `DRIVE_WEB_CONSOLE_URL`；新起实例时 TUI 不开浏览器（留给 `--open`）且提示端口=后端端口；用户已设 `DRIVE_WEB_CONSOLE_URL` 不被覆盖。顺手修复 2 例既有失败：`9a630826`（#127）把 `execute()` 改为 `choose_available_backend_port(8000)` 带参调用后，既有 fake `lambda self: 8000` 签名未跟进而 TypeError，补齐形参。
+  - 实测：`pytest donkeycar/tests/test_tui_drive.py donkeycar/tests/test_tui_web_command.py` 15 passed。`donkeycar/tests/test_web_command.py` 6 例失败为 Tony 既有问题（`#135` 生产构建路径改用 `subprocess.run` 而 fake 只实现 `Popen`，`FakeProcess` 不支持上下文管理器），在 origin/Tony 原样复现，与本次改动无关、未动。
+  - 仅 TUI/CLI 侧改动，不影响 8000 在线实例页面，无需重建 dist；Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (180)
+
+- fix(datastore, web_ui): 修复 tub sessions 列表只读打开 0 字节 rollover catalog 触发 `cannot mmap an empty file` 崩溃（main 侧登记的"待后续跟进"项，参考 main ac863a99 的修法移植到 Tony，非 cherry-pick）
+  - 根因：录制在 catalog roll-over 后、第一条记录落盘前就停止（或崩溃）时，会留下已登记进 manifest 的 0 字节 `catalog_N.catalog`；`donkeycar/parts/datastore_v2.py` 的 `Seekable.__init__` 在只读模式下无条件 `mmap.mmap(fileno, length=0)`，空文件抛 `ValueError: cannot mmap an empty file`。`GET /api/tub/sessions`（`web_ui/backend/routers/tub.py` 以 `Tub(path, read_only=True)` 打开并迭代全部 catalog）因此整个接口 500。
+  - 修复：`datastore_v2.py` `Seekable.__init__` 改为仅当 `os.path.getsize(file) > 0` 才做 mmap——Tony 侧全部只读打开路径（`Manifest.__init__` 打开最后 catalog、`ManifestIterator` 逐个打开 catalog、底层 `Catalog`/`CatalogMetadata`）都经 `Seekable` 这一个 mmap 点，一处修复即覆盖所有打开路径；空文件回退为普通文本文件读取，`_read_contents`/`readline` 对 0 行内容处理不变。
+  - 测试同步（等价移植 main ac863a99 的两个回归测试，Tony 侧接口相同原样适用）：`web_ui/backend/tests/test_tub_sessions.py` 新增 `test_list_sessions_tolerates_empty_rollover_catalog`（写 3 条记录后 `_add_catalog()` 留下空 catalog 再关 tub，sessions 列表须 200 且返回 1 个会话、3 条记录）；`donkeycar/tests/test_datastore_v2.py` 新增 `test_read_only_manifest_with_empty_catalog`（read_only 打开含空 catalog 的 manifest 并迭代不崩溃、读出 3 条记录）。
+  - 实测：修复前两个新测试均复现 `ValueError: cannot mmap an empty file`（sessions 端点 500）；修复后 `web_ui/backend` 全套 `pytest tests/ -q` 221 passed、`donkeycar/tests/test_datastore_v2.py + test_tub_v2.py` 9 passed、根 `tests/test_tub_image_cache.py + test_tub_manager_auto_refresh.py` 6 passed。仅 DD 改动，Firmware 无改动、无需 OTA。
 
 ## 2026-09-04 (179)
 

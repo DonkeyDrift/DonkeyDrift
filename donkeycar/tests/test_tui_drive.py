@@ -1,6 +1,23 @@
 import sys
 
+import pytest
+
 from donkeycar.management import tui
+
+
+@pytest.fixture(autouse=True)
+def _isolate_process_registry(monkeypatch):
+    """隔离进程登记副作用，默认走"无存活实例"路径。
+
+    实例登记与车进程 PID 文件在本机真实 home 目录（~/.donkeycar/），
+    测试若不隔离：会误杀正在运行的真实车进程、误删/误写 PID 记录，
+    且本机有存活 Web UI 实例时"新起实例"断言会被复用路径顶掉。
+    需要复用路径的用例自行再 patch tui.find_live_instance。
+    """
+    monkeypatch.setattr(tui, "find_live_instance", lambda: None)
+    monkeypatch.setattr(tui, "kill_previous_car_processes", lambda: None)
+    monkeypatch.setattr(tui, "write_drive_pids", lambda pids: None)
+    monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
 
 
 class FakeProcess:
@@ -60,7 +77,7 @@ def test_drive_command_starts_web_console_and_car_process(monkeypatch, tmp_path)
     monkeypatch.setattr(tui.console, "clear", lambda: None)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr(tui.DriveCommand, "choose_available_backend_port", lambda self: 8000)
+    monkeypatch.setattr(tui.DriveCommand, "choose_available_backend_port", lambda self, preferred_port=8100: 8000)
 
     def fake_popen(cmd_list, **kwargs):
         popen_calls.append((cmd_list, kwargs))
@@ -95,7 +112,7 @@ def test_drive_command_sets_car_url_to_chosen_backend_port(monkeypatch, tmp_path
     monkeypatch.setattr(tui.console, "clear", lambda: None)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr(tui.DriveCommand, "choose_available_backend_port", lambda self: 8001)
+    monkeypatch.setattr(tui.DriveCommand, "choose_available_backend_port", lambda self, preferred_port=8100: 8001)
 
     def fake_popen(cmd_list, **kwargs):
         popen_calls.append((cmd_list, kwargs))
@@ -204,3 +221,103 @@ def test_drive_command_keeps_web_console_when_car_process_exits(monkeypatch):
 
     assert web_process.terminated is False
     assert web_process.killed is False
+
+
+def test_drive_command_reusing_live_instance_opens_browser(monkeypatch, tmp_path):
+    """复用存活实例时：只起车进程，并由 TUI 打开实例前端端口的 Drive 页。"""
+    popen_calls = []
+    opened_urls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    inst = {"pid": 4242, "backend_port": 8000, "frontend_port": 8000}
+    monkeypatch.setattr(tui, "find_live_instance", lambda: dict(inst))
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(tui.webbrowser, "open", opened_urls.append)
+    monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
+    monkeypatch.delenv("DRIVE_API_PUBLIC_HOST", raising=False)
+    monkeypatch.delenv("DRIVE_WEB_CONSOLE_URL", raising=False)
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+    # 复用路径 web_process 为 None，monitor 循环只认 ESC，测试里直接短路
+    monkeypatch.setattr(tui.DriveCommand, "monitor_processes", lambda self, w, c: None)
+
+    tui.DriveCommand().execute()
+
+    assert len(popen_calls) == 1
+    car_cmd, car_kwargs = popen_calls[0]
+    assert car_cmd == [sys.executable, "manage.py", "drive"]
+    assert car_kwargs["env"]["DRIVE_API_SERVER_URL"] == "ws://localhost:8000/api/drive/ws"
+    assert car_kwargs["env"]["DRIVE_WEB_CONSOLE_URL"] == "http://localhost:8000"
+    assert opened_urls == ["http://localhost:8000/#/drive"]
+
+
+def test_drive_command_new_instance_leaves_browser_to_web_open(monkeypatch, tmp_path):
+    """新起实例时：浏览器由 `donkey web --open` 打开，TUI 不重复打开。"""
+    popen_calls = []
+    opened_urls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(tui.DriveCommand, "choose_available_backend_port", lambda self, preferred_port=8100: 8000)
+    monkeypatch.setattr(tui.webbrowser, "open", opened_urls.append)
+    monkeypatch.delenv("DRIVE_WEB_CONSOLE_URL", raising=False)
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+
+    tui.DriveCommand().execute()
+
+    assert len(popen_calls) == 2
+    _, car_kwargs = popen_calls[1]
+    assert opened_urls == []
+    # 生产模式前端由后端托管，提示 URL 端口即后端端口
+    assert car_kwargs["env"]["DRIVE_WEB_CONSOLE_URL"] == "http://localhost:8000"
+
+
+def test_drive_command_respects_user_drive_web_console_url(monkeypatch, tmp_path):
+    """用户已显式设置 DRIVE_WEB_CONSOLE_URL 时，车进程环境变量不被覆盖。"""
+    popen_calls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    inst = {"pid": 4242, "backend_port": 8000, "frontend_port": 8000}
+    monkeypatch.setattr(tui, "find_live_instance", lambda: dict(inst))
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(tui.webbrowser, "open", lambda _url: None)
+    monkeypatch.setenv("DRIVE_WEB_CONSOLE_URL", "http://192.0.2.10:8000")
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(tui.DriveCommand, "monitor_processes", lambda self, w, c: None)
+
+    tui.DriveCommand().execute()
+
+    _, car_kwargs = popen_calls[0]
+    assert car_kwargs["env"]["DRIVE_WEB_CONSOLE_URL"] == "http://192.0.2.10:8000"
