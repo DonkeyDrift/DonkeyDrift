@@ -6,7 +6,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 const chartState = vi.hoisted(() => {
   const chart = {
     chartArea: { left: 0, right: 200, top: 0, bottom: 100 },
-    scales: { x: { getValueForPixel: (px: number) => px / 20 } },
+    scales: { x: { getValueForPixel: (px: number) => px / 20, getPixelForValue: (v: number) => v * 20 } },
     update: vi.fn(),
     destroy: vi.fn(),
     data: { datasets: [] },
