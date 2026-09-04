@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
+import { Code2, FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb, launchZcode } from '@/services/api';
 
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
@@ -110,6 +110,29 @@ export const KimiCodeWebEntryLink: React.FC = () => {
     >
       <Sparkles className="w-3.5 h-3.5 shrink-0" />
       {launching ? t('common.enterButtons.kimiCodeWebStarting') : t('common.enterButtons.kimiCodeWeb')}
+    </button>
+  );
+};
+
+export const ZCodeEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  // zcode 端点不启动子进程、只返回 /terminal?cmd=zcode URL，毫秒级响应
+  const { launching, enter } = useLauncherEntry(launchZcode, {
+    startingKey: 'common.enterButtons.zcodeStarting',
+    failedKey: 'common.enterButtons.zcodeFailed',
+    networkKey: 'common.enterButtons.zcodeNetworkError',
+    timeoutMs: 10000,
+  });
+  return (
+    <button
+      type="button"
+      onClick={enter}
+      disabled={launching}
+      title={t('common.enterButtons.zcodeTitle')}
+      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
+    >
+      <Code2 className="w-3.5 h-3.5 shrink-0" />
+      {launching ? t('common.enterButtons.zcodeStarting') : t('common.enterButtons.zcode')}
     </button>
   );
 };

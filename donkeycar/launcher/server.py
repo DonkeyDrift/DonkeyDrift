@@ -9,6 +9,7 @@ import http.server
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -19,11 +20,11 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 from donkeycar._version import __version__
 from donkeycar.launcher.dc_discovery import find_drifter_console
-from donkeycar.launcher.kimi_web import launch_kimi_code_web
+from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
 from donkeycar.launcher.dsh_web import launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 from donkeycar.webui_instance import (
@@ -56,6 +57,7 @@ _TERMINAL_STATIC_FILES = {
     "xterm.css": ("xterm.css", "text/css; charset=utf-8"),
     "addon-fit.js": ("addon-fit.js", "text/javascript; charset=utf-8"),
     "LICENSE-xterm.txt": ("LICENSE-xterm.txt", "text/plain; charset=utf-8"),
+    "zcode.png": ("zcode.png", "image/png"),
 }
 
 
@@ -955,6 +957,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._handle_launch_kimi_code_web()
         elif path == "/api/launch/dsh":
             self._handle_launch_dsh()
+        elif path == "/api/launch/zcode":
+            self._handle_launch_zcode()
         elif path == "/api/createcar":
             body, err = self._read_json_body()
             if err is not None:
@@ -1130,6 +1134,56 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
                          extra_headers=_KIMI_WEB_CORS_HEADERS)
+
+    def _handle_launch_zcode(self):
+        """POST /api/launch/zcode：在网页终端运行 zcode（TUI coding agent），回 URL。
+
+        请求体可选 JSON {"cwd": "/abs/path"} 指定 zcode 运行目录，缺省为
+        当前用户主目录（动态推导，避免硬编码本机路径入库）。cwd 不存在
+        直接报错，绝不回退到其它目录。
+        返回 launcher 自身的 /terminal?cmd=...&title=...&icon=... URL，
+        由浏览器侧 xterm.js 打开并自动执行命令。响应带 CORS 头
+        （供 DC 页面跨域调用）。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        cwd = None
+        if content_length > 0:
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._serve_json(
+                    {"status": "error", "error": "请求体不是合法 JSON"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+            if not isinstance(body, dict):
+                self._serve_json(
+                    {"status": "error", "error": "请求体必须是 JSON 对象"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+            cwd = body.get("cwd")
+            if cwd is not None and not isinstance(cwd, str):
+                self._serve_json(
+                    {"status": "error", "error": "cwd 必须是字符串"},
+                    code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+                )
+                return
+        if cwd is None:
+            cwd = str(Path.home())
+        if not Path(cwd).expanduser().is_dir():
+            self._serve_json(
+                {"status": "error", "error": f"cwd 目录不存在: {cwd}"},
+                code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        cmd = f"cd {shlex.quote(cwd)} && zcode"
+        url = f"http://{_entry_host()}:8090/terminal?cmd={quote(cmd, safe='')}&title=ZCode&icon=zcode.png"
+        self._serve_json(
+            {"status": "ok", "url": url},
+            extra_headers=_KIMI_WEB_CORS_HEADERS,
+        )
 
     def _serve_html(self):
         """提供菜单 HTML 页面。"""

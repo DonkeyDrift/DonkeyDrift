@@ -12,6 +12,20 @@
   - 实测：后端 `pytest tests/ -q` 214 passed；前端 `vitest run` 32 文件 168 passed、`tsc -b` 无错、`npm run build` 通过。
   - 移植说明：纠缠文件（`TrainerPage.tsx`/`useStore.ts`/`api.ts`/`trainer.py` 等）逐段手合未整盖，Tony 侧 cfg 传参风格与既有 (167)(168)(169) 结构完整保留；明确放弃 dd-deploy 的 EnvSetupCard/remote_env.py（已被 Tony (166) 一键安装取代）与 dd-text-mask（与 Tony (161) 冲突）。仅 DD 改动，Firmware 无改动、无需 OTA。
 
+## 2026-09-04 (170)
+
+- feat(launcher): DD Web UI 顶栏新增「ZCode」入口——一键在网页终端（xterm.js）打开 ZCode TUI coding agent（移植自 session-zcode/dd-deploy 旧工作树在制工作，本次收尾适配最新 Tony 合入）
+  - 链路：顶栏 ZCode 按钮 → DD 后端 `POST /api/launch/zcode` → 转发 launcher（:8090）同名端点 → 返回 `http://<host>:8090/terminal?cmd=...&title=ZCode&icon=zcode.png` URL → 新标签打开 xterm.js 终端页自动执行 `cd <cwd> && zcode`。
+  - `donkeycar/launcher/server.py`：新增 `POST /api/launch/zcode` 端点 `_handle_launch_zcode`——可选 JSON body `{"cwd": ...}`（非 JSON/非对象/cwd 非字符串均 400），cwd 不存在直接 400 报错绝不回退；命令经 `shlex.quote` 防注入，`quote()` 百分号编码进 URL；响应带 CORS 头（供 DC 页面跨域调用）；`_TERMINAL_STATIC_FILES` 白名单注册 `zcode.png`（image/png）。
+  - **敏感修复**：旧在制代码缺省 cwd 硬编码本机用户名绝对路径（入库即泄露事故）——本次移植改为动态推导 `str(Path.home())`，并以测试钉死（见下）。
+  - `donkeycar/launcher/terminal_static/terminal.html`：支持 `?title=&icon=` 参数自定义标签页标题与 favicon（默认 Terminal + 无图标），取自 dd-deploy 版。
+  - `donkeycar/launcher/terminal_static/zcode.png`（新，64×64 图标，取自 dd-deploy）。
+  - `web_ui/backend/routers/launch.py`：新增 `POST /launch/zcode`，与 dsh 同款 `_forward_launch` 转发模式。
+  - 前端：`web_ui/frontend/src/services/api.ts` 新增 `launchZcode()`（zcode 端点不启动子进程、毫秒级响应，validateStatus 全放行）；`web_ui/frontend/src/components/EnterButtons.tsx` 新增 `ZCodeEntryLink`（Code2 图标，复用 `useLauncherEntry`，10s 超时）；`web_ui/frontend/src/components/Layout.tsx` 桌面导航与移动菜单两处挂载（位于 KCW 与 DSH 之间）；`web_ui/frontend/src/i18n/messages/common.ts` 新增 zcode 五条文案 zh/en。
+  - 两源取舍：端点主体取 session-zcode 版（带 cwd 校验与 shlex.quote），`&title=ZCode&icon=zcode.png` 与 terminal.html 参数支持、zcode.png 取 dd-deploy 版；dd-deploy 版 api.ts 里无人调用的 `launchZcode` 死代码未移植（本版由 EnterButtons 真实调用）。
+  - 测试同步：后端 `web_ui/backend/tests/test_launch.py` 新增 zcode 注册断言与转发用例；launcher 侧新建 `tests/test_launcher_zcode.py` 4 用例（happy path URL 形态含 shlex.quote 防注入 + CORS、cwd 不存在 400、缺省 cwd 动态 Path.home() 回归栅栏、非 JSON 400），IP 一律 RFC 5737 TEST-NET-1（192.0.2.x）占位；前端 `EnterButtons.test.tsx` 新增 `ZCodeEntryLink` 2 用例（成功开新标签/失败关标签告警），`App.test.tsx` 的 api mock 补 `launchZcode`（缺导出导致 App 渲染抛错 4 例失败，补齐后全绿）。
+  - 实测：后端 `pytest tests/` 179 passed、仓库根 `pytest tests/` 272 passed、前端 `vitest run` 30 文件 159 passed、`tsc -b` 无错、`npm run build` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-03 (169)
 
 - fix(trainer): mypc 环境发现稳健性重写 + 训练静默期进度/时长 UX 改进（2026-08-23 开发于 dd-deploy，本次由主会话移植收尾合入）
