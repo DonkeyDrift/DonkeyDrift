@@ -63,3 +63,7 @@ secrets*
 # 本机 agent 工作目录
 .claude/
 .agents/
+
+# Playwright 运行产物
+web_ui/frontend/test-results/
+web_ui/frontend/playwright-report/
