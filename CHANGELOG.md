@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-04 (179)
+
+- fix(launcher): dsh/kimi-code-web 启动端点缺省 cwd 去硬编码本机路径——动态推导 `str(Path.home() / "projects")`，内嵌前端不再发送该路径（ZCode 入口 PR #359 收尾时登记的「待单修」项）
+  - 根因：`donkeycar/launcher/server.py` 的 `_handle_launch_kimi_code_web` 与 `_handle_launch_dsh` 缺省 cwd 硬编码真实本机用户名绝对路径（公开仓库，入库即泄露）；MENU_HTML 内嵌 JS 的 `launchKimiCodeWeb()`/`launchDshWeb()` 请求体与 `currentProjectPath()` 兜底同样硬编码该串。
+  - `donkeycar/launcher/server.py`：两处端点缺省 cwd 字面量 → `cwd = str(Path.home() / "projects")`（与同文件 `_handle_launch_zcode` 的 `Path.home()` 写法同款），两处 docstring/注释同步改写；cwd 不存在仍直接报错、绝不回退的语义不变，issue #168 空体 POST 缺省路径不变。
+  - 同文件 MENU_HTML 内嵌 JS：两个启动请求体改为 `JSON.stringify({})`（不传 cwd，由后端动态缺省生效）；`currentProjectPath()` 兜底改为 `'.'`（终端会话当前目录，即 `terminal.py _default_cwd()` 的 `~/projects` 语义，不硬编码本机路径）。
+  - 明确未改：`_find_mycar_project` 的 `known_path` mycar 已知搜索路径（属另一问题）与 `donkeycar/launcher/donkeydrifter-launcher.service`（部署模板）。
+  - 测试同步：`tests/test_launcher_kimi_web.py`、`tests/test_launcher_dsh_web.py` 缺省 cwd 断言由硬编码串改为 `str(Path.home() / "projects")` 动态比对；新建 `tests/test_launcher_no_hardcoded_paths.py`——逐行扫描 `server.py`，除保留的 `projects/mycar` 已知路径外任何行出现 `/home/<用户>/` 形态本机路径即失败（防回归栅栏，含 MENU_HTML 内嵌 JS；栅栏自身用正则描述、不写入真实用户名）。
+  - 实测：`pytest` launcher 相关 10 个测试文件 174 passed（151 + 23，含新增栅栏 1 例）；`python -m py_compile donkeycar/launcher/server.py` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (178)
 
 - fix(workflow): 一次收尾修复 DonkeyDrift 侧剩余 6 个 open issue（#360–#365），全部合入 Tony、逐一关闭
