@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { listModels, deleteModel, downloadModelUrl, loadModelToCar, API_URL, getApiErrorMessage } from '../../services/api';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { listModels, deleteModel, downloadModelUrl, loadModelToCar, importModel, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useTranslation } from '@/i18n';
 
@@ -38,6 +38,8 @@ export const ModelsList: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelItem | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -94,6 +96,18 @@ export const ModelsList: React.FC = () => {
     }
   }, [refresh]);
 
+  const handleImportFile = useCallback(async (file: File) => {
+    setImporting(true);
+    try {
+      await importModel(file, configPath);
+      await refresh();
+    } catch (error) {
+      alert(t('trainer.importFailed', { message: getApiErrorMessage(error) }));
+    } finally {
+      setImporting(false);
+    }
+  }, [configPath, refresh, t]);
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3 relative">
       <div className="flex items-center justify-between">
@@ -102,14 +116,39 @@ export const ModelsList: React.FC = () => {
           title={t('trainer.trainedModels')}
           subtitle={t('trainer.trainedModelsSubtitle')}
         />
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
-        >
-          {loading ? t('trainer.loading') : t('trainer.refresh')}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="inline-flex items-center gap-1 text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
+            title={t('trainer.importModel')}
+          >
+            <Upload className="w-3.5 h-3.5" />
+            {importing ? t('trainer.importing') : t('trainer.importModel')}
+          </button>
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
+          >
+            {loading ? t('trainer.loading') : t('trainer.refresh')}
+          </button>
+        </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".tflite"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            handleImportFile(file);
+          }
+          e.target.value = '';
+        }}
+      />
 
       {models.length === 0 && (
         <div className="text-sm text-zinc-600">{t('trainer.noModels')}</div>
