@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-04 (181)
+
+- fix(tui): TUI Drive 复用已有 Web UI 实例时自动打开浏览器，并修正车进程提示 URL 端口
+  - 背景：复用实例路径（issue #127）`web_cmd=None` 不经过 `donkey web --open`，TUI 自身也无任何 `webbrowser.open`，导致用户选 Drive 后浏览器不弹出（新起实例路径正常）。车进程 `manage.py drive` 打印的「请打开浏览器访问」提示又因 `DriveApiBridge.web_console_url()` 在未设 `DRIVE_WEB_CONSOLE_URL` 时硬编码回落 `:5188`，指向无人监听的端口（生产模式前端由后端托管，实际在 :8000）。
+  - `donkeycar/management/tui.py`（`DriveCommand.execute`）：复用实例时由 TUI 直接 `webbrowser.open` 打开 `http://localhost:<frontend_port>/#/drive`（实例刚经 `find_live_instance()` 探测存活，端口必在监听，无需再等待）；新起实例路径保持不变（仍由 `donkey web --open` 打开，TUI 不重复打开）。车进程环境新增注入 `DRIVE_WEB_CONSOLE_URL=http://localhost:<frontend_port>`（复用路径取实例登记端口，新起路径生产模式取后端端口；用户已显式设置时不覆盖，`setdefault` 语义），使打印的提示与实际监听端口一致。
+  - 测试同步（`donkeycar/tests/test_tui_drive.py`）：新增 autouse 隔离 fixture——本机可能有存活实例登记（`~/.donkeycar/webui.json`）与运行中车进程（`~/.donkeycar/drive.pid`），不隔离时测试会误杀真实车进程、误删 PID 记录，且「新起实例」断言会被复用路径顶掉；fixture 将 `find_live_instance` 默认置 None、`kill_previous_car_processes`/`write_drive_pids`/`remove_drive_pid_file` 置空，需要复用路径的用例自行覆盖。新增 3 例：复用实例打开正确 URL 且只起车进程、注入正确的 `DRIVE_WEB_CONSOLE_URL`；新起实例时 TUI 不开浏览器（留给 `--open`）且提示端口=后端端口；用户已设 `DRIVE_WEB_CONSOLE_URL` 不被覆盖。顺手修复 2 例既有失败：`9a630826`（#127）把 `execute()` 改为 `choose_available_backend_port(8000)` 带参调用后，既有 fake `lambda self: 8000` 签名未跟进而 TypeError，补齐形参。
+  - 实测：`pytest donkeycar/tests/test_tui_drive.py donkeycar/tests/test_tui_web_command.py` 15 passed。`donkeycar/tests/test_web_command.py` 6 例失败为 Tony 既有问题（`#135` 生产构建路径改用 `subprocess.run` 而 fake 只实现 `Popen`，`FakeProcess` 不支持上下文管理器），在 origin/Tony 原样复现，与本次改动无关、未动。
+  - 仅 TUI/CLI 侧改动，不影响 8000 在线实例页面，无需重建 dist；Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (180)
 
 - fix(datastore, web_ui): 修复 tub sessions 列表只读打开 0 字节 rollover catalog 触发 `cannot mmap an empty file` 崩溃（main 侧登记的"待后续跟进"项，参考 main ac863a99 的修法移植到 Tony，非 cherry-pick）
