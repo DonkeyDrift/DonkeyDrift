@@ -9,8 +9,8 @@
   - **新功能（规划 §3.3「模型性能指标摘要」）**：`POST /api/arena/pilots/{id}/predictions` 响应新增 `summary`——角度/油门两序列各自的 MAE/RMSE/平均偏差(bias=pilot−user)/max|err|/count，非有限值所在帧自动剔除；纯函数 `compute_prediction_metrics`（arena.py）+ 前端 Tub Plot 图下「贴合摘要」展示区（i18n zh/en 各 10 词条）。批量 200 帧含摘要 330ms（≈606FPS 当量）；摘要计算 ~0.27µs/点（20 万点 53ms），开销可忽略；全缓存命中重跑 1.1ms。
   - **测试（本会话补齐分层体系，全部已提交分支 `test/pilot-arena-testing`）**：
     - 后端：修复 `test_drift_vision.py::TestAdaptiveDetection` 4 例（测试基建 bug——替身注入改 `raising=False` 并置位可用性守卫，本不需真库；根因是缺库时模块无 `_PupilDetector` 属性）；本机补装 `pupil-apriltags` 1.0.4 后全量 **351 passed + 1 skipped**（仅剩 opt-in 集成测试需 `ARENA_INTEGRATION=1`）。
-    - 回归护栏：`test_arena.py` +4 例（config mtime 缓存语义 1 + 摘要 3，TDD 先红后绿）+ 预测逐帧不重编译 config 的 API 级护栏（计数断言 `load_config` 全程仅 1 次、caplog 断言 predict 期间 0 条 config 日志）。
-    - 集成测试（opt-in）：`tests/integration/test_arena_real_model.py`——真实 DKG-1.tflite + mycar，`ARENA_INTEGRATION=1` 实测热缓存单帧 predict **4.23ms（≈236FPS 当量）**，预算 <30ms。
+    - 回归护栏：`test_arena.py` +4 例（config mtime 缓存语义 1 + 摘要 3，TDD 先红后绿）+ 预测逐帧不重编译 config 的 API 级护栏（计数断言 `load_config` 全程仅 1 次）。
+    - 集成测试（opt-in）：`tests/integration/test_arena_real_model.py`——真实 DKG-1.tflite + mycar，`ARENA_INTEGRATION=1` 实测热缓存单帧 predict **4.23ms（≈236FPS 当量）**，预算 <30ms；caplog 断言 predict 期间 0 条 config 日志。
     - 前端：vitest **160 passed**（28 文件，新增 `PilotArenaPage.test.tsx` 摘要面板组件测试 2 例）；Playwright E2E **1 passed**（route-mocked 全流程：加载配置→加载 Tub→选模型→加载并预测→生成曲线→摘要面板；`playwright.config.ts` + `e2e/pilot-arena.spec.ts`，vitest 已 exclude `e2e/**`、`.gitignore` 增补 Playwright 产物）。
   - 注：仅 DD 改动，已全部提交于分支 `test/pilot-arena-testing`（自 345f6f7d 起，含用户 Nowhere_X 并行提交 5698f176，未推送）；浏览器端 FPS 徽标提升与真机多 viewer 并发负载仍待用户 Windows 机器人工确认。
 

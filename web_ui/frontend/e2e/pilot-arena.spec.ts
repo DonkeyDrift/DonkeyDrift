@@ -18,8 +18,17 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     let body: unknown;
-    if (pathname.endsWith('/tub/load') || pathname.endsWith('/tub/records')) {
+    if (pathname.endsWith('/tub/load')) {
       body = tubResponse;
+    } else if (pathname.endsWith('/tub/records')) {
+      // 真实契约（routers/tub.py:137-152）：{records, total, offset, limit}，
+      // 与 /tub/load 的 {path, records, fields, total_physical_records} 不同
+      body = {
+        records: tubResponse.records,
+        total: tubResponse.total_physical_records,
+        offset: 0,
+        limit: 100,
+      };
     } else if (pathname.endsWith('/config/load')) {
       body = { config: { DRIVE_LOOP_HZ: 60 } };
     } else if (pathname.endsWith('/drift/state')) {
@@ -38,15 +47,15 @@ test.beforeEach(async ({ page }) => {
         config: {},
       };
     } else if (pathname.endsWith('/arena/model-types')) {
-      body = { model_types: ['tflite_linear', 'linear'] };
+      body = { model_types: ['tflite_linear', 'linear'], default: 'linear' };
     } else if (pathname.endsWith('/arena/models')) {
       // 返回 2 个模型：PilotArenaPage 的 auto-load 只在 models.length === 1 时触发
       // （PilotArenaPage.tsx:638-645），双模型让它跳过自动加载，
       // 『加载并预测』点击成为真实因果步骤。
       body = {
         models: [
-          { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' },
-          { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite' },
+          { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite', format: 'tflite', size: 12345, modified: '2026-09-04T00:00:00', compatible: true },
+          { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite', format: 'tflite', size: 12345, modified: '2026-09-04T00:00:00', compatible: true },
         ],
       };
     } else if (pathname.endsWith('/arena/pilots/load')) {

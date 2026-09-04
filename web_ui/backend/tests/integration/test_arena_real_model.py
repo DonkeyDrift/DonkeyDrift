@@ -15,13 +15,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("ARENA_INTEGRATION") != "1",
-    reason="opt-in 集成测试：需真实 mycar 工程与 DKG-1 模型（ARENA_INTEGRATION=1 启用）",
-)
-
 MYCAR = Path(os.environ.get("MYCAR_DIR", "/home/dkc/projects/mycar"))
 MODEL = MYCAR / "models" / "DKG-1.tflite"
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("ARENA_INTEGRATION") != "1" or not MODEL.is_file(),
+    reason="opt-in 集成测试：需 ARENA_INTEGRATION=1 且存在真实 mycar 工程与 DKG-1 模型",
+)
 
 
 def test_real_model_predict_latency_and_config_cache(caplog, monkeypatch):

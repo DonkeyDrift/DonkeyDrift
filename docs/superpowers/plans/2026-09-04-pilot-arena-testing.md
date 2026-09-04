@@ -568,8 +568,17 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     let body: unknown;
-    if (pathname.endsWith('/tub/load') || pathname.endsWith('/tub/records')) {
+    if (pathname.endsWith('/tub/load')) {
       body = tubResponse;
+    } else if (pathname.endsWith('/tub/records')) {
+      // 真实契约（routers/tub.py:137-152）：{records, total, offset, limit}，
+      // 与 /tub/load 的 {path, records, fields, total_physical_records} 不同
+      body = {
+        records: tubResponse.records,
+        total: tubResponse.total_physical_records,
+        offset: 0,
+        limit: 100,
+      };
     } else if (pathname.endsWith('/config/load')) {
       body = { config: { DRIVE_LOOP_HZ: 60 } };
     } else if (pathname.endsWith('/drift/state')) {
@@ -588,15 +597,15 @@ test.beforeEach(async ({ page }) => {
         config: {},
       };
     } else if (pathname.endsWith('/arena/model-types')) {
-      body = { model_types: ['tflite_linear', 'linear'] };
+      body = { model_types: ['tflite_linear', 'linear'], default: 'linear' };
     } else if (pathname.endsWith('/arena/models')) {
       // 返回 2 个模型：PilotArenaPage 的 auto-load 只在 models.length === 1 时触发
       // （PilotArenaPage.tsx:638-645），双模型让它跳过自动加载，
       // 『加载并预测』点击成为真实因果步骤。
       body = {
         models: [
-          { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' },
-          { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite' },
+          { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite', format: 'tflite', size: 12345, modified: '2026-09-04T00:00:00', compatible: true },
+          { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite', format: 'tflite', size: 12345, modified: '2026-09-04T00:00:00', compatible: true },
         ],
       };
     } else if (pathname.endsWith('/arena/pilots/load')) {
@@ -719,6 +728,8 @@ Run: `cd web_ui/backend && pip install pupil-apriltags`
 - 成功 → `python -m pytest tests/test_apriltag_generator.py tests/test_drift_vision.py::TestDetectorDownscale -q`，预期全绿；再跑全量记录新数字。
 - 源码编译失败（Python 3.11 无预编译 wheel）→ 保持现状：这 2 例在 Windows 开发机（已装该库）上覆盖，不阻塞。
 - **纪律**：仅装本机环境，不改 `pyproject.toml`/依赖清单（该依赖是 dev-machine 层面的既有约定）。
+
+执行期结果：pip 直接命中 cp311 manylinux 预编译 wheel（1.0.4.post11）安装成功（无需源码编译，优于计划假设）；定向复跑 6 passed，全量 **351 passed + 1 skipped**（仅剩 opt-in 集成测试）；`ARENA_INTEGRATION=1` 实测真实 DKG-1 热缓存单帧 predict **4.23ms（≈236FPS 当量）**。
 
 - [ ] **Step 2: 手工验收清单（用户 Windows 机器，真实 DKG-1）**
 
