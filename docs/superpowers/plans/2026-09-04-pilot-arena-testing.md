@@ -506,7 +506,16 @@ git commit -m "test(arena): PilotArenaPage 摘要面板组件测试（两侧指�
 - Create: `web_ui/frontend/playwright.config.ts`
 - Create: `web_ui/frontend/e2e/pilot-arena.spec.ts`
 
-E2E 覆盖真实浏览器中的完整 UI 流：SidePanel 加载 Tub → 选模型 → 加载并预测 → 生成曲线 → 摘要面板可见。后端用 `page.route('**/api/**')` 全量 stub（真实 i18n，配置 `locale: 'zh-CN'` 锁定中文文案）。已核实：`loadTub` = `POST /tub/load`；PilotArenaPage 由 FlowPage 无条件渲染，FlowPage 挂在兜底路由 `path="*"`（`App.tsx:89`）；SidePanel 挂载于 `App.tsx:79`。
+E2E 覆盖真实浏览器中的完整 UI 流：加载配置 → SidePanel 加载 Tub → 选模型 → 加载并预测 → 生成曲线 → 摘要面板可见。后端用 `page.route('**/api/**')` 全量 stub（真实 i18n，配置 `locale: 'zh-CN'` 锁定中文文案）。
+
+执行期修正（均已落库）：
+- **config 前置**：`加载 Tub` 按钮 `disabled={!config}`（TubLoader.tsx:92），须先 mock `/config/load` 并走「配置路径输入框 → 加载配置」流程。
+- **`/drift/state` mock**：DriftCard 以 10Hz 轮询，空对象会使 `state.events.length`（DriftCard.tsx:442）抛 TypeError → ErrorBoundary 全页崩溃「出错了。」。
+- **`/arena/models` 返回 2 个模型**：页面 auto-load 仅在 `models.length === 1` 时触发（PilotArenaPage.tsx:638-645），双模型跳过 auto-load，使「加载并预测」点击成为真实因果步骤。
+- **未命中端点 404 响亮失败**：fallback 返回 404 + `unmocked endpoint`，契约漂移不再被静默吞掉。
+- **vitest 隔离**：`vite.config.ts` test 块需 `exclude: [...configDefaults.exclude, 'e2e/**']`（覆盖默认值会导致收集 node_modules），见 Step 5。
+
+已核实：`loadTub` = `POST /tub/load`；PilotArenaPage 由 FlowPage 无条件渲染，FlowPage 挂在兜底路由 `path="*"`（`App.tsx:89`）；SidePanel 挂载于 `App.tsx:79`。
 
 风险与回退：`npx playwright install chromium` 需下载 ~170MB；若网络/系统库不可用导致启动失败，**标记本任务 blocked**，回退依赖 Task 3 的实测时延 + Task 6 手工清单，不阻塞整体交付。
 
@@ -544,7 +553,7 @@ import { test, expect } from '@playwright/test';
 const tubResponse = {
   path: '/tmp/tub',
   records: [
-    { _index: 0, 'cam/image_array': '0_cam_image_array_.jpg', 'user/angle': 0.1, 'user/throttle': 0.2 },
+    { _index: 0, _timestamp_ms: 0, 'cam/image_array': '0_cam_image_array_.jpg', 'user/angle': 0.1, 'user/throttle': 0.2 },
   ],
   fields: ['cam/image_array', 'user/angle', 'user/throttle'],
   total_physical_records: 1,
@@ -558,13 +567,38 @@ const summary = {
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
-    let body: unknown = {};
+    let body: unknown;
     if (pathname.endsWith('/tub/load') || pathname.endsWith('/tub/records')) {
       body = tubResponse;
+    } else if (pathname.endsWith('/config/load')) {
+      body = { config: { DRIVE_LOOP_HZ: 60 } };
+    } else if (pathname.endsWith('/drift/state')) {
+      // Drive 区的 DriftCard 以 10Hz 轮询此端点并在 state.events 上取 .length
+      // （DriftCard.tsx:442）；空对象会令整个 App 崩进 ErrorBoundary，必须给合法空闲态。
+      body = {
+        state: 'idle',
+        calibration_ready: false,
+        camera_running: false,
+        beta_deg: null,
+        pose: null,
+        telemetry_count: 0,
+        camera_fps: 0,
+        frames_written: 0,
+        events: [],
+        config: {},
+      };
     } else if (pathname.endsWith('/arena/model-types')) {
       body = { model_types: ['tflite_linear', 'linear'] };
     } else if (pathname.endsWith('/arena/models')) {
-      body = { models: [{ path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' }] };
+      // 返回 2 个模型：PilotArenaPage 的 auto-load 只在 models.length === 1 时触发
+      // （PilotArenaPage.tsx:638-645），双模型让它跳过自动加载，
+      // 『加载并预测』点击成为真实因果步骤。
+      body = {
+        models: [
+          { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' },
+          { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite' },
+        ],
+      };
     } else if (pathname.endsWith('/arena/pilots/load')) {
       body = {
         pilot: {
@@ -589,6 +623,10 @@ test.beforeEach(async ({ page }) => {
         ],
         summary,
       };
+    } else {
+      // 未 mock 的端点响亮失败：静默空对象会掩盖组件对真实响应结构的假设
+      await route.fulfill({ status: 404, json: { detail: `unmocked endpoint: ${pathname}` } });
+      return;
     }
     await route.fulfill({ json: body });
   });
@@ -596,7 +634,18 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('加载 Tub → 加载模型 → 生成曲线 → 展示模型贴合摘要', async ({ page }) => {
-  // SidePanel 的 TubLoader：真实中文 aria-label
+  // ConfigLoader：TubLoader 的『加载 Tub』按钮在 config 未加载时禁用
+  // （TubLoader.tsx:92 disabled={!config}），真实 UI 流程必须先加载配置。
+  await page.getByRole('textbox', { name: '配置路径输入框' }).fill('/tmp/car');
+  await page.getByRole('button', { name: '加载配置' }).click();
+
+  // setConfig 会收起侧栏抽屉（useStore.ts:190 activeDrawer: null），
+  // 且配置加载后会自动连带加载 <car>/data Tub；等 PA 当前数据卡出现
+  // 『Tub: /tmp/tub』即代表 config + auto-tub 均已完成、抽屉已关闭。
+  await expect(page.getByText('Tub: /tmp/tub').first()).toBeVisible();
+
+  // 重新打开抽屉，操作 SidePanel 的 TubLoader（真实中文 aria-label）
+  await page.getByRole('button', { name: '加载器' }).click();
   await page.getByRole('textbox', { name: 'Tub 路径输入框' }).fill('/tmp/tub');
   await page.getByRole('button', { name: '加载 Tub' }).click();
 
@@ -627,16 +676,35 @@ test('加载 Tub → 加载模型 → 生成曲线 → 展示模型贴合摘要'
 Run: `cd web_ui/frontend && npx playwright test`
 Expected: `1 passed`（首次可能提示缺系统库：`Host system is missing dependencies` → 需 `npx playwright install-deps chromium`（要 sudo）→ 无 sudo 则按回退方案处理）
 
-- [ ] **Step 5: 确认不干扰现有检查**
+- [ ] **Step 5: vitest 隔离 + gitignore Playwright 产物（执行期新增，独立提交）**
 
-Run: `cd web_ui/frontend && npm run check`
-Expected: 无错误（`tsc -b` 会把 e2e/playwright.config 纳入 tsconfig 范围时按报错处理；若 tsconfig 未包含 e2e/，可忽略此步差异）
+不隔离时 `npx vitest run` 会把 `e2e/pilot-arena.spec.ts` 误收集为 vitest 用例（它 import `@playwright/test`）而失败。`web_ui/frontend/vite.config.ts` 的 test 块追加（**注意**：显式 `exclude` 会整体覆盖 vitest 默认排除——node_modules 等——必须合并 `configDefaults`）：
 
-- [ ] **Step 6: Commit**
+```ts
+import { configDefaults } from 'vitest/config'
+// test 块内：
+    // 注意：显式 exclude 会整体覆盖 vitest 默认排除（node_modules 等），必须合并
+    exclude: [...configDefaults.exclude, 'e2e/**'],
+```
+
+根目录 `.gitignore` 增补：
+
+```
+# Playwright 运行产物
+web_ui/frontend/test-results/
+web_ui/frontend/playwright-report/
+```
+
+Run: `cd web_ui/frontend && npx vitest run`
+Expected: `160 passed`，不收集 e2e/；`npm run check` 无新增错误（e2e/ 不在 tsconfig type-check 范围）
+
+- [ ] **Step 6: Commit（实际为两个提交）**
 
 ```bash
 git add web_ui/frontend/playwright.config.ts web_ui/frontend/e2e/pilot-arena.spec.ts
 git commit -m "test(arena): Playwright E2E——Tub→模型→曲线→摘要面板全流程（route-mocked）"
+git add web_ui/frontend/vite.config.ts .gitignore
+git commit -m "test(web-ui): vitest 排除 e2e/ 目录并 gitignore Playwright 产物"
 ```
 
 ---
@@ -672,7 +740,7 @@ Run: `cd web_ui/backend && pip install pupil-apriltags`
 ## 执行顺序与依赖
 
 - 顺序：1 → 2 → 3 → 4 → 5 → 6（无跨任务依赖，任何单任务完成即可独立合并）。
-- 验证矩阵：每个任务都有"运行命令 + 预期输出"，提交前全量回归一次后端（`cd web_ui/backend && python -m pytest tests/ -q`）与前端（`npx vitest run -q && npm run check && npm run lint`）。
+- 验证矩阵：每个任务都有"运行命令 + 预期输出"，提交前全量回归一次后端（`cd web_ui/backend && python -m pytest tests/ -q`）与前端（`npx vitest run && npm run check`；`npm run lint` 仅要求本工作文件零新增——repo 有 2 个预存 error：`TubEditor.tsx:1538`、`SimCollectCard.test.tsx:28`，与本工作无关）。
 
 ## 自审记录
 
