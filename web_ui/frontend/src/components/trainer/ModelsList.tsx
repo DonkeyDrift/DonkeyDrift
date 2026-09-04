@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { listModels, deleteModel, downloadModelUrl, loadModelToCar, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useTranslation } from '@/i18n';
 
@@ -34,12 +34,10 @@ export const ModelsList: React.FC = () => {
   const [activePreview, setActivePreview] = useState<{
     path: string;
     name: string;
-    rect: DOMRect;
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelItem | null>(null);
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -64,44 +62,26 @@ export const ModelsList: React.FC = () => {
     }
   }, [trainingJob?.status, refresh]);
 
-  const showPreview = (model: ModelItem, rect: DOMRect) => {
-    if (previewTimerRef.current) {
-      clearTimeout(previewTimerRef.current);
-    }
-    if (model.previewPath) {
-      if (previewLoading && activePreview?.path !== model.previewPath) {
-        return;
-      }
-      setActivePreview({ path: model.previewPath, name: model.name, rect });
-      setPreviewLoading(true);
-    }
+  const openPreview = (model: ModelItem) => {
+    if (!model.previewPath) return;
+    setActivePreview({ path: model.previewPath, name: model.name });
+    setPreviewLoading(true);
   };
 
-  const hidePreview = (delay = 200) => {
-    if (previewTimerRef.current) {
-      clearTimeout(previewTimerRef.current);
-    }
-    previewTimerRef.current = setTimeout(() => {
-      setActivePreview(null);
-      setPreviewLoading(false);
-    }, delay);
-  };
+  const closePreview = useCallback(() => {
+    setActivePreview(null);
+    setPreviewLoading(false);
+  }, []);
 
-  const togglePreview = (model: ModelItem, rect: DOMRect) => {
-    if (activePreview?.path === model.previewPath) {
-      setActivePreview(null);
-      setPreviewLoading(false);
-    } else if (model.previewPath) {
-      if (previewLoading) {
-        return;
-      }
-      if (previewTimerRef.current) {
-        clearTimeout(previewTimerRef.current);
-      }
-      setActivePreview({ path: model.previewPath, name: model.name, rect });
-      setPreviewLoading(true);
-    }
-  };
+  // Close the loss chart modal with Esc
+  useEffect(() => {
+    if (!activePreview) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closePreview();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activePreview, closePreview]);
 
   const handleDelete = useCallback(async (model: ModelItem) => {
     setDeleting(model.path);
@@ -113,35 +93,6 @@ export const ModelsList: React.FC = () => {
       setDeleting(null);
     }
   }, [refresh]);
-
-  // Compute fixed-position popover coordinates
-  const getPopoverStyle = (): React.CSSProperties => {
-    if (!activePreview) return { display: 'none' };
-    const rect = activePreview.rect;
-    const padding = 12;
-    const popoverWidth = 320;
-    const popoverHeight = 260;
-
-    let left = rect.left + rect.width / 2 - popoverWidth / 2;
-    let top = rect.top - popoverHeight - padding;
-
-    // Keep inside viewport
-    if (left < 8) left = 8;
-    if (left + popoverWidth > window.innerWidth - 8) {
-      left = window.innerWidth - popoverWidth - 8;
-    }
-    if (top < 8) {
-      top = rect.bottom + padding;
-    }
-
-    return {
-      position: 'fixed',
-      left,
-      top,
-      width: popoverWidth,
-      zIndex: 9999,
-    };
-  };
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3 relative">
@@ -168,10 +119,7 @@ export const ModelsList: React.FC = () => {
         {models.map((m) => (
           <div
             key={m.name}
-            className="bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50 cursor-default"
-            onMouseEnter={(e) => m.previewPath && showPreview(m, e.currentTarget.getBoundingClientRect())}
-            onMouseLeave={() => hidePreview()}
-            onClick={(e) => m.previewPath && togglePreview(m, e.currentTarget.getBoundingClientRect())}
+            className="bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50"
           >
             {/* Row 1: model name + loss badge */}
             <div className="flex items-center justify-between gap-2">
@@ -180,11 +128,17 @@ export const ModelsList: React.FC = () => {
                 <span className="text-sm text-zinc-300 truncate" title={m.name}>{m.name}</span>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {typeof m.finalLoss === 'number' && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded mr-1">
+                {m.previewPath && (
+                  <button
+                    type="button"
+                    onClick={() => openPreview(m)}
+                    title={t('trainer.viewLossChart')}
+                    aria-label={t('trainer.viewLossChart')}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-400/10 hover:bg-emerald-400/20 px-2 py-0.5 rounded mr-1 transition-colors"
+                  >
                     <TrendingDown className="w-3 h-3" />
-                    {m.finalLoss.toFixed(4)}
-                  </span>
+                    {typeof m.finalLoss === 'number' ? m.finalLoss.toFixed(4) : t('trainer.loss')}
+                  </button>
                 )}
                 <a
                   href={downloadModelUrl(m.path)}
@@ -199,8 +153,8 @@ export const ModelsList: React.FC = () => {
                   onClick={async (e) => {
                     e.stopPropagation();
                     try {
-                      await loadModelToCar(m.path, configPath);
-                      alert(t('trainer.loadToCarSent'));
+                      const res = await loadModelToCar(m.path, configPath);
+                      alert(res?.message || t('trainer.loadToCarSent'));
                     } catch (error) {
                       alert(t('trainer.loadFailed', { message: getApiErrorMessage(error) }));
                     }
@@ -248,33 +202,47 @@ export const ModelsList: React.FC = () => {
         ))}
       </div>
 
-      {/* Fixed-position preview popover */}
+      {/* Loss chart modal */}
       {activePreview && (
         <div
-          className="bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl p-2"
-          style={getPopoverStyle()}
-          onMouseEnter={() => {
-            if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-          }}
-          onMouseLeave={() => hidePreview()}
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={closePreview}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('trainer.lossChartAlt')}
         >
-          <div className="text-xs text-zinc-400 mb-1 text-center truncate" title={activePreview.name}>
-            {activePreview.name}
-          </div>
-          {previewLoading && (
-            <div className="w-full h-32 flex items-center justify-center text-zinc-500 text-sm">
-              {t('trainer.loading')}
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 w-[26rem] max-w-[92vw] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-xs text-zinc-400 truncate" title={activePreview.name}>
+                {activePreview.name}
+              </span>
+              <button
+                type="button"
+                onClick={closePreview}
+                title={t('trainer.close')}
+                className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          )}
-          <img
-            src={`${API_URL}/trainer/models/preview?path=${encodeURIComponent(activePreview.path)}`}
-            alt={t('trainer.lossChartAlt')}
-            className={`w-full h-auto rounded ${previewLoading ? 'hidden' : ''}`}
-            style={{ maxHeight: 220 }}
-            draggable={false}
-            onLoad={() => setPreviewLoading(false)}
-            onError={() => setPreviewLoading(false)}
-          />
+            {previewLoading && (
+              <div className="w-full h-32 flex items-center justify-center text-zinc-500 text-sm">
+                {t('trainer.loading')}
+              </div>
+            )}
+            <img
+              src={`${API_URL}/trainer/models/preview?path=${encodeURIComponent(activePreview.path)}`}
+              alt={t('trainer.lossChartAlt')}
+              className={`w-full h-auto rounded ${previewLoading ? 'hidden' : ''}`}
+              style={{ maxHeight: '70vh' }}
+              draggable={false}
+              onLoad={() => setPreviewLoading(false)}
+              onError={() => setPreviewLoading(false)}
+            />
+          </div>
         </div>
       )}
 

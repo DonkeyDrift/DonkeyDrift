@@ -2,7 +2,7 @@
 My-PC environment probe.
 
 Diagnoses whether the user's own computer (the machine running the browser,
-reached via an SSH callback from this backend) is ready for "This Computer"
+reached via an SSH callback from this backend) is ready for "Lan Host"
 (mypc) training.
 
 This is intentionally a lightweight, side-effect-free pre-flight check: it
@@ -357,7 +357,7 @@ def _detect_platform(ssh, result: ProbeResult):
         status="warn",
         message="检测到 Windows 目标机（SSH 默认 shell 为 cmd）。",
         hint=(
-            "推荐在 WSL 内安装 donkeycar 并通过 WSL 的 SSH 使用本机训练，"
+            "推荐在 WSL 内安装 donkeycar 并通过 WSL 的 SSH 使用局域网主机训练，"
             "以兼容训练管线的 POSIX 命令（tar / cd / bash）。"
         ),
     ))
@@ -520,7 +520,7 @@ def _summarize(result: ProbeResult):
     failures = [c for c in result.checks if c.status == "fail"]
     if not failures:
         result.ok = True
-        result.suggestions.append("环境就绪，可以开始本机训练。")
+        result.suggestions.append("环境就绪，可以开始局域网主机训练。")
         return
 
     result.ok = False

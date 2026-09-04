@@ -9,6 +9,7 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.recording': '录制中 {duration}',
     'drive.recordedCount': '已录制条数: {count}',
     'drive.parkLocked': 'Park 锁定',
+    'drive.simOfflineReconnecting': '模拟器离线，重连中…',
     'drive.virtualJoystick': '虚拟摇杆',
     'drive.virtualJoystickSubtitle': '驾驶控制：摇杆、键盘、手柄与陀螺仪输入',
     'drive.collapseJoystick': '折叠虚拟摇杆',
@@ -33,6 +34,9 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // ModelSelector
     'drive.noModel': '无模型',
     'drive.currentModel': '当前模型',
+    'drive.modelRestarting': '正在重启车端加载模型…',
+    'drive.modelRestartTimeout': '车端重启超时未上线，请检查车端进程',
+    'drive.modelLoadFailed': '模型加载失败',
     // ProgrammableButtons
     'drive.hintW1': '增加油门上限',
     'drive.hintW2': '降低油门上限',
@@ -116,6 +120,7 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.recording': 'Recording {duration}',
     'drive.recordedCount': 'Recorded: {count}',
     'drive.parkLocked': 'Park locked',
+    'drive.simOfflineReconnecting': 'Simulator offline, reconnecting…',
     'drive.virtualJoystick': 'Virtual Joystick',
     'drive.virtualJoystickSubtitle': 'Drive controls: joystick, keyboard, gamepad, and gyroscope input',
     'drive.collapseJoystick': 'Collapse virtual joystick',
@@ -140,6 +145,9 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // ModelSelector
     'drive.noModel': 'No model',
     'drive.currentModel': 'Current model',
+    'drive.modelRestarting': 'Restarting car to load model…',
+    'drive.modelRestartTimeout': 'Car restart timed out; check the car process',
+    'drive.modelLoadFailed': 'Failed to load model',
     // ProgrammableButtons
     'drive.hintW1': 'Increase throttle limit',
     'drive.hintW2': 'Decrease throttle limit',

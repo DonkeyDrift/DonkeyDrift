@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-04 (176)
+
+- fix(trainer): Trainer 三档训练目标命名第四次定稿——「本机」→「局域网主机」（Lan Host）、「车载电脑」→「本机」（Local Host），视角约定写死为「以车上操作视角为准」（docs/issues/006）
+  - 背景：「本机 / 车载电脑」命名与实际含义颠倒——「本机」档实际要求填写 SSH 连接信息、指远程开发电脑，「车载电脑」档实际指运行 Web UI 的本机/车端。该命名此前已翻转三次（2026-08-18 (19)、(28) 等），本次为第四次并定稿：**以车上操作视角为准，「本机」= 手边这台跑 Web UI 的车端电脑**，约定已写入用户手册与 `trainer.ts` 文件头注释，避免再次翻转。
+  - 改动范围（只动显示字符串，内部枚举 `mypc` / `local` / `online`、i18n key 名、API 路径 `/train/mypc` 等一律不变）：
+    - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc` 本机→局域网主机、`tabLocal` 车载电脑→本机、`startMyPcTraining`→「在局域网主机上训练」、`startLocalTraining`→「在本机上训练」、`myPcTraining`→「局域网主机训练」、`myPcFirstUseHint` / `myPcProbeReady` / `myPcTrainingSubtitle` 等派生文案同步；en 同步 `Lan Host / Local Host / Train on Lan Host / Train on Local Host / Lan Host Training`。文件头新增命名约定注释（key 名与显示语方向相反属可接受的内部债务）。
+    - `web_ui/backend/mypc_probe.py`：直出文案「环境就绪，可以开始本机训练。」→「…局域网主机训练。」、Windows WSL 建议文案同步；`routers/trainer.py` mypc 探测路由 docstring 术语同步。
+    - 测试同步：`ModeTabs.test.tsx` 三档渲染与点击断言、`test_trainer_mypc.py` 探测建议断言。
+    - 文档：`docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」章节改为「局域网主机训练（Lan Host）」并在章首写入视角约定。
+  - 注：语义独立的「本机」（`network_utils.py`、`routers/connector.py`、`drive.ts`、手册快速开始章节的「本机场景」）未动。Firmware 无改动，无需 OTA。
+
 ## 2026-09-04 (175)
 
 - perf(frontend, backend) + feat(web-ui): Pilot Arena 推理链路优化（config 按 mtime 缓存 + 评估节流 250ms→逐帧）+ 批量预测新增「模型贴合摘要」
@@ -7,8 +18,12 @@
   - **后端**：`arena.load_car_config` 按 (config.py, myconfig.py) mtime 缓存（线程锁 + 变化即重载；`arena.py` 模块级 `_car_config_cache`）。效果：单帧预测（缓存 config+磁盘读图+解码+TFLite）**79ms → 1.72ms（≈580FPS）**；config INFO 日志仅在首次/配置保存后出现一次。全部调用点（predict/preview/批量/load）共享缓存，无行为回归（mtime 变化即失效）。
   - **前端**：推理评估节流下限 250→**16ms**（与图像加载一致，评估节奏=逐帧播放 `DRIVE_LOOP_HZ`，60Hz 时每播放帧一次推理）；新增 config 旋钮 `ARENA_PREDICTION_INTERVAL_MS`（可调大限流）；`ARENA_INFERENCE_CONCURRENCY` 上限 2→4。inference 徽标预期从 ~4 提升到接近播放帧率（受 DRIVE_LOOP_HZ=60 约束 ≈60）。
   - **新功能（规划 §3.3「模型性能指标摘要」）**：`POST /api/arena/pilots/{id}/predictions` 响应新增 `summary`——角度/油门两序列各自的 MAE/RMSE/平均偏差(bias=pilot−user)/max|err|/count，非有限值所在帧自动剔除；纯函数 `compute_prediction_metrics`（arena.py）+ 前端 Tub Plot 图下「贴合摘要」展示区（i18n zh/en 各 10 词条）。批量 200 帧含摘要 330ms（≈606FPS 当量）；摘要计算 ~0.27µs/点（20 万点 53ms），开销可忽略；全缓存命中重跑 1.1ms。
-  - **测试**：`test_arena.py` +4 例（config 缓存语义 1 + 摘要 3，TDD 先红后绿）。后端 `pytest tests/` **340 passed + 2 skipped**；其中 `test_drift_vision.py::TestAdaptiveDetection` 4 例失败为**本机(Linux)既有环境问题**——`drift_vision.py:30` try 导入 `pupil_apriltags` 不在此环境（无 `_PupilDetector` 属性），与本次改动无关（未触碰 drift 链路文件）；Windows 基线 345 全绿无此问题。前端 vitest **158 passed**（27 文件）+ `tsc -b` + `npm run build` 全绿。
-  - 注：仅 DD 改动（arena 后端/前端 6 文件 + 测试 + 本日志），未 git 提交（工作区待用户 review）；浏览器端 FPS 徽标提升与真机多 viewer 并发负载待明早人工确认。
+  - **测试（本会话补齐分层体系，全部已提交分支 `test/pilot-arena-testing`）**：
+    - 后端：修复 `test_drift_vision.py::TestAdaptiveDetection` 4 例（测试基建 bug——替身注入改 `raising=False` 并置位可用性守卫，本不需真库；根因是缺库时模块无 `_PupilDetector` 属性）；本机补装 `pupil-apriltags` 1.0.4 后全量 **351 passed + 1 skipped**（仅剩 opt-in 集成测试需 `ARENA_INTEGRATION=1`）。
+    - 回归护栏：`test_arena.py` +4 例（config mtime 缓存语义 1 + 摘要 3，TDD 先红后绿）+ 预测逐帧不重编译 config 的 API 级护栏（计数断言 `load_config` 全程仅 1 次）。
+    - 集成测试（opt-in）：`tests/integration/test_arena_real_model.py`——真实 DKG-1.tflite + mycar，`ARENA_INTEGRATION=1` 实测热缓存单帧 predict **4.23ms（≈236FPS 当量）**，预算 <30ms；caplog 断言 predict 期间 0 条 config 日志。
+    - 前端：vitest **160 passed**（28 文件，新增 `PilotArenaPage.test.tsx` 摘要面板组件测试 2 例）；Playwright E2E **1 passed**（route-mocked 全流程：加载配置→加载 Tub→选模型→加载并预测→生成曲线→摘要面板；`playwright.config.ts` + `e2e/pilot-arena.spec.ts`，vitest 已 exclude `e2e/**`、`.gitignore` 增补 Playwright 产物）。
+  - 注：仅 DD 改动，已全部提交于分支 `test/pilot-arena-testing`（自 345f6f7d 起，含用户 Nowhere_X 并行提交 5698f176，未推送）；浏览器端 FPS 徽标提升与真机多 viewer 并发负载仍待用户 Windows 机器人工确认。
 
 ## 2026-09-03 (174)
 

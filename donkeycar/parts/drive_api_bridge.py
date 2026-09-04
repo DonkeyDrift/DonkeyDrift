@@ -68,6 +68,32 @@ except Exception:  # pragma: no cover - 运行环境缺少 aiortc 时只影响 W
 logger = logging.getLogger(__name__)
 
 
+def _json_safe(value):
+    """把 payload 值递归转换为 json.dumps 可接受的原生类型。
+
+    json.dumps 的 C 编码器只认精确的内建类型：np.float32 虽是 float
+    的子类，仍会被拒绝（TypeError: Object of type float32 is not JSON
+    serializable）——模拟器/推理输出的 pilot/angle 等正是 float32，
+    曾导致遥测发送异常从 run_threaded 穿透、整车进程崩溃退出。
+    """
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        # np.float32/np.float64 是 float 子类：显式转内建 float
+        return float(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    item = getattr(value, "item", None)  # numpy 标量/零维数组的标量接口
+    if callable(item):
+        try:
+            return _json_safe(item())
+        except Exception:
+            pass
+    return value
+
+
 def parse_webrtc_ice_servers(value):
     """解析前后端共用的 ICE servers JSON 配置。"""
     if not value:
@@ -446,7 +472,9 @@ class DriveApiBridge:
     def _send_json(self, payload: dict):
         if not self.loop or not self.ws:
             return
-        asyncio.run_coroutine_threadsafe(self.ws.send(json.dumps(payload)), self.loop)
+        asyncio.run_coroutine_threadsafe(
+            self.ws.send(json.dumps(_json_safe(payload))), self.loop
+        )
 
     def _handle_webrtc_signal(self, msg: dict):
         """处理 WebRTC 信令。"""
@@ -726,7 +754,12 @@ class DriveApiBridge:
             # 仅含 type/t，无任何遥测字段，不发
             return
         self.last_telemetry = now
-        self._send_json(payload)
+        try:
+            self._send_json(payload)
+        except Exception as e:
+            # 遥测发送失败只记录不抛出：与帧发送同款防护，避免序列化等
+            # 异常从 run_threaded 穿透导致 vehicle 停机（issue #003）
+            logger.debug(f"发送遥测失败: {e}")
 
     def update(self):
         return None
@@ -739,7 +772,7 @@ class DriveApiBridge:
                     rc_steering=None, rc_throttle=None,
                     rc_mode=None, rc_park=None,
                     drift_yaw_error=None, drift_steering_correction=None,
-                    drift_throttle_mode=None):
+                    drift_throttle_mode=None, sim_connected=None):
         if img_arr is not None and self.video_transport == "webrtc":
             self.frame_buffer.update(img_arr)
             now = time.time()
@@ -783,7 +816,8 @@ class DriveApiBridge:
                                    rc_mode=rc_mode, rc_park=rc_park,
                                    drift_yaw_error=drift_yaw_error,
                                    drift_steering_correction=drift_steering_correction,
-                                   drift_throttle_mode=drift_throttle_mode)
+                                   drift_throttle_mode=drift_throttle_mode,
+                                   sim_connected=sim_connected)
 
         if mode is not None:
             self.mode = mode
@@ -813,7 +847,7 @@ class DriveApiBridge:
             rc_steering=None, rc_throttle=None,
             rc_mode=None, rc_park=None,
             drift_yaw_error=None, drift_steering_correction=None,
-            drift_throttle_mode=None):
+            drift_throttle_mode=None, sim_connected=None):
         return self.run_threaded(img_arr, num_records, mode, recording,
                                  imu_gz=imu_gz, imu_gx=imu_gx, imu_gy=imu_gy,
                                  imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
@@ -823,7 +857,8 @@ class DriveApiBridge:
                                  rc_mode=rc_mode, rc_park=rc_park,
                                  drift_yaw_error=drift_yaw_error,
                                  drift_steering_correction=drift_steering_correction,
-                                 drift_throttle_mode=drift_throttle_mode)
+                                 drift_throttle_mode=drift_throttle_mode,
+                                 sim_connected=sim_connected)
 
     def shutdown(self):
         self.running = False
