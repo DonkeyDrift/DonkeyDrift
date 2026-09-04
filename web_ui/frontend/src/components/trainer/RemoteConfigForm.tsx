@@ -10,7 +10,7 @@ interface RemoteConfigFormProps {
   hintKey?: string;
   icon?: React.ReactNode;
   subtitleKey?: string;
-  /** Compact mode: only show host / user / password / keyPath (used for "This Computer"). */
+  /** Compact mode: only show host / user / password / keyPath (used for "Lan Host"). */
   compact?: boolean;
   host: string;
   onHostChange: (v: string) => void;

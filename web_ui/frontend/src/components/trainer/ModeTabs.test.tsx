@@ -26,8 +26,8 @@ describe('ModeTabs', () => {
     renderTabs('local', vi.fn());
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveTextContent('本机');
-    expect(buttons[1]).toHaveTextContent('车载电脑');
+    expect(buttons[0]).toHaveTextContent('局域网主机');
+    expect(buttons[1]).toHaveTextContent('本机');
     expect(buttons[2]).toHaveTextContent('云端');
   });
 
@@ -44,7 +44,7 @@ describe('ModeTabs', () => {
     renderTabs('local', onChange);
     fireEvent.click(screen.getByText('云端'));
     expect(onChange).toHaveBeenCalledWith('online');
-    fireEvent.click(screen.getByText('本机'));
+    fireEvent.click(screen.getByText('局域网主机'));
     expect(onChange).toHaveBeenCalledWith('mypc');
   });
 });

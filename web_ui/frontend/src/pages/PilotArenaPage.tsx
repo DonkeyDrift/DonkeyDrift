@@ -171,7 +171,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const [preTransformations, setPreTransformations] = useState<string[]>([]);
   const [postTransformations, setPostTransformations] = useState<string[]>([]);
   const [plotPilotId, setPlotPilotId] = useState('');
-  const [plotLimit, setPlotLimit] = useState(200);
+  const [plotStart, setPlotStart] = useState(0);
+  const [plotEnd, setPlotEnd] = useState(0);
   const [plotPoints, setPlotPoints] = useState<ArenaPredictionPoint[]>([]);
   const [plotError, setPlotError] = useState<string | null>(null);
   const [plotLoading, setPlotLoading] = useState(false);
@@ -271,6 +272,13 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   useEffect(() => {
     setDisplayRecordIndex((index) => Math.max(0, Math.min(maxIndex, index)));
   }, [maxIndex]);
+
+  // 首尾帧切片区间：records 首次加载时默认取全量范围，之后记录数变化只做 clamp。
+  useEffect(() => {
+    if (!hasRecords) return;
+    setPlotEnd((end) => (end === 0 ? maxIndex : Math.min(end, maxIndex)));
+    setPlotStart((start) => Math.min(start, maxIndex));
+  }, [hasRecords, maxIndex]);
 
   useEffect(() => {
     listArenaModelTypes()
@@ -748,6 +756,14 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
 
   const loadedPilots = viewers.filter((viewer) => viewer.pilot);
 
+  const handlePlotStartChange = (value: number) => {
+    setPlotStart(Math.max(0, Math.min(value, plotEnd)));
+  };
+
+  const handlePlotEndChange = (value: number) => {
+    setPlotEnd(Math.min(maxIndex, Math.max(value, plotStart)));
+  };
+
   const loadPlot = async () => {
     if (!plotPilotId) {
       setPlotError(t('arena.selectLoadedPilotError'));
@@ -758,8 +774,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     try {
       const data = await getArenaPredictions(plotPilotId, {
         config_path: configPath,
-        start: 0,
-        limit: plotLimit,
+        start: plotStart,
+        limit: Math.max(1, plotEnd - plotStart + 1),
       });
       setPlotPoints(data.points);
     } catch (error) {
@@ -1087,28 +1103,49 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           />
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_140px_auto]">
-            <select
-              value={plotPilotId}
-              onChange={(event) => setPlotPilotId(event.target.value)}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
-            >
-              <option value="">{t('arena.selectLoadedPilot')}</option>
-              {loadedPilots.map((viewer) => viewer.pilot && (
-                <option key={viewer.pilot.id} value={viewer.pilot.id}>{viewer.pilot.name}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min="1"
-              max={Math.max(1, records.length)}
-              value={plotLimit}
-              onChange={(event) => setPlotLimit(Number(event.target.value))}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
-            />
-            <Button onClick={loadPlot} disabled={plotLoading || !plotPilotId || !hasRecords}>
-              {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
-            </Button>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+              <select
+                value={plotPilotId}
+                onChange={(event) => setPlotPilotId(event.target.value)}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+              >
+                <option value="">{t('arena.selectLoadedPilot')}</option>
+                {loadedPilots.map((viewer) => viewer.pilot && (
+                  <option key={viewer.pilot.id} value={viewer.pilot.id}>{viewer.pilot.name}</option>
+                ))}
+              </select>
+              <Button onClick={loadPlot} disabled={plotLoading || !plotPilotId || !hasRecords}>
+                {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
+              </Button>
+            </div>
+            <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+                <span data-testid="plot-start-label">{t('arena.plotStartFrame', { value: plotStart })}</span>
+                <span data-testid="plot-end-label">{t('arena.plotEndFrame', { value: plotEnd })}</span>
+                <span>{t('arena.plotRangeHint', { max: maxIndex })}</span>
+              </div>
+              <div className="space-y-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={maxIndex}
+                  value={plotStart}
+                  onChange={(event) => handlePlotStartChange(Number(event.target.value))}
+                  data-testid="plot-start-slider"
+                  className="w-full"
+                />
+                <input
+                  type="range"
+                  min={0}
+                  max={maxIndex}
+                  value={plotEnd}
+                  onChange={(event) => handlePlotEndChange(Number(event.target.value))}
+                  data-testid="plot-end-slider"
+                  className="w-full"
+                />
+              </div>
+            </div>
           </div>
           {plotError && (
             <div className="rounded-md border border-red-800 bg-red-950/60 px-3 py-2 text-sm text-red-200">

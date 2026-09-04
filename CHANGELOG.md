@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-04 (177)
+## 2026-09-04 (181)
 
 - perf(tub-library): 录制视频库回放第四轮冲刺 60 FPS——同页 TubEditor 播放期零 chart 重绘 + 零 re-render（播放竖线改 DOM 叠加层），预取图片 decode 预解码
   - 背景：回放帧率三轮优化（(121) 播放绕过 React 直画 canvas、(125) 去热路径多余 setState、(162) 墙钟调度 + 后端 /tub/image 线程池/缓存）后 FPS 角标仍远低于 60。本轮定位剩余瓶颈不在播放器本身，而在同页（TM 页）的 TubEditor 吃满主线程：① 组件级 `useStore(state => state.currentIndex)` 订阅播放位置（播放期 ~10Hz 写入）→ 整棵 1800 行编辑器树高频 re-render，且 `options`/`plugins` 引用随 render 变化连带 react-chartjs-2 chart.update；② 索引变化经 `markPlaybackActive` 续期让图表渲染循环 60Hz 持续 `chart.update('none')` 全量重绘（~1000+ 点 × 2 数据集全 layout）——合计每秒约 70 次图表重绘 + 10 次大组件 reconciliation，TubLibrary 播放 rAF 被饿死掉帧。
@@ -9,8 +9,46 @@
     - 删除组件级 `currentIndex` 订阅与 `markPlaybackActive`/`playbackActivityUntilRef` 机制：滑块位置同步并入 subscribe 回调（非受控滑块经 ref 直写 DOM）；视口自动跟随抽为 `followPlayheadViewport()`（subscribe 回调与缩放/滚动/数据 effect 两路驱动，语义不变），仅真正翻页才 `setScrollProgress` 触发 re-render；滑块 `defaultValue` 改读 `useStore.getState().currentIndex`。
     - 图表渲染循环仅保留选区跑马灯/悬停/数据变化路径，点击图表查看帧的悬停重绘不受影响。
   - `web_ui/frontend/src/components/TubLibrary.tsx`：预取 `img.onload` 后追加 `img.decode()` 预解码——帧到期时 drawImage 不再触发主线程同步 JPEG 解码；播放调度/预取窗口/FPS 角标语义不动。
-  - 测试同步：新建 `web_ui/frontend/src/components/TubEditor.test.tsx` 3 例（索引变化零 chart.update + 叠加层位置/显隐 + 滑块直写同步；点击图表仍恰好一次重绘）；`TubLibrary.test.tsx` 新增 1 例（预取 onload 后调用 decode 预解码）。前端 `vitest run` 31 文件 163 项、`tsc -b`、`npm run build` 全绿；后端无改动。
+  - 测试同步：新建 `web_ui/frontend/src/components/TubEditor.playhead.test.tsx` 3 例（与 (178) 拖拽框选的 `TubEditor.test.tsx` 并存，其假 chart 补 `getPixelForValue` 适配叠加层）（索引变化零 chart.update + 叠加层位置/显隐 + 滑块直写同步；点击图表仍恰好一次重绘）；`TubLibrary.test.tsx` 新增 1 例（预取 onload 后调用 decode 预解码）。前端 `vitest run` 31 文件 163 项、`tsc -b`、`npm run build` 全绿；后端无改动。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (180)
+
+- fix(datastore, web_ui): 修复 tub sessions 列表只读打开 0 字节 rollover catalog 触发 `cannot mmap an empty file` 崩溃（main 侧登记的"待后续跟进"项，参考 main ac863a99 的修法移植到 Tony，非 cherry-pick）
+  - 根因：录制在 catalog roll-over 后、第一条记录落盘前就停止（或崩溃）时，会留下已登记进 manifest 的 0 字节 `catalog_N.catalog`；`donkeycar/parts/datastore_v2.py` 的 `Seekable.__init__` 在只读模式下无条件 `mmap.mmap(fileno, length=0)`，空文件抛 `ValueError: cannot mmap an empty file`。`GET /api/tub/sessions`（`web_ui/backend/routers/tub.py` 以 `Tub(path, read_only=True)` 打开并迭代全部 catalog）因此整个接口 500。
+  - 修复：`datastore_v2.py` `Seekable.__init__` 改为仅当 `os.path.getsize(file) > 0` 才做 mmap——Tony 侧全部只读打开路径（`Manifest.__init__` 打开最后 catalog、`ManifestIterator` 逐个打开 catalog、底层 `Catalog`/`CatalogMetadata`）都经 `Seekable` 这一个 mmap 点，一处修复即覆盖所有打开路径；空文件回退为普通文本文件读取，`_read_contents`/`readline` 对 0 行内容处理不变。
+  - 测试同步（等价移植 main ac863a99 的两个回归测试，Tony 侧接口相同原样适用）：`web_ui/backend/tests/test_tub_sessions.py` 新增 `test_list_sessions_tolerates_empty_rollover_catalog`（写 3 条记录后 `_add_catalog()` 留下空 catalog 再关 tub，sessions 列表须 200 且返回 1 个会话、3 条记录）；`donkeycar/tests/test_datastore_v2.py` 新增 `test_read_only_manifest_with_empty_catalog`（read_only 打开含空 catalog 的 manifest 并迭代不崩溃、读出 3 条记录）。
+  - 实测：修复前两个新测试均复现 `ValueError: cannot mmap an empty file`（sessions 端点 500）；修复后 `web_ui/backend` 全套 `pytest tests/ -q` 221 passed、`donkeycar/tests/test_datastore_v2.py + test_tub_v2.py` 9 passed、根 `tests/test_tub_image_cache.py + test_tub_manager_auto_refresh.py` 6 passed。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (179)
+
+- fix(launcher): dsh/kimi-code-web 启动端点缺省 cwd 去硬编码本机路径——动态推导 `str(Path.home() / "projects")`，内嵌前端不再发送该路径（ZCode 入口 PR #359 收尾时登记的「待单修」项）
+  - 根因：`donkeycar/launcher/server.py` 的 `_handle_launch_kimi_code_web` 与 `_handle_launch_dsh` 缺省 cwd 硬编码真实本机用户名绝对路径（公开仓库，入库即泄露）；MENU_HTML 内嵌 JS 的 `launchKimiCodeWeb()`/`launchDshWeb()` 请求体与 `currentProjectPath()` 兜底同样硬编码该串。
+  - `donkeycar/launcher/server.py`：两处端点缺省 cwd 字面量 → `cwd = str(Path.home() / "projects")`（与同文件 `_handle_launch_zcode` 的 `Path.home()` 写法同款），两处 docstring/注释同步改写；cwd 不存在仍直接报错、绝不回退的语义不变，issue #168 空体 POST 缺省路径不变。
+  - 同文件 MENU_HTML 内嵌 JS：两个启动请求体改为 `JSON.stringify({})`（不传 cwd，由后端动态缺省生效）；`currentProjectPath()` 兜底改为 `'.'`（终端会话当前目录，即 `terminal.py _default_cwd()` 的 `~/projects` 语义，不硬编码本机路径）。
+  - 明确未改：`_find_mycar_project` 的 `known_path` mycar 已知搜索路径（属另一问题）与 `donkeycar/launcher/donkeydrifter-launcher.service`（部署模板）。
+  - 测试同步：`tests/test_launcher_kimi_web.py`、`tests/test_launcher_dsh_web.py` 缺省 cwd 断言由硬编码串改为 `str(Path.home() / "projects")` 动态比对；新建 `tests/test_launcher_no_hardcoded_paths.py`——逐行扫描 `server.py`，除保留的 `projects/mycar` 已知路径外任何行出现 `/home/<用户>/` 形态本机路径即失败（防回归栅栏，含 MENU_HTML 内嵌 JS；栅栏自身用正则描述、不写入真实用户名）。
+  - 实测：`pytest` launcher 相关 10 个测试文件 174 passed（151 + 23，含新增栅栏 1 例）；`python -m py_compile donkeycar/launcher/server.py` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (178)
+
+- fix(workflow): 一次收尾修复 DonkeyDrift 侧剩余 6 个 open issue（#360–#365），全部合入 Tony、逐一关闭
+  - **#360 ModelsList loss 浮窗→modal**：`web_ui/frontend/src/components/trainer/ModelsList.tsx` 把 loss 曲线从 hover 浮窗改为点击「查看损失曲线」徽章按钮触发的 modal（`data-testid="loss-chart-overlay"`）；`i18n/messages/trainer.ts` 加 `viewLossChart`/`close` 中英。新建 `ModelsList.test.tsx`（6 例全过）。
+  - **#361 TubEditor 拖拽框选**：`web_ui/frontend/src/components/TubEditor.tsx` 新增 `DRAG_SELECTION_THRESHOLD_PX=5`、`MIN_SELECTION_DRAFT_WIDTH_PX=2`、`dragStartRef`/`isDragSelectingRef`；mousedown 记按下点、mousemove 超阈值进入拖拽、mouseup/mouseleave 提交、Escape 清理、草稿绘制最小宽；容器加 `data-testid="tub-editor-chart"`。新建 `TubEditor.test.tsx`（4 例全过，需 `useStore.setState({ totalRecords })` 否则 `setSelectionRange` 按默认 0 clamp）。
+  - **#362 选模型后带模型重启**：`web_ui/backend/routers/drive.py` 拆出 `_get_config_dir/_get_params_path/_get_selected_model_path`，新增 `_validate_model_path`（拒绝绝对路径/`..`/非 `models/` 前缀），重写 `POST /load_model` 为「校验→写 `selected_model.json`→车端在线则 best-effort 下发 `restart_with_model`→返回 `restart_required`」；`donkeycar/parts/drive_api_bridge.py` 加 `restart_with_model` 分支（只 log 不自动重启）；`donkeycar/templates/complete.py` 加 `_selected_model_from_disk()`（读 `$DONKEY_CAR_DIR/selected_model.json` 或 `~/mycar/selected_model.json`），`drive()` 无 `--model` 时回退读取；前端 `DrivePage.tsx` 新增 `modelRestartRequired` 状态，选模型后显示「模型已记录，需重启车端后生效」琥珀徽章（`drive.modelRestartRequired` 中英）。后端 `test_drive.py` 新增 5 例（校验×3 + 持久化 + 在线通知），全套 30 例过。
+  - **#363 DonkeySim 断连重连**：`donkeycar/templates/simulator.py` ctr outputs 从 5 键补齐为与 `DriveApiBridge.run_threaded` 7 元组一一对应（`web/buttons`、`reconnect_simulator`、`car/mode_cmd`），键名 `reconnect_simulator` 与 cam 输入对齐；新增 `SimConnectionState` part 发布 `sim/connected`，bridge inputs 加 `sim/connected`。`donkeycar/parts/dgym.py` 加看门狗（`_watchdog_sec` 默认 5s、`_last_frame_ts`，`run_threaded` 检测超时无新帧强制 `_close_env`）。`donkeycar/parts/drive_api_bridge.py` 遥测透传 `sim_connected` 字段；`useDriveWebsocket.ts` Telemetry 加 `sim_connected`，`DrivePage.tsx` 显示「模拟器离线，重连中…」琥珀徽章（`drive.simOfflineReconnecting` 中英）。重写 `test_template_simulator_recovery.py` 为 AST 级解析 inputs/outputs 配对（4 例），`test_dgym_reconnect.py` 加看门狗 2 例、`test_drive_api_bridge_telemetry.py` 加遥测 2 例。配套环境补丁（非本仓库）：editable 安装的 `gym_donkeycar` 1.3.1 中 `envs/donkey_sim.py` `observe()` 加超时（默认 2s，可经 GYM_CONF `observe_timeout_sec` 配置）、`core/client.py` 优雅关闭/`ConnectionAbortedError` 均置 `aborted=True`，使根因 A/B 真正闭环。
+  - **#364 Pilot Arena 首尾帧双滑块**：`web_ui/frontend/src/pages/PilotArenaPage.tsx` 用 `plotStart`/`plotEnd` 状态替换单一 `plotLimit`，`loadPlot` 改发 `{ start: plotStart, limit: plotEnd - plotStart + 1 }`；UI 把单个帧数输入框换成两个原生 `input[type=range]` 双滑块 + 起止帧数值显示（`data-testid="plot-start-slider"/"plot-end-slider"`，`plotStart <= plotEnd` 约束），并加「按记录位置（0..max）选择切片」提示。`i18n/messages/arena.ts` 加 `plotStartFrame`/`plotEndFrame`/`plotRangeHint` 中英。后端 `PredictionsRequest` 已有 start/limit，未改契约。
+  - **#365 Trainer 命名颠倒**：`i18n/messages/trainer.ts` `tabMyPc` 本机→局域网主机（This Computer→Lan Host）、`tabLocal` 车载电脑→本机（Car Computer→Local Host），并同步 `myPcTraining`/`myPcProbeReady`/`myPcTrainingSubtitle` 派生文案 + 文件头加 key↔显示语映射约定注释；`web_ui/backend/mypc_probe.py` 两处直出文案「本机训练」→「局域网主机训练」；同步 `ModeTabs.test.tsx`、`MyPcProbePanel.test.tsx`、`test_trainer_mypc.py`、`RemoteConfigForm.tsx` 注释与 `docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」→「局域网主机训练（Lan Host）」。
+  - 实测：前端 `vitest run` 35 文件 186 passed、`tsc -b --noEmit` 无错、`vite build` 通过；后端 `pytest tests/test_drive.py tests/test_arena.py tests/test_trainer_mypc.py` 51 passed、`pytest donkeycar/tests/test_template_simulator_recovery.py test_dgym_reconnect.py test_drive_api_bridge_telemetry.py` 20 passed。仅 DD 改动（gym_donkeycar 环境补丁为依赖侧），Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (177)
+
+- fix(frontend): 修复老用户点击侧边「加载器」抽屉无反应——缺陷链同时吞掉配置自动加载，全新浏览器不触发故长期未察觉
+  - 根因（在本机 8000 在线实例用 Playwright + 系统 Chrome 真实点击复现）：`useStore.setError` 无条件联动写 `activeDrawer`（`setError(null)` 也会强制关抽屉）；`ConfigLoader` 挂载 effect 在 `!config && configPath` 时先调 `setError(null)`；抽屉内容只在抽屉打开时渲染。老用户（persist 了 `configPath`、全局 `config` 为 null）每次点击「加载器」→ 抽屉开 → `ConfigLoader` 挂载 → `setError(null)` → 抽屉瞬间自闭 → 组件卸载并取消 500ms 自动加载定时器 → `config` 永远加载不上，无限循环。
+  - `web_ui/frontend/src/store/useStore.ts`：`setError(null)` 只清 `error`、不再触碰 `activeDrawer`（非空错误的原有联动——含 not found/Failed 打开抽屉、其它错误关抽屉——逐字保留）；新增非持久化字段 `configAutoLoadTried`。
+  - `web_ui/frontend/src/components/ConfigLoader.tsx`：自动加载 effect 增加「每页面生命周期一次」守卫（标记在定时器真正触发时落地，500ms 内关抽屉导致卸载不算已尝试）——失败后重开抽屉不再自动重试，避免再次被错误联动关上。
+  - 测试：新建 `web_ui/frontend/src/store/useStore.test.ts`（4 例：setError(null) 不动 drawers 抽屉 / connectors 抽屉同样不动 / not found 与 Failed 打开 drawers / 其它非空错误保持既有关抽屉行为）；`ConfigLoader.test.tsx` 新增 2 回归例（remembered configPath 下挂载不关抽屉且自动加载正常发出 / 自动加载失败后重开抽屉不再自动重试且抽屉保持打开），beforeEach 重置 `activeDrawer` 与 `configAutoLoadTried`。
+  - 实测：`vitest run` 33 文件 176 passed、`tsc -b` 无错、`npm run build` 通过；修复前 Playwright 老用户场景（seed localStorage `donkeycar-storage`）在线实例复现抽屉宽度恒 0，全新/手机视口场景正常。仅 DD 前端改动，Firmware 无改动、无需 OTA。
 
 ## 2026-09-04 (176)
 

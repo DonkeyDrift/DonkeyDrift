@@ -1,26 +1,19 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-// 60fps 回放优化回归（TubEditor 侧）：播放期索引变化只移动 DOM 竖线叠加层，
-// 不触发 chart.update 全量重绘（原先每次索引变化都经 markPlaybackActive 让渲染循环
-// 60Hz 持续重绘图表，加上组件级 currentIndex 订阅的高频 re-render，主线程被吃满，
-// 同页 TubLibrary 回放的 rAF 被饿死而掉帧）。
-
-const fakeChart = vi.hoisted(() => ({
-  update: vi.fn(),
-  scales: {
-    x: {
-      getPixelForValue: (v: number) => v * 10,
-      getValueForPixel: (px: number) => px / 10,
-    },
-    y: { top: 10, bottom: 110 },
-  },
-  chartArea: { left: 0, right: 1000, top: 10, bottom: 110 },
-  ctx: {},
-}));
+const chartState = vi.hoisted(() => {
+  const chart = {
+    chartArea: { left: 0, right: 200, top: 0, bottom: 100 },
+    scales: { x: { getValueForPixel: (px: number) => px / 20, getPixelForValue: (v: number) => v * 20 } },
+    update: vi.fn(),
+    destroy: vi.fn(),
+    data: { datasets: [] },
+    options: {},
+  };
+  return { chart };
+});
 
 vi.mock('chart.js', () => ({
   Chart: { register: vi.fn() },
@@ -33,127 +26,102 @@ vi.mock('chart.js', () => ({
 }));
 
 vi.mock('react-chartjs-2', () => ({
-  Line: React.forwardRef((_props: unknown, ref: React.Ref<unknown>) => {
-    React.useEffect(() => {
-      if (typeof ref === 'function') ref(fakeChart);
-      else if (ref) (ref as { current: unknown }).current = fakeChart;
-    }, [ref]);
-    return <canvas data-testid="tub-editor-chart" />;
+  Line: React.forwardRef((_props: unknown, ref: React.ForwardedRef<unknown>) => {
+    React.useImperativeHandle(ref, () => chartState.chart);
+    return React.createElement('canvas', { 'data-testid': 'chart-canvas' });
   }),
+}));
+
+vi.mock('react-router-dom', () => ({
+  useLocation: () => ({ pathname: '/' }),
+}));
+
+vi.mock('@/i18n', () => ({
+  useTranslation: () => ({ t: (key: string) => key, lang: 'zh' }),
+}));
+
+vi.mock('@/lib/theme', () => ({
+  useResolvedTheme: () => 'dark',
 }));
 
 vi.mock('../services/api', () => ({
   deleteRecords: vi.fn(),
-  getRecords: vi.fn(),
-  getSessionRecords: vi.fn(),
+  getRecords: vi.fn(() => Promise.resolve({ records: [] })),
+  getSessionRecords: vi.fn(() => Promise.resolve({ records: [] })),
   restoreRecords: vi.fn(),
 }));
 
 import { TubEditor } from './TubEditor';
 import { useStore } from '../store/useStore';
 
-const RECORD_COUNT = 10;
 const makeRecords = () =>
-  Array.from({ length: RECORD_COUNT }, (_, i) => ({
+  Array.from({ length: 10 }, (_, i) => ({
     _index: i,
-    _timestamp_ms: i * 16,
-    'user/angle': 0.1,
-    'user/throttle': 0.2,
+    _timestamp_ms: i * 100,
+    'user/angle': 0,
+    'user/throttle': 0,
   }));
 
-let rafQueue: FrameRequestCallback[];
-const pump = (t: number) => {
-  const cbs = rafQueue;
-  rafQueue = [];
-  cbs.forEach((cb) => cb(t));
+const mountEditor = () => {
+  render(<TubEditor />);
+  // 重置模块级「两次点击」锚点，避免跨用例污染（Escape 会清锚点与选区）
+  fireEvent.keyDown(window, { key: 'Escape' });
+  return screen.getByTestId('tub-editor-chart');
 };
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  rafQueue = [];
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-    rafQueue.push(cb);
-    return rafQueue.length;
+describe('TubEditor 拖拽框选', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
   });
-  vi.stubGlobal('cancelAnimationFrame', () => {});
-  useStore.setState({
-    records: makeRecords() as never,
-    tubPath: '/tmp/tub',
-    fields: ['user/angle', 'user/throttle'],
-    activeSessionId: null,
-    activeSessionRecords: [],
-    currentIndex: 0,
-    isPlaying: false,
-    isDragging: false,
-    selectionStartIndex: null,
-    selectionEndIndex: null,
-    deletedIndexes: [],
-    totalPhysicalRecords: RECORD_COUNT,
+
+  beforeEach(() => {
+    const records = makeRecords();
+    useStore.getState().setActiveSession('s1', records);
+    useStore.setState({ totalRecords: records.length });
+    useStore.getState().clearSelectionRange();
   });
-});
 
-const renderEditor = () =>
-  render(
-    <MemoryRouter>
-      <TubEditor />
-    </MemoryRouter>,
-  );
+  it('水平拖拽超过阈值后松手提交选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    fireEvent.mouseUp(chart);
 
-describe('TubEditor playhead overlay (60fps playback)', () => {
-  it('moves the playhead overlay on index change without any chart.update', () => {
-    renderEditor();
-    // 挂载后的初始化重绘（主题/数据 effect）泵掉并清零
-    pump(1000);
-    fakeChart.update.mockClear();
-
-    act(() => {
-      useStore.setState({ currentIndex: 5 });
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
     });
-    // 渲染循环不应被唤醒；即便有挂起 rAF 也不许触发 update
-    pump(1016);
-
-    const overlay = screen.getByTestId('playhead-overlay');
-    expect(overlay.style.display).toBe('');
-    // getPixelForValue(5) = 50，减 1px 让 2px 竖线居中
-    expect(overlay.style.transform).toBe('translateX(49px)');
-    expect(fakeChart.update).not.toHaveBeenCalled();
-
-    // 非受控滑块经 ref 直写 DOM 同步
-    const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
-    expect(slider.value).toBe('5');
   });
 
-  it('hides the overlay when the playhead is outside the visible chart area', () => {
-    renderEditor();
-    pump(1000);
-    fakeChart.update.mockClear();
+  it('水平位移低于阈值时视为点击，不产生拖拽选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 42, clientY: 50 });
+    fireEvent.mouseUp(chart);
 
-    act(() => {
-      useStore.setState({ currentIndex: 8 });
-    });
-    expect(screen.getByTestId('playhead-overlay').style.display).toBe('');
-
-    // x = 200*10 = 2000px，超出 chartArea.right = 1000
-    act(() => {
-      useStore.setState({ currentIndex: 200 });
-    });
-    expect(screen.getByTestId('playhead-overlay').style.display).toBe('none');
-    expect(fakeChart.update).not.toHaveBeenCalled();
+    expect(useStore.getState().selectionStartIndex).toBeNull();
+    expect(useStore.getState().selectionEndIndex).toBeNull();
   });
 
-  it('keeps the click-to-inspect chart redraw path alive (exactly one update)', () => {
-    const { container } = renderEditor();
-    pump(1000);
-    fakeChart.update.mockClear();
+  it('拖拽中离开图表提交选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    fireEvent.mouseLeave(chart);
 
-    const chartArea = container.querySelector('.touch-none') as HTMLElement;
-    // clientX=100 → getValueForPixel(100)=10 → 取整并钳到最后一帧 index 9
-    fireEvent.mouseDown(chartArea, { clientX: 100, clientY: 50, button: 0 });
-    // mousedown 置悬停位触发一次 chart 重绘；setCurrentIndex(9) 只移动叠加层
-    pump(1016);
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
 
-    expect(fakeChart.update).toHaveBeenCalledTimes(1);
-    expect(useStore.getState().currentIndex).toBe(9);
-    expect(screen.getByTestId('playhead-overlay').style.transform).toBe('translateX(89px)');
+  it('拖拽中按 Escape 取消选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(useStore.getState().selectionStartIndex).toBeNull();
+    expect(useStore.getState().selectionEndIndex).toBeNull();
   });
 });

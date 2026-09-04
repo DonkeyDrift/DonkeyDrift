@@ -71,6 +71,17 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     V.add(cam, inputs=inputs, outputs=['cam/image_array'], threaded=threaded)
 
+    class SimConnectionState:
+        """把 DonkeyGymEnv 的 TCP 连接状态发布为 sim/connected，供遥测透传到前端。"""
+
+        def __init__(self, cam):
+            self._cam = cam
+
+        def run(self):
+            return bool(getattr(self._cam, "connected", False))
+
+    V.add(SimConnectionState(cam), outputs=['sim/connected'])
+
     server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
     if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
         #modify max_throttle closer to 1.0 to have more power
@@ -117,8 +128,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
         )
         V.add(ctr,
-              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording'],
-              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'reconnect_simulator_requested'],
+              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording', 'sim/connected'],
+              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
               threaded=True)
 
     #this throttle filter will allow one tap back for esc reverse

@@ -241,3 +241,52 @@ def test_run_threaded_reconnect_closes_env(mock_gym_make):
 
     gym_env.shutdown()
     thread.join(timeout=2.0)
+
+
+def test_run_threaded_watchdog_forces_reconnect_when_stale(mock_gym_make):
+    """验证主循环侧看门狗：超过 watchdog_sec 无新帧时强制关闭 env。"""
+    fake_env = FakeEnv(fail_after=9999)
+    mock_gym_make.return_value = fake_env
+
+    gym_env = DonkeyGymEnv(
+        sim_path="remote",
+        host="127.0.0.1",
+        port=9091,
+        env_name="donkey-generated-track-v0",
+        conf={"img_h": 120, "img_w": 160, "watchdog_sec": 5.0},
+    )
+
+    assert gym_env.env is not None
+    assert gym_env.connected is True
+
+    # 伪造「长时间无新帧」：把最后成功 step 时间戳拨到很久以前
+    gym_env._last_frame_ts = time.time() - 10.0
+    gym_env.run_threaded(0.0, 0.0, 0.0)
+
+    assert gym_env.env is None, "看门狗超时后应强制关闭 env"
+    assert gym_env.connected is False, "看门狗超时后 connected 应为 False"
+    assert fake_env.closed, "看门狗超时后应调用 env.close()"
+
+
+def test_update_refreshes_last_frame_ts_on_successful_step(mock_gym_make):
+    """验证 update() 每次成功 step 后都会刷新看门狗时间戳。"""
+    fake_env = FakeEnv(fail_after=9999)
+    mock_gym_make.return_value = fake_env
+
+    gym_env = DonkeyGymEnv(
+        sim_path="remote",
+        host="127.0.0.1",
+        port=9091,
+        env_name="donkey-generated-track-v0",
+        conf={"img_h": 120, "img_w": 160, "watchdog_sec": 5.0},
+    )
+
+    before = gym_env._last_frame_ts
+    thread = threading.Thread(target=gym_env.update, daemon=True)
+    thread.start()
+    time.sleep(0.4)
+
+    assert gym_env._last_frame_ts > before, "成功 step 后看门狗时间戳应被刷新"
+
+    gym_env.shutdown()
+    thread.join(timeout=2.0)
