@@ -17,6 +17,62 @@
   - `.gitignore` 新增：`.env`/`.env.*`、`*.pem`/`*.key`/`id_rsa*`/`known_hosts`/`*.ovpn`/`*.p12`/`*.keystore`/`credentials*`/`secrets*`、`*.log`、`.claude/`/`.agents/`。经 `git ls-files` 确认无被这些规则命中的其余已跟踪文件。
   - 无代码行为变化、无需本机部署（纯仓库卫生）；Tony 分支同等改动见 2026-09-03 (165)；Firmware 侧配套清理见 `Firmware/MUS4_FW/CHANGELOG.md` v1.8.66。
 
+## 2026-09-03 (169)
+
+- fix(trainer): mypc 环境发现稳健性重写 + 训练静默期进度/时长 UX 改进（2026-08-23 开发于 dd-deploy，本次由主会话移植收尾合入）
+  - 背景一：mypc 训练启动时 `mypc_probe._discover_env_pythons` 第一层 `source ~/.zshrc; conda env list` 在用户 Mac 上 >15s 超时，`_run_remote` 抛异常导致整个发现链中断 → `_ensure_remote_python` 放弃纠正 → createcar 用错路径 `/Users/lyt/miniconda3/.../donkey`（Mac 实际装在 `/opt/miniconda3`）→ "创建远程目录失败"。
+  - 修复一（`web_ui/backend/mypc_probe.py`，发现链整体重写）：`_run_remote` 改为永不抛异常（try/except 包住，超时/断连返回 `(1,"","")`，单条慢/挂命令不再中断整条发现链）；`_discover_env_pythons` 四层只读发现——① 三种 shell（zsh rc / bash login / zsh login）问 `conda env list`（短超时 6s，找不到快速落下层）；② 无 rc 暴露 conda 时 glob 定位 conda 二进制（`$HOME` 与 `/opt`、`/usr/local` 系统根，`sh` 包裹规避 zsh nomatch）再问它；③ glob 知名 conda 根（含系统级 `/opt`）；④ `command -v donkey` 反查同 bin 目录解释器。`find_donkeycar_python` 供训练主流程复用。
+  - 修复一（`web_ui/backend/web_online_trainer.py`）：`connect_ssh` 成功后自动 `_ensure_remote_python`——复用发现链找一个能 import donkeycar 的解释器并纠正内存配置（不写 conf），find 前 `_emit("正在定位远程 Python 环境（可能需数十秒）...")` 让用户在 ~2 分钟静默期看到进度；任何失败只记 warning 不阻断训练。
+  - 背景二：训练开始后进度一直 0%、时长偶尔卡住。SSE 诊断证实后端正常，但前端在静默期（find ~50s + createcar/上传/解压 + TF 初始化 ~30s + 第一 step）显示死 0% 条；头几步百分比极小（0.02%）`toFixed(1)` 显示 "0.0%"。
+  - 修复二（`web_ui/frontend/src/components/trainer/ProgressPanel.tsx`）：`status==='running' && totalSteps===0` 时显示 `animate-pulse` 的「正在初始化训练环境…」提示 + 8% 宽脉冲进度条，不再显示死 0% 条；`totalSteps>0 && globalPercent<0.1` 时进度条至少 2% 宽、百分比用 `toFixed(2)`；running 时起 1s 定时器（useReducer + setInterval）强制重渲染，时长平滑走秒。
+  - 测试：`ProgressPanel.test.tsx`（2 例：fake timers 验证 ticker 走秒；`totalSteps=0` 时显示初始化提示——移植时该文案从硬编码改为 i18n 键 `trainer.initializing`，断言同步为 en 文案）。`mypc_probe` 配套测试整体重写（`test_trainer_mypc_probe.py`，多层发现各层命中/回退/超时），移植时其 `_open_ssh` 替身补齐 Tony 侧新增的 `key_path` 参数。
+  - 移植说明：本次由主会话从 dd-deploy 移植收尾，剔除其中未记录在案的在制特性（known-hosts 自动填充、EnvSetupCard 一键环境配置、TubSelector、useMyPcProbe 探测门禁等）后适配最新 Tony 合入；mypc 开始/续训**不**带 dd-deploy 的「先自动环境检测」门禁，探测仍为手动点击。
+
+## 2026-09-03 (168)
+
+- feat(trainer): mypc 本机模式新增「高级选项」折叠框——收起环境检测与训练日志（2026-08-23 开发于 dd-deploy，本次由主会话移植收尾合入）
+  - 背景：本机训练页信息较多，把非首发的块收进一个默认收起的折叠框，让主流程（SSH 连接配置 + 训练状态/进度）更突出。
+  - 实现：新建 `web_ui/frontend/src/components/trainer/AdvancedOptions.tsx`——受控折叠容器（`icon/title/defaultOpen=false/externalOpen/children`），`useState` 控展开，标题行 `button`+`aria-expanded`+`aria-controls`，右侧 `ChevronDown`/`ChevronUp`，内容区用 HTML `hidden` 属性 + Tailwind `hidden` class 双重隐藏（视觉与 `SectionCardTitle` 一致）；`externalOpen` 从 false 变 true 时自动展开（训练开始时用户能立即看到日志流，不因折叠误以为卡死）。`TrainerPage.tsx` mypc 分支把 `MyPcProbePanel` 与 `LogPanel` 包进 `<AdvancedOptions>`（`externalOpen={job?.status === 'running'}`），原共享位置的 `LogPanel` 改为 `{mode !== 'mypc' && <LogPanel/>}`，local/online 模式不受影响。i18n `trainer.advancedOptions` 中文案改为「高级选项」（en 沿用「Advanced」）。
+  - 测试同步：新建 `AdvancedOptions.test.tsx`（2 例：默认收起 `aria-expanded=false` 且内容不可见、点击展开；`externalOpen` 上升沿自动展开）。dd-deploy 原 `TrainerPage.test.tsx` 强依赖被剔除的在制特性（store 化 mode、EnvSetupCard/TubSelector mock、探测门禁断言），未随附移植。
+  - 移植说明：同 (169)——剔除未记录在制特性（dd-deploy 原版还把「训练数据」TubSelector 块与 EnvSetupCard 一并收进折叠框）后适配最新 Tony 合入。
+
+## 2026-09-03 (167)
+
+- feat(trainer): mypc 本机训练断点续训（权重续训）+ 修复 Keras 3 下进度恒 0% 与时长卡顿（2026-08-23 开发于 dd-deploy，本次由主会话移植收尾合入）
+  - 背景一：用户 Mac（TF/Keras 3 新版）远程训练时进度条恒 0%、轮次/步数不动；且「训练状态」的时长会卡住再跳变。
+  - 根因一：进度解析正则 `^\s*(\d+)/(\d+)\s+\[` 只认 Keras 2 的 `[===>]` 进度条，Keras 3 输出 `37/437 ━━━━…`（Unicode 粗线）永不命中 → total_steps 恒 0；且这类行不命中旧进度条过滤、会刷进日志面板。
+  - 修复一：`web_ui/backend/web_online_trainer.py` `_parse_training_output_web` 与 `web_ui/backend/trainer_engine.py` `_parse_line` 的 step 正则改为 `[\[━]` 兼容两代 Keras；新增 `_is_progress_bar_line()`（`ETA:`/`━`/`[=]`），远程训练 stdout/stderr 两处过滤改调它；前端走秒定时器见 (169)。
+  - 背景二：mypc 训练被停止后只能从头重练。远程训练时 `ModelCheckpoint(save_best_only=True)` 已持续把最优权重写到远程 `models/<模型名>`（SavedModel 目录），可复用已上传数据做权重续训。
+  - 实现二（全部在 `web_ui/backend/`，不动 donkeycar 包）：
+    - 新增 `trainer_session.py`：`save_session`/`load_session`，session 存 `<working_dir>/<conf主名>.session.json`（remote_work_dir/model_name/tub/host/updated_at）；`run_remote_training` 开头即存（中途被停也有记录）。
+    - `web_online_trainer.py`：抽出 `_stream_remote_training(cmd)` 共用流式解析循环；新增 `run_resume(session)`——connect_ssh（含 python 路径自动纠正）→ 校验远程目录与 ./data → `ls -dt models/<模型名>*` 排除 .tflite/.png/_meta.json 取最新检查点 → 新唯一模型名 → SFTP 上传新脚本 `remote_resume_train.py` 到远程并执行 `--transfer <检查点>` → 下载新模型 → 更新 session 支持链式续训；异常一律转 RuntimeError（不 sys.exit），失败原因进状态卡片。
+    - `remote_resume_train.py`（新，上传远程执行为 `_dd_resume_train.py`）：import 远程车目录的 train.py 复现 GPU 显存/混合精度前导配置，调 `donkeydrifter.pipeline.training.train(cfg, …, transfer, …)`；远程 donkeydrifter 过旧时中文报错退出。
+    - `trainer_engine.py`：新增 `run_mypc_resume`——无 session 或 tub 已变化时投中文日志「没有可续训的历史训练（或训练数据已变化），改为全新训练」并回退 run_online；`run_online`/`run_mypc` 新增 `tub` 参数透传；SystemExit（非 Exception 子类）单独捕获，避免训练线程静默死掉任务被误标 completed；终态 status 消息携带 `error` 字段。
+    - `routers/trainer.py`：新增 `POST /train/mypc/resume`（body 复用 MyPcTrainRequest，新增可选 `tub` 字段）。
+    - 失败原因链：`web_online_trainer._log(success=False)` 记 `_last_error`，`run()` 把父类 SystemExit 转成带真实原因的 RuntimeError → engine 写进 status 消息 `error` 字段 → 前端 `useStore.TrainingJob.errorMessage`（`finishTrainingJob` 第二参数）→ `ProgressPanel` 失败时展示可复制的原因块（i18n `trainer.failureReason`）。
+  - 前端：`api.ts` 加 `resumeMyPcTrain`（startOnlineTrain/startMyPcTrain 同步支持 `tub` 参数）；`useTrainingJob.ts` 重构 `startOnline`/`startMyPc` 为由调用方传 `cfg`（避免闭包读旧 store 值）并新增 `resumeMyPc`；`TrainerPage.tsx` 在 mypc 模式且 job stopped 时主按钮显示「继续」（i18n `trainer.resumeTraining`）并走续训接口，其它模式 stopped 仍为全新开始。
+  - 停止杀远程（原 dd-deploy E2E 后补充修复）：点「停止」原先只断开监听，远程 `train.py` 变孤儿继续占算力（再点「继续」会双训练并发）。`web_online_trainer.py` 新增 `abort_remote()`——置中止标志 + 远程 `pkill` 训练进程 + 关闭 SSH（关闭 pty 让远程 sshd 发 SIGHUP，双保险），并在 `run_remote_training`/`run_resume` 执行训练命令前检查标志（覆盖打包/上传阶段被停的场景）；`trainer_engine.py` 训练线程启动后把 trainer 实例挂到 `job.trainer`，`stop_job` 对 mypc/online 模式调 `trainer.abort_remote()`。
+  - 续训语义说明：加载上次最优权重接着练（权重续训），epoch 计数从 1 重新开始，early stopping 照常；非 epoch 计数续跑。
+  - 测试同步：后端新增 `tests/test_trainer_mypc_resume.py` 14 项（session roundtrip、Keras 2/3 双格式解析×2、进度条行判定、FakeSSH 续训命中/无检查点/目录缺失、engine 回退、端点透传）；`test_trainer_mypc.py` 增补 `tub=None` 签名与 stop 调 abort_remote 用例。
+  - 移植说明：同 (169)——剔除未记录在制特性后适配最新 Tony 合入；前端续训不带 dd-deploy 的「先自动环境检测」门禁（探测门禁属未记录在制特性 useMyPcProbe，未随附），直接走续训接口；dd-deploy 原 `TrainerPage.test.tsx` 未随附（见 (168)）。
+  - 实测：后端 `pytest tests/` 178 passed、前端 `vitest run` 30 文件 157 passed、`tsc -b` 无错、`npm run build` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-03 (166)
+
+- feat(connector): Car Connector 三任务——局域网自动发现小车单测补齐、小车 Tub 数据自动同步到笔记本、笔记本一键安装训练依赖（2026-08-26 开发于 session-3task，本次收尾合入）
+  - 自动发现（补单测）：`donkeycar/tests/test_dc_discovery.py` 新增 13 用例、`web_ui/backend/tests/test_network_utils.py` 新增 16 用例。
+  - 自动同步：`web_ui/backend/remote_car_client.py`——`build_ssh_base` 加 `-o StrictHostKeyChecking=accept-new`（修新设备首连 host key 校验卡死）、`build_pull_tub_command` 加 `--update --stats`（增量同步+统计）、新增 `RsyncTransferStats`/`parse_rsync_stats()`（按 rsync 3.x 真实输出匹配，兼容老版措辞）；`web_ui/backend/connector_engine.py`——`ConnectorJob.transfer_stats`、`_run_rsync` 收集 stats 段、`has_active_pull_job()/try_begin_auto_sync()/end_auto_sync()` 防抖与 `run_auto_sync()` 入口；`web_ui/backend/routers/connector.py`——`ConnectorConfigPayload` 扩展 `auto_sync/auto_sync_tub/auto_sync_local_path/last_sync_at/last_sync_result`、`POST /status` 连接成功且开自动同步时自动入队、新增 `POST /auto_sync` 开关、`_record_last_sync()` 写回结果；前端新增 `web_ui/frontend/src/components/AutoSyncPanel.tsx`（开关 + 最近同步时间/结果，开启后 10s 轮询）挂载 `CarConnectorPage.tsx`。
+  - 一键安装：`web_ui/backend/mypc_installer.py`（新建，paramiko SSH 流式执行 `pip install --upgrade "donkeydrifter[pc]"`，get_pty 逐行、ANSI 清洗、1h 超时、stop_event）；`web_ui/backend/mypc_probe.py`——`_open_ssh` 支持可选 `key_path`、无密码时回退默认密钥/agent，缺包提示修正为 `pip install "donkeydrifter[pc]"`；`web_ui/backend/trainer_engine.py` mypc_install job 模式 + `run_mypc_install()`；`web_ui/backend/routers/trainer.py` 新增 `POST /api/trainer/mypc/install`、probe/install 透传 `key_path`；前端 `MyPcProbePanel.tsx` 一键安装按钮 + SSE 实时日志尾部、`RemoteConfigForm.tsx` 新增 SSH 私钥输入框、`useTrainingJob.ts`/`useStore.ts`/`api.ts` 透传 `key_path` 与 auto_sync 字段；i18n `connector.ts` +5 条、`trainer.ts` +8 条中英文。
+  - 测试同步：`test_connector.py` +9 用例（rsync 真实格式/防抖/自动触发/持久化）、`test_trainer_mypc.py`/`test_trainer_mypc_probe.py` mock 签名同步、新建 `test_trainer_mypc_installer.py`（13 用例）、`AutoSyncPanel.test.tsx`（4）、`MyPcProbePanel.test.tsx`（7）、`CarSettingsPanel.test.tsx` +2。实测：后端 `pytest tests/` 156 passed、`donkeycar/tests/test_dc_discovery.py` 13 passed、前端 `vitest run` 28 文件 153 passed、`tsc -b` 无错、`npm run build` 通过。端到端实测（2026-08-26 临时 8025 实例）：真机发现 2.6s 扫出真车、localhost 模拟车端验证自动同步增量 rsync 统计正确（重复触发 0 传输）、一键安装成功/失败两路径真实验证。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。`[pc]` 全家桶未在本机完整安装（/tmp tmpfs 与根分区容量限制），属环境限制非代码问题。
+
+## 2026-09-03 (165)
+
+- chore(security): 隐私防漏加固——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则（配合 Firmware 侧隐私泄露清理）
+  - 背景：两仓库安全审计（GitHub 均为公开）确认本仓库当前树与文件内容无实质泄露——无 .env/私钥/token 被跟踪，文件内容（含全历史）从未出现用户邮箱；仅提交元数据含私人邮箱（git 固有，无法经删文件去除）与历史 agent 文档（已于 2026-08-02 f1c88aad 移出版本控制）。本次补上 `.gitignore` 缺口，防止未来误提交。
+  - `.gitignore` 新增：`.env`/`.env.*`、`*.pem`/`*.key`/`id_rsa*`/`known_hosts`/`*.ovpn`/`*.p12`/`*.keystore`/`credentials*`/`secrets*`、`*.log`、`.claude/`/`.agents/`。经 `git ls-files` 确认当前无被这些规则命中的已跟踪文件。
+  - 无代码行为变化、无需本机部署（纯仓库卫生）；Firmware 侧配套清理见 `Firmware/MUS4_FW/CHANGELOG.md` v1.8.66（解除真实 Wi-Fi 凭据与本机 agent 目录的跟踪）。
+
 ## 2026-09-01 (173)
 
 - fix(drift): 俯拍系统全量夜间审计与加固——5 领域并行审计 40+ 发现，安全链路/线程安全/NaN 防线/WebRTC 协议/脚本可靠性全面修复，后端测试 257→345 全绿

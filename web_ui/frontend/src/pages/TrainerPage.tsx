@@ -8,6 +8,7 @@ import {
   listTrainerTubs,
   type TrainerTub,
 } from '../services/api';
+import { AdvancedOptions } from '../components/trainer/AdvancedOptions';
 import { ModeTabs } from '../components/trainer/ModeTabs';
 import { LocalConfigForm } from '../components/trainer/LocalConfigForm';
 import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
@@ -17,7 +18,7 @@ import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
 import { useTrainingJob } from '../hooks/useTrainingJob';
 import { useTranslation } from '@/i18n';
-import { Cpu } from 'lucide-react';
+import { Cpu, SlidersHorizontal } from 'lucide-react';
 import type { TrainerMode } from '../components/trainer/ModeTabs';
 
 const TRAINING_KEYS = [
@@ -35,7 +36,7 @@ const TRAINING_KEYS = [
 export const TrainerPage = React.memo(function TrainerPage() {
   const { t } = useTranslation();
   const [mode, setMode] = React.useState<TrainerMode>('local');
-  const { job, startLocal, startOnline, startMyPc, stopJob, isRunning } = useTrainingJob();
+  const { job, startLocal, startOnline, startMyPc, resumeMyPc, stopJob, isRunning } = useTrainingJob();
   const {
     configPath,
     trainerOnlineConfig, setTrainerOnlineConfig,
@@ -65,6 +66,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
           remoteDirBase: cfg.remote_dir_base,
           modelName: cfg.model_name,
           pythonPath: cfg.python_path,
+          keyPath: cfg.key_path ?? '',
         };
         setOnlineForm(next);
         setTrainerOnlineConfig(next);
@@ -81,6 +83,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
           remoteDirBase: cfg.remote_dir_base,
           modelName: cfg.model_name,
           pythonPath: cfg.python_path,
+          keyPath: cfg.key_path ?? '',
         };
         setMyPcForm(next);
         setTrainerMyPcConfig(next);
@@ -210,13 +213,19 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
   const handleOnlineStart = useCallback(() => {
     setTrainerOnlineConfig(onlineForm);
-    startOnline();
+    startOnline(onlineForm);
   }, [onlineForm, setTrainerOnlineConfig, startOnline]);
 
   const handleMyPcStart = useCallback(() => {
     setTrainerMyPcConfig(myPcForm);
-    startMyPc();
+    startMyPc(myPcForm);
   }, [myPcForm, setTrainerMyPcConfig, startMyPc]);
+
+  // 断点续训：镜像 handleMyPcStart，但走后端续训接口
+  const handleMyPcResume = useCallback(() => {
+    setTrainerMyPcConfig(myPcForm);
+    resumeMyPc(myPcForm);
+  }, [myPcForm, setTrainerMyPcConfig, resumeMyPc]);
 
   const handleAction = useCallback(() => {
     if (isRunning) {
@@ -224,11 +233,16 @@ export const TrainerPage = React.memo(function TrainerPage() {
     } else if (mode === 'local') {
       handleLocalStart();
     } else if (mode === 'mypc') {
-      handleMyPcStart();
+      // mypc 下已停止的任务「继续」走断点续训；其它模式维持全新开始
+      if (job?.status === 'stopped') {
+        handleMyPcResume();
+      } else {
+        handleMyPcStart();
+      }
     } else {
       handleOnlineStart();
     }
-  }, [isRunning, mode, stopJob, handleLocalStart, handleMyPcStart, handleOnlineStart]);
+  }, [isRunning, mode, job?.status, stopJob, handleLocalStart, handleMyPcStart, handleMyPcResume, handleOnlineStart]);
 
   return (
     <div className="space-y-6">
@@ -270,15 +284,25 @@ export const TrainerPage = React.memo(function TrainerPage() {
                 onModelNameChange={(v) => setMyPcForm((f) => ({ ...f, modelName: v }))}
                 pythonPath={myPcForm.pythonPath}
                 onPythonPathChange={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+                keyPath={myPcForm.keyPath}
+                onKeyPathChange={(v) => setMyPcForm((f) => ({ ...f, keyPath: v }))}
               />
-              <MyPcProbePanel
-                host={myPcForm.host}
-                user={myPcForm.user}
-                password={myPcForm.password}
-                remoteDirBase={myPcForm.remoteDirBase}
-                pythonPath={myPcForm.pythonPath}
-                onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
-              />
+              <AdvancedOptions
+                icon={<SlidersHorizontal className="w-5 h-5" />}
+                title={t('trainer.advancedOptions')}
+                externalOpen={job?.status === 'running'}
+              >
+                <MyPcProbePanel
+                  host={myPcForm.host}
+                  user={myPcForm.user}
+                  password={myPcForm.password}
+                  remoteDirBase={myPcForm.remoteDirBase}
+                  pythonPath={myPcForm.pythonPath}
+                  keyPath={myPcForm.keyPath}
+                  onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
+                />
+                <LogPanel job={job} />
+              </AdvancedOptions>
             </>
           ) : (
             <RemoteConfigForm
@@ -295,10 +319,12 @@ export const TrainerPage = React.memo(function TrainerPage() {
               onModelNameChange={(v) => setOnlineForm((f) => ({ ...f, modelName: v }))}
               pythonPath={onlineForm.pythonPath}
               onPythonPathChange={(v) => setOnlineForm((f) => ({ ...f, pythonPath: v }))}
+              keyPath={onlineForm.keyPath}
+              onKeyPathChange={(v) => setOnlineForm((f) => ({ ...f, keyPath: v }))}
             />
           )}
 
-          <LogPanel job={job} />
+          {mode !== 'mypc' && <LogPanel job={job} />}
         </div>
 
         <div className="space-y-6">
@@ -317,7 +343,9 @@ export const TrainerPage = React.memo(function TrainerPage() {
               : mode === 'local'
               ? t('trainer.startLocalTraining')
               : mode === 'mypc'
-              ? t('trainer.startMyPcTraining')
+              ? job?.status === 'stopped'
+                ? t('trainer.resumeTraining')
+                : t('trainer.startMyPcTraining')
               : t('trainer.startCloudTraining')}
           </button>
 

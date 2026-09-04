@@ -23,7 +23,7 @@ def test_mypc_route_creates_mypc_job():
 
     captured = {}
 
-    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None, ssh_credentials=None):
+    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None, ssh_credentials=None, tub=None):
         captured["job"] = job
         captured["config_file"] = config_file
         captured["working_dir"] = working_dir
@@ -53,7 +53,7 @@ def test_mypc_route_creates_mypc_job():
 def test_mypc_route_defaults():
     captured = {}
 
-    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None, ssh_credentials=None):
+    def fake_run_mypc(job, config_file="train_my_pc.conf", working_dir=None, ssh_credentials=None, tub=None):
         captured["config_file"] = config_file
         captured["working_dir"] = working_dir
         captured["ssh_credentials"] = ssh_credentials
@@ -72,7 +72,7 @@ def test_mypc_probe_route():
     from mypc_probe import ProbeCheck, ProbeResult
 
     def fake_probe(host, user, password, remote_dir_base="~/projects",
-                   python_path="", port=22):
+                   python_path="", port=22, key_path=""):
         return ProbeResult(
             ok=True,
             platform="linux",
@@ -119,6 +119,33 @@ def test_stop_mypc_job_sets_stop_event():
 
     assert job.status == "stopped"
     assert job.stop_event.is_set()
+
+
+def test_stop_mypc_job_aborts_remote_trainer():
+    """点「停止」必须同时杀远程训练进程，否则远程 train.py 变孤儿。"""
+    import asyncio
+    import threading
+    from trainer_engine import job_manager
+
+    class FakeTrainer:
+        def __init__(self):
+            self.aborted = False
+
+        def abort_remote(self):
+            self.aborted = True
+
+    job = job_manager.create_job("mypc")
+    job.status = "running"
+    job.stop_event = threading.Event()
+    job.trainer = FakeTrainer()
+
+    async def _stop():
+        job_manager.stop_job(job.id)
+
+    asyncio.run(_stop())
+
+    assert job.status == "stopped"
+    assert job.trainer.aborted is True
 
 
 def test_config_endpoint_does_not_write_password(tmp_path):
