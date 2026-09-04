@@ -2,6 +2,7 @@
 
 > 用途：供后续 AI/开发者继续开展 Pilot Arena 相关工作。首次建立 2026-09-04（本会话完成"推理链路性能优化 + 模型贴合摘要"）。
 > 测试基线：后端 `cd web_ui/backend && python -m pytest tests/ -q` 本机 **340 passed + 2 skipped**（4 例 `TestAdaptiveDetection` 失败为本机 pupil_apriltags 缺失的既有环境问题，见 §6）；前端 `cd web_ui/frontend && npx vitest run` **158 passed**（27 文件）+ `tsc -b` + `npm run build` 全绿。
+> 同日测试体系补齐后：本机已装 `pupil-apriltags` 1.0.4，后端 **351 passed + 1 skipped**（仅剩 opt-in 集成测试，`ARENA_INTEGRATION=1` 时 1 passed、实测 4.23ms/帧）；前端 **160 passed**（28 文件）+ Playwright E2E **1 passed**（详见 `docs/superpowers/plans/2026-09-04-pilot-arena-testing.md` 执行记录）。
 
 ## 0. 文档地图
 
@@ -45,6 +46,16 @@ Web 前端 `/pilot`（`web_ui/frontend/src/pages/PilotArenaPage.tsx`，经 `Flow
 
 `test_arena.py` +4（config 缓存语义 1：未变化复用同一对象/mtime 变化重载；摘要 3：偏差口径、非有限剔除、接口含 summary），TDD 先红后绿。
 
+2026-09-04 当日补齐的完整分层体系（六任务计划见 `docs/superpowers/plans/2026-09-04-pilot-arena-testing.md`，已全部提交分支 `test/pilot-arena-testing`）：
+
+| 层 | 内容 | 结果 |
+| --- | --- | --- |
+| 测试基建修复 | `TestAdaptiveDetection` 4 例替身注入（`raising=False` + 可用性守卫） | 后端全量 351 passed |
+| API 回归护栏 | `test_arena.py` +54 行：predict 逐帧不重编译 config（计数 + caplog 0 条） | passed |
+| 真实模型集成 | `tests/integration/test_arena_real_model.py`（opt-in，真实 DKG-1） | 1 passed，4.23ms/帧 |
+| 前端组件 | `PilotArenaPage.test.tsx` 摘要面板渲染（两侧/单侧数据） | 2 passed |
+| 浏览器 E2E | Playwright route-mocked 全流程（config 前置→Tub→模型→预测→曲线→摘要） | 1 passed |
+
 ## 3. 调用链/关键符号速查
 
 | 符号 | 位置 | 说明 |
@@ -73,8 +84,8 @@ Web 前端 `/pilot`（`web_ui/frontend/src/pages/PilotArenaPage.tsx`，经 `Flow
 
 ## 6. 遗留与核对项（2026-09-04 未做/待决策）
 
-- [ ] **浏览器 E2E（明早人工）**：重启后端 + `npm run build` + Ctrl+F5，确认①播放时 inference 徽标 ≈DRIVE_LOOP_HZ ②config INFO 日志不再逐帧刷屏 ③4 列多 viewer 并发负载可接受（卡顿则 `ARENA_PREDICTION_INTERVAL_MS` 调到 33~50 权衡）。
+- [ ] **真机人工验收（用户 Windows 机器，待做）**：重启后端 + `npm run build` + Ctrl+F5，确认①播放时 inference 徽标 ≈DRIVE_LOOP_HZ ②config INFO 日志不再逐帧刷屏 ③4 列多 viewer 并发负载可接受（卡顿则 `ARENA_PREDICTION_INTERVAL_MS` 调到 33~50 权衡）。自动化侧（route-mocked Playwright E2E）已覆盖 UI 全流程，真机部分仍需人工。
 - [ ] **决策·默认节流**：16ms 下限在多 viewer（4×60Hz）时会放大后端请求量；如实测吃紧可下调默认或文档化推荐配置。
-- [ ] **可选**：本机 4 例 `test_drift_vision` 环境失败（补 pupil_apriltags 或改 import 兜底）——是否处理由用户定。
+- [x] ~~**可选**：本机 4 例 `test_drift_vision` 环境失败~~ → **已解决**（2026-09-04）：测试替身注入修复（`raising=False` + 可用性守卫置位，本不需真库）；本机另补装 `pupil-apriltags` 1.0.4，全量 351 passed。
 - [ ] **可选·后续候选**（规划 §3.3 其余项）：Arena 配置持久化、多模型同图层曲线、单帧误差展示、批量任务队列/取消。
-- [x] 本轮改动未 git 提交（CHANGELOG (175) 已记录），工作区待用户 review。
+- [x] 本轮改动已全部提交于分支 `test/pilot-arena-testing`（自 345f6f7d 起，含用户 Nowhere_X 并行提交 5698f176），**未推送、未合并**，待用户决定。
