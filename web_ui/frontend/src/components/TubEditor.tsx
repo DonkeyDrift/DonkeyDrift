@@ -62,7 +62,9 @@ export const TubEditor: React.FC = () => {
   const isSessionScoped = activeSessionId != null;
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
-  const currentIndex = useStore((state) => state.currentIndex);
+  // 注意：不要组件级订阅 currentIndex——播放期它高频变化，订阅会让整棵编辑器树
+  // re-render（且 options/plugins 引用随 render 变化会连带 chart.update）。播放位置
+  // 一律走 currentIndexRef + 下方 subscribe 回调（60fps 回放优化）。
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
   const selectionStartIndex = useStore((state) => state.selectionStartIndex);
   const selectionEndIndex = useStore((state) => state.selectionEndIndex);
@@ -73,6 +75,8 @@ export const TubEditor: React.FC = () => {
   const deletedIndexes = useStore((state) => state.deletedIndexes);
   const totalPhysicalRecords = useStore((state) => state.totalPhysicalRecords);
   const chartRef = useRef<ChartInstance<'line'> | null>(null);
+  // 播放竖线 DOM 叠加层（60fps 回放优化）：竖线移动直写 style，不触发 chart.update
+  const playheadRef = useRef<HTMLDivElement>(null);
   const lineDashOffsetRef = useRef(0);
   const visualSelectionRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
   const isSelectingRef = useRef(false);
@@ -86,7 +90,6 @@ export const TubEditor: React.FC = () => {
   const chartRenderFrameRef = useRef<number | null>(null);
   const chartNeedsRenderRef = useRef(false);
   const selectionAnimationUntilRef = useRef(0);
-  const playbackActivityUntilRef = useRef(0);
   const preserveViewportOnRecordsChangeRef = useRef(false);
   const sliderRef = useRef<HTMLInputElement>(null);
   const sliderRafRef = useRef<number | null>(null);
@@ -130,6 +133,15 @@ export const TubEditor: React.FC = () => {
   const [redoHistory, setRedoHistory] = useState<RecordAction[]>([]);
   const [zoomPercent, setZoomPercent] = useState(MIN_ZOOM_PERCENT);
   const [scrollProgress, setScrollProgress] = useState(0);
+  // 供播放热路径（store subscribe 回调）读最新值，避免为播放位置订阅整组件 re-render
+  const zoomPercentRef = useRef(zoomPercent);
+  const scrollProgressRef = useRef(scrollProgress);
+  useEffect(() => {
+    zoomPercentRef.current = zoomPercent;
+  }, [zoomPercent]);
+  useEffect(() => {
+    scrollProgressRef.current = scrollProgress;
+  }, [scrollProgress]);
   const zoomMultiplier = zoomPercent / MIN_ZOOM_PERCENT;
 
   const clampZoomPercent = useCallback((value: number) => {
@@ -166,8 +178,8 @@ export const TubEditor: React.FC = () => {
 
       const hasDraftSelection = Boolean(selectionDraftRef.current);
       const hasSelectionAnimation = hasDraftSelection || time < selectionAnimationUntilRef.current;
-      const hasPlaybackActivity = time < playbackActivityUntilRef.current;
-      const shouldRender = chartNeedsRenderRef.current || hasSelectionAnimation || hasPlaybackActivity;
+      // 播放竖线已改 DOM 叠加层（随索引直写 style），不再驱动 chart 重绘
+      const shouldRender = chartNeedsRenderRef.current || hasSelectionAnimation;
 
       if (shouldRender && chartRef.current) {
         if (hasSelectionAnimation && (hasDraftSelection || visualSelectionRef.current)) {
@@ -178,7 +190,7 @@ export const TubEditor: React.FC = () => {
         chartRef.current.update('none');
       }
 
-      if (hasDraftSelection || time < selectionAnimationUntilRef.current || time < playbackActivityUntilRef.current) {
+      if (hasDraftSelection || time < selectionAnimationUntilRef.current) {
         chartRenderFrameRef.current = window.requestAnimationFrame(renderLoop);
       }
     };
@@ -187,15 +199,12 @@ export const TubEditor: React.FC = () => {
   }, []);
 
   const requestChartRender = useCallback(
-    (options?: { animateSelection?: boolean; markPlaybackActive?: boolean }) => {
+    (options?: { animateSelection?: boolean }) => {
       const now = performance.now();
 
       chartNeedsRenderRef.current = true;
       if (options?.animateSelection) {
         selectionAnimationUntilRef.current = Math.max(selectionAnimationUntilRef.current, now + 220);
-      }
-      if (options?.markPlaybackActive) {
-        playbackActivityUntilRef.current = Math.max(playbackActivityUntilRef.current, now + 120);
       }
 
       ensureChartRenderLoop();
@@ -515,25 +524,109 @@ export const TubEditor: React.FC = () => {
     }
   }, [redoHistory, runRecordAction]);
 
+  // 播放竖线位置计算（60fps 回放优化）：经 chart 比例尺换算后直接写叠加层 DOM
+  // style——竖线移动不再触发 chart.js 全量重绘（原先每次索引变化都 chart.update，
+  // ~1000+ 点 × 2 数据集全 layout，60fps 回放时主线程被吃满掉帧）。
+  const positionPlayhead = useCallback(() => {
+    const el = playheadRef.current;
+    if (!el) return;
+    const chart = chartRef.current;
+    const currentRecords = recordsRef.current;
+    const sampledIndices = sampledIndicesRef.current;
+    if (!chart || !sampledIndices.length || !currentRecords.length) {
+      el.style.display = 'none';
+      return;
+    }
+    const xAxis = chart.scales.x;
+    const chartArea = chart.chartArea;
+    if (!xAxis || !chartArea) {
+      el.style.display = 'none';
+      return;
+    }
+    const latestIndex = currentIndexRef.current;
+    const currentRecord = currentRecords[latestIndex];
+    const currentXValue = isSessionScopedRef.current
+      ? latestIndex
+      : currentRecord
+        ? currentRecord._index
+        : latestIndex;
+    const currentX = xAxis.getPixelForValue(currentXValue);
+    if (Number.isNaN(currentX) || currentX < chartArea.left || currentX > chartArea.right) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = '';
+    el.style.transform = `translateX(${currentX - 1}px)`;
+    el.style.top = `${chartArea.top}px`;
+    el.style.height = `${chartArea.bottom - chartArea.top}px`;
+  }, []);
+
+  // 视口跟随（竖线越过 padding 边界时翻页）：原 effect 逻辑改普通函数——播放期由
+  // 下面的 subscribe 回调驱动，仅在真正翻页时 setScrollProgress 触发 re-render。
+  const followPlayheadViewport = useCallback(() => {
+    const totalRecords = recordsRef.current.length;
+    const zoomPercent = zoomPercentRef.current;
+    if (!totalRecords || zoomPercent === MIN_ZOOM_PERCENT) {
+      return;
+    }
+
+    const visibleCount = Math.max(
+      2,
+      Math.min(totalRecords, Math.ceil((totalRecords * MIN_ZOOM_PERCENT) / zoomPercent))
+    );
+    const maxStartIndex = Math.max(0, totalRecords - visibleCount);
+    if (maxStartIndex <= 0) {
+      return;
+    }
+
+    const padding = Math.max(1, Math.floor(visibleCount * PLAYHEAD_SCROLL_PADDING_RATIO));
+    const currentStartIndex = Math.round(maxStartIndex * scrollProgressRef.current);
+    const currentEndIndex = Math.min(totalRecords - 1, currentStartIndex + visibleCount - 1);
+    const safeStartIndex = currentStartIndex + padding;
+    const safeEndIndex = currentEndIndex - padding;
+    const currentIndex = currentIndexRef.current;
+    let targetStartIndex: number | null = null;
+
+    if (currentIndex < safeStartIndex) {
+      targetStartIndex = currentIndex - padding;
+    } else if (currentIndex > safeEndIndex) {
+      targetStartIndex = currentIndex + padding - visibleCount + 1;
+    }
+
+    if (targetStartIndex == null) {
+      return;
+    }
+
+    const nextStartIndex = Math.max(0, Math.min(targetStartIndex, maxStartIndex));
+    const nextProgress = nextStartIndex / maxStartIndex;
+
+    setScrollProgress((previousProgress) => {
+      if (Math.abs(previousProgress - nextProgress) < 0.0005) {
+        return previousProgress;
+      }
+
+      return nextProgress;
+    });
+  }, []);
+
+  // 播放位置变化（60fps 回放时经 TubLibrary 节流 ~10Hz 写入）只做三件廉价事：
+  // 移动竖线叠加层、直写滑块 DOM、视口跟随判断——不触发 chart.update、不 re-render。
+  // 滑块为非受控组件，通过 ref 直接写 DOM 值同步。
   useEffect(() => {
     const unsubscribe = useStore.subscribe((state) => {
       const previousIndex = currentIndexRef.current;
       currentIndexRef.current = state.currentIndex;
-      if (state.currentIndex !== previousIndex) {
-        requestChartRender({ markPlaybackActive: true });
+      if (state.currentIndex === previousIndex) return;
+      positionPlayhead();
+      const slider = sliderRef.current;
+      if (slider && document.activeElement !== slider) {
+        slider.value = String(state.currentIndex);
       }
+      followPlayheadViewport();
     });
 
     return unsubscribe;
-  }, [requestChartRender]);
-
-  // 外部 currentIndex 变化时同步滑块位置（非受控组件，通过 ref 直接写 DOM 值）
-  useEffect(() => {
-    const slider = sliderRef.current;
-    if (slider && document.activeElement !== slider) {
-      slider.value = String(currentIndex);
-    }
-  }, [currentIndex]);
+  }, [positionPlayhead, followPlayheadViewport]);
 
   // 滑块拖动：requestAnimationFrame 节流 setCurrentIndex，避免高频 store 更新导致卡顿
   const handleSliderChange = useCallback(
@@ -588,56 +681,10 @@ export const TubEditor: React.FC = () => {
     setScrollProgress(targetStartIndex / maxStartIndex);
   }, [records.length, zoomPercent]);
 
+  // 视口跟随的另一触发口：用户缩放/滚动/数据变化时重新判定（播放索引变化走 subscribe 回调）
   useEffect(() => {
-    if (!records.length || zoomPercent === MIN_ZOOM_PERCENT) {
-      return;
-    }
-
-    const totalRecords = records.length;
-    const visibleCount = Math.max(
-      2,
-      Math.min(totalRecords, Math.ceil((totalRecords * MIN_ZOOM_PERCENT) / zoomPercent))
-    );
-    const maxStartIndex = Math.max(0, totalRecords - visibleCount);
-
-    if (maxStartIndex <= 0) {
-      return;
-    }
-
-    const padding = Math.max(1, Math.floor(visibleCount * PLAYHEAD_SCROLL_PADDING_RATIO));
-    const currentStartIndex = Math.round(maxStartIndex * scrollProgress);
-    const currentEndIndex = Math.min(totalRecords - 1, currentStartIndex + visibleCount - 1);
-    const safeStartIndex = currentStartIndex + padding;
-    const safeEndIndex = currentEndIndex - padding;
-    let targetStartIndex: number | null = null;
-
-    if (currentIndex < safeStartIndex) {
-      targetStartIndex = currentIndex - padding;
-    } else if (currentIndex > safeEndIndex) {
-      targetStartIndex = currentIndex + padding - visibleCount + 1;
-    }
-
-    if (targetStartIndex == null) {
-      return;
-    }
-
-    const nextStartIndex = Math.max(0, Math.min(targetStartIndex, maxStartIndex));
-    const nextProgress = nextStartIndex / maxStartIndex;
-
-    setScrollProgress((previousProgress) => {
-      if (Math.abs(previousProgress - nextProgress) < 0.0005) {
-        return previousProgress;
-      }
-
-      return nextProgress;
-    });
-  }, [
-    currentIndex,
-    isPlaying,
-    records.length,
-    scrollProgress,
-    zoomPercent,
-  ]);
+    followPlayheadViewport();
+  }, [followPlayheadViewport, records.length, scrollProgress, zoomPercent]);
 
   const visibleRange = useMemo(() => {
     if (!records.length) {
@@ -1105,7 +1152,9 @@ export const TubEditor: React.FC = () => {
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
-  }, [sampledIndices]);
+    // 数据/采样变化后 chart 尚未重绘时，先把竖线叠加层对齐一次
+    positionPlayhead();
+  }, [sampledIndices, positionPlayhead]);
 
   const options = {
     responsive: true,
@@ -1170,46 +1219,14 @@ export const TubEditor: React.FC = () => {
         
         const ctx = chart.ctx;
         const chartArea = chart.chartArea;
+        // 播放竖线已改 DOM 叠加层：chart 因数据/缩放/主题/resize 重绘后顺带对齐一次
+        positionPlayhead();
         // 浅色主题下的 canvas 配色;深色保持原值不变
         const isLightTheme = themeRef.current === 'light';
-        const playheadColor = isLightTheme ? '#e5484d' : 'rgb(239, 68, 68)';
         const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
         const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
-        const latestIndex = currentIndexRef.current;
         const totalRecords = records.length;
-        const currentRecord = records[latestIndex];
-        const currentXValue = isSessionScopedRef.current
-          ? latestIndex
-          : currentRecord
-            ? currentRecord._index
-            : latestIndex;
         
-        const currentX = xAxis.getPixelForValue(currentXValue);
-
-        if (!isNaN(currentX) && currentX >= chart.chartArea.left && currentX <= chart.chartArea.right) {
-          ctx.save();
-          ctx.strokeStyle = playheadColor;
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.9;
-          ctx.setLineDash([5, 3]);
-          
-          ctx.beginPath();
-          ctx.moveTo(currentX, yAxis.top);
-          ctx.lineTo(currentX, yAxis.bottom);
-          ctx.stroke();
-          
-          ctx.setLineDash([]);
-          ctx.fillStyle = playheadColor;
-          ctx.beginPath();
-          ctx.arc(currentX, yAxis.top, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.arc(currentX, yAxis.bottom, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          ctx.restore();
-        }
-
         const drawSelectionBox = (startValue: number, endValue: number, isDraft: boolean) => {
             const chartArea = chart.chartArea;
             
@@ -1315,7 +1332,7 @@ export const TubEditor: React.FC = () => {
         console.error('Vertical line plugin error:', error);
       }
     }
-  }), []);
+  }), [positionPlayhead]);
 
   // Sync Visual Selection Ref
   useEffect(() => {
@@ -1849,6 +1866,26 @@ export const TubEditor: React.FC = () => {
               className="w-full h-full"
             />
           </div>
+          {/* 播放竖线叠加层：位置由 positionPlayhead() 直写 style，播放期零 chart 重绘（60fps） */}
+          <div
+            ref={playheadRef}
+            data-testid="playhead-overlay"
+            className="pointer-events-none absolute left-0 w-0"
+            style={{
+              display: 'none',
+              borderLeft: `2px dashed ${theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)'}`,
+              opacity: 0.9,
+            }}
+          >
+            <div
+              className="absolute -top-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
+              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+            />
+            <div
+              className="absolute -bottom-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
+              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+            />
+          </div>
           {tooltipData && (
                <div 
                  ref={tooltipRef}
@@ -1900,7 +1937,7 @@ export const TubEditor: React.FC = () => {
             min="0"
             max={Math.max(0, records.length - 1)}
             step="1"
-            defaultValue={currentIndex}
+            defaultValue={useStore.getState().currentIndex}
             onChange={handleSliderChange}
             disabled={!records.length}
             aria-label={t('tubEditor.scrollAria')}
