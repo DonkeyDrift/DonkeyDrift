@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-04 (177)
+
+- fix(frontend): 修复老用户点击侧边「加载器」抽屉无反应——缺陷链同时吞掉配置自动加载，全新浏览器不触发故长期未察觉
+  - 根因（在本机 8000 在线实例用 Playwright + 系统 Chrome 真实点击复现）：`useStore.setError` 无条件联动写 `activeDrawer`（`setError(null)` 也会强制关抽屉）；`ConfigLoader` 挂载 effect 在 `!config && configPath` 时先调 `setError(null)`；抽屉内容只在抽屉打开时渲染。老用户（persist 了 `configPath`、全局 `config` 为 null）每次点击「加载器」→ 抽屉开 → `ConfigLoader` 挂载 → `setError(null)` → 抽屉瞬间自闭 → 组件卸载并取消 500ms 自动加载定时器 → `config` 永远加载不上，无限循环。
+  - `web_ui/frontend/src/store/useStore.ts`：`setError(null)` 只清 `error`、不再触碰 `activeDrawer`（非空错误的原有联动——含 not found/Failed 打开抽屉、其它错误关抽屉——逐字保留）；新增非持久化字段 `configAutoLoadTried`。
+  - `web_ui/frontend/src/components/ConfigLoader.tsx`：自动加载 effect 增加「每页面生命周期一次」守卫（标记在定时器真正触发时落地，500ms 内关抽屉导致卸载不算已尝试）——失败后重开抽屉不再自动重试，避免再次被错误联动关上。
+  - 测试：新建 `web_ui/frontend/src/store/useStore.test.ts`（4 例：setError(null) 不动 drawers 抽屉 / connectors 抽屉同样不动 / not found 与 Failed 打开 drawers / 其它非空错误保持既有关抽屉行为）；`ConfigLoader.test.tsx` 新增 2 回归例（remembered configPath 下挂载不关抽屉且自动加载正常发出 / 自动加载失败后重开抽屉不再自动重试且抽屉保持打开），beforeEach 重置 `activeDrawer` 与 `configAutoLoadTried`。
+  - 实测：`vitest run` 33 文件 176 passed、`tsc -b` 无错、`npm run build` 通过；修复前 Playwright 老用户场景（seed localStorage `donkeycar-storage`）在线实例复现抽屉宽度恒 0，全新/手机视口场景正常。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (176)
 
 - feat(TE): Tub 编辑器底部滑条新增选区首尾三角箭头手柄——点击/拖拽直接调整选区范围，方便 Mac 触控板操作

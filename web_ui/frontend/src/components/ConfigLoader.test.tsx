@@ -40,6 +40,8 @@ beforeEach(() => {
     tubPath: '',
     error: null,
     isLoading: false,
+    activeDrawer: null,
+    configAutoLoadTried: false,
   });
   mockLoadTub.mockResolvedValue(tubPayload as never);
 });
@@ -131,5 +133,37 @@ describe('ConfigLoader auto-discover (issue #129)', () => {
     // 留给既有 configPath 自动加载路径触发
     await waitFor(() => { expect(mockLoadConfig).toHaveBeenCalledWith('/home/x/savedcar'); });
     expect(mockDiscover).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConfigLoader 自动加载与抽屉联动回归（点击「加载器」无反应）', () => {
+  it('remembered configPath 下挂载不关闭抽屉，自动加载正常发出', async () => {
+    useStore.setState({ configPath: '/home/x/savedcar', activeDrawer: 'loaders' });
+    // loadConfig 挂起：只验证调度与抽屉状态，不走到 setConfig
+    mockLoadConfig.mockReturnValue(new Promise(() => {}) as never);
+
+    render(<ConfigLoader />);
+
+    await waitFor(() => { expect(mockLoadConfig).toHaveBeenCalledWith('/home/x/savedcar'); });
+    expect(useStore.getState().activeDrawer).toBe('loaders');
+    expect(useStore.getState().configAutoLoadTried).toBe(true);
+  });
+
+  it('自动加载失败后重开抽屉不再自动重试，抽屉保持打开', async () => {
+    useStore.setState({ configPath: '/home/x/savedcar', activeDrawer: 'loaders' });
+    mockLoadConfig.mockRejectedValue(new Error('boom') as never);
+
+    const first = render(<ConfigLoader />);
+    await waitFor(() => { expect(mockLoadConfig).toHaveBeenCalledTimes(1); });
+    // 非路径类错误按既有行为置 error 并关上抽屉
+    await waitFor(() => { expect(useStore.getState().activeDrawer).toBeNull(); });
+    first.unmount();
+
+    // 用户重新打开抽屉：不应再次自动加载（否则会再次被错误联动关上）
+    useStore.setState({ activeDrawer: 'loaders', error: null });
+    render(<ConfigLoader />);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(mockLoadConfig).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().activeDrawer).toBe('loaders');
   });
 });
