@@ -55,6 +55,12 @@ async def launch_dsh(request: Request):
     return await _forward_launch(request, "/api/launch/dsh")
 
 
+@router.post("/zcode")
+async def launch_zcode(request: Request):
+    """转发 POST /api/launch/zcode（ZCode TUI）到 launcher 并回传其 JSON 响应。"""
+    return await _forward_launch(request, "/api/launch/zcode")
+
+
 async def _forward_launch(request: Request, launcher_path: str) -> JSONResponse:
     """把 DD 前端的 launch 请求原样转发给 launcher 并回传其 JSON 响应。"""
     body = await request.body()

@@ -21,6 +21,23 @@ html,body{margin:0;height:100%;background:#101318;overflow:hidden}
 <script>
 (function(){
 'use strict';
+
+// ?title=ZCode&icon=zcode.png：自定义标签页标题与 favicon（默认 Terminal + 无图标）
+(function(){
+  try{
+    var params=new URLSearchParams(location.search);
+    var title=params.get('title');
+    if(title){document.title=title;}
+    var icon=params.get('icon');
+    if(icon){
+      var link=document.createElement('link');
+      link.rel='icon';link.type='image/png';
+      link.href='/terminal/static/'+encodeURIComponent(icon);
+      document.head.appendChild(link);
+    }
+  }catch(e){}
+})();
+
 // 语言：与 Launcher 菜单页一致——显式存储优先，否则跟随浏览器语言
 var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
 var T={
