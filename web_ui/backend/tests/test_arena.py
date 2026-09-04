@@ -497,3 +497,57 @@ def test_predictions_response_includes_summary_metrics(monkeypatch, tmp_path):
     assert summary["angle"]["bias"] == pytest.approx(0.15)
     assert summary["throttle"]["mae"] == pytest.approx(0.3)
     assert summary["throttle"]["count"] == 1
+
+
+def test_predict_does_not_reload_config_per_frame(monkeypatch, tmp_path):
+    """config 按 mtime 缓存：predict 热路径不得逐帧重编译 car config（回归护栏）。
+
+    注意：predict 每帧调用 load_car_config 是设计使然（命中 mtime 缓存、开销可忽略）；
+    本测试锁的是其内部昂贵的 load_config 编译只发生一次。
+    """
+    (tmp_path / "config.py").write_text("IMAGE_H = 120\nIMAGE_W = 160\nIMAGE_DEPTH = 3\n")
+    (tmp_path / "myconfig.py").write_text("")
+
+    model_path = tmp_path / "pilot.tflite"
+    model_path.write_text("model")
+
+    # make_client 会 reload 模块并 monkeypatch load_car_config；先捕获 reload 前的真函数
+    arena_mod = importlib.import_module("routers.arena")
+    real_load_car_config = arena_mod.load_car_config
+    real_load_config = arena_mod.load_config
+
+    client, arena = make_client(monkeypatch)
+    monkeypatch.setattr(arena, "load_car_config", real_load_car_config)
+    monkeypatch.setattr(arena.tub_router, "current_records", [
+        {"_index": i, "cam/image_array": f"{i}_cam_image_array_.jpg", "user/angle": 0.1, "user/throttle": 0.2}
+        for i in range(3)
+    ])
+
+    calls = {"count": 0}
+
+    def counting_load_config(config_file):
+        calls["count"] += 1
+        return real_load_config(config_file)
+
+    monkeypatch.setattr(arena, "load_config", counting_load_config)
+
+    load_response = client.post(
+        "/api/arena/pilots/load",
+        json={
+            "model_path": str(model_path),
+            "model_type": "tflite_linear",
+            "config_path": str(tmp_path),
+        },
+    )
+    assert load_response.status_code == 200, load_response.text
+    pilot_id = load_response.json()["pilot"]["id"]
+
+    for record_index in range(3):
+        response = client.post(
+            f"/api/arena/pilots/{pilot_id}/predict",
+            json={"record_index": record_index, "config_path": str(tmp_path)},
+        )
+        assert response.status_code == 200, response.text
+
+    # load 时编译 1 次；三次 predict 全部命中 mtime 缓存，不得重复编译
+    assert calls["count"] == 1, f"config 被重复编译 {calls['count']} 次"
