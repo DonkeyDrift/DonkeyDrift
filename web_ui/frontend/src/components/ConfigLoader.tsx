@@ -81,11 +81,17 @@ export const ConfigLoader: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!config && configPath) {
+    if (!config && configPath && !useStore.getState().configAutoLoadTried) {
       // 页面刚加载时服务器可能尚未就绪，先清除旧错误状态
       setError(null);
       // 延迟 500ms 再加载，给后端启动留出时间
-      const timer = setTimeout(() => handleManualLoad(), 500);
+      const timer = setTimeout(() => {
+        // 标记在定时器真正触发时落地：若在 500ms 内抽屉被关上导致组件卸载，
+        // 本次不算已尝试，下次打开抽屉仍会安排自动加载；加载失败后重开抽屉
+        // 不再自动重试，避免错误联动又把抽屉关上（点击「加载器」无反应回归）
+        useStore.setState({ configAutoLoadTried: true });
+        handleManualLoad();
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [config, configPath, handleManualLoad, setError]);

@@ -86,6 +86,9 @@ interface AppState {
   isLooping: boolean;
   error: string | null;
   activeDrawer: 'loaders' | 'connectors' | null;
+  // 配置自动加载每页面生命周期只尝试一次（ConfigLoader 随抽屉开关反复挂载，
+  // 不能用组件内 ref 记忆）；不持久化，刷新页面后重新尝试
+  configAutoLoadTried: boolean;
   selectionStartIndex: number | null;
   selectionEndIndex: number | null;
   selectionHistory: { startIndex: number; endIndex: number }[];
@@ -156,6 +159,7 @@ export const useStore = create<AppState>()(
       isLooping: false,
       error: null,
       activeDrawer: 'loaders' as 'loaders' | 'connectors' | null,
+      configAutoLoadTried: false,
       selectionStartIndex: null,
       selectionEndIndex: null,
       selectionHistory: [],
@@ -248,7 +252,13 @@ export const useStore = create<AppState>()(
       setIsLooping: (isLooping) => set({ isLooping }),
       setLoading: (loading) => set({ isLoading: loading }),
       setError: (error) => {
-        const shouldOpenPanel = error && (error.includes('not found') || error.includes('Failed'));
+        if (!error) {
+          // 仅清除错误，不联动抽屉：ConfigLoader 挂载时会 setError(null)，
+          // 若把 activeDrawer 置空，抽屉会被瞬间关上（老用户点击「加载器」无反应的根因）
+          set({ error: null });
+          return;
+        }
+        const shouldOpenPanel = error.includes('not found') || error.includes('Failed');
         set({ error, activeDrawer: shouldOpenPanel ? 'loaders' : null });
       },
       setActiveDrawer: (drawer) => set({ activeDrawer: drawer }),
