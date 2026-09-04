@@ -24,6 +24,8 @@ export interface TrainingJob {
   logs: string[];
   startedAt: string;
   finishedAt?: string;
+  // 失败时的真实原因（SSE status 消息的 error 字段），completed/stopped 为 null
+  errorMessage?: string | null;
 }
 
 export interface TrainerOnlineConfig {
@@ -33,6 +35,8 @@ export interface TrainerOnlineConfig {
   remoteDirBase: string;
   modelName: string;
   pythonPath: string;
+  /** SSH 私钥路径（可选，与 Car Connector 的 key_path 对齐；留空时用密码认证） */
+  keyPath: string;
 }
 
 // Connection settings for training on the user's own computer (SSH callback
@@ -116,7 +120,7 @@ interface AppState {
   setTrainingJob: (job: TrainingJob | null) => void;
   appendTrainingLog: (lines: string[]) => void;
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
-  finishTrainingJob: (status: 'completed' | 'failed' | 'stopped') => void;
+  finishTrainingJob: (status: 'completed' | 'failed' | 'stopped', errorMessage?: string | null) => void;
   setTrainerOnlineConfig: (cfg: Partial<TrainerOnlineConfig>) => void;
   setTrainerMyPcConfig: (cfg: Partial<TrainerMyPcConfig>) => void;
   setTrainerLocalConfig: (cfg: Partial<TrainerLocalConfig>) => void;
@@ -161,6 +165,7 @@ export const useStore = create<AppState>()(
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',
+        keyPath: '',
       },
       trainerMyPcConfig: {
         host: '',
@@ -169,6 +174,7 @@ export const useStore = create<AppState>()(
         remoteDirBase: '~/projects',
         modelName: 'model',
         pythonPath: '',
+        keyPath: '',
       },
       trainerLocalConfig: {
         tub: './data',
@@ -338,7 +344,7 @@ export const useStore = create<AppState>()(
             },
           };
         }),
-      finishTrainingJob: (status) =>
+      finishTrainingJob: (status, errorMessage) =>
         set((state) => {
           if (!state.trainingJob) return state;
           return {
@@ -346,6 +352,7 @@ export const useStore = create<AppState>()(
               ...state.trainingJob,
               status,
               finishedAt: new Date().toISOString(),
+              errorMessage: errorMessage ?? null,
             },
           };
         }),

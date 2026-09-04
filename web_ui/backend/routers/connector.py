@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,13 @@ class ConnectorConfigPayload(BaseModel):
     port: int = Field(default=22, ge=1, le=65535)
     car_dir: str = "~/mycar"
     key_path: Optional[str] = None
+    # 自动同步 Tub 数据：连接建立后自动增量拉取车端数据
+    auto_sync: bool = False
+    auto_sync_tub: str = "data"
+    auto_sync_local_path: str = "./data"
+    # 最近一次自动同步结果（由后端自动写入）
+    last_sync_at: Optional[str] = None
+    last_sync_result: Optional[str] = None
 
 
 class PullTubRequest(BaseModel):
@@ -100,6 +108,31 @@ def _to_config(payload: ConnectorConfigPayload, car_dir: Optional[str] = None) -
     )
 
 
+def _auto_sync_key(config: ConnectorConfig) -> str:
+    """自动同步防抖 key：同一 SSH 目标 + 车端目录视为同一连接。"""
+    return f"{config.user}@{config.host}:{config.port}:{config.car_dir}"
+
+
+def _record_last_sync(job) -> None:
+    """自动同步结束后把 last_sync_at/last_sync_result 写回连接器配置（沿用现有持久化）。"""
+    try:
+        payload = _load_payload()
+    except HTTPException:
+        return
+    payload.last_sync_at = datetime.now().isoformat()
+    if job.status == "completed":
+        stats = job.transfer_stats or {}
+        payload.last_sync_result = (
+            f"同步成功：已传输 {stats.get('transferred_files', 0)}/{stats.get('total_files', 0)} 个文件，"
+            f"{stats.get('transferred_bytes', 0)}/{stats.get('total_size', 0)} 字节"
+        )
+    elif job.status == "stopped":
+        payload.last_sync_result = "同步已停止"
+    else:
+        payload.last_sync_result = f"同步失败：{job.error_message or '未知错误'}"
+    _save_payload(payload)
+
+
 @router.get("/config")
 async def get_config():
     return {"config": _payload_data(_load_payload())}
@@ -115,11 +148,48 @@ async def set_config(payload: ConnectorConfigPayload):
     return {"config": _payload_data(payload)}
 
 
+class AutoSyncRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/auto_sync")
+async def set_auto_sync(request: AutoSyncRequest):
+    """读取/设置自动同步开关（其余自动同步参数随 /config 保存）。"""
+    payload = _load_payload()
+    payload.auto_sync = request.enabled
+    _save_payload(payload)
+    return {
+        "auto_sync": {"enabled": payload.auto_sync},
+        "last_sync": {"at": payload.last_sync_at, "result": payload.last_sync_result},
+    }
+
+
 @router.post("/status")
 async def check_status():
-    config = _to_config(_load_payload())
+    payload = _load_payload()
+    config = _to_config(payload)
     online, message = RemoteCarClient(config).check_connection()
-    return {"online": online, "message": message}
+    auto_sync_triggered = False
+    # 连接测试成功且开启自动同步且当前无 pull 任务在跑 → 自动入队增量同步（防抖：同一连接不重复触发）
+    if online and payload.auto_sync:
+        key = _auto_sync_key(config)
+        if connector_job_manager.try_begin_auto_sync(key):
+            auto_sync_triggered = True
+            asyncio.create_task(
+                connector_job_manager.run_auto_sync(
+                    key,
+                    config,
+                    payload.auto_sync_tub,
+                    payload.auto_sync_local_path,
+                    on_finished=_record_last_sync,
+                )
+            )
+    return {
+        "online": online,
+        "message": message,
+        "auto_sync": {"enabled": payload.auto_sync, "triggered": auto_sync_triggered},
+        "last_sync": {"at": payload.last_sync_at, "result": payload.last_sync_result},
+    }
 
 
 @router.post("/remote/list")
