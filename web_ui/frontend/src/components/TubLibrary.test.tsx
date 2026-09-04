@@ -203,6 +203,8 @@ describe('TubLibrary wall-clock playback scheduling', () => {
   const FRAME_COUNT = 100;
   const readyUrls = new Set<string>();
   const frameUrl = (i: number) => `http://localhost/img/cam_${i}.jpg`;
+  // 预解码断言（60fps）：预取 onload 后应调用 img.decode() 提前解码
+  const decodeSpy = vi.fn();
 
   let rafQueue: FrameRequestCallback[];
 
@@ -213,6 +215,10 @@ describe('TubLibrary wall-clock playback scheduling', () => {
     naturalWidth = 0;
     width = 160;
     height = 120;
+    decode = () => {
+      decodeSpy();
+      return Promise.resolve();
+    };
     private url = '';
     set src(v: string) {
       this.url = v;
@@ -312,6 +318,21 @@ describe('TubLibrary wall-clock playback scheduling', () => {
     // 重新对表继续 1x 播放：进度仍在 ~13 帧附近，而不是跳到 ~310 帧
     await waitFor(() => {
       expect(screen.getByText(/1[0-8] \/ 100/)).toBeInTheDocument();
+    });
+  });
+
+  it('pre-decodes prefetched frames via img.decode() after load', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 100/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始播放' }));
+
+    // 播放启动即预取前 PREFETCH_AHEAD 帧，onload 后逐张 decode 预解码，
+    // 让帧到期时 drawImage 不再触发主线程同步解码
+    await waitFor(() => {
+      expect(decodeSpy).toHaveBeenCalled();
     });
   });
 });

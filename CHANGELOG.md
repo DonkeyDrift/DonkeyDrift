@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-09-04 (183)
+
+- perf(tub-library): 录制视频库回放第四轮冲刺 60 FPS——同页 TubEditor 播放期零 chart 重绘 + 零 re-render（播放竖线改 DOM 叠加层），预取图片 decode 预解码
+  - 背景：回放帧率三轮优化（(121) 播放绕过 React 直画 canvas、(125) 去热路径多余 setState、(162) 墙钟调度 + 后端 /tub/image 线程池/缓存）后 FPS 角标仍远低于 60。本轮定位剩余瓶颈不在播放器本身，而在同页（TM 页）的 TubEditor 吃满主线程：① 组件级 `useStore(state => state.currentIndex)` 订阅播放位置（播放期 ~10Hz 写入）→ 整棵 1800 行编辑器树高频 re-render，且 `options`/`plugins` 引用随 render 变化连带 react-chartjs-2 chart.update；② 索引变化经 `markPlaybackActive` 续期让图表渲染循环 60Hz 持续 `chart.update('none')` 全量重绘（~1000+ 点 × 2 数据集全 layout）——合计每秒约 70 次图表重绘 + 10 次大组件 reconciliation，TubLibrary 播放 rAF 被饿死掉帧。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：
+    - 播放竖线（红色虚线 playhead）由 chart.js afterDraw 插件 canvas 绘制改为 DOM 叠加层（`playheadRef`，2px 虚线 + 两端圆点、深浅主题配色与出视口隐藏语义均不变）：新增 `positionPlayhead()` 经 `chart.scales.x.getPixelForValue` 换算后直接写叠加层 style；索引变化在 store subscribe 回调里直写 DOM（零 chart.update、零 re-render）；chart 因数据/缩放/主题/resize 重绘后由插件 afterDraw 顺带 `positionPlayhead()` 对齐，无需逐一跟踪 layout 变化。
+    - 删除组件级 `currentIndex` 订阅与 `markPlaybackActive`/`playbackActivityUntilRef` 机制：滑块位置同步并入 subscribe 回调（非受控滑块经 ref 直写 DOM）；视口自动跟随抽为 `followPlayheadViewport()`（subscribe 回调与缩放/滚动/数据 effect 两路驱动，语义不变），仅真正翻页才 `setScrollProgress` 触发 re-render；滑块 `defaultValue` 改读 `useStore.getState().currentIndex`。
+    - 图表渲染循环仅保留选区跑马灯/悬停/数据变化路径，点击图表查看帧的悬停重绘不受影响。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：预取 `img.onload` 后追加 `img.decode()` 预解码——帧到期时 drawImage 不再触发主线程同步 JPEG 解码；播放调度/预取窗口/FPS 角标语义不动。
+  - 测试同步：新建 `web_ui/frontend/src/components/TubEditor.playhead.test.tsx` 3 例（与 (178) 拖拽框选的 `TubEditor.test.tsx` 并存，其假 chart 补 `getPixelForValue` 适配叠加层）（索引变化零 chart.update + 叠加层位置/显隐 + 滑块直写同步；点击图表仍恰好一次重绘）；`TubLibrary.test.tsx` 新增 1 例（预取 onload 后调用 decode 预解码）。前端 `vitest run` 31 文件 163 项、`tsc -b`、`npm run build` 全绿；后端无改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (182)
 
 - fix(trainer): 修复训练中刷新页面后看不到训练进度
