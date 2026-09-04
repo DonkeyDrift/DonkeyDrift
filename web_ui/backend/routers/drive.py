@@ -17,7 +17,9 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from donkeycar import webui_instance
 from drift_engine import drift_engine
+from routers.launch import _post_to_launcher
 
 logger = logging.getLogger(__name__)
 
@@ -308,19 +310,89 @@ class LoadModelRequest(BaseModel):
     working_dir: Optional[str] = None
 
 
+# 允许加载的模型格式（与 complete.py 的加载分支一致；savedmodel 为目录）
+_ALLOWED_MODEL_EXTENSIONS = {".h5", ".tflite", ".trt", ".savedmodel", ".pth", ".json"}
+
+
+def _model_type_for_path(path: Path) -> Optional[str]:
+    """按扩展名推导 manage.py drive --type；无法推导时交给车端 myconfig 默认。"""
+    suffix = path.suffix.lower()
+    if suffix == ".tflite":
+        return "tflite_linear"
+    if suffix == ".trt":
+        return "tensorrt_linear"
+    return None
+
+
+def _resolve_model_path(model_path: str, working_dir: Optional[str]) -> Path:
+    """把前端给的模型路径解析并校验为 <working_dir>/models 内的真实文件。"""
+    if not working_dir or not working_dir.strip():
+        raise HTTPException(status_code=400, detail="缺少 working_dir，无法定位 models 目录")
+    base = Path(os.path.expanduser(working_dir)).resolve()
+    models_dir = (base / "models").resolve()
+    candidate = Path(os.path.expanduser(model_path.strip()))
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    candidate = candidate.resolve()
+    if candidate == models_dir or models_dir not in candidate.parents:
+        raise HTTPException(status_code=400, detail="模型必须位于 working_dir 的 models 目录内")
+    if candidate.suffix.lower() not in _ALLOWED_MODEL_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的模型格式: {candidate.suffix}")
+    if not candidate.exists():
+        raise HTTPException(status_code=400, detail=f"模型文件不存在: {candidate.name}")
+    return candidate
+
+
 @router.post("/load_model")
 async def load_model(request: LoadModelRequest):
-    """通知车端加载指定模型"""
-    if not drive_state.car_online():
-        raise HTTPException(status_code=400, detail="车端未连接，无法加载模型")
+    """选定自动驾驶模型：持久化选择并触发车端带模型重启（issue #003）。
 
-    ok = await drive_state.send_to_car({
-        "type": "load_model",
-        "model_path": request.model_path,
-    })
-    if not ok:
-        raise HTTPException(status_code=500, detail="发送到车端失败")
-    return {"success": True, "message": "模型加载指令已下发"}
+    车端模型只在 manage.py drive 启动时加载，运行时无热切换通道；本端点
+    把选择写入 ~/.donkeycar/drive_model.json（launcher 起车进程时附加
+    --model/--type），再请 launcher 重启车进程。launcher 不可达/报错时
+    选择仍已保存，返回 restart_required 让前端提示手动重启，不再假成功。
+    """
+    model_path = request.model_path.strip()
+    if model_path:
+        resolved = _resolve_model_path(model_path, request.working_dir)
+        webui_instance.write_drive_model(
+            str(resolved), _model_type_for_path(resolved))
+        model_name = resolved.name
+    else:
+        # 选「无模型」：清除记录，卸载同样需重启生效
+        webui_instance.remove_drive_model()
+        model_name = ""
+
+    try:
+        status, payload = await asyncio.to_thread(
+            _post_to_launcher, "/api/launch/drive", b"")
+    except Exception as e:
+        logger.warning(f"模型选择已保存，但无法自动重启（launcher 不可达）: {e}")
+        return {
+            "success": True, "restarting": False, "restart_required": True,
+            "model": model_name,
+            "message": "模型选择已保存；无法自动重启车端（launcher 未运行），请通过菜单页重启",
+        }
+
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        data = {}
+    if status != 200 or data.get("status") == "error":
+        detail = data.get("error") or f"launcher HTTP {status}"
+        logger.warning(f"模型选择已保存，但自动重启失败: {detail}")
+        return {
+            "success": True, "restarting": False, "restart_required": True,
+            "model": model_name,
+            "message": f"模型选择已保存；自动重启失败（{detail}），请通过菜单页重启",
+        }
+
+    return {
+        "success": True, "restarting": True, "restart_required": False,
+        "model": model_name,
+        "message": ("车端正在重启以加载模型" if model_name
+                    else "车端正在重启（已切换为无模型）"),
+    }
 
 
 # ------------------------------------------------------------------

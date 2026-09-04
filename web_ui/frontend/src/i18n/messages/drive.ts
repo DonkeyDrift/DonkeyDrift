@@ -34,6 +34,9 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // ModelSelector
     'drive.noModel': '无模型',
     'drive.currentModel': '当前模型',
+    'drive.modelRestarting': '正在重启车端加载模型…',
+    'drive.modelRestartTimeout': '车端重启超时未上线，请检查车端进程',
+    'drive.modelLoadFailed': '模型加载失败',
     // ProgrammableButtons
     'drive.hintW1': '增加油门上限',
     'drive.hintW2': '降低油门上限',
@@ -142,6 +145,9 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // ModelSelector
     'drive.noModel': 'No model',
     'drive.currentModel': 'Current model',
+    'drive.modelRestarting': 'Restarting car to load model…',
+    'drive.modelRestartTimeout': 'Car restart timed out; check the car process',
+    'drive.modelLoadFailed': 'Failed to load model',
     // ProgrammableButtons
     'drive.hintW1': 'Increase throttle limit',
     'drive.hintW2': 'Decrease throttle limit',

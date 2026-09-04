@@ -30,6 +30,7 @@ from donkeycar.webui_instance import (
     probe_http_ok,
     find_live_instance,
     read_instance,
+    read_drive_model,
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
@@ -271,6 +272,20 @@ def _launch_drive():
 
         # 构建 car 命令（DRIVE_API_SERVER_URL 用实际后端端口）
         car_cmd = [sys.executable, "manage.py", "drive"]
+
+        # issue #003：附加 web_ui 选定的自动驾驶模型（持久化于
+        # ~/.donkeycar/drive_model.json）；记录指向的文件已不存在时
+        # 回退为无模型启动，避免 manage.py 加载失败反复退出。
+        selected = read_drive_model()
+        if selected is not None:
+            selected_path = selected["model"]
+            if os.path.exists(selected_path):
+                car_cmd.extend(["--model", selected_path])
+                if selected.get("model_type"):
+                    car_cmd.extend(["--type", selected["model_type"]])
+            else:
+                print(f"[launcher] 选定模型文件不存在，按无模型启动: "
+                      f"{selected_path}")
 
         # 设置环境变量
         car_env = os.environ.copy()

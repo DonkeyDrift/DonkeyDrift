@@ -354,3 +354,70 @@ def test_drive_run_env_points_to_reused_backend(instance_file, tmp_path):
         "ws://127.0.0.1:8000/api/drive/ws"
     # 复用时 PID 文件只记车进程（run 退出时 finally 会清文件，故捕获写入）
     assert pid_writes == [[777]]
+
+
+# ===========================================================================
+# 选定模型持久化（issue #003：选模型后带模型重启，选择需跨重启保持）
+# ===========================================================================
+
+@pytest.fixture
+def model_file(tmp_path):
+    """把选定模型记录文件指到临时目录。"""
+    path = tmp_path / "drive_model.json"
+    with mock.patch.object(webui_instance, "DRIVE_MODEL_FILE", path):
+        yield path
+
+
+def test_drive_model_roundtrip(model_file):
+    from donkeycar.webui_instance import read_drive_model, write_drive_model
+
+    payload = write_drive_model("/abs/models/DKG-1.tflite", "tflite_linear")
+
+    assert payload["model"] == "/abs/models/DKG-1.tflite"
+    assert payload["model_type"] == "tflite_linear"
+    assert payload["selected_at"] > 0
+    assert read_drive_model() == payload
+
+
+def test_drive_model_write_without_type(model_file):
+    from donkeycar.webui_instance import read_drive_model, write_drive_model
+
+    write_drive_model("/abs/models/m.h5")
+
+    assert read_drive_model()["model_type"] is None
+
+
+def test_read_drive_model_missing_file(model_file):
+    from donkeycar.webui_instance import read_drive_model
+
+    assert read_drive_model() is None
+
+
+def test_read_drive_model_corrupt_file(model_file):
+    from donkeycar.webui_instance import read_drive_model
+
+    model_file.write_text("not json{", encoding="utf-8")
+    assert read_drive_model() is None
+
+
+def test_read_drive_model_bad_fields(model_file):
+    from donkeycar.webui_instance import read_drive_model
+
+    model_file.write_text('{"model": ""}', encoding="utf-8")
+    assert read_drive_model() is None
+    model_file.write_text('{"model": 42}', encoding="utf-8")
+    assert read_drive_model() is None
+
+
+def test_remove_drive_model(model_file):
+    from donkeycar.webui_instance import (
+        read_drive_model,
+        remove_drive_model,
+        write_drive_model,
+    )
+
+    write_drive_model("/abs/models/DKG-1.tflite", "tflite_linear")
+    remove_drive_model()
+    assert read_drive_model() is None
+    # 重复删除不报错
+    remove_drive_model()

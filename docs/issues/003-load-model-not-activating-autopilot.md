@@ -1,6 +1,6 @@
 # Issue 003: 先切换全自动/半自动模式再选择模型时，自动驾驶不激活
 
-- 状态: open
+- 状态: fixed（2026-09-04）
 - 记录日期: 2026-09-04
 - 页面: Drive（驾驶）页面
 - 类型: bug（功能缺失导致）
@@ -35,3 +35,14 @@
 4. 路径安全：后端校验 `model_path` 限制在车端 models 目录内。
 
 不再需要做：bridge 的 `load_model` 消息消费分支、模板侧运行时换模型通道、`model_loaded` ACK 链路（原建议 1-3 作废）。
+
+## 修复实现（2026-09-04）
+
+按上述确认方向落地，「选模型 = 持久化选择 + 车端带模型重启」：
+
+1. **持久化**：`donkeycar/webui_instance.py` 新增 `DRIVE_MODEL_FILE`（`~/.donkeycar/drive_model.json`）与 `read/write/remove_drive_model()`，记录 `{model, model_type, selected_at}`（原子写入）。
+2. **后端** `web_ui/backend/routers/drive.py` `/drive/load_model` 重写：校验 `model_path` 必须解析到 `<working_dir>/models` 内的真实文件（防目录逃逸、扩展名白名单、存在性检查，`.tflite→tflite_linear`、`.trt→tensorrt_linear` 推导 `--type`）→ 写入持久化记录（空路径=「无模型」则删除记录）→ 经 `routers/launch.py` 的 `_post_to_launcher` 请 launcher 重启车进程。不再要求车端在线（重启后上线即带模型）；launcher 不可达/报错时选择仍已保存，返回 `restart_required: true` 让前端提示手动重启，不再假成功。
+3. **launcher** `donkeycar/launcher/server.py` `_launch_drive()`：起车进程时读取持久化记录，存在则附加 `--model/--type`；记录指向的文件已删除时回退无模型启动并告警（避免 manage.py 反复退出）。选择因此对一切 launch 入口（菜单页/TUI）保持粘性。
+4. **前端** `DrivePage.tsx` + 新 hook `hooks/useModelRestart.ts`：后端确认重启后进入 restarting 状态——期间抑制车端→页面的模式回同步（车端重启后默认报 user，不抑制会冲掉全自动/半自动选择）、禁用模式/模型切换控件、显示「正在重启车端加载模型…」；车端掉线再上线时补发当前 `{drive_mode, car_mode}`；车端回报收敛或 3s settle 窗口后结束，120s 整体超时兜底并提示。`ModelsList` 的「加载到车端」提示改用服务端返回消息。
+
+测试：`tests/test_webui_instance.py`（持久化读写 6 项）、`tests/test_launcher_drive_launch.py`（带模型启动 4 项）、`web_ui/backend/tests/test_drive.py`（load_model 校验/重启/降级 9 项）、`web_ui/frontend/src/hooks/useModelRestart.test.tsx`（状态机 7 项）、`tests/test_drive_page_layout.py`（接线 2 项）。
