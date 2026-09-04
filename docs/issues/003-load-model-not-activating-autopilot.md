@@ -23,13 +23,15 @@
 - 车端模型只在启动时按 `--model` 加载（`donkeycar/templates/complete.py:317-365`）；运行时重载仅靠 FileWatcher 监视**启动时那个文件**的磁盘改动，没有接收新模型路径的通道。
 - 无 `--model` 启动时 `KerasPilot` part 根本未注册（`complete.py:426`），切全自动后 `pilot/*` 恒为 None，`DriveMode` 输出 0——车不动。
 
-## 修复建议
+## 修复建议（已确认方向）
 
-1. 车端 bridge 增加 `load_model` 分支：`_handle_message` 中置 latch，`run_threaded` 输出新增 `model/reload_path`。
-2. 模板侧接线：`complete.py` 的 `TriggeredCallback` 换用动态路径输入；无 `--model` 启动时 `kl` part 未注册的问题需决策——强制带模型启动并在 UI 提示，或始终创建 `kl` 延迟加载权重。
-3. 闭环反馈：车端加载后回发 `{"type":"model_loaded","success":...}`，后端广播，前端显示加载状态/错误。
-4. 路径安全：后端 `/drive/load_model` 校验 `model_path` 限制在车端 models 目录内。
+**目标形态已确认（2026-09-04）：「选模型后要求带模型重启」，不做运行时热切换。**
 
-## 待确认
+按此方向收敛改动：
 
-- 目标形态是「运行时热切换模型」还是「选模型即重启/要求带模型启动」？两者改动量差异大。
+1. 后端 `/drive/load_model`（`drive.py:311-323`）改为持久化所选模型路径（写入车端配置/启动参数），并触发或提示重启车端进程（`donkeycar/templates/complete.py --model <路径>` 重启）。
+2. 前端 `DrivePage.handleModelChange`（`DrivePage.tsx:281-289`）：选模型后显示「需重启生效」状态/进度，重启完成前禁用模式切换或给出明确提示。
+3. 重启后模式需恢复为重启前的全自动/半自动（模式状态持久化或重启后由前端补发），避免「重启后又要手动切模式」的二次坑。
+4. 路径安全：后端校验 `model_path` 限制在车端 models 目录内。
+
+不再需要做：bridge 的 `load_model` 消息消费分支、模板侧运行时换模型通道、`model_loaded` ACK 链路（原建议 1-3 作废）。

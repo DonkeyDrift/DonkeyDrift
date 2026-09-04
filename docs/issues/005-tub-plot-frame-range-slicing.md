@@ -23,14 +23,12 @@ Tub 曲线图（对比 user angle / pilot angle / user throttle / pilot throttle
 - 图表 X 轴用记录的 `_index`（catalog 索引），而 `start` 是 `records` 数组位置。若 tub 删除过记录、`_index` 非连续，两种语义的体感不同——建议 UI 明确标注按「记录位置（0..N-1）」。
 - 区间大时后端逐帧推理耗时长，现有无进度反馈，仅 `plotLoading` 转圈。
 
-## 实现建议（只动前端即可实现基本功能）
+## 实现建议
+
+**交互形式已确认（2026-09-04）：用双滑块进度条（range slider）设置首尾帧。** 项目内无现成 range-slider 组件，需自绘（chart 区域叠加双滑块，或基于原生双 `input[type=range]` 组合）或引入轻量依赖；自绘时注意与页面现有深色主题样式一致。
 
 1. `PilotArenaPage.tsx:177-182` 附近新增 `plotStart` / `plotEnd` state（默认 `0` / `records.length - 1`）。
-2. `:1127-1149` 把单个帧数输入框替换为「起始帧 / 结束帧」两个 number 输入框（项目无现成 range-slider 组件，输入框最省事；用户期望进度条式双滑块，可后续增强），做 `plotStart <= plotEnd` 校验。
+2. `:1127-1149` 把单个帧数输入框替换为双滑块控件（保留数值显示，便于精确读数；可辅以两个只读/可编辑的小数字框），做 `plotStart <= plotEnd` 约束。
 3. `:769-773` 调用改为 `{ config_path, start: plotStart, limit: plotEnd - plotStart + 1 }`。
 4. i18n：`web_ui/frontend/src/i18n/messages/arena.ts`（zh 约 49-63 行 / en 约 121-135 行）新增起止帧文案。
 5. 测试同步：`PilotArenaPage.test.tsx`、`web_ui/frontend/e2e/pilot-arena.spec.ts` 的 `/predictions` mock 契约断言、`web_ui/backend/tests/test_arena.py`（E2E mock 契约忠实度是近期提交专门修过的点，需保持真实形状）。
-
-## 待确认
-
-- 用户提到「通过进度条来设置首尾帧」：是用双滑块（range slider）还是起止输入框即可？双滑块体验更好但项目无现成组件，需自绘或引入依赖。
