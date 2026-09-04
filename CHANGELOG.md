@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-04 (181)
+## 2026-09-04 (183)
 
 - perf(tub-library): 录制视频库回放第四轮冲刺 60 FPS——同页 TubEditor 播放期零 chart 重绘 + 零 re-render（播放竖线改 DOM 叠加层），预取图片 decode 预解码
   - 背景：回放帧率三轮优化（(121) 播放绕过 React 直画 canvas、(125) 去热路径多余 setState、(162) 墙钟调度 + 后端 /tub/image 线程池/缓存）后 FPS 角标仍远低于 60。本轮定位剩余瓶颈不在播放器本身，而在同页（TM 页）的 TubEditor 吃满主线程：① 组件级 `useStore(state => state.currentIndex)` 订阅播放位置（播放期 ~10Hz 写入）→ 整棵 1800 行编辑器树高频 re-render，且 `options`/`plugins` 引用随 render 变化连带 react-chartjs-2 chart.update；② 索引变化经 `markPlaybackActive` 续期让图表渲染循环 60Hz 持续 `chart.update('none')` 全量重绘（~1000+ 点 × 2 数据集全 layout）——合计每秒约 70 次图表重绘 + 10 次大组件 reconciliation，TubLibrary 播放 rAF 被饿死掉帧。
@@ -11,6 +11,24 @@
   - `web_ui/frontend/src/components/TubLibrary.tsx`：预取 `img.onload` 后追加 `img.decode()` 预解码——帧到期时 drawImage 不再触发主线程同步 JPEG 解码；播放调度/预取窗口/FPS 角标语义不动。
   - 测试同步：新建 `web_ui/frontend/src/components/TubEditor.playhead.test.tsx` 3 例（与 (178) 拖拽框选的 `TubEditor.test.tsx` 并存，其假 chart 补 `getPixelForValue` 适配叠加层）（索引变化零 chart.update + 叠加层位置/显隐 + 滑块直写同步；点击图表仍恰好一次重绘）；`TubLibrary.test.tsx` 新增 1 例（预取 onload 后调用 decode 预解码）。前端 `vitest run` 31 文件 163 项、`tsc -b`、`npm run build` 全绿；后端无改动。
   - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (182)
+
+- fix(trainer): 修复训练中刷新页面后看不到训练进度
+  - 根因：训练任务状态（job_id/进度/日志）只存在前端 zustand 内存 `trainingJob`，`partialize` 只持久化配置、不含当前任务；刷新后 React 重新挂载，`trainingJob` 回到 null，前端既不知道有在跑任务、也不重连 SSE，`ProgressPanel` 显示「空闲」。后端 `job_manager` 是内存单例（页面刷新不影响）、`/trainer/train/{id}/status` 本就返回完整进度快照，故最小修复落在前端。
+  - `web_ui/frontend/src/store/useStore.ts`：新增持久化字段 `activeTraining: { id: string; mode: TrainingJob['mode'] } | null` + `setActiveTraining`/`clearActiveTraining`；`finishTrainingJob` 同步清空 `activeTraining`；`partialize` 白名单加入 `activeTraining`（刷新后可读回正在训练的任务 id+模式）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：新增挂载恢复 effect（ref 防 StrictMode 双跑）——读 `activeTraining`，`getJobStatus` 拉进度快照重建 `TrainingJob`（logs 先置空），`status === 'running'` 时 `connectSSE` 重连继续收实时事件，否则清空 `activeTraining` 展示终态；请求失败则清掉失效 id 回到空闲态。`startLocal`/`startSshTraining` 拿到 `job_id` 后 `setActiveTraining` 记录，供下次刷新恢复。
+  - 测试：`web_ui/frontend/src/store/useStore.test.ts` 新增 3 例（setActiveTraining / clearActiveTraining / finishTrainingJob 同步清空）；新建 `web_ui/frontend/src/hooks/useTrainingJob.test.ts` 4 例（running 恢复+重连 SSE / 终态展示并清空 / 失效清空 / 无 activeTraining 不请求）。
+  - 实测：`tsc -b --noEmit` 无错、`vitest run` 34 文件 183 passed（含新增 7 例）。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (181)
+
+- fix(tui): TUI Drive 复用已有 Web UI 实例时自动打开浏览器，并修正车进程提示 URL 端口
+  - 背景：复用实例路径（issue #127）`web_cmd=None` 不经过 `donkey web --open`，TUI 自身也无任何 `webbrowser.open`，导致用户选 Drive 后浏览器不弹出（新起实例路径正常）。车进程 `manage.py drive` 打印的「请打开浏览器访问」提示又因 `DriveApiBridge.web_console_url()` 在未设 `DRIVE_WEB_CONSOLE_URL` 时硬编码回落 `:5188`，指向无人监听的端口（生产模式前端由后端托管，实际在 :8000）。
+  - `donkeycar/management/tui.py`（`DriveCommand.execute`）：复用实例时由 TUI 直接 `webbrowser.open` 打开 `http://localhost:<frontend_port>/#/drive`（实例刚经 `find_live_instance()` 探测存活，端口必在监听，无需再等待）；新起实例路径保持不变（仍由 `donkey web --open` 打开，TUI 不重复打开）。车进程环境新增注入 `DRIVE_WEB_CONSOLE_URL=http://localhost:<frontend_port>`（复用路径取实例登记端口，新起路径生产模式取后端端口；用户已显式设置时不覆盖，`setdefault` 语义），使打印的提示与实际监听端口一致。
+  - 测试同步（`donkeycar/tests/test_tui_drive.py`）：新增 autouse 隔离 fixture——本机可能有存活实例登记（`~/.donkeycar/webui.json`）与运行中车进程（`~/.donkeycar/drive.pid`），不隔离时测试会误杀真实车进程、误删 PID 记录，且「新起实例」断言会被复用路径顶掉；fixture 将 `find_live_instance` 默认置 None、`kill_previous_car_processes`/`write_drive_pids`/`remove_drive_pid_file` 置空，需要复用路径的用例自行覆盖。新增 3 例：复用实例打开正确 URL 且只起车进程、注入正确的 `DRIVE_WEB_CONSOLE_URL`；新起实例时 TUI 不开浏览器（留给 `--open`）且提示端口=后端端口；用户已设 `DRIVE_WEB_CONSOLE_URL` 不被覆盖。顺手修复 2 例既有失败：`9a630826`（#127）把 `execute()` 改为 `choose_available_backend_port(8000)` 带参调用后，既有 fake `lambda self: 8000` 签名未跟进而 TypeError，补齐形参。
+  - 实测：`pytest donkeycar/tests/test_tui_drive.py donkeycar/tests/test_tui_web_command.py` 15 passed。`donkeycar/tests/test_web_command.py` 6 例失败为 Tony 既有问题（`#135` 生产构建路径改用 `subprocess.run` 而 fake 只实现 `Popen`，`FakeProcess` 不支持上下文管理器），在 origin/Tony 原样复现，与本次改动无关、未动。
+  - 仅 TUI/CLI 侧改动，不影响 8000 在线实例页面，无需重建 dist；Firmware 无改动、无需 OTA。
 
 ## 2026-09-04 (180)
 
