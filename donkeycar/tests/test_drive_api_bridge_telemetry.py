@@ -147,6 +147,32 @@ def test_run_delegates_telemetry_kwargs(monkeypatch):
     assert telemetry_msgs[0]["throttle"] == 0.2
 
 
+def test_telemetry_includes_sim_connected_false(monkeypatch):
+    """模拟器离线时，sim_connected=False 应写入 telemetry 消息供前端展示。"""
+    bridge = _make_bridge()
+    sent = []
+    monkeypatch.setattr(bridge, "_send_json", sent.append)
+
+    bridge.run_threaded(img_arr=None, sim_connected=False)
+
+    telemetry_msgs = [m for m in sent if m.get("type") == "telemetry"]
+    assert len(telemetry_msgs) == 1
+    assert telemetry_msgs[0]["sim_connected"] is False
+
+
+def test_telemetry_omits_sim_connected_when_none(monkeypatch):
+    """未提供 sim_connected 时（旧调用方），不应写入 sim_connected 字段。"""
+    bridge = _make_bridge()
+    sent = []
+    monkeypatch.setattr(bridge, "_send_json", sent.append)
+
+    bridge.run_threaded(img_arr=None, imu_gz=0.1)
+
+    telemetry_msgs = [m for m in sent if m.get("type") == "telemetry"]
+    assert len(telemetry_msgs) == 1
+    assert "sim_connected" not in telemetry_msgs[0]
+
+
 def test_car_mode_command_is_sticky_and_returned():
     """car_mode 命令应作为第 7 个返回值传出，且粘滞（无新命令时仍保持）。"""
     bridge = _make_bridge()

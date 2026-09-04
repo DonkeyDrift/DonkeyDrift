@@ -238,7 +238,7 @@ class WebRtcBrowserStatsRequest(BaseModel):
 # ------------------------------------------------------------------
 # 参数持久化
 # ------------------------------------------------------------------
-def _get_params_path() -> Path:
+def _get_config_dir() -> Path:
     # 优先使用环境变量 DONKEY_CAR_DIR，其次 ~/mycar（向后兼容），最后回退到 backend/data/
     car_dir = os.environ.get("DONKEY_CAR_DIR", "").strip()
     if car_dir:
@@ -250,7 +250,15 @@ def _get_params_path() -> Path:
         else:
             config_dir = Path(__file__).resolve().parent.parent / "data"
     config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "drive_params.json"
+    return config_dir
+
+
+def _get_params_path() -> Path:
+    return _get_config_dir() / "drive_params.json"
+
+
+def _get_selected_model_path() -> Path:
+    return _get_config_dir() / "selected_model.json"
 
 
 DEFAULT_PARAMS = {
@@ -303,19 +311,55 @@ class LoadModelRequest(BaseModel):
     working_dir: Optional[str] = None
 
 
+def _validate_model_path(model_path: str) -> str:
+    """模型路径安全校验：必须是位于 models 目录内的相对路径，禁止目录穿越。"""
+    if not model_path or not isinstance(model_path, str):
+        raise HTTPException(status_code=400, detail="model_path 无效")
+    if os.path.isabs(model_path):
+        raise HTTPException(status_code=400, detail="model_path 必须是相对路径")
+    parts = [p for p in Path(model_path).parts if p not in ("", ".")]
+    if not parts or ".." in parts:
+        raise HTTPException(status_code=400, detail="model_path 非法")
+    if parts[0] != "models":
+        raise HTTPException(status_code=400, detail="model_path 必须位于 models 目录内")
+    return model_path
+
+
 @router.post("/load_model")
 async def load_model(request: LoadModelRequest):
-    """通知车端加载指定模型"""
-    if not drive_state.car_online():
-        raise HTTPException(status_code=400, detail="车端未连接，无法加载模型")
+    """选择模型：持久化所选模型并要求带模型重启车端（不做运行时热切换）。
 
-    ok = await drive_state.send_to_car({
-        "type": "load_model",
-        "model_path": request.model_path,
-    })
-    if not ok:
-        raise HTTPException(status_code=500, detail="发送到车端失败")
-    return {"success": True, "message": "模型加载指令已下发"}
+    车端只在启动时按 --model 加载模型（complete.py 无 --model 时也会回退读取
+    selected_model.json），运行时无法换模型，因此这里改为：校验路径 → 写盘 →
+    尽力通知车端「带模型重启」→ 前端提示重启生效。
+    """
+    model_path = _validate_model_path(request.model_path)
+
+    try:
+        _get_selected_model_path().write_text(
+            json.dumps(
+                {
+                    "model_path": model_path,
+                    "working_dir": request.working_dir,
+                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except Exception as e:
+        logger.error(f"持久化所选模型失败: {e}")
+        raise HTTPException(status_code=500, detail=f"持久化所选模型失败: {e}")
+
+    # 车端在线时下发「带模型重启」信号（best-effort，不在线则重启后按文件读取所选模型）
+    if drive_state.car_online():
+        await drive_state.send_to_car({"type": "restart_with_model", "model_path": model_path})
+
+    return {
+        "success": True,
+        "restart_required": True,
+        "message": "模型已记录，需重启车端后生效",
+    }
 
 
 # ------------------------------------------------------------------

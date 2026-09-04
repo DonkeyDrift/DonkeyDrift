@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -570,3 +572,88 @@ def test_video_stream_emits_placeholder_when_offline():
     assert b"Content-Type: image/jpeg" in part
     payload = part.split(b"\r\n\r\n", 1)[1]
     assert payload.startswith(b"\xff\xd8")
+
+
+# ------------------------------------------------------------------
+# #362：选模型后要求带模型重启（不再运行时热切换）
+# ------------------------------------------------------------------
+def _make_model_client(monkeypatch, tmp_path, online=False):
+    monkeypatch.setenv("DONKEY_CAR_DIR", str(tmp_path))
+    if online:
+        return make_online_client()
+    return make_client()
+
+
+def test_load_model_rejects_absolute_path(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "/abs/models/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 400
+    assert "相对路径" in response.json()["detail"]
+
+
+def test_load_model_rejects_path_traversal(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "../models/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 400
+    assert "非法" in response.json()["detail"]
+
+
+def test_load_model_rejects_non_models_prefix(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "./tubs/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 400
+    assert "models" in response.json()["detail"]
+
+
+def test_load_model_persists_selection_and_requires_restart(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "./models/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["restart_required"] is True
+
+    selected_path = tmp_path / "selected_model.json"
+    assert selected_path.exists()
+    saved = json.loads(selected_path.read_text(encoding="utf-8"))
+    assert saved["model_path"] == "./models/foo.h5"
+    assert saved["working_dir"] == str(tmp_path)
+
+
+def test_load_model_notifies_online_car(monkeypatch, tmp_path):
+    client, drive = _make_model_client(monkeypatch, tmp_path, online=True)
+    sent_to_car = []
+
+    async def fake_send_to_car(payload):
+        sent_to_car.append(payload)
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "./models/bar.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 200
+    assert sent_to_car == [{"type": "restart_with_model", "model_path": "./models/bar.h5"}]

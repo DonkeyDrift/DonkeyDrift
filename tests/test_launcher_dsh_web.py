@@ -27,6 +27,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -694,8 +695,9 @@ def test_endpoint_passes_cwd_through(http_server, monkeypatch):
 
 
 def test_endpoint_defaults_cwd_to_projects(http_server, monkeypatch):
-    # 请求不带 cwd：缺省 /home/dkc/projects（与 kimi-code-web 同目录，
-    # dsh 以进程 cwd 作为新会话/工作区默认目录）
+    # 请求不带 cwd：缺省动态推导为 Path.home()/"projects"（与
+    # kimi-code-web 同目录，非硬编码串；dsh 以进程 cwd 作为新会话/
+    # 工作区默认目录）
     seen = []
 
     def fake(cwd=None):
@@ -705,7 +707,7 @@ def test_endpoint_defaults_cwd_to_projects(http_server, monkeypatch):
     monkeypatch.setattr(launcher_server, "launch_dsh_web", fake)
     code, _headers, _payload = _post(http_server + "/api/launch/dsh", b"{}")
     assert code == 200
-    assert seen == ["/home/dkc/projects"]
+    assert seen == [str(Path.home() / "projects")]
 
 
 def test_endpoint_rejects_non_json_with_cors(http_server):

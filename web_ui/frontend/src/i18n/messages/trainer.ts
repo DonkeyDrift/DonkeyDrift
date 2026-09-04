@@ -1,10 +1,16 @@
 // trainer namespace: zh values are the full Chinese translation; en values are
 // the full English translation of every entry.
+//
+// 命名约定（2026-09-04，以车上操作视角为准）：
+//   - myPc* key（tabMyPc / myPcTraining / myPcTrainingSubtitle / myPcProbeReady
+//     等）= 局域网主机（Lan Host）：通过 SSH 连接的远程开发电脑（内部枚举 mypc）。
+//   - tabLocal = 本机（Local Host）：运行 Web UI 的车端电脑（内部枚举 local）。
+// key 名沿用历史 mypc/local 约定，不与显示语同步更名。
 export const trainer: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'trainer.title': '训练器',
-    'trainer.tabMyPc': '本机',
-    'trainer.tabLocal': '车载电脑',
+    'trainer.tabMyPc': '局域网主机',
+    'trainer.tabLocal': '本机',
     'trainer.tabCloud': '云端',
     'trainer.stopTraining': '停止训练',
     'trainer.startTraining': '开始训练',
@@ -46,6 +52,8 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.copyPath': '复制路径',
     'trainer.bestLoss': '最佳: {loss}',
     'trainer.lossChartAlt': '训练损失图表',
+    'trainer.viewLossChart': '查看损失曲线',
+    'trainer.close': '关闭',
     'trainer.deleteModel': '删除模型',
     'trainer.deleteConfirm':
       '确定要删除 {name} 吗？这将同时移除其预览图和元数据。此操作不可撤销。',
@@ -71,7 +79,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.loss': '损失',
     'trainer.duration': '时长',
     'trainer.cloudTraining': '云端训练',
-    'trainer.myPcTraining': '本机训练',
+    'trainer.myPcTraining': '局域网主机训练',
     'trainer.host': 'IP',
     'trainer.user': '用户名',
     'trainer.password': '密码',
@@ -106,7 +114,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.myPcProbeHint': '首次使用前，先检测目标电脑的 SSH、Python 与 donkeycar 环境是否就绪。',
     'trainer.myPcProbeRun': '检测环境',
     'trainer.myPcProbeRunning': '检测中…',
-    'trainer.myPcProbeReady': '环境就绪，可以开始本机训练。',
+    'trainer.myPcProbeReady': '环境就绪，可以开始局域网主机训练。',
     'trainer.myPcProbeNotReady': '环境未就绪，请按下方提示修复后重试。',
     'trainer.myPcProbeFailed': '检测失败: {message}',
     'trainer.myPcProbeApplyPython': '应用到表单',
@@ -120,7 +128,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.myPcInstallRerunProbe': '安装完成后请点击「检测环境」重新检测。',
     'trainer.trainingConfigSubtitle': '设置 Tub、模型与训练参数',
     'trainer.cloudTrainingSubtitle': '配置云端训练主机连接',
-    'trainer.myPcTrainingSubtitle': '配置本机训练 SSH 连接',
+    'trainer.myPcTrainingSubtitle': '配置局域网主机训练 SSH 连接',
     'trainer.myPcProbeSubtitle': '检测目标电脑的训练环境是否就绪',
     'trainer.trainingStatusSubtitle': '查看训练进度与实时指标',
     'trainer.trainingLogSubtitle': '查看训练过程的实时输出',
@@ -128,8 +136,8 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
   },
   en: {
     'trainer.title': 'Trainer',
-    'trainer.tabMyPc': 'This Computer',
-    'trainer.tabLocal': 'Car Computer',
+    'trainer.tabMyPc': 'Lan Host',
+    'trainer.tabLocal': 'Local Host',
     'trainer.tabCloud': 'Cloud',
     'trainer.stopTraining': 'Stop Training',
     'trainer.startTraining': 'Start Training',
@@ -171,6 +179,8 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.copyPath': 'Copy path',
     'trainer.bestLoss': 'best: {loss}',
     'trainer.lossChartAlt': 'Training loss chart',
+    'trainer.viewLossChart': 'View loss chart',
+    'trainer.close': 'Close',
     'trainer.deleteModel': 'Delete Model',
     'trainer.deleteConfirm':
       'Are you sure you want to delete {name}? This will also remove its preview image and metadata. This action cannot be undone.',
@@ -196,7 +206,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.loss': 'Loss',
     'trainer.duration': 'Duration',
     'trainer.cloudTraining': 'Cloud Training',
-    'trainer.myPcTraining': 'This Computer Training',
+    'trainer.myPcTraining': 'Lan Host Training',
     'trainer.host': 'IP',
     'trainer.user': 'User',
     'trainer.password': 'Password',
@@ -229,7 +239,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.myPcProbeHint': 'Before first use, check the target computer\'s SSH, Python, and donkeycar environment.',
     'trainer.myPcProbeRun': 'Run Check',
     'trainer.myPcProbeRunning': 'Checking...',
-    'trainer.myPcProbeReady': 'Environment ready. You can start training on this computer.',
+    'trainer.myPcProbeReady': 'Environment ready. You can start training on the Lan Host.',
     'trainer.myPcProbeNotReady': 'Environment not ready. Fix the issues below and retry.',
     'trainer.myPcProbeFailed': 'Check failed: {message}',
     'trainer.myPcProbeApplyPython': 'Apply to form',
@@ -243,7 +253,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.myPcInstallRerunProbe': 'After installation, click "Run Check" to probe again.',
     'trainer.trainingConfigSubtitle': 'Set tub, model, and training parameters',
     'trainer.cloudTrainingSubtitle': 'Configure the cloud training host connection',
-    'trainer.myPcTrainingSubtitle': "Configure this computer's SSH connection",
+    'trainer.myPcTrainingSubtitle': "Configure the Lan Host's SSH connection",
     'trainer.myPcProbeSubtitle': 'Check whether the target computer training environment is ready',
     'trainer.trainingStatusSubtitle': 'View training progress and live metrics',
     'trainer.trainingLogSubtitle': 'View live output from the training process',
