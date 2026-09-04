@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useStore, TrainingJob, TrainerOnlineConfig, TrainerMyPcConfig } from '../store/useStore';
 import {
   startLocalTrain,
@@ -6,6 +6,7 @@ import {
   startMyPcTrain,
   resumeMyPcTrain,
   stopTrain,
+  getJobStatus,
   createLogStream,
   setTrainerConfig,
 } from '../services/api';
@@ -14,6 +15,8 @@ export function useTrainingJob() {
   const {
     trainingJob,
     setTrainingJob,
+    setActiveTraining,
+    clearActiveTraining,
     appendTrainingLog,
     updateTrainingProgress,
     finishTrainingJob,
@@ -69,6 +72,51 @@ export function useTrainingJob() {
     };
   }, [appendTrainingLog, updateTrainingProgress, finishTrainingJob]);
 
+  // 刷新页面后恢复训练进度：activeTraining 已持久化（id + 模式），
+  // 据此从 /status 拉回进度快照并重连 SSE 继续收实时事件。
+  const rehydratedRef = useRef(false);
+  useEffect(() => {
+    if (rehydratedRef.current) return;
+    rehydratedRef.current = true;
+
+    const active = useStore.getState().activeTraining;
+    if (!active) return;
+    // 已经在跑（例如刚启动后立刻刷新前的残留），避免重复订阅
+    if (useStore.getState().trainingJob) return;
+
+    getJobStatus(active.id)
+      .then((status) => {
+        const job: TrainingJob = {
+          id: active.id,
+          mode: active.mode,
+          status: status.status,
+          progress: {
+            currentEpoch: status.progress?.currentEpoch ?? 0,
+            totalEpochs: status.progress?.totalEpochs ?? 0,
+            currentStep: status.progress?.currentStep ?? 0,
+            totalSteps: status.progress?.totalSteps ?? 0,
+            loss: status.progress?.loss ?? null,
+            globalPercent: status.progress?.globalPercent ?? 0,
+          },
+          logs: [],
+          startedAt: status.started_at ?? new Date().toISOString(),
+          finishedAt: status.finished_at,
+          errorMessage: status.error ?? null,
+        };
+        setTrainingJob(job);
+        if (status.status === 'running') {
+          connectSSE(active.id, job);
+        } else {
+          // 已终态：展示一次结果即可，清掉持久化 id 避免下次刷新再复活
+          clearActiveTraining();
+        }
+      })
+      .catch(() => {
+        // 任务已不存在（后端重启等）：清掉失效 id，回到空闲态
+        clearActiveTraining();
+      });
+  }, [setTrainingJob, clearActiveTraining, connectSSE]);
+
   const startLocal = useCallback(async (params: {
     tub: string;
     model: string;
@@ -102,8 +150,9 @@ export function useTrainingJob() {
     };
 
     setTrainingJob(job);
+    setActiveTraining(job_id, 'local');
     connectSSE(job_id, job);
-  }, [trainingJob, configPath, setTrainingJob, connectSSE]);
+  }, [trainingJob, configPath, setTrainingJob, setActiveTraining, connectSSE]);
 
   // Shared pipeline for SSH-based training ('online' = cloud server,
   // 'mypc' = the user's own computer, reached via SSH callback).
@@ -124,6 +173,7 @@ export function useTrainingJob() {
       user: cfg.user,
       remote_dir_base: cfg.remoteDirBase,
       model_name: cfg.modelName,
+      model_type: cfg.modelType,
       python_path: cfg.pythonPath,
       key_path: cfg.keyPath,
     }, configFile);
@@ -157,8 +207,9 @@ export function useTrainingJob() {
     };
 
     setTrainingJob(job);
+    setActiveTraining(job_id, mode);
     connectSSE(job_id, job);
-  }, [trainingJob, configPath, setTrainingJob, connectSSE]);
+  }, [trainingJob, configPath, setTrainingJob, setActiveTraining, connectSSE]);
 
   const startOnline = useCallback(async (cfg: TrainerOnlineConfig) =>
     startSshTraining('online', 'train_online.conf', cfg, startOnlineTrain),

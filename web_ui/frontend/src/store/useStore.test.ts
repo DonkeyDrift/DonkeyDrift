@@ -40,3 +40,37 @@ describe('useStore.setError 与 activeDrawer 联动', () => {
     expect(useStore.getState().activeDrawer).toBeNull();
   });
 });
+
+describe('useStore activeTraining（刷新后恢复训练进度）', () => {
+  beforeEach(() => {
+    useStore.setState({ activeTraining: null, trainingJob: null });
+  });
+
+  it('setActiveTraining 记录正在训练的任务 id 与模式', () => {
+    useStore.getState().setActiveTraining('job-1', 'mypc');
+    expect(useStore.getState().activeTraining).toEqual({ id: 'job-1', mode: 'mypc' });
+  });
+
+  it('clearActiveTraining 清空任务标记', () => {
+    useStore.getState().setActiveTraining('job-1', 'local');
+    useStore.getState().clearActiveTraining();
+    expect(useStore.getState().activeTraining).toBeNull();
+  });
+
+  it('finishTrainingJob 在任务终态时同步清空 activeTraining', () => {
+    useStore.setState({
+      activeTraining: { id: 'job-1', mode: 'local' },
+      trainingJob: {
+        id: 'job-1',
+        mode: 'local',
+        status: 'running',
+        progress: { currentEpoch: 0, totalEpochs: 0, currentStep: 0, totalSteps: 0, loss: null, globalPercent: 0 },
+        logs: [],
+        startedAt: new Date().toISOString(),
+      },
+    });
+    useStore.getState().finishTrainingJob('completed');
+    expect(useStore.getState().trainingJob?.status).toBe('completed');
+    expect(useStore.getState().activeTraining).toBeNull();
+  });
+});

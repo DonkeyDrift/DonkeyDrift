@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-04 (181)
+## 2026-09-04 (185)
 
 - feat(trainer): 「已训练模型」卡片新增「导入模型」按钮——上传本地 .tflite 模型到当前项目 models/ 目录，列表自动刷新后可下载 / 加载到车端
   - 背景：模型卡片已有「下载 / 加载到车端 / 复制路径 / 删除」，唯独缺「导入（上传）」，本地模型只能手工拷文件。
@@ -10,6 +10,51 @@
   - i18n `web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.importModel` / `trainer.importing` / `trainer.importFailed` 中英文案。
   - 测试同步：后端新增 `web_ui/backend/tests/test_trainer_models.py`（4 例：成功落盘 / 拒绝非 .tflite / 重名 409 且原文件不覆盖 / 路径穿越文件名净化）。
   - 实测：后端 `pytest tests/test_trainer*.py tests/test_connector.py -q` 122 passed；前端 `npm run check`（tsc -b）无错、`npm run build` 通过。仅 DD 后端/前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (184)
+
+- fix(trainer): 远程训练补齐模型配置——「我这台电脑」(Mac/mypc) 模式恢复模型名称输入并新增模型类型选择，云端模式同步获得
+  - 背景：用户反馈 Mac 上训练时没有选择模型配置的地方（输入模型名称、选择类型）。根因有二：① (171) myPC 体验包给 `RemoteConfigForm` 引入 `compact` 模式时把「模型名称」连同 remoteDirBase/pythonPath 一起藏进了 `!compact` 块，mypc 模式下模型名称无处可填；② 远程训练命令的模型类型一直硬编码 `--type linear`，前端没有任何远程模式可选类型。
+  - `web_ui/frontend/src/components/trainer/modelTypes.ts`（新建）：抽出 `MODEL_TYPES` 共享常量（linear/categorical/rnn/imu/behavior/localizer/3d），`LocalConfigForm.tsx` 删除本地同名常量改为引用，杜绝两份列表漂移。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：「模型名称」输入框移出 `!compact` 块（compact 与完整模式都显示，带占位符），旁新增「模型类型」下拉（两列 grid）；新增必填 props `modelType`/`onModelTypeChange`；remoteDirBase/pythonPath 维持仅完整（云端）模式显示不变（mypc 由环境探测自动填 pythonPath）。i18n 复用既有 `trainer.modelName`/`trainer.modelType` 键，无新增文案。
+  - `web_ui/frontend/src/store/useStore.ts`：`TrainerOnlineConfig`（`TrainerMyPcConfig` 继承之）新增 `modelType: string`，online/mypc 两处默认值 `'linear'`，随 persist 持久化。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mypc 与 online 两个 `RemoteConfigForm` 实例接线 `modelType`；挂载加载 `getTrainerConfig` 回填 `model_type`（mypc 侧保留用户已改值）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：`startSshTraining` 持久化 conf 时带上 `model_type: cfg.modelType`；`services/api.ts` 的 `TrainerConfig` 接口同步可选 `model_type`。
+  - `web_ui/backend/routers/trainer.py`：`TrainerConfig` 模型新增 `model_type: str = "linear"`；GET `/api/trainer/config` 返回 `model_type`（缺省 linear），POST 写入 `[Remote] model_type`。
+  - `web_ui/backend/web_online_trainer.py`：`run_remote_training` 与 `run_resume` 的训练/续训命令 `--type` 改为读 conf 的 `model_type`（缺省 `linear`），替换两处硬编码；`remote_resume_train.py` 本就支持 `--type` 无需改。
+  - `web_ui/backend/train_my_pc.conf.example`：`[Remote]` 增加 `model_type = linear` 示例行。
+  - 兼容性：不配置时默认 `linear`，与既有命令逐字一致；旧 conf 无 `model_type` 键不受影响。
+  - 测试同步：后端新建 `tests/test_trainer_model_type.py`（5 例：训练命令用配置类型 / 缺省 linear / 续训命令用配置类型且 `--transfer` 正确 / config 端点 model_type 读写回路 / 旧配置缺键回退 linear）；前端 `RemoteConfigForm.test.tsx` 补 compact 模式 3 例（模型名称输入联动 / 模型类型下拉选项与联动 / compact 不显示远程目录）。实测：后端 `pytest tests/ -q` 220 passed；前端 `vitest run` 32 文件 173 passed、`npm run build`（`tsc -b`）通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (183)
+
+- perf(tub-library): 录制视频库回放第四轮冲刺 60 FPS——同页 TubEditor 播放期零 chart 重绘 + 零 re-render（播放竖线改 DOM 叠加层），预取图片 decode 预解码
+  - 背景：回放帧率三轮优化（(121) 播放绕过 React 直画 canvas、(125) 去热路径多余 setState、(162) 墙钟调度 + 后端 /tub/image 线程池/缓存）后 FPS 角标仍远低于 60。本轮定位剩余瓶颈不在播放器本身，而在同页（TM 页）的 TubEditor 吃满主线程：① 组件级 `useStore(state => state.currentIndex)` 订阅播放位置（播放期 ~10Hz 写入）→ 整棵 1800 行编辑器树高频 re-render，且 `options`/`plugins` 引用随 render 变化连带 react-chartjs-2 chart.update；② 索引变化经 `markPlaybackActive` 续期让图表渲染循环 60Hz 持续 `chart.update('none')` 全量重绘（~1000+ 点 × 2 数据集全 layout）——合计每秒约 70 次图表重绘 + 10 次大组件 reconciliation，TubLibrary 播放 rAF 被饿死掉帧。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：
+    - 播放竖线（红色虚线 playhead）由 chart.js afterDraw 插件 canvas 绘制改为 DOM 叠加层（`playheadRef`，2px 虚线 + 两端圆点、深浅主题配色与出视口隐藏语义均不变）：新增 `positionPlayhead()` 经 `chart.scales.x.getPixelForValue` 换算后直接写叠加层 style；索引变化在 store subscribe 回调里直写 DOM（零 chart.update、零 re-render）；chart 因数据/缩放/主题/resize 重绘后由插件 afterDraw 顺带 `positionPlayhead()` 对齐，无需逐一跟踪 layout 变化。
+    - 删除组件级 `currentIndex` 订阅与 `markPlaybackActive`/`playbackActivityUntilRef` 机制：滑块位置同步并入 subscribe 回调（非受控滑块经 ref 直写 DOM）；视口自动跟随抽为 `followPlayheadViewport()`（subscribe 回调与缩放/滚动/数据 effect 两路驱动，语义不变），仅真正翻页才 `setScrollProgress` 触发 re-render；滑块 `defaultValue` 改读 `useStore.getState().currentIndex`。
+    - 图表渲染循环仅保留选区跑马灯/悬停/数据变化路径，点击图表查看帧的悬停重绘不受影响。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：预取 `img.onload` 后追加 `img.decode()` 预解码——帧到期时 drawImage 不再触发主线程同步 JPEG 解码；播放调度/预取窗口/FPS 角标语义不动。
+  - 测试同步：新建 `web_ui/frontend/src/components/TubEditor.playhead.test.tsx` 3 例（与 (178) 拖拽框选的 `TubEditor.test.tsx` 并存，其假 chart 补 `getPixelForValue` 适配叠加层）（索引变化零 chart.update + 叠加层位置/显隐 + 滑块直写同步；点击图表仍恰好一次重绘）；`TubLibrary.test.tsx` 新增 1 例（预取 onload 后调用 decode 预解码）。前端 `vitest run` 31 文件 163 项、`tsc -b`、`npm run build` 全绿；后端无改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (182)
+
+- fix(trainer): 修复训练中刷新页面后看不到训练进度
+  - 根因：训练任务状态（job_id/进度/日志）只存在前端 zustand 内存 `trainingJob`，`partialize` 只持久化配置、不含当前任务；刷新后 React 重新挂载，`trainingJob` 回到 null，前端既不知道有在跑任务、也不重连 SSE，`ProgressPanel` 显示「空闲」。后端 `job_manager` 是内存单例（页面刷新不影响）、`/trainer/train/{id}/status` 本就返回完整进度快照，故最小修复落在前端。
+  - `web_ui/frontend/src/store/useStore.ts`：新增持久化字段 `activeTraining: { id: string; mode: TrainingJob['mode'] } | null` + `setActiveTraining`/`clearActiveTraining`；`finishTrainingJob` 同步清空 `activeTraining`；`partialize` 白名单加入 `activeTraining`（刷新后可读回正在训练的任务 id+模式）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：新增挂载恢复 effect（ref 防 StrictMode 双跑）——读 `activeTraining`，`getJobStatus` 拉进度快照重建 `TrainingJob`（logs 先置空），`status === 'running'` 时 `connectSSE` 重连继续收实时事件，否则清空 `activeTraining` 展示终态；请求失败则清掉失效 id 回到空闲态。`startLocal`/`startSshTraining` 拿到 `job_id` 后 `setActiveTraining` 记录，供下次刷新恢复。
+  - 测试：`web_ui/frontend/src/store/useStore.test.ts` 新增 3 例（setActiveTraining / clearActiveTraining / finishTrainingJob 同步清空）；新建 `web_ui/frontend/src/hooks/useTrainingJob.test.ts` 4 例（running 恢复+重连 SSE / 终态展示并清空 / 失效清空 / 无 activeTraining 不请求）。
+  - 实测：`tsc -b --noEmit` 无错、`vitest run` 34 文件 183 passed（含新增 7 例）。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (181)
+
+- fix(tui): TUI Drive 复用已有 Web UI 实例时自动打开浏览器，并修正车进程提示 URL 端口
+  - 背景：复用实例路径（issue #127）`web_cmd=None` 不经过 `donkey web --open`，TUI 自身也无任何 `webbrowser.open`，导致用户选 Drive 后浏览器不弹出（新起实例路径正常）。车进程 `manage.py drive` 打印的「请打开浏览器访问」提示又因 `DriveApiBridge.web_console_url()` 在未设 `DRIVE_WEB_CONSOLE_URL` 时硬编码回落 `:5188`，指向无人监听的端口（生产模式前端由后端托管，实际在 :8000）。
+  - `donkeycar/management/tui.py`（`DriveCommand.execute`）：复用实例时由 TUI 直接 `webbrowser.open` 打开 `http://localhost:<frontend_port>/#/drive`（实例刚经 `find_live_instance()` 探测存活，端口必在监听，无需再等待）；新起实例路径保持不变（仍由 `donkey web --open` 打开，TUI 不重复打开）。车进程环境新增注入 `DRIVE_WEB_CONSOLE_URL=http://localhost:<frontend_port>`（复用路径取实例登记端口，新起路径生产模式取后端端口；用户已显式设置时不覆盖，`setdefault` 语义），使打印的提示与实际监听端口一致。
+  - 测试同步（`donkeycar/tests/test_tui_drive.py`）：新增 autouse 隔离 fixture——本机可能有存活实例登记（`~/.donkeycar/webui.json`）与运行中车进程（`~/.donkeycar/drive.pid`），不隔离时测试会误杀真实车进程、误删 PID 记录，且「新起实例」断言会被复用路径顶掉；fixture 将 `find_live_instance` 默认置 None、`kill_previous_car_processes`/`write_drive_pids`/`remove_drive_pid_file` 置空，需要复用路径的用例自行覆盖。新增 3 例：复用实例打开正确 URL 且只起车进程、注入正确的 `DRIVE_WEB_CONSOLE_URL`；新起实例时 TUI 不开浏览器（留给 `--open`）且提示端口=后端端口；用户已设 `DRIVE_WEB_CONSOLE_URL` 不被覆盖。顺手修复 2 例既有失败：`9a630826`（#127）把 `execute()` 改为 `choose_available_backend_port(8000)` 带参调用后，既有 fake `lambda self: 8000` 签名未跟进而 TypeError，补齐形参。
+  - 实测：`pytest donkeycar/tests/test_tui_drive.py donkeycar/tests/test_tui_web_command.py` 15 passed。`donkeycar/tests/test_web_command.py` 6 例失败为 Tony 既有问题（`#135` 生产构建路径改用 `subprocess.run` 而 fake 只实现 `Popen`，`FakeProcess` 不支持上下文管理器），在 origin/Tony 原样复现，与本次改动无关、未动。
+  - 仅 TUI/CLI 侧改动，不影响 8000 在线实例页面，无需重建 dist；Firmware 无改动、无需 OTA。
 
 ## 2026-09-04 (180)
 

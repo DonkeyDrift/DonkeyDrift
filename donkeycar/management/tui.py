@@ -1289,13 +1289,21 @@ class DriveCommand(DonkeyCommand):
                     creationflags=creation_flags
                 )
                 processes.append(web_process)
+                # 新起实例：TUI 不走 --dev，生产模式前端由后端托管，前端端口即后端端口
+                frontend_port = backend_port
             else:
                 # 复用实例：车端连回已有后端
                 backend_port = inst["backend_port"]
+                frontend_port = inst["frontend_port"]
 
             car_env = os.environ.copy()
             car_env["DRIVE_API_SERVER_URL"] = \
                 self.get_drive_api_server_url(backend_port=backend_port)
+            # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口
+            #（DriveApiBridge 未设置时硬编码回落 5188）；用户已显式设置时尊重其值
+            car_env.setdefault(
+                "DRIVE_WEB_CONSOLE_URL", f"http://localhost:{frontend_port}"
+            )
             car_process = subprocess.Popen(
                 car_cmd,
                 cwd=car_path,
@@ -1307,6 +1315,13 @@ class DriveCommand(DonkeyCommand):
 
             # 记录本次启动的进程 PID，供下次启动时清理
             write_drive_pids([p.pid for p in processes])
+
+            if inst is not None:
+                # 复用实例不经过 `donkey web --open`，由 TUI 直接打开 Drive 页；
+                # 实例刚通过 find_live_instance() 探测，前端端口已在监听
+                drive_url = f"http://localhost:{frontend_port}/#/drive"
+                webbrowser.open(drive_url)
+                console.print(f"[dim]已在浏览器打开 {drive_url}[/dim]")
 
             self.monitor_processes(web_process, car_process)
             console.print(f"\n[bold green]✓ 执行结束[/bold green]")
