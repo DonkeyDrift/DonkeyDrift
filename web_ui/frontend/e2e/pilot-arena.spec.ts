@@ -17,15 +17,38 @@ const summary = {
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
-    let body: unknown = {};
+    let body: unknown;
     if (pathname.endsWith('/tub/load') || pathname.endsWith('/tub/records')) {
       body = tubResponse;
     } else if (pathname.endsWith('/config/load')) {
       body = { config: { DRIVE_LOOP_HZ: 60 } };
+    } else if (pathname.endsWith('/drift/state')) {
+      // Drive 区的 DriftCard 以 10Hz 轮询此端点并在 state.events 上取 .length
+      // （DriftCard.tsx:442）；空对象会令整个 App 崩进 ErrorBoundary，必须给合法空闲态。
+      body = {
+        state: 'idle',
+        calibration_ready: false,
+        camera_running: false,
+        beta_deg: null,
+        pose: null,
+        telemetry_count: 0,
+        camera_fps: 0,
+        frames_written: 0,
+        events: [],
+        config: {},
+      };
     } else if (pathname.endsWith('/arena/model-types')) {
       body = { model_types: ['tflite_linear', 'linear'] };
     } else if (pathname.endsWith('/arena/models')) {
-      body = { models: [{ path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' }] };
+      // 返回 2 个模型：PilotArenaPage 的 auto-load 只在 models.length === 1 时触发
+      // （PilotArenaPage.tsx:638-645），双模型让它跳过自动加载，
+      // 『加载并预测』点击成为真实因果步骤。
+      body = {
+        models: [
+          { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' },
+          { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite' },
+        ],
+      };
     } else if (pathname.endsWith('/arena/pilots/load')) {
       body = {
         pilot: {
@@ -50,6 +73,10 @@ test.beforeEach(async ({ page }) => {
         ],
         summary,
       };
+    } else {
+      // 未 mock 的端点响亮失败：静默空对象会掩盖组件对真实响应结构的假设
+      await route.fulfill({ status: 404, json: { detail: `unmocked endpoint: ${pathname}` } });
+      return;
     }
     await route.fulfill({ json: body });
   });
