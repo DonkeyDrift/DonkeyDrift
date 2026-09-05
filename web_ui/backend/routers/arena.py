@@ -297,17 +297,29 @@ async def list_models(working_dir: Optional[str] = None, model_type: Optional[st
 
     for name in sorted(os.listdir(models_dir)):
         full_path = os.path.join(models_dir, name)
-        if not os.path.isfile(full_path):
-            continue
         suffix = os.path.splitext(name)[1].lower()
-        if suffix not in extensions:
+        if os.path.isfile(full_path):
+            if suffix not in extensions:
+                continue
+            size = os.stat(full_path).st_size
+        elif (
+            os.path.isdir(full_path)
+            and name.lower().endswith(".savedmodel")
+            and ".savedmodel" in extensions
+        ):
+            size = sum(
+                os.path.getsize(os.path.join(dirpath, f))
+                for dirpath, _, filenames in os.walk(full_path)
+                for f in filenames
+            )
+        else:
             continue
         stat = os.stat(full_path)
         items.append({
             "name": name,
             "path": os.path.abspath(full_path),
             "format": _format_for_path(name),
-            "size": stat.st_size,
+            "size": size,
             "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             "compatible": True,
         })
@@ -316,7 +328,8 @@ async def list_models(working_dir: Optional[str] = None, model_type: Optional[st
 
 @router.post("/pilots/load")
 async def load_pilot(request: LoadPilotRequest):
-    if not os.path.isfile(request.model_path):
+    # SavedModel 是目录形式，文件与目录都允许
+    if not os.path.exists(request.model_path):
         raise HTTPException(status_code=404, detail="Model file not found")
 
     cfg = load_car_config(request.config_path)

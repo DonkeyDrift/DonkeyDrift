@@ -21,6 +21,7 @@ import {
   ArenaPredictionPoint,
   getArenaPredictions,
   getImageUrl,
+  importModel,
   listArenaModels,
   listArenaModelTypes,
   loadArenaPilot,
@@ -491,6 +492,22 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     }
   }, [clearViewerPredictionState, configPath, updateViewer]);
 
+  // 一键导入外部模型文件（.tflite/.h5/.zip SavedModel），导入后立即刷新该 viewer 的模型列表
+  const [importingViewerId, setImportingViewerId] = useState<string | null>(null);
+  const importInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const handleImportModel = useCallback(async (viewer: ViewerState, file: File) => {
+    setImportingViewerId(viewer.localId);
+    try {
+      await importModel(file, configPath);
+      await refreshModels(viewer);
+    } catch (error) {
+      updateViewer(viewer.localId, { loading: false, error: getApiErrorMessage(error) });
+    } finally {
+      setImportingViewerId(null);
+    }
+  }, [configPath, refreshModels, updateViewer]);
+
   const refreshPrediction = useCallback(async (
     viewer: ViewerState,
     recordIndex: number,
@@ -922,10 +939,31 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                     ))}
                   </select>
                 </label>
-                <div className="flex items-end">
+                <div className="flex items-end gap-2">
                   <Button variant="secondary" className="w-full" onClick={() => refreshModels(viewer)} disabled={viewer.loading}>
                     {t('arena.scanModels')}
                   </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => importInputRefs.current[viewer.localId]?.click()}
+                    disabled={viewer.loading || importingViewerId === viewer.localId}
+                  >
+                    {importingViewerId === viewer.localId ? t('arena.importing') : t('arena.importModel')}
+                  </Button>
+                  <input
+                    ref={(el) => { importInputRefs.current[viewer.localId] = el; }}
+                    type="file"
+                    accept=".tflite,.h5,.zip"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        void handleImportModel(viewer, file);
+                      }
+                      event.target.value = '';
+                    }}
+                  />
                 </div>
               </div>
 

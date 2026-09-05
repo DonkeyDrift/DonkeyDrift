@@ -91,6 +91,44 @@ def test_list_models_includes_all_arena_model_formats(tmp_path):
     assert names == {"pilot.h5", "pilot.tflite", "pilot.savedmodel", "pilot.trt"}
 
 
+def test_list_models_includes_savedmodel_directory(tmp_path):
+    models_dir = tmp_path / "models"
+    savedmodel_dir = models_dir / "pilot.savedmodel"
+    savedmodel_dir.mkdir(parents=True)
+    (savedmodel_dir / "saved_model.pb").write_text("pb")
+
+    from routers import arena
+
+    client = TestClient(FastAPI())
+    client.app.include_router(arena.router, prefix="/api/arena")
+
+    response = client.get("/api/arena/models", params={"working_dir": str(tmp_path)})
+
+    assert response.status_code == 200
+    models = {item["name"]: item for item in response.json()["models"]}
+    assert "pilot.savedmodel" in models
+    assert models["pilot.savedmodel"]["format"] == "savedmodel"
+
+
+def test_load_pilot_accepts_savedmodel_directory(monkeypatch, tmp_path):
+    client, _ = make_client(monkeypatch)
+    savedmodel_dir = tmp_path / "pilot.savedmodel"
+    savedmodel_dir.mkdir()
+    (savedmodel_dir / "saved_model.pb").write_text("pb")
+
+    load_response = client.post(
+        "/api/arena/pilots/load",
+        json={
+            "model_path": str(savedmodel_dir),
+            "model_type": "linear",
+            "config_path": str(tmp_path),
+        },
+    )
+
+    assert load_response.status_code == 200
+    assert load_response.json()["pilot"]["name"] == "pilot.savedmodel"
+
+
 def test_load_car_config_merges_base_config_and_myconfig(tmp_path):
     (tmp_path / "config.py").write_text("IMAGE_H = 120\nIMAGE_W = 160\nIMAGE_DEPTH = 3\n")
     (tmp_path / "myconfig.py").write_text("IMAGE_H = 240\n")

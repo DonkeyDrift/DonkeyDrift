@@ -3,6 +3,7 @@ Trainer API Router - exposes training configuration, job management, and SSE log
 """
 import asyncio
 import configparser
+import io
 import json
 import os
 import re
@@ -10,7 +11,9 @@ import shutil
 import socket
 import subprocess
 import threading
+import zipfile
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request
@@ -589,10 +592,11 @@ async def list_tubs(working_dir: Optional[str] = None):
 
 @router.get("/models")
 async def list_models(working_dir: Optional[str] = None):
-    """List local .tflite models in ./models directory.
+    """List local models in ./models directory.
 
-    Only .tflite files are shown. Training loss charts (.png) are hidden
-    from the list but linked to their corresponding model via previewPath.
+    Shows .tflite / .h5 model files and TensorFlow SavedModel directories
+    (``<name>.savedmodel/``). Training loss charts (.png) are hidden from
+    the list but linked to their corresponding model via previewPath.
     """
     cwd = working_dir or os.getcwd()
     models_dir = os.path.join(cwd, "models")
@@ -608,11 +612,12 @@ async def list_models(working_dir: Optional[str] = None):
 
     for name in sorted(os.listdir(models_dir)):
         full = os.path.join(models_dir, name)
-        # Only show .tflite model files
-        if not (os.path.isfile(full) and name.endswith(".tflite")):
+        is_savedmodel_dir = os.path.isdir(full) and name.lower().endswith(".savedmodel")
+        is_model_file = os.path.isfile(full) and name.lower().endswith((".tflite", ".h5"))
+        if not (is_model_file or is_savedmodel_dir):
             continue
 
-        stem = os.path.splitext(name)[0]
+        stem = name[: -len(".savedmodel")] if is_savedmodel_dir else os.path.splitext(name)[0]
         preview_name = f"{stem}.png"
         preview_path = (
             os.path.abspath(os.path.join(models_dir, preview_name))
@@ -633,8 +638,8 @@ async def list_models(working_dir: Optional[str] = None):
         stat = os.stat(full)
         items.append({
             "name": name,
-            "type": "file",
-            "size": stat.st_size,
+            "type": "dir" if is_savedmodel_dir else "file",
+            "size": _get_dir_size(full) if is_savedmodel_dir else stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             "path": os.path.abspath(full),
             "previewPath": preview_path,
@@ -659,8 +664,8 @@ async def download_model(path: str = Query(..., description="Absolute path to th
     """Download a model file as attachment."""
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Model file not found")
-    if not path.lower().endswith(".tflite"):
-        raise HTTPException(status_code=400, detail="Only .tflite model files are supported")
+    if not path.lower().endswith((".tflite", ".h5")):
+        raise HTTPException(status_code=400, detail="Only .tflite/.h5 model files are supported")
     filename = os.path.basename(path)
     return FileResponse(
         path,
@@ -670,18 +675,22 @@ async def download_model(path: str = Query(..., description="Absolute path to th
 
 
 @router.delete("/models")
-async def delete_model(path: str = Query(..., description="Absolute path to the model file")):
-    """Delete a model file and its associated preview image and metadata."""
-    if not os.path.isfile(path):
+async def delete_model(path: str = Query(..., description="Absolute path to the model file or .savedmodel directory")):
+    """Delete a model and its associated preview image and metadata."""
+    is_savedmodel_dir = os.path.isdir(path) and path.lower().endswith(".savedmodel")
+    if not is_savedmodel_dir and not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Model file not found")
-    if not path.lower().endswith(".tflite"):
-        raise HTTPException(status_code=400, detail="Only .tflite model files are supported")
+    if not is_savedmodel_dir and not path.lower().endswith((".tflite", ".h5")):
+        raise HTTPException(status_code=400, detail="Only .tflite/.h5 model files or .savedmodel directories are supported")
 
-    # Remove the main model file
-    os.remove(path)
+    # Remove the main model file (or SavedModel directory tree)
+    if is_savedmodel_dir:
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
 
     # Remove associated files (preview .png and _meta.json) if they exist
-    stem = os.path.splitext(path)[0]
+    stem = path[: -len(".savedmodel")] if is_savedmodel_dir else os.path.splitext(path)[0]
     for suffix in (".png", "_meta.json"):
         associated_path = f"{stem}{suffix}"
         if os.path.isfile(associated_path):
@@ -693,43 +702,107 @@ async def delete_model(path: str = Query(..., description="Absolute path to the 
     return {"status": True, "path": path}
 
 
+def _extract_savedmodel_zip(payload: bytes, dest: str) -> int:
+    """Extract a SavedModel zip bundle into `dest`, returning total bytes.
+
+    Requires the archive to contain a saved_model.pb (a single common
+    top-level directory, e.g. "foo.savedmodel/", is stripped). Rejects
+    unsafe entries (absolute paths / "..") and non-SavedModel archives.
+    Raises HTTPException on any validation failure; never leaves a partial
+    `dest` behind.
+    """
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload))
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Invalid zip file")
+
+    entries = [info for info in archive.infolist() if not info.is_dir()]
+    if not entries:
+        raise HTTPException(status_code=400, detail="Empty zip archive")
+    for info in entries:
+        parts = PurePosixPath(info.filename).parts
+        if info.filename.startswith("/") or ".." in parts:
+            raise HTTPException(status_code=400, detail="Unsafe path in zip archive")
+
+    # Strip a single common top-level directory, if all entries share one
+    prefix = ""
+    roots = {PurePosixPath(info.filename).parts[0] for info in entries}
+    if len(roots) == 1 and all(len(PurePosixPath(info.filename).parts) > 1 for info in entries):
+        prefix = next(iter(roots)) + "/"
+
+    rel_names = [info.filename[len(prefix):] for info in entries]
+    if "saved_model.pb" not in rel_names:
+        raise HTTPException(
+            status_code=400,
+            detail="Zip does not contain a SavedModel (saved_model.pb missing)",
+        )
+
+    os.makedirs(dest)
+    size = 0
+    try:
+        for info in entries:
+            target = os.path.join(dest, info.filename[len(prefix):])
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with archive.open(info) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out)
+            size += info.file_size
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    return size
+
+
 @router.post("/models/import")
 async def import_model(
     file: UploadFile = File(...),
     working_dir: Optional[str] = Form(None),
 ):
-    """Import (upload) a .tflite model into <working_dir>/models.
+    """Import (upload) a model into <working_dir>/models.
 
-    Mirrors list_models' working_dir resolution so the uploaded file lands in
-    exactly the directory the Trainer page lists. Rejects non-.tflite files
-    and duplicate names (no silent overwrite).
+    Accepts .tflite / .h5 single files, and .zip bundles holding a
+    TensorFlow SavedModel which are extracted into a ``<name>.savedmodel/``
+    directory. Mirrors list_models' working_dir resolution so the uploaded
+    model lands in exactly the directory the Trainer page lists. Rejects
+    unsupported types and duplicate names (no silent overwrite).
     """
     filename = os.path.basename(file.filename or "")
     if not filename:
         raise HTTPException(status_code=400, detail="No file selected")
-    if not filename.lower().endswith(".tflite"):
-        raise HTTPException(status_code=400, detail="Only .tflite model files are supported")
+    lower = filename.lower()
+    if not lower.endswith((".tflite", ".h5", ".zip")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .tflite, .h5 or .zip (SavedModel) model files are supported",
+        )
 
     cwd = working_dir or os.getcwd()
     models_dir = os.path.join(cwd, "models")
     os.makedirs(models_dir, exist_ok=True)
 
-    dest = os.path.join(models_dir, filename)
-    if os.path.exists(dest):
-        raise HTTPException(status_code=409, detail=f"Model already exists: {filename}")
-
-    size = 0
-    with open(dest, "wb") as out:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
-            size += len(chunk)
+    if lower.endswith(".zip"):
+        name = f"{os.path.splitext(filename)[0]}.savedmodel"
+        dest = os.path.join(models_dir, name)
+        if os.path.exists(dest):
+            raise HTTPException(status_code=409, detail=f"Model already exists: {name}")
+        payload = await file.read()
+        size = _extract_savedmodel_zip(payload, dest)
+    else:
+        name = filename
+        dest = os.path.join(models_dir, name)
+        if os.path.exists(dest):
+            raise HTTPException(status_code=409, detail=f"Model already exists: {name}")
+        size = 0
+        with open(dest, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                size += len(chunk)
 
     return {
         "status": True,
-        "name": filename,
+        "name": name,
         "path": os.path.abspath(dest),
         "size": size,
     }

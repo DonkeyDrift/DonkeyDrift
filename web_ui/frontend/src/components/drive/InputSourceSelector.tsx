@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Gamepad2, Smartphone, Joystick, Keyboard, ChevronDown, ChevronUp } from 'lucide-react';
+import { Gamepad2, Smartphone, Joystick, Keyboard, Cpu, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
 
-export type InputSource = 'joystick' | 'keyboard' | 'gamepad' | 'gyro';
+export type InputSource = 'joystick' | 'keyboard' | 'gamepad' | 'gyro' | 'esp32';
 
 interface InputSourceSelectorProps {
   value: InputSource;
@@ -18,6 +18,7 @@ const SOURCES: { value: InputSource; labelKey: string; icon: React.ReactNode }[]
   { value: 'keyboard', labelKey: 'drive.sourceKeyboard', icon: <Keyboard className="w-3.5 h-3.5" /> },
   { value: 'gamepad', labelKey: 'drive.sourceGamepad', icon: <Gamepad2 className="w-3.5 h-3.5" /> },
   { value: 'gyro', labelKey: 'drive.sourceGyro', icon: <Smartphone className="w-3.5 h-3.5" /> },
+  { value: 'esp32', labelKey: 'drive.sourceEsp32', icon: <Cpu className="w-3.5 h-3.5" /> },
 ];
 
 export const InputSourceSelector: React.FC<InputSourceSelectorProps> = ({

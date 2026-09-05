@@ -139,7 +139,7 @@ export const ModelsList: React.FC = () => {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".tflite"
+        accept=".tflite,.h5,.zip"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
