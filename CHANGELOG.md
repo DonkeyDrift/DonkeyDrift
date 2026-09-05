@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-05 (188)
+
+- feat(models): 一键导入模型扩展至 .h5/.savedmodel 并新增 Pilot Arena 入口——外部模型导入后入模型列表，可用于 PA 推理与 Drive 自动驾驶选择 (fixes #374)
+  - 背景：(185) 已提供 Trainer 模型卡片的 .tflite 导入按钮，但 issue #374 要求的 `.h5`/`.savedmodel` 与 Pilot Arena 入口缺失；且 Trainer `GET /models` 只列 `.tflite`（Drive 页模型选择复用该接口），PA `/arena/models` 只认文件——`.savedmodel` 实为目录形式（`saved_model.pb` + `variables/`），永远扫不到。
+  - 后端 `web_ui/backend/routers/trainer.py`：`POST /api/trainer/models/import` 扩展为接受 `.tflite`/`.h5` 单文件与 `.zip`（SavedModel 打包）——zip 解压为 `models/<名>.savedmodel/` 目录，剥离单一顶层目录、强制校验含 `saved_model.pb`、zip-slip 防护、重名 409、失败不留残留目录；`GET /models` 新增列出 `.h5` 与 `.savedmodel` 目录（`type: file/dir` 区分，目录大小递归汇总）——导入后立即出现在 Trainer 列表，Drive 页自动能选；`download` 扩展到 `.h5`；`delete` 支持 `.h5` 与 `.savedmodel` 目录（`shutil.rmtree`），关联 `.png`/`_meta.json` 一并清理。
+  - 后端 `web_ui/backend/routers/arena.py`：`/arena/models` 命中 `.savedmodel` 目录（在白名单内时）；`pilots/load` 允许目录路径（SavedModel 加载由 donkeycar `get_model_by_type` 原生支持）。
+  - 前端 `web_ui/frontend/src/pages/PilotArenaPage.tsx`：「扫描模型」旁新增「导入模型」按钮 + 隐藏 file input（按 viewer 维度 ref），上传成功后 `refreshModels` 立即刷新该 viewer 的模型列表，错误走 `viewer.error` 展示；`web_ui/frontend/src/components/trainer/ModelsList.tsx`：文件选择 `accept` 放宽为 `.tflite,.h5,.zip`；i18n `web_ui/frontend/src/i18n/messages/arena.ts` 新增 `arena.importModel`/`arena.importing` 中英文案。
+  - 测试同步：`tests/test_trainer_models.py` 原「拒绝 .h5」改为「拒绝 .txt」，新增 .h5 上传→列表出现、SavedModel zip→解压成目录且列表 `type=dir`、无 `saved_model.pb` 的 zip 400、zip-slip 400、SavedModel 重名 409；`tests/test_arena.py` 新增 SavedModel 目录出现在 arena 列表、`load_pilot` 接受目录。实测：后端 `pytest test_trainer_models.py test_arena.py` 24 passed；前端 `npm run build` 通过。
+  - 已知边界：`.savedmodel` 目录暂不支持下载（400 提示）；zip=SavedModel 约定目前由后端报错文案传达。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-05 (187)
 
 - feat(drive): Drive 输入源新增「ESP32 手柄」——复用车端固件上行的 rc/steering、rc/throttle 通道，经与现有输入源完全相同的 60Hz 控制循环驱动车辆，录制链路行为一致 (fixes #371)
