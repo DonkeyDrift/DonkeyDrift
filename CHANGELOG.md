@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-05 (189)
+
+- fix(trainer): macOS 远端训练禁用 Metal GPU 回退 CPU float32——修 loss 曲线尖峰、val 卡退化水平不收敛 (fixes #370)
+  - 根因：tensorflow-metal 插件在 Apple Silicon 上 float32 下亦有已知数值 bug（上游 keras-team/tf-keras#140 佐证）。证据链：① 9-4 异常模型（M6Q0/KZOG/8PS1）全部产自 Mac (mypc) 远端训练，8 月正常曲线全部产自本机训练；② 8PS1 的 val 卡死值 ~0.37 与本机 7051 条数据的"预测均值"退化水平 `var(angle)+var(throttle)=0.3842` 精确吻合——Mac 上模型几乎没学到东西；③ 同数据同代码在本机 CPU（TF 2.15.1）复跑 14 epoch，loss 0.276→0.048、val_loss 0.249→0.028 平滑单调下降——学习率、数据质量、loss 统计口径全部证伪；④ 远端 Mac 跑的 PyPI `donkeydrifter==0.1.0` 与 Tony 的训练行为逐行一致（唯一差异 fp16 门控已被既有远程补丁等价覆盖），排除旧代码嫌疑。
+  - `donkeycar/templates/train.py`：darwin 且有 GPU 时 `tf.config.set_visible_devices([], 'GPU')`，隐藏 Metal GPU 回退 CPU float32（模型小、CPU 几分钟可训完，正确性优先）；对未来新装的远端 env 生效。
+  - `donkeycar/management/train_online.py`：`_patch_remote_train_py_if_macos()` 的 sed 把启用 fp16 的 `mixed_precision.set_global_policy(...)` 行直接替换为 `tf.config.set_visible_devices([], "GPU")`——一次补丁同时拿掉 fp16 与 Metal GPU，存量远端 env 立即生效；旧模板的误导性 print 一并替换；续训路径（remote_resume_train.py import 同一 train.py）自动覆盖。已对旧（0.1.0）/新两版模板干跑 sed 验证（py_compile 通过），新模板被替换行位于 darwin 不会进入的分支，文本替换无害。
+  - 测试同步：`tests/test_train_template_fp16.py` 补 macOS GPU 禁用断言；`tests/test_online_trainer_workspace.py` 断言 sed 含 `set_visible_devices`。实测：`pytest tests/test_train_template_fp16.py tests/test_online_trainer_workspace.py` 15 passed；`pytest web_ui/backend/tests/` 230 passed；`pytest tests/` 274 passed；本机 CPU 端到端完整训练复现健康收敛曲线。
+  - 注：仅 macOS 远端训练路径受影响，本机 Web UI 无感知，无需本机部署；Firmware 无改动、无需 OTA。真闭环待用户 Mac 重训验证（sed 补丁随下次 createcar 自动打上）。
+
 ## 2026-09-05 (188)
 
 - feat(models): 一键导入模型扩展至 .h5/.savedmodel 并新增 Pilot Arena 入口——外部模型导入后入模型列表，可用于 PA 推理与 Drive 自动驾驶选择 (fixes #374)
