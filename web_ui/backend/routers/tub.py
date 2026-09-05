@@ -10,6 +10,7 @@ import threading
 from collections import OrderedDict
 from donkeycar.parts.tub_v2 import Tub
 from donkeycar.pipeline.types import TubRecord
+from ai_clean_engine import CollisionReverseHeuristic
 import logging
 from typing import List, Optional, Any, Dict
 
@@ -87,6 +88,16 @@ class TubDeleteRequest(BaseModel):
 class SessionDeleteRequest(BaseModel):
     tub_path: str
     session_id: str
+
+class AiCleanScanRequest(BaseModel):
+    tub_paths: List[str]
+
+class AiCleanTubDeletion(BaseModel):
+    tub_path: str
+    indexes: List[int]
+
+class AiCleanExecuteRequest(BaseModel):
+    deletions: List[AiCleanTubDeletion]
 
 @router.post("/load")
 async def load_tub(request: TubLoadRequest):
@@ -441,7 +452,7 @@ async def restore_records(request: TubDeleteRequest):
     global current_tub, current_records
     if not current_tub:
         raise HTTPException(status_code=400, detail="No tub loaded")
-        
+
     try:
         current_tub.restore_records(request.indexes)
         # Reload records so restored indexes are reflected in subsequent reads
@@ -455,3 +466,155 @@ async def restore_records(request: TubDeleteRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# AI 清理「碰撞后倒车」（issue #373）：两段式——先扫描出待删片段清单，
+# 用户确认后再批量软删除（复用 manifest 级删除，与框选删除同一机制，
+# 事后仍可通过 restore 撤销）。识别规则见 ai_clean_engine.py。
+# ---------------------------------------------------------------------------
+
+def _validate_tub_path(path: str) -> str:
+    """展开并校验 tub 路径，不合法时抛 HTTPException。"""
+    expanded = os.path.expanduser(path)
+    if not os.path.exists(expanded):
+        raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
+    if not os.path.exists(os.path.join(expanded, 'manifest.json')):
+        raise HTTPException(status_code=400, detail=f"Path is not a valid tub: {path}")
+    return expanded
+
+
+@router.get("/ai_clean/candidates")
+async def ai_clean_candidates(tubPath: str):
+    """列出可参与 AI 清理的 tub：当前 tub 及其同目录下的兄弟 tub。
+
+    用户的多个 tub 通常平铺在同一目录下（如 data/、data_sim/……），
+    批量清理时前端让用户勾选本次要扫描的范围。
+    """
+    path = _validate_tub_path(tubPath)
+    parent = os.path.dirname(path.rstrip(os.sep)) or os.sep
+
+    candidates: List[Dict[str, Any]] = []
+    try:
+        for name in sorted(os.listdir(parent)):
+            child = os.path.join(parent, name)
+            if not os.path.isdir(child):
+                continue
+            if not os.path.isfile(os.path.join(child, 'manifest.json')):
+                continue
+            candidates.append({
+                "path": child,
+                "name": name,
+                "is_current": os.path.abspath(child) == os.path.abspath(path),
+            })
+    except OSError as e:
+        logger.error(f"Failed to list sibling tubs of {path}: {e}")
+
+    # 当前 tub 必须始终在列表里（父目录不可读等极端情况下兜底）
+    if not any(c["is_current"] for c in candidates):
+        candidates.insert(0, {
+            "path": path,
+            "name": os.path.basename(path.rstrip(os.sep)) or path,
+            "is_current": True,
+        })
+    return {"status": True, "current": path, "tubs": candidates}
+
+
+@router.post("/ai_clean/scan")
+async def ai_clean_scan(request: AiCleanScanRequest):
+    """批量扫描多个 tub，返回每个 tub 识别出的「碰撞后倒车」待删片段清单。
+
+    单个 tub 失败（路径无效/读取异常）不拖垮整批——该 tub 条目中带回
+    error 字段，前端按 tub 分别展示。
+    """
+    if not request.tub_paths:
+        raise HTTPException(status_code=400, detail="No tub paths given")
+
+    detector = CollisionReverseHeuristic()
+    tubs: List[Dict[str, Any]] = []
+    for raw_path in request.tub_paths:
+        path = os.path.expanduser(raw_path)
+        try:
+            path = _validate_tub_path(path)
+            tub = Tub(path, read_only=True)
+            try:
+                records = [record for record in tub]
+            finally:
+                tub.close()
+            segments = [seg.to_dict() for seg in detector.detect(records)]
+            frame_count = sum(seg["frame_count"] for seg in segments)
+            tubs.append({
+                "tub_path": path,
+                "record_count": len(records),
+                "segments": segments,
+                "segment_count": len(segments),
+                "frame_count": frame_count,
+            })
+        except HTTPException as e:
+            tubs.append({"tub_path": path, "error": str(e.detail)})
+        except Exception as e:
+            logger.error(f"AI clean scan failed for tub {path}: {e}")
+            tubs.append({"tub_path": path, "error": str(e)})
+
+    return {
+        "status": True,
+        "tubs": tubs,
+        "total_segments": sum(t.get("segment_count", 0) for t in tubs),
+        "total_frames": sum(t.get("frame_count", 0) for t in tubs),
+    }
+
+
+@router.post("/ai_clean/execute")
+async def ai_clean_execute(request: AiCleanExecuteRequest):
+    """确认后批量删除：对每个 tub 软删除指定帧（manifest 级，可恢复）。
+
+    与 /delete、/delete_session 同一删除机制，删除后 manifest 的
+    deleted_indexes 即更新，各面板读取时自动跳过这些帧。
+    """
+    global current_tub, current_records
+    if not request.deletions:
+        raise HTTPException(status_code=400, detail="No deletions given")
+
+    results: List[Dict[str, Any]] = []
+    total_deleted = 0
+    loaded_tub_affected = False
+    for deletion in request.deletions:
+        path = os.path.expanduser(deletion.tub_path)
+        try:
+            path = _validate_tub_path(path)
+            # 过滤掉非法索引，避免误伤 manifest
+            indexes = sorted({i for i in deletion.indexes if isinstance(i, int) and i >= 0})
+            if indexes:
+                deleter = Tub(path)
+                try:
+                    deleter.delete_records(indexes)
+                finally:
+                    deleter.close()
+            total_deleted += len(indexes)
+            results.append({"tub_path": path, "deleted_count": len(indexes)})
+            if current_tub and current_tub_path == path:
+                loaded_tub_affected = True
+        except HTTPException as e:
+            results.append({"tub_path": path, "error": str(e.detail)})
+        except Exception as e:
+            logger.error(f"AI clean execute failed for tub {path}: {e}")
+            results.append({"tub_path": path, "error": str(e)})
+
+    # 当前已加载的 tub 被清理过时同步全局状态，其它面板立即反映删除结果
+    response: Dict[str, Any] = {
+        "status": True,
+        "results": results,
+        "total_deleted": total_deleted,
+        "record_count": None,
+        "deleted_indexes": None,
+    }
+    if loaded_tub_affected:
+        try:
+            current_tub.close()
+            current_tub = Tub(current_tub_path)
+            current_records = [record for record in current_tub]
+            response["record_count"] = len(current_records)
+            response["deleted_indexes"] = sorted(list(current_tub.manifest.deleted_indexes))
+        except Exception as e:
+            logger.error(f"Failed to reload tub {current_tub_path} after AI clean: {e}")
+    return response

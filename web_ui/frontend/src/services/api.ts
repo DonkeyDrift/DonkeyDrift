@@ -216,6 +216,72 @@ export const getImageUrl = (path: string, tubPath?: string) => {
 };
 
 // ------------------------------------------------------------------
+// AI Clean APIs（AI 一键批量清理「碰撞后倒车」数据，issue #373）
+// ------------------------------------------------------------------
+export interface AiCleanCandidate {
+  path: string;
+  name: string;
+  is_current: boolean;
+}
+
+export interface AiCleanSegment {
+  start_index: number;
+  end_index: number;
+  frame_count: number;
+  indexes: number[];
+  reason_code: 'stop_then_reverse' | 'plunge_reverse' | string;
+  detail: {
+    collision_index?: number | null;
+    reverse_start_index?: number | null;
+    reverse_frames?: number | null;
+    peak_forward_throttle?: number | null;
+  };
+}
+
+export interface AiCleanTubScan {
+  tub_path: string;
+  record_count?: number;
+  segments?: AiCleanSegment[];
+  segment_count?: number;
+  frame_count?: number;
+  error?: string;
+}
+
+export interface AiCleanExecuteResult {
+  tub_path: string;
+  deleted_count?: number;
+  error?: string;
+}
+
+export const listAiCleanCandidates = async (tubPath: string) => {
+  const response = await api.get('/tub/ai_clean/candidates', { params: { tubPath } });
+  return response.data as { status: boolean; current: string; tubs: AiCleanCandidate[] };
+};
+
+export const scanAiClean = async (tubPaths: string[]) => {
+  const response = await api.post('/tub/ai_clean/scan', { tub_paths: tubPaths });
+  return response.data as {
+    status: boolean;
+    tubs: AiCleanTubScan[];
+    total_segments: number;
+    total_frames: number;
+  };
+};
+
+export const executeAiClean = async (
+  deletions: { tub_path: string; indexes: number[] }[],
+) => {
+  const response = await api.post('/tub/ai_clean/execute', { deletions });
+  return response.data as {
+    status: boolean;
+    results: AiCleanExecuteResult[];
+    total_deleted: number;
+    record_count: number | null;
+    deleted_indexes: number[] | null;
+  };
+};
+
+// ------------------------------------------------------------------
 // Trainer APIs
 // ------------------------------------------------------------------
 export interface TrainerConfig {
