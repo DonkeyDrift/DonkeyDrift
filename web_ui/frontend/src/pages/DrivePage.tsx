@@ -30,6 +30,10 @@ type DrivePageProps = {
   active?: boolean;
 };
 
+// ESP32 手柄输入源：rc 遥测断流判定阈值。车端正常按 100Hz 上行 rc 通道，
+// 超过该间隔未收到数据（车离线/固件未上行）时输出 0，不沿用旧油门（#371）。
+const ESP32_RC_STALE_MS = 500;
+
 export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
   const { t, lang } = useTranslation();
   const [webRtcSignal, setWebRtcSignal] = useState<WebRtcSignal | null>(null);
@@ -38,12 +42,24 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   // 这类低频字段在“值变化”时落一次 state，供驾驶模式跟随与 Park 锁定徽标使用。
   const lastRcModeRef = useRef<number | null>(null);
   const lastRcParkRef = useRef<number | null>(null);
+  // ESP32 手柄输入源：缓存遥测 rc_steering/rc_throttle 最新值与到达时刻（断流安全判断用）
+  const esp32Ref = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
+  // handleTelemetry/getCurrentControl 是稳定回调（不随输入源重建、避免 ws 重连），经 ref 读当前输入源
+  const inputSourceRef = useRef<InputSource>('joystick');
   const [rcMode, setRcMode] = useState<number | null>(null);
   const [rcPark, setRcPark] = useState<number | null>(null);
   const [simConnected, setSimConnected] = useState(true);
 
   const handleTelemetry = useCallback((t: Telemetry) => {
     useTelemetryStore.getState().push(t);
+    // ESP32 手柄输入源：缓存车端上行的 rc 通道最新值（值域 -1..1，固件 T 帧）
+    if (typeof t.rc_steering === 'number' || typeof t.rc_throttle === 'number') {
+      esp32Ref.current = {
+        angle: typeof t.rc_steering === 'number' ? t.rc_steering : 0,
+        throttle: typeof t.rc_throttle === 'number' ? t.rc_throttle : 0,
+        updatedAt: Date.now(),
+      };
+    }
     if (typeof t.rc_mode === 'number' && t.rc_mode !== lastRcModeRef.current) {
       lastRcModeRef.current = t.rc_mode;
       setRcMode(t.rc_mode);
@@ -82,6 +98,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
+  useEffect(() => {
+    inputSourceRef.current = inputSource;
+  }, [inputSource]);
   const [joystickOpen, setJoystickOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -203,6 +222,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   const getCurrentControl = useCallback(() => {
     let a = 0, t = 0;
+    // ESP32 手柄：选中即由车端 rc 通道唯一驱动（不与其它输入合并），
+    // 透传回控制/录制链路；遥测断流超 ESP32_RC_STALE_MS 时输出 0，不沿用旧油门。
+    if (inputSourceRef.current === 'esp32') {
+      if (Date.now() - esp32Ref.current.updatedAt <= ESP32_RC_STALE_MS) {
+        a = esp32Ref.current.angle;
+        t = esp32Ref.current.throttle;
+      }
+      return { angle: a, throttle: t, drive_mode: mode };
+    }
     switch (lastInputType.current) {
       case 'joystick':
         a = joystickRef.current.angle;
