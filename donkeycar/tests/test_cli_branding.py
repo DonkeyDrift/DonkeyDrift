@@ -27,5 +27,6 @@ def test_cli_usage_mentions_donkeydrifter_for_unknown_command():
     )
 
     combined_output = result.stdout + result.stderr
-    assert "DonkeyDrifter" in combined_output
+    # CLI banner 已随仓库改名同步为 DonkeyDrift。
+    assert "DonkeyDrift" in combined_output
     assert "available commands" in combined_output

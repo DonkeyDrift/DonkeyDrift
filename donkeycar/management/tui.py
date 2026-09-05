@@ -1239,7 +1239,7 @@ class DriveCommand(DonkeyCommand):
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
         cmd_str = self.get_preview_command(web_cmd, car_cmd, drive_api_server_url)
 
-        console.print("[dim]将启动 DonkeyDrifter 的 Drive 标签页，并连接当前车辆项目。[/dim]")
+        console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
         console.print("\n[bold yellow]命令预览:[/bold yellow]")
         console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
 

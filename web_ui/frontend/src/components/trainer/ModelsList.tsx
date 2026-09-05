@@ -197,8 +197,8 @@ export const ModelsList: React.FC = () => {
                   onClick={async (e) => {
                     e.stopPropagation();
                     try {
-                      await loadModelToCar(m.path, configPath);
-                      alert(t('trainer.loadToCarSent'));
+                      const res = await loadModelToCar(m.path, configPath);
+                      alert(res?.message || t('trainer.loadToCarSent'));
                     } catch (error) {
                       alert(t('trainer.loadFailed', { message: getApiErrorMessage(error) }));
                     }

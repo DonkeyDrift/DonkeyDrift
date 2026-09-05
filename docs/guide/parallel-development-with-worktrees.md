@@ -1,6 +1,6 @@
 # 使用 Git Worktree 进行并行开发
 
-本文档描述如何在 DonkeyDrifter 项目中使用 Git Worktree 让两个 Kimi CLI（或任何两个开发者）同时并行开发不同功能模块，避免文件冲突。
+本文档描述如何在 DonkeyDrift 项目中使用 Git Worktree 让两个 Kimi CLI（或任何两个开发者）同时并行开发不同功能模块，避免文件冲突。
 
 ---
 

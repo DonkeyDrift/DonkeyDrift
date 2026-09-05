@@ -29,6 +29,9 @@ from pathlib import Path
 # 实例登记文件与车进程 PID 文件（与 base.py / tui.py / launcher 既有约定一致）
 WEBUI_INSTANCE_FILE = Path.home() / ".donkeycar" / "webui.json"
 DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
+# 当前选定自动驾驶模型（issue #003）：web_ui 后端写入，launcher 每次
+# 起车进程时读取并附加 --model/--type，选择跨重启保持。
+DRIVE_MODEL_FILE = Path.home() / ".donkeycar" / "drive_model.json"
 
 # 探测超时（秒）：仅本机回环探测，快速失败
 PROBE_TIMEOUT_S = 2.0
@@ -179,6 +182,52 @@ def remove_drive_pid_file(pid_file=None):
         pid_file = DRIVE_PID_FILE
     try:
         Path(pid_file).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+# ── 选定模型持久化（issue #003）─────────────────────────────────────
+
+def read_drive_model(model_file=None):
+    """读选定模型记录；文件缺失/损坏/字段非法返回 None。
+
+    记录格式：``{"model": 绝对路径, "model_type": str|None, "selected_at": ...}``
+    """
+    if model_file is None:
+        model_file = DRIVE_MODEL_FILE
+    try:
+        data = json.loads(Path(model_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("model"), str) \
+            and data["model"].strip():
+        return data
+    return None
+
+
+def write_drive_model(model_path, model_type=None, model_file=None):
+    """写入选定模型记录（原子替换）。"""
+    if model_file is None:
+        model_file = DRIVE_MODEL_FILE
+    payload = {
+        "model": str(model_path),
+        "model_type": model_type if model_type else None,
+        "selected_at": time.time(),
+    }
+    path = Path(model_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.replace(path)
+    return payload
+
+
+def remove_drive_model(model_file=None):
+    """删除选定模型记录（选「无模型」时调用）。"""
+    if model_file is None:
+        model_file = DRIVE_MODEL_FILE
+    try:
+        Path(model_file).unlink(missing_ok=True)
     except OSError:
         pass
 

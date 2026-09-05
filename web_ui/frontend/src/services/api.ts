@@ -697,6 +697,26 @@ export interface ArenaPredictionPoint {
   pilot_throttle: number;
 }
 
+export interface ArenaMetricSummary {
+  count: number;
+  mae: number;
+  rmse: number;
+  bias: number;
+  max_abs_error: number;
+}
+
+export interface ArenaPredictionsSummary {
+  angle: ArenaMetricSummary | null;
+  throttle: ArenaMetricSummary | null;
+}
+
+export interface ArenaPredictionsResponse {
+  status: boolean;
+  limit: number;
+  points: ArenaPredictionPoint[];
+  summary: ArenaPredictionsSummary;
+}
+
 export const listArenaModelTypes = async () => {
   const response = await api.get('/arena/model-types');
   return response.data;
@@ -780,7 +800,7 @@ export const getArenaPredictions = async (pilotId: string, payload: {
   blur?: number | null;
 }) => {
   const response = await api.post(`/arena/pilots/${pilotId}/predictions`, payload);
-  return response.data as { status: boolean; limit: number; points: ArenaPredictionPoint[] };
+  return response.data as ArenaPredictionsResponse;
 };
 
 // ------------------------------------------------------------------

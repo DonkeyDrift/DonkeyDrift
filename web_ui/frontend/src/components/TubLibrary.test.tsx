@@ -336,3 +336,68 @@ describe('TubLibrary wall-clock playback scheduling', () => {
     });
   });
 });
+
+// 回归测试（统一流程大页面 #178）：TM 并入 FlowPage 后经 /tub 深链进入，
+// 播放控制不再按「pathname === '/'」判断，而是按「tub-manager section 是否在
+// 视口内（active）」。在 /tub 下按空格应在 TM 区内切换播放/暂停，而不是让页面滚动。
+describe('TubLibrary spacebar playback control', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: [
+        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+      ],
+    });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('toggles playback when space is pressed while the Tub Manager section is active', async () => {
+    render(
+      <MemoryRouter initialEntries={['/tub']}>
+        <TubLibrary active />
+      </MemoryRouter>,
+    );
+
+    // Wait for the selected session's records to load before pressing space
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { code: 'Space' });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '停止播放' })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { code: 'Space' });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '开始播放' })).toBeInTheDocument();
+    });
+  });
+
+  it('does not toggle playback when the Tub Manager section is not active', async () => {
+    render(
+      <MemoryRouter initialEntries={['/tub']}>
+        <TubLibrary />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { code: 'Space' });
+    // Still showing the start label — space did not toggle playback
+    expect(screen.getByRole('button', { name: '开始播放' })).toBeInTheDocument();
+  });
+});

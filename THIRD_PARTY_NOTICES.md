@@ -2,7 +2,7 @@
 
 ## Donkeycar
 
-DonkeyDrifter is derived from the Donkeycar project:
+DonkeyDrift is derived from the Donkeycar project:
 
 https://github.com/autorope/donkeycar
 
@@ -19,5 +19,5 @@ Original copyright notice:
 Copyright (c) 2017 Will Roscoe
 ```
 
-DonkeyDrifter is an independent fork and is not affiliated with, sponsored by,
+DonkeyDrift is an independent fork and is not affiliated with, sponsored by,
 or endorsed by the Donkeycar maintainers.

@@ -16,9 +16,11 @@ import { Button } from '../components/ui/Button';
 import { ArrowLeftRight, ArrowRightLeft, Cpu, Database, LineChart, SlidersHorizontal } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import {
+  ArenaMetricSummary,
   ArenaModel,
   ArenaPilot,
   ArenaPredictionPoint,
+  ArenaPredictionsSummary,
   getArenaPredictions,
   getImageUrl,
   listArenaModels,
@@ -80,7 +82,9 @@ const TRANSFORMATION_OPTIONS = [
 const ARENA_IMAGE_CACHE_LIMIT = 40;
 const ARENA_IMAGE_MAX_IN_FLIGHT = 1;
 const ARENA_IMAGE_MIN_INTERVAL_MS = 16;
-const ARENA_PREDICTION_MIN_INTERVAL_MS = 250;
+// 推理评估节流下限。后端曾每帧重载 config(≈75ms)，故原用 250ms 防堆积；config 已缓存后
+// 放宽到与逐帧播放一致(≤60Hz)，推理节奏改由实际能力决定。可用 ARENA_PREDICTION_INTERVAL_MS 调大。
+const ARENA_PREDICTION_MIN_INTERVAL_MS = 16;
 const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
 
 /**
@@ -174,6 +178,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const [plotStart, setPlotStart] = useState(0);
   const [plotEnd, setPlotEnd] = useState(0);
   const [plotPoints, setPlotPoints] = useState<ArenaPredictionPoint[]>([]);
+  const [plotSummary, setPlotSummary] = useState<ArenaPredictionsSummary | null>(null);
   const [plotError, setPlotError] = useState<string | null>(null);
   const [plotLoading, setPlotLoading] = useState(false);
   const [imageProcessingCollapsed, setImageProcessingCollapsed] = useState(true);
@@ -214,8 +219,12 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const hasRecords = records.length > 0;
   const maxIndex = Math.max(0, records.length - 1);
   const playbackSpeed = 1000 / Math.max(1, Number(config?.DRIVE_LOOP_HZ) || 60);
-  const evaluationIntervalMs = Math.max(playbackSpeed, ARENA_PREDICTION_MIN_INTERVAL_MS);
-  const maxInferenceConcurrency = Math.max(1, Math.min(2, Number(config?.ARENA_INFERENCE_CONCURRENCY) || 1));
+  const predictionMinIntervalMs = Math.max(
+    ARENA_IMAGE_MIN_INTERVAL_MS,
+    Number(config?.ARENA_PREDICTION_INTERVAL_MS) || ARENA_PREDICTION_MIN_INTERVAL_MS,
+  );
+  const evaluationIntervalMs = Math.max(playbackSpeed, predictionMinIntervalMs);
+  const maxInferenceConcurrency = Math.max(1, Math.min(4, Number(config?.ARENA_INFERENCE_CONCURRENCY) || 1));
   const prefetchFrameCount = Math.max(0, Math.min(8, Number(config?.ARENA_PREFETCH_FRAMES) || 0));
   const predictionOptions = useMemo(() => ({
     preTransformations,
@@ -500,7 +509,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     const inFlightCount = predictionInFlightCountRef.current[viewer.localId] ?? 0;
     const now = window.performance.now();
     if (options.playback) {
-      if (inFlightCount >= maxInferenceConcurrency || now - (predictionLastRequestAtRef.current[viewer.localId] ?? 0) < ARENA_PREDICTION_MIN_INTERVAL_MS) {
+      if (inFlightCount >= maxInferenceConcurrency || now - (predictionLastRequestAtRef.current[viewer.localId] ?? 0) < predictionMinIntervalMs) {
         pendingViewerIndexRef.current[viewer.localId] = recordIndex;
         return;
       }
@@ -547,7 +556,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         delete pendingViewerIndexRef.current[viewer.localId];
       }
     }
-  }, [cachePilotPrediction, configPath, hasRecords, maxInferenceConcurrency, predictionOptions, updateFps, updateViewer]);
+  }, [cachePilotPrediction, configPath, hasRecords, maxInferenceConcurrency, predictionMinIntervalMs, predictionOptions, updateFps, updateViewer]);
 
   const prefetchPredictions = useCallback(async (viewer: ViewerState, start: number, limit: number) => {
     if (!viewer.pilot || !hasRecords || limit <= 0) return;
@@ -771,6 +780,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     }
     setPlotLoading(true);
     setPlotError(null);
+    setPlotSummary(null);
     try {
       const data = await getArenaPredictions(plotPilotId, {
         config_path: configPath,
@@ -778,11 +788,38 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         limit: Math.max(1, plotEnd - plotStart + 1),
       });
       setPlotPoints(data.points);
+      setPlotSummary(data.summary ?? null);
     } catch (error) {
       setPlotError(getApiErrorMessage(error));
     } finally {
       setPlotLoading(false);
     }
+  };
+
+  const formatSigned = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+
+  const renderMetricSeries = (label: string, series: ArenaMetricSummary | null) => {
+    if (!series) {
+      return (
+        <div className="rounded-md bg-zinc-950 px-3 py-2 text-xs text-zinc-500">
+          {label}: {t('arena.metricNoData')}
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-md bg-zinc-950 px-3 py-2 text-xs text-zinc-300">
+        <span className="text-zinc-500">{label}</span>{' '}
+        <span className="font-mono">{t('arena.metricMae', { v: series.mae.toFixed(3) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono">{t('arena.metricRmse', { v: series.rmse.toFixed(3) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono">{t('arena.metricBias', { v: formatSigned(series.bias) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono">{t('arena.metricMaxErr', { v: series.max_abs_error.toFixed(3) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono text-zinc-400">{t('arena.metricFrames', { n: String(series.count) })}</span>
+      </div>
+    );
   };
 
   const plotData = {
@@ -1155,6 +1192,15 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           {plotPoints.length > 0 && (
             <div className="rounded-md border border-zinc-800 bg-zinc-950 p-4">
               <Line data={plotData} options={{ responsive: true, plugins: { legend: { labels: { color: seriesColors.legend } } }, scales: { x: { ticks: { color: seriesColors.ticks } }, y: { ticks: { color: seriesColors.ticks } } } }} />
+            </div>
+          )}
+          {plotSummary && (plotSummary.angle || plotSummary.throttle) && (
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-zinc-500">{t('arena.plotSummary')}</p>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {renderMetricSeries(t('arena.metricAngle'), plotSummary.angle)}
+                {renderMetricSeries(t('arena.metricThrottle'), plotSummary.throttle)}
+              </div>
             </div>
           )}
         </CardContent>

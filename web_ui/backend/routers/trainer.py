@@ -152,7 +152,7 @@ async def set_trainer_config(cfg: TrainerConfig, config_file: str = "train_onlin
 
 @router.post("/mypc/probe")
 async def probe_mypc(request: MyPcProbeRequest):
-    """Pre-flight check for 'This Computer' (mypc) training.
+    """Pre-flight check for 'Lan Host' (mypc) training.
 
     Connects to the user's computer over SSH and reports whether the target
     OS, Python interpreter, and donkeycar environment are ready, returning
@@ -542,6 +542,8 @@ async def list_tubs(working_dir: Optional[str] = None):
     def _add_tub(full_path: str):
         rel = os.path.relpath(full_path, cwd)
         display = "./" + rel if not rel.startswith(".") else rel
+        # Windows 下 os.path 用反斜杠，统一为正斜杠保证前端展示与测试断言一致
+        display = display.replace(os.sep, "/")
         tubs.append({
             "name": os.path.basename(full_path) or full_path,
             "relative_path": display,

@@ -29,7 +29,6 @@ Options:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -212,7 +211,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     transition_ms = int(args["--transition-ms"])
     out_path = args["--out"]
 
-    all_records: list[dict] = []
+    if speed <= 0:
+        print(f"错误：--speed 必须 > 0（当前 {speed}），否则时间轴无意义", flush=True)
+        return 1
+
+    # 每个 tub 的用户段作为独立段传入 concat_segments：逐段平移时戳并在
+    # 段间插静置帧，保证跨 tub 合并（第二个 tub 时戳可能早于第一个）后
+    # 时戳仍严格递增——回放端 DriftReplayPart 假设 t_rel 单调
+    segments: list[list[dict]] = []
     sources = []
     for tp in tub_paths:
         recs = load_tub_records(tp)
@@ -220,13 +226,13 @@ def main(argv: Iterable[str] | None = None) -> int:
         # （local/local_angle）。漂移回放复现的是人工操作。
         seg = [r for r in recs if r["mode"] == "user"]
         if seg:
-            all_records.extend(seg)
-            sources.append(os.path.basename(tp.rstrip("/")))
-    if not all_records:
+            segments.append(seg)
+            sources.append(Path(tp).name)
+    if not segments:
         print("未找到人工驾驶录制段（mode='user'）", flush=True)
         return 1
 
-    merged = concat_segments([all_records], transition_ms=transition_ms)
+    merged = concat_segments(segments, transition_ms=transition_ms)
     scaled = apply_scale(merged, throttle_scale=scale_thr, angle_scale=scale_ang,
                           throttle_clip=clip_thr, angle_clip=clip_ang)
     resampled = resample_timeline(scaled, speed=speed)

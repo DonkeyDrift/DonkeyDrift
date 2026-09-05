@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import atexit
 import uvicorn
 import os
 import sys
@@ -10,7 +11,7 @@ import logging
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect
+from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, drift
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -25,7 +26,7 @@ if not DEBUG:
     # 抑制后端业务路由日志（连接/断连统计等）
     logging.getLogger("routers.drive").setLevel(logging.WARNING)
 
-app = FastAPI(title="DonkeyDrifter")
+app = FastAPI(title="DonkeyDrift Web API")
 
 # Configure CORS
 app.add_middleware(
@@ -67,6 +68,22 @@ app.include_router(connector.router, prefix="/api/connector", tags=["connector"]
 app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
 app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
+app.include_router(drift.router, prefix="/api/drift", tags=["drift"])
+
+@app.on_event("startup")
+async def _install_drift_hooks():
+    drift.install_drive_hooks()
+
+
+@app.on_event("shutdown")
+async def _stop_drift_engine():
+    """应用关闭必须停掉漂移相机循环（释放 DirectShow 句柄）。"""
+    drift.drift_engine.stop_camera_loop()
+
+
+# 进程退出兜底：shutdown 钩子跑不到时（强杀/reload 边缘）也尽力释放相机；
+# stop_camera_loop 幂等，重复调用安全。
+atexit.register(drift.drift_engine.stop_camera_loop)
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(
@@ -98,11 +115,11 @@ if os.path.isdir(FRONTEND_DIST):
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)
-        return {"message": "DonkeyDrifter is running"}
+        return {"message": "DonkeyDrift Web UI is running"}
 else:
     @app.get("/")
     async def root():
-        return {"message": "DonkeyDrifter is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
+        return {"message": "DonkeyDrift Web UI is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("DRIVE_WEB_PORT", 8000))

@@ -127,8 +127,20 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
             webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
         )
+        # outputs 顺序必须与 DriveApiBridge.run_threaded 的 7 元组返回值严格一致
+        # (Vehicle/Memory 按位置配对)：少写或错序会导致重连标志被静默丢弃。
+        # inputs 顺序必须与 run_threaded 签名严格一致（Vehicle 按位置解包），
+        # 尾部 sim/connected 由上面的 SimConnectionState 提供；中间键在模拟器
+        # 模式下不存在时 Memory.get 返回 None，遥测自动省略对应字段。
+        ctr_inputs = ['cam/image_array', 'tub/num_records', 'user/mode', 'recording',
+                      'imu/gyr_z', 'imu/gyr_x', 'imu/gyr_y',
+                      'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+                      'steering', 'throttle', 'pilot/angle', 'pilot/throttle',
+                      'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park',
+                      'drift/yaw_error', 'drift/steering_correction', 'drift/throttle_mode',
+                      'sim/connected']
         V.add(ctr,
-              inputs=['cam/image_array', 'tub/num_records', 'user/mode', 'recording', 'sim/connected'],
+              inputs=ctr_inputs,
               outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
               threaded=True)
 

@@ -105,7 +105,7 @@ logger = logging.getLogger(__name__)
 # Web UI backend runtime deps. Kept in sync with setup.cfg [fastapi-backend] extra and
 # web_ui/backend/requirements.txt. Used for fast pre-flight checks before
 # spawning `uvicorn` from the `web` command.
-_WEBUI_BACKEND_MODULES = ('fastapi', 'uvicorn', 'multipart')
+_WEBUI_BACKEND_MODULES = ('fastapi', 'uvicorn', 'multipart', 'websockets')
 try:
     import importlib
     _BACKEND_DEPS_OK = all(
@@ -1605,7 +1605,7 @@ def execute_from_command_line():
         c = Tui()
         c.run([])
     else:
-        dk.utils.eprint('DonkeyDrifter CLI')
+        dk.utils.eprint('DonkeyDrift CLI')
         dk.utils.eprint('Usage: The available commands are:')
         dk.utils.eprint(list(commands.keys()))
 

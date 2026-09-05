@@ -36,7 +36,7 @@ def test_notice_documents_donkeydrifter_fork_status():
 
     assert notice.exists()
     text = read_text(notice)
-    assert "DonkeyDrifter" in text
+    assert "DonkeyDrift" in text
     assert "Donkeycar" in text
     assert "MIT License" in text
     assert "Apache License 2.0" in text
@@ -56,12 +56,15 @@ def test_third_party_notices_document_upstream_donkeycar():
 def test_setup_metadata_uses_donkeydrifter_identity():
     metadata = read_setup_metadata()
 
+    # PyPI 包名保留 `donkeydrifter`，避免破坏已有 pip install / import。
     assert metadata["name"] == "donkeydrifter"
     assert metadata["author"] == "Haobot"
     assert metadata["author_email"] == "haobot2018@gmail.com"
-    assert metadata["url"] == "https://github.com/DonkeyDrift/DonkeyDrifter"
+    # 仓库已更名为 DonkeyDrift；GitHub URL 同步更新。
+    assert metadata["url"] == "https://github.com/DonkeyDrift/DonkeyDrift"
     assert metadata["license"] == "Apache-2.0"
-    assert "DonkeyDrifter" in metadata["description"]
+    # description / keywords 中保留品牌名 DonkeyDrift 与 PyPI 包名 donkeydrifter。
+    assert "DonkeyDrift" in metadata["description"]
     assert "donkeydrifter" in metadata["keywords"]
     assert "License :: OSI Approved :: Apache Software License" in metadata[
         "classifiers"
@@ -80,7 +83,8 @@ def test_base_install_requires_simulator_and_pygame_dependencies():
 def test_readme_documents_donkeydrifter_identity_and_compatibility():
     readme = read_text(PROJECT_ROOT / "README.md")
 
-    assert readme.startswith("# DonkeyDrifter")
+    # 仓库 / 品牌名为 DonkeyDrift；PyPI 包名仍为 donkeydrifter。
+    assert readme.startswith("# DonkeyDrift")
     assert "pip install donkeydrifter" in readme
     assert "import donkeydrifter as dk" in readme
     assert "import donkeycar as dk" in readme
@@ -108,6 +112,18 @@ def test_docs_include_compatibility_and_attribution_guides():
     assert "not affiliated" in attribution_text.lower()
 
 
+def test_agent_docs_describe_donkeydrifter_migration_contract():
+    for relative_path in ("AGENTS.md", "CLAUDE.md"):
+        text = read_text(PROJECT_ROOT / relative_path)
+        # 品牌已迁移到 DonkeyDrift，但 PyPI 包名 / import 别名 donkeydrifter 仍保留。
+        assert "DonkeyDrift" in text
+        assert "donkeydrifter" in text
+        assert "兼容" in text or "compatibility" in text.lower()
+        assert "donkeycar" in text
+        assert "CLI" in text
+        assert "donkey" in text
+        assert "Apache" in text
+        assert "MIT" in text
 def test_makefile_package_uses_modern_build_backend():
     makefile = read_text(PROJECT_ROOT / "Makefile")
 
@@ -120,8 +136,8 @@ def test_python_ci_checks_donkeydrifter_import_and_build():
         PROJECT_ROOT / ".github" / "workflows" / "python-package-conda.yml"
     )
 
-    assert "Python package and test DonkeyDrifter" in workflow
-    assert "Install DonkeyDrifter" in workflow
+    assert "Python package and test DonkeyDrift" in workflow
+    assert "Install DonkeyDrift" in workflow
     assert "import donkeydrifter; from donkeydrifter import Vehicle" in workflow
     assert "import donkeycar; from donkeycar import Vehicle" in workflow
     assert "python -m build --sdist --wheel" in workflow
@@ -130,7 +146,7 @@ def test_python_ci_checks_donkeydrifter_import_and_build():
 def test_super_linter_workflow_uses_donkeydrifter_name():
     workflow = read_text(PROJECT_ROOT / ".github" / "workflows" / "superlinter.yml")
 
-    assert "Lint DonkeyDrifter" in workflow
+    assert "Lint DonkeyDrift" in workflow
 
 
 def test_torch_extra_pins_fastai_below_incompatible_2_8_series():
@@ -147,7 +163,7 @@ def test_pypi_trusted_publishing_workflow_is_configured():
 
     assert workflow_path.exists()
     workflow = read_text(workflow_path)
-    assert "Publish DonkeyDrifter to PyPI" in workflow
+    assert "Publish DonkeyDrift to PyPI" in workflow
     assert "tags:" in workflow
     assert '"v*"' in workflow
     assert "id-token: write" in workflow

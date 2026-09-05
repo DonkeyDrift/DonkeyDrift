@@ -366,7 +366,7 @@ export function FlowPage() {
 
       <section id="tub-manager" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
         <FlowSectionHeader step={2} meta={SECTIONS[1]} />
-        <TubManagerPage />
+        <TubManagerPage active={inView['tub-manager']} />
       </section>
 
       <section id="trainer" style={SECTION_STYLE} className="scroll-mt-40 lg:scroll-mt-20 space-y-4 border-t border-zinc-800 pt-10">
