@@ -182,7 +182,7 @@ class TestOnlineTrainerWorkspace(unittest.TestCase):
 
     @patch('donkeycar.management.train_online.console')
     def test_setup_remote_workspace_macos_patches_train_py(self, mock_console):
-        """macOS 远端：createcar 成功后对 train.py 执行 sed 禁用 mixed_float16"""
+        """macOS 远端：createcar 成功后对 train.py 执行 sed 禁用 mixed_float16 与 Metal GPU"""
         stdout_ok = MagicMock(channel=MagicMock(recv_exit_status=lambda: 0))
         stdout_ls = MagicMock(read=lambda: b"")
         stdout_uname = MagicMock(read=lambda: b"Darwin\n")
@@ -203,6 +203,8 @@ class TestOnlineTrainerWorkspace(unittest.TestCase):
         self.assertIn("sed -i", sed_cmd)
         self.assertIn("mixed_precision", sed_cmd)
         self.assertIn("set_global_policy", sed_cmd)
+        # Metal GPU 一并禁用（float32 下 tensorflow-metal 也有已知数值问题）
+        self.assertIn("set_visible_devices", sed_cmd)
         self.assertIn(f"{path}/train.py", sed_cmd)
         # 日志应有补丁记录
         log_msgs = [c[0][0] for c in self.trainer._log.call_args_list]

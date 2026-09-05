@@ -1,4 +1,5 @@
 import { arena } from './arena';
+import { aiclean } from './aiclean';
 import { common } from './common';
 import { connector } from './connector';
 import { console as consoleNs } from './console';
@@ -14,6 +15,7 @@ import { tubnav } from './tubnav';
 export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
   zh: {
     ...arena.zh,
+    ...aiclean.zh,
     ...common.zh,
     ...connector.zh,
     ...consoleNs.zh,
@@ -28,6 +30,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
   },
   en: {
     ...arena.en,
+    ...aiclean.en,
     ...common.en,
     ...connector.en,
     ...consoleNs.en,

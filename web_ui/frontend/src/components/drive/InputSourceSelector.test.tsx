@@ -22,6 +22,17 @@ describe('InputSourceSelector', () => {
     expect(screen.getByText('键盘')).toBeInTheDocument();
     expect(screen.getByText('手柄')).toBeInTheDocument();
     expect(screen.getByText('陀螺仪')).toBeInTheDocument();
+    expect(screen.getByText('ESP32 手柄')).toBeInTheDocument();
+  });
+
+  it('可选择 ESP32 手柄输入源', () => {
+    const onChange = vi.fn();
+    render(<InputSourceSelector value="joystick" onChange={onChange} />);
+
+    fireEvent.mouseEnter(screen.getByText('摇杆'));
+    fireEvent.click(screen.getByText('ESP32 手柄'));
+
+    expect(onChange).toHaveBeenCalledWith('esp32');
   });
 
   it('选择新输入源后触发 onChange 并收起抽屉', () => {
