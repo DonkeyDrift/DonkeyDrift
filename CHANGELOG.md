@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-05 (190)
+
+- feat(tub): TM 录制视频库新增「AI 清理」——启发式自动识别「碰撞后倒车」片段，扫描 → 清单确认 → 批量软删除 (fixes #373)
+  - 背景：录制数据中「碰撞后倒车」片段对训练有害，此前只能在 Tub Editor 人工逐段框选删除，tub 一多批量清理成本高。
+  - 后端 `web_ui/backend/ai_clean_engine.py`（新增）：识别器独立成模块（`CollisionReverseHeuristic` + `AiCleanConfig` 阈值 dataclass + `CleanSegment`），接口 `detect(records) -> List[CleanSegment]`，以后可直接换成模型实现。规则：连续 ≥3 帧 throttle ≤ -0.05 判倒车段；要求前置碰撞特征（急停后倒车：40 帧内有急停帧且急停前有正向行驶，锚点回溯到停稳区间首帧；或直接坠入倒车）；边界前后各扩 5 帧圈入碰撞瞬间与恢复起步；间隔 ≤10 帧相邻片段合并；按 `_session_id` 分段识别、跨会话不关联；油门取 `user/throttle`，缺失回退 `pilot/throttle`，再缺失不虚构。纯倒车、正常行驶、急停不倒车均不命中。
+  - 后端 `web_ui/backend/routers/tub.py`：新增 `GET /api/tub/ai_clean/candidates`（列出当前及兄弟 tub 供勾选批量范围）、`POST /api/tub/ai_clean/scan`（批量扫描返回每 tub 待删片段：起止帧/帧数/原因，单 tub 失败不拖垮整批）、`POST /api/tub/ai_clean/execute`（复用 manifest 软删除 `Tub.delete_records`，与 TE 框选删除同一机制、可 restore；影响当前全局已加载 tub 时重载同步）。
+  - 前端：`web_ui/frontend/src/services/api.ts` 新增三个接口封装；`web_ui/frontend/src/components/AiCleanModal.tsx`（新增）三步弹窗——勾选 tub 范围（默认当前 tub）→ 扫描 → 待删片段清单（每 tub 几段/几帧、每段起止帧+原因+碰撞帧，可按 tub 勾选）→ 确认批量删除 → 结果反馈；`web_ui/frontend/src/components/TubLibrary.tsx` 录制视频库卡片头部新增「AI 清理」入口（Sparkles 图标），执行成功后刷新列表与当前 tub；i18n `web_ui/frontend/src/i18n/messages/aiclean.ts`（新增，zh/en 全套）+ `messages/index.ts` 注册。
+  - 测试同步：`web_ui/backend/tests/test_tub_ai_clean.py`（新增 20 例：碰撞后倒车/纯倒车/正常行驶/急停不倒车/短倒车误触/超时倒车不关联/双碰撞/合并/会话边界/pilot 回退/字段缺失/边界截断 + 7 项 API 测试含 manifest 一致性与全局 tub 同步）。实测：后端全量 `pytest web_ui/backend/tests/` 250 passed；前端 `npm run build` 通过、`vitest run TubLibrary/TubEditor*` 16 passed；真实数据冒烟（5353 存活帧识别出 1 段 119 帧急停后倒车，人工核对油门曲线判断正确，未触碰原始数据）。
+  - 遗留：识别器默认阈值按实车 ~20Hz 标定（常量注释注明），模拟器 60Hz 数据可经 `AiCleanConfig` 调参，前端目前固定用默认阈值。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-05 (189)
 
 - fix(trainer): macOS 远端训练禁用 Metal GPU 回退 CPU float32——修 loss 曲线尖峰、val 卡退化水平不收敛 (fixes #370)

@@ -28,8 +28,10 @@ import {
   Pin,
   Play,
   RotateCcw,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
+import { AiCleanModal } from './AiCleanModal';
 
 // 图片缓存上限：按播放位置预取后续帧，无上限时长会话内存无限增长、
 // 加重 GC 拖慢页面切换，超限后按 LRU（Map 插入序）淘汰最旧条目（#135）
@@ -155,6 +157,7 @@ export const TubLibrary: React.FC = () => {
   const [frameAspect, setFrameAspect] = useState<number | null>(null);
   const [pinned, setPinned] = useState<string[]>([]);
   const [actualFps, setActualFps] = useState(0);
+  const [aiCleanOpen, setAiCleanOpen] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -589,6 +592,37 @@ export const TubLibrary: React.FC = () => {
     }
   }, [pendingDelete, tubPath, selected, refreshSessions, setTub, t]);
 
+  // AI 清理执行成功后：刷新录制列表、当前选中录制的帧与全局 tub，
+  // 让各面板立即丢弃被删帧（与整条删除后的同步逻辑一致）
+  const refreshAfterAiClean = useCallback(async () => {
+    if (!tubPath) return;
+    await refreshSessions(tubPath);
+    if (selected) {
+      try {
+        const data = await getSessionRecords(tubPath, selected.session_id);
+        setRecords(data.records || []);
+        setActiveSession(selected.session_id, (data.records || []) as StoreTubRecord[]);
+        setFrame(0);
+        frameRef.current = 0;
+      } catch {
+        // 会话级刷新尽力而为：全局 tub 仍会刷新
+      }
+    }
+    try {
+      const { loadTub } = await import('../services/api');
+      const data = await loadTub(tubPath);
+      setTub(
+        data.path,
+        data.records || [],
+        data.fields || [],
+        data.total_physical_records,
+        data.deleted_indexes,
+      );
+    } catch {
+      // Refreshing the global tub is best-effort; the library list is already updated
+    }
+  }, [tubPath, selected, refreshSessions, setTub, setActiveSession]);
+
   const hasRecords = records.length > 0;
 
   // Pinned clips float to the top; both groups keep the API's newest-first order
@@ -613,12 +647,27 @@ export const TubLibrary: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <SectionCardTitle
-          icon={<Clapperboard className="w-5 h-5" />}
-          title={t('tubLibrary.title')}
-          subtitle={t('tub.subtitle')}
-        />
-        <p className="text-sm text-zinc-400">{t('tubLibrary.subtitle')}</p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-1.5">
+            <SectionCardTitle
+              icon={<Clapperboard className="w-5 h-5" />}
+              title={t('tubLibrary.title')}
+              subtitle={t('tub.subtitle')}
+            />
+            <p className="text-sm text-zinc-400">{t('tubLibrary.subtitle')}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!tubPath}
+            aria-label={t('aiClean.entryAria')}
+            title={t('aiClean.entryAria')}
+            onClick={() => setAiCleanOpen(true)}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="text-xs">{t('aiClean.entry')}</span>
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {!tubPath ? (
@@ -872,6 +921,15 @@ export const TubLibrary: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* AI 清理碰撞后倒车（issue #373） */}
+        {aiCleanOpen && tubPath && (
+          <AiCleanModal
+            tubPath={tubPath}
+            onClose={() => setAiCleanOpen(false)}
+            onExecuted={() => void refreshAfterAiClean()}
+          />
         )}
 
         {/* Delete confirmation */}
