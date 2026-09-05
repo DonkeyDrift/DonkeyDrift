@@ -7,7 +7,6 @@ import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
 import { DriveModeSelector, DriveMode, driveModeToRcMode, rcModeToDriveMode } from '../components/drive/DriveModeSelector';
 import { useDriveWebsocket, type WebRtcSignal, type Telemetry } from '../hooks/useDriveWebsocket';
 import { useDriveControlLoop } from '../hooks/useDriveControlLoop';
-import { useModelRestart } from '../hooks/useModelRestart';
 import { useKeyboardDrive } from '../hooks/useKeyboardDrive';
 import { useDriveHotkeys } from '../hooks/useDriveHotkeys';
 import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
@@ -42,8 +41,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const lastRcParkRef = useRef<number | null>(null);
   const [rcMode, setRcMode] = useState<number | null>(null);
   const [rcPark, setRcPark] = useState<number | null>(null);
-  // 模拟器连接状态：null = 非模拟器模式或未上报；false = 离线重连中
-  const [simConnected, setSimConnected] = useState<boolean | null>(null);
+  const [simConnected, setSimConnected] = useState(true);
 
   const handleTelemetry = useCallback((t: Telemetry) => {
     useTelemetryStore.getState().push(t);
@@ -56,8 +54,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       setRcPark(t.rc_park);
     }
     if (typeof t.sim_connected === 'boolean') {
-      const connected = t.sim_connected;
-      setSimConnected((prev) => (prev === connected ? prev : connected));
+      setSimConnected(t.sim_connected);
     }
   }, []);
 
@@ -82,6 +79,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [recordingLock, setRecordingLock] = useState(false);
   const recordingLockRef = useRef(false);
   const [currentModel, setCurrentModel] = useState<string>('');
+  const [modelRestartRequired, setModelRestartRequired] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
@@ -96,19 +94,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
-
-  // 选模型后的车端带模型重启（issue #003）：后端确认重启后 begin()，
-  // 车端掉线再上线时由 hook 补发当前模式，避免重启后回落到 user。
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const [modelNotice, setModelNotice] = useState<string | null>(null);
-  const { restarting: modelRestarting, begin: beginModelRestart } = useModelRestart({
-    online: carState.online,
-    reportedMode: carState.driveMode,
-    getMode: () => modeRef.current,
-    send,
-    onTimeout: () => setModelNotice(t('drive.modelRestartTimeout')),
-  });
 
   const toggleSteeringCurve = useCallback((key: string) => {
     setSteeringVisibleKeys((prev) => {
@@ -273,12 +258,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     };
   }, [recording, recordStartTime]);
 
-  // 同步车端模式（选模型触发的车端重启窗口内除外：重启中的车端会短暂回报
-  // 默认 user 模式，不抑制会把页面的全自动/半自动选择冲掉——issue #003）
+  // 同步车端模式
   useEffect(() => {
-    if (!modelRestarting) {
-      setMode(carState.driveMode as DriveMode);
-    }
+    setMode(carState.driveMode as DriveMode);
     setRecording(carState.recording);
     if (carState.recording && !recordStartTime) {
       setRecordStartTime(Date.now());
@@ -286,7 +268,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     if (!carState.recording) {
       setRecordStartTime(null);
     }
-  }, [carState.driveMode, carState.recording, recordStartTime, modelRestarting]);
+  }, [carState.driveMode, carState.recording, recordStartTime]);
 
   // 车端真实模式（ESP32 rc_mode）变化时，选择器跟随（遥控器/DC 端切换）。
   // 仅接受 0/1/2；无遥测时由上面的 carState.driveMode 兜底。
@@ -303,23 +285,19 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   const handleModelChange = useCallback((modelName: string) => {
     setCurrentModel(modelName);
-    setModelNotice(null);
-    if (modelName && !configPath) return;
-    // 选模型 = 后端持久化选择并触发车端带模型重启（issue #003）；
-    // 空串 = 选「无模型」，同样需重启生效。
-    const modelPath = modelName ? `./models/${modelName}` : '';
-    loadModelToCar(modelPath, configPath)
-      .then((res) => {
-        if (res?.restarting) {
-          beginModelRestart();
-        } else {
-          setModelNotice(res?.message || t('drive.modelLoadFailed'));
-        }
-      })
-      .catch((err) => {
-        setModelNotice(`${t('drive.modelLoadFailed')}: ${getApiErrorMessage(err)}`);
-      });
-  }, [configPath, beginModelRestart, t]);
+    setModelRestartRequired(false);
+    if (modelName && configPath) {
+      const modelPath = `./models/${modelName}`;
+      loadModelToCar(modelPath, configPath)
+        .then((res) => {
+          // 后端现在只记录选择，需重启车端后生效（#362）
+          setModelRestartRequired(Boolean(res?.restart_required));
+        })
+        .catch((err) => {
+          console.warn('加载模型到车端失败:', getApiErrorMessage(err));
+        });
+    }
+  }, [configPath]);
 
   const cycleMode = useCallback(() => {
     const modes: DriveMode[] = ['user', 'local_angle', 'local'];
@@ -383,30 +361,25 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               )}
               {simConnected === false && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap animate-pulse"
-                  data-sim-connected="false"
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  data-sim-connected={simConnected}
                 >
                   {t('drive.simOfflineReconnecting')}
                 </span>
               )}
-              <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online || modelRestarting} />
+              <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />
               <ModelSelector
                 value={currentModel}
                 options={models}
                 onChange={handleModelChange}
-                disabled={!carState.online || modelsLoading || modelRestarting}
+                disabled={!carState.online || modelsLoading}
               />
-              {modelRestarting && (
+              {modelRestartRequired && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/20 text-cyan-400 text-xs font-medium whitespace-nowrap animate-pulse"
-                  data-testid="model-restarting"
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  data-model-restart-required="true"
                 >
-                  {t('drive.modelRestarting')}
-                </span>
-              )}
-              {!modelRestarting && modelNotice && (
-                <span className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap" role="alert">
-                  {modelNotice}
+                  {t('drive.modelRestartRequired')}
                 </span>
               )}
             </div>

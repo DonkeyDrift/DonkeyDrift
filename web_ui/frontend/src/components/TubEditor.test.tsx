@@ -1,176 +1,154 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-// 捕获 Line 的 ref 并注入伪造 chart 实例，避免 jsdom 下 chart.js 真实 canvas 渲染
-let lastChartRef: React.MutableRefObject<unknown> | null = null;
-let fakeChartInstance: unknown = null;
+const chartState = vi.hoisted(() => {
+  const chart = {
+    chartArea: { left: 0, right: 200, top: 0, bottom: 100 },
+    scales: { x: { getValueForPixel: (px: number) => px / 20, getPixelForValue: (v: number) => v * 20 } },
+    update: vi.fn(),
+    destroy: vi.fn(),
+    data: { datasets: [] },
+    options: {},
+  };
+  return { chart };
+});
+
+vi.mock('chart.js', () => ({
+  Chart: { register: vi.fn() },
+  CategoryScale: {},
+  LinearScale: {},
+  PointElement: {},
+  LineElement: {},
+  Title: {},
+  Legend: {},
+}));
 
 vi.mock('react-chartjs-2', () => ({
-  Line: React.forwardRef((_props: Record<string, unknown>, ref: React.Ref<unknown>) => {
-    lastChartRef = ref as React.MutableRefObject<unknown>;
-    if (fakeChartInstance) {
-      lastChartRef.current = fakeChartInstance;
-    }
-    return <div data-testid="mock-chart" />;
+  Line: React.forwardRef((_props: unknown, ref: React.ForwardedRef<unknown>) => {
+    React.useImperativeHandle(ref, () => chartState.chart);
+    return React.createElement('canvas', { 'data-testid': 'chart-canvas' });
   }),
+}));
+
+vi.mock('@/i18n', () => ({
+  useTranslation: () => ({ t: (key: string) => key, lang: 'zh' }),
+}));
+
+vi.mock('@/lib/theme', () => ({
+  useResolvedTheme: () => 'dark',
+}));
+
+vi.mock('../services/api', () => ({
+  deleteRecords: vi.fn(),
+  getRecords: vi.fn(() => Promise.resolve({ records: [] })),
+  getSessionRecords: vi.fn(() => Promise.resolve({ records: [] })),
+  restoreRecords: vi.fn(),
 }));
 
 import { TubEditor } from './TubEditor';
 import { useStore } from '../store/useStore';
 
-const TOTAL_RECORDS = 5000;
-const CHART_WIDTH = 1000;
-
-const createFakeChart = () => ({
-  chartArea: { left: 0, right: CHART_WIDTH, top: 0, bottom: 400 },
-  ctx: {},
-  update: vi.fn(),
-  scales: {
-    x: {
-      getPixelForValue: (value: number) => (value / TOTAL_RECORDS) * CHART_WIDTH,
-      getValueForPixel: (pixel: number) => (pixel / CHART_WIDTH) * TOTAL_RECORDS,
-    },
-    y: { top: 0, bottom: 400 },
-  },
-});
-
-const makeRecords = (count: number) =>
-  Array.from({ length: count }, (_, i) => ({
+const makeRecords = () =>
+  Array.from({ length: 10 }, (_, i) => ({
     _index: i,
-    _timestamp_ms: i,
-    'user/angle': 0.1,
-    'user/throttle': 0.2,
+    _timestamp_ms: i * 100,
+    'user/angle': 0,
+    'user/throttle': 0,
   }));
 
-const resetStore = () => {
-  useStore.setState({
-    records: [],
-    activeSessionId: null,
-    activeSessionRecords: [],
-    totalRecords: 0,
-    totalPhysicalRecords: 0,
-    deletedIndexes: [],
-    currentIndex: 0,
-    selectionStartIndex: null,
-    selectionEndIndex: null,
-    selectionHistory: [],
-    selectionHistoryIndex: -1,
-    isPlaying: false,
-    isDragging: false,
+const mountEditor = () => {
+  // active=true 使全局快捷键（Escape 等）生效（#178：section 在视口内才响应快捷键）
+  render(<TubEditor active />);
+  // 重置模块级「两次点击」锚点，避免跨用例污染（Escape 会清锚点与选区）
+  fireEvent.keyDown(window, { key: 'Escape' });
+  return screen.getByTestId('tub-editor-chart');
+};
+
+describe('TubEditor 拖拽框选', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
   });
-};
 
-const renderWithChart = () => {
-  fakeChartInstance = createFakeChart();
-  // active=true 使全局快捷键（Escape）生效
-  return render(<TubEditor active />);
-};
-
-describe('TubEditor 拖拽框选（Issue #002）', () => {
   beforeEach(() => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      top: 0,
-      right: CHART_WIDTH,
-      bottom: 400,
-      width: CHART_WIDTH,
-      height: 400,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    } as DOMRect);
-    resetStore();
-    useStore.setState({
-      records: makeRecords(TOTAL_RECORDS),
-      totalRecords: TOTAL_RECORDS,
-      totalPhysicalRecords: TOTAL_RECORDS,
-    });
+    const records = makeRecords();
+    useStore.getState().setActiveSession('s1', records);
+    useStore.setState({ totalRecords: records.length });
+    useStore.getState().clearSelectionRange();
   });
 
-  afterEach(() => {
-    // 重置模块级两次点击锚点，避免跨用例泄漏
-    fireEvent.keyDown(window, { key: 'Escape' });
-    cleanup();
-    vi.restoreAllMocks();
-    fakeChartInstance = null;
-    lastChartRef = null;
-    resetStore();
-  });
-
-  it('拖拽位移超过阈值时，mouseup 提交框选范围', async () => {
-    const { container } = renderWithChart();
-    const chartDiv = container.querySelector<HTMLElement>('.cursor-crosshair');
-    expect(chartDiv).not.toBeNull();
-
-    // 100px → 帧 500，300px → 帧 1500
-    fireEvent.mouseDown(chartDiv!, { clientX: 100, clientY: 100, button: 0 });
-    fireEvent.mouseMove(chartDiv!, { clientX: 300, clientY: 100 });
+  it('水平拖拽超过阈值后松手提交选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
 
     // 拖拽中容器切换为拖拽光标（草稿框激活）
-    expect(chartDiv!.className).toContain('cursor-ew-resize');
+    expect(chart.className).toContain('cursor-ew-resize');
 
-    fireEvent.mouseUp(chartDiv!);
+    fireEvent.mouseUp(chart);
 
     await waitFor(() => {
-      expect(useStore.getState().selectionStartIndex).toBe(500);
-      expect(useStore.getState().selectionEndIndex).toBe(1501);
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
     });
   });
 
-  it('位移小于阈值时视为点击：不提交拖拽选区，保留两次点击锚点行为', () => {
-    const { container } = renderWithChart();
-    const chartDiv = container.querySelector<HTMLElement>('.cursor-crosshair');
-    expect(chartDiv).not.toBeNull();
-
-    // 第一次点击（伴随 2px 微小移动）：只记录锚点，不产生选区
-    fireEvent.mouseDown(chartDiv!, { clientX: 100, clientY: 100, button: 0 });
-    fireEvent.mouseMove(chartDiv!, { clientX: 102, clientY: 100 });
-    fireEvent.mouseUp(chartDiv!);
+  it('水平位移低于阈值时视为点击，不产生拖拽选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 42, clientY: 50 });
+    fireEvent.mouseUp(chart);
 
     expect(useStore.getState().selectionStartIndex).toBeNull();
-    expect(useStore.getState().currentIndex).toBe(500);
-
-    // 第二次点击：锚点 500 → 1500 提交选区（既有两次点击行为不受影响）
-    fireEvent.mouseDown(chartDiv!, { clientX: 300, clientY: 100, button: 0 });
-    fireEvent.mouseUp(chartDiv!);
-
-    expect(useStore.getState().selectionStartIndex).toBe(500);
-    expect(useStore.getState().selectionEndIndex).toBe(1501);
+    expect(useStore.getState().selectionEndIndex).toBeNull();
   });
 
-  it('拖拽中鼠标移出图表时，提交到离开点', async () => {
-    const { container } = renderWithChart();
-    const chartDiv = container.querySelector<HTMLElement>('.cursor-crosshair');
-    expect(chartDiv).not.toBeNull();
+  it('位移小于阈值时保留两次点击锚点行为：第二次点击提交锚点选区', async () => {
+    const chart = mountEditor();
 
-    fireEvent.mouseDown(chartDiv!, { clientX: 100, clientY: 100, button: 0 });
-    fireEvent.mouseMove(chartDiv!, { clientX: 300, clientY: 100 });
-    fireEvent.mouseLeave(chartDiv!, { clientX: 300, clientY: 100 });
-    fireEvent.mouseOut(chartDiv!, { clientX: 300, clientY: 100 });
+    // 第一次点击（伴随 2px 微小移动）：只记录锚点，不产生选区
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 42, clientY: 50 });
+    fireEvent.mouseUp(chart);
+
+    expect(useStore.getState().selectionStartIndex).toBeNull();
+    expect(useStore.getState().currentIndex).toBe(2);
+
+    // 第二次点击：锚点 2 → 7 提交选区 [2, 8)（既有两次点击行为不受影响）
+    fireEvent.mouseDown(chart, { clientX: 140, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
 
     await waitFor(() => {
-      expect(useStore.getState().selectionStartIndex).toBe(500);
-      expect(useStore.getState().selectionEndIndex).toBe(1501);
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
     });
   });
 
-  it('Escape 取消进行中的拖拽：清除草稿且不提交选区', async () => {
-    const { container } = renderWithChart();
-    const chartDiv = container.querySelector<HTMLElement>('.cursor-crosshair');
-    expect(chartDiv).not.toBeNull();
+  it('拖拽中离开图表提交选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    fireEvent.mouseLeave(chart, { clientX: 140, clientY: 50 });
 
-    fireEvent.mouseDown(chartDiv!, { clientX: 100, clientY: 100, button: 0 });
-    fireEvent.mouseMove(chartDiv!, { clientX: 300, clientY: 100 });
-    expect(chartDiv!.className).toContain('cursor-ew-resize');
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
+
+  it('拖拽中按 Escape 取消选区', async () => {
+    const chart = mountEditor();
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    expect(chart.className).toContain('cursor-ew-resize');
 
     fireEvent.keyDown(window, { key: 'Escape' });
 
     // 草稿清除，光标恢复
-    expect(chartDiv!.className).toContain('cursor-crosshair');
+    expect(chart.className).toContain('cursor-crosshair');
 
-    fireEvent.mouseUp(chartDiv!);
+    fireEvent.mouseUp(chart);
 
     // 等待可能的 rAF flush，确认未提交任何选区
     await new Promise((resolve) => setTimeout(resolve, 50));

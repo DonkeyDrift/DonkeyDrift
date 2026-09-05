@@ -1,13 +1,11 @@
 // trainer namespace: zh values are the full Chinese translation; en values are
 // the full English translation of every entry.
 //
-// 命名约定（2026-09-04 定稿，勿再翻转）：key 名沿用内部枚举 mypc / local / online，
-// 但显示文案以车上操作视角为准：
-//   mypc   = 通过 SSH 连接的远程开发电脑 → 「局域网主机 / Lan Host」
-//   local  = 运行 Web UI 的车端本机     → 「本机 / Local Host」
-//   online = 云端                       → 「云端 / Cloud」
-// 因此 key 名（如 startLocalTraining）与显示语（在本机上训练）方向相反，属可接受
-// 的内部债务；改文案时只动字符串值，不要改 key 名或枚举值。
+// 命名约定（2026-09-04，以车上操作视角为准）：
+//   - myPc* key（tabMyPc / myPcTraining / myPcTrainingSubtitle / myPcProbeReady
+//     等）= 局域网主机（Lan Host）：通过 SSH 连接的远程开发电脑（内部枚举 mypc）。
+//   - tabLocal = 本机（Local Host）：运行 Web UI 的车端电脑（内部枚举 local）。
+// key 名沿用历史 mypc/local 约定，不与显示语同步更名。
 export const trainer: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'trainer.title': '训练器',
@@ -15,14 +13,14 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.tabLocal': '本机',
     'trainer.tabCloud': '云端',
     'trainer.stopTraining': '停止训练',
-    'trainer.startMyPcTraining': '在局域网主机上训练',
-    'trainer.startLocalTraining': '在本机上训练',
-    'trainer.startCloudTraining': '在云端训练',
+    'trainer.startTraining': '开始训练',
     'trainer.resumeTraining': '继续',
     'trainer.trainingConfig': '训练配置',
     'trainer.tubPath': 'Tub 路径',
     'trainer.tubPathManual': '手动输入…',
     'trainer.tubLoaded': '当前已加载',
+    'trainer.trainingData': '训练数据',
+    'trainer.trainingDataSubtitle': '选择用于训练的 Tub，开始训练时会打包上传到你的电脑',
     'trainer.workingDir': '工作目录: {path}',
     'trainer.modelName': '模型名称',
     'trainer.modelNamePlaceholder': '例如 my_model',
@@ -62,6 +60,9 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.cancel': '取消',
     'trainer.deleting': '删除中…',
     'trainer.delete': '删除',
+    'trainer.importModel': '导入模型',
+    'trainer.importing': '导入中…',
+    'trainer.importFailed': '导入失败: {message}',
     'trainer.trainingStatus': '训练状态',
     'trainer.statusPending': '待开始',
     'trainer.statusRunning': '运行中',
@@ -79,11 +80,33 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.duration': '时长',
     'trainer.cloudTraining': '云端训练',
     'trainer.myPcTraining': '局域网主机训练',
-    'trainer.host': '主机',
+    'trainer.host': 'IP',
     'trainer.user': '用户名',
     'trainer.password': '密码',
-    'trainer.myPcFirstUseHint':
-      '填写局域网主机的 SSH 连接信息（主机 / 用户名 / 密码）。密码仅本次会话使用，不会保存到磁盘。',
+    'trainer.hostPlaceholder': 'IP 地址',
+    'trainer.userPlaceholder': '登录用户名',
+    'trainer.passwordPlaceholder': '登录密码',
+    'trainer.showPassword': '显示密码',
+    'trainer.hidePassword': '隐藏密码',
+    'trainer.autoFill': '一键获取',
+    'trainer.autoFillApplied': '已填入：{value}',
+    'trainer.autoFillLoopback':
+      '检测到你在本机浏览器打开页面——请在目标电脑（Mac/Windows）的浏览器里打开本页面，再点一键获取。',
+    'trainer.autoFillNoUser':
+      '无法自动获取用户名：在 Mac 上打开“终端”输入 whoami 查看，或查看 系统设置 → 用户与群组。',
+    'trainer.autoFillFailed': '获取失败，请检查网络后重试，或手动填写。',
+    'trainer.autoFillNeedPassword':
+      '请先填写密码再点一键获取——需要用密码登录验证才能拿到准确用户名。',
+    'trainer.autoFillVerified': '已验证并填入：{value}',
+    'trainer.autoFillNoSsh':
+      '连不上目标电脑的 SSH——请先在 Mac 上打开 系统设置 → 通用 → 共享 → 远程登录，然后重试。',
+    'trainer.enableSshGuide':
+      '也可以在 Mac 上打开“终端”（聚焦搜索搜“终端”），粘贴执行下面这条命令一键开启（会要求输入开机密码），完成后回来重新点一键获取：',
+    'trainer.copyCommand': '复制',
+    'trainer.copied': '已复制',
+    'trainer.autoFillAuthFailed':
+      '用该密码未能通过任何候选用户名的验证——请确认密码正确后重试。',
+    'trainer.autoFillFromHistory': '已从连接记录填入这台电脑的信息（密码需手填）。',
     'trainer.remoteDirBase': '远程目录基路径',
     'trainer.pythonPath': 'Python 路径',
     'trainer.keyPath': 'SSH 私钥路径（可选）',
@@ -117,14 +140,14 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.tabLocal': 'Local Host',
     'trainer.tabCloud': 'Cloud',
     'trainer.stopTraining': 'Stop Training',
-    'trainer.startMyPcTraining': 'Train on Lan Host',
-    'trainer.startLocalTraining': 'Train on Local Host',
-    'trainer.startCloudTraining': 'Train on Cloud',
+    'trainer.startTraining': 'Start Training',
     'trainer.resumeTraining': 'Resume',
     'trainer.trainingConfig': 'Training Config',
     'trainer.tubPath': 'Tub Path',
     'trainer.tubPathManual': 'Manual input...',
     'trainer.tubLoaded': 'loaded',
+    'trainer.trainingData': 'Training Data',
+    'trainer.trainingDataSubtitle': 'Choose the tub to train on — it will be packaged and uploaded to this computer.',
     'trainer.workingDir': 'Working dir: {path}',
     'trainer.modelName': 'Model Name',
     'trainer.modelNamePlaceholder': 'e.g. my_model',
@@ -164,6 +187,9 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.cancel': 'Cancel',
     'trainer.deleting': 'Deleting...',
     'trainer.delete': 'Delete',
+    'trainer.importModel': 'Import Model',
+    'trainer.importing': 'Importing...',
+    'trainer.importFailed': 'Import failed: {message}',
     'trainer.trainingStatus': 'Training Status',
     'trainer.statusPending': 'PENDING',
     'trainer.statusRunning': 'RUNNING',
@@ -181,11 +207,31 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.duration': 'Duration',
     'trainer.cloudTraining': 'Cloud Training',
     'trainer.myPcTraining': 'Lan Host Training',
-    'trainer.host': 'Host',
+    'trainer.host': 'IP',
     'trainer.user': 'User',
     'trainer.password': 'Password',
-    'trainer.myPcFirstUseHint':
-      "Enter the Lan Host's SSH connection details (host / user / password). The password is used only for this session and is not saved to disk.",
+    'trainer.hostPlaceholder': 'IP address',
+    'trainer.userPlaceholder': 'Login username',
+    'trainer.passwordPlaceholder': 'Login password',
+    'trainer.showPassword': 'Show password',
+    'trainer.hidePassword': 'Hide password',
+    'trainer.autoFill': 'Detect',
+    'trainer.autoFillApplied': 'Filled in: {value}',
+    'trainer.autoFillLoopback':
+      'Local browser detected. Open this page in a browser on the target computer (Mac/Windows), then click Detect.',
+    'trainer.autoFillNoUser':
+      'Could not detect the username. On the Mac, open Terminal and run `whoami`, or check System Settings → Users & Groups.',
+    'trainer.autoFillFailed': 'Detection failed. Check the network and retry, or fill it in manually.',
+    'trainer.autoFillNeedPassword': 'Fill in the password first — accurate username detection verifies by logging in.',
+    'trainer.autoFillVerified': 'Verified and filled in: {value}',
+    'trainer.autoFillNoSsh':
+      'Cannot reach SSH on the target computer. On the Mac, enable System Settings → General → Sharing → Remote Login, then retry.',
+    'trainer.enableSshGuide':
+      'Or on the Mac: open Terminal (search “Terminal” in Spotlight), paste and run this command (it will ask for your login password), then come back and click Detect again:',
+    'trainer.copyCommand': 'Copy',
+    'trainer.copied': 'Copied',
+    'trainer.autoFillAuthFailed': 'No candidate username passed verification with this password — check the password and retry.',
+    'trainer.autoFillFromHistory': 'Connection details filled in from the saved record (password still needs to be entered).',
     'trainer.remoteDirBase': 'Remote Dir Base',
     'trainer.pythonPath': 'Python Path',
     'trainer.keyPath': 'SSH Key Path (optional)',

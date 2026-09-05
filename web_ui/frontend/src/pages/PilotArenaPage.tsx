@@ -176,7 +176,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const [postTransformations, setPostTransformations] = useState<string[]>([]);
   const [plotPilotId, setPlotPilotId] = useState('');
   const [plotStart, setPlotStart] = useState(0);
-  const [plotEnd, setPlotEnd] = useState<number | null>(null);
+  const [plotEnd, setPlotEnd] = useState(0);
   const [plotPoints, setPlotPoints] = useState<ArenaPredictionPoint[]>([]);
   const [plotSummary, setPlotSummary] = useState<ArenaPredictionsSummary | null>(null);
   const [plotError, setPlotError] = useState<string | null>(null);
@@ -218,9 +218,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const displayUserControl = getRecordUserControl(displayRecord);
   const hasRecords = records.length > 0;
   const maxIndex = Math.max(0, records.length - 1);
-  // 帧区间按记录位置（0..N-1）语义；plotEnd 为 null 表示跟随末帧
-  const plotRangeEnd = Math.min(plotEnd ?? maxIndex, maxIndex);
-  const plotRangeStart = Math.min(plotStart, plotRangeEnd);
   const playbackSpeed = 1000 / Math.max(1, Number(config?.DRIVE_LOOP_HZ) || 60);
   const predictionMinIntervalMs = Math.max(
     ARENA_IMAGE_MIN_INTERVAL_MS,
@@ -284,6 +281,13 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   useEffect(() => {
     setDisplayRecordIndex((index) => Math.max(0, Math.min(maxIndex, index)));
   }, [maxIndex]);
+
+  // 首尾帧切片区间：records 首次加载时默认取全量范围，之后记录数变化只做 clamp。
+  useEffect(() => {
+    if (!hasRecords) return;
+    setPlotEnd((end) => (end === 0 ? maxIndex : Math.min(end, maxIndex)));
+    setPlotStart((start) => Math.min(start, maxIndex));
+  }, [hasRecords, maxIndex]);
 
   useEffect(() => {
     listArenaModelTypes()
@@ -761,6 +765,14 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
 
   const loadedPilots = viewers.filter((viewer) => viewer.pilot);
 
+  const handlePlotStartChange = (value: number) => {
+    setPlotStart(Math.max(0, Math.min(value, plotEnd)));
+  };
+
+  const handlePlotEndChange = (value: number) => {
+    setPlotEnd(Math.min(maxIndex, Math.max(value, plotStart)));
+  };
+
   const loadPlot = async () => {
     if (!plotPilotId) {
       setPlotError(t('arena.selectLoadedPilotError'));
@@ -772,8 +784,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     try {
       const data = await getArenaPredictions(plotPilotId, {
         config_path: configPath,
-        start: plotRangeStart,
-        limit: plotRangeEnd - plotRangeStart + 1,
+        start: plotStart,
+        limit: Math.max(1, plotEnd - plotStart + 1),
       });
       setPlotPoints(data.points);
       setPlotSummary(data.summary ?? null);
@@ -1128,45 +1140,49 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           />
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_2fr_auto]">
-            <select
-              value={plotPilotId}
-              onChange={(event) => setPlotPilotId(event.target.value)}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
-            >
-              <option value="">{t('arena.selectLoadedPilot')}</option>
-              {loadedPilots.map((viewer) => viewer.pilot && (
-                <option key={viewer.pilot.id} value={viewer.pilot.id}>{viewer.pilot.name}</option>
-              ))}
-            </select>
-            <div className="space-y-1">
-              <label className="flex items-center gap-2 text-xs text-zinc-400">
-                <span className="w-24 shrink-0 font-mono">{t('arena.plotStartFrame', { value: plotRangeStart })}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={maxIndex}
-                  value={plotRangeStart}
-                  onChange={(event) => setPlotStart(Math.min(Number(event.target.value), plotRangeEnd))}
-                  className="w-full accent-cyan-500"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-xs text-zinc-400">
-                <span className="w-24 shrink-0 font-mono">{t('arena.plotEndFrame', { value: plotRangeEnd })}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={maxIndex}
-                  value={plotRangeEnd}
-                  onChange={(event) => setPlotEnd(Math.max(Number(event.target.value), plotRangeStart))}
-                  className="w-full accent-cyan-500"
-                />
-              </label>
-              <p className="text-xs text-zinc-600">{t('arena.plotRangeHint', { value: maxIndex })}</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+              <select
+                value={plotPilotId}
+                onChange={(event) => setPlotPilotId(event.target.value)}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+              >
+                <option value="">{t('arena.selectLoadedPilot')}</option>
+                {loadedPilots.map((viewer) => viewer.pilot && (
+                  <option key={viewer.pilot.id} value={viewer.pilot.id}>{viewer.pilot.name}</option>
+                ))}
+              </select>
+              <Button onClick={loadPlot} disabled={plotLoading || !plotPilotId || !hasRecords}>
+                {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
+              </Button>
             </div>
-            <Button onClick={loadPlot} disabled={plotLoading || !plotPilotId || !hasRecords}>
-              {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
-            </Button>
+            <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+                <span data-testid="plot-start-label">{t('arena.plotStartFrame', { value: plotStart })}</span>
+                <span data-testid="plot-end-label">{t('arena.plotEndFrame', { value: plotEnd })}</span>
+                <span>{t('arena.plotRangeHint', { max: maxIndex })}</span>
+              </div>
+              <div className="space-y-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={maxIndex}
+                  value={plotStart}
+                  onChange={(event) => handlePlotStartChange(Number(event.target.value))}
+                  data-testid="plot-start-slider"
+                  className="w-full"
+                />
+                <input
+                  type="range"
+                  min={0}
+                  max={maxIndex}
+                  value={plotEnd}
+                  onChange={(event) => handlePlotEndChange(Number(event.target.value))}
+                  data-testid="plot-end-slider"
+                  className="w-full"
+                />
+              </div>
+            </div>
           </div>
           {plotError && (
             <div className="rounded-md border border-red-800 bg-red-950/60 px-3 py-2 text-sm text-red-200">

@@ -1,9 +1,8 @@
 """
 My-PC environment probe.
 
-Diagnoses whether the user's own computer (the machine running the browser,
-reached via an SSH callback from this backend) is ready for "Lan Host"
-(mypc) training.
+Diagnoses whether the Lan Host (the remote development machine reached via an
+SSH callback from this backend) is ready for "Lan Host" (mypc) training.
 
 This is intentionally a lightweight, side-effect-free pre-flight check: it
 connects over SSH, detects the remote OS, finds a usable Python interpreter,

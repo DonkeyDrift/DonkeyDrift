@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { listModels, deleteModel, downloadModelUrl, loadModelToCar, API_URL, getApiErrorMessage } from '../../services/api';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { listModels, deleteModel, downloadModelUrl, loadModelToCar, importModel, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useTranslation } from '@/i18n';
 
@@ -38,6 +38,8 @@ export const ModelsList: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelItem | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -63,25 +65,25 @@ export const ModelsList: React.FC = () => {
   }, [trainingJob?.status, refresh]);
 
   const openPreview = (model: ModelItem) => {
-    if (!model.previewPath) return;
-    setActivePreview({ path: model.previewPath, name: model.name });
-    setPreviewLoading(true);
+    if (model.previewPath) {
+      setActivePreview({ path: model.previewPath, name: model.name });
+      setPreviewLoading(true);
+    }
   };
 
-  const closePreview = useCallback(() => {
+  const closePreview = () => {
     setActivePreview(null);
     setPreviewLoading(false);
-  }, []);
+  };
 
-  // Close the loss chart modal with Esc
   useEffect(() => {
     if (!activePreview) return;
-    const onKeyDown = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closePreview();
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activePreview, closePreview]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activePreview]);
 
   const handleDelete = useCallback(async (model: ModelItem) => {
     setDeleting(model.path);
@@ -94,6 +96,18 @@ export const ModelsList: React.FC = () => {
     }
   }, [refresh]);
 
+  const handleImportFile = useCallback(async (file: File) => {
+    setImporting(true);
+    try {
+      await importModel(file, configPath);
+      await refresh();
+    } catch (error) {
+      alert(t('trainer.importFailed', { message: getApiErrorMessage(error) }));
+    } finally {
+      setImporting(false);
+    }
+  }, [configPath, refresh, t]);
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3 relative">
       <div className="flex items-center justify-between">
@@ -102,14 +116,39 @@ export const ModelsList: React.FC = () => {
           title={t('trainer.trainedModels')}
           subtitle={t('trainer.trainedModelsSubtitle')}
         />
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
-        >
-          {loading ? t('trainer.loading') : t('trainer.refresh')}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="inline-flex items-center gap-1 text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
+            title={t('trainer.importModel')}
+          >
+            <Upload className="w-3.5 h-3.5" />
+            {importing ? t('trainer.importing') : t('trainer.importModel')}
+          </button>
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
+          >
+            {loading ? t('trainer.loading') : t('trainer.refresh')}
+          </button>
+        </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".tflite"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            handleImportFile(file);
+          }
+          e.target.value = '';
+        }}
+      />
 
       {models.length === 0 && (
         <div className="text-sm text-zinc-600">{t('trainer.noModels')}</div>
@@ -119,7 +158,7 @@ export const ModelsList: React.FC = () => {
         {models.map((m) => (
           <div
             key={m.name}
-            className="bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50"
+            className="bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50 cursor-default"
           >
             {/* Row 1: model name + loss badge */}
             <div className="flex items-center justify-between gap-2">
@@ -128,17 +167,22 @@ export const ModelsList: React.FC = () => {
                 <span className="text-sm text-zinc-300 truncate" title={m.name}>{m.name}</span>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {m.previewPath && (
+                {typeof m.finalLoss === 'number' && m.previewPath && (
                   <button
-                    type="button"
                     onClick={() => openPreview(m)}
-                    title={t('trainer.viewLossChart')}
                     aria-label={t('trainer.viewLossChart')}
+                    title={t('trainer.viewLossChart')}
                     className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-400/10 hover:bg-emerald-400/20 px-2 py-0.5 rounded mr-1 transition-colors"
                   >
                     <TrendingDown className="w-3 h-3" />
-                    {typeof m.finalLoss === 'number' ? m.finalLoss.toFixed(4) : t('trainer.loss')}
+                    {m.finalLoss.toFixed(4)}
                   </button>
+                )}
+                {typeof m.finalLoss === 'number' && !m.previewPath && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded mr-1">
+                    <TrendingDown className="w-3 h-3" />
+                    {m.finalLoss.toFixed(4)}
+                  </span>
                 )}
                 <a
                   href={downloadModelUrl(m.path)}
@@ -202,28 +246,23 @@ export const ModelsList: React.FC = () => {
         ))}
       </div>
 
-      {/* Loss chart modal */}
+      {/* Loss chart preview modal */}
       {activePreview && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
           onClick={closePreview}
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('trainer.lossChartAlt')}
+          data-testid="loss-chart-overlay"
         >
-          <div
-            className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 w-[26rem] max-w-[92vw] shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4 w-[360px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-zinc-400 truncate" title={activePreview.name}>
                 {activePreview.name}
               </span>
               <button
-                type="button"
                 onClick={closePreview}
+                aria-label={t('trainer.close')}
                 title={t('trainer.close')}
-                className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+                className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -237,7 +276,7 @@ export const ModelsList: React.FC = () => {
               src={`${API_URL}/trainer/models/preview?path=${encodeURIComponent(activePreview.path)}`}
               alt={t('trainer.lossChartAlt')}
               className={`w-full h-auto rounded ${previewLoading ? 'hidden' : ''}`}
-              style={{ maxHeight: '70vh' }}
+              style={{ maxHeight: 220 }}
               draggable={false}
               onLoad={() => setPreviewLoading(false)}
               onError={() => setPreviewLoading(false)}

@@ -71,12 +71,16 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     V.add(cam, inputs=inputs, outputs=['cam/image_array'], threaded=threaded)
 
-    # 把模拟器连接状态发布到 Memory，供 DriveApiBridge 遥测上报（Drive 页离线提示）
     class SimConnectionState:
-        def run(self):
-            return cam.connected
+        """把 DonkeyGymEnv 的 TCP 连接状态发布为 sim/connected，供遥测透传到前端。"""
 
-    V.add(SimConnectionState(), outputs=['sim/connected'])
+        def __init__(self, cam):
+            self._cam = cam
+
+        def run(self):
+            return bool(getattr(self._cam, "connected", False))
+
+    V.add(SimConnectionState(cam), outputs=['sim/connected'])
 
     server_url = os.environ.get("DRIVE_API_SERVER_URL") or getattr(cfg, "DRIVE_API_SERVER_URL", None) or "ws://127.0.0.1:8000/api/drive/ws"
     if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:

@@ -6,4 +6,5 @@ host =
 user =
 remote_dir_base = ~/projects
 model_name = model
+model_type = linear
 python_path = ~/miniconda3/envs/donkey/bin/python

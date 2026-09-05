@@ -224,6 +224,8 @@ export interface TrainerConfig {
   remote_dir_base: string;
   model_name: string;
   python_path: string;
+  /** 模型类型（linear/categorical/...），远程训练命令 --type 参数 */
+  model_type?: string;
   /** SSH 私钥路径（可选，留空用密码认证） */
   key_path?: string;
 }
@@ -274,6 +276,38 @@ export const probeMyPc = async (cfg: {
   return response.data;
 };
 
+export interface MyPcClientInfo {
+  ip: string;
+  is_loopback: boolean;
+  hostname: string;
+  username: string;
+  verified: boolean;
+  ssh: string; // '' | 'ok' | 'auth_failed' | 'unreachable'
+}
+
+export async function getMyPcClientInfo(password?: string): Promise<MyPcClientInfo> {
+  // POST + JSON body（而非 GET query）：密码绝不进访问日志
+  const response = await api.post('/trainer/mypc/client-info', {
+    password: password || '',
+  });
+  return response.data;
+}
+
+export interface MyPcKnownHost {
+  host: string;
+  user: string;
+  python_path: string;
+  remote_dir_base: string;
+  last_used_at: number;
+  reachable: boolean;
+  // 安全约束：历史记录不含密码，前端永远不要从这里取密码
+}
+
+export async function getMyPcKnownHosts(): Promise<MyPcKnownHost[]> {
+  const response = await api.get('/trainer/mypc/known-hosts');
+  return response.data.hosts;
+}
+
 export const installMyPc = async (cfg: {
   host: string;
   user: string;
@@ -297,6 +331,18 @@ export const downloadModelUrl = (path: string): string => {
 
 export const deleteModel = async (path: string) => {
   const response = await api.delete('/trainer/models', { params: { path } });
+  return response.data;
+};
+
+export const importModel = async (file: File, workingDir?: string) => {
+  const form = new FormData();
+  form.append('file', file);
+  if (workingDir) {
+    form.append('working_dir', workingDir);
+  }
+  // 不手动设置 Content-Type：axios 对 FormData 会在浏览器侧自动设置
+  // multipart/form-data 边界，手动设置反而会丢失 boundary。
+  const response = await api.post('/trainer/models/import', form);
   return response.data;
 };
 
@@ -596,6 +642,15 @@ export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWeb
   // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
   // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。
   const response = await api.post('/launch/dsh', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
+export const launchZcode = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // zcode 端点不启动子进程、只返回 /terminal?cmd=zcode URL，毫秒级响应
+  const response = await api.post('/launch/zcode', {}, {
     signal,
     validateStatus: () => true,
   });

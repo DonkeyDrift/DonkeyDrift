@@ -207,7 +207,13 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
         const url = toFetch[cursor++];
         const img = new Image();
         inFlight += 1;
-        img.onload = img.onerror = () => {
+        img.onload = () => {
+          // 预解码（60fps）：帧到期前完成 JPEG 解码，drawImage 不再触发主线程同步解码
+          img.decode?.().catch(() => {});
+          inFlight -= 1;
+          pump();
+        };
+        img.onerror = () => {
           inFlight -= 1;
           pump();
         };

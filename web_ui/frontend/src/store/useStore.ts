@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { TrainerMode } from '../components/trainer/ModeTabs';
 
 const MAX_SELECTION_HISTORY = 120;
 
@@ -34,6 +35,8 @@ export interface TrainerOnlineConfig {
   password: string;
   remoteDirBase: string;
   modelName: string;
+  /** 模型类型（linear/categorical/...），写入 conf 的 model_type */
+  modelType: string;
   pythonPath: string;
   /** SSH 私钥路径（可选，与 Car Connector 的 key_path 对齐；留空时用密码认证） */
   keyPath: string;
@@ -41,7 +44,10 @@ export interface TrainerOnlineConfig {
 
 // Connection settings for training on the user's own computer (SSH callback
 // from the backend to the machine running the browser, config train_my_pc.conf).
-export type TrainerMyPcConfig = TrainerOnlineConfig;
+// 比 online 多一个 tub 字段：训练打包哪个 tub（相对 working_dir 的路径）。
+export interface TrainerMyPcConfig extends TrainerOnlineConfig {
+  tub: string;
+}
 
 export interface TrainerLocalConfig {
   tub: string;
@@ -82,6 +88,9 @@ interface AppState {
   isLooping: boolean;
   error: string | null;
   activeDrawer: 'loaders' | 'connectors' | null;
+  // 配置自动加载每页面生命周期只尝试一次（ConfigLoader 随抽屉开关反复挂载，
+  // 不能用组件内 ref 记忆）；不持久化，刷新页面后重新尝试
+  configAutoLoadTried: boolean;
   selectionStartIndex: number | null;
   selectionEndIndex: number | null;
   selectionHistory: { startIndex: number; endIndex: number }[];
@@ -89,6 +98,9 @@ interface AppState {
 
   // Trainer state
   trainingJob: TrainingJob | null;
+  // 当前正在训练的任务（id + 模式），持久化以支持刷新后恢复进度
+  activeTraining: { id: string; mode: TrainingJob['mode'] } | null;
+  trainerMode: TrainerMode;
   trainerOnlineConfig: TrainerOnlineConfig;
   trainerMyPcConfig: TrainerMyPcConfig;
   trainerLocalConfig: TrainerLocalConfig;
@@ -118,6 +130,9 @@ interface AppState {
 
   // Trainer actions
   setTrainingJob: (job: TrainingJob | null) => void;
+  setActiveTraining: (id: string, mode: TrainingJob['mode']) => void;
+  clearActiveTraining: () => void;
+  setTrainerMode: (mode: TrainerMode) => void;
   appendTrainingLog: (lines: string[]) => void;
   updateTrainingProgress: (progress: TrainingJob['progress']) => void;
   finishTrainingJob: (status: 'completed' | 'failed' | 'stopped', errorMessage?: string | null) => void;
@@ -150,6 +165,7 @@ export const useStore = create<AppState>()(
       isLooping: false,
       error: null,
       activeDrawer: 'loaders' as 'loaders' | 'connectors' | null,
+      configAutoLoadTried: false,
       selectionStartIndex: null,
       selectionEndIndex: null,
       selectionHistory: [],
@@ -158,12 +174,15 @@ export const useStore = create<AppState>()(
 
       // Trainer defaults
       trainingJob: null,
+      activeTraining: null,
+      trainerMode: 'local',
       trainerOnlineConfig: {
         host: '',
         user: '',
         password: '',
         remoteDirBase: '~/projects',
         modelName: 'model',
+        modelType: 'linear',
         pythonPath: '~/miniconda3/envs/donkey/bin/python',
         keyPath: '',
       },
@@ -173,8 +192,10 @@ export const useStore = create<AppState>()(
         password: '',
         remoteDirBase: '~/projects',
         modelName: 'model',
+        modelType: 'linear',
         pythonPath: '',
         keyPath: '',
+        tub: './data',
       },
       trainerLocalConfig: {
         tub: './data',
@@ -240,7 +261,13 @@ export const useStore = create<AppState>()(
       setIsLooping: (isLooping) => set({ isLooping }),
       setLoading: (loading) => set({ isLoading: loading }),
       setError: (error) => {
-        const shouldOpenPanel = error && (error.includes('not found') || error.includes('Failed'));
+        if (!error) {
+          // 仅清除错误，不联动抽屉：ConfigLoader 挂载时会 setError(null)，
+          // 若把 activeDrawer 置空，抽屉会被瞬间关上（老用户点击「加载器」无反应的根因）
+          set({ error: null });
+          return;
+        }
+        const shouldOpenPanel = error.includes('not found') || error.includes('Failed');
         set({ error, activeDrawer: shouldOpenPanel ? 'loaders' : null });
       },
       setActiveDrawer: (drawer) => set({ activeDrawer: drawer }),
@@ -324,6 +351,9 @@ export const useStore = create<AppState>()(
 
       // Trainer actions
       setTrainingJob: (job) => set({ trainingJob: job }),
+      setActiveTraining: (id, mode) => set({ activeTraining: { id, mode } }),
+      clearActiveTraining: () => set({ activeTraining: null }),
+      setTrainerMode: (mode) => set({ trainerMode: mode }),
       appendTrainingLog: (lines) =>
         set((state) => {
           if (!state.trainingJob) return state;
@@ -354,6 +384,7 @@ export const useStore = create<AppState>()(
               finishedAt: new Date().toISOString(),
               errorMessage: errorMessage ?? null,
             },
+            activeTraining: null,
           };
         }),
       setTrainerOnlineConfig: (cfg) =>
@@ -378,6 +409,8 @@ export const useStore = create<AppState>()(
         trainerOnlineConfig: state.trainerOnlineConfig,
         trainerMyPcConfig: state.trainerMyPcConfig,
         trainerLocalConfig: state.trainerLocalConfig,
+        trainerMode: state.trainerMode,
+        activeTraining: state.activeTraining,
       }),
     }
   )

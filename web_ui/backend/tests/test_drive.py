@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -572,194 +574,86 @@ def test_video_stream_emits_placeholder_when_offline():
     assert payload.startswith(b"\xff\xd8")
 
 
-# ===========================================================================
-# /drive/load_model（issue #003：选模型 = 持久化选择 + 触发车端带模型重启）
-# ===========================================================================
-
-def _make_models_dir(tmp_path, names=("DKG-1.tflite",)):
-    models_dir = tmp_path / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
-    for name in names:
-        (models_dir / name).write_bytes(b"model-bytes")
-    return models_dir
+# ------------------------------------------------------------------
+# #362：选模型后要求带模型重启（不再运行时热切换）
+# ------------------------------------------------------------------
+def _make_model_client(monkeypatch, tmp_path, online=False):
+    monkeypatch.setenv("DONKEY_CAR_DIR", str(tmp_path))
+    if online:
+        return make_online_client()
+    return make_client()
 
 
-def _patch_model_store(monkeypatch, drive, tmp_path):
-    """把模型持久化文件指到临时目录，避免写真实 ~/.donkeycar。"""
-    model_file = tmp_path / "drive_model.json"
-    monkeypatch.setattr(drive.webui_instance, "DRIVE_MODEL_FILE", model_file)
-    return model_file
-
-
-def test_load_model_persists_selection_and_triggers_restart(
-        monkeypatch, tmp_path):
-    """合法选择：写入持久化记录（tflite 推导 tflite_linear）并触发 launcher
-    重启车进程；车端离线也允许（重启后上线即带模型）。"""
-    client, drive = make_client()  # 故意不在线：不再要求 car_online
-    _make_models_dir(tmp_path)
-    model_file = _patch_model_store(monkeypatch, drive, tmp_path)
-    launcher_calls = []
-
-    def fake_post(path, body):
-        launcher_calls.append((path, body))
-        return 200, b'{"status": "launched"}'
-
-    monkeypatch.setattr(drive, "_post_to_launcher", fake_post)
+def test_load_model_rejects_absolute_path(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
 
     response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/DKG-1.tflite",
+        "model_path": "/abs/models/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 400
+    assert "相对路径" in response.json()["detail"]
+
+
+def test_load_model_rejects_path_traversal(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "../models/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 400
+    assert "非法" in response.json()["detail"]
+
+
+def test_load_model_rejects_non_models_prefix(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "./tubs/foo.h5",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 400
+    assert "models" in response.json()["detail"]
+
+
+def test_load_model_persists_selection_and_requires_restart(monkeypatch, tmp_path):
+    client, _ = _make_model_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "./models/foo.h5",
         "working_dir": str(tmp_path),
     })
 
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert data["restarting"] is True
-    assert launcher_calls == [("/api/launch/drive", b"")]
-
-    import json as _json
-    record = _json.loads(model_file.read_text(encoding="utf-8"))
-    assert record["model"] == str(tmp_path / "models" / "DKG-1.tflite")
-    assert record["model_type"] == "tflite_linear"
-
-
-def test_load_model_h5_leaves_type_to_config(monkeypatch, tmp_path):
-    """.h5 不推导 --type（交给车端 myconfig DEFAULT_MODEL_TYPE）。"""
-    client, drive = make_client()
-    _make_models_dir(tmp_path, names=("m.h5",))
-    model_file = _patch_model_store(monkeypatch, drive, tmp_path)
-    monkeypatch.setattr(
-        drive, "_post_to_launcher", lambda path, body: (200, b"{}"))
-
-    response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/m.h5",
-        "working_dir": str(tmp_path),
-    })
-
-    assert response.status_code == 200
-    import json as _json
-    record = _json.loads(model_file.read_text(encoding="utf-8"))
-    assert record["model_type"] is None
-
-
-def test_load_model_rejects_path_outside_models_dir(monkeypatch, tmp_path):
-    """路径逃逸 models 目录（../ 或绝对路径）一律 400。"""
-    client, drive = make_online_client()
-    _make_models_dir(tmp_path)
-    _patch_model_store(monkeypatch, drive, tmp_path)
-    outside = tmp_path / "evil.tflite"
-    outside.write_bytes(b"x")
-    monkeypatch.setattr(
-        drive, "_post_to_launcher", lambda path, body: (200, b"{}"))
-
-    for bad in ("../evil.tflite", str(outside), "./models/../../etc/x.tflite"):
-        response = client.post("/api/drive/load_model", json={
-            "model_path": bad,
-            "working_dir": str(tmp_path),
-        })
-        assert response.status_code == 400, bad
-
-
-def test_load_model_rejects_missing_file(monkeypatch, tmp_path):
-    client, drive = make_online_client()
-    _make_models_dir(tmp_path)
-    _patch_model_store(monkeypatch, drive, tmp_path)
-
-    response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/nope.tflite",
-        "working_dir": str(tmp_path),
-    })
-
-    assert response.status_code == 400
-
-
-def test_load_model_rejects_disallowed_extension(monkeypatch, tmp_path):
-    client, drive = make_online_client()
-    _make_models_dir(tmp_path, names=("notes.txt",))
-    _patch_model_store(monkeypatch, drive, tmp_path)
-
-    response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/notes.txt",
-        "working_dir": str(tmp_path),
-    })
-
-    assert response.status_code == 400
-
-
-def test_load_model_requires_working_dir(tmp_path):
-    client, _ = make_client()
-
-    response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/DKG-1.tflite",
-    })
-
-    assert response.status_code == 400
-
-
-def test_load_model_launcher_unreachable_returns_restart_required(
-        monkeypatch, tmp_path):
-    """launcher 不在线：选择已持久化，但如实告知前端需手动重启，
-    不再像旧实现那样「假成功」。"""
-    client, drive = make_client()
-    _make_models_dir(tmp_path)
-    model_file = _patch_model_store(monkeypatch, drive, tmp_path)
-
-    def failing_post(path, body):
-        raise OSError("connection refused")
-
-    monkeypatch.setattr(drive, "_post_to_launcher", failing_post)
-
-    response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/DKG-1.tflite",
-        "working_dir": str(tmp_path),
-    })
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["restarting"] is False
     assert data["restart_required"] is True
-    assert model_file.exists()  # 选择仍已持久化
+
+    selected_path = tmp_path / "selected_model.json"
+    assert selected_path.exists()
+    saved = json.loads(selected_path.read_text(encoding="utf-8"))
+    assert saved["model_path"] == "./models/foo.h5"
+    assert saved["working_dir"] == str(tmp_path)
 
 
-def test_load_model_launcher_error_returns_restart_required(
-        monkeypatch, tmp_path):
-    """launcher 报业务错误（如找不到 mycar 项目）：同样降级为需手动重启。"""
-    client, drive = make_client()
-    _make_models_dir(tmp_path)
-    _patch_model_store(monkeypatch, drive, tmp_path)
-    monkeypatch.setattr(
-        drive, "_post_to_launcher",
-        lambda path, body: (500, b'{"status": "error", "error": "no mycar"}'))
+def test_load_model_notifies_online_car(monkeypatch, tmp_path):
+    client, drive = _make_model_client(monkeypatch, tmp_path, online=True)
+    sent_to_car = []
+
+    async def fake_send_to_car(payload):
+        sent_to_car.append(payload)
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
 
     response = client.post("/api/drive/load_model", json={
-        "model_path": "./models/DKG-1.tflite",
+        "model_path": "./models/bar.h5",
         "working_dir": str(tmp_path),
     })
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["restarting"] is False
-    assert data["restart_required"] is True
-    assert "no mycar" in data["message"]
-
-
-def test_load_model_clear_selection_removes_record(monkeypatch, tmp_path):
-    """选「无模型」：删除持久化记录并触发重启（卸载模型也需重启生效）。"""
-    client, drive = make_client()
-    _make_models_dir(tmp_path)
-    model_file = _patch_model_store(monkeypatch, drive, tmp_path)
-    model_file.write_text('{"model": "/x/m.tflite"}', encoding="utf-8")
-    launcher_calls = []
-    monkeypatch.setattr(
-        drive, "_post_to_launcher",
-        lambda path, body: launcher_calls.append(path) or (200, b"{}"))
-
-    response = client.post("/api/drive/load_model", json={
-        "model_path": "",
-        "working_dir": str(tmp_path),
-    })
-
-    assert response.status_code == 200
-    assert response.json()["restarting"] is True
-    assert not model_file.exists()
-    assert launcher_calls == ["/api/launch/drive"]
+    assert sent_to_car == [{"type": "restart_with_model", "model_path": "./models/bar.h5"}]

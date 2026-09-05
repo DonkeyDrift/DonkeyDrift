@@ -7,5 +7,7 @@ pillow
 websockets
 aiortc
 av
+httpx2
+zeroconf
 httpx
 pupil-apriltags

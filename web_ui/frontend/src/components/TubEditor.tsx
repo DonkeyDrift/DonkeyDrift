@@ -34,9 +34,7 @@ const MAX_ZOOM_PERCENT = 1000;
 const ZOOM_STEP_PERCENT = 100;
 const MAX_UNDO_HISTORY = 10;
 const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
-// 拖拽框选：水平位移超过该阈值才进入拖拽态，否则按「移动播放头 + 两次点击」处理
 const DRAG_SELECTION_THRESHOLD_PX = 5;
-// 草稿框最小可见宽度（吸取 #130 教训，与底部滑块 max(..., 2px) 一致）
 const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
 type RecordAction = {
@@ -65,7 +63,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const isSessionScoped = activeSessionId != null;
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
-  const currentIndex = useStore((state) => state.currentIndex);
+  // 注意：不要组件级订阅 currentIndex——播放期它高频变化，订阅会让整棵编辑器树
+  // re-render（且 options/plugins 引用随 render 变化会连带 chart.update）。播放位置
+  // 一律走 currentIndexRef + 下方 subscribe 回调（60fps 回放优化）。
   const setCurrentIndex = useStore((state) => state.setCurrentIndex);
   const selectionStartIndex = useStore((state) => state.selectionStartIndex);
   const selectionEndIndex = useStore((state) => state.selectionEndIndex);
@@ -76,10 +76,11 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const deletedIndexes = useStore((state) => state.deletedIndexes);
   const totalPhysicalRecords = useStore((state) => state.totalPhysicalRecords);
   const chartRef = useRef<ChartInstance<'line'> | null>(null);
+  // 播放竖线 DOM 叠加层（60fps 回放优化）：竖线移动直写 style，不触发 chart.update
+  const playheadRef = useRef<HTMLDivElement>(null);
   const lineDashOffsetRef = useRef(0);
   const visualSelectionRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
   const isSelectingRef = useRef(false);
-  // 拖拽框选：mousedown 只记录按下点，mousemove 中位移超阈值才进入拖拽态
   const dragStartRef = useRef<{ x: number; index: number } | null>(null);
   const isDragSelectingRef = useRef(false);
   const currentIndexRef = useRef(useStore.getState().currentIndex);
@@ -92,7 +93,6 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const chartRenderFrameRef = useRef<number | null>(null);
   const chartNeedsRenderRef = useRef(false);
   const selectionAnimationUntilRef = useRef(0);
-  const playbackActivityUntilRef = useRef(0);
   const preserveViewportOnRecordsChangeRef = useRef(false);
   const sliderRef = useRef<HTMLInputElement>(null);
   const sliderRafRef = useRef<number | null>(null);
@@ -106,6 +106,14 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     currentIndex: number;
   } | null>(null);
   const selectionDraftRef = useRef(selectionDraft);
+  // 底部滑条首尾三角手柄拖拽预览：拖拽中只更新显示，松手才一次性提交 setSelectionRange
+  const [handleDrag, setHandleDrag] = useState<{
+    edge: 'start' | 'end';
+    startIndex: number;
+    endIndex: number;
+  } | null>(null);
+  const handleDragRef = useRef<{ edge: 'start' | 'end'; startIndex: number; endIndex: number } | null>(null);
+  const sliderContainerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const hoverPositionRef = useRef<{ x: number; y: number; dataIndex: number } | null>(null);
   const recordsRef = useRef(records);
@@ -128,6 +136,15 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const [redoHistory, setRedoHistory] = useState<RecordAction[]>([]);
   const [zoomPercent, setZoomPercent] = useState(MIN_ZOOM_PERCENT);
   const [scrollProgress, setScrollProgress] = useState(0);
+  // 供播放热路径（store subscribe 回调）读最新值，避免为播放位置订阅整组件 re-render
+  const zoomPercentRef = useRef(zoomPercent);
+  const scrollProgressRef = useRef(scrollProgress);
+  useEffect(() => {
+    zoomPercentRef.current = zoomPercent;
+  }, [zoomPercent]);
+  useEffect(() => {
+    scrollProgressRef.current = scrollProgress;
+  }, [scrollProgress]);
   const zoomMultiplier = zoomPercent / MIN_ZOOM_PERCENT;
 
   const clampZoomPercent = useCallback((value: number) => {
@@ -164,8 +181,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       const hasDraftSelection = Boolean(selectionDraftRef.current);
       const hasSelectionAnimation = hasDraftSelection || time < selectionAnimationUntilRef.current;
-      const hasPlaybackActivity = time < playbackActivityUntilRef.current;
-      const shouldRender = chartNeedsRenderRef.current || hasSelectionAnimation || hasPlaybackActivity;
+      // 播放竖线已改 DOM 叠加层（随索引直写 style），不再驱动 chart 重绘
+      const shouldRender = chartNeedsRenderRef.current || hasSelectionAnimation;
 
       if (shouldRender && chartRef.current) {
         if (hasSelectionAnimation && (hasDraftSelection || visualSelectionRef.current)) {
@@ -176,7 +193,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         chartRef.current.update('none');
       }
 
-      if (hasDraftSelection || time < selectionAnimationUntilRef.current || time < playbackActivityUntilRef.current) {
+      if (hasDraftSelection || time < selectionAnimationUntilRef.current) {
         chartRenderFrameRef.current = window.requestAnimationFrame(renderLoop);
       }
     };
@@ -185,15 +202,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   }, []);
 
   const requestChartRender = useCallback(
-    (options?: { animateSelection?: boolean; markPlaybackActive?: boolean }) => {
+    (options?: { animateSelection?: boolean }) => {
       const now = performance.now();
 
       chartNeedsRenderRef.current = true;
       if (options?.animateSelection) {
         selectionAnimationUntilRef.current = Math.max(selectionAnimationUntilRef.current, now + 220);
-      }
-      if (options?.markPlaybackActive) {
-        playbackActivityUntilRef.current = Math.max(playbackActivityUntilRef.current, now + 120);
       }
 
       ensureChartRenderLoop();
@@ -513,25 +527,109 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     }
   }, [redoHistory, runRecordAction]);
 
+  // 播放竖线位置计算（60fps 回放优化）：经 chart 比例尺换算后直接写叠加层 DOM
+  // style——竖线移动不再触发 chart.js 全量重绘（原先每次索引变化都 chart.update，
+  // ~1000+ 点 × 2 数据集全 layout，60fps 回放时主线程被吃满掉帧）。
+  const positionPlayhead = useCallback(() => {
+    const el = playheadRef.current;
+    if (!el) return;
+    const chart = chartRef.current;
+    const currentRecords = recordsRef.current;
+    const sampledIndices = sampledIndicesRef.current;
+    if (!chart || !sampledIndices.length || !currentRecords.length) {
+      el.style.display = 'none';
+      return;
+    }
+    const xAxis = chart.scales.x;
+    const chartArea = chart.chartArea;
+    if (!xAxis || !chartArea) {
+      el.style.display = 'none';
+      return;
+    }
+    const latestIndex = currentIndexRef.current;
+    const currentRecord = currentRecords[latestIndex];
+    const currentXValue = isSessionScopedRef.current
+      ? latestIndex
+      : currentRecord
+        ? currentRecord._index
+        : latestIndex;
+    const currentX = xAxis.getPixelForValue(currentXValue);
+    if (Number.isNaN(currentX) || currentX < chartArea.left || currentX > chartArea.right) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = '';
+    el.style.transform = `translateX(${currentX - 1}px)`;
+    el.style.top = `${chartArea.top}px`;
+    el.style.height = `${chartArea.bottom - chartArea.top}px`;
+  }, []);
+
+  // 视口跟随（竖线越过 padding 边界时翻页）：原 effect 逻辑改普通函数——播放期由
+  // 下面的 subscribe 回调驱动，仅在真正翻页时 setScrollProgress 触发 re-render。
+  const followPlayheadViewport = useCallback(() => {
+    const totalRecords = recordsRef.current.length;
+    const zoomPercent = zoomPercentRef.current;
+    if (!totalRecords || zoomPercent === MIN_ZOOM_PERCENT) {
+      return;
+    }
+
+    const visibleCount = Math.max(
+      2,
+      Math.min(totalRecords, Math.ceil((totalRecords * MIN_ZOOM_PERCENT) / zoomPercent))
+    );
+    const maxStartIndex = Math.max(0, totalRecords - visibleCount);
+    if (maxStartIndex <= 0) {
+      return;
+    }
+
+    const padding = Math.max(1, Math.floor(visibleCount * PLAYHEAD_SCROLL_PADDING_RATIO));
+    const currentStartIndex = Math.round(maxStartIndex * scrollProgressRef.current);
+    const currentEndIndex = Math.min(totalRecords - 1, currentStartIndex + visibleCount - 1);
+    const safeStartIndex = currentStartIndex + padding;
+    const safeEndIndex = currentEndIndex - padding;
+    const currentIndex = currentIndexRef.current;
+    let targetStartIndex: number | null = null;
+
+    if (currentIndex < safeStartIndex) {
+      targetStartIndex = currentIndex - padding;
+    } else if (currentIndex > safeEndIndex) {
+      targetStartIndex = currentIndex + padding - visibleCount + 1;
+    }
+
+    if (targetStartIndex == null) {
+      return;
+    }
+
+    const nextStartIndex = Math.max(0, Math.min(targetStartIndex, maxStartIndex));
+    const nextProgress = nextStartIndex / maxStartIndex;
+
+    setScrollProgress((previousProgress) => {
+      if (Math.abs(previousProgress - nextProgress) < 0.0005) {
+        return previousProgress;
+      }
+
+      return nextProgress;
+    });
+  }, []);
+
+  // 播放位置变化（60fps 回放时经 TubLibrary 节流 ~10Hz 写入）只做三件廉价事：
+  // 移动竖线叠加层、直写滑块 DOM、视口跟随判断——不触发 chart.update、不 re-render。
+  // 滑块为非受控组件，通过 ref 直接写 DOM 值同步。
   useEffect(() => {
     const unsubscribe = useStore.subscribe((state) => {
       const previousIndex = currentIndexRef.current;
       currentIndexRef.current = state.currentIndex;
-      if (state.currentIndex !== previousIndex) {
-        requestChartRender({ markPlaybackActive: true });
+      if (state.currentIndex === previousIndex) return;
+      positionPlayhead();
+      const slider = sliderRef.current;
+      if (slider && document.activeElement !== slider) {
+        slider.value = String(state.currentIndex);
       }
+      followPlayheadViewport();
     });
 
     return unsubscribe;
-  }, [requestChartRender]);
-
-  // 外部 currentIndex 变化时同步滑块位置（非受控组件，通过 ref 直接写 DOM 值）
-  useEffect(() => {
-    const slider = sliderRef.current;
-    if (slider && document.activeElement !== slider) {
-      slider.value = String(currentIndex);
-    }
-  }, [currentIndex]);
+  }, [positionPlayhead, followPlayheadViewport]);
 
   // 滑块拖动：requestAnimationFrame 节流 setCurrentIndex，避免高频 store 更新导致卡顿
   const handleSliderChange = useCallback(
@@ -586,56 +684,10 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     setScrollProgress(targetStartIndex / maxStartIndex);
   }, [records.length, zoomPercent]);
 
+  // 视口跟随的另一触发口：用户缩放/滚动/数据变化时重新判定（播放索引变化走 subscribe 回调）
   useEffect(() => {
-    if (!records.length || zoomPercent === MIN_ZOOM_PERCENT) {
-      return;
-    }
-
-    const totalRecords = records.length;
-    const visibleCount = Math.max(
-      2,
-      Math.min(totalRecords, Math.ceil((totalRecords * MIN_ZOOM_PERCENT) / zoomPercent))
-    );
-    const maxStartIndex = Math.max(0, totalRecords - visibleCount);
-
-    if (maxStartIndex <= 0) {
-      return;
-    }
-
-    const padding = Math.max(1, Math.floor(visibleCount * PLAYHEAD_SCROLL_PADDING_RATIO));
-    const currentStartIndex = Math.round(maxStartIndex * scrollProgress);
-    const currentEndIndex = Math.min(totalRecords - 1, currentStartIndex + visibleCount - 1);
-    const safeStartIndex = currentStartIndex + padding;
-    const safeEndIndex = currentEndIndex - padding;
-    let targetStartIndex: number | null = null;
-
-    if (currentIndex < safeStartIndex) {
-      targetStartIndex = currentIndex - padding;
-    } else if (currentIndex > safeEndIndex) {
-      targetStartIndex = currentIndex + padding - visibleCount + 1;
-    }
-
-    if (targetStartIndex == null) {
-      return;
-    }
-
-    const nextStartIndex = Math.max(0, Math.min(targetStartIndex, maxStartIndex));
-    const nextProgress = nextStartIndex / maxStartIndex;
-
-    setScrollProgress((previousProgress) => {
-      if (Math.abs(previousProgress - nextProgress) < 0.0005) {
-        return previousProgress;
-      }
-
-      return nextProgress;
-    });
-  }, [
-    currentIndex,
-    isPlaying,
-    records.length,
-    scrollProgress,
-    zoomPercent,
-  ]);
+    followPlayheadViewport();
+  }, [followPlayheadViewport, records.length, scrollProgress, zoomPercent]);
 
   const visibleRange = useMemo(() => {
     if (!records.length) {
@@ -755,39 +807,6 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       const chart = chartRef.current;
       const chartArea = chart.chartArea;
 
-      // 拖拽框选：按下后水平位移超过阈值才进入拖拽态，否则保持「移动播放头 + 两次点击」
-      const dragStart = dragStartRef.current;
-      if (dragStart) {
-        const dragX = Math.max(chartArea.left, Math.min(x, chartArea.right));
-        if (!isDragSelectingRef.current) {
-          if (Math.abs(dragX - dragStart.x) >= DRAG_SELECTION_THRESHOLD_PX) {
-            // 进入拖拽态：撤销 mousedown 的锚点/选区处理，避免与两次点击冲突
-            isDragSelectingRef.current = true;
-            isSelectingRef.current = true;
-            globalSelectionAnchorIndex = null;
-            clearSelectionRange();
-            visualSelectionRef.current = null;
-            const draft = {
-              startX: dragStart.x,
-              currentX: dragX,
-              startIndex: dragStart.index,
-              currentIndex: getIndexFromPointerX(dragX, chart),
-            };
-            selectionDraftRef.current = draft;
-            setSelectionDraft(draft);
-          }
-        } else {
-          const nextDraft = {
-            startX: dragStart.x,
-            currentX: dragX,
-            startIndex: dragStart.index,
-            currentIndex: getIndexFromPointerX(dragX, chart),
-          };
-          selectionDraftRef.current = nextDraft;
-          setSelectionDraft(nextDraft);
-        }
-      }
-
       if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) {
         if (hoverPositionRef.current || tooltipDataRef.current) {
           hoverPositionRef.current = null;
@@ -800,6 +819,35 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       const clampedX = Math.max(chartArea.left, Math.min(x, chartArea.right));
       const clampedIndex = getIndexFromPointerX(clampedX, chart);
+
+      // 拖拽框选：按下点与当前点水平位移超过阈值才进入拖拽态，否则维持「移动播放头 + 两次点击锚点」
+      const dragStart = dragStartRef.current;
+      if (dragStart) {
+        const deltaX = Math.abs(clampedX - dragStart.x);
+        if (!isDragSelectingRef.current && deltaX >= DRAG_SELECTION_THRESHOLD_PX) {
+          isDragSelectingRef.current = true;
+          globalSelectionAnchorIndex = null;
+          clearSelectionRange();
+          visualSelectionRef.current = null;
+          const draft = {
+            startX: dragStart.x,
+            currentX: clampedX,
+            startIndex: dragStart.index,
+            currentIndex: clampedIndex,
+          };
+          selectionDraftRef.current = draft;
+          setSelectionDraft(draft);
+          requestChartRender();
+        } else if (isDragSelectingRef.current) {
+          const prevDraft = selectionDraftRef.current;
+          if (prevDraft) {
+            const nextDraft = { ...prevDraft, currentX: clampedX, currentIndex: clampedIndex };
+            selectionDraftRef.current = nextDraft;
+            setSelectionDraft(nextDraft);
+            requestChartRender();
+          }
+        }
+      }
 
       const currentRecords = recordsRef.current;
       const record = currentRecords[clampedIndex];
@@ -839,38 +887,31 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange]
   );
 
-  const handleMouseLeave = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      // 拖拽中移出图表：提交到离开点（坐标按图表区收敛）
-      if (isDragSelectingRef.current && dragStartRef.current && chartRef.current && containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const chartArea = chartRef.current.chartArea;
-        const clampedX = Math.max(chartArea.left, Math.min(event.clientX - rect.left, chartArea.right));
-        const leaveIndex = getIndexFromPointerX(clampedX, chartRef.current);
-        const startIndex = Math.min(dragStartRef.current.index, leaveIndex);
-        const endIndex = Math.max(dragStartRef.current.index, leaveIndex) + 1;
+  const handleMouseLeave = useCallback(() => {
+    // 拖拽框选中离开图表：提交当前草稿选区（坐标已由最后一次 mousemove 收敛到图表区）
+    if (isDragSelectingRef.current && dragStartRef.current) {
+      const draft = selectionDraftRef.current;
+      if (draft && records.length) {
+        const startIndex = Math.min(draft.startIndex, draft.currentIndex);
+        const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
         queueSelectionRangeUpdate(startIndex, endIndex);
+        globalSelectionAnchorIndex = null;
       }
+    }
+    isDragSelectingRef.current = false;
+    dragStartRef.current = null;
+    selectionDraftRef.current = null;
+    setSelectionDraft(null);
 
-      isDragSelectingRef.current = false;
-      isSelectingRef.current = false;
-      dragStartRef.current = null;
-      if (selectionDraftRef.current) {
-        selectionDraftRef.current = null;
-        setSelectionDraft(null);
-      }
+    if (!hoverPositionRef.current && !tooltipDataRef.current) {
+      return;
+    }
 
-      if (!hoverPositionRef.current && !tooltipDataRef.current) {
-        return;
-      }
-
-      hoverPositionRef.current = null;
-      tooltipDataRef.current = null;
-      setTooltipData(null);
-      requestChartRender();
-    },
-    [getIndexFromPointerX, queueSelectionRangeUpdate, requestChartRender]
-  );
+    hoverPositionRef.current = null;
+    tooltipDataRef.current = null;
+    setTooltipData(null);
+    requestChartRender();
+  }, [requestChartRender, queueSelectionRangeUpdate, records.length]);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -888,15 +929,15 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       const clampedIndex = getIndexFromPointerX(x, chart);
 
+      // 记录按下点，供 mousemove 用水平位移阈值判定是否进入拖拽框选
+      dragStartRef.current = { x, index: clampedIndex };
+      isDragSelectingRef.current = false;
+
       // Update hover position so the red line can follow the mouse exactly
       hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
       requestChartRender();
 
       setCurrentIndex(clampedIndex);
-
-      // 拖拽框选起点：仅记录，是否进入拖拽态由 mousemove 的位移阈值决定
-      dragStartRef.current = { x, index: clampedIndex };
-      isDragSelectingRef.current = false;
 
       // 两次点击选择：mousedown 时立即处理，不依赖 click 事件
       if (globalSelectionAnchorIndex == null) {
@@ -924,28 +965,23 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const handleMouseUp = useCallback(
     () => {
       isSelectingRef.current = false;
-      dragStartRef.current = null;
 
-      // 非拖拽态：保持「移动播放头 + 两次点击」语义，mouseup 不做额外处理
-      if (!isDragSelectingRef.current) {
-        return;
+      if (isDragSelectingRef.current) {
+        const draft = selectionDraftRef.current;
+        if (draft && records.length) {
+          const startIndex = Math.min(draft.startIndex, draft.currentIndex);
+          const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
+          queueSelectionRangeUpdate(startIndex, endIndex);
+          globalSelectionAnchorIndex = null;
+        }
       }
-      isDragSelectingRef.current = false;
 
-      const draft = selectionDraftRef.current;
+      isDragSelectingRef.current = false;
+      dragStartRef.current = null;
       selectionDraftRef.current = null;
       setSelectionDraft(null);
-
-      if (!draft || !recordsRef.current.length) {
-        return;
-      }
-
-      // 拖拽态：提交选区（锚点已在进入拖拽态时清除）
-      const startIndex = Math.min(draft.startIndex, draft.currentIndex);
-      const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
-      queueSelectionRangeUpdate(startIndex, endIndex);
     },
-    [queueSelectionRangeUpdate]
+    [queueSelectionRangeUpdate, records.length]
   );
 
   const isEditableTarget = (target: EventTarget | null) => {
@@ -972,7 +1008,6 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         clearSelectionRange();
         globalSelectionAnchorIndex = null;
         isDragSelectingRef.current = false;
-        isSelectingRef.current = false;
         dragStartRef.current = null;
         selectionDraftRef.current = null;
         setSelectionDraft(null);
@@ -1184,7 +1219,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
-  }, [sampledIndices]);
+    // 数据/采样变化后 chart 尚未重绘时，先把竖线叠加层对齐一次
+    positionPlayhead();
+  }, [sampledIndices, positionPlayhead]);
 
   const options = {
     responsive: true,
@@ -1249,46 +1286,14 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         
         const ctx = chart.ctx;
         const chartArea = chart.chartArea;
+        // 播放竖线已改 DOM 叠加层：chart 因数据/缩放/主题/resize 重绘后顺带对齐一次
+        positionPlayhead();
         // 浅色主题下的 canvas 配色;深色保持原值不变
         const isLightTheme = themeRef.current === 'light';
-        const playheadColor = isLightTheme ? '#e5484d' : 'rgb(239, 68, 68)';
         const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
         const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
-        const latestIndex = currentIndexRef.current;
         const totalRecords = records.length;
-        const currentRecord = records[latestIndex];
-        const currentXValue = isSessionScopedRef.current
-          ? latestIndex
-          : currentRecord
-            ? currentRecord._index
-            : latestIndex;
         
-        const currentX = xAxis.getPixelForValue(currentXValue);
-
-        if (!isNaN(currentX) && currentX >= chart.chartArea.left && currentX <= chart.chartArea.right) {
-          ctx.save();
-          ctx.strokeStyle = playheadColor;
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.9;
-          ctx.setLineDash([5, 3]);
-          
-          ctx.beginPath();
-          ctx.moveTo(currentX, yAxis.top);
-          ctx.lineTo(currentX, yAxis.bottom);
-          ctx.stroke();
-          
-          ctx.setLineDash([]);
-          ctx.fillStyle = playheadColor;
-          ctx.beginPath();
-          ctx.arc(currentX, yAxis.top, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.arc(currentX, yAxis.bottom, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          ctx.restore();
-        }
-
         const drawSelectionBox = (startValue: number, endValue: number, isDraft: boolean) => {
             const chartArea = chart.chartArea;
             
@@ -1344,10 +1349,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             const endX = currentSelectionDraft.currentX;
             const minX = Math.min(startX, endX);
             const maxX = Math.max(startX, endX);
+            const draftWidth = Math.max(maxX - minX, MIN_SELECTION_DRAFT_WIDTH_PX);
 
-            if (!isNaN(minX) && !isNaN(maxX) && maxX > minX) {
-                // 窄选区可见性兜底（#130）：不足 2px 时按最小可见宽度绘制
-                const draftWidth = Math.max(maxX - minX, MIN_SELECTION_DRAFT_WIDTH_PX);
+            if (!isNaN(minX) && !isNaN(maxX) && maxX >= minX) {
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
@@ -1396,7 +1400,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         console.error('Vertical line plugin error:', error);
       }
     }
-  }), []);
+  }), [positionPlayhead]);
 
   // Sync Visual Selection Ref
   useEffect(() => {
@@ -1439,6 +1443,11 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       return null;
     }
 
+    // 三角手柄拖拽预览优先，让绿条与手柄实时跟随
+    if (handleDrag) {
+      return { startIndex: handleDrag.startIndex, endIndex: handleDrag.endIndex };
+    }
+
     if (selectionDraft) {
       const startIndex = Math.min(selectionDraft.startIndex, selectionDraft.currentIndex);
       const endIndex = Math.max(selectionDraft.startIndex, selectionDraft.currentIndex) + 1;
@@ -1453,7 +1462,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     }
 
     return null;
-  }, [records.length, selectionDraft, selectionStartIndex, selectionEndIndex]);
+  }, [records.length, handleDrag, selectionDraft, selectionStartIndex, selectionEndIndex]);
 
   // 滑块（底部概览条）与图表共用同一坐标：会话视图用「会话内数组下标」(0..N-1)，
   // 全局视图用整个 tub 的物理 _index。选区绿条 / 已删除红条都按此坐标定位。
@@ -1477,7 +1486,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     [records]
   );
 
-  const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
+  // 选区在底部滑条上的起止百分比（数值），绿条样式与三角手柄定位共用同一换算
+  const sliderSelectionPercents = useMemo<{ startPct: number; endPct: number } | null>(() => {
     if (!sliderSelectionRange || !records.length || !sliderSpan) {
       return null;
     }
@@ -1496,14 +1506,21 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         ? endRecord._index + 1
         : startXValue + 1;
 
-    const leftPercent = (startXValue / sliderSpan) * 100;
-    const widthPercent = ((endXValue - startXValue) / sliderSpan) * 100;
-
     return {
-      left: `${leftPercent}%`,
-      width: `max(${widthPercent}%, 2px)`,
+      startPct: (startXValue / sliderSpan) * 100,
+      endPct: (endXValue / sliderSpan) * 100,
     };
   }, [records, isSessionScoped, sliderSpan, sliderSelectionRange]);
+
+  const sliderSelectionStyle = useMemo<React.CSSProperties | null>(() => {
+    if (!sliderSelectionPercents) {
+      return null;
+    }
+    return {
+      left: `${sliderSelectionPercents.startPct}%`,
+      width: `max(${sliderSelectionPercents.endPct - sliderSelectionPercents.startPct}%, 2px)`,
+    };
+  }, [sliderSelectionPercents]);
 
   const sliderDeletedStyles = useMemo<{ left: string; width: string }[]>(() => {
     const inScopeIndexes = isSessionScoped
@@ -1540,6 +1557,73 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       };
     });
   }, [deletedIndexes, isSessionScoped, sessionFirstIndex, sessionLastIndex, sliderSpan, physicalToArrayPos]);
+
+  // 底部滑条 x 坐标 → 数组下标（endIndex 排他语义，取值 0..records.length）。
+  // 与 sliderSelectionPercents 同一坐标系：会话视图=数组下标，全局视图=物理 _index 经 physicalToArrayPos 反算。
+  const indexFromSliderClientX = useCallback(
+    (clientX: number): number => {
+      const container = sliderContainerRef.current;
+      if (!container || !records.length || !sliderSpan) {
+        return 0;
+      }
+      const rect = container.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const xValue = pct * sliderSpan;
+      const idx = isSessionScoped ? Math.round(xValue) : physicalToArrayPos(Math.round(xValue));
+      return Math.max(0, Math.min(records.length, idx));
+    },
+    [records.length, sliderSpan, isSessionScoped, physicalToArrayPos]
+  );
+
+  // 首尾三角手柄拖拽：Pointer Events 统一鼠标/触控板/触屏；
+  // 拖拽中只更新预览（滑条绿条 + 图表选区矩形），松手才一次性 setSelectionRange（一条撤销历史）
+  const handleSelectionHandlePointerDown = useCallback(
+    (edge: 'start' | 'end') => (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !sliderSelectionRange) return;
+      event.stopPropagation();
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const initial = {
+        edge,
+        startIndex: sliderSelectionRange.startIndex,
+        endIndex: sliderSelectionRange.endIndex,
+      };
+      handleDragRef.current = initial;
+      setHandleDrag(initial);
+    },
+    [sliderSelectionRange]
+  );
+
+  const handleSelectionHandlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const prev = handleDragRef.current;
+      if (!prev) return;
+      event.stopPropagation();
+      const idx = indexFromSliderClientX(event.clientX);
+      // 两端不可交叉，选区至少保留 1 条记录（endIndex 排他）
+      const next =
+        prev.edge === 'start'
+          ? { ...prev, startIndex: Math.max(0, Math.min(idx, prev.endIndex - 1)) }
+          : { ...prev, endIndex: Math.min(records.length, Math.max(idx, prev.startIndex + 1)) };
+      handleDragRef.current = next;
+      setHandleDrag(next);
+      visualSelectionRef.current = { startIndex: next.startIndex, endIndex: next.endIndex };
+      requestChartRender();
+    },
+    [indexFromSliderClientX, records.length, requestChartRender]
+  );
+
+  const handleSelectionHandlePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const prev = handleDragRef.current;
+      if (!prev) return;
+      event.stopPropagation();
+      handleDragRef.current = null;
+      setHandleDrag(null);
+      setSelectionRange(prev.startIndex, prev.endIndex);
+    },
+    [setSelectionRange]
+  );
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
@@ -1625,7 +1709,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   );
 
   const handleTouchEnd = useCallback(
-    () => {
+    (event: React.TouchEvent<HTMLDivElement>) => {
       isSelectingRef.current = false;
       // 触摸轻触（tap）等效于点击——选择逻辑由 touchstart 中 preventDefault 后的 click 事件处理
       // 这里只清理预览状态
@@ -1831,6 +1915,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       <CardContent className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={containerRef}
+          data-testid="tub-editor-chart"
           className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
@@ -1848,6 +1933,26 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
               data={data} 
               plugins={[verticalLinePlugin]}
               className="w-full h-full"
+            />
+          </div>
+          {/* 播放竖线叠加层：位置由 positionPlayhead() 直写 style，播放期零 chart 重绘（60fps） */}
+          <div
+            ref={playheadRef}
+            data-testid="playhead-overlay"
+            className="pointer-events-none absolute left-0 w-0"
+            style={{
+              display: 'none',
+              borderLeft: `2px dashed ${theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)'}`,
+              opacity: 0.9,
+            }}
+          >
+            <div
+              className="absolute -top-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
+              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+            />
+            <div
+              className="absolute -bottom-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
+              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
             />
           </div>
           {tooltipData && (
@@ -1874,7 +1979,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             </div>
           )}
         </div>
-        <div className="relative mt-3 h-6 shrink-0">
+        <div ref={sliderContainerRef} className="relative mt-3 h-6 shrink-0">
           <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-lg bg-zinc-700" />
           {sliderSelectionStyle && (
             <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2">
@@ -1901,12 +2006,55 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             min="0"
             max={Math.max(0, records.length - 1)}
             step="1"
-            defaultValue={currentIndex}
+            defaultValue={useStore.getState().currentIndex}
             onChange={handleSliderChange}
             disabled={!records.length}
             aria-label={t('tubEditor.scrollAria')}
             className="tub-editor-scroll-slider relative z-20 h-6 w-full appearance-none cursor-pointer bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
           />
+          {sliderSelectionPercents && sliderSelectionRange && (
+            <>
+              {/* 选区首尾三角手柄：z-30 压过播放头滑块，24×24 命中区方便触控板点选 */}
+              <div
+                role="slider"
+                aria-label={t('tubEditor.selectionStartHandleAria')}
+                aria-valuemin={0}
+                aria-valuemax={records.length}
+                aria-valuenow={sliderSelectionRange.startIndex}
+                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+                style={{ left: `${sliderSelectionPercents.startPct}%` }}
+                onPointerDown={handleSelectionHandlePointerDown('start')}
+                onPointerMove={handleSelectionHandlePointerMove}
+                onPointerUp={handleSelectionHandlePointerUp}
+                onPointerCancel={handleSelectionHandlePointerUp}
+              >
+                <div
+                  className={`h-0 w-0 border-y-[6px] border-l-[9px] border-y-transparent transition-transform ${
+                    handleDrag?.edge === 'start' ? 'scale-125 border-l-emerald-300' : 'border-l-emerald-400'
+                  }`}
+                />
+              </div>
+              <div
+                role="slider"
+                aria-label={t('tubEditor.selectionEndHandleAria')}
+                aria-valuemin={0}
+                aria-valuemax={records.length}
+                aria-valuenow={sliderSelectionRange.endIndex}
+                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+                style={{ left: `${sliderSelectionPercents.endPct}%` }}
+                onPointerDown={handleSelectionHandlePointerDown('end')}
+                onPointerMove={handleSelectionHandlePointerMove}
+                onPointerUp={handleSelectionHandlePointerUp}
+                onPointerCancel={handleSelectionHandlePointerUp}
+              >
+                <div
+                  className={`h-0 w-0 border-y-[6px] border-r-[9px] border-y-transparent transition-transform ${
+                    handleDrag?.edge === 'end' ? 'scale-125 border-r-emerald-300' : 'border-r-emerald-400'
+                  }`}
+                />
+              </div>
+            </>
+          )}
         </div>
       </CardContent>
     </Card>

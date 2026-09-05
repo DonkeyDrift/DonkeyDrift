@@ -227,7 +227,8 @@ class WebOnlineTrainer(OnlineTrainer):
 
         # 3. Train
         self._emit(f"Starting remote training (Python: {python_path})...")
-        cmd_train = f"cd {remote_dir} && {python_path} train.py --tub ./data --model ./models/{model_name} --type linear"
+        model_type = self.get_config_value("model_type") or "linear"
+        cmd_train = f"cd {remote_dir} && {python_path} train.py --tub ./data --model ./models/{model_name} --type {model_type}"
         if self._abort_requested:
             raise RuntimeError("训练已被用户停止")
         self._stream_remote_training(cmd_train)
@@ -490,8 +491,9 @@ class WebOnlineTrainer(OnlineTrainer):
                 self.sftp_client.put(local_script, f"{remote_dir}/_dd_resume_train.py")
 
                 python_path = self._resolve_remote_path(self.get_config_value("python_path"))
+                model_type = self.get_config_value("model_type") or "linear"
                 cmd = (f"cd {remote_dir} && {python_path} _dd_resume_train.py "
-                       f"--tub ./data --model ./models/{new_model} --type linear "
+                       f"--tub ./data --model ./models/{new_model} --type {model_type} "
                        f"--transfer {checkpoint}")
                 self._emit(f"正在从上次的最佳权重继续训练（检查点: {os.path.basename(checkpoint)}）...")
                 self._stream_remote_training(cmd)

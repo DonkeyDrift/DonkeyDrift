@@ -204,8 +204,8 @@ describe('PilotArenaPage 帧区间切片', () => {
     expect(screen.getByText('arena.plotStartFrame:0')).toBeInTheDocument();
     expect(screen.getByText('arena.plotEndFrame:9')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/arena\.plotStartFrame/), { target: { value: '3' } });
-    fireEvent.change(screen.getByLabelText(/arena\.plotEndFrame/), { target: { value: '7' } });
+    fireEvent.change(screen.getByTestId('plot-start-slider'), { target: { value: '3' } });
+    fireEvent.change(screen.getByTestId('plot-end-slider'), { target: { value: '7' } });
     fireEvent.click(screen.getByRole('button', { name: 'arena.generatePlot' }));
 
     await waitFor(() => expect(api.getArenaPredictions).toHaveBeenCalled());
@@ -232,8 +232,8 @@ describe('PilotArenaPage 帧区间切片', () => {
 
     await loadPilotAndSelectPlotPilot();
 
-    fireEvent.change(screen.getByLabelText(/arena\.plotEndFrame/), { target: { value: '4' } });
-    fireEvent.change(screen.getByLabelText(/arena\.plotStartFrame/), { target: { value: '8' } });
+    fireEvent.change(screen.getByTestId('plot-end-slider'), { target: { value: '4' } });
+    fireEvent.change(screen.getByTestId('plot-start-slider'), { target: { value: '8' } });
 
     // 首帧被钳制到末帧 4
     expect(screen.getByText('arena.plotStartFrame:4')).toBeInTheDocument();

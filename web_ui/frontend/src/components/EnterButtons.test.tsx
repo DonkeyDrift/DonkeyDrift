@@ -3,7 +3,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { DonkeyEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink } from './EnterButtons';
+import { DonkeyEntryLink, DrifterConsoleEntryLink, KimiCodeWebEntryLink, DshEntryLink, ZCodeEntryLink } from './EnterButtons';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
@@ -13,11 +13,13 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/services/api', () => ({
   launchKimiCodeWeb: vi.fn(),
   launchDsh: vi.fn(),
+  launchZcode: vi.fn(),
   getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb, launchZcode } from '@/services/api';
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
 const mockLaunchDsh = vi.mocked(launchDsh);
+const mockLaunchZcode = vi.mocked(launchZcode);
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('entry link components (Issue #175 nav-link style)', () => {
@@ -28,6 +30,7 @@ describe('entry link components (Issue #175 nav-link style)', () => {
         <DrifterConsoleEntryLink />
         <KimiCodeWebEntryLink />
         <DshEntryLink />
+        <ZCodeEntryLink />
       </MemoryRouter>,
     );
     // Drifter Console 已改为 SPA 内路由链接（Issue #234），其余两个仍是按钮入口
@@ -35,7 +38,7 @@ describe('entry link components (Issue #175 nav-link style)', () => {
     expect(drifterLink).toBeInTheDocument();
     expect(drifterLink?.className).toContain('text-xs');
     expect(drifterLink?.className).toContain('text-zinc-500');
-    for (const label of ['common.enterButtons.kimiCodeWeb', 'common.enterButtons.dsh']) {
+    for (const label of ['common.enterButtons.kimiCodeWeb', 'common.enterButtons.dsh', 'common.enterButtons.zcode']) {
       const btn = screen.getByText(label).closest('button');
       expect(btn).toBeInTheDocument();
       // 弱化处理：更小字号 + 更淡颜色，一眼可辨为高级选项
@@ -125,6 +128,31 @@ describe('DshEntryLink', () => {
     mockLaunchDsh.mockResolvedValue({ status: 'error', error: 'boom' });
     render(<DshEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.dsh'));
+    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    expect(fakeWin.close).toHaveBeenCalled();
+    openSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+});
+
+describe('ZCodeEntryLink', () => {
+  it('opens ZCode terminal URL in the pre-opened tab on success', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    mockLaunchZcode.mockResolvedValue({ status: 'ok', url: 'http://192.0.2.57:8090/terminal?cmd=zcode' });
+    render(<ZCodeEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.zcode'));
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    await waitFor(() => { expect(fakeWin.location.href).toBe('http://192.0.2.57:8090/terminal?cmd=zcode'); });
+    openSpy.mockRestore();
+  });
+  it('closes the tab and alerts on failure', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mockLaunchZcode.mockResolvedValue({ status: 'error', error: 'boom' });
+    render(<ZCodeEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.zcode'));
     await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
     expect(fakeWin.close).toHaveBeenCalled();
     openSpy.mockRestore();

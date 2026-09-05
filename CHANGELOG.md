@@ -1,5 +1,149 @@
 # 变更日志
 
+## 2026-09-05 (186)
+
+- feat(models): 收录实车训练模型 DKG-1（TFLite）——仓库内归档分发，供 Pilot Arena opt-in 真实模型集成测试等环境取用
+  - 背景：`DKG-1.tflite` 为 linear 双头 pilot（输入 120×160×3 RGB，两个 [1,1] 输出头分别给方向/油门，3,273,072 字节），此前仅存于本机 `mycar/models/`（非 git 管理）；main 分支 opt-in 集成测试 `web_ui/backend/tests/integration/test_arena_real_model.py` 依赖本机存在该模型，换机/新环境无从获取。应用户要求收录进仓库归档。
+  - `models/DKG-1.tflite`（新建 `models/` 目录）：与本机 `mycar/models/DKG-1.tflite` 逐字节一致（md5 `39270f5baab386be59f51312f1e3277e`）。
+  - 隐私自查：`strings` 扫描仅含 TFLite 元数据与层名（`TFL3`/`serving_default`/`img_in`/`n_outputs0`/`n_outputs1`、`min_runtime_version 2.15.1`），无 SSID/密码/内网 IP/本机绝对路径/真实邮箱。
+  - 说明：该模型为外部提供的训练产物、不含训练 history，故无配套 loss 曲线图与 `_meta.json`；DD 训练页模型列表中不显示 loss 预览属预期（`trainer.py` 的 `list_models` 按同名 `.png`/`_meta.json` 关联）。
+  - 测试同步：纯二进制归档、无代码改动，无需新增测试。
+  - 注：仅 DD 仓库改动，Firmware 无改动、无需 OTA；不触及 web 前后端运行代码，无需本机部署。
+
+## 2026-09-04 (185)
+
+- feat(trainer): 「已训练模型」卡片新增「导入模型」按钮——上传本地 .tflite 模型到当前项目 models/ 目录，列表自动刷新后可下载 / 加载到车端
+  - 背景：模型卡片已有「下载 / 加载到车端 / 复制路径 / 删除」，唯独缺「导入（上传）」，本地模型只能手工拷文件。
+  - 后端 `web_ui/backend/routers/trainer.py`：新增 `POST /api/trainer/models/import`（`UploadFile` + `working_dir` Form），`os.path.basename` 去路径防目录穿越、仅允许 `.tflite`、自动创建 `models/`、同名返回 409 不静默覆盖、分块落盘，返回 `{status,name,path,size}`；`working_dir` 解析与 `list_models` 一致，保证上传位置 = 列表读取位置；fastapi import 增补 `UploadFile/File/Form`。
+  - 前端 `web_ui/frontend/src/services/api.ts`：新增 `importModel(file, workingDir?)`，`FormData` 传 `file` + `working_dir`，不手动设 Content-Type（axios 对 FormData 在浏览器侧自动补 multipart boundary）。
+  - 前端 `web_ui/frontend/src/components/trainer/ModelsList.tsx`：头部新增「导入模型」按钮（Upload 图标）+ 隐藏 `<input type="file" accept=".tflite">`，选择后调 `importModel` 并 `refresh`；导入中禁用按钮、失败 `alert` 后端 detail。
+  - i18n `web_ui/frontend/src/i18n/messages/trainer.ts`：新增 `trainer.importModel` / `trainer.importing` / `trainer.importFailed` 中英文案。
+  - 测试同步：后端新增 `web_ui/backend/tests/test_trainer_models.py`（4 例：成功落盘 / 拒绝非 .tflite / 重名 409 且原文件不覆盖 / 路径穿越文件名净化）。
+  - 实测：后端 `pytest tests/test_trainer*.py tests/test_connector.py -q` 122 passed；前端 `npm run check`（tsc -b）无错、`npm run build` 通过。仅 DD 后端/前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (184)
+
+- fix(trainer): 远程训练补齐模型配置——「我这台电脑」(Mac/mypc) 模式恢复模型名称输入并新增模型类型选择，云端模式同步获得
+  - 背景：用户反馈 Mac 上训练时没有选择模型配置的地方（输入模型名称、选择类型）。根因有二：① (171) myPC 体验包给 `RemoteConfigForm` 引入 `compact` 模式时把「模型名称」连同 remoteDirBase/pythonPath 一起藏进了 `!compact` 块，mypc 模式下模型名称无处可填；② 远程训练命令的模型类型一直硬编码 `--type linear`，前端没有任何远程模式可选类型。
+  - `web_ui/frontend/src/components/trainer/modelTypes.ts`（新建）：抽出 `MODEL_TYPES` 共享常量（linear/categorical/rnn/imu/behavior/localizer/3d），`LocalConfigForm.tsx` 删除本地同名常量改为引用，杜绝两份列表漂移。
+  - `web_ui/frontend/src/components/trainer/RemoteConfigForm.tsx`：「模型名称」输入框移出 `!compact` 块（compact 与完整模式都显示，带占位符），旁新增「模型类型」下拉（两列 grid）；新增必填 props `modelType`/`onModelTypeChange`；remoteDirBase/pythonPath 维持仅完整（云端）模式显示不变（mypc 由环境探测自动填 pythonPath）。i18n 复用既有 `trainer.modelName`/`trainer.modelType` 键，无新增文案。
+  - `web_ui/frontend/src/store/useStore.ts`：`TrainerOnlineConfig`（`TrainerMyPcConfig` 继承之）新增 `modelType: string`，online/mypc 两处默认值 `'linear'`，随 persist 持久化。
+  - `web_ui/frontend/src/pages/TrainerPage.tsx`：mypc 与 online 两个 `RemoteConfigForm` 实例接线 `modelType`；挂载加载 `getTrainerConfig` 回填 `model_type`（mypc 侧保留用户已改值）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：`startSshTraining` 持久化 conf 时带上 `model_type: cfg.modelType`；`services/api.ts` 的 `TrainerConfig` 接口同步可选 `model_type`。
+  - `web_ui/backend/routers/trainer.py`：`TrainerConfig` 模型新增 `model_type: str = "linear"`；GET `/api/trainer/config` 返回 `model_type`（缺省 linear），POST 写入 `[Remote] model_type`。
+  - `web_ui/backend/web_online_trainer.py`：`run_remote_training` 与 `run_resume` 的训练/续训命令 `--type` 改为读 conf 的 `model_type`（缺省 `linear`），替换两处硬编码；`remote_resume_train.py` 本就支持 `--type` 无需改。
+  - `web_ui/backend/train_my_pc.conf.example`：`[Remote]` 增加 `model_type = linear` 示例行。
+  - 兼容性：不配置时默认 `linear`，与既有命令逐字一致；旧 conf 无 `model_type` 键不受影响。
+  - 测试同步：后端新建 `tests/test_trainer_model_type.py`（5 例：训练命令用配置类型 / 缺省 linear / 续训命令用配置类型且 `--transfer` 正确 / config 端点 model_type 读写回路 / 旧配置缺键回退 linear）；前端 `RemoteConfigForm.test.tsx` 补 compact 模式 3 例（模型名称输入联动 / 模型类型下拉选项与联动 / compact 不显示远程目录）。实测：后端 `pytest tests/ -q` 220 passed；前端 `vitest run` 32 文件 173 passed、`npm run build`（`tsc -b`）通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (183)
+
+- perf(tub-library): 录制视频库回放第四轮冲刺 60 FPS——同页 TubEditor 播放期零 chart 重绘 + 零 re-render（播放竖线改 DOM 叠加层），预取图片 decode 预解码
+  - 背景：回放帧率三轮优化（(121) 播放绕过 React 直画 canvas、(125) 去热路径多余 setState、(162) 墙钟调度 + 后端 /tub/image 线程池/缓存）后 FPS 角标仍远低于 60。本轮定位剩余瓶颈不在播放器本身，而在同页（TM 页）的 TubEditor 吃满主线程：① 组件级 `useStore(state => state.currentIndex)` 订阅播放位置（播放期 ~10Hz 写入）→ 整棵 1800 行编辑器树高频 re-render，且 `options`/`plugins` 引用随 render 变化连带 react-chartjs-2 chart.update；② 索引变化经 `markPlaybackActive` 续期让图表渲染循环 60Hz 持续 `chart.update('none')` 全量重绘（~1000+ 点 × 2 数据集全 layout）——合计每秒约 70 次图表重绘 + 10 次大组件 reconciliation，TubLibrary 播放 rAF 被饿死掉帧。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：
+    - 播放竖线（红色虚线 playhead）由 chart.js afterDraw 插件 canvas 绘制改为 DOM 叠加层（`playheadRef`，2px 虚线 + 两端圆点、深浅主题配色与出视口隐藏语义均不变）：新增 `positionPlayhead()` 经 `chart.scales.x.getPixelForValue` 换算后直接写叠加层 style；索引变化在 store subscribe 回调里直写 DOM（零 chart.update、零 re-render）；chart 因数据/缩放/主题/resize 重绘后由插件 afterDraw 顺带 `positionPlayhead()` 对齐，无需逐一跟踪 layout 变化。
+    - 删除组件级 `currentIndex` 订阅与 `markPlaybackActive`/`playbackActivityUntilRef` 机制：滑块位置同步并入 subscribe 回调（非受控滑块经 ref 直写 DOM）；视口自动跟随抽为 `followPlayheadViewport()`（subscribe 回调与缩放/滚动/数据 effect 两路驱动，语义不变），仅真正翻页才 `setScrollProgress` 触发 re-render；滑块 `defaultValue` 改读 `useStore.getState().currentIndex`。
+    - 图表渲染循环仅保留选区跑马灯/悬停/数据变化路径，点击图表查看帧的悬停重绘不受影响。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：预取 `img.onload` 后追加 `img.decode()` 预解码——帧到期时 drawImage 不再触发主线程同步 JPEG 解码；播放调度/预取窗口/FPS 角标语义不动。
+  - 测试同步：新建 `web_ui/frontend/src/components/TubEditor.playhead.test.tsx` 3 例（与 (178) 拖拽框选的 `TubEditor.test.tsx` 并存，其假 chart 补 `getPixelForValue` 适配叠加层）（索引变化零 chart.update + 叠加层位置/显隐 + 滑块直写同步；点击图表仍恰好一次重绘）；`TubLibrary.test.tsx` 新增 1 例（预取 onload 后调用 decode 预解码）。前端 `vitest run` 31 文件 163 项、`tsc -b`、`npm run build` 全绿；后端无改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (182)
+
+- fix(trainer): 修复训练中刷新页面后看不到训练进度
+  - 根因：训练任务状态（job_id/进度/日志）只存在前端 zustand 内存 `trainingJob`，`partialize` 只持久化配置、不含当前任务；刷新后 React 重新挂载，`trainingJob` 回到 null，前端既不知道有在跑任务、也不重连 SSE，`ProgressPanel` 显示「空闲」。后端 `job_manager` 是内存单例（页面刷新不影响）、`/trainer/train/{id}/status` 本就返回完整进度快照，故最小修复落在前端。
+  - `web_ui/frontend/src/store/useStore.ts`：新增持久化字段 `activeTraining: { id: string; mode: TrainingJob['mode'] } | null` + `setActiveTraining`/`clearActiveTraining`；`finishTrainingJob` 同步清空 `activeTraining`；`partialize` 白名单加入 `activeTraining`（刷新后可读回正在训练的任务 id+模式）。
+  - `web_ui/frontend/src/hooks/useTrainingJob.ts`：新增挂载恢复 effect（ref 防 StrictMode 双跑）——读 `activeTraining`，`getJobStatus` 拉进度快照重建 `TrainingJob`（logs 先置空），`status === 'running'` 时 `connectSSE` 重连继续收实时事件，否则清空 `activeTraining` 展示终态；请求失败则清掉失效 id 回到空闲态。`startLocal`/`startSshTraining` 拿到 `job_id` 后 `setActiveTraining` 记录，供下次刷新恢复。
+  - 测试：`web_ui/frontend/src/store/useStore.test.ts` 新增 3 例（setActiveTraining / clearActiveTraining / finishTrainingJob 同步清空）；新建 `web_ui/frontend/src/hooks/useTrainingJob.test.ts` 4 例（running 恢复+重连 SSE / 终态展示并清空 / 失效清空 / 无 activeTraining 不请求）。
+  - 实测：`tsc -b --noEmit` 无错、`vitest run` 34 文件 183 passed（含新增 7 例）。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (181)
+
+- fix(tui): TUI Drive 复用已有 Web UI 实例时自动打开浏览器，并修正车进程提示 URL 端口
+  - 背景：复用实例路径（issue #127）`web_cmd=None` 不经过 `donkey web --open`，TUI 自身也无任何 `webbrowser.open`，导致用户选 Drive 后浏览器不弹出（新起实例路径正常）。车进程 `manage.py drive` 打印的「请打开浏览器访问」提示又因 `DriveApiBridge.web_console_url()` 在未设 `DRIVE_WEB_CONSOLE_URL` 时硬编码回落 `:5188`，指向无人监听的端口（生产模式前端由后端托管，实际在 :8000）。
+  - `donkeycar/management/tui.py`（`DriveCommand.execute`）：复用实例时由 TUI 直接 `webbrowser.open` 打开 `http://localhost:<frontend_port>/#/drive`（实例刚经 `find_live_instance()` 探测存活，端口必在监听，无需再等待）；新起实例路径保持不变（仍由 `donkey web --open` 打开，TUI 不重复打开）。车进程环境新增注入 `DRIVE_WEB_CONSOLE_URL=http://localhost:<frontend_port>`（复用路径取实例登记端口，新起路径生产模式取后端端口；用户已显式设置时不覆盖，`setdefault` 语义），使打印的提示与实际监听端口一致。
+  - 测试同步（`donkeycar/tests/test_tui_drive.py`）：新增 autouse 隔离 fixture——本机可能有存活实例登记（`~/.donkeycar/webui.json`）与运行中车进程（`~/.donkeycar/drive.pid`），不隔离时测试会误杀真实车进程、误删 PID 记录，且「新起实例」断言会被复用路径顶掉；fixture 将 `find_live_instance` 默认置 None、`kill_previous_car_processes`/`write_drive_pids`/`remove_drive_pid_file` 置空，需要复用路径的用例自行覆盖。新增 3 例：复用实例打开正确 URL 且只起车进程、注入正确的 `DRIVE_WEB_CONSOLE_URL`；新起实例时 TUI 不开浏览器（留给 `--open`）且提示端口=后端端口；用户已设 `DRIVE_WEB_CONSOLE_URL` 不被覆盖。顺手修复 2 例既有失败：`9a630826`（#127）把 `execute()` 改为 `choose_available_backend_port(8000)` 带参调用后，既有 fake `lambda self: 8000` 签名未跟进而 TypeError，补齐形参。
+  - 实测：`pytest donkeycar/tests/test_tui_drive.py donkeycar/tests/test_tui_web_command.py` 15 passed。`donkeycar/tests/test_web_command.py` 6 例失败为 Tony 既有问题（`#135` 生产构建路径改用 `subprocess.run` 而 fake 只实现 `Popen`，`FakeProcess` 不支持上下文管理器），在 origin/Tony 原样复现，与本次改动无关、未动。
+  - 仅 TUI/CLI 侧改动，不影响 8000 在线实例页面，无需重建 dist；Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (180)
+
+- fix(datastore, web_ui): 修复 tub sessions 列表只读打开 0 字节 rollover catalog 触发 `cannot mmap an empty file` 崩溃（main 侧登记的"待后续跟进"项，参考 main ac863a99 的修法移植到 Tony，非 cherry-pick）
+  - 根因：录制在 catalog roll-over 后、第一条记录落盘前就停止（或崩溃）时，会留下已登记进 manifest 的 0 字节 `catalog_N.catalog`；`donkeycar/parts/datastore_v2.py` 的 `Seekable.__init__` 在只读模式下无条件 `mmap.mmap(fileno, length=0)`，空文件抛 `ValueError: cannot mmap an empty file`。`GET /api/tub/sessions`（`web_ui/backend/routers/tub.py` 以 `Tub(path, read_only=True)` 打开并迭代全部 catalog）因此整个接口 500。
+  - 修复：`datastore_v2.py` `Seekable.__init__` 改为仅当 `os.path.getsize(file) > 0` 才做 mmap——Tony 侧全部只读打开路径（`Manifest.__init__` 打开最后 catalog、`ManifestIterator` 逐个打开 catalog、底层 `Catalog`/`CatalogMetadata`）都经 `Seekable` 这一个 mmap 点，一处修复即覆盖所有打开路径；空文件回退为普通文本文件读取，`_read_contents`/`readline` 对 0 行内容处理不变。
+  - 测试同步（等价移植 main ac863a99 的两个回归测试，Tony 侧接口相同原样适用）：`web_ui/backend/tests/test_tub_sessions.py` 新增 `test_list_sessions_tolerates_empty_rollover_catalog`（写 3 条记录后 `_add_catalog()` 留下空 catalog 再关 tub，sessions 列表须 200 且返回 1 个会话、3 条记录）；`donkeycar/tests/test_datastore_v2.py` 新增 `test_read_only_manifest_with_empty_catalog`（read_only 打开含空 catalog 的 manifest 并迭代不崩溃、读出 3 条记录）。
+  - 实测：修复前两个新测试均复现 `ValueError: cannot mmap an empty file`（sessions 端点 500）；修复后 `web_ui/backend` 全套 `pytest tests/ -q` 221 passed、`donkeycar/tests/test_datastore_v2.py + test_tub_v2.py` 9 passed、根 `tests/test_tub_image_cache.py + test_tub_manager_auto_refresh.py` 6 passed。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (179)
+
+- fix(launcher): dsh/kimi-code-web 启动端点缺省 cwd 去硬编码本机路径——动态推导 `str(Path.home() / "projects")`，内嵌前端不再发送该路径（ZCode 入口 PR #359 收尾时登记的「待单修」项）
+  - 根因：`donkeycar/launcher/server.py` 的 `_handle_launch_kimi_code_web` 与 `_handle_launch_dsh` 缺省 cwd 硬编码真实本机用户名绝对路径（公开仓库，入库即泄露）；MENU_HTML 内嵌 JS 的 `launchKimiCodeWeb()`/`launchDshWeb()` 请求体与 `currentProjectPath()` 兜底同样硬编码该串。
+  - `donkeycar/launcher/server.py`：两处端点缺省 cwd 字面量 → `cwd = str(Path.home() / "projects")`（与同文件 `_handle_launch_zcode` 的 `Path.home()` 写法同款），两处 docstring/注释同步改写；cwd 不存在仍直接报错、绝不回退的语义不变，issue #168 空体 POST 缺省路径不变。
+  - 同文件 MENU_HTML 内嵌 JS：两个启动请求体改为 `JSON.stringify({})`（不传 cwd，由后端动态缺省生效）；`currentProjectPath()` 兜底改为 `'.'`（终端会话当前目录，即 `terminal.py _default_cwd()` 的 `~/projects` 语义，不硬编码本机路径）。
+  - 明确未改：`_find_mycar_project` 的 `known_path` mycar 已知搜索路径（属另一问题）与 `donkeycar/launcher/donkeydrifter-launcher.service`（部署模板）。
+  - 测试同步：`tests/test_launcher_kimi_web.py`、`tests/test_launcher_dsh_web.py` 缺省 cwd 断言由硬编码串改为 `str(Path.home() / "projects")` 动态比对；新建 `tests/test_launcher_no_hardcoded_paths.py`——逐行扫描 `server.py`，除保留的 `projects/mycar` 已知路径外任何行出现 `/home/<用户>/` 形态本机路径即失败（防回归栅栏，含 MENU_HTML 内嵌 JS；栅栏自身用正则描述、不写入真实用户名）。
+  - 实测：`pytest` launcher 相关 10 个测试文件 174 passed（151 + 23，含新增栅栏 1 例）；`python -m py_compile donkeycar/launcher/server.py` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (178)
+
+- fix(workflow): 一次收尾修复 DonkeyDrift 侧剩余 6 个 open issue（#360–#365），全部合入 Tony、逐一关闭
+  - **#360 ModelsList loss 浮窗→modal**：`web_ui/frontend/src/components/trainer/ModelsList.tsx` 把 loss 曲线从 hover 浮窗改为点击「查看损失曲线」徽章按钮触发的 modal（`data-testid="loss-chart-overlay"`）；`i18n/messages/trainer.ts` 加 `viewLossChart`/`close` 中英。新建 `ModelsList.test.tsx`（6 例全过）。
+  - **#361 TubEditor 拖拽框选**：`web_ui/frontend/src/components/TubEditor.tsx` 新增 `DRAG_SELECTION_THRESHOLD_PX=5`、`MIN_SELECTION_DRAFT_WIDTH_PX=2`、`dragStartRef`/`isDragSelectingRef`；mousedown 记按下点、mousemove 超阈值进入拖拽、mouseup/mouseleave 提交、Escape 清理、草稿绘制最小宽；容器加 `data-testid="tub-editor-chart"`。新建 `TubEditor.test.tsx`（4 例全过，需 `useStore.setState({ totalRecords })` 否则 `setSelectionRange` 按默认 0 clamp）。
+  - **#362 选模型后带模型重启**：`web_ui/backend/routers/drive.py` 拆出 `_get_config_dir/_get_params_path/_get_selected_model_path`，新增 `_validate_model_path`（拒绝绝对路径/`..`/非 `models/` 前缀），重写 `POST /load_model` 为「校验→写 `selected_model.json`→车端在线则 best-effort 下发 `restart_with_model`→返回 `restart_required`」；`donkeycar/parts/drive_api_bridge.py` 加 `restart_with_model` 分支（只 log 不自动重启）；`donkeycar/templates/complete.py` 加 `_selected_model_from_disk()`（读 `$DONKEY_CAR_DIR/selected_model.json` 或 `~/mycar/selected_model.json`），`drive()` 无 `--model` 时回退读取；前端 `DrivePage.tsx` 新增 `modelRestartRequired` 状态，选模型后显示「模型已记录，需重启车端后生效」琥珀徽章（`drive.modelRestartRequired` 中英）。后端 `test_drive.py` 新增 5 例（校验×3 + 持久化 + 在线通知），全套 30 例过。
+  - **#363 DonkeySim 断连重连**：`donkeycar/templates/simulator.py` ctr outputs 从 5 键补齐为与 `DriveApiBridge.run_threaded` 7 元组一一对应（`web/buttons`、`reconnect_simulator`、`car/mode_cmd`），键名 `reconnect_simulator` 与 cam 输入对齐；新增 `SimConnectionState` part 发布 `sim/connected`，bridge inputs 加 `sim/connected`。`donkeycar/parts/dgym.py` 加看门狗（`_watchdog_sec` 默认 5s、`_last_frame_ts`，`run_threaded` 检测超时无新帧强制 `_close_env`）。`donkeycar/parts/drive_api_bridge.py` 遥测透传 `sim_connected` 字段；`useDriveWebsocket.ts` Telemetry 加 `sim_connected`，`DrivePage.tsx` 显示「模拟器离线，重连中…」琥珀徽章（`drive.simOfflineReconnecting` 中英）。重写 `test_template_simulator_recovery.py` 为 AST 级解析 inputs/outputs 配对（4 例），`test_dgym_reconnect.py` 加看门狗 2 例、`test_drive_api_bridge_telemetry.py` 加遥测 2 例。配套环境补丁（非本仓库）：editable 安装的 `gym_donkeycar` 1.3.1 中 `envs/donkey_sim.py` `observe()` 加超时（默认 2s，可经 GYM_CONF `observe_timeout_sec` 配置）、`core/client.py` 优雅关闭/`ConnectionAbortedError` 均置 `aborted=True`，使根因 A/B 真正闭环。
+  - **#364 Pilot Arena 首尾帧双滑块**：`web_ui/frontend/src/pages/PilotArenaPage.tsx` 用 `plotStart`/`plotEnd` 状态替换单一 `plotLimit`，`loadPlot` 改发 `{ start: plotStart, limit: plotEnd - plotStart + 1 }`；UI 把单个帧数输入框换成两个原生 `input[type=range]` 双滑块 + 起止帧数值显示（`data-testid="plot-start-slider"/"plot-end-slider"`，`plotStart <= plotEnd` 约束），并加「按记录位置（0..max）选择切片」提示。`i18n/messages/arena.ts` 加 `plotStartFrame`/`plotEndFrame`/`plotRangeHint` 中英。后端 `PredictionsRequest` 已有 start/limit，未改契约。
+  - **#365 Trainer 命名颠倒**：`i18n/messages/trainer.ts` `tabMyPc` 本机→局域网主机（This Computer→Lan Host）、`tabLocal` 车载电脑→本机（Car Computer→Local Host），并同步 `myPcTraining`/`myPcProbeReady`/`myPcTrainingSubtitle` 派生文案 + 文件头加 key↔显示语映射约定注释；`web_ui/backend/mypc_probe.py` 两处直出文案「本机训练」→「局域网主机训练」；同步 `ModeTabs.test.tsx`、`MyPcProbePanel.test.tsx`、`test_trainer_mypc.py`、`RemoteConfigForm.tsx` 注释与 `docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」→「局域网主机训练（Lan Host）」。
+  - 实测：前端 `vitest run` 35 文件 186 passed、`tsc -b --noEmit` 无错、`vite build` 通过；后端 `pytest tests/test_drive.py tests/test_arena.py tests/test_trainer_mypc.py` 51 passed、`pytest donkeycar/tests/test_template_simulator_recovery.py test_dgym_reconnect.py test_drive_api_bridge_telemetry.py` 20 passed。仅 DD 改动（gym_donkeycar 环境补丁为依赖侧），Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (177)
+
+- fix(frontend): 修复老用户点击侧边「加载器」抽屉无反应——缺陷链同时吞掉配置自动加载，全新浏览器不触发故长期未察觉
+  - 根因（在本机 8000 在线实例用 Playwright + 系统 Chrome 真实点击复现）：`useStore.setError` 无条件联动写 `activeDrawer`（`setError(null)` 也会强制关抽屉）；`ConfigLoader` 挂载 effect 在 `!config && configPath` 时先调 `setError(null)`；抽屉内容只在抽屉打开时渲染。老用户（persist 了 `configPath`、全局 `config` 为 null）每次点击「加载器」→ 抽屉开 → `ConfigLoader` 挂载 → `setError(null)` → 抽屉瞬间自闭 → 组件卸载并取消 500ms 自动加载定时器 → `config` 永远加载不上，无限循环。
+  - `web_ui/frontend/src/store/useStore.ts`：`setError(null)` 只清 `error`、不再触碰 `activeDrawer`（非空错误的原有联动——含 not found/Failed 打开抽屉、其它错误关抽屉——逐字保留）；新增非持久化字段 `configAutoLoadTried`。
+  - `web_ui/frontend/src/components/ConfigLoader.tsx`：自动加载 effect 增加「每页面生命周期一次」守卫（标记在定时器真正触发时落地，500ms 内关抽屉导致卸载不算已尝试）——失败后重开抽屉不再自动重试，避免再次被错误联动关上。
+  - 测试：新建 `web_ui/frontend/src/store/useStore.test.ts`（4 例：setError(null) 不动 drawers 抽屉 / connectors 抽屉同样不动 / not found 与 Failed 打开 drawers / 其它非空错误保持既有关抽屉行为）；`ConfigLoader.test.tsx` 新增 2 回归例（remembered configPath 下挂载不关抽屉且自动加载正常发出 / 自动加载失败后重开抽屉不再自动重试且抽屉保持打开），beforeEach 重置 `activeDrawer` 与 `configAutoLoadTried`。
+  - 实测：`vitest run` 33 文件 176 passed、`tsc -b` 无错、`npm run build` 通过；修复前 Playwright 老用户场景（seed localStorage `donkeycar-storage`）在线实例复现抽屉宽度恒 0，全新/手机视口场景正常。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (176)
+
+- feat(TE): Tub 编辑器底部滑条新增选区首尾三角箭头手柄——点击/拖拽直接调整选区范围，方便 Mac 触控板操作
+  - 背景：选区只能靠图表上「两次点击」框选，Mac 触控板操控不便；底部概览滑条上的绿色选区条两端原无任何可交互手柄（全部 `pointer-events-none`，唯一的原生 range input 只控制播放头）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：
+    - 新增 `handleDrag` state + `handleDragRef` + `sliderContainerRef`——拖拽中只更新预览（滑条绿条与手柄位置、图表选区矩形经 `visualSelectionRef` + `requestChartRender()` 实时跟随），松手才一次性 `setSelectionRange`（只产生一条撤销历史，避免逐帧刷 history）。
+    - `sliderSelectionRange` useMemo 增加 `handleDrag` 优先分支；`sliderSelectionStyle` 重构为 `sliderSelectionPercents`（数值型 startPct/endPct）+ 薄样式包装，绿条与手柄定位共用同一换算、杜绝两套坐标漂移。
+    - 新增 `indexFromSliderClientX`——滑条容器 x 坐标 → 数组下标，与绿条同一坐标系（会话视图=数组下标，全局视图=物理 `_index` 经既有 `physicalToArrayPos` 反算），clamp 到 `[0, records.length]`。
+    - 新增 Pointer Events 拖拽回调（鼠标/触控板/触屏通吃）：pointerdown `stopPropagation` + `setPointerCapture` 并记录拖拽边；pointermove 按边更新，两端不可交叉、选区至少保留 1 条记录（endIndex 排他语义）；pointerup/pointercancel 提交一次 `setSelectionRange`。
+    - 滑条 JSX：有选区时在绿条首尾渲染两个 z-30 手柄（左 `▶` / 右 `◀` CSS border 三角，emerald 配色与选区一致），24×24 透明命中区方便触控板点选，`cursor-ew-resize`、`touch-none`，拖拽中放大高亮；`role="slider"` + aria 属性。
+  - i18n：`web_ui/frontend/src/i18n/messages/tubeditor.ts` 新增 `tubEditor.selectionStartHandleAria` / `tubEditor.selectionEndHandleAria` 中英文案。
+  - 未改动：图表「两次点击」框选逻辑、播放头 range input 行为；无选区时不显示手柄。
+  - 实测：`npm run build`（`tsc -b` + vite）通过、`vitest run` 32 文件 170 passed；eslint 仅一条 `handleTouchEnd` 未用参数报错，为 Tony 侧既有问题、与本次无关。仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (171)
+
+- feat(trainer): mypc 首用体验五连——tub 选择 / 探测门禁 / known-hosts 连接记忆 / client-info 一键获取 / trainerMode 上 store（2026-08-23 开发于 dd-deploy，本次由 wrap-mypc-ux 移植收尾合入，含两处安全设计偏差）
+  - tub 选择：前端新建 `web_ui/frontend/src/components/trainer/TubSelector.tsx`（候选 tub 下拉 + 当前值不在候选时手动输入回退），`LocalConfigForm.tsx` 重构复用之；mypc 模式「高级选项」内新增「训练数据」卡（`SectionCardTitle` + TubSelector，`myPcTubEditedRef` 防自动回写）；后端 `donkeycar/management/train_online.py` 把 `package_data` 的硬编码 `./data` 改为 `OnlineTrainer.data_dir` 实例属性（子类/调用方可指定 tub 路径，tar arcname 仍根于 `data`，远程布局不变；Tony 版 macOS mixed_float16 远端补丁 `_patch_remote_train_py_if_macos` 完整保留）；`routers/trainer.py` `OnlineTrainRequest` 新增 `tub` 字段透传 engine（`run_online`/`run_mypc`/`run_mypc_resume` 的 `tub` 形参 Tony (167) 已具备）；`useStore.TrainerMyPcConfig` 新增 `tub` 字段，`useTrainingJob.startSshTraining` 透传。
+  - 探测门禁：前端新建 `hooks/useMyPcProbe.ts`（封装 `probeMyPc` 调用与 result/loading/error 状态），探测状态由 `TrainerPage` 受控持有并与 `MyPcProbePanel` 共用同一份结果；mypc 模式「开始训练/继续」前若 `myPcEnvReady !== true` 先自动跑环境检测——通过才调 `startMyPc`/`resumeMyPc`（并采用检测到的 `python_path`），未就绪或请求失败则不开始（结果/错误显示在环境检测面板）；`MyPcProbePanel.tsx` 改为受控组件（`result/loading/error/onRunProbe` 由父组件传入，一键安装所需连接凭据仍走 props）；检测进行中主按钮禁用并显示 `trainer.myPcProbeRunning`。
+  - known-hosts 连接记忆（**设计偏差①：永不存密码**——dd-deploy 原版历史记录带密码字段，本次移植改为只存连接元信息）：后端新建 `web_ui/backend/mypc_history.py`（`mypc_known_hosts.json`，只存 host/user/python_path/remote_dir_base/last_used_at——`save_known_host` 没有 password 形参，加载时丢弃旧版文件残留的 password 字段，重写时彻底清掉；原子写、上限 10 条、全部 I/O best-effort）；探测 SSH 通过 / mypc 开始训练 / 续训三处钩子自动记忆；新增 `GET /api/trainer/mypc/known-hosts`（并发 22 端口可达性探测标注 `reachable`，永不失败）；前端 `TrainerPage` 挂载时用「最近使用且当前在线」的记录自动填充 host/user/python_path/remote_dir_base（密码永远由用户手填），`myPcEditedRef` 保护用户手动输入不被覆盖；`.gitignore` 增加 `mypc_known_hosts.json`（含内网主机信息，本机私有）。
+  - client-info 一键获取（**设计偏差②：改为 POST**——dd-deploy 原版为 GET 带 query，本次移植改为 `POST /api/trainer/mypc/client-info` 密码放 JSON body，绝不进访问日志）：后端按浏览器来源 IP（`x-forwarded-for` 优先）经 mDNS 浏览（zeroconf 懒加载，缺包可启动）→ avahi-resolve-address / getent 回退反解主机名，所有格词尾剥离猜登录用户名；给了密码且非环回时按候选名单逐个真实 SSH `whoami` 验证（`verified` 仅成功为真，`ssh` 报 ok/auth_failed/unreachable）；整体 6s/15s 超时封顶、任何错误降级为空串。`web_ui/backend/requirements.txt` 加 `zeroconf`；前端 `RemoteConfigForm.tsx` 新增 `compact` 模式（mypc 只留 IP/用户名/密码/私钥四框，remoteDirBase/modelName/pythonPath 收进高级选项/自动填充）、输入框占位符化、host 标签「主机」→「IP」、密码可见性切换、「一键获取」按钮（环回提示 / 无 SSH 时给出 macOS 开启远程登录命令并支持复制 / 认证失败 / 历史命中已填入 等全文案分支）。
+  - trainerMode 上 store：`useStore` 新增 `trainerMode`/`setTrainerMode`（persist 持久化，TrainerPage 页内不再自持 mode state）；`FlowPage.tsx` trainer section 头挂 `ModeTabs`（与步骤标题同行）；主按钮三模式统一文案 `trainer.startTraining`（替换原 startMyPcTraining/startLocalTraining/startCloudTraining 三键，mypc 且 job stopped 时仍显示「继续」）。
+  - 测试同步：后端新增 `tests/test_trainer_mypc_tub.py`（8 例：SystemExit/真实失败原因/路由 tub 透传/package_data 自定义 data_dir）、`tests/test_trainer_mypc_autopython.py`（6 例：`find_donkeycar_python` 配置优先/发现回退/全空 + `_ensure_remote_python` 纠正/未找到/异常吞噬）、`tests/test_trainer_mypc_history.py`（15 例：排序/upsert/封顶/原子写/损坏文件 + 端点可达性 + 三处保存钩子，含「写出的 JSON 永远不含 password」红线断言）、`tests/test_trainer_mypc_clientinfo.py`（7 例：环回跳过/mDNS 命中/avahi 回退/SSH 验证通过与失败/连接中止 + GET 必须 405 安全回归），`tests/conftest.py` 自动把 history 文件隔离进 tmp 目录；前端重写 `TrainerPage.test.tsx`（6 例：store 模式切换 / 探测门禁×3 / 续训门禁 / 折叠框默认收起展开）、新建 `useMyPcProbe.test.ts`（3 例）、`MyPcProbePanel.test.tsx` 适配受控接口（9 例，含点击检测按钮改调 onRunProbe 的契约锁定）。测试与代码内 IP 一律 192.0.2.x（TEST-NET-1）占位。
+  - 实测：后端 `pytest tests/ -q` 214 passed；前端 `vitest run` 32 文件 168 passed、`tsc -b` 无错、`npm run build` 通过。
+  - 移植说明：纠缠文件（`TrainerPage.tsx`/`useStore.ts`/`api.ts`/`trainer.py` 等）逐段手合未整盖，Tony 侧 cfg 传参风格与既有 (167)(168)(169) 结构完整保留；明确放弃 dd-deploy 的 EnvSetupCard/remote_env.py（已被 Tony (166) 一键安装取代）与 dd-text-mask（与 Tony (161) 冲突）。仅 DD 改动，Firmware 无改动、无需 OTA。
+
+## 2026-09-04 (170)
+
+- feat(launcher): DD Web UI 顶栏新增「ZCode」入口——一键在网页终端（xterm.js）打开 ZCode TUI coding agent（移植自 session-zcode/dd-deploy 旧工作树在制工作，本次收尾适配最新 Tony 合入）
+  - 链路：顶栏 ZCode 按钮 → DD 后端 `POST /api/launch/zcode` → 转发 launcher（:8090）同名端点 → 返回 `http://<host>:8090/terminal?cmd=...&title=ZCode&icon=zcode.png` URL → 新标签打开 xterm.js 终端页自动执行 `cd <cwd> && zcode`。
+  - `donkeycar/launcher/server.py`：新增 `POST /api/launch/zcode` 端点 `_handle_launch_zcode`——可选 JSON body `{"cwd": ...}`（非 JSON/非对象/cwd 非字符串均 400），cwd 不存在直接 400 报错绝不回退；命令经 `shlex.quote` 防注入，`quote()` 百分号编码进 URL；响应带 CORS 头（供 DC 页面跨域调用）；`_TERMINAL_STATIC_FILES` 白名单注册 `zcode.png`（image/png）。
+  - **敏感修复**：旧在制代码缺省 cwd 硬编码本机用户名绝对路径（入库即泄露事故）——本次移植改为动态推导 `str(Path.home())`，并以测试钉死（见下）。
+  - `donkeycar/launcher/terminal_static/terminal.html`：支持 `?title=&icon=` 参数自定义标签页标题与 favicon（默认 Terminal + 无图标），取自 dd-deploy 版。
+  - `donkeycar/launcher/terminal_static/zcode.png`（新，64×64 图标，取自 dd-deploy）。
+  - `web_ui/backend/routers/launch.py`：新增 `POST /launch/zcode`，与 dsh 同款 `_forward_launch` 转发模式。
+  - 前端：`web_ui/frontend/src/services/api.ts` 新增 `launchZcode()`（zcode 端点不启动子进程、毫秒级响应，validateStatus 全放行）；`web_ui/frontend/src/components/EnterButtons.tsx` 新增 `ZCodeEntryLink`（Code2 图标，复用 `useLauncherEntry`，10s 超时）；`web_ui/frontend/src/components/Layout.tsx` 桌面导航与移动菜单两处挂载（位于 KCW 与 DSH 之间）；`web_ui/frontend/src/i18n/messages/common.ts` 新增 zcode 五条文案 zh/en。
+  - 两源取舍：端点主体取 session-zcode 版（带 cwd 校验与 shlex.quote），`&title=ZCode&icon=zcode.png` 与 terminal.html 参数支持、zcode.png 取 dd-deploy 版；dd-deploy 版 api.ts 里无人调用的 `launchZcode` 死代码未移植（本版由 EnterButtons 真实调用）。
+  - 测试同步：后端 `web_ui/backend/tests/test_launch.py` 新增 zcode 注册断言与转发用例；launcher 侧新建 `tests/test_launcher_zcode.py` 4 用例（happy path URL 形态含 shlex.quote 防注入 + CORS、cwd 不存在 400、缺省 cwd 动态 Path.home() 回归栅栏、非 JSON 400），IP 一律 RFC 5737 TEST-NET-1（192.0.2.x）占位；前端 `EnterButtons.test.tsx` 新增 `ZCodeEntryLink` 2 用例（成功开新标签/失败关标签告警），`App.test.tsx` 的 api mock 补 `launchZcode`（缺导出导致 App 渲染抛错 4 例失败，补齐后全绿）。
+  - 实测：后端 `pytest tests/` 179 passed、仓库根 `pytest tests/` 272 passed、前端 `vitest run` 30 文件 159 passed、`tsc -b` 无错、`npm run build` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-04 (176)
 
 - fix(trainer): Trainer 三档训练目标命名第四次定稿——「本机」→「局域网主机」（Lan Host）、「车载电脑」→「本机」（Local Host），视角约定写死为「以车上操作视角为准」（docs/issues/006）
