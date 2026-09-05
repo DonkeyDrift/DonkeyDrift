@@ -1,4 +1,6 @@
+import io
 import sys
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -35,16 +37,118 @@ def test_import_model_writes_tflite_into_models_dir(tmp_path):
     assert dest.read_bytes() == b"\x00\x01\x02\x03"
 
 
-def test_import_model_rejects_non_tflite(tmp_path):
+def test_import_model_rejects_unsupported_extension(tmp_path):
     with _build_client() as client:
         resp = client.post(
             "/api/trainer/models/import",
             data={"working_dir": str(tmp_path)},
-            files={"file": ("model.h5", b"data", "application/octet-stream")},
+            files={"file": ("notes.txt", b"data", "application/octet-stream")},
         )
 
     assert resp.status_code == 400
-    assert not (tmp_path / "models" / "model.h5").exists()
+    assert not (tmp_path / "models" / "notes.txt").exists()
+
+
+def test_import_model_accepts_h5_and_lists_it(tmp_path):
+    with _build_client() as client:
+        resp = client.post(
+            "/api/trainer/models/import",
+            data={"working_dir": str(tmp_path)},
+            files={"file": ("pilot.h5", b"h5data", "application/octet-stream")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "pilot.h5"
+
+        listed = client.get("/api/trainer/models", params={"working_dir": str(tmp_path)})
+
+    assert listed.status_code == 200
+    names = {item["name"] for item in listed.json()["models"]}
+    assert "pilot.h5" in names
+
+
+def _make_savedmodel_zip(entries: dict) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_import_model_accepts_savedmodel_zip_and_lists_it(tmp_path):
+    payload = _make_savedmodel_zip({
+        "mymodel.savedmodel/saved_model.pb": b"pb",
+        "mymodel.savedmodel/variables/variables.data-00000-of-00001": b"weights",
+        "mymodel.savedmodel/variables/variables.index": b"index",
+    })
+    with _build_client() as client:
+        resp = client.post(
+            "/api/trainer/models/import",
+            data={"working_dir": str(tmp_path)},
+            files={"file": ("mymodel.zip", payload, "application/zip")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["name"] == "mymodel.savedmodel"
+
+        dest = tmp_path / "models" / "mymodel.savedmodel"
+        assert (dest / "saved_model.pb").is_file()
+        assert (dest / "variables" / "variables.index").is_file()
+
+        listed = client.get("/api/trainer/models", params={"working_dir": str(tmp_path)})
+
+    assert listed.status_code == 200
+    models = {item["name"]: item for item in listed.json()["models"]}
+    assert "mymodel.savedmodel" in models
+    assert models["mymodel.savedmodel"]["type"] == "dir"
+    assert models["mymodel.savedmodel"]["size"] > 0
+
+
+def test_import_model_rejects_zip_without_savedmodel(tmp_path):
+    payload = _make_savedmodel_zip({"readme.txt": b"nope"})
+    with _build_client() as client:
+        resp = client.post(
+            "/api/trainer/models/import",
+            data={"working_dir": str(tmp_path)},
+            files={"file": ("fake.zip", payload, "application/zip")},
+        )
+
+    assert resp.status_code == 400
+    assert not (tmp_path / "models" / "fake.savedmodel").exists()
+
+
+def test_import_model_rejects_zip_path_traversal(tmp_path):
+    payload = _make_savedmodel_zip({
+        "saved_model.pb": b"pb",
+        "../evil.pb": b"x",
+    })
+    with _build_client() as client:
+        resp = client.post(
+            "/api/trainer/models/import",
+            data={"working_dir": str(tmp_path)},
+            files={"file": ("evil.zip", payload, "application/zip")},
+        )
+
+    assert resp.status_code == 400
+    assert not (tmp_path / "models" / "evil.savedmodel").exists()
+    assert not (tmp_path / "evil.pb").exists()
+
+
+def test_import_model_rejects_duplicate_savedmodel_name(tmp_path):
+    payload = _make_savedmodel_zip({"saved_model.pb": b"pb"})
+    with _build_client() as client:
+        first = client.post(
+            "/api/trainer/models/import",
+            data={"working_dir": str(tmp_path)},
+            files={"file": ("dup.zip", payload, "application/zip")},
+        )
+        second = client.post(
+            "/api/trainer/models/import",
+            data={"working_dir": str(tmp_path)},
+            files={"file": ("dup.zip", payload, "application/zip")},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
 
 
 def test_import_model_rejects_duplicate_name(tmp_path):
