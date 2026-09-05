@@ -62,6 +62,14 @@ try:
         mixed_precision.set_global_policy(policy)
         print('Mixed precision policy set to mixed_float16')
     else:
+        if gpus and sys.platform == 'darwin':
+            # tensorflow-metal is numerically unstable on Apple Silicon even
+            # in float32 (train loss spikes, val loss pinned at the
+            # predict-mean baseline — upstream issue keras-team/tf-keras#140).
+            # Hide the Metal GPU so training runs deterministically on CPU.
+            tf.config.set_visible_devices([], 'GPU')
+            print('Disabled Metal GPU on macOS (numerical instability); '
+                  'training on CPU (float32)')
         print('Skipping mixed_float16 (no GPU or macOS); using float32')
 except Exception as e:
     print(f"Error setting mixed precision: {e}")

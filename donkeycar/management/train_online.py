@@ -404,12 +404,15 @@ class OnlineTrainer:
         raise RuntimeError(f"在 {retries} 次尝试后无法生成唯一的远程目录")
 
     def _patch_remote_train_py_if_macos(self, remote_dir):
-        """macOS 远端禁用 createcar 生成的 train.py 里的 mixed_float16。
+        """macOS 远端补丁 createcar 生成的 train.py：禁用 mixed_float16 并回退 CPU。
 
         远程训练用的是远端 env 自带的 createcar 模板，模板修复要等远端更新
         env 才生效；这里在每次 createcar 成功后直接给生成的 train.py 打补丁，
         立即生效（续训功能 import 的同一个 train.py，一并覆盖）。
-        mixed_float16 在 Apple Metal/CPU 上数值不稳定，会导致训练 loss 发散。
+        mixed_float16 在 Apple Metal/CPU 上数值不稳定，会导致训练 loss 发散；
+        tensorflow-metal 即使在 float32 下也有已知数值问题（train loss 尖峰、
+        val loss 卡在"预测均值"退化水平，上游 keras-team/tf-keras#140），所以
+        sed 直接把启用 fp16 的那一行换成隐藏 Metal GPU 的调用，训练回退 CPU。
         任何失败只记日志，不阻断训练。
         """
         try:
@@ -418,16 +421,24 @@ class OnlineTrainer:
             if uname != "Darwin":
                 return
             train_py = f"{remote_dir}/train.py"
+            # 旧/新两版模板里 set_global_policy 行都在 tf 导入之后、模型构建
+            # 之前执行，替换成 set_visible_devices 后一次 sed 同时拿掉 fp16 与
+            # Metal GPU；新模板里该行位于 darwin 不会进入的分支，但本补丁只在
+            # Darwin 远端执行，文本替换无害。第二处替换让旧模板打印如实日志。
             sed_cmd = (
                 "sed -i.bak "
-                "'s/mixed_precision\\.set_global_policy(policy)/"
-                "pass  # mixed_float16 disabled by DonkeyDrifter on macOS/' "
+                "-e 's/mixed_precision\\.set_global_policy(policy)/"
+                "tf.config.set_visible_devices([], \"GPU\")  "
+                "# Metal GPU disabled by DonkeyDrifter on macOS/' "
+                "-e \"s/print('Mixed precision policy set to mixed_float16')/"
+                "print('Metal GPU disabled by DonkeyDrifter on macOS; "
+                "training on CPU (float32)')/\" "
                 f"{train_py}"
             )
             stdin, stdout, stderr = self.ssh_client.exec_command(sed_cmd)
             if stdout.channel.recv_exit_status() == 0:
-                console.print("[yellow]检测到 macOS 远端：已禁用 train.py 的 mixed_float16[/yellow]")
-                self._log("Patched remote train.py: disabled mixed_float16 (macOS)")
+                console.print("[yellow]检测到 macOS 远端：已禁用 train.py 的 mixed_float16 与 Metal GPU（回退 CPU 训练）[/yellow]")
+                self._log("Patched remote train.py: disabled mixed_float16 + Metal GPU (macOS)")
             else:
                 err = stderr.read().decode().strip()
                 self._log(f"Failed to patch remote train.py (non-fatal): {err}", success=False)
