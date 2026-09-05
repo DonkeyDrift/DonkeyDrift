@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-05 (187)
+
+- feat(drive): Drive 输入源新增「ESP32 手柄」——复用车端固件上行的 rc/steering、rc/throttle 通道，经与现有输入源完全相同的 60Hz 控制循环驱动车辆，录制链路行为一致 (fixes #371)
+  - 背景：Drive 页输入源此前只有 joystick/keyboard/gamepad/gyro 四种，无法用车端 ESP32 上的实体手柄/遥控直接驾驶。固件本就上行 rc 通道：ESP32 串口 `T<t>S<s>` 帧 → 车端 `ArdRc` part 发布 `rc/steering`、`rc/throttle`（-1..1）→ `DriveApiBridge` 以 `rc_steering`/`rc_throttle` 随遥测上行 → 后端 `web_ui/backend/routers/drive.py:564` 原样广播 → 前端 `useDriveWebsocket` 的 `Telemetry` 接口本就有这两个字段。方案为纯前端透传：选中后把最新 rc 值送进同一条控制/录制链路，后端与 launcher 零改动。
+  - `web_ui/frontend/src/components/drive/InputSourceSelector.tsx`：`InputSource` 联合类型新增 `'esp32'`，SOURCES 增加 Cpu 图标选项；不做禁用逻辑（与键盘一致），无数据时输出 0。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：新增 `esp32Ref`（缓存 rc 最新值 + `updatedAt`），`handleTelemetry` 收到 rc 字段即更新；`getCurrentControl()` 顶部新增 esp32 分支——选中后由 rc 通道唯一驱动（不与其它输入合并，避免切换瞬间残留旧油门）；断流安全：超过 `ESP32_RC_STALE_MS = 500`ms 无 rc 数据（车离线/固件未上行）输出 0/0，不沿用旧油门。UI 显示复用既有 50Hz 同步的 ControlBars/VerticalThrottleBar。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：新增中文「ESP32 手柄」/ 英文「ESP32 Gamepad」。
+  - 测试同步：`web_ui/frontend/src/components/drive/InputSourceSelector.test.tsx` 悬浮展开断言补 ESP32 选项 + 新增「可选择 ESP32 手柄输入源」用例；vitest 该文件 8/8 通过；`npm run build`（tsc -b && vite build）通过。无 Python 改动。
+  - 注：仅 DD 前端改动，Firmware 无改动、无需 OTA。
+
 ## 2026-09-05 (186)
 
 - feat(models): 收录实车训练模型 DKG-1（TFLite）——仓库内归档分发，供 Pilot Arena opt-in 真实模型集成测试等环境取用
