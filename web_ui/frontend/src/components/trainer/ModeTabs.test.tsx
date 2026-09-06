@@ -27,7 +27,7 @@ describe('ModeTabs', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(3);
     expect(buttons[0]).toHaveTextContent('局域网主机');
-    expect(buttons[1]).toHaveTextContent('本机');
+    expect(buttons[1]).toHaveTextContent('车载电脑');
     expect(buttons[2]).toHaveTextContent('云端');
   });
 

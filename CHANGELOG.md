@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-06 (199)
+
+- fix(trainer): Trainer 页「本机」标签改回「车载电脑」——仅改显示名，不动机器枚举与逻辑；「局域网主机」「云端」保持不变
+  - 背景：用户要求把 DD 页面 Trainer 的「本机」（指运行 Web UI 的车端电脑，内部枚举 local）显示名改为「车载电脑」，「局域网主机」（mypc）维持现名不动。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`trainer.tabLocal` zh「本机」→「车载电脑」、en「Local Host」→「Car Computer」；文件头命名约定注释（tabLocal = 车载电脑（Car Computer））同步。
+  - 测试同步：`web_ui/frontend/src/components/trainer/ModeTabs.test.tsx` 断言「本机」→「车载电脑」。实测：`vitest run src/components/trainer` 6 文件 27 例全过、`src/pages/TrainerPage.test.tsx` 6 例全过；全量 `vitest run` 37 文件 226 例全绿。
+  - 已知限制：今日两仓库 PR 数已达上限（DD #397–#400、FW #146–#148 共 7 个），本改动暂未合入 Tony；本机 8000 实例按 (197) 同款先例破例按本分支部署，明日（9-07）合并后 ff 对齐。
+
 ## 2026-09-06 (198)
 
 - fix(console): DD 页面整页三步审查修复——console 代理 SSRF 防护兑现（拒绝公网 IP）+ OTA 期间 503 识别在线 + 静音键失败自愈 + DC/CC 内嵌页换 IP 自愈 + iframe 全屏修复 + OTA 弹窗不再中途消失
