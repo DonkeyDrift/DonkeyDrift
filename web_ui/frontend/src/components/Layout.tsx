@@ -5,7 +5,7 @@ import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
 import { VersionBadge } from './VersionBadge';
-import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, KimiCodeWebEntryLink, ZCodeEntryLink } from './EnterButtons';
+import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, FindCarEntryLink, KimiCodeWebEntryLink, ZCodeEntryLink } from './EnterButtons';
 import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './ConsoleControls';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
@@ -80,6 +80,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <KimiCodeWebEntryLink />
               <ZCodeEntryLink />
               <DshEntryLink />
+              <FindCarEntryLink />
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
               <VersionBadge />
@@ -141,6 +142,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <KimiCodeWebEntryLink />
                 <ZCodeEntryLink />
                 <DshEntryLink />
+                <FindCarEntryLink />
               </div>
             </nav>
           </div>

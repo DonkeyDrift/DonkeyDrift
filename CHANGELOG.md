@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-06 (200)
+
+- feat(findcar): 一键找车——改为局域网直连发现（去 token、去云端），DD 网页一键扫描出本机 DD 与小车 ESP32 的 IP
+  - 背景：用户希望在一个网页里点击一下就能搜索局域网内有没有小车，看到 ESP32 的 IP 或 DonkeyDrift 的 IP。最初方案 A 是车辆与 DD 后端周期上报到 Cloudflare Pages Functions + KV、网页输共享 token 查询；用户随后明确要求去掉 token、在 DD 网页里一键查询，故废弃云端方案，改为纯局域网直连发现——DD 后端复用既有 `discover_hosts(port=80)` + `_check_drifter_console` 扫描，前端新增「找小车」入口与结果弹窗，零 token、零云端依赖。Firmware 侧对应关闭云端上报（见 Firmware v1.8.74）。
+  - 后端：删除 `web_ui/backend/findcar.py`、`web_ui/backend/routers/findcar.py`、`web_ui/backend/tests/test_findcar.py`；`web_ui/backend/main.py` 移除 findcar 路由/心跳/启动钩子（复用既有 `GET /api/connector/local_ips` 与 `POST /api/connector/discover_console` 即可，无需新端点）。
+  - 前端：新增 `web_ui/frontend/src/components/FindCarModal.tsx`（打开时并行调用上述两端点，列出「本机 DD」`http://<ip>:8000` 与「小车 ESP32」`http://<ip>` 可点击链接，loading/notFound 状态）；`EnterButtons.tsx` 新增 `FindCarEntryLink` 入口；`Layout.tsx` 桌面/手机导航各挂载该入口；i18n 新增 `common.enterButtons.findCar*` 与 `common.findCar.*` 词条（zh/en）。
+  - 测试同步：新增 `web_ui/frontend/src/components/FindCarModal.test.tsx`。实测后端 `pytest web_ui/backend/tests/` 269 全过；前端 `vitest run` 与 `npm run build` 通过。
+  - 已知限制：今日两仓库 PR 数已达上限，本改动暂未合入 Tony；本机 8000 实例按本分支部署，明日（9-07）合并后 ff 对齐。
+
 ## 2026-09-06 (199)
 
 - fix(trainer): Trainer 页「本机」标签改回「车载电脑」——仅改显示名，不动机器枚举与逻辑；「局域网主机」「云端」保持不变
