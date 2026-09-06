@@ -2,12 +2,12 @@
 
 ## 2026-09-06 (200)
 
-- feat(findcar): 一键找车——DD 后端周期上报本机局域网信息到 Cloudflare Pages Functions，配合「找小车」网页在局域网内一键发现小车（DD 与车）
-  - 背景：用户希望在一个网页里点击一下就能搜索局域网内有没有小车，看到 ESP32 的 IP 或 DonkeyDrift 的 IP。方案 A：车辆与 DD 后端分别周期上报自身局域网信息到云端（Cloudflare Pages Functions + KV），网页读 KV 列出在线设备。本功能为 DD 侧心跳上报 + 配置接口；Firmware 侧见 Firmware v1.8.73。
-  - `web_ui/backend/findcar.py`（新增）：心跳模块——`load_config`/`save_config` 读写 `~/.donkeycar_findcar.json`（文件缺失/损坏/写失败均静默不抛异常）；`report_once` 用标准库 `urllib.request` HTTPS POST 到 `{url}/report`（带浏览器 UA 规避 Cloudflare 对默认 Python-urllib UA 的 403；日志只打印目标 URL、绝不打印 token）；`heartbeat_loop` 首次上报后每 `interval_seconds`（默认 300）重复上报；`start_heartbeat` 未配置时返回 None，否则创建后台任务。device_id 取主机名、lan_ip 经 `detect_lan_ip()`、port 取 `DRIVE_WEB_PORT`（默认 8000）。
-  - `web_ui/backend/routers/findcar.py`（新增）：`GET/POST /api/findcar/config`——GET 返回脱敏配置（token 只留首尾各 2 字符、中间打码）、POST 保存 url/token/enabled/interval_seconds。
-  - `web_ui/backend/main.py`：`from routers import findcar as findcar_router` + `import findcar`；`app.include_router(findcar_router.router, prefix="/api/findcar", tags=["findcar"])`；`@app.on_event("startup")` 调 `findcar.start_heartbeat()`（失败只记日志、不影响启动）。
-  - 测试同步：新增 `web_ui/backend/tests/test_findcar.py` 15 例（配置读写容错、token 脱敏、payload 字段、report_once 成功/失败/UA、心跳循环、start_heartbeat 开关、路由 GET/POST 与脱敏返回）。实测：`pytest web_ui/backend/tests/test_findcar.py` 15 passed。
+- feat(findcar): 一键找车——改为局域网直连发现（去 token、去云端），DD 网页一键扫描出本机 DD 与小车 ESP32 的 IP
+  - 背景：用户希望在一个网页里点击一下就能搜索局域网内有没有小车，看到 ESP32 的 IP 或 DonkeyDrift 的 IP。最初方案 A 是车辆与 DD 后端周期上报到 Cloudflare Pages Functions + KV、网页输共享 token 查询；用户随后明确要求去掉 token、在 DD 网页里一键查询，故废弃云端方案，改为纯局域网直连发现——DD 后端复用既有 `discover_hosts(port=80)` + `_check_drifter_console` 扫描，前端新增「找小车」入口与结果弹窗，零 token、零云端依赖。Firmware 侧对应关闭云端上报（见 Firmware v1.8.74）。
+  - 后端：删除 `web_ui/backend/findcar.py`、`web_ui/backend/routers/findcar.py`、`web_ui/backend/tests/test_findcar.py`；`web_ui/backend/main.py` 移除 findcar 路由/心跳/启动钩子（复用既有 `GET /api/connector/local_ips` 与 `POST /api/connector/discover_console` 即可，无需新端点）。
+  - 前端：新增 `web_ui/frontend/src/components/FindCarModal.tsx`（打开时并行调用上述两端点，列出「本机 DD」`http://<ip>:8000` 与「小车 ESP32」`http://<ip>` 可点击链接，loading/notFound 状态）；`EnterButtons.tsx` 新增 `FindCarEntryLink` 入口；`Layout.tsx` 桌面/手机导航各挂载该入口；i18n 新增 `common.enterButtons.findCar*` 与 `common.findCar.*` 词条（zh/en）。
+  - 测试同步：新增 `web_ui/frontend/src/components/FindCarModal.test.tsx`。实测后端 `pytest web_ui/backend/tests/` 269 全过；前端 `vitest run` 与 `npm run build` 通过。
+  - 已知限制：今日两仓库 PR 数已达上限，本改动暂未合入 Tony；本机 8000 实例按本分支部署，明日（9-07）合并后 ff 对齐。
 
 ## 2026-09-06 (199)
 

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Code2, FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
+import { Code2, FlaskConical, Menu, Search, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 import { fetchZcodeRemoteLink, launchDsh, launchKimiCodeWeb, launchZcodeRemote } from '@/services/api';
+import { FindCarModal } from './FindCarModal';
 
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
@@ -331,5 +332,19 @@ export const DshEntryLink: React.FC = () => {
       <FlaskConical className="w-3.5 h-3.5 shrink-0" />
       {launching ? t('common.enterButtons.dshStarting') : t('common.enterButtons.dsh')}
     </button>
+  );
+};
+
+export const FindCarEntryLink: React.FC = () => {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title={t('common.enterButtons.findCarTitle')} className={entryLinkCls}>
+        <Search className="w-3.5 h-3.5 shrink-0" />
+        {t('common.enterButtons.findCar')}
+      </button>
+      <FindCarModal open={open} onClose={() => setOpen(false)} />
+    </>
   );
 };
