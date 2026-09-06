@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Code2, FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { launchDsh, launchKimiCodeWeb, launchZcode } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb } from '@/services/api';
 
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
@@ -114,25 +114,75 @@ export const KimiCodeWebEntryLink: React.FC = () => {
   );
 };
 
+// ZCode 入口（行为变更）：原为 launcher 网页终端，现改为打开 ZCode 远程控制链接。
+// 远程链接由 ZCode 桌面端生成、本身是凭证，只存浏览器 localStorage，绝不入库；
+// 单击打开（无存档则先 prompt 录入），双击重新录入更新链接。
+export const ZCODE_REMOTE_STORAGE_KEY = 'zcodeRemoteUrl';
+
+// 单击动作稍作延迟，等待可能到来的双击（系统双击间隔通常 ≤500ms），
+// 避免双击更新时先触发一次"打开旧链接"
+const ZCODE_CLICK_DELAY_MS = 300;
+
 export const ZCodeEntryLink: React.FC = () => {
   const { t } = useTranslation();
-  // zcode 端点不启动子进程、只返回 /terminal?cmd=zcode URL，毫秒级响应
-  const { launching, enter } = useLauncherEntry(launchZcode, {
-    startingKey: 'common.enterButtons.zcodeStarting',
-    failedKey: 'common.enterButtons.zcodeFailed',
-    networkKey: 'common.enterButtons.zcodeNetworkError',
-    timeoutMs: 10000,
-  });
+  const clickTimer = useRef<number | null>(null);
+
+  // 卸载时清掉未触发的单击定时器
+  useEffect(
+    () => () => {
+      if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
+    },
+    [],
+  );
+
+  // prompt 录入/更新链接：仅接受 https:// 开头，校验失败 alert 且不保存
+  const promptForUrl = () => {
+    const input = window.prompt(t('common.enterButtons.zcodePrompt'));
+    if (input === null) return; // 用户取消
+    const url = input.trim();
+    if (!url.startsWith('https://')) {
+      window.alert(t('common.enterButtons.zcodeInvalid'));
+      return;
+    }
+    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, url);
+    window.open(url, '_blank', 'noopener');
+  };
+
+  const openRemote = () => {
+    const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
+    if (saved) {
+      window.open(saved, '_blank', 'noopener');
+    } else {
+      promptForUrl();
+    }
+  };
+
+  const handleClick = () => {
+    if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      openRemote();
+    }, ZCODE_CLICK_DELAY_MS);
+  };
+
+  const handleDoubleClick = () => {
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    promptForUrl();
+  };
+
   return (
     <button
       type="button"
-      onClick={enter}
-      disabled={launching}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       title={t('common.enterButtons.zcodeTitle')}
-      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
+      className={entryLinkCls}
     >
       <Code2 className="w-3.5 h-3.5 shrink-0" />
-      {launching ? t('common.enterButtons.zcodeStarting') : t('common.enterButtons.zcode')}
+      {t('common.enterButtons.zcode')}
     </button>
   );
 };
