@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-06 (191)
+
+- feat(nav): 导航区新增「ZCode 远程」入口——单击新标签页打开 localStorage 中的 ZCode 远程控制链接，双击重新录入；与 Firmware Web Console 侧统一交互规格
+  - 背景：ZCode 桌面端可生成「远程控制」链接（形如 `https://zcode.z.ai/remote/v4#配对凭证`，链接本身即凭证），用户希望在 DD 网页导航一键打开。链接只存浏览器 localStorage（键 `zcodeRemoteUrl`），绝不入库。
+  - 前端 `web_ui/frontend/src/components/ZcodeRemoteLink.tsx`（新增）：复用 EnterButtons 的 `entryLinkCls` 弱化高级入口样式（Satellite 图标）；单击读 localStorage——有值 `window.open(url, '_blank', 'noopener')`，无值 `window.prompt` 录入（校验 `https://` 开头，非法输入 alert 且不保存）后打开；双击重新 prompt 更新；单击动作 300ms 去抖，避免双击更新时先误开旧链接，组件卸载清理定时器。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行与手机汉堡菜单的既有 ZCode（网页终端）入口之后各加一处。
+  - i18n `web_ui/frontend/src/i18n/messages/common.ts`：新增 `common.zcodeRemote.*` 中英文案（label/title/prompt/invalid），title 写明「单击打开 ZCode 远程控制，双击更新链接」。
+  - 测试同步：`web_ui/frontend/src/components/ZcodeRemoteLink.test.tsx`（新增 6 例：无链接 prompt+保存+打开、有链接直接打开不 prompt、双击重新录入且旧链接不被打开、非法输入 alert 不保存不打开、取消 prompt 无动作、弱化样式与 title 断言）。实测：`npm run check`（tsc）通过、`vitest run` 全量 38 文件 207 例全绿、`npm run build` 通过。
+  - 注：仅 DD 前端改动，本仓库无固件内容、无需 OTA；安全红线——真实远程链接是凭证，代码与测试中仅出现占位示例 `https://zcode.z.ai/remote/v4`。
+
 ## 2026-09-05 (190)
 
 - feat(tub): TM 录制视频库新增「AI 清理」——启发式自动识别「碰撞后倒车」片段，扫描 → 清单确认 → 批量软删除 (fixes #373)
