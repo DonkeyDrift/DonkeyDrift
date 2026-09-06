@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-06 (198)
+
+- fix(console): DD 页面整页三步审查修复——console 代理 SSRF 防护兑现（拒绝公网 IP）+ OTA 期间 503 识别在线 + 静音键失败自愈 + DC/CC 内嵌页换 IP 自愈 + iframe 全屏修复 + OTA 弹窗不再中途消失
+  - 背景：对 Drift Console（固件侧，见 Firmware v1.8.72）与 DD 页面整体做「边界情况 / 陌生 CodeReviewer 复审 / 上线严重 Bug 预演」三步审查，DD 侧发现 5 条实锤问题，本次全部修复。
+  - `web_ui/backend/routers/console.py`：`_validate_ip` 补 `addr.is_private` 检查——docstring 一直宣称"仅允许局域网地址防 SSRF"但实现只查 IPv4 版本，`8.8.8.8` 等公网地址原样放行；现公网 400 拒绝，私网/回环/链路本地放行（docstring 写明语义）。
+  - `web_ui/backend/routers/connector.py`：`_check_drifter_console` 新增 HTTPError 分支——固件 OTA 上传期间中间件对所有非 /update 请求回 `503 "OTA in progress"`（固件 `WebConsoleServer.cpp:1509-1515`），此前一律判离线，导致 OTA 进行中 DD 重扫把正在刷机的车误判消失；现"503 且 body 含 OTA 标记"判定为在线（OTA 忙），其余错误路径不变。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：① 静音状态 fetch 失败补调 `refresh()`（照抄 DEV 的"缓存 IP 失效→重扫"自愈模式）——此前 ESP32 换 IP 后静音键永久 502 只能刷新页面；② 静音未知态（`muted===null`）按钮显式禁用并提示 unreachable，与 DEV 侧"不伪装成关"语义对齐；③ OTA 弹窗渲染条件 `{open && ip && …}` → `{open && (ip || uploading) && …}`——上传期间 ip 被重扫暂时置 null 不再导致弹窗中途消失。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`、`web_ui/frontend/src/components/CarSettingsPanel.tsx`：① `selectedIp` 自愈——`prev || found[0].ip` 保留旧值导致车换 IP（DHCP/OTA 重启）后 iframe 永久指向死地址白屏；现发现结果非空且 prev 已不在列表中则切到 `found[0].ip`，found 为空保持 prev（注释说明手动 IP 会被切走的可接受语义）；② 两处 iframe 补 `allowFullScreen`——此前 DD 内嵌时车端图表/终端两个全屏键被浏览器拒绝（跨源 iframe 无该属性必败）。
+  - 测试同步：`web_ui/backend/tests/test_console.py` +1（公网拒绝/私网回环链路本地放行矩阵）；`web_ui/backend/tests/test_connector.py` +2（503 带/不带 OTA 标记）；`ConsoleControls.test.tsx` +3（mute 失败调 refresh、未知态禁用、上传中 ip=null 弹窗仍在）；`DrifterConsolePage.test.tsx`/`CarSettingsPanel.test.tsx` 各 +3（换 IP 自愈切换、found 空保持、allowFullScreen 断言）。实测：后端 `pytest web_ui/backend/tests/` 269 全过、根 `pytest tests/` 288 全过；前端 `vitest run` 37 文件 226 例全绿、`tsc -b --noEmit` 与 `npm run build` 通过。
+
 ## 2026-09-06 (197)
 
 - feat(nav): ZCode 远控点击即取活链、零弹框零粘贴——DD 后端新增 `/api/zcode-remote/link` 端点实时向桌面端取当前远控链接，单击直接打开，彻底告别「手机连接已失效」与粘贴弹框

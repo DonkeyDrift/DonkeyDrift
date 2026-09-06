@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -337,6 +338,12 @@ async def _check_drifter_console(ip: str) -> dict | None:
                 return "Drifter Console" in html
         is_console = await asyncio.to_thread(_fetch)
         if is_console:
+            return {"ip": ip, "port": 80, "reachable": True}
+    except urllib.error.HTTPError as exc:
+        # 固件 OTA 上传期间（WebConsoleServer.cpp middleware）对所有非 /update
+        # 请求快速返回 503，body 固定为 "OTA in progress\n"。此时设备在线、只是
+        # OTA 忙，按标记判定为发现成功，避免重扫把正在刷机的车误判为离线。
+        if exc.code == 503 and "OTA in progress" in exc.read().decode("utf-8", errors="ignore"):
             return {"ip": ip, "port": 80, "reachable": True}
     except Exception:
         pass

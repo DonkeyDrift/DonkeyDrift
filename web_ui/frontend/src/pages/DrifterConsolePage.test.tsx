@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DrifterConsolePage } from './DrifterConsolePage';
 
 vi.mock('@/i18n', () => ({
@@ -59,5 +59,73 @@ describe('DrifterConsolePage 扫描状态显示（Issue #234）', () => {
       expect(iframe).not.toBeNull();
       expect(iframe?.getAttribute('src')).toContain('http://192.168.3.46/');
     });
+  });
+
+  it('重扫后旧 IP 不在列表时自动切换到新发现的第一台（车换 IP 自愈）', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+      count: 1,
+      scanned: 256,
+      message: '',
+    });
+    render(<DrifterConsolePage />);
+    await waitFor(() => {
+      expect(document.querySelector('iframe')?.getAttribute('src')).toContain(
+        'http://192.168.3.46/',
+      );
+    });
+
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [{ ip: '192.168.3.88', port: 80, reachable: true }],
+      count: 1,
+      scanned: 256,
+      message: '',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'console.rescan' }));
+    await waitFor(() => {
+      expect(document.querySelector('iframe')?.getAttribute('src')).toContain(
+        'http://192.168.3.88/',
+      );
+    });
+  });
+
+  it('重扫未发现设备（车暂时离线）时保持当前选择不动', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+      count: 1,
+      scanned: 256,
+      message: '',
+    });
+    render(<DrifterConsolePage />);
+    await waitFor(() => {
+      expect(document.querySelector('iframe')?.getAttribute('src')).toContain(
+        'http://192.168.3.46/',
+      );
+    });
+
+    mockDiscover.mockResolvedValue(emptyResult);
+    fireEvent.click(screen.getByRole('button', { name: 'console.rescan' }));
+    await waitFor(() => expect(mockDiscover).toHaveBeenCalledTimes(2));
+    expect(document.querySelector('iframe')?.getAttribute('src')).toContain(
+      'http://192.168.3.46/',
+    );
+  });
+
+  it('内嵌 DC iframe 带 allowFullScreen，车端图表/终端全屏键可用', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+      count: 1,
+      scanned: 256,
+      message: '',
+    });
+    render(<DrifterConsolePage />);
+    await waitFor(() => {
+      expect(document.querySelector('iframe')).not.toBeNull();
+    });
+    expect(document.querySelector('iframe')).toHaveAttribute('allowfullscreen');
   });
 });

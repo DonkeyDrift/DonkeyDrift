@@ -698,3 +698,41 @@ def test_record_last_sync_persists_result(monkeypatch, tmp_path):
     loaded = client.get("/api/connector/config").json()["config"]
     assert "同步失败" in loaded["last_sync_result"]
     assert "rsync 退出码: 23" in loaded["last_sync_result"]
+
+
+def test_check_drifter_console_treats_ota_503_as_online(monkeypatch):
+    """固件 OTA 上传期间返回 503 + body "OTA in progress\\n"，应判定设备在线。"""
+    import asyncio
+    import io
+    import urllib.error
+
+    connector = importlib.import_module("routers.connector")
+
+    def raise_ota_503(req, timeout=None):
+        fp = io.BytesIO(b"OTA in progress\n")
+        raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", {}, fp)
+
+    monkeypatch.setattr(connector.urllib.request, "urlopen", raise_ota_503)
+
+    result = asyncio.run(connector._check_drifter_console("192.168.3.46"))
+
+    assert result == {"ip": "192.168.3.46", "port": 80, "reachable": True}
+
+
+def test_check_drifter_console_ignores_503_without_ota_marker(monkeypatch):
+    """503 但 body 不含 OTA 标记（非固件 OTA 场景），仍按未发现处理。"""
+    import asyncio
+    import io
+    import urllib.error
+
+    connector = importlib.import_module("routers.connector")
+
+    def raise_plain_503(req, timeout=None):
+        fp = io.BytesIO(b"Service Unavailable")
+        raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", {}, fp)
+
+    monkeypatch.setattr(connector.urllib.request, "urlopen", raise_plain_503)
+
+    result = asyncio.run(connector._check_drifter_console("192.168.3.46"))
+
+    assert result is None

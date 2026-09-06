@@ -28,7 +28,12 @@ export const DrifterConsolePage: React.FC = () => {
       const result = await discoverConnectorConsoles();
       const found = result.found || [];
       setDevices(found);
-      setSelectedIp((prev) => prev || (found.length > 0 ? found[0].ip : ''));
+      setSelectedIp((prev) => {
+        if (found.length === 0) return prev; // 车暂时离线/扫描失败：保持现状
+        // 车 DHCP 换 IP 后旧地址已不在列表中：切到新发现的第一台，避免 iframe 指向死地址。
+        // 手动输入的 IP 不在 devices 列表里，重扫非空时会切走——可接受的自愈语义。
+        return found.some((d) => d.ip === prev) ? prev : found[0].ip;
+      });
     } catch {
       // 扫描失败时保留现有选择，静默跳过
     } finally {
@@ -138,6 +143,7 @@ export const DrifterConsolePage: React.FC = () => {
             ref={iframeRef}
             src={`http://${selectedIp}/?embedded=1&lang=${lang}`}
             title="Drifter Console"
+            allowFullScreen
             className="h-full w-full border-0 bg-zinc-950"
           />
         </div>
