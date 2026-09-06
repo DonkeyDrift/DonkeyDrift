@@ -126,23 +126,32 @@ export const ZCODE_REMOTE_STORAGE_KEY = 'zcodeRemoteUrl';
 // 避免双击更新时先触发一次"打开旧链接"
 const ZCODE_CLICK_DELAY_MS = 300;
 
-// 链接必须带 sid/hash（持久化设备凭证）才有效——裸 /remote/v4 必然"手机连接已失效"
-const parseRemoteUrl = (raw: string): URL | null => {
-  if (!raw.startsWith('https://')) return null;
+// 链接宽容归一化（与固件侧 zcodeRemoteNormalize 同语义）：trim + 去首尾引号
+// （含「」“”‘’）；桌面端复制的链接参数可能跟在 # fragment 后——fragment 里
+// 含 = 时把参数归并进 query（query 已有同名参数不覆盖）并清空 hash；
+// 含 remoteControlToken 的链接原样返回；否则必须带 sid/hash（持久化设备凭证——
+// 裸 /remote/v4 必然"手机连接已失效"），并把 t 刷成当前毫秒戳（远控页拒绝旧 t）
+const normalizeRemoteUrl = (raw: string): string | null => {
+  let u: URL;
   try {
-    const u = new URL(raw);
-    return u.searchParams.get('sid') && u.searchParams.get('hash') ? u : null;
+    u = new URL(raw.trim().replace(/^["'“”‘’「」]+|["'“”‘’「」]+$/g, ''));
   } catch {
     return null;
   }
-};
-
-// 用已存链接现拼带全新 t 的 URL；无存档或参数不全返回 null（走录入）
-const buildFreshRemoteUrl = (): string | null => {
-  const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
-  if (!saved) return null;
-  const u = parseRemoteUrl(saved);
-  if (!u) return null;
+  if (u.protocol !== 'https:') return null;
+  if (u.hash.length > 1) {
+    let h = u.hash.slice(1);
+    const q = h.indexOf('?');
+    if (q >= 0) h = h.slice(q + 1);
+    if (h.indexOf('=') > 0) {
+      new URLSearchParams(h).forEach((v, k) => {
+        if (!u.searchParams.get(k)) u.searchParams.set(k, v);
+      });
+    }
+    u.hash = '';
+  }
+  if (u.searchParams.get('remoteControlToken')) return u.toString();
+  if (!u.searchParams.get('sid') || !u.searchParams.get('hash')) return null;
   u.searchParams.set('t', String(Date.now()));
   return u.toString();
 };
@@ -182,9 +191,11 @@ export const ZCodeEntryLink: React.FC = () => {
     [],
   );
 
-  // 复制 + 新标签打开 + 后台唤醒桌面端（只有点击才向 Z Code 发请求）
+  // 复制 + 新标签打开 + 后台唤醒桌面端（只有点击才向 Z Code 发请求）；
+  // 存档归一化有效就直接用，无效（无存档/早期存的裸链接）才 prompt 录入
   const openRemote = () => {
-    const fresh = buildFreshRemoteUrl();
+    const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
+    const fresh = saved ? normalizeRemoteUrl(saved) : null;
     if (!fresh) {
       promptForUrl();
       return;
@@ -194,16 +205,18 @@ export const ZCodeEntryLink: React.FC = () => {
     launchZcodeRemote().catch(() => {});
   };
 
-  // prompt 录入/更新链接：必须是桌面端"Copy link"的完整链接（含 sid/hash），
-  // 校验失败 alert 且不保存；保存成功立即按新链接打开一次
+  // prompt 录入/更新链接：预填归一化后的存档（存档无效时预填空串，
+  // 避免早期存的无效裸链接诱导直接回车）；输入经归一化，失败 alert
+  // 且不保存；保存归一化后的值并立即按新链接打开一次
   const promptForUrl = () => {
+    const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
     const input = window.prompt(
       t('common.enterButtons.zcodePrompt'),
-      localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY) ?? '',
+      saved ? (normalizeRemoteUrl(saved) ?? '') : '',
     );
     if (input === null) return; // 用户取消
-    const url = input.trim();
-    if (!parseRemoteUrl(url)) {
+    const url = normalizeRemoteUrl(input);
+    if (!url) {
       window.alert(t('common.enterButtons.zcodeInvalid'));
       return;
     }

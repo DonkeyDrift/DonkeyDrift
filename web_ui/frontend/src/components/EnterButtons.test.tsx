@@ -137,7 +137,8 @@ describe('DshEntryLink', () => {
 
 describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher 网页终端）', () => {
   // 占位链接（安全红线：测试里只允许占位示例，绝不出现真实远程链接凭证）；
-  // 有效链接必须带 sid/hash 持久化凭证参数，t 为生成时间戳（点击时现拼刷新）
+  // 有效链接带 sid/hash 持久化凭证参数（t 为生成时间戳、归一化时现拼刷新），
+  // 或带 remoteControlToken（原样通过）；桌面端复制的链接参数可能跟在 # fragment 后
   const STORED_URL = 'https://zcode.z.ai/remote/v4?sid=placeholder-sid&hash=placeholder-hash&t=1';
   const UPDATED_URL = 'https://zcode.z.ai/remote/v4?sid=placeholder-sid2&hash=placeholder-hash2&t=2';
   const BARE_URL = 'https://zcode.z.ai/remote/v4';
@@ -159,6 +160,16 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
   const openedParams = (openSpy: ReturnType<typeof vi.spyOn>) =>
     new URL(vi.mocked(openSpy).mock.calls[0][0] as string).searchParams;
 
+  // 断言 localStorage 存入的是归一化后的链接：sid/hash 保留、t 被刷成全新毫秒戳
+  const expectStored = (sid: string, hash: string, staleT: string) => {
+    const stored = new URL(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY) ?? '');
+    expect(stored.searchParams.get('sid')).toBe(sid);
+    expect(stored.searchParams.get('hash')).toBe(hash);
+    const tVal = stored.searchParams.get('t');
+    expect(tVal).not.toBe(staleT);
+    expect(Number(tVal)).toBeGreaterThan(0);
+  };
+
   beforeEach(() => {
     vi.useFakeTimers();
     localStorage.clear();
@@ -179,7 +190,7 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     clickAndFlush(renderButton());
     expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
-    expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBe(STORED_URL);
+    expectStored('placeholder-sid', 'placeholder-hash', '1');
     // 打开的是现拼的新鲜链接：sid/hash 保留、t 已刷新（不再是存入时的 t=1）
     const params = openedParams(openSpy);
     expect(params.get('sid')).toBe('placeholder-sid');
@@ -235,7 +246,7 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
       vi.advanceTimersByTime(400);
     });
     expect(promptSpy).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBe(UPDATED_URL);
+    expectStored('placeholder-sid2', 'placeholder-hash2', '2');
     // 只打开新链接一次，单击的旧链接被去抖抑制
     expect(openSpy).toHaveBeenCalledTimes(1);
     expect(openedParams(openSpy).get('sid')).toBe('placeholder-sid2');
@@ -267,8 +278,42 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     clickAndFlush(renderButton());
     expect(promptSpy).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBe(STORED_URL);
+    expectStored('placeholder-sid', 'placeholder-hash', '1');
     expect(openSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a desktop-copied link whose params live in the # fragment', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    vi.spyOn(window, 'prompt').mockReturnValue(
+      'https://zcode.z.ai/remote/v4#sid=frag-sid&hash=frag-hash&t=9',
+    );
+    clickAndFlush(renderButton());
+    // fragment 参数归并进 query、hash 清空、t 刷新后保存
+    const stored = new URL(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY) ?? '');
+    expect(stored.searchParams.get('sid')).toBe('frag-sid');
+    expect(stored.searchParams.get('hash')).toBe('frag-hash');
+    expect(stored.searchParams.get('t')).not.toBe('9');
+    expect(stored.hash).toBe('');
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openedParams(openSpy).get('sid')).toBe('frag-sid');
+  });
+
+  it('passes a remoteControlToken link through unchanged (no t refresh)', () => {
+    const TOKEN_URL = 'https://zcode.z.ai/remote/v4?remoteControlToken=placeholder-token';
+    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, TOKEN_URL);
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => null);
+    clickAndFlush(renderButton());
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith(TOKEN_URL, '_blank', 'noopener');
+  });
+
+  it('prefills the prompt with an empty string when the stored link is invalid', () => {
+    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, BARE_URL);
+    vi.spyOn(window, 'open').mockImplementation(() => null);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
+    clickAndFlush(renderButton());
+    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
   });
 
   it('does nothing when the prompt is cancelled', () => {

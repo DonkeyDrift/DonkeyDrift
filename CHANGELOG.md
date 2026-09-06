@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-06 (195)
+
+- fix(nav): ZCode 远控链接宽容归一化——兼容桌面端「Copy link」参数在 `#` fragment 后的链接、remoteControlToken 链接原样通过、无效存档不再预填诱导回车（修复 (194) 粘贴桌面端链接被误判"链接无效"）
+  - 背景：(194) 上线后用户反馈粘贴桌面端复制的链接被误判「链接无效」——根因一：桌面端链接的参数可能跟在 `#` fragment 后（形如 `https://zcode.z.ai/remote/v4#sid=…&hash=…`），而 (194) 的校验只认 query；根因二：prompt 会预填早期存的无效裸链接，诱导用户直接回车再次触发"无效"。本次把解析换成与固件侧同语义的宽容归一化函数。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`parseRemoteUrl()`/`buildFreshRemoteUrl()` 合并替换为 `normalizeRemoteUrl(raw)`——trim + 去首尾引号（含「」“”‘’）→ `new URL`，非 `https:` 返回 null → hash 长度 >1 时去掉 `#`（内部若还有 `?` 取其后半），含 `=` 则用 `URLSearchParams` 把参数归并进 query（query 已有同名参数不覆盖）并清空 hash → 含 `remoteControlToken` 参数原样返回 → 否则必须含 sid+hash 且把 `t` 刷成 `Date.now()`。单击逻辑：存档归一化有效就直接用、无效才 prompt；prompt 预填改为 `saved ? (normalizeRemoteUrl(saved) ?? '') : ''`（无效存档预填空串，不再诱导回车）；用户输入经归一化，null 则 alert 不保存，保存归一化后的值。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块 10 例 → 13 例——3 处「存入值 === 原 URL」断言改为解析存入 URL 断言 sid/hash 保留、`t` 为全新毫秒戳（归一化会刷新 t）；新增 3 例（fragment 形式链接被接受且参数归并进 query、remoteControlToken 链接原样通过不刷 t、无效存档时 prompt 预填为 ''）。实测：`vitest run` 全量 37 文件 212 例全绿、`tsc --noEmit` 通过、`npm run build` 通过。
+  - 注：与固件侧 DC 顶栏 ZCode 按钮的同款宽容归一化（`zcodeRemoteNormalize`）语义对齐；安全红线不变——真实远程链接是凭证，测试中仅出现占位示例。
+
 ## 2026-09-06 (194)
 
 - feat(nav): 「ZCode」远控入口点击即新鲜、正常点击零弹框——单击用已存凭证现拼带全新时间戳的远控链接，复制到剪贴板后直接新标签打开，并后台唤醒 PC 上的 Z Code 桌面端
