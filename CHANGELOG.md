@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-09-06 (197)
+
+- feat(nav): ZCode 远控点击即取活链、零弹框零粘贴——DD 后端新增 `/api/zcode-remote/link` 端点实时向桌面端取当前远控链接，单击直接打开，彻底告别「手机连接已失效」与粘贴弹框
+  - 背景：(194)(195) 把链接保鲜做到了「存档凭证 + 本地刷新 t」，但仍要求用户先从桌面端「复制链接」手工录入一次；无存档或存档失效时仍弹 prompt。本次逆向了桌面端协议后彻底自动化：链接由 sid（中继注册下发，持久化于 `~/.zcode/v2/setting.json`）+ passHash（`credentials.json` 中 aes-256-gcm 加密存储，key 为本机派生）+ 新鲜 t 现拼而成，后端可实时取/现拼，前端点击即用。
+  - `web_ui/backend/routers/zcode_remote.py`（新增）：POST `/api/zcode-remote/link`——优先走 CDP（`http://127.0.0.1:9222/json` 找渲染页 target，WS 发 `Runtime.evaluate` 调 preload 暴露的 `window.zcode.getWebRemoteControlStatus()`，非 running 则 `startWebRemoteControl({workspacePath})`）取桌面端实时 connectUrl；桌面端进程不在（扫 `/proc`）则 detached 拉起并最多等 25s；CDP 路径失败兜底 `_mint_link_from_store()`——读 `setting.json`/`credentials.json`/`telemetry-state.json`，本地解密 passHash 现拼 `?sid=…&hash=…&t=Date.now()&mid&name&app_version`（`_refresh_t()` 保证 t 新鲜）；凭证缺失 409、其它异常 500。数据目录 `_v2_dir()` 读 `ZCODE_DATA_BASE_DIR` env（缺省 home）便于测试隔离。
+  - `web_ui/backend/main.py`：import + `include_router(zcode_remote.router, prefix="/api/zcode-remote")`。
+  - `web_ui/frontend/src/services/api.ts`：新增 `fetchZcodeRemoteLink()`（POST `/zcode-remote/link`，30s 超时——覆盖桌面端冷启动，validateStatus 全放行自行判定）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：openRemote 改为先同步 `window.open('about:blank','_blank')` 占位标签（`opener=null`，保住用户手势链不被浏览器拦截）→ `fetchZcodeRemoteLink()` 取活链 → 成功则落 localStorage 存档 + 占位标签 `location.href` 导航（占位被拦则 `window.open` 直开）→ 失败回落存档归一化现拼，无存档才 prompt 录入（此时已脱离点击手势，录入后直接导航占位标签而非新开窗口，取消/无效输入关占位）。**与 (196) 审查补强融合**：回落读取走 `readStoredRemoteUrl()` 容错、prompt 保存 setItem try/catch、无双击手势路径仍走 `openFresh()`。正常点击全程零弹框。
+  - 测试同步：新增 `web_ui/backend/tests/test_zcode_remote.py` 8 例（CDP 取链成功/非 running 先 start/进程不在拉起后取链/CDP 失败兜底本地现拼/凭证缺失 409/环境变量隔离等）；`EnterButtons.test.tsx` ZCode 块按新流程重写为 18 例（占位标签导航、占位被拦直开、取链失败回落存档、无档 prompt 后导航同一占位、活链落存档，含 (196) 的 setItem/getItem 抛错两例适配新流程）。实测：后端 `pytest web_ui/backend/tests/` 266 全过、根 `pytest tests/` 288 全过；前端 `vitest run` 37 文件 217 例全绿、`tsc -b --noEmit` 通过、`npm run build` 通过。端点真机实测 26ms 返回活链。
+  - 注：安全红线不变——远控链接是凭证，仅经后端内存传递 + 浏览器 localStorage，代码与测试中仅占位示例；Firmware 侧 DC 顶栏 ZCode 按钮同款改造为 v1.8.71（POST 到 `http://<launcherIp>:8000/api/zcode-remote/link`）。
+  - 已知限制：今日 PR 数已达上限，本改动暂未合入 Tony；本机 8000 实例破例按本分支部署（deploy-8000 detached 于本分支头），明日合并后 ff 对齐。
+
 ## 2026-09-06 (196)
 
 - fix(nav): ZCode 远控入口审查补强——DD 侧 localStorage 读写容错（存储禁用/隐私模式下点击不再整个失效）、消除 prompt→open 递归；launcher /proc 扫描参数化可直测
