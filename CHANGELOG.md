@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-07 (201)
+
+- feat(findcar): 一键找车恢复云端上报并去 token——网站 `find-dkc.pages.dev` 打开即列，无需任何口令；措辞统一「Donkey Car」（ESP32）/「DonkeyDrift」（DD）
+  - 背景：(200) 曾按「DD 网页局域网直连发现、去 token 去云端」落地，但用户实际想要的是**公网网站**（Cloudflare Pages 域名）里点一下就能查到局域网内小车/DD，且明确不要 token。公网网页扫不了局域网，只能靠车与 DD 上报到 Cloudflare KV、网页读 KV；去 token 即完全公开查询（用户已接受）。因此恢复云端上报，但删除共享口令，并把项目从 `find-car` 改为 `find-dkc`、把「小车」措辞改为「Donkey Car」。
+  - 后端：新增 `web_ui/backend/findcar.py`（`FindCarConfig` 不再含 `token` 字段；`_is_configured` 只判 `enabled and url`；`_report_payload` 无 token；`load_config` 对旧配置 `data.pop("token", None)` 容错）；新增 `web_ui/backend/routers/findcar.py`（`FindCarConfigUpdate` 无 token；`GET/POST /api/findcar/config`）。
+  - `web_ui/backend/main.py`：import `findcar` 与 `routers.findcar`、`include_router(..., prefix="/api/findcar")`、`@app.on_event("startup")` 启动 `findcar.start_heartbeat()`。
+  - 测试同步：新增 `web_ui/backend/tests/test_findcar.py` 16 例（配置读写容错、去 token 断言、`_report_payload` 无 token、`report_once` 成功/失败/UA、`heartbeat_loop`、`start_heartbeat` 开关、路由契约）。实测后端 `pytest web_ui/backend/tests/` 285 全过。
+  - Cloudflare 站点（非 git，目录 `cloudflare/find-car/`）：`public/index.html` 去 token 输入框、打开自动 `fetch('/devices')`、标题「Find Donkey Car」；`functions/devices.js` 去 token 校验、KV prefix `dev:`；`functions/report.js` 去 token 校验、KV 键 `dev:<device_id>`、TTL 720s；`wrangler.toml` name 改 `find-dkc`。已部署 `https://find-dkc.pages.dev/`，实测 `/devices` 返回 200。
+  - Firmware 侧对应恢复云端上报并去 token（见 Firmware v1.8.75）。
+
 ## 2026-09-06 (200)
 
 - feat(findcar): 一键找车——改为局域网直连发现（去 token、去云端），DD 网页一键扫描出本机 DD 与小车 ESP32 的 IP
