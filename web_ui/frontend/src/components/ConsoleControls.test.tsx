@@ -82,6 +82,21 @@ describe('ConsoleMuteButton', () => {
       window.removeEventListener(MUTE_CHANGED_EVENT, listener);
     }
   });
+
+  it('re-scans for the console when the mute fetch fails (stale cached IP)', async () => {
+    mockGetJson.mockRejectedValue(new Error('boom'));
+    render(<ConsoleMuteButton />);
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it('shows a disabled unreachable state instead of "unmuted" while the mute state is unknown', async () => {
+    mockGetJson.mockRejectedValue(new Error('boom'));
+    render(<ConsoleMuteButton />);
+    const btn = await screen.findByRole('button', { name: 'console.muteAria' });
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(btn).toHaveAttribute('title', 'console.unreachable');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+  });
 });
 
 describe('ConsoleOtaButton', () => {
@@ -121,6 +136,32 @@ describe('ConsoleOtaButton', () => {
     render(<ConsoleOtaButton />);
     const btn = screen.getByRole('button', { name: 'OTA' });
     expect(btn).toBeDisabled();
+  });
+
+  it('keeps the upload dialog open for the whole upload even if the console IP is lost mid-upload', async () => {
+    let resolveUpload!: (v: string) => void;
+    mockPostForm.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+    const { rerender } = render(<ConsoleOtaButton />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    const fileInput = await screen.findByLabelText('console.otaChooseFile');
+    const file = new File(['binary'], 'firmware.bin', { type: 'application/octet-stream' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: 'console.otaUpload' }));
+    await screen.findByRole('button', { name: 'console.otaUploading' });
+
+    // 上传进行中车端 503，DD 重扫把 ip 置 null：弹窗不得消失
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false, refresh: mockRefresh });
+    rerender(<ConsoleOtaButton />);
+    expect(screen.getByText('console.otaTitle')).toBeInTheDocument();
+
+    resolveUpload('ACK:UPDATE_OK');
+    await waitFor(() => expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument());
   });
 });
 

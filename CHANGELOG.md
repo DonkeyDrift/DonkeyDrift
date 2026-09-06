@@ -1,5 +1,57 @@
 # 变更日志
 
+## 2026-09-06 (198)
+
+- fix(console): DD 页面整页三步审查修复——console 代理 SSRF 防护兑现（拒绝公网 IP）+ OTA 期间 503 识别在线 + 静音键失败自愈 + DC/CC 内嵌页换 IP 自愈 + iframe 全屏修复 + OTA 弹窗不再中途消失
+  - 背景：对 Drift Console（固件侧，见 Firmware v1.8.72）与 DD 页面整体做「边界情况 / 陌生 CodeReviewer 复审 / 上线严重 Bug 预演」三步审查，DD 侧发现 5 条实锤问题，本次全部修复。
+  - `web_ui/backend/routers/console.py`：`_validate_ip` 补 `addr.is_private` 检查——docstring 一直宣称"仅允许局域网地址防 SSRF"但实现只查 IPv4 版本，`8.8.8.8` 等公网地址原样放行；现公网 400 拒绝，私网/回环/链路本地放行（docstring 写明语义）。
+  - `web_ui/backend/routers/connector.py`：`_check_drifter_console` 新增 HTTPError 分支——固件 OTA 上传期间中间件对所有非 /update 请求回 `503 "OTA in progress"`（固件 `WebConsoleServer.cpp:1509-1515`），此前一律判离线，导致 OTA 进行中 DD 重扫把正在刷机的车误判消失；现"503 且 body 含 OTA 标记"判定为在线（OTA 忙），其余错误路径不变。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：① 静音状态 fetch 失败补调 `refresh()`（照抄 DEV 的"缓存 IP 失效→重扫"自愈模式）——此前 ESP32 换 IP 后静音键永久 502 只能刷新页面；② 静音未知态（`muted===null`）按钮显式禁用并提示 unreachable，与 DEV 侧"不伪装成关"语义对齐；③ OTA 弹窗渲染条件 `{open && ip && …}` → `{open && (ip || uploading) && …}`——上传期间 ip 被重扫暂时置 null 不再导致弹窗中途消失。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`、`web_ui/frontend/src/components/CarSettingsPanel.tsx`：① `selectedIp` 自愈——`prev || found[0].ip` 保留旧值导致车换 IP（DHCP/OTA 重启）后 iframe 永久指向死地址白屏；现发现结果非空且 prev 已不在列表中则切到 `found[0].ip`，found 为空保持 prev（注释说明手动 IP 会被切走的可接受语义）；② 两处 iframe 补 `allowFullScreen`——此前 DD 内嵌时车端图表/终端两个全屏键被浏览器拒绝（跨源 iframe 无该属性必败）。
+  - 测试同步：`web_ui/backend/tests/test_console.py` +1（公网拒绝/私网回环链路本地放行矩阵）；`web_ui/backend/tests/test_connector.py` +2（503 带/不带 OTA 标记）；`ConsoleControls.test.tsx` +3（mute 失败调 refresh、未知态禁用、上传中 ip=null 弹窗仍在）；`DrifterConsolePage.test.tsx`/`CarSettingsPanel.test.tsx` 各 +3（换 IP 自愈切换、found 空保持、allowFullScreen 断言）。实测：后端 `pytest web_ui/backend/tests/` 269 全过、根 `pytest tests/` 288 全过；前端 `vitest run` 37 文件 226 例全绿、`tsc -b --noEmit` 与 `npm run build` 通过。
+
+## 2026-09-06 (197)
+
+- feat(nav): ZCode 远控点击即取活链、零弹框零粘贴——DD 后端新增 `/api/zcode-remote/link` 端点实时向桌面端取当前远控链接，单击直接打开，彻底告别「手机连接已失效」与粘贴弹框
+  - 背景：(194)(195) 把链接保鲜做到了「存档凭证 + 本地刷新 t」，但仍要求用户先从桌面端「复制链接」手工录入一次；无存档或存档失效时仍弹 prompt。本次逆向了桌面端协议后彻底自动化：链接由 sid（中继注册下发，持久化于 `~/.zcode/v2/setting.json`）+ passHash（`credentials.json` 中 aes-256-gcm 加密存储，key 为本机派生）+ 新鲜 t 现拼而成，后端可实时取/现拼，前端点击即用。
+  - `web_ui/backend/routers/zcode_remote.py`（新增）：POST `/api/zcode-remote/link`——优先走 CDP（`http://127.0.0.1:9222/json` 找渲染页 target，WS 发 `Runtime.evaluate` 调 preload 暴露的 `window.zcode.getWebRemoteControlStatus()`，非 running 则 `startWebRemoteControl({workspacePath})`）取桌面端实时 connectUrl；桌面端进程不在（扫 `/proc`）则 detached 拉起并最多等 25s；CDP 路径失败兜底 `_mint_link_from_store()`——读 `setting.json`/`credentials.json`/`telemetry-state.json`，本地解密 passHash 现拼 `?sid=…&hash=…&t=Date.now()&mid&name&app_version`（`_refresh_t()` 保证 t 新鲜）；凭证缺失 409、其它异常 500。数据目录 `_v2_dir()` 读 `ZCODE_DATA_BASE_DIR` env（缺省 home）便于测试隔离。
+  - `web_ui/backend/main.py`：import + `include_router(zcode_remote.router, prefix="/api/zcode-remote")`。
+  - `web_ui/frontend/src/services/api.ts`：新增 `fetchZcodeRemoteLink()`（POST `/zcode-remote/link`，30s 超时——覆盖桌面端冷启动，validateStatus 全放行自行判定）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：openRemote 改为先同步 `window.open('about:blank','_blank')` 占位标签（`opener=null`，保住用户手势链不被浏览器拦截）→ `fetchZcodeRemoteLink()` 取活链 → 成功则落 localStorage 存档 + 占位标签 `location.href` 导航（占位被拦则 `window.open` 直开）→ 失败回落存档归一化现拼，无存档才 prompt 录入（此时已脱离点击手势，录入后直接导航占位标签而非新开窗口，取消/无效输入关占位）。**与 (196) 审查补强融合**：回落读取走 `readStoredRemoteUrl()` 容错、prompt 保存 setItem try/catch、无双击手势路径仍走 `openFresh()`。正常点击全程零弹框。
+  - 测试同步：新增 `web_ui/backend/tests/test_zcode_remote.py` 8 例（CDP 取链成功/非 running 先 start/进程不在拉起后取链/CDP 失败兜底本地现拼/凭证缺失 409/环境变量隔离等）；`EnterButtons.test.tsx` ZCode 块按新流程重写为 18 例（占位标签导航、占位被拦直开、取链失败回落存档、无档 prompt 后导航同一占位、活链落存档，含 (196) 的 setItem/getItem 抛错两例适配新流程）。实测：后端 `pytest web_ui/backend/tests/` 266 全过、根 `pytest tests/` 288 全过；前端 `vitest run` 37 文件 217 例全绿、`tsc -b --noEmit` 通过、`npm run build` 通过。端点真机实测 26ms 返回活链。
+  - 注：安全红线不变——远控链接是凭证，仅经后端内存传递 + 浏览器 localStorage，代码与测试中仅占位示例；Firmware 侧 DC 顶栏 ZCode 按钮同款改造为 v1.8.71（POST 到 `http://<launcherIp>:8000/api/zcode-remote/link`）。
+  - 已知限制：今日 PR 数已达上限，本改动暂未合入 Tony；本机 8000 实例破例按本分支部署（deploy-8000 detached 于本分支头），明日合并后 ff 对齐。
+
+## 2026-09-06 (196)
+
+- fix(nav): ZCode 远控入口审查补强——DD 侧 localStorage 读写容错（存储禁用/隐私模式下点击不再整个失效）、消除 prompt→open 递归；launcher /proc 扫描参数化可直测
+  - 背景：(194)(195) 合并前对两仓库该功能做三步审查（边界情况+测试补充、陌生 CodeReviewer 复审、上线严重 Bug 预演）发现：DD 侧 `localStorage.getItem/setItem` 未 try/catch（固件侧 `zcodeRemoteGet`/`zcodeRemotePrompt` 已包）——浏览器存储被禁用/隐私模式时 `setItem` 抛 QuotaExceededError、`getItem` 抛 SecurityError，点击「ZCode」会以未捕获异常整个失效。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `readStoredRemoteUrl()`（getItem 抛错按无存档处理走 prompt）；`promptForUrl` 的 setItem 包 try/catch（写入失败本次仍按手中链接打开，下次点击再 prompt）；抽出 `openFresh(url)`（复制+打开+唤醒三合一），`promptForUrl` 末尾由递归调 `openRemote()` 改为直接 `openFresh(url)`——消除递归路径，打开的链接与刚存入的值一致。
+  - `donkeycar/launcher/server.py`：`_zcode_desktop_running(proc_root="/proc")` 参数化 proc 根目录（行为不变），/proc 扫描逻辑可直接单测。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块 13 → 15 例（setItem 抛错仍打开+唤醒 / getItem 抛错按无存档走 prompt 且预填空串；prompt 取消用例补「不唤醒桌面端」断言）；`tests/test_launcher_zcode_remote.py` 5 → 9 例（假 /proc 检出运行中进程 / 无匹配 / proc 根不可读返回 False / 单进程 cmdline 读不出跳过不误判）。Firmware 侧同款审查补测：node 行为测试固化入库（`MUS4_FW/tests/zcode_remote_url.test.mjs` 23 例 + pytest 包装）。
+  - 刻意不改（审查记录）：① DC 双击重录后不打开 vs DD 双击后立即打开——不一致自 v1.8.68/(193) 起即存在，非本功能引入，保持现状待用户拍板；② `remoteControlToken` 链接不刷 t 为有意设计（token 链接形态未经真机凭证验证——若 z.ai 对其同样校验 t 新鲜度，会复发「手机连接已失效」，预演头号嫌疑，记录在案）；③ `_launcherIp` 硬编码默认值系 Donkey/DonkeyDrifter 入口链接同款既有模式，本功能未引入、未扩大。
+
+## 2026-09-06 (195)
+
+- fix(nav): ZCode 远控链接宽容归一化——兼容桌面端「Copy link」参数在 `#` fragment 后的链接、remoteControlToken 链接原样通过、无效存档不再预填诱导回车（修复 (194) 粘贴桌面端链接被误判"链接无效"）
+  - 背景：(194) 上线后用户反馈粘贴桌面端复制的链接被误判「链接无效」——根因一：桌面端链接的参数可能跟在 `#` fragment 后（形如 `https://zcode.z.ai/remote/v4#sid=…&hash=…`），而 (194) 的校验只认 query；根因二：prompt 会预填早期存的无效裸链接，诱导用户直接回车再次触发"无效"。本次把解析换成与固件侧同语义的宽容归一化函数。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`parseRemoteUrl()`/`buildFreshRemoteUrl()` 合并替换为 `normalizeRemoteUrl(raw)`——trim + 去首尾引号（含「」“”‘’）→ `new URL`，非 `https:` 返回 null → hash 长度 >1 时去掉 `#`（内部若还有 `?` 取其后半），含 `=` 则用 `URLSearchParams` 把参数归并进 query（query 已有同名参数不覆盖）并清空 hash → 含 `remoteControlToken` 参数原样返回 → 否则必须含 sid+hash 且把 `t` 刷成 `Date.now()`。单击逻辑：存档归一化有效就直接用、无效才 prompt；prompt 预填改为 `saved ? (normalizeRemoteUrl(saved) ?? '') : ''`（无效存档预填空串，不再诱导回车）；用户输入经归一化，null 则 alert 不保存，保存归一化后的值。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块 10 例 → 13 例——3 处「存入值 === 原 URL」断言改为解析存入 URL 断言 sid/hash 保留、`t` 为全新毫秒戳（归一化会刷新 t）；新增 3 例（fragment 形式链接被接受且参数归并进 query、remoteControlToken 链接原样通过不刷 t、无效存档时 prompt 预填为 ''）。实测：`vitest run` 全量 37 文件 212 例全绿、`tsc --noEmit` 通过、`npm run build` 通过。
+  - 注：与固件侧 DC 顶栏 ZCode 按钮的同款宽容归一化（`zcodeRemoteNormalize`）语义对齐；安全红线不变——真实远程链接是凭证，测试中仅出现占位示例。
+
+## 2026-09-06 (194)
+
+- feat(nav): 「ZCode」远控入口点击即新鲜、正常点击零弹框——单击用已存凭证现拼带全新时间戳的远控链接，复制到剪贴板后直接新标签打开，并后台唤醒 PC 上的 Z Code 桌面端
+  - 背景：(193) 的远控链接入口是原样打开 localStorage 里保存的链接，但链接里的 `t` 生成时间戳会过期（z.ai 远控页明示"不要复用旧复制的链接"），旧链接打开即显示「手机连接已失效」；无存档时还会 prompt 弹框。远控链接形如 `https://zcode.z.ai/remote/v4?sid=<设备 sid>&hash=<配对 hash>&t=<生成毫秒戳>&mid=…&name=…&app_version=…`，其中 sid/hash 为持久化设备凭证，`t` 需保持新鲜。本次让每次点击都现拼带全新 `t` 的链接，只有点击后才向 Z Code 发请求，复制到剪贴板再打开，并新增 launcher 唤醒端点确保桌面端在线。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`ZCodeEntryLink` 改造——新增 `parseRemoteUrl()`（校验 `https://` 且必须含 `sid`/`hash` 参数，裸 `/remote/v4` 一律视为无效）、`buildFreshRemoteUrl()`（用已存链接现拼 `t=Date.now()` 的新鲜 URL，无存档/参数不全返回 null）、`copyRemoteUrl()`（clipboard API + textarea/execCommand 降级，失败不阻塞）；单击去抖后走「buildFreshRemoteUrl → 无则 prompt（预填当前存档）→ 复制 + `window.open(fresh,'_blank','noopener')` + fire-and-forget `launchZcodeRemote()` 唤醒桌面端」，正常点击零弹框；双击重新录入不变。保存成功的当次也按 fresh-t 重建后打开。
+  - `web_ui/frontend/src/services/api.ts`：新增 `launchZcodeRemote()`（POST `/api/launch/zcode-remote`，validateStatus 全放行）。
+  - `web_ui/backend/routers/launch.py`：新增 `/zcode-remote` 转发路由；`_post_to_launcher`/`_forward_launch` 增加 `timeout_s` 参数（缺省仍为 `FORWARD_TIMEOUT_S` 125s，zcode-remote 用 10s 短超时——唤醒是即时动作）。
+  - `donkeycar/launcher/server.py`：新增 `_handle_launch_zcode_remote`（POST `/api/launch/zcode-remote`，带 CORS 头）——扫 `/proc` 判断 Z Code 桌面端进程（`.zcode-app/zcode`）在否；不在则 `subprocess.Popen(..., start_new_session=True)` detached 拉起 `Path.home()/".zcode-app/zcode"`（动态推导不硬编码，DISPLAY 环境兜底 `:0`），靠桌面端 App 启动自愈恢复上次开启的 Web 远控会话；二进制不存在 400、拉起 OSError 500；返回 `{"status":"ok","running":...,"started":...}`。
+  - i18n `web_ui/frontend/src/i18n/messages/common.ts`：`zcodeTitle`/`zcodePrompt`/`zcodeInvalid` 中英词条更新（引导粘贴桌面端「Copy link」完整链接；无效文案明确须含 sid/hash）。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块改写为 10 例（无存档 prompt+保存+打开 fresh-t 副本、有存档零弹框打开 fresh-t 重建链接、点击复制剪贴板、唤醒失败仍打开、双击重录且旧链接被去抖抑制、非 https 拒存、缺 sid/hash 裸链接拒存、存档缺参数回退 prompt、取消无动作、title 断言）；`web_ui/backend/tests/test_launch.py` 3 处 fake 签名同步 `timeout_s` + 新增 zcode-remote 短超时转发用例 + 路由注册断言；新增 `tests/test_launcher_zcode_remote.py` 5 例（已在运行不重复拉起/未运行 detached 拉起含 DISPLAY 兜底/二进制缺失 400/拉起 OSError 500/路径动态 home 栅栏）。实测：`pytest tests/ -k launcher` 184 passed、`pytest web_ui/backend/tests/` 258 passed、前端 `vitest run` 37 文件 209 例全绿、`tsc --noEmit` 通过、`npm run build` 通过。
+  - 注：安全红线——真实远程链接是凭证，只存浏览器 localStorage，代码与测试中仅出现占位示例；Firmware 侧同款改造为 v1.8.69（DC 顶栏 ZCode 按钮）。
+  - 已知限制：运行中的 8090 launcher 实例仍为他人 worktree 旧码，唤醒端点待合并 Tony 并重部署 launcher 后生效；前端对该端点失败静默，不影响跳转。
+
 ## 2026-09-06 (193)
 
 - feat(nav): 导航区「ZCode」入口行为替换为远程控制链接跳转——不再新增独立入口，复用旧 ZCode 按钮（标签/图标/样式不变），单击打开 localStorage 链接、双击重录

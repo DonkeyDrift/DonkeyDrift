@@ -27,7 +27,9 @@ LAUNCHER_BASE_URL = "http://localhost:8090"
 FORWARD_TIMEOUT_S = 125.0
 
 
-def _post_to_launcher(path: str, body: bytes) -> tuple[int, bytes]:
+def _post_to_launcher(
+    path: str, body: bytes, timeout_s: float = FORWARD_TIMEOUT_S
+) -> tuple[int, bytes]:
     """同步转发 POST 到 launcher，返回 (HTTP 状态码, 响应体)。"""
     req = urllib.request.Request(
         f"{LAUNCHER_BASE_URL}{path}",
@@ -36,7 +38,7 @@ def _post_to_launcher(path: str, body: bytes) -> tuple[int, bytes]:
         headers={"Content-Type": "application/json"} if body else {},
     )
     try:
-        with urllib.request.urlopen(req, timeout=FORWARD_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         # launcher 的业务错误（400/500）同样带 JSON 体，原样透传
@@ -61,12 +63,23 @@ async def launch_zcode(request: Request):
     return await _forward_launch(request, "/api/launch/zcode")
 
 
-async def _forward_launch(request: Request, launcher_path: str) -> JSONResponse:
+@router.post("/zcode-remote")
+async def launch_zcode_remote(request: Request):
+    """转发 POST /api/launch/zcode-remote（唤醒 Z Code 桌面端）到 launcher。
+
+    唤醒是即时动作（进程在跑直接 ok，不在则后台拉起），不走 launch 类
+    端点的 125s 长超时，前端 fire-and-forget 调用。"""
+    return await _forward_launch(request, "/api/launch/zcode-remote", timeout_s=10.0)
+
+
+async def _forward_launch(
+    request: Request, launcher_path: str, timeout_s: float = FORWARD_TIMEOUT_S
+) -> JSONResponse:
     """把 DD 前端的 launch 请求原样转发给 launcher 并回传其 JSON 响应。"""
     body = await request.body()
     try:
         status, payload = await asyncio.to_thread(
-            _post_to_launcher, launcher_path, body
+            _post_to_launcher, launcher_path, body, timeout_s
         )
     except Exception as e:
         logger.error("转发 launcher %s 失败: %s", launcher_path, e)

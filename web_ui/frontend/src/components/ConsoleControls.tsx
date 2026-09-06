@@ -23,7 +23,7 @@ export const MUTE_CHANGED_EVENT = 'dd-console-mute-changed';
 /** 静音按钮：位于 GitHub 图标右侧、主题切换左侧；每 5s 轮询以同步 DC 侧改动。 */
 export const ConsoleMuteButton: React.FC = () => {
   const { t } = useTranslation();
-  const { ip } = useConsoleDevice();
+  const { ip, refresh } = useConsoleDevice();
   const [muted, setMuted] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -34,8 +34,11 @@ export const ConsoleMuteButton: React.FC = () => {
       setMuted(data.muted === 1 || data.muted === true);
     } catch {
       setMuted(null);
+      // 缓存的车端 IP 可能已失效（切网 / DHCP 重租）：与 DEV 开关同款自愈——
+      // 重扫后 ip 更新，fetchMute 随 ip 依赖重建，上面的 useEffect 会自动用新 IP 重取。
+      refresh();
     }
-  }, [ip]);
+  }, [ip, refresh]);
 
   useEffect(() => {
     fetchMute();
@@ -69,15 +72,17 @@ export const ConsoleMuteButton: React.FC = () => {
   };
 
   const unreachable = !ip;
+  // muted === null：初次加载中或读取失败——显示为不可达，而不是伪装成「未静音」。
+  const unknown = !unreachable && muted === null;
   const label = muted ? t('console.unmuteAria') : t('console.muteAria');
   return (
     <button
       type="button"
       onClick={toggle}
-      disabled={unreachable || busy}
+      disabled={unreachable || unknown || busy}
       aria-label={label}
       aria-pressed={muted === true}
-      title={unreachable ? t('console.unreachable') : label}
+      title={unreachable || unknown ? t('console.unreachable') : label}
       className={`console-mute-btn flex items-center justify-center w-8 h-8 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
         muted
           ? 'bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]'
@@ -153,7 +158,9 @@ export const ConsoleOtaButton: React.FC = () => {
         OTA
       </button>
 
-      {open && ip && (
+      {/* 上传期间不依赖 ip：OTA 中车端 503，DD 重扫可能暂时把 ip 置 null，
+          弹窗须在整个上传期间稳定存在（上传本身基于已发出的请求，不受影响）。 */}
+      {open && (ip || uploading) && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">

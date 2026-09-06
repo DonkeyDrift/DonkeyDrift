@@ -890,6 +890,34 @@ def _start_hostip_reporter():
 # 响应，DC 按钮永远失败。仅 launch 类端点放行，不扩散到其它端点。
 _KIMI_WEB_CORS_HEADERS = (("Access-Control-Allow-Origin", "*"),)
 
+# Z Code 桌面端（Electron AppImage 解包目录）二进制路径：动态推导 home，
+# 避免硬编码本机路径入库
+_ZCODE_DESKTOP_BIN = Path.home() / ".zcode-app" / "zcode"
+
+
+def _zcode_desktop_running(proc_root: str = "/proc") -> bool:
+    """扫 /proc 判断 Z Code 桌面端进程是否在运行（不依赖 pgrep 路径）。
+
+    proc_root 可替换（测试用假 /proc 目录）；目录不可读（非 Linux）返回
+    False，单个进程 cmdline 读不出（竞争退出/权限）跳过不误判。
+    """
+    needle = ".zcode-app/zcode"
+    try:
+        pids = os.listdir(proc_root)
+    except OSError:
+        return False
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc_root, pid, "cmdline"), "rb") as f:
+                cmdline = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if needle in cmdline:
+            return True
+    return False
+
 
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
     """Launcher HTTP 请求处理器。"""
@@ -959,6 +987,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._handle_launch_dsh()
         elif path == "/api/launch/zcode":
             self._handle_launch_zcode()
+        elif path == "/api/launch/zcode-remote":
+            self._handle_launch_zcode_remote()
         elif path == "/api/createcar":
             body, err = self._read_json_body()
             if err is not None:
@@ -1187,6 +1217,52 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         url = f"http://{_entry_host()}:8090/terminal?cmd={quote(cmd, safe='')}&title=ZCode&icon=zcode.png"
         self._serve_json(
             {"status": "ok", "url": url},
+            extra_headers=_KIMI_WEB_CORS_HEADERS,
+        )
+
+    def _handle_launch_zcode_remote(self):
+        """POST /api/launch/zcode-remote：确保 Z Code 桌面端在线（不在则拉起）。
+
+        DC/DD 的「ZCode」按钮点击时调用（只有点击才发这个请求）：远控链接
+        只有在桌面端 Web 远控会话在线时才有效，否则 z.ai 页面显示
+        "手机连接已失效"；桌面端 App 启动时会恢复上次开启的远控会话，
+        所以这里只需保证桌面端进程在跑。响应带 CORS 头（供 DC 页面跨域调用）。
+        """
+        # 读取并丢弃请求体（如有）
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+        if _zcode_desktop_running():
+            self._serve_json(
+                {"status": "ok", "running": True, "started": False},
+                extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        if not _ZCODE_DESKTOP_BIN.is_file():
+            self._serve_json(
+                {"status": "error", "error": f"Z Code 桌面端不存在: {_ZCODE_DESKTOP_BIN}"},
+                code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        try:
+            env = dict(os.environ)
+            env.setdefault("DISPLAY", ":0")
+            subprocess.Popen(
+                [str(_ZCODE_DESKTOP_BIN)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=env,
+            )
+        except OSError as e:
+            self._serve_json(
+                {"status": "error", "error": f"拉起 Z Code 桌面端失败: {e}"},
+                code=500, extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        self._serve_json(
+            {"status": "ok", "running": False, "started": True},
             extra_headers=_KIMI_WEB_CORS_HEADERS,
         )
 

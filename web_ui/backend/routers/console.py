@@ -22,13 +22,20 @@ OTA_TIMEOUT = 300
 
 
 def _validate_ip(ip: str) -> str:
-    """仅允许 IPv4 局域网地址，避免代理被用于任意内网/外网 SSRF。"""
+    """仅允许 IPv4 私网地址（RFC1918、回环、链路本地），避免代理被用于外网 SSRF。
+
+    ipaddress 的 is_private 把回环（127.0.0.0/8）与链路本地（169.254.0.0/16）
+    也判为 private，本代理予以放行——回环便于本机调试，链路本地是车端 AP
+    之外的另一种直连场景；公网地址一律拒绝。
+    """
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="非法的车端 IP 地址") from exc
     if addr.version != 4:
         raise HTTPException(status_code=400, detail="仅支持 IPv4 车端地址")
+    if not addr.is_private:
+        raise HTTPException(status_code=400, detail="仅允许局域网私网车端地址")
     return ip
 
 

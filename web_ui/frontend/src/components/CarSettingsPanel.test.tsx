@@ -92,4 +92,56 @@ describe('CarSettingsPanel', () => {
       expect(calBtn).toBeDisabled();
     });
   });
+
+  it('重扫后旧 IP 不在列表时自动切换到新发现的第一台（车换 IP 自愈）', async () => {
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+    } as never);
+    const { container } = render(<CarSettingsPanel />);
+    await waitFor(() => {
+      expect(container.querySelector('iframe')?.getAttribute('src')).toContain(
+        'http://192.168.3.46/',
+      );
+    });
+
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.88', port: 80, reachable: true }],
+    } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'console.rescan' }));
+    await waitFor(() => {
+      expect(container.querySelector('iframe')?.getAttribute('src')).toContain(
+        'http://192.168.3.88/',
+      );
+    });
+  });
+
+  it('重扫未发现设备（车暂时离线）时保持当前选择不动', async () => {
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+    } as never);
+    const { container } = render(<CarSettingsPanel />);
+    await waitFor(() => {
+      expect(container.querySelector('iframe')?.getAttribute('src')).toContain(
+        'http://192.168.3.46/',
+      );
+    });
+
+    mockDiscover.mockResolvedValue({ found: [] } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'console.rescan' }));
+    await waitFor(() => expect(mockDiscover).toHaveBeenCalledTimes(2));
+    expect(container.querySelector('iframe')?.getAttribute('src')).toContain(
+      'http://192.168.3.46/',
+    );
+  });
+
+  it('内嵌车端设置 iframe 带 allowFullScreen，车端图表/终端全屏键可用', async () => {
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+    } as never);
+    const { container } = render(<CarSettingsPanel />);
+    await waitFor(() => {
+      expect(container.querySelector('iframe')).not.toBeNull();
+    });
+    expect(container.querySelector('iframe')).toHaveAttribute('allowfullscreen');
+  });
 });
