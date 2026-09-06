@@ -4,13 +4,13 @@
 // 命名约定（2026-09-04，以车上操作视角为准）：
 //   - myPc* key（tabMyPc / myPcTraining / myPcTrainingSubtitle / myPcProbeReady
 //     等）= 局域网主机（Lan Host）：通过 SSH 连接的远程开发电脑（内部枚举 mypc）。
-//   - tabLocal = 本机（Local Host）：运行 Web UI 的车端电脑（内部枚举 local）。
+//   - tabLocal = 车载电脑（Car Computer）：运行 Web UI 的车端电脑（内部枚举 local）。
 // key 名沿用历史 mypc/local 约定，不与显示语同步更名。
 export const trainer: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'trainer.title': '训练器',
     'trainer.tabMyPc': '局域网主机',
-    'trainer.tabLocal': '本机',
+    'trainer.tabLocal': '车载电脑',
     'trainer.tabCloud': '云端',
     'trainer.stopTraining': '停止训练',
     'trainer.startTraining': '开始训练',
@@ -137,7 +137,7 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
   en: {
     'trainer.title': 'Trainer',
     'trainer.tabMyPc': 'Lan Host',
-    'trainer.tabLocal': 'Local Host',
+    'trainer.tabLocal': 'Car Computer',
     'trainer.tabCloud': 'Cloud',
     'trainer.stopTraining': 'Stop Training',
     'trainer.startTraining': 'Start Training',
