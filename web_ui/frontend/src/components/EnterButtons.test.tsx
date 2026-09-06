@@ -13,11 +13,13 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/services/api', () => ({
   launchKimiCodeWeb: vi.fn(),
   launchDsh: vi.fn(),
+  launchZcodeRemote: vi.fn(() => Promise.resolve({ status: 'ok' })),
   getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb, launchZcodeRemote } from '@/services/api';
 const mockLaunchKimi = vi.mocked(launchKimiCodeWeb);
 const mockLaunchDsh = vi.mocked(launchDsh);
+const mockLaunchZcodeRemote = vi.mocked(launchZcodeRemote);
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('entry link components (Issue #175 nav-link style)', () => {
@@ -134,9 +136,11 @@ describe('DshEntryLink', () => {
 });
 
 describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher 网页终端）', () => {
-  // 占位链接（安全红线：测试里只允许占位示例，绝不出现真实远程链接凭证）
-  const STORED_URL = 'https://zcode.z.ai/remote/v4';
-  const UPDATED_URL = 'https://zcode.z.ai/remote/v4#updated-placeholder';
+  // 占位链接（安全红线：测试里只允许占位示例，绝不出现真实远程链接凭证）；
+  // 有效链接必须带 sid/hash 持久化凭证参数，t 为生成时间戳（点击时现拼刷新）
+  const STORED_URL = 'https://zcode.z.ai/remote/v4?sid=placeholder-sid&hash=placeholder-hash&t=1';
+  const UPDATED_URL = 'https://zcode.z.ai/remote/v4?sid=placeholder-sid2&hash=placeholder-hash2&t=2';
+  const BARE_URL = 'https://zcode.z.ai/remote/v4';
 
   const renderButton = () => {
     render(<ZCodeEntryLink />);
@@ -151,9 +155,14 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
     });
   };
 
+  // 从 window.open 实参里取出打开 URL 的查询参数
+  const openedParams = (openSpy: ReturnType<typeof vi.spyOn>) =>
+    new URL(vi.mocked(openSpy).mock.calls[0][0] as string).searchParams;
+
   beforeEach(() => {
     vi.useFakeTimers();
     localStorage.clear();
+    mockLaunchZcodeRemote.mockResolvedValue({ status: 'ok' });
   });
 
   afterEach(() => {
@@ -165,23 +174,52 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
     expect(renderButton()).toHaveAttribute('title', 'common.enterButtons.zcodeTitle');
   });
 
-  it('prompts, saves and opens the link when none is stored', () => {
+  it('prompts, saves, then opens a fresh-t copy of the link when none is stored', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     clickAndFlush(renderButton());
-    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt');
+    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBe(STORED_URL);
-    expect(openSpy).toHaveBeenCalledWith(STORED_URL, '_blank', 'noopener');
+    // 打开的是现拼的新鲜链接：sid/hash 保留、t 已刷新（不再是存入时的 t=1）
+    const params = openedParams(openSpy);
+    expect(params.get('sid')).toBe('placeholder-sid');
+    expect(params.get('hash')).toBe('placeholder-hash');
+    expect(params.get('t')).not.toBe('1');
+    // 点击时后台唤醒桌面端
+    expect(mockLaunchZcodeRemote).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the stored link directly without prompting', () => {
+  it('opens a fresh-t rebuild of the stored link without prompting', () => {
     localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, STORED_URL);
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => null);
     clickAndFlush(renderButton());
     expect(promptSpy).not.toHaveBeenCalled();
     expect(openSpy).toHaveBeenCalledTimes(1);
-    expect(openSpy).toHaveBeenCalledWith(STORED_URL, '_blank', 'noopener');
+    const params = openedParams(openSpy);
+    expect(params.get('sid')).toBe('placeholder-sid');
+    expect(params.get('t')).not.toBe('1');
+    expect(mockLaunchZcodeRemote).toHaveBeenCalledTimes(1);
+  });
+
+  it('copies the fresh link to the clipboard on click', () => {
+    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, STORED_URL);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    vi.spyOn(window, 'open').mockImplementation(() => null);
+    clickAndFlush(renderButton());
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = new URL(writeText.mock.calls[0][0]).searchParams;
+    expect(copied.get('sid')).toBe('placeholder-sid');
+    expect(copied.get('t')).not.toBe('1');
+  });
+
+  it('still opens the link when the desktop wake request fails', () => {
+    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, STORED_URL);
+    mockLaunchZcodeRemote.mockRejectedValue(new Error('launcher down'));
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    clickAndFlush(renderButton());
+    expect(openSpy).toHaveBeenCalledTimes(1);
   });
 
   it('re-prompts and updates the stored link on double click (single click suppressed)', () => {
@@ -200,17 +238,37 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBe(UPDATED_URL);
     // 只打开新链接一次，单击的旧链接被去抖抑制
     expect(openSpy).toHaveBeenCalledTimes(1);
-    expect(openSpy).toHaveBeenCalledWith(UPDATED_URL, '_blank', 'noopener');
+    expect(openedParams(openSpy).get('sid')).toBe('placeholder-sid2');
   });
 
   it('alerts and neither saves nor opens a non-https link', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    vi.spyOn(window, 'prompt').mockReturnValue('http://zcode.z.ai/remote/v4');
+    vi.spyOn(window, 'prompt').mockReturnValue('http://zcode.z.ai/remote/v4?sid=placeholder-sid&hash=placeholder-hash');
     clickAndFlush(renderButton());
     expect(alertSpy).toHaveBeenCalledWith('common.enterButtons.zcodeInvalid');
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('alerts and rejects a bare link without sid/hash params', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    vi.spyOn(window, 'prompt').mockReturnValue(BARE_URL);
+    clickAndFlush(renderButton());
+    expect(alertSpy).toHaveBeenCalledWith('common.enterButtons.zcodeInvalid');
+    expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the prompt when the stored link lacks sid/hash', () => {
+    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, BARE_URL);
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
+    clickAndFlush(renderButton());
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBe(STORED_URL);
+    expect(openSpy).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing when the prompt is cancelled', () => {

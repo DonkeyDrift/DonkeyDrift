@@ -29,6 +29,7 @@ def test_main_registers_launch_router():
     assert "/api/launch/kimi-code-web" in routes
     assert "/api/launch/dsh" in routes
     assert "/api/launch/zcode" in routes
+    assert "/api/launch/zcode-remote" in routes
 
 
 def test_post_to_launcher_posts_body_and_preserves_timeout(monkeypatch):
@@ -86,7 +87,7 @@ def test_forward_launch_kimi_code_web_returns_launcher_json(monkeypatch):
     launch = importlib.import_module("routers.launch")
     captured = {}
 
-    def fake_post(path, body):
+    def fake_post(path, body, timeout_s):
         captured["path"] = path
         captured["body"] = body
         return 200, json.dumps(
@@ -107,7 +108,7 @@ def test_forward_launch_zcode_returns_launcher_json(monkeypatch):
     launch = importlib.import_module("routers.launch")
     captured = {}
 
-    def fake_post(path, body):
+    def fake_post(path, body, timeout_s):
         captured["path"] = path
         captured["body"] = body
         return 200, json.dumps(
@@ -125,10 +126,33 @@ def test_forward_launch_zcode_returns_launcher_json(monkeypatch):
         "status": "ok", "url": "http://192.0.2.10:8090/terminal?cmd=zcode"}
 
 
+def test_forward_launch_zcode_remote_uses_short_timeout(monkeypatch):
+    # zcode-remote 是即时唤醒动作：转发走独立的短超时，不用 125s 长超时
+    launch = importlib.import_module("routers.launch")
+    captured = {}
+
+    def fake_post(path, body, timeout_s):
+        captured["path"] = path
+        captured["body"] = body
+        captured["timeout_s"] = timeout_s
+        return 200, json.dumps(
+            {"status": "ok", "running": True, "started": False}).encode()
+
+    monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
+
+    resp = asyncio.run(launch.launch_zcode_remote(_FakeRequest()))
+
+    assert captured["path"] == "/api/launch/zcode-remote"
+    assert captured["timeout_s"] < launch.FORWARD_TIMEOUT_S
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {
+        "status": "ok", "running": True, "started": False}
+
+
 def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
     launch = importlib.import_module("routers.launch")
 
-    def fake_post(path, body):
+    def fake_post(path, body, timeout_s):
         raise ConnectionRefusedError("connection refused")
 
     monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
@@ -143,7 +167,7 @@ def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
 def test_forward_launch_non_json_response_returns_502(monkeypatch):
     launch = importlib.import_module("routers.launch")
     monkeypatch.setattr(
-        launch, "_post_to_launcher", lambda path, body: (200, b"not-json"))
+        launch, "_post_to_launcher", lambda path, body, timeout_s: (200, b"not-json"))
 
     resp = asyncio.run(launch.launch_kimi_code_web(_FakeRequest()))
 

@@ -723,6 +723,16 @@ export const launchZcode = async (signal?: AbortSignal): Promise<LaunchKimiCodeW
   return response.data as LaunchKimiCodeWebResult;
 };
 
+export const launchZcodeRemote = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // zcode-remote 唤醒端点：确保 Z Code 桌面端进程在线（不在则拉起），
+  // 毫秒级响应；点击「ZCode」远控入口时 fire-and-forget 调用，失败静默。
+  const response = await api.post('/launch/zcode-remote', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
 // Donkey 菜单/启动页由 launcher（:8090）服务，与后端 launch.py 的
 // LAUNCHER_BASE_URL 约定一致；从浏览器侧按当前访问主机推导。
 export const getDonkeyUrl = (): string =>

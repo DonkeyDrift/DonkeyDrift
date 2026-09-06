@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Code2, FlaskConical, Menu, Sparkles, SquareTerminal } from 'lucide-react';
 import { useTranslation } from '@/i18n';
-import { launchDsh, launchKimiCodeWeb } from '@/services/api';
+import { launchDsh, launchKimiCodeWeb, launchZcodeRemote } from '@/services/api';
 
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
 // 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
@@ -114,14 +114,61 @@ export const KimiCodeWebEntryLink: React.FC = () => {
   );
 };
 
-// ZCode 入口（行为变更）：原为 launcher 网页终端，现改为打开 ZCode 远程控制链接。
+// ZCode 入口（远程控制链接，行为再变更）：单击用已存链接里的持久化 sid/hash
+// 现拼一条带全新 t 时间戳的 URL（z.ai 远控页会拒绝 t 过旧的旧链接——
+// "手机连接已失效"），复制到剪贴板后新标签直接打开、正常点击零弹框，
+// 并后台唤醒 PC 上的 Z Code 桌面端（不在线则拉起，失败静默）。
+// 无存档或存档缺 sid/hash（早期存的裸链接）时才 prompt 录入，双击重新录入。
 // 远程链接由 ZCode 桌面端生成、本身是凭证，只存浏览器 localStorage，绝不入库；
-// 单击打开（无存档则先 prompt 录入），双击重新录入更新链接。
 export const ZCODE_REMOTE_STORAGE_KEY = 'zcodeRemoteUrl';
 
 // 单击动作稍作延迟，等待可能到来的双击（系统双击间隔通常 ≤500ms），
 // 避免双击更新时先触发一次"打开旧链接"
 const ZCODE_CLICK_DELAY_MS = 300;
+
+// 链接必须带 sid/hash（持久化设备凭证）才有效——裸 /remote/v4 必然"手机连接已失效"
+const parseRemoteUrl = (raw: string): URL | null => {
+  if (!raw.startsWith('https://')) return null;
+  try {
+    const u = new URL(raw);
+    return u.searchParams.get('sid') && u.searchParams.get('hash') ? u : null;
+  } catch {
+    return null;
+  }
+};
+
+// 用已存链接现拼带全新 t 的 URL；无存档或参数不全返回 null（走录入）
+const buildFreshRemoteUrl = (): string | null => {
+  const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
+  if (!saved) return null;
+  const u = parseRemoteUrl(saved);
+  if (!u) return null;
+  u.searchParams.set('t', String(Date.now()));
+  return u.toString();
+};
+
+// 复制到剪贴板（clipboard API + execCommand 降级），失败不阻塞跳转
+const copyRemoteUrl = (url: string) => {
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    } catch {
+      /* 复制失败不影响跳转 */
+    }
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url).catch(fallback);
+  } else {
+    fallback();
+  }
+};
 
 export const ZCodeEntryLink: React.FC = () => {
   const { t } = useTranslation();
@@ -135,26 +182,33 @@ export const ZCodeEntryLink: React.FC = () => {
     [],
   );
 
-  // prompt 录入/更新链接：仅接受 https:// 开头，校验失败 alert 且不保存
+  // 复制 + 新标签打开 + 后台唤醒桌面端（只有点击才向 Z Code 发请求）
+  const openRemote = () => {
+    const fresh = buildFreshRemoteUrl();
+    if (!fresh) {
+      promptForUrl();
+      return;
+    }
+    copyRemoteUrl(fresh);
+    window.open(fresh, '_blank', 'noopener');
+    launchZcodeRemote().catch(() => {});
+  };
+
+  // prompt 录入/更新链接：必须是桌面端"Copy link"的完整链接（含 sid/hash），
+  // 校验失败 alert 且不保存；保存成功立即按新链接打开一次
   const promptForUrl = () => {
-    const input = window.prompt(t('common.enterButtons.zcodePrompt'));
+    const input = window.prompt(
+      t('common.enterButtons.zcodePrompt'),
+      localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY) ?? '',
+    );
     if (input === null) return; // 用户取消
     const url = input.trim();
-    if (!url.startsWith('https://')) {
+    if (!parseRemoteUrl(url)) {
       window.alert(t('common.enterButtons.zcodeInvalid'));
       return;
     }
     localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, url);
-    window.open(url, '_blank', 'noopener');
-  };
-
-  const openRemote = () => {
-    const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
-    if (saved) {
-      window.open(saved, '_blank', 'noopener');
-    } else {
-      promptForUrl();
-    }
+    openRemote();
   };
 
   const handleClick = () => {
