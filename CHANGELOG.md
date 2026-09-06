@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-06 (193)
+
+- feat(nav): 导航区「ZCode」入口行为替换为远程控制链接跳转——不再新增独立入口，复用旧 ZCode 按钮（标签/图标/样式不变），单击打开 localStorage 链接、双击重录
+  - 背景：(192) 以独立「ZCode 远程」按钮上线后，用户明确不要新增按钮，要求把旧「ZCode」入口（原 launcher 网页终端 `/terminal?cmd=zcode`）的行为直接替换为远程链接跳转。交互规格不变：单击读 localStorage `zcodeRemoteUrl`——有值 `window.open(url, '_blank', 'noopener')`，无值 `window.prompt` 录入（校验 `https://` 开头，非法输入 alert 且不保存）后打开；双击重新 prompt 更新；单击 300ms 去抖避免双击误开旧链接。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`ZCodeEntryLink` 由 `useLauncherEntry(launchZcode)` 改为本地 localStorage/prompt 逻辑（导出 `ZCODE_REMOTE_STORAGE_KEY`，Code2 图标与 `entryLinkCls` 不变）；删除 `launchZcode` 引用（`services/api.ts` 的封装保留未动，launcher 端点仍在）。
+  - 删除 (192) 引入的独立组件：`ZcodeRemoteLink.tsx` / `ZcodeRemoteLink.test.tsx` 删除，`Layout.tsx` 两处引用与 import 撤除（Layout 恢复原状），i18n `common.zcodeRemote.*` 词条撤除。
+  - i18n `web_ui/frontend/src/i18n/messages/common.ts`：`common.enterButtons.zcodeTitle` 改为「单击打开 ZCode 远程控制，双击更新链接」/英文对应文案；新增 `zcodePrompt`/`zcodeInvalid` 中英文案；移除不再使用的 `zcodeStarting`/`zcodeFailed`/`zcodeNetworkError`。
+  - 测试同步：`EnterButtons.test.tsx` 的 `ZCodeEntryLink` 旧 launcher 行为 2 例替换为新行为 6 例（title 提示、无链接 prompt+保存+打开、有链接直接打开不 prompt、双击重录且旧链接被去抖抑制、非 https alert 不保存不打开、取消 prompt 无动作），并清理 mock 中的 `launchZcode`。实测：`npm run check`（tsc）通过、`vitest run` 全量 37 文件 205 例全绿、`npm run build` 通过。
+  - 注：仅 DD 前端改动，无需 OTA；安全红线——真实远程链接是凭证，代码与测试中仅出现占位示例 `https://zcode.z.ai/remote/v4`。
+
 ## 2026-09-06 (192)
 
 - feat(nav): 导航区新增「ZCode 远程」入口——单击新标签页打开 localStorage 中的 ZCode 远程控制链接，双击重新录入；与 Firmware Web Console 侧统一交互规格

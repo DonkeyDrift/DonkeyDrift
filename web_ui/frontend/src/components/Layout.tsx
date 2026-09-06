@@ -4,7 +4,6 @@ import { Menu, Settings, X } from 'lucide-react';
 import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
-import { ZcodeRemoteLink } from './ZcodeRemoteLink';
 import { VersionBadge } from './VersionBadge';
 import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, KimiCodeWebEntryLink, ZCodeEntryLink } from './EnterButtons';
 import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './ConsoleControls';
@@ -80,7 +79,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </Link>
               <KimiCodeWebEntryLink />
               <ZCodeEntryLink />
-              <ZcodeRemoteLink />
               <DshEntryLink />
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
@@ -142,7 +140,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <DrifterConsoleEntryLink />
                 <KimiCodeWebEntryLink />
                 <ZCodeEntryLink />
-                <ZcodeRemoteLink />
                 <DshEntryLink />
               </div>
             </nav>
