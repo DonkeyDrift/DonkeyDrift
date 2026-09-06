@@ -649,6 +649,95 @@ class TestPatchClientUuidPolyfill:
 
 
 # ===========================================================================
+# _patch_settings_mirror_gate（设置镜像回环门自愈补丁）
+# ===========================================================================
+# rc.2 实测的 dsh-client-ui-settings/lib/client.js 片段：共享设置镜像与
+# 命名空间作用域各一处 isLoopback 三目门（局域网浏览器落 "memory" 后镜像
+# 恒 unavailable，设置页报 "settings are unavailable in this browser"）：
+_GATE_SNIPPET = (
+    "\t\t\tconst mirror = new SettingsDescribeMirror(connection.api, "
+    "connection.isLoopback ? \"host\" : \"memory\");\n"
+    "\t\t\tconst controller = new SettingsScopeController(connection.api, "
+    "spec, this.mirror, connection.isLoopback ? \"host\" : \"memory\", "
+    "this.schema);\n"
+)
+
+
+def _make_dsh_ui_settings_tree(tmp_path, client_text):
+    """搭假 dsh 安装树：<pkg>/lib/bin.js + dsh-client-ui-settings/client.js。"""
+    pkg = tmp_path / "dsh"
+    (pkg / "lib").mkdir(parents=True)
+    (pkg / "lib" / "bin.js").write_text("#!/usr/bin/env node\n",
+                                        encoding="utf-8")
+    us = (pkg / "node_modules" / "@deepseek-ai"
+          / "dsh-client-ui-settings" / "lib")
+    us.mkdir(parents=True)
+    (us / "client.js").write_text(client_text, encoding="utf-8")
+    return pkg / "lib" / "bin.js"
+
+
+class TestPatchSettingsMirrorGate:
+    def test_patches_both_loopback_gates_to_host(self, tmp_path):
+        binary = _make_dsh_ui_settings_tree(tmp_path, _GATE_SNIPPET)
+        dsh_web._patch_settings_mirror_gate(str(binary))
+        text = ((tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                 / "dsh-client-ui-settings" / "lib" / "client.js")
+                .read_text(encoding="utf-8"))
+        assert dsh_web._PATCH_GATE_OLD not in text
+        # 共享镜像与命名空间作用域两处一并替换
+        assert text.count(dsh_web._PATCH_GATE_NEW) == 2
+
+    def test_idempotent_second_call_is_noop(self, tmp_path):
+        binary = _make_dsh_ui_settings_tree(tmp_path, _GATE_SNIPPET)
+        dsh_web._patch_settings_mirror_gate(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-ui-settings" / "lib" / "client.js")
+        patched = target.read_text(encoding="utf-8")
+        dsh_web._patch_settings_mirror_gate(str(binary))
+        assert target.read_text(encoding="utf-8") == patched
+
+    def test_unexpected_source_skips_silently(self, tmp_path):
+        # dsh 升级后代码段变了：不命中就不动文件
+        binary = _make_dsh_ui_settings_tree(tmp_path, "const x = 1;\n")
+        dsh_web._patch_settings_mirror_gate(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-ui-settings" / "lib" / "client.js")
+        assert target.read_text(encoding="utf-8") == "const x = 1;\n"
+
+    def test_missing_ui_settings_package_skips_silently(self, tmp_path):
+        # pnpm 布局：dsh 包下没有 node_modules/dsh-client-ui-settings
+        pkg = tmp_path / "dsh"
+        (pkg / "lib").mkdir(parents=True)
+        (pkg / "lib" / "bin.js").write_text("", encoding="utf-8")
+        # 不抛异常即通过
+        dsh_web._patch_settings_mirror_gate(str(pkg / "lib" / "bin.js"))
+
+    def test_launch_patches_gate_before_spawn(self, tmp_path, monkeypatch):
+        # launch_dsh_web 冷启动路径会先打镜像门补丁再拉子进程
+        binary = _make_dsh_ui_settings_tree(tmp_path, _GATE_SNIPPET)
+        calls = []
+
+        def fake_patch(b):
+            calls.append(b)
+
+        monkeypatch.setattr(dsh_web, "_patch_settings_mirror_gate", fake_patch)
+        # 该树没有 dsh-client-connection，真实栅栏/UUID 补丁会跳过；这里
+        # 置空只聚焦验证镜像门补丁的调用时机
+        monkeypatch.setattr(dsh_web, "_patch_privileged_methods",
+                            lambda b: None)
+        monkeypatch.setattr(dsh_web, "_patch_client_uuid_polyfill",
+                            lambda b: None)
+        proc = _FakeProc(payload=_DSH_BANNER, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: str(binary),
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert calls == [str(binary)]
+
+
+# ===========================================================================
 # POST /api/launch/dsh 端点（内存 HTTP 服务器）
 # ===========================================================================
 @pytest.fixture()
