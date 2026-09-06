@@ -324,5 +324,36 @@ describe('ZCodeEntryLink（远程控制链接行为，有意替代原 launcher �
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(openSpy).not.toHaveBeenCalled();
     expect(alertSpy).not.toHaveBeenCalled();
+    // 取消 = 没有真正打开，不唤醒桌面端
+    expect(mockLaunchZcodeRemote).not.toHaveBeenCalled();
+  });
+
+  it('still opens the entered link when the storage write fails (private mode)', () => {
+    // 隐私模式/存储禁用时 setItem 抛错——本次仍按手中链接打开并唤醒，
+    // 只是不落盘（下次点击会再 prompt）
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('QuotaExceededError');
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
+    clickAndFlush(renderButton());
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openedParams(openSpy).get('sid')).toBe('placeholder-sid');
+    expect(mockLaunchZcodeRemote).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a throwing storage read as no saved link and falls back to the prompt', () => {
+    // getItem 抛 SecurityError（存储禁用）时按无存档处理：prompt 预填空串、
+    // 录入后正常打开，点击不失效
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('SecurityError');
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
+    clickAndFlush(renderButton());
+    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openedParams(openSpy).get('sid')).toBe('placeholder-sid');
+    expect(mockLaunchZcodeRemote).toHaveBeenCalledTimes(1);
   });
 });

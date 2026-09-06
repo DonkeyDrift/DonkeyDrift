@@ -156,6 +156,17 @@ const normalizeRemoteUrl = (raw: string): string | null => {
   return u.toString();
 };
 
+// 读取存档链接：浏览器存储不可用（隐私模式/用户禁用）时 getItem 可能直接
+// 抛 SecurityError——按无存档处理走 prompt，不让点击整个失效（固件侧
+// zcodeRemoteGet 同款容错）
+const readStoredRemoteUrl = (): string => {
+  try {
+    return localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+};
+
 // 复制到剪贴板（clipboard API + execCommand 降级），失败不阻塞跳转
 const copyRemoteUrl = (url: string) => {
   const fallback = () => {
@@ -191,25 +202,30 @@ export const ZCodeEntryLink: React.FC = () => {
     [],
   );
 
-  // 复制 + 新标签打开 + 后台唤醒桌面端（只有点击才向 Z Code 发请求）；
-  // 存档归一化有效就直接用，无效（无存档/早期存的裸链接）才 prompt 录入
+  // 复制 + 新标签打开 + 后台唤醒桌面端（只有真正打开才向 Z Code 发请求）
+  const openFresh = (url: string) => {
+    copyRemoteUrl(url);
+    window.open(url, '_blank', 'noopener');
+    launchZcodeRemote().catch(() => {});
+  };
+
+  // 存档归一化有效就直接打开，无效（无存档/早期存的裸链接）才 prompt 录入
   const openRemote = () => {
-    const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
+    const saved = readStoredRemoteUrl();
     const fresh = saved ? normalizeRemoteUrl(saved) : null;
     if (!fresh) {
       promptForUrl();
       return;
     }
-    copyRemoteUrl(fresh);
-    window.open(fresh, '_blank', 'noopener');
-    launchZcodeRemote().catch(() => {});
+    openFresh(fresh);
   };
 
   // prompt 录入/更新链接：预填归一化后的存档（存档无效时预填空串，
   // 避免早期存的无效裸链接诱导直接回车）；输入经归一化，失败 alert
-  // 且不保存；保存归一化后的值并立即按新链接打开一次
+  // 且不保存；保存归一化后的值并立即按新链接打开一次。存储写入失败
+  // （隐私模式/禁用）不阻塞本次打开——下次点击会再 prompt。
   const promptForUrl = () => {
-    const saved = localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY);
+    const saved = readStoredRemoteUrl();
     const input = window.prompt(
       t('common.enterButtons.zcodePrompt'),
       saved ? (normalizeRemoteUrl(saved) ?? '') : '',
@@ -220,8 +236,12 @@ export const ZCodeEntryLink: React.FC = () => {
       window.alert(t('common.enterButtons.zcodeInvalid'));
       return;
     }
-    localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, url);
-    openRemote();
+    try {
+      localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, url);
+    } catch {
+      /* 存储不可用：本次仍按手中链接打开 */
+    }
+    openFresh(url);
   };
 
   const handleClick = () => {

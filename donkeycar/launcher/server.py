@@ -895,18 +895,22 @@ _KIMI_WEB_CORS_HEADERS = (("Access-Control-Allow-Origin", "*"),)
 _ZCODE_DESKTOP_BIN = Path.home() / ".zcode-app" / "zcode"
 
 
-def _zcode_desktop_running() -> bool:
-    """扫 /proc 判断 Z Code 桌面端进程是否在运行（不依赖 pgrep 路径）。"""
+def _zcode_desktop_running(proc_root: str = "/proc") -> bool:
+    """扫 /proc 判断 Z Code 桌面端进程是否在运行（不依赖 pgrep 路径）。
+
+    proc_root 可替换（测试用假 /proc 目录）；目录不可读（非 Linux）返回
+    False，单个进程 cmdline 读不出（竞争退出/权限）跳过不误判。
+    """
     needle = ".zcode-app/zcode"
     try:
-        pids = os.listdir("/proc")
+        pids = os.listdir(proc_root)
     except OSError:
         return False
     for pid in pids:
         if not pid.isdigit():
             continue
         try:
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
+            with open(os.path.join(proc_root, pid, "cmdline"), "rb") as f:
                 cmdline = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
         except OSError:
             continue

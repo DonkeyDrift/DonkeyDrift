@@ -106,3 +106,42 @@ def test_desktop_bin_path_is_dynamic_home():
     # 缺省路径动态取 Path.home()（防硬编码本机路径入库泄露的回归栅栏）
     assert launcher_server._ZCODE_DESKTOP_BIN == (
         Path.home() / ".zcode-app" / "zcode")
+
+
+# --- _zcode_desktop_running 直接测试（假 /proc 目录，经 proc_root 参数注入）---
+
+
+def _make_fake_proc(root: Path, entries: dict) -> None:
+    for pid, cmdline in entries.items():
+        d = root / pid
+        d.mkdir()
+        if cmdline is not None:
+            (d / "cmdline").write_bytes(cmdline)
+
+
+def test_proc_scan_detects_running_desktop(tmp_path):
+    _make_fake_proc(tmp_path, {
+        "1234": b"/home/user/.zcode-app/zcode\0--some-flag\0",
+        "not-a-pid": b"ignored",  # 非数字目录名跳过
+    })
+    assert launcher_server._zcode_desktop_running(str(tmp_path)) is True
+
+
+def test_proc_scan_no_match_returns_false(tmp_path):
+    _make_fake_proc(tmp_path, {"1234": b"/usr/bin/other-app\0"})
+    assert launcher_server._zcode_desktop_running(str(tmp_path)) is False
+
+
+def test_proc_scan_unreadable_root_returns_false(tmp_path):
+    # /proc 整个不可读（非 Linux 等）→ False，走"拉起桌面端"分支
+    assert launcher_server._zcode_desktop_running(
+        str(tmp_path / "nonexistent")) is False
+
+
+def test_proc_scan_skips_processes_whose_cmdline_is_unreadable(tmp_path):
+    # 进程竞争退出/权限导致 cmdline 读不出 → 跳过该 pid 继续扫，不误判不崩溃
+    _make_fake_proc(tmp_path, {
+        "1": None,  # 无 cmdline 文件
+        "2": b"/x/.zcode-app/zcode\0",
+    })
+    assert launcher_server._zcode_desktop_running(str(tmp_path)) is True

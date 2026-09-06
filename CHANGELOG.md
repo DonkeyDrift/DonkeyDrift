@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-06 (196)
+
+- fix(nav): ZCode 远控入口审查补强——DD 侧 localStorage 读写容错（存储禁用/隐私模式下点击不再整个失效）、消除 prompt→open 递归；launcher /proc 扫描参数化可直测
+  - 背景：(194)(195) 合并前对两仓库该功能做三步审查（边界情况+测试补充、陌生 CodeReviewer 复审、上线严重 Bug 预演）发现：DD 侧 `localStorage.getItem/setItem` 未 try/catch（固件侧 `zcodeRemoteGet`/`zcodeRemotePrompt` 已包）——浏览器存储被禁用/隐私模式时 `setItem` 抛 QuotaExceededError、`getItem` 抛 SecurityError，点击「ZCode」会以未捕获异常整个失效。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `readStoredRemoteUrl()`（getItem 抛错按无存档处理走 prompt）；`promptForUrl` 的 setItem 包 try/catch（写入失败本次仍按手中链接打开，下次点击再 prompt）；抽出 `openFresh(url)`（复制+打开+唤醒三合一），`promptForUrl` 末尾由递归调 `openRemote()` 改为直接 `openFresh(url)`——消除递归路径，打开的链接与刚存入的值一致。
+  - `donkeycar/launcher/server.py`：`_zcode_desktop_running(proc_root="/proc")` 参数化 proc 根目录（行为不变），/proc 扫描逻辑可直接单测。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块 13 → 15 例（setItem 抛错仍打开+唤醒 / getItem 抛错按无存档走 prompt 且预填空串；prompt 取消用例补「不唤醒桌面端」断言）；`tests/test_launcher_zcode_remote.py` 5 → 9 例（假 /proc 检出运行中进程 / 无匹配 / proc 根不可读返回 False / 单进程 cmdline 读不出跳过不误判）。Firmware 侧同款审查补测：node 行为测试固化入库（`MUS4_FW/tests/zcode_remote_url.test.mjs` 23 例 + pytest 包装）。
+  - 刻意不改（审查记录）：① DC 双击重录后不打开 vs DD 双击后立即打开——不一致自 v1.8.68/(193) 起即存在，非本功能引入，保持现状待用户拍板；② `remoteControlToken` 链接不刷 t 为有意设计（token 链接形态未经真机凭证验证——若 z.ai 对其同样校验 t 新鲜度，会复发「手机连接已失效」，预演头号嫌疑，记录在案）；③ `_launcherIp` 硬编码默认值系 Donkey/DonkeyDrifter 入口链接同款既有模式，本功能未引入、未扩大。
+
 ## 2026-09-06 (195)
 
 - fix(nav): ZCode 远控链接宽容归一化——兼容桌面端「Copy link」参数在 `#` fragment 后的链接、remoteControlToken 链接原样通过、无效存档不再预填诱导回车（修复 (194) 粘贴桌面端链接被误判"链接无效"）
