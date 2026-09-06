@@ -11,6 +11,8 @@ import logging
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote
+from routers import findcar as findcar_router
+import findcar
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -68,6 +70,16 @@ app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
 app.include_router(zcode_remote.router, prefix="/api/zcode-remote", tags=["zcode-remote"])
 app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
+app.include_router(findcar_router.router, prefix="/api/findcar", tags=["findcar"])
+
+
+@app.on_event("startup")
+async def _start_findcar_heartbeat():
+    """启动一键找车心跳上报；失败只记日志，绝不影响 app 启动。"""
+    try:
+        findcar.start_heartbeat()
+    except Exception:
+        logging.getLogger(__name__).warning("findcar 心跳启动失败", exc_info=True)
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(
