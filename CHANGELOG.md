@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-06 (191)
+
+- fix(launcher): DSH 局域网设置页/模型选择修复——新增设置镜像回环门自愈补丁，根治「加载提供方目录失败： settings are unavailable in this browser」（issue #164 后续）
+  - 根因：8.18 的栅栏补丁只放宽了服务端（`dsh-client-connection/lib/index.js` 的 `PRIVILEGED_METHODS` 空信任表→trustedHosts），但 `dsh-client-ui-settings/lib/client.js` 前端还有一道门——共享设置镜像 `SettingsDescribeMirror` 与命名空间作用域 `SettingsScopeController` 按 `connection.isLoopback ? "host" : "memory"` 选持久化模式（上游假定 settings RPC 仅回环可达）；局域网浏览器落 `"memory"` 后镜像初始即 unavailable、`ensure()` 空转、永不发起 `settings.describe`，`dsh-client-ui-settings-models` 的 `load()` 在 `mirrored.view === void 0` 时抛出该报错。dsh 8.21 重装（0.1.1-rc.2）后栅栏补丁自愈重打仍正常（服务端 LAN Host curl `settings.describe`/`llm.providers` 实测 200），前端门从未被补过，本次复发即它所致。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_patch_settings_mirror_gate()`——把前端三目 `connection.isLoopback ? "host" : "memory"` 强制为 host（`(true) /* [donkey-launcher] ... */ ? "host" : "memory"`，内联注释作幂等标记），文件内镜像与作用域两处一次替换；配套 `_ui_settings_client_path()`（同 realpath 布局定位 `dsh-client-ui-settings/lib/client.js`）与 `_PATCH_GATE_OLD/_PATCH_GATE_NEW` 常量；在 `launch_dsh_web` 冷启动路径既有两个补丁后追加调用；幂等（已打跳过）、升级还原后自动重打（未命中仅告警）、失败只告警不抛。安全边界不扩大：非 trusted-host 仍被服务端栅栏 403，前端只是让 trusted-host 浏览器用上服务端本就放行的 RPC。模块 docstring 同步补第三条补丁说明。
+  - 实机验证：本机已装 dsh 的 `dsh-client-ui-settings/lib/client.js` 按同款替换就地补丁（2 处，留 `.donkey-bak` 备份），运行中实例立即生效——served `/plugins/@deepseek-ai/dsh-client-ui-settings/client.js` 的 rev 自动更新（`5d1695c62b38`→`a47a350fa5f5`）、旧片段归零，浏览器硬刷新即可用，dsh web 无需重启。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 `TestPatchSettingsMirrorGate` 5 例（两处一并替换/幂等/锚点未命中不动文件/缺包跳过/launch 冷启动调用时机）。实测：`pytest tests/test_launcher_dsh_web.py` 45 passed；`pytest tests/ -k launcher` 179 passed。
+  - 注：仅 DD 改动（launcher 启动补丁），Firmware 无改动、无需 OTA；`dsh-client-ui-settings-general` 的 raw 文档编辑器与 `dsh-client-ui-deliverables` 的 `canOpenPath` 回环门为上游有意设计，保留不动。
+
 ## 2026-09-05 (190)
 
 - feat(tub): TM 录制视频库新增「AI 清理」——启发式自动识别「碰撞后倒车」片段，扫描 → 清单确认 → 批量软删除 (fixes #373)
