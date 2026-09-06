@@ -27,6 +27,13 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   局域网浏览器打开设置页/模型选择会 403（"正在加载"、"加载提供方目录
   失败"）。修法见 ``_patch_privileged_methods``：启动前对安装文件做
   幂等自愈补丁，把特权方法的信任表放宽为 trustedHosts。
+- 仅放宽服务端还不够：dsh-client-ui-settings 前端的共享设置镜像与
+  命名空间作用域按 ``isLoopback ? "host" : "memory"`` 选模式（上游
+  假定 settings RPC 仅回环可达），局域网浏览器落 "memory" 后镜像恒
+  unavailable、永不读 settings.describe，设置页/选模型仍报"加载提供方
+  目录失败: settings are unavailable in this browser"（2026-09-06 rc.2
+  重装后实测）。修法见 ``_patch_settings_mirror_gate``：把前端三目条件
+  幂等强制为 host（镜像与作用域两处一并替换）。
 - 局域网浏览器处于非安全上下文（``http://<局域网 IP>``，非 localhost），
   ``crypto.randomUUID`` 不可用；dsh-client-connection 铸造 RPC id 时抛
   ``TypeError``，连接永远到不了 connected、DSH 停在"选择工作区"不会
@@ -164,6 +171,22 @@ _PATCH_UUID_NEW = (
     "\t\t//#region lib/types/client/connection.js\n"
 )
 
+# dsh-client-ui-settings/lib/client.js 的前端回环自锁：共享设置镜像
+# （SettingsDescribeMirror）与命名空间作用域（SettingsScopeController）按
+# ``connection.isLoopback ? "host" : "memory"`` 选持久化模式——上游这么做
+# 是因为上游 settings RPC 仅回环可达；但 _patch_privileged_methods 已把
+# 服务端栅栏对 --trusted-host 放行，局域网浏览器却被前端这个门锁在
+# "memory"：mirror 初始即 unavailable、ensure() 空转、永不发起
+# settings.describe，设置页/选模型报"加载提供方目录失败: settings are
+# unavailable in this browser"（dsh-client-ui-settings-models 的 load()
+# 在 mirrored.view 为 undefined 时抛错）。补丁把三目条件强制为 host
+# （保留原结构、内联注释作幂等标记），文件里两处（mirror + scope）一次
+# 替换完成。回环行为不变；非 trusted-host 仍被服务端栅栏 403，安全边界
+# 不扩大。
+_PATCH_GATE_OLD = 'connection.isLoopback ? "host" : "memory"'
+_PATCH_GATE_NEW = ('(true) /* [donkey-launcher] trusted-host browsers reach '
+                   'settings RPCs via the fence patch */ ? "host" : "memory"')
+
 # 补丁锁：launcher 多线程，防并发重打
 _PATCH_LOCK = threading.Lock()
 
@@ -228,6 +251,23 @@ def _connection_client_path(binary: str):
         pkg_root = bin_real.parent.parent  # <pkg>/lib/bin.js -> <pkg>
         candidate = (pkg_root / "node_modules" / "@deepseek-ai"
                      / "dsh-client-connection" / "lib" / "client.js")
+        return candidate if candidate.is_file() else None
+    except OSError:
+        return None
+
+
+def _ui_settings_client_path(binary: str):
+    """从 dsh 可执行文件定位 dsh-client-ui-settings/lib/client.js。
+
+    与 ``_connection_index_path`` 同布局，只是目标是 dsh-client-ui-settings
+    包（设置镜像回环门补丁要改的文件）。找不到（如 pnpm 布局）返回
+    None，调用方跳过补丁。
+    """
+    try:
+        bin_real = Path(os.path.realpath(binary))
+        pkg_root = bin_real.parent.parent  # <pkg>/lib/bin.js -> <pkg>
+        candidate = (pkg_root / "node_modules" / "@deepseek-ai"
+                     / "dsh-client-ui-settings" / "lib" / "client.js")
         return candidate if candidate.is_file() else None
     except OSError:
         return None
@@ -323,6 +363,49 @@ def _patch_client_uuid_polyfill(binary: str):
     except OSError as e:
         logger.warning(
             "dsh UUID 补丁失败（dsh 仍可启动，局域网自动进入 Projects 可能失效）: %s",
+            e)
+
+
+def _patch_settings_mirror_gate(binary: str):
+    """对 dsh 安装里的设置镜像回环门做幂等自愈补丁（issue #164 后续）。
+
+    dsh-client-ui-settings 前端的共享设置镜像（SettingsDescribeMirror）与
+    命名空间作用域（SettingsScopeController）按 ``isLoopback ? "host" :
+    "memory"`` 选模式：局域网浏览器落到 "memory" 后镜像恒 unavailable、
+    永不发起 settings.describe，设置页/选模型报 "加载提供方目录失败:
+    settings are unavailable in this browser"。服务端栅栏补丁
+    （``_patch_privileged_methods``）已把 settings.* 对 --trusted-host
+    放行，这里把前端三目条件强制为 "host"（文件内 mirror 与 scope 两处
+    一并替换），让局域网浏览器真正用上服务端已放行的 RPC。
+
+    幂等/自愈语义与 ``_patch_privileged_methods`` 一致：已打过（新代码段
+    在）跳过；源码升级未命中旧片段也跳过；任何失败只告警不抛——dsh 仍
+    可启动，仅局域网设置页/模型选择不可用。
+    """
+    target = _ui_settings_client_path(binary)
+    if target is None:
+        logger.warning("dsh 设置镜像门补丁：未找到 dsh-client-ui-settings，跳过")
+        return
+    try:
+        with _PATCH_LOCK:
+            text = target.read_text(encoding="utf-8")
+            if _PATCH_GATE_NEW in text:
+                return  # 已打过（幂等）
+            if _PATCH_GATE_OLD not in text:
+                logger.warning(
+                    "dsh 设置镜像门补丁：目标代码段未命中（dsh 可能已升级改版），"
+                    "跳过: %s", target)
+                return
+            tmp = target.with_name(target.name + ".donkey-patch.tmp")
+            tmp.write_text(
+                text.replace(_PATCH_GATE_OLD, _PATCH_GATE_NEW),
+                encoding="utf-8")
+            os.replace(tmp, target)
+            logger.info("dsh 设置镜像门补丁：局域网镜像/作用域已切 host 模式: %s",
+                        target)
+    except OSError as e:
+        logger.warning(
+            "dsh 设置镜像门补丁失败（dsh 仍可启动，局域网设置页可能不可用）: %s",
             e)
 
 
@@ -552,6 +635,9 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # client.js 注入 crypto.randomUUID 兜底 + ?dsh_new_session=1 清理逻辑
     # （幂等，失败只影响局域网自动进入 Projects 和新会话清理，不影响 dsh 启动）
     _patch_client_uuid_polyfill(binary)
+    # 设置镜像回环门补丁：局域网浏览器切 host 模式（幂等，失败只影响
+    # 局域网设置页/模型选择，不影响 dsh 启动）
+    _patch_settings_mirror_gate(binary)
 
     lan_ip = lan_ip_fn()
     mdns = mdns_fn()
