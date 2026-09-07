@@ -258,8 +258,11 @@ export const listAiCleanCandidates = async (tubPath: string) => {
   return response.data as { status: boolean; current: string; tubs: AiCleanCandidate[] };
 };
 
-export const scanAiClean = async (tubPaths: string[]) => {
-  const response = await api.post('/tub/ai_clean/scan', { tub_paths: tubPaths });
+export const scanAiClean = async (tubPaths: string[], sessionId?: string | null) => {
+  const response = await api.post('/tub/ai_clean/scan', {
+    tub_paths: tubPaths,
+    ...(sessionId ? { session_id: sessionId } : {}),
+  });
   return response.data as {
     status: boolean;
     tubs: AiCleanTubScan[];

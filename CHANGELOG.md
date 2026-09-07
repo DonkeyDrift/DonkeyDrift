@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-07 (204)
+
+- feat(tub): TE 新增「AI 一键筛选」——识别碰撞后倒车片段、曲线高亮、确认删除可撤销（Issue #402）
+  - 背景：用户要求提交训练的数据里不能有倒车；入弯前减速不能误删，复用 `CollisionReverseHeuristic` 智能识别（碰撞特征前置的连续负油门）。
+  - 后端 `web_ui/backend/routers/tub.py`：`/ai_clean/scan` 可选 `session_id` 缩小到当前录制会话（向后兼容）。
+  - 前端 `web_ui/frontend/src/components/TubEditor.tsx`：Sparkles「AI 一键筛选」按钮；识别片段在转向/油门曲线上琥珀色高亮（verticalLinePlugin 区间）；确认层 `TubEditorAiCleanModal.tsx`（新增）列片段+统计；删除复用 `runRecordAction`（manifest 级软删除，纳入撤销栈）。
+  - 测试同步：`test_tub_ai_clean.py` +1；`TubEditor.aiclean.test.tsx`、`TubEditorAiCleanModal.test.tsx` 新增。实测 pytest 21 全过、vitest 40 文件 235 例全绿、`npm run build` 通过。
+
 ## 2026-09-07 (203)
 
 - fix(trainer): 导入模型支持 loss 曲线与元数据——补传接口 + 列表悬停预览（Issue #407）
