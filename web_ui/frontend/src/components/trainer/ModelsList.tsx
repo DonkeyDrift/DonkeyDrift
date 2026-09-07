@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { listModels, deleteModel, downloadModelUrl, loadModelToCar, importModel, API_URL, getApiErrorMessage } from '../../services/api';
+import { listModels, deleteModel, downloadModelUrl, loadModelToCar, importModel, uploadModelLoss, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload, ImagePlus } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useTranslation } from '@/i18n';
 
@@ -23,8 +23,15 @@ function formatSize(bytes: number): string {
     size /= 1024;
     unitIdx++;
   }
-  return `${size.toFixed(1)} ${units[unitIdx]}`;
+  return size.toFixed(1) + ' ' + units[unitIdx];
 }
+
+function previewUrl(path: string): string {
+  return API_URL + '/trainer/models/preview?path=' + encodeURIComponent(path);
+}
+
+const fileInputClass =
+  'mt-1 block w-full text-xs text-zinc-300 file:mr-2 file:rounded file:border-0 file:bg-cyan-500/20 file:px-2 file:py-1 file:text-xs file:text-cyan-300';
 
 export const ModelsList: React.FC = () => {
   const { t } = useTranslation();
@@ -39,7 +46,22 @@ export const ModelsList: React.FC = () => {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelItem | null>(null);
   const [importing, setImporting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importModelFile, setImportModelFile] = useState<File | null>(null);
+  const [importLossImage, setImportLossImage] = useState<File | null>(null);
+  const [importMetaJson, setImportMetaJson] = useState<File | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<ModelItem | null>(null);
+  const [uploadLossImage, setUploadLossImage] = useState<File | null>(null);
+  const [uploadMetaJson, setUploadMetaJson] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [hoverPreview, setHoverPreview] = useState<{
+    path: string;
+    name: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+  const hoverPos = useRef({ x: 0, y: 0 });
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -85,28 +107,98 @@ export const ModelsList: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [activePreview]);
 
-  const handleDelete = useCallback(async (model: ModelItem) => {
-    setDeleting(model.path);
-    try {
-      await deleteModel(model.path);
-      setConfirmDelete(null);
-      await refresh();
-    } finally {
-      setDeleting(null);
+  const clearHover = useCallback(() => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
     }
-  }, [refresh]);
+    setHoverPreview(null);
+  }, []);
 
-  const handleImportFile = useCallback(async (file: File) => {
+  // Cleanup the hover timer on unmount
+  useEffect(() => clearHover, [clearHover]);
+
+  const handleRowMouseEnter = (m: ModelItem) => (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!m.previewPath) return;
+    hoverPos.current = { x: e.clientX + 16, y: e.clientY + 20 };
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current);
+    }
+    hoverTimer.current = window.setTimeout(() => {
+      setHoverPreview({
+        path: m.previewPath as string,
+        name: m.name,
+        x: hoverPos.current.x,
+        y: hoverPos.current.y,
+      });
+    }, 300);
+  };
+
+  const handleRowMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    hoverPos.current = { x: e.clientX + 16, y: e.clientY + 20 };
+    setHoverPreview((prev) =>
+      prev ? { ...prev, x: hoverPos.current.x, y: hoverPos.current.y } : prev,
+    );
+  };
+
+  const handleRowMouseLeave = () => clearHover();
+
+  const handleDelete = useCallback(
+    async (model: ModelItem) => {
+      setDeleting(model.path);
+      try {
+        await deleteModel(model.path);
+        setConfirmDelete(null);
+        await refresh();
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [refresh],
+  );
+
+  const handleImportSubmit = useCallback(async () => {
+    if (!importModelFile) return;
     setImporting(true);
     try {
-      await importModel(file, configPath);
+      await importModel(
+        importModelFile,
+        configPath,
+        importLossImage ?? undefined,
+        importMetaJson ?? undefined,
+      );
+      setShowImport(false);
+      setImportModelFile(null);
+      setImportLossImage(null);
+      setImportMetaJson(null);
       await refresh();
     } catch (error) {
       alert(t('trainer.importFailed', { message: getApiErrorMessage(error) }));
     } finally {
       setImporting(false);
     }
-  }, [configPath, refresh, t]);
+  }, [importModelFile, importLossImage, importMetaJson, configPath, refresh, t]);
+
+  const handleUploadLossSubmit = useCallback(async () => {
+    if (!uploadTarget) return;
+    setUploading(true);
+    try {
+      await uploadModelLoss(
+        uploadTarget.name,
+        configPath,
+        uploadLossImage ?? undefined,
+        uploadMetaJson ?? undefined,
+      );
+      setUploadTarget(null);
+      setUploadLossImage(null);
+      setUploadMetaJson(null);
+      await refresh();
+    } catch (error) {
+      alert(t('trainer.uploadLossFailed', { message: getApiErrorMessage(error) }));
+    } finally {
+      setUploading(false);
+    }
+  }, [uploadTarget, uploadLossImage, uploadMetaJson, configPath, refresh, t]);
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3 relative">
@@ -118,13 +210,13 @@ export const ModelsList: React.FC = () => {
         />
         <div className="flex items-center gap-3">
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setShowImport(true)}
             disabled={importing}
             className="inline-flex items-center gap-1 text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
             title={t('trainer.importModel')}
           >
             <Upload className="w-3.5 h-3.5" />
-            {importing ? t('trainer.importing') : t('trainer.importModel')}
+            {t('trainer.importModel')}
           </button>
           <button
             onClick={refresh}
@@ -136,20 +228,6 @@ export const ModelsList: React.FC = () => {
         </div>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".tflite,.h5,.zip"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            handleImportFile(file);
-          }
-          e.target.value = '';
-        }}
-      />
-
       {models.length === 0 && (
         <div className="text-sm text-zinc-600">{t('trainer.noModels')}</div>
       )}
@@ -159,6 +237,9 @@ export const ModelsList: React.FC = () => {
           <div
             key={m.name}
             className="bg-zinc-950 rounded px-3 py-2 border border-zinc-800/50 cursor-default"
+            onMouseEnter={handleRowMouseEnter(m)}
+            onMouseMove={handleRowMouseMove}
+            onMouseLeave={handleRowMouseLeave}
           >
             {/* Row 1: model name + loss badge */}
             <div className="flex items-center justify-between gap-2">
@@ -183,6 +264,19 @@ export const ModelsList: React.FC = () => {
                     <TrendingDown className="w-3 h-3" />
                     {m.finalLoss.toFixed(4)}
                   </span>
+                )}
+                {!m.previewPath && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setUploadTarget(m);
+                    }}
+                    title={t('trainer.uploadLoss')}
+                    className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-cyan-400 px-2 py-0.5 rounded mr-1 transition-colors"
+                  >
+                    <ImagePlus className="w-3 h-3" />
+                    {t('trainer.uploadLoss')}
+                  </button>
                 )}
                 <a
                   href={downloadModelUrl(m.path)}
@@ -241,10 +335,36 @@ export const ModelsList: React.FC = () => {
                   </span>
                 )}
               </span>
+              {!m.previewPath && typeof m.finalLoss !== 'number' && (
+                <span className="text-xs text-zinc-600">{t('trainer.noLossData')}</span>
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      {/* Hover loss chart tooltip */}
+      {hoverPreview && (
+        <div
+          className="fixed z-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-3 pointer-events-none"
+          style={{
+            left: Math.min(hoverPreview.x, Math.max(0, window.innerWidth - 260)),
+            top: Math.min(hoverPreview.y, Math.max(0, window.innerHeight - 220)),
+          }}
+          data-testid="loss-chart-tooltip"
+        >
+          <div className="text-xs text-zinc-400 mb-1 truncate max-w-[220px]" title={hoverPreview.name}>
+            {hoverPreview.name}
+          </div>
+          <img
+            src={previewUrl(hoverPreview.path)}
+            alt={t('trainer.lossChartAlt')}
+            className="rounded max-w-[220px]"
+            style={{ maxHeight: 180 }}
+            draggable={false}
+          />
+        </div>
+      )}
 
       {/* Loss chart preview modal */}
       {activePreview && (
@@ -273,14 +393,144 @@ export const ModelsList: React.FC = () => {
               </div>
             )}
             <img
-              src={`${API_URL}/trainer/models/preview?path=${encodeURIComponent(activePreview.path)}`}
+              src={previewUrl(activePreview.path)}
               alt={t('trainer.lossChartAlt')}
-              className={`w-full h-auto rounded ${previewLoading ? 'hidden' : ''}`}
+              className={'w-full h-auto rounded ' + (previewLoading ? 'hidden' : '')}
               style={{ maxHeight: 220 }}
               draggable={false}
               onLoad={() => setPreviewLoading(false)}
               onError={() => setPreviewLoading(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Import model dialog */}
+      {showImport && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => setShowImport(false)}
+          data-testid="import-model-dialog"
+        >
+          <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5 w-96 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-zinc-200">{t('trainer.importModel')}</h4>
+              <button
+                onClick={() => setShowImport(false)}
+                aria-label={t('trainer.close')}
+                title={t('trainer.close')}
+                className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs text-zinc-400">{t('trainer.importModelFile')}</span>
+                <input
+                  type="file"
+                  accept=".tflite,.h5,.zip"
+                  className={fileInputClass}
+                  onChange={(e) => setImportModelFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-zinc-400">{t('trainer.importLossImage')}</span>
+                <input
+                  type="file"
+                  accept=".png,.jpg,.jpeg"
+                  className={fileInputClass}
+                  onChange={(e) => setImportLossImage(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-zinc-400">{t('trainer.importMetaJson')}</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className={fileInputClass}
+                  onChange={(e) => setImportMetaJson(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowImport(false)}
+                disabled={importing}
+                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors disabled:text-zinc-600"
+              >
+                {t('trainer.cancel')}
+              </button>
+              <button
+                onClick={handleImportSubmit}
+                disabled={!importModelFile || importing}
+                className="px-3 py-1.5 text-xs bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded transition-colors disabled:text-zinc-600 disabled:bg-zinc-800"
+              >
+                {importing ? t('trainer.importing') : t('trainer.importConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload loss (补传) dialog */}
+      {uploadTarget && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => setUploadTarget(null)}
+          data-testid="upload-loss-dialog"
+        >
+          <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5 w-96 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h4 className="text-sm font-semibold text-zinc-200">{t('trainer.uploadLossTitle')}</h4>
+              <button
+                onClick={() => setUploadTarget(null)}
+                aria-label={t('trainer.close')}
+                title={t('trainer.close')}
+                className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500 mb-3">
+              <span className="text-zinc-300">{uploadTarget.name}</span> · {t('trainer.uploadLossHint')}
+            </p>
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs text-zinc-400">{t('trainer.importLossImage')}</span>
+                <input
+                  type="file"
+                  accept=".png,.jpg,.jpeg"
+                  className={fileInputClass}
+                  onChange={(e) => setUploadLossImage(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-zinc-400">{t('trainer.importMetaJson')}</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className={fileInputClass}
+                  onChange={(e) => setUploadMetaJson(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setUploadTarget(null)}
+                disabled={uploading}
+                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors disabled:text-zinc-600"
+              >
+                {t('trainer.cancel')}
+              </button>
+              <button
+                onClick={handleUploadLossSubmit}
+                disabled={uploading}
+                className="px-3 py-1.5 text-xs bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded transition-colors disabled:text-zinc-600 disabled:bg-zinc-800"
+              >
+                {uploading ? t('trainer.loading') : t('trainer.uploadLoss')}
+              </button>
+            </div>
           </div>
         </div>
       )}

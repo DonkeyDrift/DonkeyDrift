@@ -400,15 +400,49 @@ export const deleteModel = async (path: string) => {
   return response.data;
 };
 
-export const importModel = async (file: File, workingDir?: string) => {
+export const importModel = async (
+  file: File,
+  workingDir?: string,
+  lossImage?: File,
+  metaJson?: File,
+) => {
   const form = new FormData();
   form.append('file', file);
+  if (lossImage) {
+    form.append('loss_image', lossImage);
+  }
+  if (metaJson) {
+    form.append('meta_json', metaJson);
+  }
   if (workingDir) {
     form.append('working_dir', workingDir);
   }
   // 不手动设置 Content-Type：axios 对 FormData 会在浏览器侧自动设置
   // multipart/form-data 边界，手动设置反而会丢失 boundary。
   const response = await api.post('/trainer/models/import', form);
+  return response.data;
+};
+
+export const uploadModelLoss = async (
+  name: string,
+  workingDir?: string,
+  lossImage?: File,
+  metaJson?: File,
+) => {
+  const form = new FormData();
+  if (lossImage) {
+    form.append('loss_image', lossImage);
+  }
+  if (metaJson) {
+    form.append('meta_json', metaJson);
+  }
+  if (workingDir) {
+    form.append('working_dir', workingDir);
+  }
+  const response = await api.post(
+    `/trainer/models/${encodeURIComponent(name)}/loss`,
+    form,
+  );
   return response.data;
 };
 

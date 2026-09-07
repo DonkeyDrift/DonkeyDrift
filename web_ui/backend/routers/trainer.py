@@ -752,10 +752,60 @@ def _extract_savedmodel_zip(payload: bytes, dest: str) -> int:
     return size
 
 
+def _normalize_loss_png(filename: str, data: bytes) -> bytes:
+    """Convert a loss chart upload to PNG bytes (JPEG re-encoded in memory).
+
+    The preview endpoint only serves image/png under a <stem>.png name, so a
+    JPEG upload is converted via Pillow; a PNG upload passes through as-is.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".png":
+        return data
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as img:
+            img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid loss image: {exc}")
+
+
+def _save_loss_image(models_dir: str, stem: str, filename: str, data: bytes) -> str:
+    """Save a loss chart upload as <stem>.png, returning the dest path."""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg"):
+        raise HTTPException(status_code=400, detail="Loss image must be a PNG or JPG file")
+    if not data:
+        raise HTTPException(status_code=400, detail="Loss image is empty")
+    dest = os.path.join(models_dir, f"{stem}.png")
+    with open(dest, "wb") as out:
+        out.write(_normalize_loss_png(filename, data))
+    return dest
+
+
+def _save_loss_meta(models_dir: str, stem: str, data: bytes) -> dict:
+    """Save training metadata upload as <stem>_meta.json, returning the dict."""
+    try:
+        meta = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Loss metadata must be valid JSON")
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=400, detail="Loss metadata must be a JSON object")
+    dest = os.path.join(models_dir, f"{stem}_meta.json")
+    with open(dest, "w") as out:
+        json.dump(meta, out)
+    return meta
+
+
 @router.post("/models/import")
 async def import_model(
     file: UploadFile = File(...),
     working_dir: Optional[str] = Form(None),
+    loss_image: Optional[UploadFile] = File(None),
+    meta_json: Optional[UploadFile] = File(None),
 ):
     """Import (upload) a model into <working_dir>/models.
 
@@ -764,6 +814,10 @@ async def import_model(
     directory. Mirrors list_models' working_dir resolution so the uploaded
     model lands in exactly the directory the Trainer page lists. Rejects
     unsupported types and duplicate names (no silent overwrite).
+
+    Optionally accepts a loss chart image (loss_image, PNG/JPG) and training
+    metadata (meta_json, JSON with final_loss/best_loss) saved as <stem>.png /
+    <stem>_meta.json so list_models links them automatically (issue #407).
     """
     filename = os.path.basename(file.filename or "")
     if not filename:
@@ -775,12 +829,13 @@ async def import_model(
             detail="Only .tflite, .h5 or .zip (SavedModel) model files are supported",
         )
 
+    stem = os.path.splitext(filename)[0]
     cwd = working_dir or os.getcwd()
     models_dir = os.path.join(cwd, "models")
     os.makedirs(models_dir, exist_ok=True)
 
     if lower.endswith(".zip"):
-        name = f"{os.path.splitext(filename)[0]}.savedmodel"
+        name = f"{stem}.savedmodel"
         dest = os.path.join(models_dir, name)
         if os.path.exists(dest):
             raise HTTPException(status_code=409, detail=f"Model already exists: {name}")
@@ -800,11 +855,77 @@ async def import_model(
                 out.write(chunk)
                 size += len(chunk)
 
+    # Save optional loss artifacts (loss chart + training metadata) so
+    # list_models links them to the imported model automatically (issue #407).
+    preview_path = None
+    final_loss = None
+    best_loss = None
+    if loss_image is not None and (loss_image.filename or "").strip():
+        loss_data = await loss_image.read()
+        preview_path = _save_loss_image(models_dir, stem, loss_image.filename or "", loss_data)
+    if meta_json is not None and (meta_json.filename or "").strip():
+        meta = _save_loss_meta(models_dir, stem, await meta_json.read())
+        final_loss = meta.get("final_loss")
+        best_loss = meta.get("best_loss")
+
     return {
         "status": True,
         "name": name,
         "path": os.path.abspath(dest),
         "size": size,
+        "previewPath": os.path.abspath(preview_path) if preview_path else None,
+        "finalLoss": final_loss,
+        "bestLoss": best_loss,
+    }
+
+
+@router.post("/models/{name}/loss")
+async def upload_model_loss(
+    name: str,
+    working_dir: Optional[str] = Form(None),
+    loss_image: Optional[UploadFile] = File(None),
+    meta_json: Optional[UploadFile] = File(None),
+):
+    """Upload loss chart & metadata for an existing imported model (issue #407).
+
+    Models imported without training artifacts have no loss preview. This
+    endpoint attaches a <stem>.png and <stem>_meta.json afterwards so
+    list_models links them exactly like locally trained models.
+    """
+    if loss_image is None and meta_json is None:
+        raise HTTPException(status_code=400, detail="Provide loss_image and/or meta_json")
+
+    safe_name = os.path.basename(name)
+    if not safe_name or safe_name != name:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
+    cwd = working_dir or os.getcwd()
+    models_dir = os.path.join(cwd, "models")
+    full = os.path.join(models_dir, safe_name)
+    is_savedmodel_dir = os.path.isdir(full) and safe_name.lower().endswith(".savedmodel")
+    is_model_file = os.path.isfile(full) and safe_name.lower().endswith((".tflite", ".h5"))
+    if not (is_model_file or is_savedmodel_dir):
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    stem = safe_name[: -len(".savedmodel")] if is_savedmodel_dir else os.path.splitext(safe_name)[0]
+
+    preview_path = None
+    final_loss = None
+    best_loss = None
+    if loss_image is not None and (loss_image.filename or "").strip():
+        loss_data = await loss_image.read()
+        preview_path = _save_loss_image(models_dir, stem, loss_image.filename or "", loss_data)
+    if meta_json is not None and (meta_json.filename or "").strip():
+        meta = _save_loss_meta(models_dir, stem, await meta_json.read())
+        final_loss = meta.get("final_loss")
+        best_loss = meta.get("best_loss")
+
+    return {
+        "status": True,
+        "name": safe_name,
+        "previewPath": os.path.abspath(preview_path) if preview_path else None,
+        "finalLoss": final_loss,
+        "bestLoss": best_loss,
     }
 
 
