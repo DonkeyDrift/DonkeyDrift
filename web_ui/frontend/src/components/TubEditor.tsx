@@ -5,7 +5,15 @@ import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore, type TubRecord } from '../store/useStore';
-import { deleteRecords, getRecords, getSessionRecords, restoreRecords } from '../services/api';
+import {
+  deleteRecords,
+  getApiErrorMessage,
+  getRecords,
+  getSessionRecords,
+  restoreRecords,
+  scanAiClean,
+  type AiCleanSegment,
+} from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
 import {
@@ -19,7 +27,8 @@ import {
 } from 'chart.js';
 import type { Chart as ChartInstance, Plugin } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { LineChart, Redo2, RotateCcw, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { LineChart, Redo2, RotateCcw, Sparkles, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { TubEditorAiCleanModal } from './TubEditorAiCleanModal';
 
 ChartJS.register(
   CategoryScale,
@@ -120,6 +129,8 @@ export const TubEditor: React.FC = () => {
   const recordsRef = useRef(records);
   const sampledIndicesRef = useRef<number[]>([]);
   const isSessionScopedRef = useRef(isSessionScoped);
+  // AI 一键筛选高亮区间（已换算为图表 x 坐标），供画布插件 afterDraw 读取
+  const aiCleanHighlightsRef = useRef<{ startXValue: number; endXValue: number }[]>([]);
 
   useEffect(() => {
     recordsRef.current = records;
@@ -133,6 +144,12 @@ export const TubEditor: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMode, setProcessingMode] = useState<'delete' | 'restore' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // AI 一键筛选（issue #402）：待删片段、确认层开关、扫描/删除状态与提示
+  const [aiCleanSegments, setAiCleanSegments] = useState<AiCleanSegment[]>([]);
+  const [aiCleanModalOpen, setAiCleanModalOpen] = useState(false);
+  const [aiCleanBusy, setAiCleanBusy] = useState(false);
+  const [aiCleanError, setAiCleanError] = useState<string | null>(null);
+  const [aiCleanInfo, setAiCleanInfo] = useState<string | null>(null);
   const [actionHistory, setActionHistory] = useState<RecordAction[]>([]);
   const [redoHistory, setRedoHistory] = useState<RecordAction[]>([]);
   const [zoomPercent, setZoomPercent] = useState(MIN_ZOOM_PERCENT);
@@ -527,6 +544,67 @@ export const TubEditor: React.FC = () => {
       });
     }
   }, [redoHistory, runRecordAction]);
+
+  // AI 一键筛选（issue #402）：扫描当前 tub（或当前录制会话）里的「碰撞后倒车」
+  // 片段 → 高亮 + 弹确认层；确认后复用 runRecordAction，与框选删除走同一套
+  // manifest 级软删除 + 撤销栈，保证体验一致。
+  const handleAiCleanScan = useCallback(async () => {
+    if (!tubPath || aiCleanBusy) return;
+    setAiCleanBusy(true);
+    setAiCleanError(null);
+    setAiCleanInfo(null);
+    try {
+      const data = await scanAiClean([tubPath], activeSessionId);
+      const tub = data.tubs?.[0];
+      if (tub?.error) {
+        setAiCleanError(tub.error);
+        return;
+      }
+      const segments = (tub?.segments ?? []).filter(
+        (seg) => (seg.indexes?.length ?? 0) > 0
+      );
+      setAiCleanSegments(segments);
+      if (segments.length === 0) {
+        setAiCleanInfo(t('tubEditor.aiFilterNoSegments'));
+      } else {
+        setAiCleanModalOpen(true);
+      }
+    } catch (err) {
+      setAiCleanError(getApiErrorMessage(err, t('tubEditor.aiFilterScanFailed')));
+    } finally {
+      setAiCleanBusy(false);
+    }
+  }, [tubPath, activeSessionId, aiCleanBusy, t]);
+
+  const handleAiCleanConfirm = useCallback(async () => {
+    if (aiCleanSegments.length === 0) return;
+    const indexes = Array.from(
+      new Set(aiCleanSegments.flatMap((seg) => seg.indexes ?? []))
+    ).sort((a, b) => a - b);
+    if (indexes.length === 0) {
+      setAiCleanError(t('tubEditor.aiFilterNoSegments'));
+      return;
+    }
+    setAiCleanBusy(true);
+    setAiCleanError(null);
+    const succeeded = await runRecordAction('delete', indexes, true);
+    setAiCleanBusy(false);
+    if (succeeded) {
+      setAiCleanSegments([]);
+      setAiCleanModalOpen(false);
+      setAiCleanInfo(null);
+      clearSelectionRange();
+      visualSelectionRef.current = null;
+    } else {
+      setAiCleanError(t('tubEditor.aiFilterDeleteFailed'));
+    }
+  }, [aiCleanSegments, runRecordAction, clearSelectionRange, t]);
+
+  const handleAiCleanClose = useCallback(() => {
+    setAiCleanModalOpen(false);
+    setAiCleanSegments([]);
+    setAiCleanError(null);
+  }, []);
 
   // 播放竖线位置计算（60fps 回放优化）：经 chart 比例尺换算后直接写叠加层 DOM
   // style——竖线移动不再触发 chart.js 全量重绘（原先每次索引变化都 chart.update，
@@ -1294,7 +1372,31 @@ export const TubEditor: React.FC = () => {
         const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
         const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
         const totalRecords = records.length;
-        
+
+        // AI 一键筛选高亮（issue #402）：待删「碰撞后倒车」片段用琥珀色区间标注
+        const aiHighlights = aiCleanHighlightsRef.current;
+        if (aiHighlights && aiHighlights.length) {
+          const highlightFill = isLightTheme ? 'rgba(217, 119, 6, 0.20)' : 'rgba(234, 179, 8, 0.16)';
+          const highlightStroke = isLightTheme ? '#b45309' : 'rgb(234, 179, 8)';
+          for (const hl of aiHighlights) {
+            const startX = xAxis.getPixelForValue(hl.startXValue);
+            const endX = xAxis.getPixelForValue(hl.endXValue);
+            if (!isNaN(startX) && !isNaN(endX) && endX > startX) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.clip();
+              ctx.fillStyle = highlightFill;
+              ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.lineWidth = 1.5;
+              ctx.setLineDash([4, 4]);
+              ctx.strokeStyle = highlightStroke;
+              ctx.strokeRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.restore();
+            }
+          }
+        }
+
         const drawSelectionBox = (startValue: number, endValue: number, isDraft: boolean) => {
             const chartArea = chart.chartArea;
             
@@ -1486,6 +1588,32 @@ export const TubEditor: React.FC = () => {
     },
     [records]
   );
+
+  // AI 一键筛选高亮：把待删片段的物理 _index 区间换算成图表 x 坐标——
+  // 会话视图用「会话内数组下标」，全局视图用物理 _index（与曲线 x 轴一致）。
+  const aiCleanHighlights = useMemo(() => {
+    if (!aiCleanSegments.length) {
+      return [] as { startXValue: number; endXValue: number }[];
+    }
+    return aiCleanSegments.map((seg) => {
+      if (isSessionScoped) {
+        return {
+          startXValue: physicalToArrayPos(seg.start_index),
+          endXValue: physicalToArrayPos(seg.end_index + 1),
+        };
+      }
+      return { startXValue: seg.start_index, endXValue: seg.end_index + 1 };
+    });
+  }, [aiCleanSegments, isSessionScoped, physicalToArrayPos]);
+
+  useEffect(() => {
+    aiCleanHighlightsRef.current = aiCleanHighlights;
+  }, [aiCleanHighlights]);
+
+  // 片段变化（扫描出新结果 / 删除后清空）时触发一次画布重绘以更新高亮
+  useEffect(() => {
+    requestChartRender();
+  }, [aiCleanSegments, requestChartRender]);
 
   // 选区在底部滑条上的起止百分比（数值），绿条样式与三角手柄定位共用同一换算
   const sliderSelectionPercents = useMemo<{ startPct: number; endPct: number } | null>(() => {
@@ -1748,6 +1876,7 @@ export const TubEditor: React.FC = () => {
    const containerCursorClass = selectionDraft ? 'cursor-ew-resize' : 'cursor-crosshair';
 
   return (
+    <>
     <Card className={chartCardClassName}>
       <CardHeader className="relative flex flex-col items-start justify-between gap-4 space-y-0">
         <SectionCardTitle
@@ -1848,6 +1977,12 @@ export const TubEditor: React.FC = () => {
                   {actionError}
                 </span>
               )}
+              {aiCleanInfo && !aiCleanError && (
+                <span className="ml-2 text-xs text-emerald-400">{aiCleanInfo}</span>
+              )}
+              {aiCleanError && (
+                <span className="ml-2 text-xs text-red-400">{aiCleanError}</span>
+              )}
               <Button
                 size="sm"
                 variant="secondary"
@@ -1873,6 +2008,20 @@ export const TubEditor: React.FC = () => {
             </div>
           </div>
           <div className="order-first flex min-h-[30px] items-center justify-start gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void handleAiCleanScan()}
+              disabled={aiCleanBusy || isProcessing || !tubPath}
+              aria-label={t('tubEditor.aiFilterEntryAria')}
+              title={t('tubEditor.aiFilterEntryAria')}
+              className="h-full text-xs"
+            >
+              <Sparkles className="h-4 w-4 text-cyan-400" />
+              <span className="text-xs">
+                {aiCleanBusy ? t('tubEditor.aiFilterScanning') : t('tubEditor.aiFilterEntry')}
+              </span>
+            </Button>
             <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0">
               <div className="h-4 box-content text-xs text-zinc-400 uppercase">{t('tubEditor.zoomLabel')}</div>
               <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
@@ -2059,5 +2208,15 @@ export const TubEditor: React.FC = () => {
         </div>
       </CardContent>
     </Card>
+    {aiCleanModalOpen && aiCleanSegments.length > 0 && (
+      <TubEditorAiCleanModal
+        segments={aiCleanSegments}
+        busy={aiCleanBusy}
+        error={aiCleanError}
+        onClose={handleAiCleanClose}
+        onConfirm={() => void handleAiCleanConfirm()}
+      />
+    )}
+    </>
   );
 };

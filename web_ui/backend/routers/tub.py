@@ -91,6 +91,8 @@ class SessionDeleteRequest(BaseModel):
 
 class AiCleanScanRequest(BaseModel):
     tub_paths: List[str]
+    # 可选：仅扫描指定录制会话（_session_id）；缺省扫描整个 tub（向后兼容）
+    session_id: Optional[str] = None
 
 class AiCleanTubDeletion(BaseModel):
     tub_path: str
@@ -541,6 +543,13 @@ async def ai_clean_scan(request: AiCleanScanRequest):
                 records = [record for record in tub]
             finally:
                 tub.close()
+            # TE 会话视图：可选按 _session_id 缩小扫描范围到单个录制会话，
+            # 识别引擎只在指定会话内找「碰撞后倒车」，跨会话不关联、不合并。
+            if request.session_id is not None:
+                records = [
+                    r for r in records
+                    if str(r.get('_session_id', '')) == request.session_id
+                ]
             segments = [seg.to_dict() for seg in detector.detect(records)]
             frame_count = sum(seg["frame_count"] for seg in segments)
             tubs.append({
