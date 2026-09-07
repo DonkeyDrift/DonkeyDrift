@@ -8,6 +8,7 @@ import { drive } from './drive';
 import { drivehooks } from './drivehooks';
 import { driveviz } from './driveviz';
 import { fab } from './fab';
+import { harness } from './harness';
 import { trainer } from './trainer';
 import { tubeditor } from './tubeditor';
 import { tublibrary } from './tublibrary';
@@ -25,6 +26,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
     ...drivehooks.zh,
     ...driveviz.zh,
     ...fab.zh,
+    ...harness.zh,
     ...trainer.zh,
     ...tubeditor.zh,
     ...tublibrary.zh,
@@ -41,6 +43,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
     ...drivehooks.en,
     ...driveviz.en,
     ...fab.en,
+    ...harness.en,
     ...trainer.en,
     ...tubeditor.en,
     ...tublibrary.en,
