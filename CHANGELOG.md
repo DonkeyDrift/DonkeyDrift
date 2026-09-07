@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-07 (202)
+
+- fix(cc): CC 导航入口改造——删除「Car Connector」文字标题，小齿轮移入顶栏右侧控制区（Issue #406）
+  - 背景：用户要求顶栏导航不再显示 CC 文字，把齿轮做成右侧控制区（语言/静音/深浅色）同款纯图标按钮。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行与手机汉堡菜单移除「齿轮 + 文字」条目；桌面右侧控制区（GitHubLink 后）与手机标题区第二行（静音前）挂载新按钮，位置逻辑一致。
+  - `web_ui/frontend/src/components/CarConnectorButton.tsx`（新增）：w-8 h-8 圆形图标按钮，Link `/connector`，aria-label/title 复用 `common.nav.carConnector`；`/connector` 激活态 `text-cyan-400`。
+  - 测试同步：新增 `CarConnectorButton.test.tsx` 4 例。实测 `vitest run` 39 文件 235 例全绿、`npm run build` 通过。
+
 ## 2026-09-07 (201)
 
 - feat(findcar): 一键找车恢复云端上报并去 token——网站 `find-dkc.pages.dev` 打开即列，无需任何口令；措辞统一「Donkey Car」（ESP32）/「DonkeyDrift」（DD）
