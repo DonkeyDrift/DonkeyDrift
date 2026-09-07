@@ -6,11 +6,12 @@ import uvicorn
 import os
 import sys
 import logging
+from contextlib import asynccontextmanager
 
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config
+from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config, harness_updater
 from routers import findcar as findcar_router
 import findcar
 
@@ -27,7 +28,26 @@ if not DEBUG:
     # 抑制后端业务路由日志（连接/断连统计等）
     logging.getLogger("routers.drive").setLevel(logging.WARNING)
 
-app = FastAPI(title="DonkeyDrifter")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动/关闭后台任务（issue #404）。
+
+    - findcar 心跳上报：原实现用 @app.on_event("startup")，但 Starlette 1.x
+      在自定义 lifespan 存在时不再触发 on_event 处理器（会静默停摆），故并入；
+    - Harness 一键更新周期检查（issue #404）。
+    """
+    try:
+        findcar.start_heartbeat()
+    except Exception:
+        logging.getLogger(__name__).warning("findcar 心跳启动失败", exc_info=True)
+    harness_updater.start_background_check()
+    try:
+        yield
+    finally:
+        await harness_updater.stop_background_check()
+
+
+app = FastAPI(title="DonkeyDrifter", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -72,6 +92,7 @@ app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
 app.include_router(findcar_router.router, prefix="/api/findcar", tags=["findcar"])
 app.include_router(ai_config.router, prefix="/api/ai-config", tags=["ai-config"])
+app.include_router(harness_updater.router, prefix="/api/harness", tags=["harness"])
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(
@@ -108,13 +129,6 @@ else:
     @app.get("/")
     async def root():
         return {"message": "DonkeyDrifter is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
-
-@app.on_event("startup")
-async def _start_findcar_heartbeat():
-    try:
-        findcar.start_heartbeat()
-    except Exception:
-        logging.getLogger(__name__).warning("findcar 心跳启动失败", exc_info=True)
 
 
 if __name__ == "__main__":

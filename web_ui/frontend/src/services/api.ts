@@ -796,6 +796,118 @@ export const getDonkeyUrl = (): string =>
   `${window.location.protocol}//${window.location.hostname}:8090/`;
 
 // ------------------------------------------------------------------
+// Harness Updater APIs（CC 页「Harness 下载 + 一键更新」板块，issue #404）
+// ------------------------------------------------------------------
+export interface HarnessComponentInstall {
+  type: 'npm' | 'url';
+  package?: string | null;
+  download_url?: string | null;
+  linux_deb?: string | null;
+  doc_url?: string | null;
+}
+
+export interface HarnessComponent {
+  id: string;
+  kind: 'cli' | 'desktop';
+  name: string;
+  installed: boolean;
+  version: string | null;
+  path: string | null;
+  install: HarnessComponentInstall;
+}
+
+export interface HarnessInfo {
+  id: string;
+  name: string;
+  vendor: string;
+  remote_default: string | null;
+  components: HarnessComponent[];
+}
+
+export interface HarnessCatalog {
+  ok: boolean;
+  harnesses: HarnessInfo[];
+  checked_at: string;
+}
+
+export interface HarnessUpdateItem {
+  kind: 'harness' | 'project' | 'component' | 'firmware';
+  harness_id?: string;
+  component_id?: string;
+  id?: string;
+  name: string;
+  installed: boolean;
+  installed_version: string | null;
+  latest_version: string | null;
+  updateable: boolean;
+  install_type?: string;
+  package?: string | null;
+  doc_url?: string | null;
+  asset?: string | null;
+  asset_name?: string | null;
+  vehicle_ip?: string | null;
+  note?: string | null;
+}
+
+export interface HarnessCheckResult {
+  ok: boolean;
+  checked_at: string;
+  updates: HarnessUpdateItem[];
+  updateable_count: number;
+  errors: string[];
+}
+
+export interface HarnessStatus {
+  background_enabled: boolean;
+  interval_s: number;
+  last_check_at: string | null;
+  last_check_ok: boolean | null;
+  updateable_count: number | null;
+  updates: HarnessUpdateItem[];
+}
+
+export const getHarnessCatalog = async (): Promise<HarnessCatalog> => {
+  const response = await api.get('/harness/catalog');
+  return response.data as HarnessCatalog;
+};
+
+export const getHarnessStatus = async (): Promise<HarnessStatus> => {
+  const response = await api.get('/harness/status');
+  return response.data as HarnessStatus;
+};
+
+export const downloadHarness = async (harnessId: string, componentId: string) => {
+  const response = await api.post('/harness/download', {
+    harness_id: harnessId,
+    component_id: componentId,
+  });
+  return response.data as { status: string; path?: string; url?: string; message: string };
+};
+
+export const installHarness = async (harnessId: string, componentId: string) => {
+  const response = await api.post('/harness/install', {
+    harness_id: harnessId,
+    component_id: componentId,
+  });
+  return response.data as { status: string; path?: string; url?: string; message: string };
+};
+
+export const checkHarnessUpdates = async (): Promise<HarnessCheckResult> => {
+  const response = await api.post('/harness/check');
+  return response.data as HarnessCheckResult;
+};
+
+export const installHarnessUpdate = async (kind: string, id: string) => {
+  const response = await api.post('/harness/install-update', { kind, id });
+  return response.data as { status: string; message: string };
+};
+
+export const flashFirmware = async (ip: string, assetPath?: string) => {
+  const response = await api.post('/harness/ota/flash', { ip, asset_path: assetPath });
+  return response.data as { status: string; message: string };
+};
+
+// ------------------------------------------------------------------
 // Pilot Arena APIs
 // ------------------------------------------------------------------
 export interface ArenaModel {

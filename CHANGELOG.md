@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-07 (206)
+
+- feat(cc): CC 新增 Harness 下载板块与一键更新——CLI+桌面端联动下载、Harness/项目/组件/OTA 固件统一更新 + 定期自动检查（Issue #404）
+  - 背景：对标 CC Switch：主流 Harness（Codex/Claude/DeepSeek Harness/Z-Code）选择下载（CLI 与桌面端联动），一键检查更新 Harness、DonkeyDrift 本体、donkeycar 组件与 OTA 固件；后台周期检查，下次打开即是最新。
+  - 后端 `web_ui/backend/routers/harness_updater.py`（新增，`main.py` lifespan 注册 `/api/harness`）：目录 + 检测（PATH/安装目录/注册表）+ 下载安装（本地-only `~/.donkeycar/downloads`，npm/.deb 优先）+ 更新检查 + HTTP OTA 刷写复用（`:3232` 提示）+ asyncio 周期检查（默认首检 30s、间隔 24h，HARNESS_*_S 可覆盖）+ 状态持久化本地-only。
+  - `web_ui/backend/main.py`：findcar 心跳由 `on_event` 并入 lifespan——Starlette 1.x 自定义 lifespan 下 on_event 不触发，否则 find-dkc 心跳静默停摆。
+  - 前端 `web_ui/frontend/src/components/HarnessPanel.tsx`（新增）：目录列表（已装/未装/版本、CLI+桌面端分组）+ 一键更新区 + 周期检查状态；CarConnectorPage 挂载。
+  - 测试同步：`test_harness_updater.py` 19 例；`HarnessPanel.test.tsx` 7 例。实测 pytest 19 全过、vitest 39 文件 238 例全绿、`npm run build` 通过。
+  - 已知限制：macOS/Windows 安装器未实测；Firmware 仓库暂无 release 产物，OTA 下载走降级分支（待发布对齐）。
+
 ## 2026-09-07 (205)
 
 - feat(cc): CC 新增「AI 配置」板块——多供应商 AI 模型配置（API Key + Codex OAuth 设备码登录）（Issue #403）

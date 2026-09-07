@@ -9,3 +9,4 @@ aiortc
 av
 httpx2
 zeroconf
+packaging
