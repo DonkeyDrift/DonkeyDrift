@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-07 (207)
+
+- fix(drive): 模拟器预览画质与 NN 输入解耦——Drive 页面显示模拟器最高画质（Issue #401/#405）
+  - 背景：DONKEY_GYM 连接模拟器时 Drive 页画质被锁在 NN 输入分辨率 160×120，经 320×240 上采样 + 有损压缩，与模拟器原生画面差距大；要求预览显示最高画质、处理分辨率不变。
+  - `donkeycar/parts/dgym.py`：新增 render_img_w/render_img_h（缺省回退 img_w/img_h 向后兼容）；渲染帧下采样回 IMAGE_W×IMAGE_H 作为 cam/image_array，渲染原始帧作为 preview/image_array（output_preview）。
+  - `donkeycar/parts/drive_api_bridge.py`：新增 jpeg_quality（默认 95）与 preserve_source_resolution；MJPEG 可配置质量编码；帧缓冲 upscale_only——预览源分辨率≥目标时不有损降采样。
+  - `donkeycar/templates/simulator.py`：cam 输出双通道、DriveApiBridge 视频源换为 preview/image_array（签名零改动）；cfg_simulator.py 默认渲染 640×480 + DRIVE_VIDEO_JPEG_QUALITY=95；cfg_complete.py/complete.py 实车模板保持旧行为。
+  - 测试同步：test_dgym_preview.py / test_template_simulator_preview.py 新增、test_drive_api_bridge.py 更新。实测相关单测 77+25 全过、后端 269 全过。
+  - 已知限制：本机无真实 DonkeySim，E2E 画质对比未实测（单测以假 env 覆盖渲染→预览链路）。
+
 ## 2026-09-07 (206)
 
 - feat(cc): CC 新增 Harness 下载板块与一键更新——CLI+桌面端联动下载、Harness/项目/组件/OTA 固件统一更新 + 定期自动检查（Issue #404）
