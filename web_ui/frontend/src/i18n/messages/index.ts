@@ -1,5 +1,6 @@
 import { arena } from './arena';
 import { aiclean } from './aiclean';
+import { aiconfig } from './aiconfig';
 import { common } from './common';
 import { connector } from './connector';
 import { console as consoleNs } from './console';
@@ -16,6 +17,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
   zh: {
     ...arena.zh,
     ...aiclean.zh,
+    ...aiconfig.zh,
     ...common.zh,
     ...connector.zh,
     ...consoleNs.zh,
@@ -31,6 +33,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
   en: {
     ...arena.en,
     ...aiclean.en,
+    ...aiconfig.en,
     ...common.en,
     ...connector.en,
     ...consoleNs.en,

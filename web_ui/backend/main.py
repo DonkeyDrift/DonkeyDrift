@@ -10,7 +10,7 @@ import logging
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote
+from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config
 from routers import findcar as findcar_router
 import findcar
 
@@ -71,6 +71,7 @@ app.include_router(zcode_remote.router, prefix="/api/zcode-remote", tags=["zcode
 app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
 app.include_router(findcar_router.router, prefix="/api/findcar", tags=["findcar"])
+app.include_router(ai_config.router, prefix="/api/ai-config", tags=["ai-config"])
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(

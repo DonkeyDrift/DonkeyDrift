@@ -994,3 +994,155 @@ export const stopSimCollect = async (jobId: string) => {
 export const createSimCollectEventStream = (jobId: string) => {
   return new EventSource(`${API_URL}/simcollect/${jobId}/events`);
 };
+
+// ------------------------------------------------------------------
+// AI Config APIs（多供应商 AI 模型配置，issue #403；供 TE「AI 一键筛选」#402 等消费）
+// 安全约定：后端永不返回明文 api_key / oauth token，只返回掩码与「是否已配置」。
+// ------------------------------------------------------------------
+export interface AiConfigAccount {
+  id: string;
+  name: string;
+  api_key_masked: string | null;
+  has_api_key: boolean;
+  oauth_connected: boolean;
+  base_url: string | null;
+  models: string[] | null;
+}
+
+export interface AiConfigProvider {
+  id: string;
+  name: string;
+  icon: string;
+  base_url: string;
+  oauth: boolean;
+  api_format: 'openai' | 'anthropic' | string;
+  custom: boolean;
+  default_models: string[];
+  accounts: AiConfigAccount[];
+}
+
+export interface AiConfigProvidersResponse {
+  providers: AiConfigProvider[];
+  active_provider: string | null;
+  active_account: string | null;
+}
+
+export interface AiActiveConfig {
+  active_provider: string | null;
+  name?: string;
+  account_id?: string | null;
+  account_name?: string | null;
+  model?: string | null;
+  base_url?: string;
+  oauth?: boolean;
+  configured: boolean;
+}
+
+export const listAiConfigProviders = async (): Promise<AiConfigProvidersResponse> => {
+  const response = await api.get('/ai-config/providers');
+  return response.data;
+};
+
+export const fetchActiveAiConfig = async (): Promise<AiActiveConfig> => {
+  const response = await api.get('/ai-config/active');
+  return response.data;
+};
+
+export const saveAiConfigAccount = async (
+  providerId: string,
+  payload: {
+    account_id?: string;
+    name?: string;
+    api_key?: string;
+    base_url?: string;
+    models?: string[];
+  },
+): Promise<{ status: boolean; account: AiConfigAccount }> => {
+  const response = await api.post(`/ai-config/providers/${providerId}`, payload);
+  return response.data;
+};
+
+export const deleteAiConfigAccount = async (
+  providerId: string,
+  accountId: string,
+): Promise<{ status: boolean }> => {
+  const response = await api.delete(`/ai-config/providers/${providerId}/accounts/${accountId}`);
+  return response.data;
+};
+
+export const setActiveAiProvider = async (
+  providerId: string,
+  accountId?: string | null,
+): Promise<AiActiveConfig> => {
+  const response = await api.post(`/ai-config/providers/${providerId}/active`, {
+    account_id: accountId ?? null,
+  });
+  return response.data;
+};
+
+export const createCustomAiProvider = async (payload: {
+  name: string;
+  base_url: string;
+  models?: string[];
+  api_format?: string;
+  provider_id?: string;
+}): Promise<{ status: boolean; provider_id: string }> => {
+  const response = await api.post('/ai-config/custom', payload);
+  return response.data;
+};
+
+export const deleteCustomAiProvider = async (
+  providerId: string,
+): Promise<{ status: boolean }> => {
+  const response = await api.delete(`/ai-config/custom/${providerId}`);
+  return response.data;
+};
+
+export interface AiOAuthDeviceCode {
+  status: boolean;
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+export const startAiOAuthDeviceCode = async (
+  providerId = 'codex',
+): Promise<AiOAuthDeviceCode> => {
+  const response = await api.post('/ai-config/oauth/device-code', { provider_id: providerId });
+  return response.data;
+};
+
+export interface AiOAuthPollResult {
+  status: 'pending' | 'expired' | 'success' | 'error';
+  account?: AiConfigAccount;
+  detail?: string;
+}
+
+export const pollAiOAuthDeviceCode = async (
+  deviceCode: string,
+  userCode?: string,
+): Promise<AiOAuthPollResult> => {
+  const response = await api.post('/ai-config/oauth/poll', {
+    device_code: deviceCode,
+    user_code: userCode,
+  });
+  return response.data;
+};
+
+export interface AiConfigTestResult {
+  ok: boolean;
+  message: string;
+  status_code?: number;
+  latency_ms?: number;
+  detail?: string;
+}
+
+export const testAiConfigConnection = async (payload?: {
+  provider_id?: string;
+  account_id?: string;
+}): Promise<AiConfigTestResult> => {
+  const response = await api.post('/ai-config/test', payload ?? {});
+  return response.data;
+};
