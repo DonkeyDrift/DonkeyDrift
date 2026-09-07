@@ -4,6 +4,7 @@ import json
 import time
 
 import numpy as np
+import cv2
 
 from donkeycar.parts.drive_api_bridge import (
     DriveApiBridge,
@@ -97,6 +98,7 @@ def test_drive_api_bridge_handles_control_message():
 def test_drive_api_bridge_sends_base64_frame(monkeypatch):
     sent_payloads = []
     encoded_images = []
+    encoded_params = []
     bridge = DriveApiBridge(auto_start=False, video_transport="mjpeg")
     bridge.connected = True
     # Suppress the periodic car_state send so this test only verifies the frame payload.
@@ -107,8 +109,9 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
         lambda image, code: f"converted-{image}-{code}",
     )
 
-    def fake_imencode(extension, image):
+    def fake_imencode(extension, image, params=None):
         encoded_images.append(image)
+        encoded_params.append(params)
         return True, FakeEncodedFrame()
 
     monkeypatch.setattr("donkeycar.parts.drive_api_bridge.cv2.imencode", fake_imencode)
@@ -118,6 +121,7 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
 
     assert outputs == (0.0, 0.0, "user", False, {}, False, None)
     assert encoded_images == ["converted-rgb-image-4"]
+    assert encoded_params == [[cv2.IMWRITE_JPEG_QUALITY, 95]]
     assert [p for p in sent_payloads if p.get("type") == "frame"] == [{
         "type": "frame",
         "data": base64.b64encode(b"jpeg-bytes").decode("ascii"),
@@ -125,6 +129,31 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
         "drive_mode": "user",
         "recording": False,
     }]
+
+
+def test_drive_api_bridge_sends_frame_with_configured_jpeg_quality(monkeypatch):
+    """DRIVE_VIDEO_JPEG_QUALITY 应透传到 cv2.imencode 的 JPEG 质量参数。"""
+    sent_payloads = []
+    encoded_params = []
+    bridge = DriveApiBridge(auto_start=False, video_transport="mjpeg", jpeg_quality=42)
+    bridge.connected = True
+    bridge.last_car_state = time.time()
+
+    monkeypatch.setattr(
+        "donkeycar.parts.drive_api_bridge.cv2.cvtColor",
+        lambda image, code: image,
+    )
+
+    def fake_imencode(extension, image, params=None):
+        encoded_params.append((extension, params))
+        return True, FakeEncodedFrame()
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.cv2.imencode", fake_imencode)
+    monkeypatch.setattr(bridge, "_send_json", sent_payloads.append)
+
+    bridge.run_threaded(img_arr="rgb-image", num_records=0, mode="user", recording=False)
+
+    assert encoded_params == [(".jpg", [cv2.IMWRITE_JPEG_QUALITY, 42])]
 
 
 def test_frame_buffer_updates_frame_id_and_keeps_latest_frame():
@@ -144,6 +173,47 @@ def test_frame_buffer_updates_frame_id_and_keeps_latest_frame():
 
 def test_frame_buffer_resizes_to_target_resolution(monkeypatch):
     buffer = DriveVideoFrameBuffer(width=320, height=240)
+    source = np.zeros((120, 160, 3), dtype=np.uint8)
+    resized = np.ones((240, 320, 3), dtype=np.uint8)
+    calls = []
+
+    def fake_resize(image, size):
+        calls.append((image.shape, size))
+        return resized
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.cv2.resize", fake_resize)
+
+    buffer.update(source)
+
+    latest = buffer.get_latest()
+    assert calls == [((120, 160, 3), (320, 240))]
+    assert latest is not None
+    assert latest.frame.shape == (240, 320, 3)
+
+
+def test_frame_buffer_preserves_native_resolution_when_upscale_only(monkeypatch):
+    """upscale_only 时，源分辨率 ≥ 目标分辨率应保留原生帧，避免有损降采样。"""
+    buffer = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True)
+    source = np.zeros((480, 640, 3), dtype=np.uint8)
+    calls = []
+
+    def fake_resize(image, size):
+        calls.append(size)
+        return image
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.cv2.resize", fake_resize)
+
+    buffer.update(source)
+
+    latest = buffer.get_latest()
+    assert calls == []
+    assert latest is not None
+    assert latest.frame.shape == (480, 640, 3)
+
+
+def test_frame_buffer_still_upscales_smaller_source_when_upscale_only(monkeypatch):
+    """upscale_only 时，源分辨率 < 目标分辨率仍应上采样到目标尺寸。"""
+    buffer = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True)
     source = np.zeros((120, 160, 3), dtype=np.uint8)
     resized = np.ones((240, 320, 3), dtype=np.uint8)
     calls = []
