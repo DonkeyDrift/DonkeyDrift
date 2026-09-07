@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-07 (205)
+
+- feat(cc): CC 新增「AI 配置」板块——多供应商 AI 模型配置（API Key + Codex OAuth 设备码登录）（Issue #403）
+  - 背景：集中配置 AI 模型供应商供各 AI 功能统一调用（TE「AI 一键筛选」#402 是第一个消费方）；参考 CC Switch 设计（供应商预设 + 自定义 + 一键切换当前 + Codex ChatGPT 设备码登录）。
+  - 后端 `web_ui/backend/routers/ai_config.py`（新增，`main.py` 注册 `/api/ai-config`）：预设供应商 zhipu/codex/anthropic/moonshot/qwen/deepseek + 自定义；凭据本地-only 持久化 `~/.donkeycar/ai_config.json`（绝不进仓库）；API Key/OAuth token 只返回掩码（sk-***last4）与「是否已配置」；CRUD + 切换当前 + 多账号 + Codex 设备码 OAuth（client_id 可覆盖）+ `/test` 连通测试；`resolve_active_credentials()` 供 #402 消费。
+  - 前端 `web_ui/frontend/src/components/AiSettingsPanel.tsx`（新增）作为 Car Connector 第三块面板：供应商列表/编辑/切换/自定义增删/设备码 UI/连接测试；`services/api.ts` 新增 aiConfig 服务。
+  - 测试同步：`test_ai_config.py` 12 例；`AiSettingsPanel.test.tsx` 3 例。实测 pytest 12 全过、vitest 39 文件 234 例全绿、`npm run build` 通过。
+  - 已知限制：Codex 设备码端点无法用真实账号联调（client_id 按 cc-switch 实现，可环境变量覆盖）；`/test` 对 Codex OAuth 账号暂不支持。
+
 ## 2026-09-07 (204)
 
 - feat(tub): TE 新增「AI 一键筛选」——识别碰撞后倒车片段、曲线高亮、确认删除可撤销（Issue #402）
