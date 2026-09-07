@@ -806,6 +806,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
         video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
         webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
         webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+        jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
     )
     # inputs 顺序必须与 DriveApiBridge.run_threaded 签名严格一致（Vehicle 按位置解包）：
     # (img_arr, num_records, mode, recording, imu_gz, imu_gx, imu_gy,

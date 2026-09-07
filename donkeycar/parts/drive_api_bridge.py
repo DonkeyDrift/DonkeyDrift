@@ -95,9 +95,11 @@ class DriveVideoFrameBuffer:
     """只保留最新图像帧的低延迟缓冲。"""
 
     def __init__(self, width: int = 320, height: int = 240,
-                 clock: Callable[[], float] = time.time, history_size: int = 120):
+                 clock: Callable[[], float] = time.time, history_size: int = 120,
+                 upscale_only: bool = False):
         self.width = width
         self.height = height
+        self.upscale_only = upscale_only
         self.clock = clock
         self.frame_id = 0
         self.latest: Optional[DriveVideoFrame] = None
@@ -134,9 +136,14 @@ class DriveVideoFrameBuffer:
         shape = getattr(img_arr, "shape", None)
         if shape is None or len(shape) < 2:
             return img_arr
-        if shape[0] == self.height and shape[1] == self.width:
+        h, w = shape[0], shape[1]
+        if h == self.height and w == self.width:
             return img_arr
         if cv2 is None:
+            return img_arr
+        if self.upscale_only and h >= self.height and w >= self.width:
+            # 预览源分辨率已不低于目标分辨率：保留原生高分辨率帧，避免有损降采样
+            #（模拟器预览「最高画质」：渲染分辨率≥ DRIVE_VIDEO_WIDTH×HEIGHT 时直接使用）。
             return img_arr
         return cv2.resize(img_arr, (self.width, self.height))
 
@@ -282,7 +289,8 @@ class DriveApiBridge:
                  auto_start: bool = True, video_transport: str = "webrtc",
                  video_width: int = 320, video_height: int = 240,
                  video_fps: int = 60, webrtc_enabled: bool = True,
-                 webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0):
+                 webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0,
+                 jpeg_quality: int = 95, preserve_source_resolution: bool = False):
         self.server_url = self._with_role(server_url, role)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
@@ -291,7 +299,10 @@ class DriveApiBridge:
         self.webrtc_enabled = webrtc_enabled
         self.webrtc_local_description_timeout = webrtc_local_description_timeout
         self.webrtc_ice_servers = parse_webrtc_ice_servers(os.environ.get("DRIVE_WEBRTC_ICE_SERVERS") or webrtc_ice_servers)
-        self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height)
+        self.jpeg_quality = jpeg_quality
+        self.preserve_source_resolution = preserve_source_resolution
+        self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height,
+                                                 upscale_only=preserve_source_resolution)
 
         self.angle = 0.0
         self.throttle = 0.0
@@ -692,7 +703,7 @@ class DriveApiBridge:
         if cv2 is None:
             return
         frame = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
-        ok, encoded = cv2.imencode(".jpg", frame)
+        ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
         if not ok:
             return
         frame_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
