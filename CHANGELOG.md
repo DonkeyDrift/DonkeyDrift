@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-07 (203)
+
+- fix(trainer): 导入模型支持 loss 曲线与元数据——补传接口 + 列表悬停预览（Issue #407）
+  - 背景：外部导入的模型没有训练产物，列表里没有 loss 徽章入口；用户期望悬停即可看到 model loss 图。
+  - 后端 `web_ui/backend/routers/trainer.py`：`POST /models/import` 可选 `loss_image`（PNG/JPG，JPEG 自动转 PNG）与 `meta_json`（final_loss/best_loss），落盘 `<stem>.png`/`<stem>_meta.json` 让 list_models 自动关联；新增 `POST /models/{name}/loss` 补传接口（basename 防穿越、模型存在性校验）。
+  - 前端 `web_ui/frontend/src/components/trainer/ModelsList.tsx`：有 loss 数据的模型悬停 300ms 浮层显示曲线（移出消失），保留点击绿色徽章弹窗；导入对话框支持附带 loss 图与 meta；无 loss 模型显示「补传 loss」入口；`services/api.ts` 新增 `uploadModelLoss`。
+  - 测试同步：`test_trainer_models.py` +6；`ModelsList.test.tsx` 更新+新增。实测 pytest 15 全过、vitest 38 文件 233 例全绿、`npm run build` 通过。
+
+
 ## 2026-09-07 (202)
 
 - fix(cc): CC 导航入口改造——删除「Car Connector」文字标题，小齿轮移入顶栏右侧控制区（Issue #406）
