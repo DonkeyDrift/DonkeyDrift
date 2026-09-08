@@ -35,17 +35,19 @@ describe('CarConnectorButton（Issue #406 顶栏图标入口）', () => {
 
   it('highlights the whole frame (bg + border + icon) in cyan when on /connector', () => {
     renderAt('/connector');
-    const cls = screen.getByRole('link', { name: 'common.nav.carConnector' }).className;
-    expect(cls).toContain('bg-[#5cc8ff]/10');
-    expect(cls).toContain('border-[#5cc8ff]/60');
-    expect(cls).toContain('text-[#5cc8ff]');
+    const link = screen.getByRole('link', { name: 'common.nav.carConnector' });
+    expect(link.className).toContain('bg-[#5cc8ff]/10');
+    expect(link.className).toContain('border-[#5cc8ff]/60');
+    expect(link.className).toContain('text-[#5cc8ff]');
+    expect(link).toHaveAttribute('aria-current', 'page');
   });
 
   it('uses the neutral zinc frame (same as mute/theme/language) on other routes', () => {
     renderAt('/drive');
-    const cls = screen.getByRole('link', { name: 'common.nav.carConnector' }).className;
-    expect(cls).not.toContain('border-[#5cc8ff]/60');
-    expect(cls).toContain('bg-zinc-800');
-    expect(cls).toContain('border-zinc-700');
+    const link = screen.getByRole('link', { name: 'common.nav.carConnector' });
+    expect(link.className).not.toContain('border-[#5cc8ff]/60');
+    expect(link.className).toContain('bg-zinc-800');
+    expect(link.className).toContain('border-zinc-700');
+    expect(link).not.toHaveAttribute('aria-current');
   });
 });

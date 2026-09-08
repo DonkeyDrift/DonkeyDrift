@@ -7,7 +7,9 @@ import { useTranslation } from '@/i18n';
 // 文字」改为右侧控制区里的纯图标按钮。样式与旁边的静音按钮（ConsoleMuteButton）逐类
 // 一致——相同尺寸/圆角/边框/悬停；激活态（位于 /connector）整框蓝化：浅蓝底 + 蓝边框
 // + 蓝图标（bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]），与静音键的激活态
-// 同款，而不是只把图标染蓝、框仍是灰色。文字语义由 aria-label / title 保留
+// 同款，而不是只把图标染蓝、框仍是灰色。浅色主题在 themes/theme-light.css 里有同款
+// 覆盖（以 [aria-current="page"] 为激活态标记，与静音键 [aria-pressed="true"] 对应）。
+// 文字语义由 aria-label / title 保留
 //（复用 common.nav.carConnector）。
 export const CarConnectorButton: React.FC = () => {
   const { t } = useTranslation();
@@ -18,6 +20,7 @@ export const CarConnectorButton: React.FC = () => {
       to="/connector"
       aria-label={t('common.nav.carConnector')}
       title={t('common.nav.carConnector')}
+      aria-current={active ? 'page' : undefined}
       className={`car-connector-btn flex items-center justify-center w-8 h-8 rounded-full border transition-colors ${
         active
           ? 'bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]'
