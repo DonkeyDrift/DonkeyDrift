@@ -1047,6 +1047,61 @@ def test_endpoint_error_from_automation_is_500(http_server, monkeypatch):
 
 
 # ===========================================================================
+# _extract_dsh_web_url（就绪 banner 行锚定的入口提取）
+# ===========================================================================
+# 装了 dsh-remote-web-ui（web-all 全家桶成员）后的真实输出顺序：插件
+# 的 LAN 可达行先于 dsh web banner 出现（2026-09-08 实测）
+_NOISY_OUTPUT = (
+    "remote-web-ui: the paired Web GUI is reachable on LAN at "
+    "http://192.168.3.62:58641\r\n"
+    "remote-web-ui: LAN-exposed bind — pairing gates the /remote channel; "
+    "direct /api stays under the harness fence + browser auth\r\n"
+    "dsh web: http://127.0.0.1:58641/?token=AbC_123 "
+    "(LAN: http://192.168.3.62:58641/?token=AbC_123)\r\n"
+)
+
+
+class TestExtractDshWebUrl:
+    def test_noise_before_banner_still_gets_token_url(self):
+        # 插件 URL 行先出现也不抢走提取：banner 行才是权威入口（带 token）
+        assert dsh_web._extract_dsh_web_url(_NOISY_OUTPUT) == \
+            "http://127.0.0.1:58641/?token=AbC_123"
+
+    def test_old_style_banner_without_token(self):
+        # 旧版 banner（无 token、带 LAN 尾注）照常提取；提取器吃的是已剥
+        # ANSI 的文本（与 _spawn_and_capture 的调用一致）
+        assert dsh_web._extract_dsh_web_url(kimi_web.strip_ansi(
+            "\x1b[?1049hdsh web: http://127.0.0.1:58641 "
+            "(LAN: http://192.168.3.57:58641)\r\n")) == \
+            "http://127.0.0.1:58641"
+
+    def test_url_without_banner_returns_none(self):
+        # 只有插件噪声、没有 ready banner：绝不把噪声 URL 当入口（防垂死
+        # 进程打印 URL 被误判为启动成功）
+        assert dsh_web._extract_dsh_web_url(
+            "remote-web-ui: reachable on LAN at http://192.168.3.62:58641\r\n"
+            "Error: plugin tree failed to load\r\n") is None
+
+    def test_empty_output_returns_none(self):
+        assert dsh_web._extract_dsh_web_url("") is None
+
+    def test_spawn_with_noisy_output_captures_token(self):
+        # 端到端：带噪声的真实输出顺序下冷启动，抓到带 token 的入口
+        proc = _FakeProc(payload=_NOISY_OUTPUT.encode("utf-8"), hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/home/u/env/bin/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert result["url"] == ("http://192.168.3.10:58641/?token=AbC_123"
+                                 "&dsh_new_session=1")
+        # 落盘登记同样带 token（跨重启复用的 token 来源）
+        assert dsh_web._read_entry_state()["url"] == \
+            "http://192.168.3.10:58641/?token=AbC_123"
+
+
+# ===========================================================================
 # _mark_new_session（URL 追加 ?dsh_new_session=1）
 # ===========================================================================
 def test_mark_new_session_appends_marker_and_is_idempotent():

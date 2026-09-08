@@ -71,10 +71,10 @@ from pathlib import Path
 
 # 复用 kimi_web 的通用机制（同包内私有工具，见各引用处注释）
 from donkeycar.launcher.kimi_web import (
+    _ANY_URL_RE,
     _lan_ip,
     _mdns_hostname,
     _lan_url,
-    extract_web_url,
     strip_ansi,
 )
 
@@ -574,6 +574,34 @@ def _live_spawned_url():
     return _probe_dsh_fixed_port()
 
 
+# dsh web 就绪 banner 的行前缀（剥 ANSI 后按行匹配）：banner 行是权威
+# 入口来源（新版必带 ?token=）。URL 行尾可能粘着的句读（与 kimi_web 的
+# _URL_TRAILING_PUNCT 同款语义）
+_DSH_BANNER_PREFIX = "dsh web:"
+_DSH_URL_TRAILING_PUNCT = ".,;:!?"
+
+
+def _extract_dsh_web_url(plain: str):
+    """从（已剥 ANSI 的）dsh 输出提取就绪 banner 行里的入口 URL。
+
+    只认 ``dsh web:`` 开头的 banner 行、取该行第一个 URL：新版 banner
+    必带 ``?token=``（0.1.2-rc.1 实测），是唯一可用入口；插件可能更早
+    打印自己的 URL（如 dsh-remote-web-ui 的 "reachable on LAN at
+    http://…" 行），通用提取（kimi_web.extract_web_url 的"文本里第一个
+    URL"兜底）会先到先得抓丢 token、甚至把垂死进程打印的任意 URL 误判
+    为启动成功。找不到 banner 行返回 None——ready banner 没出现就当未
+    就绪（超时/退出路径各自报现场），绝不退回通用兜底。
+    """
+    for line in plain.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(_DSH_BANNER_PREFIX):
+            continue
+        m = _ANY_URL_RE.search(stripped)
+        if m:
+            return m.group(0).rstrip(_DSH_URL_TRAILING_PUNCT)
+    return None
+
+
 def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
                        popen_fn=None):
     """拉起 ``dsh web``（0.0.0.0 + 固定专属端口 ``DSH_WEB_PORT`` + 可选
@@ -630,14 +658,14 @@ def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
     error = None
     while True:
         plain = _text()
-        url = extract_web_url(plain)
+        url = _extract_dsh_web_url(plain)
         if url:
             return proc, url, None
         if proc.poll() is not None:
             # 进程退出后管道里可能还有未读尽的残余输出，稍等补读再判定
             time.sleep(0.3)
             plain = _text()
-            url = extract_web_url(plain)
+            url = _extract_dsh_web_url(plain)
             if url:
                 return proc, url, None
             error = (f"dsh web 进程提前退出（码 {proc.returncode}）；"
