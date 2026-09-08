@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-08 (210)
+
+- fix(cc): 静音键禁用态误报修复——发现中显示「连接中」，代理请求加兜底超时
+  - 背景：用户反馈 DD 页面静音按键「点不了」。实测按钮是禁用态（title「Drifter Console 不在线」），根因是页面加载后局域网扫描发现车端需要数秒，这期间按钮禁用且误报「不在线」；另外前端代理 fetch 无超时，车端 IP 失效导致请求挂起时失败分支永不触发、按钮会永久卡死禁用态。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：静音键改用 `useConsoleDevice` 的 `resolving` 状态——扫描进行中 title 显示 `console.connecting`（连接中…），扫描失败/确不可达才显示不在线。
+  - `web_ui/frontend/src/services/console.ts`：`consoleRequest` 在调用方未提供 signal 时附加 12s `AbortController` 兜底超时（后端代理自身 10s 超时留余量），挂起请求也能触发失败分支自愈（refresh 重扫换新 IP）。
+  - 测试同步：`ConsoleControls.test.tsx` +1（resolving→连接中）；新增 `services/console.test.ts` 2 例（超时中止 / 显式 signal 透传）。实测 `vitest run` 254 例全绿、`npm run build` 通过。
+
 ## 2026-09-08 (209)
 
 - fix(zcode): ZCode 远控点击卡死在「等待桌面端确认配对…」——取活链 CDP 端口改专用候选，避开被占用的 9222
