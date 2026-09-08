@@ -334,9 +334,13 @@ async def _cdp_remote_url() -> str | None:
                 "window.zcode && window.zcode.getWebRemoteControlStatus"
                 " ? window.zcode.getWebRemoteControlStatus() : null",
             )
-            if not isinstance(status, dict):
-                return None
-            if status.get("status") != "running":
+            if isinstance(status, dict) and status.get("connectUrl"):
+                # 远控会话已在线（v3.8.1 实测 status="active"，旧版曾为 "running"）：
+                # 直接复用 connectUrl，绝不调 startWebRemoteControl——对活动会话调
+                # start 会触发桌面端重启会话（日志 stopped reason=restart），把已
+                # 连接的手机/浏览器端全部踢成「桌面端已离线」
+                return _refresh_t(status["connectUrl"])
+            if isinstance(status, dict):
                 workspace = (
                     _read_json(_v2_dir() / "setting.json").get(
                         "webRemoteControlLastEnabledContext"
@@ -349,8 +353,8 @@ async def _cdp_remote_url() -> str | None:
                     + json.dumps({"workspacePath": workspace})
                     + ")",
                 )
-            if isinstance(status, dict) and status.get("connectUrl"):
-                return _refresh_t(status["connectUrl"])
+                if isinstance(status, dict) and status.get("connectUrl"):
+                    return _refresh_t(status["connectUrl"])
     except Exception as e:
         logger.info("CDP 取 ZCode 远控链接失败: %s", e)
     return None
