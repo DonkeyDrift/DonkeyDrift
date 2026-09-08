@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-08 (211)
+
+- fix(launcher): 「打开 dsh」about:blank——dsh 自动升级 0.1.2-rc.1 引入根页面 token 鉴权，打断 launcher 的复用/探测链路
+  - 背景：dsh 被插件安装会话于 2026-09-08 20:16 自动升级到 0.1.2-rc.1，两层断裂：① 升级时仍在跑的旧 dsh web 进程用内存里的旧 manifest 组装器吐出无 `batches` 的 boot manifest，磁盘上的新前端解析器抛 "client-modules: boot manifest batches must be an array"（Failed to load plugins）；② 重启实例后新版对根页面启用 per-process token 鉴权——无 token `GET /` 一律 401，`_probe_root`/`_probe_dsh_fixed_port` 均判"实例不在"→ 每次点击「打开 dsh」都走冷启动 → 端口被存活实例占用 EADDRINUSE 退出（码 1）→ 浏览器 about:blank。
+  - `donkeycar/launcher/dsh_web.py`：`_probe_root` 兼容 200/401 两时代（401 即新版 token 门在应答）；`_probe_dsh_fixed_port` 新增 token 时代判定——401 响应体须含 dsh 专属文案 `dsh web authentication required`（外部服务的 401 不认），且 `~/.donkeycar/dsh_web_entry.json` 登记的带 token 入口经 `_probe_token_entry` 验证有效（303/200）才复用（token query 保留、`_lan_url` 改写当前局域网入口）；新增 `_write_entry_state`/`_read_entry_state` 把 banner 抓到的带 token 入口原子落盘（跨 launcher 重启的复用通道）；`_probe_token_entry` 用 http.client 禁跳转取首响应（有效 token 回 303 铸会话 cookie，跟跳转会丢 cookie 二次 401 误判失效）；`_SPAWNED` 登记条目新增 `url` 字段（复用返回带 token 入口，旧式无 url 条目退回裸入口）；冷启动失败且固定端口被存活 dsh 占用但复用不了时，报"占用且 token 未知"的可行动提示而非裸退出码现场。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 14 例（401 存活判定/500 判死、401+登记有效复用、无登记/坏 token/外部 401 文案/登记端口不符均不复用、launcher 重启后纯靠登记复用、内存登记带 token 复用、启动成功写登记、端口占用提示、`_probe_token_entry` 真实 HTTP 服务器验证禁跳转 303/无效 401/连接失败 None）；`test_dead_entry_removed` 断言改 proc/port 子集（登记条目新增 url 字段）；autouse fixture 把登记文件钉到 tmp_path 隔离真实 HOME。实测本文件 59 例全绿、launcher 全家 202 例全绿。
+  - 真机端到端实测：冷启动 3.3s 抓到带 token 入口并落盘登记；二次调用 0.03s 复用同 token 入口（内存登记）；跨进程（模拟 launcher 重启、空内存登记）0.02s 纯靠登记文件复用成功；页面 200 且 boot manifest 含 batches（Failed to load plugins 消失）。
+
 ## 2026-09-08 (210)
 
 - fix(cc): 静音键禁用态误报修复——发现中显示「连接中」，代理请求加兜底超时

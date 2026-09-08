@@ -8,7 +8,9 @@
 - _patch_client_uuid_polyfill：client.js 顶部注入 crypto.randomUUID 兜底
   （非安全上下文下 RFC4122 v4，见 _PATCH_UUID_*）
 - _probe_dsh_fixed_port：固定端口特征探测（200 且响应体含
-  __DSH_BOOT__ 才视为 dsh；无标记/连接失败返回 None）
+  __DSH_BOOT__ 才视为 dsh；无标记/连接失败返回 None）；新版 dsh
+  （≥0.1.2-rc.1）token 鉴权时代：无 token GET / 的 401 + dsh 专属文案 +
+  登记的带 token 入口（_probe_token_entry 验证 303/200）才复用
 - launch_dsh_web：存活实例复用（不起子进程）、冷启动拉起
   ``dsh web --patch … --port 58641 --trusted-host …``（固定专属端口
   DSH_WEB_PORT；_FakeProc 脚本化管道输出）成功抓 banner URL 且改写为
@@ -21,12 +23,13 @@
 ESP32 origin 跨域调用依赖它）。不起真实 dsh。
 """
 
+import io
 import json
 import os
 import threading
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -121,6 +124,14 @@ def _clean_spawned():
     """每个测试后清掉 _SPAWNED，避免跨测试污染。"""
     yield
     dsh_web._SPAWNED.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_entry_state(tmp_path, monkeypatch):
+    """把入口登记文件钉到临时目录，避免测试读写真实的
+    ~/.donkeycar/dsh_web_entry.json（新版 dsh token 时代的复用通道）。"""
+    monkeypatch.setattr(dsh_web, "_entry_state_path",
+                        lambda: tmp_path / "dsh_web_entry.json")
 
 
 # 真实 _probe_dsh_fixed_port 的引用：下面的 autouse fixture 默认把它钉成
@@ -349,8 +360,10 @@ class TestSpawnedRegistry:
             resolve_binary_fn=lambda: "/x/dsh",
             lan_ip_fn=lambda: "192.168.3.10",
             popen_fn=_make_popen([fresh]))
-        # 死条目剔除后走冷启动（固定端口探测被 autouse fixture 钉为 None）
-        assert dsh_web._SPAWNED == [{"proc": fresh, "port": 58641}]
+        # 死条目剔除后走冷启动（固定端口探测被 autouse fixture 钉为 None）；
+        # 新式登记带 url 字段，断言按 proc/port 子集比较
+        assert [(e["proc"], e["port"]) for e in dsh_web._SPAWNED] == \
+            [(fresh, 58641)]
         assert result["status"] == "ok"
 
     def test_probe_failure_removed_then_cold_start(self, monkeypatch):
@@ -477,6 +490,206 @@ class TestFixedPortReuse:
         assert proc.killed is True  # 冷启动失败路径杀净
         # 冷启动前一次 + 失败后兜底一次，都探回环固定端口
         assert calls == ["http://127.0.0.1:58641/"] * 2
+
+
+# ===========================================================================
+# 新版 dsh（≥0.1.2-rc.1，2026-09-08 自动升级引入）token 鉴权时代：
+# 无 token GET / 返回 401；复用必须用登记的带 token 入口 URL
+# ===========================================================================
+# 新版 dsh 无 token GET / 的 401 响应体（0.1.2-rc.1 实测）
+_DSH_AUTH_401_BODY = (b"dsh web authentication required; "
+                      b"reopen the URL printed by dsh web.")
+# 新版 dsh 就绪 banner：入口 URL 带 ?token=（0.1.2-rc.1 实测格式）
+_DSH_BANNER_TOKEN = (b"\x1b[?1049hdsh web: http://127.0.0.1:58641/"
+                     b"?token=AbC_123\r\n")
+
+
+def _raise_401(body=_DSH_AUTH_401_BODY):
+    """构造 dsh 401 应答的 urlopen 替身（带可读响应体）。"""
+    def fake_urlopen(url, timeout=None):
+        raise urllib.error.HTTPError(
+            url, 401, "Unauthorized", None, io.BytesIO(body))
+    return fake_urlopen
+
+
+class TestProbeRootTokenEra:
+    def test_401_counts_as_alive(self, monkeypatch):
+        # 新版 dsh token 门：无 token GET / 是 401，仍是 dsh web 在应答
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_401())
+        assert dsh_web._probe_root("127.0.0.1", 58641) is True
+
+    def test_other_http_error_counts_as_dead(self, monkeypatch):
+        def fake_urlopen(url, timeout=None):
+            raise urllib.error.HTTPError(
+                url, 500, "Server Error", None, io.BytesIO(b""))
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        assert dsh_web._probe_root("127.0.0.1", 58641) is False
+
+
+class TestProbeDshFixedPortTokenEra:
+    def test_401_with_marker_and_valid_state_reuses_token_url(self,
+                                                              monkeypatch):
+        # 新版 token 门 + 登记的 token 有效（303 铸 cookie）→ 复用带
+        # token 入口（改写为局域网 host，token query 保留）
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_401())
+        dsh_web._write_entry_state(
+            "http://192.168.3.10:58641/?token=AbC_123", 58641, 4242)
+        seen = []
+        monkeypatch.setattr(
+            dsh_web, "_probe_token_entry",
+            lambda url, timeout=None: seen.append(url) or 303)
+        assert dsh_web._probe_dsh_fixed_port() == \
+            "http://192.168.3.10:58641/?token=AbC_123"
+        # 登记入口先改写为回环验证（保留 token query）
+        assert seen == ["http://127.0.0.1:58641/?token=AbC_123"]
+
+    def test_401_without_state_returns_none(self, monkeypatch):
+        # 端口上是新版 dsh 但无入口登记（如 launcher 首次接管外部实例）：
+        # 复用不了（拿不到 token），返回 None 走冷启动
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_401())
+        assert dsh_web._probe_dsh_fixed_port() is None
+
+    def test_401_stale_token_returns_none(self, monkeypatch):
+        # 登记的 token 已随旧进程失效（401）：不复用，走冷启动
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_401())
+        dsh_web._write_entry_state(
+            "http://192.168.3.10:58641/?token=STALE", 58641, 1)
+        monkeypatch.setattr(dsh_web, "_probe_token_entry",
+                            lambda url, timeout=None: 401)
+        assert dsh_web._probe_dsh_fixed_port() is None
+
+    def test_401_foreign_body_returns_none(self, monkeypatch):
+        # 401 但响应体不是 dsh 专属文案：端口被外部鉴权服务占用，不能当 dsh
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(urllib.request, "urlopen",
+                            _raise_401(b"Basic realm=router"))
+        assert dsh_web._probe_dsh_fixed_port() is None
+
+    def test_state_port_mismatch_returns_none(self, monkeypatch):
+        # 登记的入口指向别的端口（陈旧登记）：不匹配固定端口，不复用
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_401())
+        dsh_web._write_entry_state(
+            "http://192.168.3.10:9999/?token=AbC_123", 9999, 1)
+        monkeypatch.setattr(dsh_web, "_probe_token_entry",
+                            lambda url, timeout=None: 303)
+        assert dsh_web._probe_dsh_fixed_port() is None
+
+
+class TestFixedPortReuseTokenEra:
+    def test_empty_registry_reuses_token_state_after_restart(self,
+                                                              monkeypatch):
+        # launcher 重启后 _SPAWNED 丢失（模拟）+ 新版 token 门：401 +
+        # 登记的 token 入口有效 → 复用，不冷启动
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port",
+                            _REAL_PROBE_DSH_FIXED_PORT)
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_401())
+        dsh_web._write_entry_state(
+            "http://192.168.3.10:58641/?token=AbC", 58641, 1)
+        monkeypatch.setattr(dsh_web, "_probe_token_entry",
+                            lambda url, timeout=None: 303)
+        spawned = []
+        result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
+        assert result == {"status": "ok",
+                          "url": "http://192.168.3.10:58641/"
+                                 "?token=AbC&dsh_new_session=1"}
+        assert spawned == []  # 复用路径不起子进程
+        # 实例非本进程拉起，没有 proc 可登记
+        assert dsh_web._SPAWNED == []
+
+    def test_spawn_failure_with_occupied_port_reports_hint(self, monkeypatch):
+        # 冷启动 EADDRINUSE 且固定端口被存活的 dsh 占用但复用不了：
+        # 报"占用"提示而不是裸的退出码现场
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port", lambda: None)
+        monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        proc = _FakeProc(payload=b"Error: address already in use\r\n",
+                         exit_code=1)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=5.0,
+            resolve_binary_fn=lambda: "/x/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "error"
+        assert "占用" in result["error"]
+
+
+class TestSpawnedRegistryTokenEra:
+    def test_live_entry_reuses_registered_token_url(self, monkeypatch):
+        # 内存登记的新式条目（带 url）：复用时返回带 token 的入口
+        proc = _FakeProc(hold=True)
+        dsh_web._SPAWNED.append({
+            "proc": proc, "port": 58641,
+            "url": "http://192.168.3.10:58641/?token=AbC"})
+        monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        spawned = []
+        result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
+        assert result == {"status": "ok",
+                          "url": "http://192.168.3.10:58641/"
+                                 "?token=AbC&dsh_new_session=1"}
+        assert spawned == []
+
+    def test_spawn_success_writes_entry_state(self):
+        # 新版 banner 带 token：URL 原样保留 token，内存登记与落盘登记
+        # 都存改写后的带 token 局域网入口
+        proc = _FakeProc(payload=_DSH_BANNER_TOKEN, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/home/u/env/bin/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert result["url"] == ("http://192.168.3.10:58641/?token=AbC_123"
+                                 "&dsh_new_session=1")
+        assert dsh_web._read_entry_state() == {
+            "url": "http://192.168.3.10:58641/?token=AbC_123",
+            "port": 58641, "pid": proc.pid}
+        assert dsh_web._SPAWNED[0]["url"] == \
+            "http://192.168.3.10:58641/?token=AbC_123"
+
+
+class TestProbeTokenEntry:
+    """_probe_token_entry 必须看首响应（禁跳转）：有效 token 的 303
+    铸 cookie，跟跳转会丢 cookie 二次 401 误判失效。"""
+
+    @pytest.fixture()
+    def auth_server(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if urllib.parse.urlsplit(self.path).query == "token=ok":
+                    self.send_response(303)
+                    self.send_header("Location", "/")
+                    self.send_header(
+                        "Set-Cookie", "dsh-auth-x=v1.sig; HttpOnly")
+                else:
+                    self.send_response(401)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        yield f"http://127.0.0.1:{srv.server_address[1]}"
+        srv.shutdown()
+
+    def test_valid_token_returns_303_not_followed(self, auth_server):
+        assert dsh_web._probe_token_entry(auth_server + "/?token=ok") == 303
+
+    def test_invalid_token_returns_401(self, auth_server):
+        assert dsh_web._probe_token_entry(auth_server + "/?token=bad") == 401
+
+    def test_connection_failure_returns_none(self):
+        # 没人监听的端口：连接拒绝 → None（不抛）
+        assert dsh_web._probe_token_entry("http://127.0.0.1:1/?token=ok",
+                                          timeout=1.0) is None
 
 
 # ===========================================================================
