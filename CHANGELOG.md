@@ -4,8 +4,9 @@
 
 - fix(cc): CC 齿轮按钮样式对齐静音键——激活态整框蓝化（浅蓝底 + 蓝边框 + 蓝图标）
   - 背景：用户反馈顶栏右侧的齿轮按钮小框与旁边按键（静音/主题/语言）大小与 UI 设计不一致；进入设置（/connector）时只有齿轮图标变蓝、外框仍是灰色，与静音键激活态（整框蓝化）不对称。
-  - `web_ui/frontend/src/components/CarConnectorButton.tsx`：类名与 `ConsoleMuteButton` 逐类对齐——基础 `w-8 h-8 rounded-full border transition-colors`；激活态（/connector）`bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]`（浅蓝底 + 蓝边框 + 蓝图标）；非激活态 `bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100`。
-  - 测试同步：`CarConnectorButton.test.tsx` 激活/非激活断言更新为整框蓝化类名。实测 `vitest run` 251 例全绿、`npm run build` 通过。
+  - `web_ui/frontend/src/components/CarConnectorButton.tsx`：类名与 `ConsoleMuteButton` 逐类对齐——基础 `w-8 h-8 rounded-full border transition-colors`；激活态（/connector）`bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]`（浅蓝底 + 蓝边框 + 蓝图标）；非激活态 `bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100`；新增 `aria-current={active ? 'page' : undefined}` 作激活语义标记。
+  - `web_ui/frontend/src/themes/theme-light.css`：`car-connector-btn` 加入顶栏按钮基础覆盖组（浅色底 `#f4f6f9`、边框 `#ccd5df`、inset 内圈 `#d5dce4`、字号 12px/600——此前齿轮缺这组覆盖，浅色主题下字号 16px 且无内圈，观感比邻居大、设计不一致）；补悬停 `:not([aria-current="page"]):hover` 与激活态 `[aria-current="page"]`（边框 + inset 内圈 `#5cc8ff`，镜像静音键 `[aria-pressed="true"]` 双层蓝框规则）。
+  - 测试同步：`CarConnectorButton.test.tsx` 激活/非激活断言更新为整框蓝化类名 + `aria-current`。实测 `vitest run` 251 例全绿、`npm run build` 通过；部署后以系统 Chrome 实测两种主题下激活/非激活逐值一致（HashRouter 路由 `#/connector`）。
 
 ## 2026-09-07 (207)
 
