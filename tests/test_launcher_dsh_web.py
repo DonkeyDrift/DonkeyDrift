@@ -875,6 +875,17 @@ _GATE_SNIPPET = (
     "this.schema);\n"
 )
 
+# 0.1.2-rc.1 起的镜像门写法：apply() 里单处、带 const 前缀（2026-09-08
+# 实测，旧锚点在该版未命中导致局域网设置镜像落 memory、选模型报
+# "settings are unavailable in this browser"）
+_GATE_SNIPPET_RC1 = (
+    "\t\tfunction apply(ctx) {\n"
+    "\t\t\tconst persistence = ctx.remote.$host.isLoopback "
+    "? \"host\" : \"memory\";\n"
+    "\t\t\tconst mirror = new SettingsDescribeMirror(ctx, persistence);\n"
+    "}\n"
+)
+
 
 def _make_dsh_ui_settings_tree(tmp_path, client_text):
     """搭假 dsh 安装树：<pkg>/lib/bin.js + dsh-client-ui-settings/client.js。"""
@@ -908,6 +919,26 @@ class TestPatchSettingsMirrorGate:
         patched = target.read_text(encoding="utf-8")
         dsh_web._patch_settings_mirror_gate(str(binary))
         assert target.read_text(encoding="utf-8") == patched
+
+    def test_patches_rc1_const_gate_to_host(self, tmp_path):
+        # 0.1.2-rc.1 代锚点：单处 const 前缀写法也命中并强制 host
+        binary = _make_dsh_ui_settings_tree(tmp_path, _GATE_SNIPPET_RC1)
+        dsh_web._patch_settings_mirror_gate(str(binary))
+        text = ((tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                 / "dsh-client-ui-settings" / "lib" / "client.js")
+                .read_text(encoding="utf-8"))
+        assert dsh_web._PATCH_GATE_OLD_RC1 not in text
+        assert text.count(dsh_web._PATCH_GATE_NEW_RC1) == 1
+
+    def test_rc1_hotfix_marker_recognized_as_patched(self, tmp_path):
+        # 手工热修（rc.1 新标记）过的文件不重复改写；旧代标记同样互认幂等
+        hotfixed = _GATE_SNIPPET_RC1.replace(
+            dsh_web._PATCH_GATE_OLD_RC1, dsh_web._PATCH_GATE_NEW_RC1)
+        binary = _make_dsh_ui_settings_tree(tmp_path, hotfixed)
+        dsh_web._patch_settings_mirror_gate(str(binary))
+        target = (tmp_path / "dsh" / "node_modules" / "@deepseek-ai"
+                  / "dsh-client-ui-settings" / "lib" / "client.js")
+        assert target.read_text(encoding="utf-8") == hotfixed
 
     def test_unexpected_source_skips_silently(self, tmp_path):
         # dsh 升级后代码段变了：不命中就不动文件

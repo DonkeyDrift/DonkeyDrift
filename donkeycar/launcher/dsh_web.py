@@ -201,6 +201,20 @@ _PATCH_UUID_NEW = (
 _PATCH_GATE_OLD = 'connection.isLoopback ? "host" : "memory"'
 _PATCH_GATE_NEW = ('(true) /* [donkey-launcher] trusted-host browsers reach '
                    'settings RPCs via the fence patch */ ? "host" : "memory"')
+# 0.1.2-rc.1 起镜像门只剩一处且写法变了（apply() 里带 const 前缀）；
+# 2026-09-08 实测该版服务端 settings/credentials RPC 对 trusted-host 已
+# 放行（PRIVILEGED_METHODS 栅栏已重构移除），卡局域网的只剩这个前端门
+_PATCH_GATE_OLD_RC1 = ('const persistence = ctx.remote.$host.isLoopback '
+                       '? "host" : "memory";')
+_PATCH_GATE_NEW_RC1 = ('const persistence = /* [donkey-launcher] trusted-host '
+                       'browsers reach settings RPCs via the fence patch */ '
+                       '"host";')
+# 两代锚点按序尝试：旧代（<0.1.2-rc.1，文件里 mirror/scope 两处）与新代
+# （0.1.2-rc.1+，单处带 const）
+_PATCH_GATE_GENERATIONS = (
+    (_PATCH_GATE_OLD, _PATCH_GATE_NEW),
+    (_PATCH_GATE_OLD_RC1, _PATCH_GATE_NEW_RC1),
+)
 
 # web-all 聚合 client.js（web profile 的 node_modules 里，非 dsh 安装树）的
 # remote-channel 判定：remote-web-ui 卸载后，其编译进聚合 client 的通道
@@ -414,9 +428,11 @@ def _patch_settings_mirror_gate(binary: str):
     放行，这里把前端三目条件强制为 "host"（文件内 mirror 与 scope 两处
     一并替换），让局域网浏览器真正用上服务端已放行的 RPC。
 
-    幂等/自愈语义与 ``_patch_privileged_methods`` 一致：已打过（新代码段
-    在）跳过；源码升级未命中旧片段也跳过；任何失败只告警不抛——dsh 仍
-    可启动，仅局域网设置页/模型选择不可用。
+    幂等/自愈语义与 ``_patch_privileged_methods`` 一致：已打过（任一代
+    新代码段在）跳过；按 ``_PATCH_GATE_GENERATIONS`` 两代锚点依次尝试
+    （<0.1.2-rc.1 两处三目、0.1.2-rc.1+ 单处 const），都未命中说明源码
+    又改版，跳过；任何失败只告警不抛——dsh 仍可启动，仅局域网设置页/
+    模型选择不可用。
     """
     target = _ui_settings_client_path(binary)
     if target is None:
@@ -425,20 +441,22 @@ def _patch_settings_mirror_gate(binary: str):
     try:
         with _PATCH_LOCK:
             text = target.read_text(encoding="utf-8")
-            if _PATCH_GATE_NEW in text:
-                return  # 已打过（幂等）
-            if _PATCH_GATE_OLD not in text:
-                logger.warning(
-                    "dsh 设置镜像门补丁：目标代码段未命中（dsh 可能已升级改版），"
-                    "跳过: %s", target)
+            if any(new in text for _, new in _PATCH_GATE_GENERATIONS):
+                return  # 已打过（任一代标记，幂等）
+            for old, new in _PATCH_GATE_GENERATIONS:
+                if old not in text:
+                    continue
+                tmp = target.with_name(target.name + ".donkey-patch.tmp")
+                tmp.write_text(
+                    text.replace(old, new),
+                    encoding="utf-8")
+                os.replace(tmp, target)
+                logger.info("dsh 设置镜像门补丁：局域网镜像/作用域已切 host "
+                            "模式: %s", target)
                 return
-            tmp = target.with_name(target.name + ".donkey-patch.tmp")
-            tmp.write_text(
-                text.replace(_PATCH_GATE_OLD, _PATCH_GATE_NEW),
-                encoding="utf-8")
-            os.replace(tmp, target)
-            logger.info("dsh 设置镜像门补丁：局域网镜像/作用域已切 host 模式: %s",
-                        target)
+            logger.warning(
+                "dsh 设置镜像门补丁：目标代码段未命中（dsh 可能已升级改版），"
+                "跳过: %s", target)
     except OSError as e:
         logger.warning(
             "dsh 设置镜像门补丁失败（dsh 仍可启动，局域网设置页可能不可用）: %s",

@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-08 (215)
+
+- fix(launcher): 局域网选模型报「settings are unavailable in this browser」——0.1.2-rc.1 镜像门锚点改版未命中，补丁升级支持两代锚点
+  - 背景：接 214 的 405 修复后，下一层暴露：局域网浏览器选模型/设置页报"加载提供方目录失败: settings are unavailable in this browser"。根因：0.1.2-rc.1 里 `dsh-client-ui-settings` 的镜像门只剩一处且写法变了（`const persistence = ctx.remote.$host.isLoopback ? "host" : "memory";`），launcher 的 `_patch_settings_mirror_gate` 旧锚点（`connection.isLoopback ? "host" : "memory"`）未命中被跳过——局域网浏览器镜像落 "memory"、恒 unavailable；而该版服务端 settings/credentials RPC 对 trusted-host 实测已放行（PRIVILEGED_METHODS 栅栏重构移除），卡局域网的只剩这个前端门。
+  - `donkeycar/launcher/dsh_web.py`：`_patch_settings_mirror_gate` 升级为两代锚点按序尝试（`_PATCH_GATE_GENERATIONS`：旧代两处三目 + rc.1 代单处 const），幂等检查认任一代标记（含手工热修同款文本）。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 2 例（rc.1 代锚点命中并强制 host、rc.1 热修标记幂等互认）。实测本文件 73 例全绿、launcher 全家 216 例全绿。
+  - 真机端到端验证（Playwright + 系统 Chrome，非回环域名 tony007.local）：模型选择器打开且提供方（DeepSeek）可见、设置页零报错；`/api/settings/describe` 与 `/api/credentials/describe` 局域网实测 200。残留 403 仅 web-all 家族自有桥接路由（`/api/dsh-web-ui-settings/*`、doctor/task-board/ssh，"回环或已配对"门），不影响核心提供方目录。
+
 ## 2026-09-08 (214)
 
 - fix(launcher): 局域网浏览器全部 API 报 405——remote-web-ui 卸载后 web-all 聚合 client 仍自装 fetch 劫持
