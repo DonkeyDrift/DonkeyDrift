@@ -33,13 +33,19 @@ describe('CarConnectorButton（Issue #406 顶栏图标入口）', () => {
     expect(screen.getByRole('link', { name: 'common.nav.carConnector' }).textContent).toBe('');
   });
 
-  it('highlights the gear when on /connector', () => {
+  it('highlights the whole frame (bg + border + icon) in cyan when on /connector', () => {
     renderAt('/connector');
-    expect(screen.getByRole('link', { name: 'common.nav.carConnector' }).className).toContain('text-cyan-400');
+    const cls = screen.getByRole('link', { name: 'common.nav.carConnector' }).className;
+    expect(cls).toContain('bg-[#5cc8ff]/10');
+    expect(cls).toContain('border-[#5cc8ff]/60');
+    expect(cls).toContain('text-[#5cc8ff]');
   });
 
-  it('does not highlight the gear on other routes', () => {
+  it('uses the neutral zinc frame (same as mute/theme/language) on other routes', () => {
     renderAt('/drive');
-    expect(screen.getByRole('link', { name: 'common.nav.carConnector' }).className).not.toContain('text-cyan-400');
+    const cls = screen.getByRole('link', { name: 'common.nav.carConnector' }).className;
+    expect(cls).not.toContain('border-[#5cc8ff]/60');
+    expect(cls).toContain('bg-zinc-800');
+    expect(cls).toContain('border-zinc-700');
   });
 });
