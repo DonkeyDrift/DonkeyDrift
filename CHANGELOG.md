@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-09-08 (212)
+
+- fix(launcher): dsh 入口 URL 提取锚定 ``dsh web:`` banner 行——插件噪声行抢跑导致抓丢 token
+  - 背景：装上 web-all 全家桶后其成员 `dsh-remote-web-ui` 在 dsh 就绪 banner 之前打印自己的 LAN 可达行（"reachable on LAN at http://…"，无 token），launcher 沿用 kimi_web 的通用提取（文本里第一个 URL 先到先得）抓到该噪声 URL：入口丢失 `?token=`（浏览器 401），落盘登记同样带不上 token；垂死进程打印任意 URL 还会被误判为启动成功（实测一次 duplicate-route 崩溃被当成功返回）。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_extract_dsh_web_url`——只认 ``dsh web:`` 开头的 banner 行、取该行第一个 URL（句读剥离与 kimi_web 同款）；找不到 banner 行返回 None（ready banner 未出现即未就绪，走超时/退出路径报现场），不再退回通用兜底；`_spawn_and_capture` 两处调用点切换到新提取器。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 5 例（噪声先于 banner 仍取 banner token、旧版无 token banner、只有噪声无 banner 返回 None、空输出、带噪声输出端到端冷启动抓 token 并落盘登记）。实测本文件 64 例全绿、launcher 全家 207 例全绿。
+
 ## 2026-09-08 (211)
 
 - fix(launcher): 「打开 dsh」about:blank——dsh 自动升级 0.1.2-rc.1 引入根页面 token 鉴权，打断 launcher 的复用/探测链路
