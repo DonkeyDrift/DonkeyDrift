@@ -951,6 +951,112 @@ class TestPatchSettingsMirrorGate:
 
 
 # ===========================================================================
+# _patch_remote_channel_client（web-all 聚合 client 的 remote-channel 判定）
+# ===========================================================================
+# web-all 聚合 client.js 里 remoteChannelRequired 的原始实现（0.3.17 实测）：
+# 非回环 + 策略读取失败（hostPairingPolicy 未定）时兜底返回 true → 自装
+# fetch 劫持把 /api 改写到已卸载的 /remote/* 通道（局域网 405）
+_REMOTE_CHANNEL_SNIPPET = (
+    "\t\tfunction remoteChannelRequired(hostname, snapshot, hostPairingPolicy) {\n"
+    "\t\t\tif (isLoopbackHostname(hostname)) return false;\n"
+    "\t\t\tif (snapshot.status === \"ready\") return "
+    "(snapshot.value?.enabled ?? true) && "
+    "(snapshot.value?.requirePairingForLan ?? true);\n"
+    "\t\t\treturn hostPairingPolicy !== false;\n"
+    "\t\t}\n"
+)
+
+
+def _make_web_all_profile(tmp_path, client_text):
+    """搭假 web profile：<profile>/node_modules/@linxin666/dsh-web-all/lib/
+    client.js，返回 profile 根目录。"""
+    client = (tmp_path / "node_modules" / "@linxin666" / "dsh-web-all"
+              / "lib")
+    client.mkdir(parents=True)
+    (client / "client.js").write_text(client_text, encoding="utf-8")
+    return tmp_path
+
+
+class TestPatchRemoteChannelClient:
+    def test_patches_required_to_always_false(self, tmp_path):
+        profile = _make_web_all_profile(tmp_path, _REMOTE_CHANNEL_SNIPPET)
+        assert dsh_web._patch_remote_channel_client(str(profile)) is None
+        text = ((tmp_path / "node_modules" / "@linxin666" / "dsh-web-all"
+                 / "lib" / "client.js").read_text(encoding="utf-8"))
+        assert dsh_web._PATCH_REMOTE_CHANNEL_NEW in text
+        assert dsh_web._PATCH_REMOTE_CHANNEL_OLD not in text
+        # 回环短路保留在最前，其余分支全部强制 false
+        assert "return hostPairingPolicy !== false;" not in text
+
+    def test_idempotent_second_call_is_noop(self, tmp_path):
+        profile = _make_web_all_profile(tmp_path, _REMOTE_CHANNEL_SNIPPET)
+        dsh_web._patch_remote_channel_client(str(profile))
+        target = (tmp_path / "node_modules" / "@linxin666" / "dsh-web-all"
+                  / "lib" / "client.js")
+        patched = target.read_text(encoding="utf-8")
+        dsh_web._patch_remote_channel_client(str(profile))
+        assert target.read_text(encoding="utf-8") == patched
+
+    def test_recognizes_hotfix_marker_as_patched(self, tmp_path):
+        # 手工热修（同款标记文本）过的文件视为已打补丁，不重复改写
+        hotfixed = _REMOTE_CHANNEL_SNIPPET.replace(
+            "\t\t\tif (snapshot.status === \"ready\") return "
+            "(snapshot.value?.enabled ?? true) && "
+            "(snapshot.value?.requirePairingForLan ?? true);\n"
+            "\t\t\treturn hostPairingPolicy !== false;\n",
+            dsh_web._PATCH_REMOTE_CHANNEL_NEW + "\n")
+        profile = _make_web_all_profile(tmp_path, hotfixed)
+        dsh_web._patch_remote_channel_client(str(profile))
+        target = (tmp_path / "node_modules" / "@linxin666" / "dsh-web-all"
+                  / "lib" / "client.js")
+        assert target.read_text(encoding="utf-8") == hotfixed
+
+    def test_unexpected_source_skips_silently(self, tmp_path):
+        # web-all 升级后代码段变了：不命中就不动文件
+        profile = _make_web_all_profile(tmp_path, "const x = 1;\n")
+        dsh_web._patch_remote_channel_client(str(profile))
+        target = (tmp_path / "node_modules" / "@linxin666" / "dsh-web-all"
+                  / "lib" / "client.js")
+        assert target.read_text(encoding="utf-8") == "const x = 1;\n"
+
+    def test_missing_web_all_package_skips_silently(self, tmp_path):
+        # 聚合包未安装（空 profile 目录）：不抛异常即通过
+        dsh_web._patch_remote_channel_client(str(tmp_path / "empty"))
+
+    def test_default_locator_uses_home_dsh_profiles(self, monkeypatch, tmp_path):
+        # 缺省定位走 ~/.dsh/profiles/<DSH_PROFILE 或 web>
+        monkeypatch.setattr(dsh_web.Path, "home",
+                            lambda: tmp_path)
+        monkeypatch.delenv("DSH_PROFILE", raising=False)
+        profile = _make_web_all_profile(
+            tmp_path / ".dsh" / "profiles" / "web", _REMOTE_CHANNEL_SNIPPET)
+        assert dsh_web._web_all_client_path() is not None
+        dsh_web._patch_remote_channel_client()
+        text = ((tmp_path / ".dsh" / "profiles" / "web" / "node_modules"
+                 / "@linxin666" / "dsh-web-all" / "lib" / "client.js")
+                .read_text(encoding="utf-8"))
+        assert dsh_web._PATCH_REMOTE_CHANNEL_NEW in text
+
+    def test_launch_patches_remote_channel_before_spawn(self, monkeypatch,
+                                                        tmp_path):
+        # launch_dsh_web 冷启动路径会先打 remote-channel 补丁再拉子进程
+        calls = []
+        monkeypatch.setattr(dsh_web, "_patch_remote_channel_client",
+                            lambda profile_dir=None: calls.append(profile_dir))
+        for name in ("_patch_privileged_methods", "_patch_client_uuid_polyfill",
+                     "_patch_settings_mirror_gate"):
+            monkeypatch.setattr(dsh_web, name, lambda b: None)
+        proc = _FakeProc(payload=_DSH_BANNER, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/x/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([proc]))
+        assert result["status"] == "ok"
+        assert calls == [None]  # 缺省 profile 定位（无参调用）
+
+
+# ===========================================================================
 # POST /api/launch/dsh 端点（内存 HTTP 服务器）
 # ===========================================================================
 @pytest.fixture()

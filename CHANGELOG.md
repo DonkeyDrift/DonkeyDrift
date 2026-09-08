@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-08 (214)
+
+- fix(launcher): 局域网浏览器全部 API 报 405——remote-web-ui 卸载后 web-all 聚合 client 仍自装 fetch 劫持
+  - 背景：卸载 remote-web-ui（用户要求，配对窗口问题）后，编译进 web-all 聚合 client 的其通道逻辑仍在非回环页面激活：读 `/api/pair/status` 拿 404（插件已不在）即兜底假定"需要配对"，给页面装 fetch/WebSocket 劫持，把所有 `/api/*` 请求改写到已不存在的 `/remote/*` 通道——局域网浏览器每个 RPC 都报 `transport failure … HTTP 405`（实测 `/api/llm/listProviders` 直连 200、`/remote/api/` 前缀 405），模型选择/设置页全挂；服务端任何探测都 200，纯客户端行为。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_patch_remote_channel_client` 幂等自愈补丁——把聚合 client.js 的 `remoteChannelRequired` 强制恒 false（API 全部直连，安全边界回到 trusted-host 栅栏）；定位走 web profile（`~/.dsh/profiles/<DSH_PROFILE|web>/node_modules/@linxin666/dsh-web-all/lib/client.js`，非 dsh 安装树）；幂等标记与手工热修文本一致（已打过/升级未命中/包未安装均静默跳过）；`launch_dsh_web` 冷启动路径在其余三个补丁之后调用。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 7 例（补丁生效、幂等、识别热修标记、升级未命中跳过、包未安装跳过、缺省 HOME 定位、launch 先打补丁再拉进程）。实测本文件 71 例全绿、launcher 全家 214 例全绿。
+  - 真机端到端验证（Playwright + 系统 Chrome，非回环域名 tony007.local）：`/api/llm/listProviders` 网络层实测 200、零 `/remote/` 请求、`window.__DSH_TRANSPORT__` 未定义（无劫持）、模型选择器可正常打开、无任何"加载提供方目录失败"/405/配对弹窗。
+
 ## 2026-09-08 (213)
 
 - fix(zcode-remote): 取链复用活动远控会话，不再误判 status 未运行而强制重启（根治「桌面端已离线」弹窗）

@@ -39,6 +39,13 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   ``TypeError``，连接永远到不了 connected、DSH 停在"选择工作区"不会
   自动进入 Projects。修法见 ``_patch_client_uuid_polyfill``：启动前对
   client.js 顶部插入 getRandomValues 版 UUID 兜底（幂等自愈）。
+- web-all 聚合 client 里编译了 remote-web-ui 的通道逻辑：该插件卸载后
+  聚合 client 仍会在读配对策略失败（/api/pair/status 404）时兜底假定
+  "需要配对"，给非回环页面自装 fetch/WebSocket 劫持，把 /api 请求改写
+  到已不存在的 /remote/* 通道——局域网浏览器全部 API 报 HTTP 405。
+  修法见 ``_patch_remote_channel_client``：启动前对聚合 client.js 的
+  remoteChannelRequired 强制恒 false（幂等自愈；目标在 web profile 的
+  node_modules，非 dsh 安装树）。
 - 就绪 banner 一行：``dsh web: http://127.0.0.1:<port>/?token=…``，
   抓第一个 URL（回环）后改写为局域网 IP（复用 kimi_web 的 _lan_url，
   issue #125 同款问题）。
@@ -194,6 +201,27 @@ _PATCH_UUID_NEW = (
 _PATCH_GATE_OLD = 'connection.isLoopback ? "host" : "memory"'
 _PATCH_GATE_NEW = ('(true) /* [donkey-launcher] trusted-host browsers reach '
                    'settings RPCs via the fence patch */ ? "host" : "memory"')
+
+# web-all 聚合 client.js（web profile 的 node_modules 里，非 dsh 安装树）的
+# remote-channel 判定：remote-web-ui 卸载后，其编译进聚合 client 的通道
+# 逻辑仍会在"读配对策略失败"（/api/pair/status 404）时兜底假定"需要
+# 配对"，主动给页面装 fetch/WebSocket 劫持，把所有 /api 请求改写到已
+# 不存在的 /remote/* 通道——局域网浏览器全部 API 报 HTTP 405（2026-09-08
+# 实测：/api/llm/listProviders 直连 200、/remote/ 前缀 405）。补丁把
+# remoteChannelRequired 强制恒 false：永不走 /remote 通道，API 全部直连
+# （安全边界回到 trusted-host 栅栏，与卸载该插件的决定一致）。
+_PATCH_REMOTE_CHANNEL_OLD = (
+    "\t\t\tif (snapshot.status === \"ready\") return "
+    "(snapshot.value?.enabled ?? true) && "
+    "(snapshot.value?.requirePairingForLan ?? true);\n"
+    "\t\t\treturn hostPairingPolicy !== false;"
+)
+_PATCH_REMOTE_CHANNEL_NEW = (
+    "\t\t\t/* [donkey-launcher] remote-web-ui host uninstalled: "
+    "/api/pair/status 404 must not default to \"pairing required\" — "
+    "never route /api through the gated /remote channel */\n"
+    "\t\t\treturn false;"
+)
 
 # 补丁锁：launcher 多线程，防并发重打
 _PATCH_LOCK = threading.Lock()
@@ -414,6 +442,64 @@ def _patch_settings_mirror_gate(binary: str):
     except OSError as e:
         logger.warning(
             "dsh 设置镜像门补丁失败（dsh 仍可启动，局域网设置页可能不可用）: %s",
+            e)
+
+
+def _web_all_client_path(profile_dir=None):
+    """定位 web profile 里 @linxin666/dsh-web-all 的聚合 client.js。
+
+    与其它三个补丁不同，目标不在 dsh 安装树里，而在 dsh 的 profile
+    目录（``~/.dsh/profiles/<profile>/node_modules``）。profile 跟随
+    ``DSH_PROFILE`` 环境变量（与 remote-web-ui 自己的默认一致），缺省
+    ``web``。找不到（聚合包未安装）返回 None，调用方跳过补丁。
+    """
+    if profile_dir is None:
+        profile = os.environ.get("DSH_PROFILE", "web")
+        profile_dir = Path.home() / ".dsh" / "profiles" / profile
+    candidate = (Path(profile_dir) / "node_modules" / "@linxin666"
+                 / "dsh-web-all" / "lib" / "client.js")
+    return candidate if candidate.is_file() else None
+
+
+def _patch_remote_channel_client(profile_dir=None):
+    """对 web-all 聚合 client.js 的 remote-channel 判定做幂等自愈补丁。
+
+    remote-web-ui 卸载后（见 cordis.patch.yml 的 disabled 覆盖行），其
+    编译进聚合 client 的通道逻辑仍会在非回环页面上自装 fetch/WebSocket
+    劫持（读 /api/pair/status 拿 404 即兜底"需要配对"），把 /api 请求
+    改写到已不存在的 /remote/* 通道，局域网浏览器全部 API 报 HTTP 405。
+    补丁把 remoteChannelRequired 强制恒 false——API 全部直连。
+
+    幂等/自愈语义与 ``_patch_settings_mirror_gate`` 一致：已打过（新代码
+    段在，含手工热修的同款标记）跳过；聚合包升级后未命中旧代码段也跳过
+    （下次启动若代码段仍在会自动重打）；任何失败只告警不抛——dsh 仍可
+    启动，仅局域网浏览器可能复现 405。
+    """
+    target = _web_all_client_path(profile_dir)
+    if target is None:
+        logger.warning("dsh remote-channel 补丁：未找到 web-all 聚合 client，跳过")
+        return
+    try:
+        with _PATCH_LOCK:
+            text = target.read_text(encoding="utf-8")
+            if _PATCH_REMOTE_CHANNEL_NEW in text:
+                return  # 已打过（幂等，含手工热修的同款标记）
+            if _PATCH_REMOTE_CHANNEL_OLD not in text:
+                logger.warning(
+                    "dsh remote-channel 补丁：目标代码段未命中（web-all 可能已"
+                    "升级改版），跳过: %s", target)
+                return
+            tmp = target.with_name(target.name + ".donkey-patch.tmp")
+            tmp.write_text(
+                text.replace(_PATCH_REMOTE_CHANNEL_OLD,
+                             _PATCH_REMOTE_CHANNEL_NEW),
+                encoding="utf-8")
+            os.replace(tmp, target)
+            logger.info("dsh remote-channel 补丁：remoteChannelRequired 已强制"
+                        "恒 false（API 直连，不走 /remote 通道）: %s", target)
+    except OSError as e:
+        logger.warning(
+            "dsh remote-channel 补丁失败（dsh 仍可启动，局域网可能复现 405）: %s",
             e)
 
 
@@ -773,6 +859,9 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # 设置镜像回环门补丁：局域网浏览器切 host 模式（幂等，失败只影响
     # 局域网设置页/模型选择，不影响 dsh 启动）
     _patch_settings_mirror_gate(binary)
+    # web-all remote-channel 补丁：remote-web-ui 卸载后防止聚合 client 自装
+    # fetch 劫持把 /api 改写到已不存在的 /remote 通道（局域网 405）
+    _patch_remote_channel_client()
 
     lan_ip = lan_ip_fn()
     mdns = mdns_fn()
