@@ -919,6 +919,39 @@ def _zcode_desktop_running(proc_root: str = "/proc") -> bool:
     return False
 
 
+# launcher 拉起 Z Code 桌面端时也带 CDP 调试口：候选端口与端口文件路径和
+# web_ui/backend/routers/zcode_remote.py 保持一致，DD /api/zcode-remote/link
+# 才能经 CDP 取活链/代开远控（9222 常被浏览器自动化占用，不能硬编码）。
+_ZCODE_CDP_PORT_CANDIDATES = (9333, 9334, 9335, 9336)
+_ZCODE_CDP_PORT_FILE_NAME = "dd-zcode-cdp.json"
+
+
+def _pick_free_cdp_port() -> int | None:
+    """挑一个空闲的 CDP 调试端口（绑定测试即代表无进程占用）。"""
+    for port in _ZCODE_CDP_PORT_CANDIDATES:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    return None
+
+
+def _write_cdp_port(port: int) -> None:
+    """把选中的 CDP 端口写进端口文件（与 zcode_remote.py 同路径）。"""
+    try:
+        base = os.environ.get("ZCODE_DATA_BASE_DIR", "").strip() or str(Path.home())
+        v2 = Path(base) / ".zcode" / "v2"
+        v2.mkdir(parents=True, exist_ok=True)
+        (v2 / _ZCODE_CDP_PORT_FILE_NAME).write_text(
+            json.dumps({"port": port}), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
     """Launcher HTTP 请求处理器。"""
 
@@ -1247,14 +1280,20 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         try:
             env = dict(os.environ)
             env.setdefault("DISPLAY", ":0")
+            port = _pick_free_cdp_port()
+            cmd = [str(_ZCODE_DESKTOP_BIN), "--no-sandbox"]
+            if port:
+                cmd.append(f"--remote-debugging-port={port}")
             subprocess.Popen(
-                [str(_ZCODE_DESKTOP_BIN)],
+                cmd,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
                 env=env,
             )
+            if port:
+                _write_cdp_port(port)
         except OSError as e:
             self._serve_json(
                 {"status": "error", "error": f"拉起 Z Code 桌面端失败: {e}"},

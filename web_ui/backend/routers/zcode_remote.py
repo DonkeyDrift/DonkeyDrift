@@ -3,8 +3,8 @@
 点击 DC/DD 的「ZCode」按钮时，实时向本机 ZCode 桌面端取一条新鲜远控链接，
 彻底替代"手工粘贴链接存 localStorage"的旧流程：
 
-1. 桌面端在跑且带 CDP 调试口（:9222）时，直接向渲染进程取
-   `getWebRemoteControlStatus().connectUrl`；远控未开启则代调
+1. 桌面端在跑且带 CDP 调试口（专用端口 9333 起，9222 常被浏览器自动化占用）时，
+   直接向渲染进程取 `getWebRemoteControlStatus().connectUrl`；远控未开启则代调
    `startWebRemoteControl` 开启（等同桌面端 UI 上的「开启远程控制」）。
 2. 桌面端不在跑：后台拉起（带 CDP 口），等它就绪后取链接。
 3. 兜底：从桌面端持久化凭证现拼链接——deviceSid 存
@@ -45,7 +45,13 @@ router = APIRouter()
 ZCODE_APP_DIR = Path.home() / ".zcode-app"
 ZCODE_APP_BIN = ZCODE_APP_DIR / "zcode"
 REMOTE_PAGE_BASE = "https://zcode.z.ai/remote/v4"
-CDP_BASE_URL = "http://127.0.0.1:9222"
+# CDP 调试端口：专用 9333 起——9222 常被浏览器自动化（如本机 Chrome 调试会话）占用，
+# ZCode 带着被占用的端口拉起时 CDP 会静默失效，取不到活链只能走兜底现拼，
+# 手机端就会卡在「等待桌面端确认配对…」。实际选中的端口持久化到
+# ~/.zcode/v2/dd-zcode-cdp.json，/link 每次都从那里定位，不猜端口。
+CDP_PORT_CANDIDATES = (9333, 9334, 9335, 9336)
+CDP_PORT_FILE_NAME = "dd-zcode-cdp.json"
+LEGACY_CDP_PORT = 9222
 # 点击后整体等待桌面端就绪的上限（冷启动 + 中继注册）
 ENSURE_TIMEOUT_S = 25.0
 
@@ -66,6 +72,74 @@ def _read_json(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _cdp_port_file() -> Path:
+    return _v2_dir() / CDP_PORT_FILE_NAME
+
+
+def _stored_cdp_port() -> int | None:
+    """读持久化的 CDP 端口；文件缺失/损坏返回 None。"""
+    try:
+        port = int(_read_json(_cdp_port_file()).get("port", 0))
+    except (TypeError, ValueError):
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+def _write_cdp_port(port: int) -> None:
+    try:
+        path = _cdp_port_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"port": port}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _cdp_port_owned_by_zcode(port: int) -> bool:
+    """端口 /json 目标里含 ZCode 渲染页（renderer/index.html）才算被 ZCode 占用。"""
+    try:
+        targets = _http_json(f"http://127.0.0.1:{port}/json", timeout=1.0)
+    except Exception:
+        return False
+    return any(
+        isinstance(t, dict)
+        and t.get("type") == "page"
+        and "renderer/index.html" in t.get("url", "")
+        for t in targets
+    )
+
+
+def _current_cdp_port() -> int | None:
+    """当前 ZCode 桌面端可用的 CDP 端口：端口文件优先，其次兼容旧版 9222。
+
+    外部进程（如普通 Chrome 调试会话）占用端口时一律不认领，
+    避免把它的 /json 目标误当 ZCode。
+    """
+    port = _stored_cdp_port()
+    if port and _cdp_port_owned_by_zcode(port):
+        return port
+    if _cdp_port_owned_by_zcode(LEGACY_CDP_PORT):
+        return LEGACY_CDP_PORT
+    return None
+
+
+def _port_bindable(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _pick_free_cdp_port() -> int | None:
+    """从候选里挑一个空闲端口（绑定测试即代表无进程占用）。"""
+    for port in CDP_PORT_CANDIDATES:
+        if _port_bindable(port):
+            return port
+    return None
 
 
 def _b64u_decode(s: str) -> bytes:
@@ -168,7 +242,11 @@ def _app_running() -> bool:
 
 
 def _launch_app() -> None:
-    """后台拉起桌面端（图形会话环境 + CDP 调试口），detached 不阻塞。"""
+    """后台拉起桌面端（图形会话环境 + CDP 调试口），detached 不阻塞。
+
+    CDP 端口从候选里挑空闲的并持久化到端口文件：9222 被外部进程占用时
+    （2026-09-08 实况）也能拿到可控的调试口，而不是静默失去 CDP。
+    """
     env = os.environ.copy()
     env.update(
         {
@@ -181,16 +259,22 @@ def _launch_app() -> None:
     xauth = sorted(glob.glob("/run/user/1000/.mutter-Xwaylandauth.*"))
     if xauth:
         env["XAUTHORITY"] = xauth[0]
+    port = _pick_free_cdp_port()
+    cmd = [str(ZCODE_APP_BIN), "--no-sandbox"]
+    if port:
+        cmd.append(f"--remote-debugging-port={port}")
     try:
         subprocess.Popen(
-            [str(ZCODE_APP_BIN), "--no-sandbox", "--remote-debugging-port=9222"],
+            cmd,
             cwd=str(ZCODE_APP_DIR),
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        logger.info("ZCode 桌面端已拉起（CDP :9222）")
+        if port:
+            _write_cdp_port(port)
+        logger.info("ZCode 桌面端已拉起（CDP :%s）", port or "off")
     except OSError as e:
         logger.warning("拉起 ZCode 桌面端失败: %s", e)
 
@@ -224,8 +308,11 @@ async def _cdp_remote_url() -> str | None:
     """经 CDP 确保远控开启并返回 connectUrl；任何一步失败返回 None。"""
     import websockets
 
+    port = _current_cdp_port()
+    if not port:
+        return None
     try:
-        targets = await asyncio.to_thread(_http_json, f"{CDP_BASE_URL}/json")
+        targets = await asyncio.to_thread(_http_json, f"http://127.0.0.1:{port}/json")
     except Exception:
         return None
     page = next(

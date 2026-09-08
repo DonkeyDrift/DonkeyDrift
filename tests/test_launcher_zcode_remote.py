@@ -66,6 +66,9 @@ def test_not_running_launches_detached(http_server, monkeypatch, tmp_path):
             calls.append((args, kwargs))
 
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    written = []
+    monkeypatch.setattr(launcher_server, "_pick_free_cdp_port", lambda: 9334)
+    monkeypatch.setattr(launcher_server, "_write_cdp_port", lambda p: written.append(p))
     code, headers, payload = _post(http_server + "/api/launch/zcode-remote", b"{}")
     assert code == 200
     assert headers.get("Access-Control-Allow-Origin") == "*"
@@ -73,7 +76,9 @@ def test_not_running_launches_detached(http_server, monkeypatch, tmp_path):
     assert body == {"status": "ok", "running": False, "started": True}
     assert len(calls) == 1
     args, kwargs = calls[0]
-    assert args == [str(fake_bin)]
+    # 带 CDP 调试口拉起：DD /api/zcode-remote/link 才能经 CDP 取活链/代开远控
+    assert args == [str(fake_bin), "--no-sandbox", "--remote-debugging-port=9334"]
+    assert written == [9334]  # 端口已持久化，供 /link 端点定位
     assert kwargs["start_new_session"] is True  # detached，不随 launcher 退出
     assert kwargs["env"]["DISPLAY"]  # 图形会话 DISPLAY 已兜底
 
