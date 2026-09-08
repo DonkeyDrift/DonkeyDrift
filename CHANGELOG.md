@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-08 (213)
+
+- fix(zcode-remote): 取链复用活动远控会话，不再误判 status 未运行而强制重启（根治「桌面端已离线」弹窗）
+  - 背景：用户反馈远控页面偶尔弹「桌面端已离线」，必须手动点击重连。经 CDP 实测，桌面端 v3.8.1 的 `getWebRemoteControlStatus()` 返回 `status="active"`（含 `connectUrl`），而 `_cdp_remote_url()` 判断 `status != "running"` 即调 `startWebRemoteControl`——于是**每次取链（DC 点 ZCode / 调 `/api/zcode-remote/link`）都会重启远控会话**（桌面端日志 `web-remote-control stopped reason=restart`），relay 向已连接的手机/浏览器端广播 `desktop-disconnected`，页面即弹「桌面端已离线」；当日日志 2 次 restart 与 2 次 /link 调用时刻完全吻合。
+  - `web_ui/backend/routers/zcode_remote.py`：`_cdp_remote_url()` 改为——status 返回带 `connectUrl` 即直接复用（仅刷新 `t`），不再依据 status 词表判定（active/running 皆复用），绝不动活动会话；仅当返回 dict 且无 `connectUrl`（远控确实未开启）才 `startWebRemoteControl`；status 为 null 的瞬态维持原兜底路径（不动会话、走凭证现拼）。
+  - 测试同步：`web_ui/backend/tests/test_zcode_remote.py` 注入假 websockets 模块直测 `_cdp_remote_url` 决策，新增 4 例——active 带 connectUrl 复用且只发 1 条 CDP 查询（绝不 start）/ 旧词表 running 同样复用 / 无 connectUrl 才 start（2 条消息）/ status null 不 start 返回 None 走兜底；backend 334 例全过。
+  - 真机端到端实测：部署 8000 后连续 4 次 /link 全部成功且 sid 不变，桌面端日志 restart 计数保持 2 不变（零新增），CDP 确认已连接的 Mac Safari 端全程 `mobileConnected=true` 未被踢。
+  - 关联排查结论（不改动）：用户另报 Mac Safari 里「用 Z.AI 登录」不弹窗直接「登录失败」——该登录界面属远控页面自带账号登录（i18n `loginTitle`「登录后继续使用 Web 远程控制」），其按钮先 `await startOAuthWithPolling`（网络请求）再 `window.open`，Safari 会因瞬态激活丢失拦截此类弹窗；属 z.ai 页面侧问题，绕开方式：Safari 设置允许 zcode.z.ai 弹窗或改用 Chrome 打开远控页；本修复落地后用户不应再落到该登录界面。
+
 ## 2026-09-08 (212)
 
 - fix(launcher): dsh 入口 URL 提取锚定 ``dsh web:`` banner 行——插件噪声行抢跑导致抓丢 token
