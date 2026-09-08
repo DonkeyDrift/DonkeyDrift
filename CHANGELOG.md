@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-09-08 (208)
+
+- fix(cc): CC 齿轮按钮样式对齐静音键——激活态整框蓝化（浅蓝底 + 蓝边框 + 蓝图标）
+  - 背景：用户反馈顶栏右侧的齿轮按钮小框与旁边按键（静音/主题/语言）大小与 UI 设计不一致；进入设置（/connector）时只有齿轮图标变蓝、外框仍是灰色，与静音键激活态（整框蓝化）不对称。
+  - `web_ui/frontend/src/components/CarConnectorButton.tsx`：类名与 `ConsoleMuteButton` 逐类对齐——基础 `w-8 h-8 rounded-full border transition-colors`；激活态（/connector）`bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]`（浅蓝底 + 蓝边框 + 蓝图标）；非激活态 `bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100`。
+  - 测试同步：`CarConnectorButton.test.tsx` 激活/非激活断言更新为整框蓝化类名。实测 `vitest run` 251 例全绿、`npm run build` 通过。
+
 ## 2026-09-07 (207)
 
 - fix(drive): 模拟器预览画质与 NN 输入解耦——Drive 页面显示模拟器最高画质（Issue #401/#405）
