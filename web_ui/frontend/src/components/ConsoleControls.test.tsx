@@ -58,6 +58,14 @@ describe('ConsoleMuteButton', () => {
     expect(btn).toHaveAttribute('title', 'console.unreachable');
   });
 
+  it('shows a connecting title while the console is still being discovered', () => {
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: true, refresh: mockRefresh });
+    render(<ConsoleMuteButton />);
+    const btn = screen.getByRole('button');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'console.connecting');
+  });
+
   it('turns blue when muted', async () => {
     mockGetJson.mockResolvedValue({ muted: 1 });
     render(<ConsoleMuteButton />);

@@ -23,7 +23,7 @@ export const MUTE_CHANGED_EVENT = 'dd-console-mute-changed';
 /** 静音按钮：位于 GitHub 图标右侧、主题切换左侧；每 5s 轮询以同步 DC 侧改动。 */
 export const ConsoleMuteButton: React.FC = () => {
   const { t } = useTranslation();
-  const { ip, refresh } = useConsoleDevice();
+  const { ip, resolving, refresh } = useConsoleDevice();
   const [muted, setMuted] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -82,7 +82,7 @@ export const ConsoleMuteButton: React.FC = () => {
       disabled={unreachable || unknown || busy}
       aria-label={label}
       aria-pressed={muted === true}
-      title={unreachable || unknown ? t('console.unreachable') : label}
+      title={resolving ? t('console.connecting') : unreachable || unknown ? t('console.unreachable') : label}
       className={`console-mute-btn flex items-center justify-center w-8 h-8 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
         muted
           ? 'bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]'
