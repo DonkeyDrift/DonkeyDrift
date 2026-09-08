@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-08 (209)
+
+- fix(zcode): ZCode 远控点击卡死在「等待桌面端确认配对…」——取活链 CDP 端口改专用候选，避开被占用的 9222
+  - 背景：DC「ZCode」点击后手机端一直停在「等待桌面端确认配对…/手机端已就绪，等待桌面端会话匹配当前连接。」。根因链：① 8000 曾被 8-23 旧构建（dd-deploy）占住，/api/zcode-remote/link 404（launcher systemd override 指向旧 worktree，已由入口治理修正，见当日另一条目）；② 端点硬编码 CDP :9222，而 9222 被本机 Chrome 调试会话占用——ZCode 带着被占端口拉起时 CDP 静默失效，取不到活链只能走本地凭证现拼兜底，手机端永远等不到桌面端会话匹配。
+  - `web_ui/backend/routers/zcode_remote.py`：CDP 端口改候选 9333-9336 + 绑定探测选空闲 + 所有权校验（/json 目标须含 ZCode renderer/index.html 才认领，外部进程占用一律不认）；选中端口持久化 `~/.zcode/v2/dd-zcode-cdp.json`；`_cdp_remote_url` 按端口文件定位并兼容旧版 9222；`_launch_app` 带空闲端口拉起并写端口文件。
+  - `donkeycar/launcher/server.py`：`_handle_launch_zcode_remote` 拉起桌面端同样带 `--no-sandbox` 与空闲 CDP 端口并写同一端口文件，保证 DD /link 端点能经 CDP 取活链/代开远控。
+  - 测试同步：`web_ui/backend/tests/test_zcode_remote.py` +8（端口文件读写/损坏、所有权校验、9222 兼容回退、空闲端口选择、拉起参数与持久化）；`tests/test_launcher_zcode_remote.py` 更新拉起参数断言。实测 launcher 9 绿、backend 15 绿。
+  - 端到端实测（本机 8023 临时实例 + 无头 Chrome 模拟手机端）：9222 被 Chrome 占用时，冷启动 /link 3.9s 返回活链；桌面端日志 external relay device state paired + workspace bridge active，手机端页面 2s 内显示「已连接到当前桌面窗口」并列出工作区。
+
 ## 2026-09-08 (208)
 
 - fix(cc): CC 齿轮按钮样式对齐静音键——激活态整框蓝化（浅蓝底 + 蓝边框 + 蓝图标）

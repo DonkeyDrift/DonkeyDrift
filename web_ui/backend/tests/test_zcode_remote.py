@@ -146,3 +146,72 @@ def test_link_endpoint_409_when_nothing_available(tmp_path, monkeypatch):
     resp = _client().post("/api/zcode-remote/link")
     assert resp.status_code == 409
     assert resp.json()["status"] == "error"
+
+
+# --- CDP 端口选择与持久化（2026-09-08：9222 被外部进程占用导致取不到活链）---
+
+
+def test_cdp_port_file_roundtrip(zcode_store):
+    zr = importlib.import_module("routers.zcode_remote")
+    assert zr._stored_cdp_port() is None
+    zr._write_cdp_port(9334)
+    assert zr._stored_cdp_port() == 9334
+
+
+def test_cdp_port_file_corrupt_returns_none(zcode_store):
+    zr = importlib.import_module("routers.zcode_remote")
+    zr._cdp_port_file().write_text("not-json{{{", encoding="utf-8")
+    assert zr._stored_cdp_port() is None
+
+
+def test_current_cdp_port_requires_zcode_ownership(zcode_store, monkeypatch):
+    # 端口文件写了 9333，但 9333 被外部进程（如普通 Chrome）占用 → 不认领
+    zr = importlib.import_module("routers.zcode_remote")
+    zr._write_cdp_port(9333)
+    monkeypatch.setattr(zr, "_cdp_port_owned_by_zcode", lambda port: port == 9336)
+    assert zr._current_cdp_port() is None
+
+
+def test_current_cdp_port_falls_back_to_legacy_9222(zcode_store, monkeypatch):
+    zr = importlib.import_module("routers.zcode_remote")
+    monkeypatch.setattr(zr, "_cdp_port_owned_by_zcode", lambda port: port == 9222)
+    assert zr._current_cdp_port() == 9222
+
+
+def test_current_cdp_port_prefers_port_file(zcode_store, monkeypatch):
+    zr = importlib.import_module("routers.zcode_remote")
+    zr._write_cdp_port(9333)
+    monkeypatch.setattr(
+        zr, "_cdp_port_owned_by_zcode", lambda port: port in (9222, 9333)
+    )
+    assert zr._current_cdp_port() == 9333
+
+
+def test_pick_free_cdp_port_skips_busy(zcode_store, monkeypatch):
+    zr = importlib.import_module("routers.zcode_remote")
+    busy = {9333, 9334}
+    monkeypatch.setattr(zr, "_port_bindable", lambda port: port not in busy)
+    assert zr._pick_free_cdp_port() == 9335
+
+
+def test_launch_app_uses_free_port_and_persists(monkeypatch, tmp_path):
+    zr = importlib.import_module("routers.zcode_remote")
+    monkeypatch.setenv("ZCODE_DATA_BASE_DIR", str(tmp_path))
+    calls = []
+
+    class _FakePopen:
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setattr(zr.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(zr, "_pick_free_cdp_port", lambda: 9334)
+    zr._launch_app()
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == [
+        str(zr.ZCODE_APP_BIN),
+        "--no-sandbox",
+        "--remote-debugging-port=9334",
+    ]
+    assert kwargs["start_new_session"] is True
+    assert zr._stored_cdp_port() == 9334
