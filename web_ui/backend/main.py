@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
 
     - findcar 心跳上报：原实现用 @app.on_event("startup")，但 Starlette 1.x
       在自定义 lifespan 存在时不再触发 on_event 处理器（会静默停摆），故并入；
+    - findcar 下线标记：关停时补发一次 state=offline，网页立即显示「离线」；
     - Harness 一键更新周期检查（issue #404）。
     """
     try:
@@ -44,6 +45,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        try:
+            await findcar.stop_heartbeat()
+        except Exception:
+            logging.getLogger(__name__).warning("findcar 下线标记发送失败", exc_info=True)
         await harness_updater.stop_background_check()
 
 
