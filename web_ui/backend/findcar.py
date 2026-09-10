@@ -3,6 +3,9 @@
 网页「找 Donkey Car」通过 Pages Functions 列出本机实例；后端启动后（若已配置
 findcar）立即上报一次，并每 ``interval_seconds`` 秒重复上报，供网页实时发现本机。
 去 token 公开上报：无需共享口令。
+
+除在线心跳外，后端优雅退出（lifespan 关闭、systemctl stop、Ctrl-C）时还会发一次
+``state=offline`` 的下线标记，网页立即显示「离线」，不必干等在线窗口走完。
 """
 import asyncio
 import json
@@ -23,7 +26,14 @@ logger = logging.getLogger(__name__)
 
 # 配置文件路径（与 connector 的 ~/.donkeycar_web_connector.json 命名惯例一致）
 CONFIG_PATH: Path = Path.home() / ".donkeycar_findcar.json"
-DEFAULT_INTERVAL_SECONDS = 300
+# 150s 一跳：网页在线窗口 5.5 分钟（容忍漏跳一次），写入量 576 次/天，
+# 与 ESP32 的 ~288 次/天 合计仍在 Cloudflare KV 免费层 1000 写/天 之内。
+DEFAULT_INTERVAL_SECONDS = 150
+# 下线标记是尽力而为：超时短、失败只记日志，绝不在退出路径上卡住关停。
+OFFLINE_TIMEOUT_SECONDS = 3
+
+STATE_ONLINE = "online"
+STATE_OFFLINE = "offline"
 
 
 class FindCarConfig(BaseModel):
@@ -64,7 +74,43 @@ def _is_configured(cfg: FindCarConfig) -> bool:
     return bool(cfg.enabled and cfg.url.strip())
 
 
-def _report_payload(cfg: FindCarConfig) -> dict:
+def _os_name(path: str = "/etc/os-release") -> str:
+    """读 os-release 的 PRETTY_NAME（如 Ubuntu 26.04 LTS），取不到返回空串。"""
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            for line in file:
+                if line.startswith("PRETTY_NAME="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def _read_dmi(field: str) -> str:
+    """读 DMI 字段；无权限/不存在返回空串。"""
+    try:
+        return (
+            Path("/sys/devices/virtual/dmi/id") / field
+        ).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _machine_model() -> str:
+    """本机型号（网页「类型」列显示用）：优先 DMI 产品名，退回主板名，最后退回架构。
+
+    例：``ADL-N``（迷你主机）、``LENOVO 82RN``（带厂商标识的整机）。
+    """
+    product = _read_dmi("product_name")
+    vendor = _read_dmi("sys_vendor")
+    if product and vendor and vendor.lower() not in product.lower():
+        return f"{vendor} {product}"
+    if product:
+        return product
+    return _read_dmi("board_name")
+
+
+def _report_payload(cfg: FindCarConfig, state: str = STATE_ONLINE) -> dict:
     """构造上报 body（与 Cloudflare Pages Functions 协议严格一致，字段全为字符串）。"""
     try:
         lan_ip = detect_lan_ip()
@@ -80,17 +126,23 @@ def _report_payload(cfg: FindCarConfig) -> dict:
         "port": os.environ.get("DRIVE_WEB_PORT", "8000"),
         "hostname": hostname,
         "version": version or "",
+        # 主机身份：网页「类型」列显示型号（如 ADL-N），悬停显示系统与主机名
+        "model": _machine_model(),
+        "os": _os_name(),
+        "state": state,
     }
 
 
-def report_once(cfg: FindCarConfig) -> bool:
+def report_once(
+    cfg: FindCarConfig, state: str = STATE_ONLINE, timeout: int = 8
+) -> bool:
     """通过 HTTPS POST 上报一次心跳；成功返回 True，异常返回 False。"""
     base = cfg.url.strip().rstrip("/")
     if not base:
         logger.warning("findcar 心跳未上报：未配置 Pages Functions URL")
         return False
     url = base + "/report"
-    body = json.dumps(_report_payload(cfg), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(_report_payload(cfg, state), ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         url,
         data=body,
@@ -103,11 +155,23 @@ def report_once(cfg: FindCarConfig) -> bool:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             response.read()
         return True
     except Exception:
         logger.warning("findcar 心跳上报失败（url=%s）", url, exc_info=True)
+        return False
+
+
+def report_offline(cfg: Optional[FindCarConfig] = None) -> bool:
+    """优雅退出时上报一次下线标记（尽力而为，失败不影响关停）。"""
+    try:
+        cfg = cfg if cfg is not None else load_config()
+        if not _is_configured(cfg):
+            return False
+        return report_once(cfg, state=STATE_OFFLINE, timeout=OFFLINE_TIMEOUT_SECONDS)
+    except Exception:
+        logger.warning("findcar 下线标记上报异常", exc_info=True)
         return False
 
 
@@ -130,3 +194,11 @@ def start_heartbeat() -> Optional[asyncio.Task]:
     if not _is_configured(cfg):
         return None
     return asyncio.create_task(heartbeat_loop(cfg))
+
+
+async def stop_heartbeat() -> None:
+    """关停钩子：向云端补发下线标记，让网页立刻显示「离线」。"""
+    try:
+        await asyncio.to_thread(report_offline)
+    except Exception:
+        logger.warning("findcar 下线标记发送失败", exc_info=True)

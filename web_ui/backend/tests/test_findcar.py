@@ -57,7 +57,7 @@ def test_get_config_returns_defaults(monkeypatch, tmp_path):
     cfg = response.json()["config"]
     assert cfg["url"] == ""
     assert cfg["enabled"] is False
-    assert cfg["interval_seconds"] == 300
+    assert cfg["interval_seconds"] == 150
     # 去 token 后不再有任何 token 字段
     assert "token" not in cfg
 
@@ -111,7 +111,7 @@ def test_corrupted_config_file_falls_back_to_defaults(monkeypatch, tmp_path):
     assert response.json()["config"] == {
         "url": "",
         "enabled": False,
-        "interval_seconds": 300,
+        "interval_seconds": 150,
     }
 
 
@@ -194,6 +194,10 @@ def test_report_once_posts_json_and_returns_true(monkeypatch):
     assert body["port"] == os.environ.get("DRIVE_WEB_PORT", "8000")
     assert body["hostname"] == hostname
     assert body["version"] == getattr(findcar_mod.donkeycar, "__version__", "")
+    # 默认心跳显式带上在线状态；离线标记由 report_offline 发
+    assert body["state"] == "online"
+    # 主机身份字段：网页「类型」列显示型号、悬停显示系统
+    assert "model" in body and "os" in body
     # 去 token：body 不含 token
     assert "token" not in body
     # 协议要求字段全为字符串
@@ -389,3 +393,171 @@ def test_start_heartbeat_returns_task_when_configured(monkeypatch, tmp_path):
 
     task = asyncio.run(run())
     assert task.done()
+
+
+# ---------------------------------------------------------------------------
+# 主机身份（型号 / 系统）——网页「类型」列显示用
+# ---------------------------------------------------------------------------
+
+
+def test_machine_model_uses_dmi_product_name(monkeypatch):
+    import findcar as findcar_mod
+
+    monkeypatch.setattr(
+        findcar_mod,
+        "_read_dmi",
+        lambda field: {
+            "product_name": "ADL-N",
+            "sys_vendor": "",
+            "board_name": "ADL-N",
+        }.get(field, ""),
+    )
+
+    assert findcar_mod._machine_model() == "ADL-N"
+
+
+def test_machine_model_prefixes_vendor_when_not_in_product(monkeypatch):
+    import findcar as findcar_mod
+
+    monkeypatch.setattr(
+        findcar_mod,
+        "_read_dmi",
+        lambda field: {"product_name": "82RN", "sys_vendor": "LENOVO"}.get(field, ""),
+    )
+
+    assert findcar_mod._machine_model() == "LENOVO 82RN"
+
+
+def test_machine_model_keeps_product_when_vendor_already_included(monkeypatch):
+    import findcar as findcar_mod
+
+    monkeypatch.setattr(
+        findcar_mod,
+        "_read_dmi",
+        lambda field: {
+            "product_name": "LENOVO ThinkPad X1",
+            "sys_vendor": "LENOVO",
+        }.get(field, ""),
+    )
+
+    assert findcar_mod._machine_model() == "LENOVO ThinkPad X1"
+
+
+def test_machine_model_falls_back_to_board_name(monkeypatch):
+    import findcar as findcar_mod
+
+    monkeypatch.setattr(
+        findcar_mod,
+        "_read_dmi",
+        lambda field: {"board_name": "ADL-N"}.get(field, ""),
+    )
+
+    assert findcar_mod._machine_model() == "ADL-N"
+
+
+def test_machine_model_empty_when_dmi_unavailable(monkeypatch):
+    """DMI 读不到（非 x86 / 无权限）时不抛异常，返回空串，网页再退回主机名。"""
+    import findcar as findcar_mod
+
+    monkeypatch.setattr(findcar_mod, "_read_dmi", lambda field: "")
+
+    assert findcar_mod._machine_model() == ""
+
+
+def test_os_name_reads_pretty_name(monkeypatch, tmp_path):
+    import findcar as findcar_mod
+
+    os_release = tmp_path / "os-release"
+    os_release.write_text(
+        'NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 26.04 LTS"\nVERSION_ID="26.04"\n',
+        encoding="utf-8",
+    )
+
+    assert findcar_mod._os_name(str(os_release)) == "Ubuntu 26.04 LTS"
+
+
+def test_os_name_missing_file_returns_empty(tmp_path):
+    import findcar as findcar_mod
+
+    assert findcar_mod._os_name(str(tmp_path / "nope")) == ""
+
+
+# ---------------------------------------------------------------------------
+# 下线标记（优雅退出时立即显示「离线」）
+# ---------------------------------------------------------------------------
+
+
+def test_report_offline_posts_offline_state_with_short_timeout(monkeypatch):
+    import findcar as findcar_mod
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    monkeypatch.setattr(findcar_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(findcar_mod, "detect_lan_ip", lambda: "192.168.3.10")
+
+    cfg = findcar_mod.FindCarConfig(url="https://find-dkc.pages.dev", enabled=True)
+
+    assert findcar_mod.report_offline(cfg) is True
+    assert captured["body"]["state"] == "offline"
+    assert captured["timeout"] == findcar_mod.OFFLINE_TIMEOUT_SECONDS
+
+
+def test_report_offline_returns_false_when_not_configured(monkeypatch):
+    import findcar as findcar_mod
+
+    def fail_urlopen(req, timeout=None):  # pragma: no cover - 不应被调用
+        raise AssertionError("未配置时不应发起请求")
+
+    monkeypatch.setattr(findcar_mod.urllib.request, "urlopen", fail_urlopen)
+
+    assert findcar_mod.report_offline(findcar_mod.FindCarConfig(url="", enabled=False)) is False
+
+
+def test_report_offline_swallows_errors(monkeypatch):
+    import findcar as findcar_mod
+
+    monkeypatch.setattr(
+        findcar_mod,
+        "load_config",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    assert findcar_mod.report_offline() is False
+
+
+def test_stop_heartbeat_sends_offline_marker(monkeypatch):
+    import asyncio
+
+    import findcar as findcar_mod
+
+    calls = []
+    monkeypatch.setattr(findcar_mod, "report_offline", lambda: calls.append(1) or True)
+
+    asyncio.run(findcar_mod.stop_heartbeat())
+
+    assert calls == [1]
+
+
+def test_stop_heartbeat_swallows_errors(monkeypatch):
+    import asyncio
+
+    import findcar as findcar_mod
+
+    def boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(findcar_mod, "report_offline", boom)
+
+    asyncio.run(findcar_mod.stop_heartbeat())  # 不抛异常
+
+
+def test_main_lifespan_wires_findcar_offline_marker():
+    """Starlette 1.x 下 on_event 不再触发，下线标记必须挂在 lifespan 里。"""
+    source = (BACKEND_DIR / "main.py").read_text(encoding="utf-8")
+
+    assert "findcar.stop_heartbeat()" in source

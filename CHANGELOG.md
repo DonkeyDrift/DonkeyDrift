@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-10 (216)
+
+- fix(findcar): 一键找车「离线仍显示在线」+「类型显示 DonkeyDrift」——下线即时标记、在线窗口收紧、上报本机型号与系统
+  - 背景：用户反馈 find-dkc 网页（Find Donkey Car）两处问题：① DD 已经不在线，网页仍显示「在线」；② 「类型」列显示 DonkeyDrift，希望改成这台 Ubuntu 主机的型号或名称。根因：① 云端在线窗口与 KV 记录 TTL 同为 12 分钟，DD 停止心跳后要干等 12 分钟记录才过期、且到期即整行消失，期间一直显示「在线」，优雅退出也不发任何下线信号；② 上报字段只有 device_id/hostname/version，缺主机型号，网页只能按 `type` 显示软件名。
+  - `web_ui/backend/findcar.py`：新增 `_os_name()`（读 os-release 的 PRETTY_NAME）、`_read_dmi()`/`_machine_model()`（DMI `product_name`，缺则 `board_name`；有厂商标识时补 `sys_vendor` 前缀），上报 body 新增 `model` / `os` / `state` 三个字段；新增 `report_offline()` 与 `stop_heartbeat()`——优雅退出（lifespan 关闭 / systemctl stop / Ctrl-C）补发一次 `state=offline`（3 秒超时、尽力而为），网页立即显示「离线」而不必等窗口走完；心跳默认间隔 300s → 150s（576 次写/天，与 ESP32 的约 288 次/天 合计仍在 Cloudflare KV 免费层 1000 写/天 之内），配合云端 dd 在线窗口 5.5 分钟可容忍漏跳一次。
+  - `web_ui/backend/main.py`：lifespan 的 `finally` 中 `await findcar.stop_heartbeat()`（Starlette 1.x 下 `on_event` 不再触发，下线钩子必须挂在 lifespan）。
+  - 测试同步：`web_ui/backend/tests/test_findcar.py` 新增 12 例（DMI 型号四态、os-release 读取与缺文件、离线标记的 state 与短超时、未配置不发请求、异常吞掉、stop_heartbeat 成功/异常路径、main.py 下线钩子必须留在 lifespan），默认间隔断言 300 → 150。backend 347 例全过。
+  - 云端侧（`/home/dkc/projects/cloudflare/find-car/`，非 git 仓库，已 `wrangler pages deploy` 到 find-dkc）：`functions/report.js` 接收并存储 `model`/`os`/`state`，TTL 改 900s（离线标记 600s）；`functions/devices.js` 在线窗口按类型收紧（dd 5.5 分钟 / esp32 8 分钟）、`state=offline` 立即判离线、返回 model/os、在线设备排前；`public/index.html` 「类型」列 DD 行改显示主机型号（取不到退回主机名）、状态列加最近心跳「x 分钟前」、轮询 1s → 5s 且后台标签页暂停（1s 轮询每天 8.6 万次会打满 Cloudflare 免费额度）。
+  - 配套（另一仓库，详见 Firmware CHANGELOG v1.8.78）：车在线却在网页上查不到 ESP32 的根因是 v1.8.77 在干净 worktree 里编译、gitignore 的 `WirelessSecrets.h` 缺失导致 `CLOUD_REPORT_URL` 未定义、整块云端上报被静默编译掉——已改为仓库内默认上报地址并 OTA 刷车。
+
 ## 2026-09-08 (215)
 
 - fix(launcher): 局域网选模型报「settings are unavailable in this browser」——0.1.2-rc.1 镜像门锚点改版未命中，补丁升级支持两代锚点
