@@ -85,7 +85,7 @@ export const ConsoleMuteButton: React.FC = () => {
       title={resolving ? t('console.connecting') : unreachable || unknown ? t('console.unreachable') : label}
       className={`console-mute-btn flex items-center justify-center w-8 h-8 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
         muted
-          ? 'bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]'
+          ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400'
           : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100'
       }`}
     >
@@ -292,14 +292,14 @@ export const ConsoleDevToggle: React.FC = () => {
           title={unreachable || unknown ? t('console.unreachable') : undefined}
           className={`${cls} ${
             enabled
-              ? 'bg-[#5cc8ff]/25 border-[#5cc8ff] text-[#5cc8ff] shadow-[inset_0_0_0_1px_#5cc8ff]'
+              ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
               : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-cyan-400 hover:border-cyan-500/50'
           }`}
         >
           DEV
         </button>
         {!unreachable && !unknown && (
-          <span className="pointer-events-none absolute right-0 top-full mt-2 w-72 rounded-lg border border-[#5cc8ff] bg-[#111820] px-2.5 py-2 text-xs font-semibold leading-relaxed text-[#dbeafe] opacity-0 transition-opacity group-hover:opacity-100 z-50">
+          <span className="pointer-events-none absolute right-0 top-full mt-2 w-72 rounded-lg border border-cyan-500 bg-zinc-800 px-2.5 py-2 text-xs font-semibold leading-relaxed text-zinc-200 opacity-0 transition-opacity group-hover:opacity-100 z-50">
             {t('console.devHint')}
           </span>
         )}

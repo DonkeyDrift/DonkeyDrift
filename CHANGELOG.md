@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-09-11 (217)
+
+- feat(web-ui): 全站新增「座舱 / Apple」双 UI 风格切换——Apple 风为新默认，座舱风逐值保留可随时切回；删除无意义说明小字
+  - 背景：用户要求按 Apple 设计语言重设计 DD 界面（高级感），同时完整保留现有座舱风并提供切换入口；历史上曾有 `SkinSwitcher`（aa48b7ae）后被统一视觉移除，本次按新架构复活。
+  - 主题地基（变量化）：`src/themes/theme-mus4.css`、`src/themes/theme-light.css` 从「逐类名覆盖 Tailwind 工具类 + 硬编码 hex」改造为「变量驱动」——顶部各定义 114/116 个语义变量（`--canvas/--surface/--ink/--hairline/--accent/--ok/--warn/--bad`、`--r-*`、`--w-*`、`--tracking-title` 等），全部覆盖规则改引 `var(--*)`；新增 `html.theme-mus4.ui-apple` / `html.theme-light.ui-apple` 纯变量覆写块（Apple token：accent `#2997ff`/`#0066cc`、canvas `#000`/`#f5f5f7`、surface `#1c1c1e`/`#fff`、iOS system 状态色、卡片去渐变去投影只留 hairline、圆角卡片 18/控件 10/胶囊 9999）。座舱象限（无 `ui-apple` class）计算样式经「变量递归解析回字面值逐条对比」脚本验证与旧版一致。
+  - 风格机制：新建 `src/lib/uistyle.ts`（`<html>` `ui-apple` class + localStorage `donkeydrifter.ui.style`（默认 apple）+ `donkeydrifter:ui-style-changed` CustomEvent 广播，`useSyncExternalStore` 写法与 `lib/theme.ts` 一致）；`index.html` 防闪烁脚本同步解析 style；删除遗留死代码 `src/hooks/useTheme.ts`。
+  - 切换器：新建 `src/components/SkinSwitcher.tsx`（座舱 / Apple 分段控件，i18n `common.uiStyle.*`，Apple 象限呈 iOS 分段观感），进 `Layout.tsx` 桌面顶栏右侧控制组与移动端折叠菜单。
+  - 顶栏治理：`Layout.tsx` 高级工具入口（Kimi Code Web / ZCode / DeepSeek Harness / FindCar）收进「⋯」溢出菜单（点外/Esc/切路由收起），Donkey/DrifterConsole 入口在 lg 档（1024–1279px）也收进溢出菜单、≥xl 回到主导航；GitHub/版本号移到标题旁全宽度显示；间距收紧。顶栏 min-content 从 1554px 降到 ~1000px，1440/1280/1024 三档实测零横向溢出（旧版 1440 即溢出 114px）。
+  - 组件与反馈：`EnterButtons.tsx` 3 处 `alert()` 改为页面内 inline 错误 banner（`role="alert"`、可关闭）；`Empty.tsx` 空状态重做（图标 + 标题 + 一句引导）；`SectionCardTitle.tsx` 副标题从 hover 展开改常驻 Footnote（13px `--ink2`，移动端可达），删除 marquee 动效与 `subtitleMarquee` prop；`FabActions.tsx` 等组件删除发光 glow 与 isLight 三元选色；域内 JS 硬编码色约 70 处清零（全部走语义变量）。
+  - 页面清扫：8 个页面 + drive/、trainer/、TubEditor/TubLibrary 的 arbitrary-value 颜色、阴影三元全部语义化；canvas/图表配色（TelemetryChart、TubEditor、PilotArena、TubLibrary）订阅 `useUiStyle()`，风格切换时重取 CSS 变量配色；原生 select/input 视觉对齐 ui/Input 配方。
+  - 内嵌契约对接固件 v1.9.0：`DrifterConsolePage` 与 `CarSettingsPanel` 的 iframe src 拼 `&ui=<cockpit|apple>`（key 含 uiStyle，切换即重载），与车端 DC 双风格联动。
+  - 删小字（用户要求）：删除渲染点 + zh/en 词条——FlowPage section 描述（`flow.*.desc` ×4）、drive 虚拟摇杆副标题与鼠标触屏说明、SimCollect 说明段、ParameterPanel autoSaveNote、PilotArena 6 个 subtitle + plotRangeHint + pageDescription、TubEditor/TubLibrary subtitle、Trainer 7 个 subtitle 与 3 个 hint、TubLoader/SimulatorConfig subtitle、ConfigLoader description/apiLabel、Harness 后台检查说明、aiClean 机制解释句（保留软删除安全句）；功能性标签、安全警示、快捷键列表、错误信息全部保留。
+  - `src/index.css`：全局 `:active scale(.97)` 按压反馈（排除拖拽控件，`data-no-press` 豁免口，`prefers-reduced-motion` 降级）、`--ease-apple` 标准缓动、`.tnum` 数字等宽工具类。
+  - 测试同步：新增 `SkinSwitcher.test.tsx`（7 例）与 `DrifterConsolePage` `?ui=` 契约用例（2 例），EnterButtons/ConsoleControls/DriveModeSelector/SimCollectCard 等断言随 DOM/文案更新；**vitest 45 文件 264 例全过**，`tsc` 零错误，`npm run build` 通过。
+  - 性能红线：FlowPage 的 content-visibility / scroll-spy / 滑动动画、100Hz 遥测旁路 store 全部未动；未新增大面积 backdrop-blur。
+
 ## 2026-09-10 (216)
 
 - fix(findcar): 一键找车「离线仍显示在线」+「类型显示 DonkeyDrift」——下线即时标记、在线窗口收紧、上报本机型号与系统

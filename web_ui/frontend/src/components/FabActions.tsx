@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from '@/i18n';
-import { useResolvedTheme } from '@/lib/theme';
 
 // FAB cluster mirrored 1:1 from the ESP32 Drifter Console
 // (Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h):
-// .fabToggle (glowing dot) + .fabActions (.helpFab) + .helpModal.
+// .fabToggle (accent dot) + .fabActions (.helpFab) + .helpModal.
 // Only the help modal's shortcut list content differs (DonkeyDrifter shortcuts).
 // 语言入口不在此处：顶栏 LanguageSwitcher 为静音式单按钮（issue #139）。
+// 颜色全部走标准 Tailwind 工具类，由 themes/*.css 皮肤按语义变量重映射——
+// Apple 象限无投影无 glow（--shadow-lg/xl = none），座舱保持原观感。
 export const FabActions: React.FC = () => {
   const { t } = useTranslation();
   const [fabOpen, setFabOpen] = useState(false);
@@ -34,42 +35,26 @@ export const FabActions: React.FC = () => {
     setHelpOpen(true);
   };
 
-  // Skin CSS (themes/theme-light.css) only remaps standard Tailwind utilities;
-  // the arbitrary-value colors below are JS-side and must branch on the
-  // resolved theme. The dark branch keeps the current ESP32 palette verbatim.
-  const isLight = useResolvedTheme() === 'light';
-
   const fabBallBase =
-    `absolute bottom-0 right-0 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 font-black leading-none ${
-      isLight
-        ? 'shadow-[0_8px_22px_rgba(15,23,42,0.14)]'
-        : 'shadow-[0_8px_22px_rgba(0,0,0,0.22)]'
-    } backdrop-blur-[4px] transition-[opacity,transform] duration-[180ms]`;
+    'absolute bottom-0 right-0 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 font-black leading-none shadow-lg backdrop-blur-[4px] transition-[opacity,transform] duration-[180ms]';
   const fabBallVisibility = fabOpen
     ? 'pointer-events-auto scale-100 opacity-100'
     : 'pointer-events-none scale-[0.55] opacity-0';
 
-  const fabToggleColors = isLight
-    ? 'border-[#5cc8ff] bg-[#5cc8ff] shadow-[0_0_18px_rgba(12,155,214,0.45),0_0_36px_rgba(12,155,214,0.3)] hover:shadow-[0_0_22px_rgba(12,155,214,0.5),0_0_44px_rgba(12,155,214,0.4)] focus-visible:shadow-[0_0_22px_rgba(12,155,214,0.5),0_0_44px_rgba(12,155,214,0.4)]'
-    : 'border-[#8bdcff] bg-[#8bdcff] shadow-[0_0_18px_#5cc8ff,0_0_36px_rgba(92,200,255,0.55)] hover:shadow-[0_0_22px_#8bdcff,0_0_44px_rgba(92,200,255,0.72)] focus-visible:shadow-[0_0_22px_#8bdcff,0_0_44px_rgba(92,200,255,0.72)]';
-  const helpFabColors = isLight
-    ? 'border-[#5cc8ff] bg-[#5cc8ff] hover:border-[#3eb6f0] hover:bg-[#3eb6f0] hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] focus-visible:border-[#3eb6f0] focus-visible:bg-[#3eb6f0]'
-    : 'border-[rgba(92,200,255,0.72)] bg-[rgba(92,200,255,0.62)] hover:border-[#8bdcff] hover:bg-[#8bdcff] hover:shadow-[0_12px_32px_rgba(0,0,0,0.35)] focus-visible:border-[#8bdcff] focus-visible:bg-[#8bdcff]';
-  const helpModalColors = isLight
-    ? 'border-[#0c9bd6] bg-[linear-gradient(135deg,#ffffff,#edf1f6)] shadow-[0_18px_60px_rgba(15,23,42,0.24)]'
-    : 'border-[#5cc8ff] bg-[linear-gradient(135deg,#1c2430,#121821)] shadow-[0_18px_60px_rgba(0,0,0,0.45)]';
-  const helpCloseColors = isLight
-    ? 'text-[#5f7185] hover:bg-[#eaf0f6] hover:text-[#1c2733]'
-    : 'text-[#a1a1aa] hover:bg-[#27272a] hover:text-[#f4f4f5]';
-  const helpBodyText = isLight ? 'text-[#1c2733]' : 'text-[#dbeafe]';
-  const sectionHeadText = isLight ? 'text-[#5f7185]' : 'text-[#8fa1b5]';
-  const kbdColors = isLight
-    ? 'border-[#d5dce4] bg-[#fbfcfe] text-[#1c2733]'
-    : 'border-[#2b3441] bg-[#171c24] text-[#dbeafe]';
+  // ESP32 fill 语言：accent 填充 + on-accent 文字（皮肤规则 .bg-cyan-500.text-white）
+  const fabToggleColors =
+    'border-cyan-500 bg-cyan-500 hover:bg-cyan-700 focus-visible:bg-cyan-700';
+  const helpFabColors =
+    'border-cyan-500/60 bg-cyan-500 text-white hover:border-cyan-500 hover:bg-cyan-700 focus-visible:border-cyan-500 focus-visible:bg-cyan-700';
+  const helpModalColors = 'border-cyan-500/50 bg-zinc-900 shadow-xl';
+  const helpCloseColors = 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100';
+  const helpBodyText = 'text-zinc-200';
+  const sectionHeadText = 'text-zinc-400';
+  const kbdColors = 'border-zinc-700 bg-zinc-800 text-zinc-200';
 
   return (
     <>
-      {/* .fabToggle: glowing cyan dot that expands/collapses the cluster */}
+      {/* .fabToggle: accent dot that expands/collapses the cluster */}
       <button
         type="button"
         onClick={toggleFab}
@@ -84,7 +69,7 @@ export const FabActions: React.FC = () => {
           type="button"
           onClick={openHelp}
           aria-label={t('fab.help')}
-          className={`${fabBallBase} ${helpFabColors} text-[24px] text-[#061019] ${fabBallVisibility} ${fabOpen ? '-translate-x-[56px]' : ''}`}
+          className={`${fabBallBase} ${helpFabColors} text-[24px] ${fabBallVisibility} ${fabOpen ? '-translate-x-[56px]' : ''}`}
         >
           ?
         </button>
@@ -95,14 +80,14 @@ export const FabActions: React.FC = () => {
         <>
           {/* .helpOverlay */}
           <div
-            className={`fixed inset-0 z-[100] ${isLight ? 'bg-[rgba(15,23,42,0.35)]' : 'bg-[rgba(5,7,10,0.45)]'}`}
+            className="fixed inset-0 z-[100] bg-black/60"
             onClick={() => setHelpOpen(false)}
           />
           {/* .helpModal: anchored bottom-right above the FAB cluster */}
-          <div className={`fixed bottom-[74px] right-[18px] z-[101] max-h-[calc(100vh-100px)] w-[min(340px,calc(100vw-36px))] overflow-y-auto rounded-[14px] border ${helpModalColors} p-[14px]`}>
+          <div className={`fixed bottom-[74px] right-[18px] z-[101] max-h-[calc(100vh-100px)] w-[min(340px,calc(100vw-36px))] overflow-y-auto rounded-xl border ${helpModalColors} p-[14px]`}>
             {/* .helpHead */}
             <div className="mb-2 flex items-center justify-between gap-3">
-              <h2 className={`m-0 text-base font-bold ${isLight ? 'text-[#1c2733]' : 'text-[#e8edf2]'}`}>{t('fab.helpTitle')}</h2>
+              <h2 className="m-0 text-base font-bold text-zinc-100">{t('fab.helpTitle')}</h2>
               {/* .helpClose */}
               <button
                 type="button"

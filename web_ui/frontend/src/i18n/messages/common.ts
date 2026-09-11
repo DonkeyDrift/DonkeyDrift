@@ -10,11 +10,11 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.pilotArena': 'Pilot Arena',
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': '菜单',
-    // 统一流程大页面 section 描述（#178）：开车采数据 → 管数据 → 训练 → 评测
-    'flow.drive.desc': '驾驶并采集训练数据',
-    'flow.tubManager.desc': '浏览与管理采集的数据',
-    'flow.trainer.desc': '用数据训练出模型',
-    'flow.pilotArena.desc': '加载模型进行评测与对比',
+    'common.nav.more': '更多入口',
+    // SkinSwitcher（座舱/Apple 双风格切换，见 src/lib/uistyle.ts）
+    'common.uiStyle.switchLabel': '界面风格',
+    'common.uiStyle.cockpit': '座舱',
+    'common.uiStyle.apple': 'Apple',
     // App shell
     'common.app.somethingWentWrong': '出错了。',
     'common.app.failedToRefreshTub': '刷新 Tub 失败',
@@ -24,9 +24,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.configLoader.failedToLoad': '加载配置失败',
     'common.configLoader.failedToLoadFromDir': '从所选目录加载配置失败',
     'common.configLoader.title': '配置加载器',
-    'common.configLoader.description': '选择车辆目录（由 donkey createcar 创建）',
     'common.configLoader.hoverSubtitle': '选择车辆目录',
-    'common.configLoader.apiLabel': 'API: {origin}/api',
     'common.configLoader.pathPlaceholder': '配置路径，例如 /home/dkc/projects/mycar',
     'common.configLoader.pathInputAria': '配置路径输入框',
     'common.configLoader.browse': '浏览',
@@ -83,6 +81,9 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.unknownError': '未知错误',
     'common.cannotConnectBackend': '无法连接后端服务，请确认已执行 donkey web 并且后端端口可访问',
     'common.close': '关闭',
+    // Empty（统一空状态组件）
+    'common.empty.title': '暂无数据',
+    'common.empty.hint': '加载或选择数据后在此显示',
   },
   en: {
     // Layout top navigation
@@ -92,11 +93,11 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.pilotArena': 'Pilot Arena',
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': 'Menu',
-    // Unified flow page section descriptions (#178)
-    'flow.drive.desc': 'Drive and record training data',
-    'flow.tubManager.desc': 'Browse and manage collected data',
-    'flow.trainer.desc': 'Train a model from your data',
-    'flow.pilotArena.desc': 'Load models to evaluate and compare',
+    'common.nav.more': 'More',
+    // SkinSwitcher (cockpit / Apple dual UI style, see src/lib/uistyle.ts)
+    'common.uiStyle.switchLabel': 'Interface style',
+    'common.uiStyle.cockpit': 'Cockpit',
+    'common.uiStyle.apple': 'Apple',
     // App shell
     'common.app.somethingWentWrong': 'Something went wrong.',
     'common.app.failedToRefreshTub': 'Failed to refresh tub',
@@ -106,9 +107,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.configLoader.failedToLoad': 'Failed to load config',
     'common.configLoader.failedToLoadFromDir': 'Failed to load config from selected directory',
     'common.configLoader.title': 'Config Loader',
-    'common.configLoader.description': 'Select car directory (created via donkey createcar)',
     'common.configLoader.hoverSubtitle': 'Select car directory',
-    'common.configLoader.apiLabel': 'API: {origin}/api',
     'common.configLoader.pathPlaceholder': 'Config path, e.g. /home/dkc/projects/mycar',
     'common.configLoader.pathInputAria': 'Config path input field',
     'common.configLoader.browse': 'Browse',
@@ -166,5 +165,8 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.unknownError': 'Unknown error',
     'common.cannotConnectBackend': 'Cannot connect to the backend service. Please make sure donkey web is running and the backend port is accessible.',
     'common.close': 'Close',
+    // Empty (shared empty-state component)
+    'common.empty.title': 'Nothing here yet',
+    'common.empty.hint': 'Load or select data to see it here',
   },
 };

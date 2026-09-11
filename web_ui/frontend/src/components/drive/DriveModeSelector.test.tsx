@@ -26,45 +26,39 @@ describe('DriveModeSelector', () => {
     expect(onChange).toHaveBeenCalledWith('local');
   });
 
-  it('激活按钮按 ESP32 模式配色着色（手动绿/半自动琥珀/全自动蓝）', () => {
+  it('激活按钮按 ESP32 模式配色着色（手动绿/半自动琥珀/全自动蓝，语义类映射 --ok/--warn/--accent）', () => {
     const { rerender } = render(<DriveModeSelector value="user" onChange={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: '手动' })).toHaveClass('mode-active');
     expect(screen.getByRole('button', { name: '手动' })).toHaveAttribute('data-mode', 'user');
-    expect(screen.getByRole('button', { name: '手动' }).className).toContain('#39d98a');
+    expect(screen.getByRole('button', { name: '手动' })).toHaveClass('bg-emerald-500/25', 'text-emerald-400');
     expect(screen.getByRole('button', { name: '半自动' })).not.toHaveClass('mode-active');
 
     rerender(<DriveModeSelector value="local_angle" onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: '半自动' })).toHaveClass('mode-active');
-    expect(screen.getByRole('button', { name: '半自动' }).className).toContain('#ffcc66');
+    expect(screen.getByRole('button', { name: '半自动' })).toHaveClass('bg-amber-400/10', 'text-amber-400');
 
     rerender(<DriveModeSelector value="local" onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: '全自动' })).toHaveClass('mode-active');
-    expect(screen.getByRole('button', { name: '全自动' }).className).toContain('#5cc8ff');
+    expect(screen.getByRole('button', { name: '全自动' })).toHaveClass('bg-cyan-600/20', 'text-cyan-400');
   });
 
-  it('浅色主题下激活按钮使用同色相墨色配色,切回深色恢复原配色', () => {
-    const { rerender } = render(<DriveModeSelector value="user" onChange={vi.fn()} />);
+  it('配色走语义类 + CSS 变量：切主题/风格类名不变，无硬编码 hex', () => {
+    render(<DriveModeSelector value="local" onChange={vi.fn()} />);
+    const button = screen.getByRole('button', { name: '全自动' });
+    const darkClassName = button.className;
+    expect(darkClassName).not.toContain('#');
 
     act(() => {
       applyTheme('light');
     });
-
-    expect(screen.getByRole('button', { name: '手动' }).className).toContain('#1fae6b');
-    expect(screen.getByRole('button', { name: '手动' }).className).not.toContain('#39d98a');
-
-    rerender(<DriveModeSelector value="local_angle" onChange={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '半自动' }).className).toContain('#b57d0e');
-    expect(screen.getByRole('button', { name: '半自动' }).className).not.toContain('#ffcc66');
-
-    rerender(<DriveModeSelector value="local" onChange={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '全自动' }).className).toContain('#0c9bd6');
-    expect(screen.getByRole('button', { name: '全自动' }).className).not.toContain('#5cc8ff');
+    // 浅色/深色/Apple 象限配色由 theme-*.css 变量接管，类名保持一致
+    expect(button.className).toBe(darkClassName);
 
     act(() => {
       applyTheme('dark');
     });
-    expect(screen.getByRole('button', { name: '全自动' }).className).toContain('#5cc8ff');
+    expect(button.className).toBe(darkClassName);
   });
 
   it('disabled 时按钮不可点击', () => {

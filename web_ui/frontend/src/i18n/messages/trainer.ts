@@ -2,8 +2,7 @@
 // the full English translation of every entry.
 //
 // 命名约定（2026-09-04，以车上操作视角为准）：
-//   - myPc* key（tabMyPc / myPcTraining / myPcTrainingSubtitle / myPcProbeReady
-//     等）= 局域网主机（Lan Host）：通过 SSH 连接的远程开发电脑（内部枚举 mypc）。
+//   - myPc* key（tabMyPc / myPcTraining / myPcProbeReady 等）= 局域网主机（Lan Host）：通过 SSH 连接的远程开发电脑（内部枚举 mypc）。
 //   - tabLocal = 车载电脑（Car Computer）：运行 Web UI 的车端电脑（内部枚举 local）。
 // key 名沿用历史 mypc/local 约定，不与显示语同步更名。
 export const trainer: { zh: Record<string, string>; en: Record<string, string> } = {
@@ -20,7 +19,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.tubPathManual': '手动输入…',
     'trainer.tubLoaded': '当前已加载',
     'trainer.trainingData': '训练数据',
-    'trainer.trainingDataSubtitle': '选择用于训练的 Tub，开始训练时会打包上传到你的电脑',
     'trainer.workingDir': '工作目录: {path}',
     'trainer.modelName': '模型名称',
     'trainer.modelNamePlaceholder': '例如 my_model',
@@ -70,7 +68,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.noLossData': '无 loss 数据',
     'trainer.uploadLoss': '补传 loss',
     'trainer.uploadLossTitle': '补传 Loss 图',
-    'trainer.uploadLossHint': '为已导入的模型补充 loss 曲线图与训练元数据',
     'trainer.uploadLossFailed': '补传失败: {message}',
     'trainer.selectFile': '选择文件',
     'trainer.trainingStatus': '训练状态',
@@ -121,7 +118,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.pythonPath': 'Python 路径',
     'trainer.keyPath': 'SSH 私钥路径（可选）',
     'trainer.myPcProbe': '环境检测',
-    'trainer.myPcProbeHint': '首次使用前，先检测目标电脑的 SSH、Python 与 donkeycar 环境是否就绪。',
     'trainer.myPcProbeRun': '检测环境',
     'trainer.myPcProbeRunning': '检测中…',
     'trainer.myPcProbeReady': '环境就绪，可以开始局域网主机训练。',
@@ -136,13 +132,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.myPcInstallDone': '训练依赖安装完成，请重新运行环境检测确认。',
     'trainer.myPcInstallFailed': '安装失败: {message}',
     'trainer.myPcInstallRerunProbe': '安装完成后请点击「检测环境」重新检测。',
-    'trainer.trainingConfigSubtitle': '设置 Tub、模型与训练参数',
-    'trainer.cloudTrainingSubtitle': '配置云端训练主机连接',
-    'trainer.myPcTrainingSubtitle': '配置局域网主机训练 SSH 连接',
-    'trainer.myPcProbeSubtitle': '检测目标电脑的训练环境是否就绪',
-    'trainer.trainingStatusSubtitle': '查看训练进度与实时指标',
-    'trainer.trainingLogSubtitle': '查看训练过程的实时输出',
-    'trainer.trainedModelsSubtitle': '浏览、下载与加载已训练的模型',
   },
   en: {
     'trainer.title': 'Trainer',
@@ -157,7 +146,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.tubPathManual': 'Manual input...',
     'trainer.tubLoaded': 'loaded',
     'trainer.trainingData': 'Training Data',
-    'trainer.trainingDataSubtitle': 'Choose the tub to train on — it will be packaged and uploaded to this computer.',
     'trainer.workingDir': 'Working dir: {path}',
     'trainer.modelName': 'Model Name',
     'trainer.modelNamePlaceholder': 'e.g. my_model',
@@ -207,7 +195,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.noLossData': 'No loss data',
     'trainer.uploadLoss': 'Upload loss',
     'trainer.uploadLossTitle': 'Upload Loss Chart',
-    'trainer.uploadLossHint': 'Add a loss chart and training metadata for this imported model',
     'trainer.uploadLossFailed': 'Upload failed: {message}',
     'trainer.selectFile': 'Choose file',
     'trainer.trainingStatus': 'Training Status',
@@ -256,7 +243,6 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.pythonPath': 'Python Path',
     'trainer.keyPath': 'SSH Key Path (optional)',
     'trainer.myPcProbe': 'Environment Check',
-    'trainer.myPcProbeHint': 'Before first use, check the target computer\'s SSH, Python, and donkeycar environment.',
     'trainer.myPcProbeRun': 'Run Check',
     'trainer.myPcProbeRunning': 'Checking...',
     'trainer.myPcProbeReady': 'Environment ready. You can start training on the Lan Host.',
@@ -271,12 +257,5 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.myPcInstallDone': 'Training dependencies installed. Please run the environment check again to confirm.',
     'trainer.myPcInstallFailed': 'Install failed: {message}',
     'trainer.myPcInstallRerunProbe': 'After installation, click "Run Check" to probe again.',
-    'trainer.trainingConfigSubtitle': 'Set tub, model, and training parameters',
-    'trainer.cloudTrainingSubtitle': 'Configure the cloud training host connection',
-    'trainer.myPcTrainingSubtitle': "Configure the Lan Host's SSH connection",
-    'trainer.myPcProbeSubtitle': 'Check whether the target computer training environment is ready',
-    'trainer.trainingStatusSubtitle': 'View training progress and live metrics',
-    'trainer.trainingLogSubtitle': 'View live output from the training process',
-    'trainer.trainedModelsSubtitle': 'Browse, download, and load trained models',
   },
 };

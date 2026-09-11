@@ -29,9 +29,6 @@ export const harness: { zh: Record<string, string>; en: Record<string, string> }
     'harness.flashFirmware': '刷写固件',
     'harness.flashing': '刷写中...',
     'harness.noUpdate': '暂无可更新项',
-    'harness.background': '后台自动检查',
-    'harness.backgroundOn': '已开启（每 {hours} 小时）',
-    'harness.backgroundOff': '未开启',
     'harness.manualInstallHint': '自动安装需系统权限，失败时请按提示手动安装',
   },
   en: {
@@ -63,9 +60,6 @@ export const harness: { zh: Record<string, string>; en: Record<string, string> }
     'harness.flashFirmware': 'Flash firmware',
     'harness.flashing': 'Flashing...',
     'harness.noUpdate': 'No updates available',
-    'harness.background': 'Background auto-check',
-    'harness.backgroundOn': 'On (every {hours} hours)',
-    'harness.backgroundOff': 'Off',
     'harness.manualInstallHint': 'Auto-install may need system permissions; follow the hint to install manually on failure',
   },
 };

@@ -71,7 +71,7 @@ describe('ConsoleMuteButton', () => {
     render(<ConsoleMuteButton />);
     const btn = await screen.findByRole('button', { name: 'console.unmuteAria' });
     expect(btn).toHaveAttribute('aria-pressed', 'true');
-    expect(btn.className).toContain('text-[#5cc8ff]');
+    expect(btn.className).toContain('text-cyan-400');
   });
 
   it('broadcasts MUTE_CHANGED_EVENT after toggling so the embedded console updates immediately', async () => {
@@ -231,10 +231,9 @@ describe('ConsoleDevToggle', () => {
 
     const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle.className).toContain('bg-[#5cc8ff]/25');
-    expect(toggle.className).toContain('border-[#5cc8ff]');
-    expect(toggle.className).toContain('text-[#5cc8ff]');
-    expect(toggle.className).toContain('shadow-[inset_0_0_0_1px_#5cc8ff]');
+    expect(toggle.className).toContain('bg-cyan-500/20');
+    expect(toggle.className).toContain('border-cyan-500');
+    expect(toggle.className).toContain('text-cyan-400');
   });
 
   it('is disabled when the console is unreachable', () => {

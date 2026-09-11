@@ -3,7 +3,6 @@
 export const tubeditor: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'tubEditor.title': 'Tub 编辑器',
-    'tubEditor.subtitle': '编辑 Tub 数据',
     'tubEditor.liveUpdate': '实时更新',
     'tubEditor.emptyChartAria': '空图表占位',
     'tubEditor.emptyState': '选择文件以查看遥测数据',
@@ -67,7 +66,6 @@ export const tubeditor: { zh: Record<string, string>; en: Record<string, string>
   },
   en: {
     'tubEditor.title': 'Tub Editor',
-    'tubEditor.subtitle': 'Edit Tub with functions',
     'tubEditor.liveUpdate': 'Live Update',
     'tubEditor.emptyChartAria': 'empty-chart placeholder',
     'tubEditor.emptyState': 'Select files to view telemetry data',

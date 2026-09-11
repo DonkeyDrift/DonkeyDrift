@@ -8,9 +8,7 @@ import { MODEL_TYPES } from './modelTypes';
 
 interface RemoteConfigFormProps {
   titleKey?: string;
-  hintKey?: string;
   icon?: React.ReactNode;
-  subtitleKey?: string;
   /** Compact mode: only show host / user / password / keyPath (used for "Lan Host"). */
   compact?: boolean;
   host: string;
@@ -37,9 +35,7 @@ const SSH_ENABLE_CMD = 'sudo systemsetup -setremotelogin on';
 
 export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
   titleKey = 'trainer.cloudTraining',
-  hintKey,
   icon = <Cloud className="w-5 h-5" />,
-  subtitleKey,
   compact = false,
   host,
   onHostChange,
@@ -142,7 +138,6 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
         <SectionCardTitle
           icon={icon}
           title={t(titleKey)}
-          subtitle={subtitleKey ? t(subtitleKey) : undefined}
         />
         {compact && (
           <button
@@ -158,7 +153,6 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
       </div>
       {allHint && <p className={`text-xs ${allHint.className}`}>{allHint.text}</p>}
       {allHint2 && <p className={`text-xs ${allHint2.className}`}>{allHint2.text}</p>}
-      {hintKey && <p className="text-xs text-zinc-500">{t(hintKey)}</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -171,7 +165,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             autoCapitalize="none"
             spellCheck={false}
             placeholder={t('trainer.hostPlaceholder')}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-cyan-600"
+            className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
           />
         </div>
         <div className="space-y-1">
@@ -184,7 +178,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             autoCapitalize="none"
             spellCheck={false}
             placeholder={t('trainer.userPlaceholder')}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-cyan-600"
+            className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
           />
         </div>
       </div>
@@ -241,7 +235,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           value={keyPath}
           placeholder="~/.ssh/id_rsa"
           onChange={(e) => onKeyPathChange?.(e.target.value)}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-cyan-600"
+          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
         />
       </div>
 
@@ -253,7 +247,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
               type="text"
               value={remoteDirBase}
               onChange={(e) => onRemoteDirBaseChange(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
             />
           </div>
 
@@ -263,7 +257,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
               type="text"
               value={pythonPath}
               onChange={(e) => onPythonPathChange(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
             />
           </div>
         </>
@@ -278,7 +272,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
             value={modelName}
             onChange={(e) => onModelNameChange(e.target.value)}
             placeholder={t('trainer.modelNamePlaceholder')}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-cyan-600"
+            className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
           />
         </div>
         <div className="space-y-1">
@@ -286,7 +280,7 @@ export const RemoteConfigForm: React.FC<RemoteConfigFormProps> = ({
           <select
             value={modelType}
             onChange={(e) => onModelTypeChange(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+            className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
           >
             {MODEL_TYPES.map((type) => (
               <option key={type} value={type}>{type}</option>

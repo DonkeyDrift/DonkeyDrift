@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { browseDirectory, getApiErrorMessage } from '../services/api';
-import { Folder, ArrowLeft, X, FolderOpen } from 'lucide-react';
+import { Folder, ArrowLeft, X, FolderOpen, Loader2 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { useTranslation } from '@/i18n';
 
@@ -83,7 +83,8 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-2 min-h-0">
           {loading ? (
-            <div className="flex justify-center items-center h-full text-zinc-500">
+            <div className="flex justify-center items-center gap-2 h-full text-zinc-500">
+              <Loader2 className="w-4 h-4 animate-spin" />
               {t('common.fileBrowser.loading')}
             </div>
           ) : error ? (

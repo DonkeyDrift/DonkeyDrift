@@ -54,12 +54,10 @@ describe('SimCollectCard', () => {
     mock.stop.mockClear();
   });
 
-  it('renders title, hint and start button in idle state', () => {
+  it('renders title and start button in idle state', () => {
     renderCard();
     expect(screen.getByText('模拟器采集')).toBeInTheDocument();
     expect(screen.getByText('开始采集')).toBeInTheDocument();
-    // 说明文字含 Mac
-    expect(screen.getByText(/SSH 控制 Mac/)).toBeInTheDocument();
   });
 
   it('calls start with the configured steps when Start clicked', () => {

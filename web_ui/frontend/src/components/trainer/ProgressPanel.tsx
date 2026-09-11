@@ -62,7 +62,6 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({ job }) => {
         <SectionCardTitle
           icon={<Activity className="w-5 h-5" />}
           title={t('trainer.trainingStatus')}
-          subtitle={t('trainer.trainingStatusSubtitle')}
         />
         {job && (
           <span className={`text-sm font-bold ${statusColor}`}>{statusLabel[status!]}</span>
