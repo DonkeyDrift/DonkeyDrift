@@ -98,17 +98,28 @@ describe('KimiCodeWebEntryLink', () => {
     await waitFor(() => { expect(fakeWin.location.href).toBe('https://kimi.example/web#token=x'); });
     openSpy.mockRestore();
   });
-  it('closes the tab and alerts on failure', async () => {
+  it('closes the tab and shows an inline error banner on failure', async () => {
     const fakeWin = { location: { href: '' }, close: vi.fn() };
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     mockLaunchKimi.mockResolvedValue({ status: 'error', error: 'boom' });
     render(<KimiCodeWebEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
-    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('common.enterButtons.kimiCodeWebFailed');
+    });
     expect(fakeWin.close).toHaveBeenCalled();
     openSpy.mockRestore();
-    alertSpy.mockRestore();
+  });
+  it('dismisses the inline error banner via its close button', async () => {
+    const fakeWin = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
+    mockLaunchKimi.mockResolvedValue({ status: 'error', error: 'boom' });
+    render(<KimiCodeWebEntryLink />);
+    fireEvent.click(screen.getByText('common.enterButtons.kimiCodeWeb'));
+    const banner = await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    await waitFor(() => { expect(banner).not.toBeInTheDocument(); });
+    openSpy.mockRestore();
   });
 });
 
@@ -123,17 +134,17 @@ describe('DshEntryLink', () => {
     await waitFor(() => { expect(fakeWin.location.href).toBe('http://192.168.3.57:43749'); });
     openSpy.mockRestore();
   });
-  it('closes the tab and alerts on failure', async () => {
+  it('closes the tab and shows an inline error banner on failure', async () => {
     const fakeWin = { location: { href: '' }, close: vi.fn() };
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => fakeWin as unknown as Window);
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     mockLaunchDsh.mockResolvedValue({ status: 'error', error: 'boom' });
     render(<DshEntryLink />);
     fireEvent.click(screen.getByText('common.enterButtons.dsh'));
-    await waitFor(() => { expect(alertSpy).toHaveBeenCalled(); });
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('common.enterButtons.dshFailed');
+    });
     expect(fakeWin.close).toHaveBeenCalled();
     openSpy.mockRestore();
-    alertSpy.mockRestore();
   });
 });
 
@@ -300,24 +311,22 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
     expect(navigatedParams().get('sid')).toBe('placeholder-sid2');
   });
 
-  it('alerts and neither saves nor navigates a non-https link', async () => {
+  it('shows an inline error banner and neither saves nor navigates a non-https link', async () => {
     mockOpenWindows();
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     vi.spyOn(window, 'prompt').mockReturnValue('http://zcode.z.ai/remote/v4?sid=placeholder-sid&hash=placeholder-hash');
     await clickAndFlush(renderButton());
-    expect(alertSpy).toHaveBeenCalledWith('common.enterButtons.zcodeInvalid');
+    expect(screen.getByRole('alert')).toHaveTextContent('common.enterButtons.zcodeInvalid');
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(lastNavigated()).toBeUndefined();
     // 录入无效：占位标签被关闭
     expect(fakeWins[0].close).toHaveBeenCalledTimes(1);
   });
 
-  it('alerts and rejects a bare link without sid/hash params', async () => {
+  it('shows an inline error banner and rejects a bare link without sid/hash params', async () => {
     mockOpenWindows();
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     vi.spyOn(window, 'prompt').mockReturnValue(BARE_URL);
     await clickAndFlush(renderButton());
-    expect(alertSpy).toHaveBeenCalledWith('common.enterButtons.zcodeInvalid');
+    expect(screen.getByRole('alert')).toHaveTextContent('common.enterButtons.zcodeInvalid');
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(lastNavigated()).toBeUndefined();
     expect(fakeWins[0].close).toHaveBeenCalledTimes(1);
@@ -368,12 +377,11 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
 
   it('does nothing when the prompt is cancelled', async () => {
     mockOpenWindows();
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     vi.spyOn(window, 'prompt').mockReturnValue(null);
     await clickAndFlush(renderButton());
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(lastNavigated()).toBeUndefined();
-    expect(alertSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(fakeWins[0].close).toHaveBeenCalledTimes(1);
     // 取消 = 没有真正打开，不唤醒桌面端
     expect(mockLaunchZcodeRemote).not.toHaveBeenCalled();

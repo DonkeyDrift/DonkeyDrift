@@ -1,22 +1,48 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Code2, FlaskConical, Menu, Search, Sparkles, SquareTerminal } from 'lucide-react';
+import { AlertCircle, Code2, FlaskConical, Menu, Search, Sparkles, SquareTerminal, X } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 import { fetchZcodeRemoteLink, launchDsh, launchKimiCodeWeb, launchZcodeRemote } from '@/services/api';
 import { FindCarModal } from './FindCarModal';
 
+/** 页面内 inline 错误横幅（替代 alert）：--bad 系洗色底 + hairline，可关闭。
+ *  定位在顶栏下方（移动端标题区 135px / 桌面 57px，与 SidePanel 同款偏移）。 */
+const EntryErrorBanner: React.FC<{ message: string; onClose: () => void }> = ({ message, onClose }) => {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="alert"
+      className="fixed left-1/2 top-[143px] lg:top-16 z-[90] flex w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 rounded-md border border-red-500/50 bg-red-500/20 px-3 py-2 text-xs text-red-400"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span className="flex-1 break-words">{message}</span>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t('common.close')}
+        className="shrink-0 text-red-400 hover:text-red-300 transition-colors"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+};
+
 // 启动 launcher 侧服务（kimi / dsh）并在新标签页打开目标 URL：
-// 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截
+// 点击同步上下文先开空白页拿句柄，等异步拿到 URL 再 window.open 会被弹窗拦截；
+// 失败时不再 alert，改为页面内 inline 错误横幅（可关闭）
 const useLauncherEntry = (
   launch: (signal: AbortSignal) => Promise<{ status: string; url?: string; error?: string }>,
   opts: { startingKey: string; failedKey: string; networkKey: string; timeoutMs: number },
 ) => {
   const { t } = useTranslation();
   const [launching, setLaunching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const enter = async () => {
     if (launching) return;
     const win = window.open('about:blank', '_blank');
     setLaunching(true);
+    setError(null);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
     try {
@@ -29,17 +55,17 @@ const useLauncherEntry = (
         }
       } else {
         win?.close();
-        alert(t(opts.failedKey, { message: data.error || t('common.unknownError') }));
+        setError(t(opts.failedKey, { message: data.error || t('common.unknownError') }));
       }
     } catch {
       win?.close();
-      alert(t(opts.failedKey, { message: t(opts.networkKey) }));
+      setError(t(opts.failedKey, { message: t(opts.networkKey) }));
     } finally {
       clearTimeout(timer);
       setLaunching(false);
     }
   };
-  return { launching, enter };
+  return { launching, enter, error, clearError: () => setError(null) };
 };
 
 // 高级入口的导航链接样式（Issue #175）：融入导航行、去掉胶囊外壳，但用
@@ -95,23 +121,26 @@ export const DrifterConsoleEntryLink: React.FC = () => {
 export const KimiCodeWebEntryLink: React.FC = () => {
   const { t } = useTranslation();
   // kimi 冷启动可达数十秒，launcher 端整体超时 120s，客户端超时留足余量
-  const { launching, enter } = useLauncherEntry(launchKimiCodeWeb, {
+  const { launching, enter, error, clearError } = useLauncherEntry(launchKimiCodeWeb, {
     startingKey: 'common.enterButtons.kimiCodeWebStarting',
     failedKey: 'common.enterButtons.kimiCodeWebFailed',
     networkKey: 'common.enterButtons.kimiCodeWebNetworkError',
     timeoutMs: 125000,
   });
   return (
-    <button
-      type="button"
-      onClick={enter}
-      disabled={launching}
-      title={t('common.enterButtons.kimiCodeWebTitle')}
-      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
-    >
-      <Sparkles className="w-3.5 h-3.5 shrink-0" />
-      {launching ? t('common.enterButtons.kimiCodeWebStarting') : t('common.enterButtons.kimiCodeWeb')}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={enter}
+        disabled={launching}
+        title={t('common.enterButtons.kimiCodeWebTitle')}
+        className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
+      >
+        <Sparkles className="w-3.5 h-3.5 shrink-0" />
+        {launching ? t('common.enterButtons.kimiCodeWebStarting') : t('common.enterButtons.kimiCodeWeb')}
+      </button>
+      {error && <EntryErrorBanner message={error} onClose={clearError} />}
+    </>
   );
 };
 
@@ -194,6 +223,7 @@ const copyRemoteUrl = (url: string) => {
 export const ZCodeEntryLink: React.FC = () => {
   const { t } = useTranslation();
   const clickTimer = useRef<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // 卸载时清掉未触发的单击定时器
   useEffect(
@@ -246,12 +276,12 @@ export const ZCodeEntryLink: React.FC = () => {
   };
 
   // prompt 录入/更新链接：预填归一化后的存档（存档无效时预填空串，
-  // 避免早期存的无效裸链接诱导直接回车）；输入经归一化，失败 alert
-  // 且不保存；保存归一化后的值并立即按新链接打开一次。存储写入失败
-  // （隐私模式/禁用）不阻塞本次打开——下次点击会再 prompt。单击主流程
-  // 传入占位标签 win 时导航它（此刻已脱离点击手势，直接 window.open
-  // 会被拦截），取消/无效输入则关掉占位；双击等同步手势路径无 win，
-  // 直接 openFresh
+  // 避免早期存的无效裸链接诱导直接回车）；输入经归一化，失败在页面内
+  // 弹 inline 错误横幅且不保存；保存归一化后的值并立即按新链接打开一次。
+  // 存储写入失败（隐私模式/禁用）不阻塞本次打开——下次点击会再 prompt。
+  // 单击主流程传入占位标签 win 时导航它（此刻已脱离点击手势，直接
+  // window.open 会被拦截），取消/无效输入则关掉占位；双击等同步手势路径
+  // 无 win，直接 openFresh
   const promptForUrl = (win?: Window | null) => {
     const saved = readStoredRemoteUrl();
     const input = window.prompt(
@@ -264,7 +294,7 @@ export const ZCodeEntryLink: React.FC = () => {
     }
     const url = normalizeRemoteUrl(input);
     if (!url) {
-      window.alert(t('common.enterButtons.zcodeInvalid'));
+      setError(t('common.enterButtons.zcodeInvalid'));
       if (win) win.close();
       return;
     }
@@ -299,39 +329,45 @@ export const ZCodeEntryLink: React.FC = () => {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-      title={t('common.enterButtons.zcodeTitle')}
-      className={entryLinkCls}
-    >
-      <Code2 className="w-3.5 h-3.5 shrink-0" />
-      {t('common.enterButtons.zcode')}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        title={t('common.enterButtons.zcodeTitle')}
+        className={entryLinkCls}
+      >
+        <Code2 className="w-3.5 h-3.5 shrink-0" />
+        {t('common.enterButtons.zcode')}
+      </button>
+      {error && <EntryErrorBanner message={error} onClose={() => setError(null)} />}
+    </>
   );
 };
 
 export const DshEntryLink: React.FC = () => {
   const { t } = useTranslation();
   // dsh 冷启动数秒、launcher 端整体超时 60s
-  const { launching, enter } = useLauncherEntry(launchDsh, {
+  const { launching, enter, error, clearError } = useLauncherEntry(launchDsh, {
     startingKey: 'common.enterButtons.dshStarting',
     failedKey: 'common.enterButtons.dshFailed',
     networkKey: 'common.enterButtons.dshNetworkError',
     timeoutMs: 65000,
   });
   return (
-    <button
-      type="button"
-      onClick={enter}
-      disabled={launching}
-      title={t('common.enterButtons.dshTitle')}
-      className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
-    >
-      <FlaskConical className="w-3.5 h-3.5 shrink-0" />
-      {launching ? t('common.enterButtons.dshStarting') : t('common.enterButtons.dsh')}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={enter}
+        disabled={launching}
+        title={t('common.enterButtons.dshTitle')}
+        className={launching ? `${entryLinkCls} opacity-60 cursor-wait` : entryLinkCls}
+      >
+        <FlaskConical className="w-3.5 h-3.5 shrink-0" />
+        {launching ? t('common.enterButtons.dshStarting') : t('common.enterButtons.dsh')}
+      </button>
+      {error && <EntryErrorBanner message={error} onClose={clearError} />}
+    </>
   );
 };
 

@@ -3,7 +3,6 @@
 export const tubnav: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     // TubLibrary（原 TubNavigator 功能已合入 TubLibrary）
-    'tub.subtitle': '浏览 Tub 记录',
     'tub.steering': '转向',
     'tub.throttle': '油门',
     'tub.imageLoadError': '图像加载失败',
@@ -21,7 +20,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.refreshTitle': '重新拉取当前 Tub 数据',
     // TubLoader
     'tub.loaderTitle': 'Tub 加载器',
-    'tub.loaderSubtitle': '选择 Tub 目录，通常为 ./data',
     'tub.loaderHoverSubtitle': '选择 Tub 目录',
     'tub.pathPlaceholder': 'Tub 路径，例如 /home/dkc/projects/mycar/data',
     'tub.pathInputAria': 'Tub 路径输入框',
@@ -37,7 +35,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.loadFailedFromDir': '从所选目录加载 Tub 失败',
     // SimulatorConfig
     'tub.simTitle': '模拟器配置',
-    'tub.simSubtitle': '配置 DonkeySim 模拟器连接',
     'tub.simHoverSubtitle': '配置模拟器连接',
     'tub.simHostLabel': '模拟器主机 IP',
     'tub.simHostPlaceholder': '例如 192.168.1.100',
@@ -63,7 +60,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
   },
   en: {
     // TubLibrary (features of the former TubNavigator merged into TubLibrary)
-    'tub.subtitle': 'Navigate through tub records',
     'tub.steering': 'STEERING',
     'tub.throttle': 'Throttle',
     'tub.imageLoadError': 'Image Load Error',
@@ -81,7 +77,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.refreshTitle': 'Reload current tub data from server',
     // TubLoader
     'tub.loaderTitle': 'Tub Loader',
-    'tub.loaderSubtitle': 'Select tub directory, typically ./data',
     'tub.loaderHoverSubtitle': 'Select a tub directory',
     'tub.pathPlaceholder': 'Tub path, e.g. /home/dkc/projects/mycar/data',
     'tub.pathInputAria': 'Tub path input field',
@@ -97,7 +92,6 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.loadFailedFromDir': 'Failed to load tub from selected directory',
     // SimulatorConfig
     'tub.simTitle': 'Simulator Configuration',
-    'tub.simSubtitle': 'Configure the DonkeySim simulator connection',
     'tub.simHoverSubtitle': 'Configure simulator connection',
     'tub.simHostLabel': 'Simulator host IP',
     'tub.simHostPlaceholder': 'e.g. 192.168.1.100',

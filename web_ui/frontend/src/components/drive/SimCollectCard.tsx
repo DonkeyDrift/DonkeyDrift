@@ -91,8 +91,6 @@ export const SimCollectCard: React.FC = () => {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-zinc-400">{t('drive.simCollectHint')}</p>
-
         <div className="max-w-xs">
           <NumberField
             label={t('drive.simCollectSteps')}

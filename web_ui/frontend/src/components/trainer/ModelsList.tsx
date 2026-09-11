@@ -206,7 +206,6 @@ export const ModelsList: React.FC = () => {
         <SectionCardTitle
           icon={<Boxes className="w-5 h-5" />}
           title={t('trainer.trainedModels')}
-          subtitle={t('trainer.trainedModelsSubtitle')}
         />
         <div className="flex items-center gap-3">
           <button
@@ -493,7 +492,7 @@ export const ModelsList: React.FC = () => {
               </button>
             </div>
             <p className="text-xs text-zinc-500 mb-3">
-              <span className="text-zinc-300">{uploadTarget.name}</span> · {t('trainer.uploadLossHint')}
+              <span className="text-zinc-300">{uploadTarget.name}</span>
             </p>
             <div className="space-y-3">
               <label className="block">

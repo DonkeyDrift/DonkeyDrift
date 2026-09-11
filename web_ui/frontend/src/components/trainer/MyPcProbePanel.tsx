@@ -153,14 +153,10 @@ export const MyPcProbePanel: React.FC<MyPcProbePanelProps> = ({
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <SectionCardTitle
-            icon={<ScanLine className="w-5 h-5" />}
-            title={t('trainer.myPcProbe')}
-            subtitle={t('trainer.myPcProbeSubtitle')}
-          />
-          <p className="text-xs text-zinc-500 mt-1">{t('trainer.myPcProbeHint')}</p>
-        </div>
+        <SectionCardTitle
+          icon={<ScanLine className="w-5 h-5" />}
+          title={t('trainer.myPcProbe')}
+        />
         <button
           onClick={onRunProbe}
           disabled={loading}

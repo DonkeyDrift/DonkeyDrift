@@ -16,6 +16,7 @@ import {
 } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
+import { useUiStyle } from '@/lib/uistyle';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -47,6 +48,18 @@ const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
 const DRAG_SELECTION_THRESHOLD_PX = 5;
 const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
+/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
+ *  canvas 配色按语义角色（转向=--accent、油门=--warn、选区=--ok、删除标记=--bad）
+ *  随主题与 UI 风格（座舱/Apple）切换自动重取色；fallback 为原深/浅硬编码值。 */
+const cssVarColor = (name: string, fallback: string): string => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 type RecordAction = {
   mode: 'delete' | 'restore';
   indexes: number[];
@@ -58,6 +71,8 @@ let globalSelectionAnchorIndex: number | null = null;
 export const TubEditor: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
+  // 订阅 UI 风格（座舱/Apple）：切换时 chart 数据/插件按新象限的 CSS 变量重取色
+  const uiStyle = useUiStyle();
   // TM 页在 App 中常驻保活（#135）：据此在切走时屏蔽全局快捷键
   const isTubManagerRoute = useLocation().pathname === '/';
   const themeRef = useRef(theme);
@@ -233,11 +248,11 @@ export const TubEditor: React.FC = () => {
     [ensureChartRenderLoop]
   );
 
-  // 主题切换时同步 ref(供 canvas 插件读取)并触发一次重绘
+  // 主题/风格切换时同步 ref(供 canvas 插件读取)并触发一次重绘
   useEffect(() => {
     themeRef.current = theme;
     requestChartRender();
-  }, [theme, requestChartRender]);
+  }, [theme, uiStyle, requestChartRender]);
 
   const flushPendingSelectionRange = useCallback(() => {
     selectionRangeFrameRef.current = null;
@@ -1273,8 +1288,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetSteering'),
             data: angleData,
-            borderColor: theme === 'light' ? '#0c9bd6' : 'rgb(6, 182, 212)',
-            backgroundColor: theme === 'light' ? 'rgba(12, 155, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)',
+            borderColor: cssVarColor('--accent', theme === 'light' ? '#0c9bd6' : 'rgb(6, 182, 212)'),
+            backgroundColor: cssVarColor('--accent-a50', theme === 'light' ? 'rgba(12, 155, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)'),
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1283,8 +1298,8 @@ export const TubEditor: React.FC = () => {
           {
             label: t('tubEditor.datasetThrottle'),
             data: throttleData,
-            borderColor: theme === 'light' ? '#d99a17' : 'rgb(234, 179, 8)',
-            backgroundColor: theme === 'light' ? 'rgba(217, 154, 23, 0.5)' : 'rgba(234, 179, 8, 0.5)',
+            borderColor: cssVarColor('--warn', theme === 'light' ? '#d99a17' : 'rgb(234, 179, 8)'),
+            backgroundColor: cssVarColor('--warn-a55', theme === 'light' ? 'rgba(217, 154, 23, 0.5)' : 'rgba(234, 179, 8, 0.5)'),
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1294,7 +1309,7 @@ export const TubEditor: React.FC = () => {
       },
       sampledIndices: sampledX,
     };
-  }, [records, zoomPercent, isSessionScoped, t, theme]);
+  }, [records, zoomPercent, isSessionScoped, t, theme, uiStyle]);
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
@@ -1309,7 +1324,7 @@ export const TubEditor: React.FC = () => {
       legend: {
         position: 'top' as const,
         labels: {
-            color: theme === 'light' ? '#1a2330' : '#e4e4e7' // zinc-200
+            color: cssVarColor('--ink', theme === 'light' ? '#1a2330' : '#e4e4e7')
         }
       },
       tooltip: {
@@ -1326,19 +1341,19 @@ export const TubEditor: React.FC = () => {
               ? visibleRange.endIndex
               : records.length > 0 && records[visibleRange.endIndex] ? records[visibleRange.endIndex]._index : visibleRange.endIndex,
             ticks: {
-              color: theme === 'light' ? '#5b6b7d' : '#71717a',
+              color: cssVarColor('--ink3', theme === 'light' ? '#5b6b7d' : '#71717a'),
               callback: (value: string | number) => `${Math.round(Number(value))}`,
             },
-            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
+            grid: { color: cssVarColor('--line-soft', theme === 'light' ? '#dbe2ea' : '#27272a') }
         },
         y: {
             min: -1,
             max: 1,
             ticks: {
-              color: theme === 'light' ? '#5b6b7d' : '#71717a',
+              color: cssVarColor('--ink3', theme === 'light' ? '#5b6b7d' : '#71717a'),
               stepSize: 0.2,
             },
-            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
+            grid: { color: cssVarColor('--line-soft', theme === 'light' ? '#dbe2ea' : '#27272a') }
         }
     },
     animation: {
@@ -1367,17 +1382,16 @@ export const TubEditor: React.FC = () => {
         const chartArea = chart.chartArea;
         // 播放竖线已改 DOM 叠加层：chart 因数据/缩放/主题/resize 重绘后顺带对齐一次
         positionPlayhead();
-        // 浅色主题下的 canvas 配色;深色保持原值不变
+        // canvas 配色按语义变量取色（选区=--ok、AI 高亮=--warn），随主题/UI 风格自动切换
         const isLightTheme = themeRef.current === 'light';
-        const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
-        const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+        const selectionColor = cssVarColor('--ok', isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)');
         const totalRecords = records.length;
 
         // AI 一键筛选高亮（issue #402）：待删「碰撞后倒车」片段用琥珀色区间标注
         const aiHighlights = aiCleanHighlightsRef.current;
         if (aiHighlights && aiHighlights.length) {
-          const highlightFill = isLightTheme ? 'rgba(217, 119, 6, 0.20)' : 'rgba(234, 179, 8, 0.16)';
-          const highlightStroke = isLightTheme ? '#b45309' : 'rgb(234, 179, 8)';
+          const highlightAlpha = isLightTheme ? 0.2 : 0.16;
+          const highlightStroke = cssVarColor('--warn', isLightTheme ? '#b45309' : 'rgb(234, 179, 8)');
           for (const hl of aiHighlights) {
             const startX = xAxis.getPixelForValue(hl.startXValue);
             const endX = xAxis.getPixelForValue(hl.endXValue);
@@ -1386,8 +1400,10 @@ export const TubEditor: React.FC = () => {
               ctx.beginPath();
               ctx.rect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
               ctx.clip();
-              ctx.fillStyle = highlightFill;
+              ctx.globalAlpha = highlightAlpha;
+              ctx.fillStyle = highlightStroke;
               ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.globalAlpha = 1;
               ctx.lineWidth = 1.5;
               ctx.setLineDash([4, 4]);
               ctx.strokeStyle = highlightStroke;
@@ -1430,14 +1446,17 @@ export const TubEditor: React.FC = () => {
                 
                 if (isDraft) {
                     // 拖动过程中也使用绿色，确保用户体验一致
-                    ctx.fillStyle = selectionFillColor;
+                    ctx.globalAlpha = 0.15;
+                    ctx.fillStyle = selectionColor;
                     ctx.strokeStyle = selectionColor;
                 } else {
-                    ctx.fillStyle = selectionFillColor;
+                    ctx.globalAlpha = 0.15;
+                    ctx.fillStyle = selectionColor;
                     ctx.strokeStyle = selectionColor;
                 }
 
                 ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+                ctx.globalAlpha = 1;
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
                 ctx.strokeRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
@@ -1461,10 +1480,12 @@ export const TubEditor: React.FC = () => {
                 ctx.clip();
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
-                ctx.fillStyle = selectionFillColor;
+                ctx.globalAlpha = 0.15;
+                ctx.fillStyle = selectionColor;
                 ctx.strokeStyle = selectionColor;
 
                 ctx.fillRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
+                ctx.globalAlpha = 1;
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
                 ctx.strokeRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
@@ -1857,7 +1878,6 @@ export const TubEditor: React.FC = () => {
           <SectionCardTitle
             icon={<LineChart className="w-5 h-5" />}
             title={t('tubEditor.title')}
-            subtitle={t('tubEditor.subtitle')}
           />
         </CardHeader>
         <CardContent>
@@ -1882,7 +1902,6 @@ export const TubEditor: React.FC = () => {
         <SectionCardTitle
           icon={<LineChart className="w-5 h-5" />}
           title={t('tubEditor.title')}
-          subtitle={t('tubEditor.subtitle')}
         >
           {isDragging && (
             <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-400 animate-pulse">
@@ -2092,17 +2111,17 @@ export const TubEditor: React.FC = () => {
             className="pointer-events-none absolute left-0 w-0"
             style={{
               display: 'none',
-              borderLeft: `2px dashed ${theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)'}`,
+              borderLeft: '2px dashed var(--bad)',
               opacity: 0.9,
             }}
           >
             <div
               className="absolute -top-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
-              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+              style={{ background: 'var(--bad)' }}
             />
             <div
               className="absolute -bottom-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
-              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+              style={{ background: 'var(--bad)' }}
             />
           </div>
           {tooltipData && (

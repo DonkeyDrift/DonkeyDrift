@@ -16,15 +16,14 @@ type SectionMeta = {
   /** 深链路由：点导航 / 直接访问该 path 时平滑滚动到本 section */
   path: string;
   titleKey: string;
-  descKey: string;
 };
 
 /** Drive → TM → Trainer → PA 的固定顺序（#178）：自上而下对应 采数据 → 管数据 → 训练 → 评测 的流程引导 */
 const SECTIONS: SectionMeta[] = [
-  { id: 'drive', path: '/drive', titleKey: 'common.nav.drive', descKey: 'flow.drive.desc' },
-  { id: 'tub-manager', path: '/tub', titleKey: 'common.nav.tubManager', descKey: 'flow.tubManager.desc' },
-  { id: 'trainer', path: '/trainer', titleKey: 'common.nav.trainer', descKey: 'flow.trainer.desc' },
-  { id: 'pilot', path: '/pilot', titleKey: 'common.nav.pilotArena', descKey: 'flow.pilotArena.desc' },
+  { id: 'drive', path: '/drive', titleKey: 'common.nav.drive' },
+  { id: 'tub-manager', path: '/tub', titleKey: 'common.nav.tubManager' },
+  { id: 'trainer', path: '/trainer', titleKey: 'common.nav.trainer' },
+  { id: 'pilot', path: '/pilot', titleKey: 'common.nav.pilotArena' },
 ];
 
 /**
@@ -49,16 +48,11 @@ function SectionFallback() {
 function FlowSectionHeader({ step, meta }: { step: number; meta: SectionMeta }) {
   const { t } = useTranslation();
   return (
-    <div className="group flex items-center gap-3">
+    <div className="flex items-center gap-3">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-500/40 bg-cyan-500/10 text-sm font-bold text-cyan-400">
         {step}
       </span>
-      <div className="flex min-w-0 items-baseline">
-        <h2 className="text-xl font-bold leading-none text-zinc-100">{t(meta.titleKey)}</h2>
-        <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[300px] group-hover:opacity-100 group-hover:ml-3 text-xs text-zinc-400 font-normal">
-          {t(meta.descKey)}
-        </span>
-      </div>
+      <h2 className="text-xl font-bold leading-none text-zinc-100">{t(meta.titleKey)}</h2>
     </div>
   );
 }

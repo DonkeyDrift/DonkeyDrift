@@ -30,7 +30,8 @@ import {
   getApiErrorMessage,
 } from '../services/api';
 import { useTranslation } from '@/i18n';
-import { useResolvedTheme } from '@/lib/theme';
+import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
+import { useUiStyle } from '@/lib/uistyle';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -85,9 +86,11 @@ const ARENA_PREDICTION_MIN_INTERVAL_MS = 250;
 const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
 
 /**
- * canvas 绘制线 / chart.js 数据系列的 JS 配色,深色值即现状;
- * 浅色值对标 theme-light.css 色板(同色相、保饱和、适度降明度):
- * 绿→#1fae6b、蓝→#0c9bd6、黄绿→琥珀 #d99a17、浅蓝→深蓝 #0a6f9e。
+ * canvas 绘制线 / chart.js 数据系列的 JS 配色（回退值表，深色值即现状；
+ * 浅色值对标 theme-light.css 色板:同色相、保饱和、适度降明度）。
+ * 语义角色（user=--ok、pilot=--accent、legend=--ink2、ticks=--ink3）实际取色走
+ * CSS 变量，随主题与 UI 风格（座舱/Apple）切换自动变化；userThrottle/pilotThrottle
+ * 为数据可视化专用色相，保持固定。
  */
 const ARENA_SERIES_COLORS = {
   dark: {
@@ -106,6 +109,36 @@ const ARENA_SERIES_COLORS = {
     legend: '#42546a',
     ticks: '#5b6b7d',
   },
+};
+
+type ArenaSeriesColors = (typeof ARENA_SERIES_COLORS)['dark'];
+
+/** 语义角色 → CSS 变量名（取不到时回退 ARENA_SERIES_COLORS 对应值）。 */
+const ARENA_SERIES_CSS_VARS: Partial<Record<keyof ArenaSeriesColors, string>> = {
+  user: '--ok',
+  pilot: '--accent',
+  legend: '--ink2',
+  ticks: '--ink3',
+};
+
+/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。 */
+const cssVarColor = (name: string, fallback: string): string => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+/** 按当前主题解析系列配色：语义角色读 CSS 变量，其余用回退值表。 */
+const resolveArenaSeriesColors = (theme: ResolvedTheme): ArenaSeriesColors => {
+  const fallback = ARENA_SERIES_COLORS[theme];
+  const resolved = { ...fallback };
+  for (const key of Object.keys(ARENA_SERIES_CSS_VARS) as (keyof ArenaSeriesColors)[]) {
+    resolved[key] = cssVarColor(ARENA_SERIES_CSS_VARS[key] as string, fallback[key]);
+  }
+  return resolved;
 };
 
 const formatValue = (value: number | undefined) =>
@@ -149,7 +182,9 @@ type PilotArenaPageProps = {
 export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true }: PilotArenaPageProps) {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
-  const seriesColors = ARENA_SERIES_COLORS[theme];
+  // 订阅 UI 风格（座舱/Apple）：切换时语义系列色（--ok/--accent/--ink2/--ink3）重取色
+  const uiStyle = useUiStyle();
+  const seriesColors = useMemo(() => resolveArenaSeriesColors(theme), [theme, uiStyle]);
   const configPath = useStore((state) => state.configPath);
   const tubPath = useStore((state) => state.tubPath);
   const records = useStore((state) => state.records);
@@ -843,7 +878,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         <select
           value={columns}
           onChange={(event) => setColumns(Number(event.target.value) as 1 | 2 | 3 | 4)}
-          className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+          className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
         >
           {[1, 2, 3, 4].map((value) => (
             <option key={value} value={value}>{t('arena.columnCount', { value })}</option>
@@ -863,7 +898,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           <SectionCardTitle
             icon={<Database className="w-5 h-5" />}
             title={t('arena.currentData')}
-            subtitle={t('arena.currentDataSubtitle')}
           />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -918,7 +952,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                   <SectionCardTitle
                     icon={<Cpu className="w-5 h-5" />}
                     title={viewer.pilot?.name || t('arena.noPilotLoaded')}
-                    subtitle={t('arena.pilotSubtitle')}
                   />
                   <p className="mt-1 text-xs text-zinc-500">{viewer.pilot?.model_type || viewer.modelType}</p>
                 </div>
@@ -932,7 +965,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                   <select
                     value={viewer.modelType}
                     onChange={(event) => updateViewer(viewer.localId, { modelType: event.target.value, modelPath: '', models: [], pilot: undefined })}
-                    className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+                    className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                   >
                     {modelTypes.map((type) => (
                       <option key={type} value={type}>{type}</option>
@@ -972,7 +1005,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 <select
                   value={viewer.modelPath}
                   onChange={(event) => updateViewer(viewer.localId, { modelPath: event.target.value, pilot: undefined })}
-                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                 >
                   <option value="">{t('arena.selectModel')}</option>
                   {viewer.models.map((model) => (
@@ -995,7 +1028,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
               )}
 
               <div className="aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
-                <div className={`absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(133,150,170,0.35)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>
+                <div className="absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md shadow-lg">
                   <div>
                     <div className="text-[10px] uppercase leading-none text-zinc-400">{t('arena.playbackLabel')}</div>
                     <div className="font-mono text-sm leading-tight text-cyan-400">{viewer.playbackFps}</div>
@@ -1044,7 +1077,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           <SectionCardTitle
             icon={<SlidersHorizontal className="w-5 h-5" />}
             title={t('arena.imageProcessing')}
-            subtitle={t('arena.imageProcessingSubtitle')}
           />
           <Button variant="secondary" size="sm" onClick={() => setImageProcessingCollapsed((collapsed) => !collapsed)}>
             {imageProcessingCollapsed ? t('arena.expand') : t('arena.collapse')}
@@ -1092,7 +1124,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                   className="mb-2"
                   icon={<ArrowLeftRight className="w-5 h-5" />}
                   title={t('arena.preTransformations')}
-                  subtitle={t('arena.preTransformationsSubtitle')}
                 />
                 <div className="flex flex-wrap gap-2">
                   {TRANSFORMATION_OPTIONS.map((name) => (
@@ -1112,7 +1143,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                   className="mb-2"
                   icon={<ArrowRightLeft className="w-5 h-5" />}
                   title={t('arena.postTransformations')}
-                  subtitle={t('arena.postTransformationsSubtitle')}
                 />
                 <div className="flex flex-wrap gap-2">
                   {TRANSFORMATION_OPTIONS.map((name) => (
@@ -1137,7 +1167,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           <SectionCardTitle
             icon={<LineChart className="w-5 h-5" />}
             title={t('arena.tubPlot')}
-            subtitle={t('arena.tubPlotSubtitle')}
           />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1146,7 +1175,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
               <select
                 value={plotPilotId}
                 onChange={(event) => setPlotPilotId(event.target.value)}
-                className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+                className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               >
                 <option value="">{t('arena.selectLoadedPilot')}</option>
                 {loadedPilots.map((viewer) => viewer.pilot && (
@@ -1161,7 +1190,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                 <span data-testid="plot-start-label">{t('arena.plotStartFrame', { value: plotStart })}</span>
                 <span data-testid="plot-end-label">{t('arena.plotEndFrame', { value: plotEnd })}</span>
-                <span>{t('arena.plotRangeHint', { max: maxIndex })}</span>
               </div>
               <div className="space-y-1">
                 <input

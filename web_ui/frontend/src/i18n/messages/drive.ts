@@ -12,10 +12,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.simOfflineReconnecting': '模拟器离线，重连中…',
     'drive.modelRestartRequired': '模型已记录，需重启车端后生效',
     'drive.virtualJoystick': '虚拟摇杆',
-    'drive.virtualJoystickSubtitle': '驾驶控制：摇杆、键盘、手柄与陀螺仪输入',
     'drive.collapseJoystick': '折叠虚拟摇杆',
     'drive.expandJoystick': '展开虚拟摇杆',
-    'drive.mouseTouchSupport': '支持鼠标 / 触屏',
     'drive.hotkeysLine1': '键盘快捷键: I 前进 · K 倒车 · J 左转 · L 右转',
     'drive.hotkeysLine2': 'R 切换录制 · M 切换模式',
     // DriveModeSelector
@@ -48,7 +46,6 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.turnRight': '右 转',
     // SimCollectCard
     'drive.simCollectTitle': '模拟器采集',
-    'drive.simCollectHint': '通过 SSH 控制 Mac（dkc-mac）上的 donkey_sim 模拟器采集虚拟驾驶数据，结果落在本机。',
     'drive.simCollectSteps': '采集步数',
     'drive.simCollectAdvanced': '高级参数',
     'drive.simCollectKp': '比例增益 KP',
@@ -83,10 +80,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.simOfflineReconnecting': 'Simulator offline, reconnecting…',
     'drive.modelRestartRequired': 'Model saved — restart the car to apply',
     'drive.virtualJoystick': 'Virtual Joystick',
-    'drive.virtualJoystickSubtitle': 'Drive controls: joystick, keyboard, gamepad, and gyroscope input',
     'drive.collapseJoystick': 'Collapse virtual joystick',
     'drive.expandJoystick': 'Expand virtual joystick',
-    'drive.mouseTouchSupport': 'Mouse / touch supported',
     'drive.hotkeysLine1': 'Keyboard shortcuts: I forward · K reverse · J left · L right',
     'drive.hotkeysLine2': 'R toggle recording · M cycle mode',
     // DriveModeSelector
@@ -119,7 +114,6 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.turnRight': 'Right',
     // SimCollectCard
     'drive.simCollectTitle': 'Sim Collector',
-    'drive.simCollectHint': 'Collects virtual driving data from the donkey_sim on your Mac (dkc-mac) over SSH; results are stored locally.',
     'drive.simCollectSteps': 'Steps',
     'drive.simCollectAdvanced': 'Advanced',
     'drive.simCollectKp': 'Gain KP',

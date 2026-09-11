@@ -187,12 +187,6 @@ export const HarnessPanel: React.FC = () => {
             </Button>
           </div>
           <p className="mt-1 text-xs text-zinc-500">{lastCheckText}</p>
-          <p className="mt-1 text-xs text-zinc-500" data-testid="harness-background">
-            {t('harness.background')}:{' '}
-            {status?.background_enabled
-              ? t('harness.backgroundOn', { hours: Math.round((status.interval_s ?? 86400) / 3600) })
-              : t('harness.backgroundOff')}
-          </p>
 
           {(status?.updates ?? []).length === 0 ? (
             <p className="mt-3 text-xs text-zinc-500" data-testid="harness-no-update">
@@ -213,7 +207,7 @@ export const HarnessPanel: React.FC = () => {
         </div>
 
         {notice && (
-          <p className="text-xs text-cyan-300" data-testid="harness-notice">
+          <p className="text-xs text-cyan-200" data-testid="harness-notice">
             {notice}
           </p>
         )}

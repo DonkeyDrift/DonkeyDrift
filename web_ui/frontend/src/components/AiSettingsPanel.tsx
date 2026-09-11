@@ -210,10 +210,10 @@ function CodexOAuthFlow({ onDone }: { onDone: () => void }) {
         <>
           <div className="flex items-center gap-2">
             <span className="text-xs text-zinc-400">{t('aiConfig.oauthCodeLabel')}:</span>
-            <code className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-sm text-cyan-300" data-testid="ai-codex-user-code">{device.user_code}</code>
+            <code className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-sm text-cyan-200" data-testid="ai-codex-user-code">{device.user_code}</code>
           </div>
           <a
-            className="inline-flex items-center gap-1 text-sm text-cyan-400 hover:text-cyan-300"
+            className="inline-flex items-center gap-1 text-sm text-cyan-200 hover:text-cyan-400"
             href={device.verification_uri}
             target="_blank"
             rel="noreferrer"
@@ -414,7 +414,7 @@ function ProviderBlock({ provider, active, expanded, onToggle, onSetActive, onDe
           <ProviderIcon icon={provider.icon} />
           <span className="truncate text-sm font-medium text-zinc-100" data-testid={`ai-name-${provider.id}`}>{provider.name}</span>
           {active && (
-            <span className="rounded-full bg-cyan-600/20 px-2 py-0.5 text-xs text-cyan-300" data-testid={`ai-active-${provider.id}`}>{t('aiConfig.currentBadge')}</span>
+            <span className="rounded-full bg-cyan-600/20 px-2 py-0.5 text-xs text-cyan-200" data-testid={`ai-active-${provider.id}`}>{t('aiConfig.currentBadge')}</span>
           )}
         </button>
         {!active && (

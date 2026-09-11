@@ -8,12 +8,22 @@
  * Every rule stays prefixed with `html.theme-mus4`
  * so the skin beats the original Tailwind utilities on specificity alone.
  *
+ * UI style dimension (cockpit / Apple): all colors, gradients, shadows,
+ * radii, font-weights and title tracking live in the variable palette
+ * below (`html.theme-mus4 { --* }`, values = cockpit status quo); rules
+ * reference `var(--语义名)` only. `src/lib/uistyle.ts` toggles the
+ * `ui-apple` class on <html>, and the pure-variable override block
+ * `html.theme-mus4.ui-apple { --* }` re-themes every rule to Apple
+ * tokens without touching any rule body. Without `ui-apple` the palette
+ * resolves every rule back to the exact cockpit values.
+ *
  * Visual-only skin: rules may only touch color, background-color,
  * background-image (gradients), border-color, border-radius, box-shadow,
  * outline/outline-offset (inset hairline frames), accent-color,
- * font-family, font-weight and the corresponding --tw-* color variables.
- * Layout-affecting properties (display/position/flex/grid/order/width/
- * height/margin/padding/top/right/bottom/left/float/...) are forbidden.
+ * font-family, font-weight, letter-spacing (title tracking) and the
+ * corresponding --tw-* color variables. Layout-affecting properties
+ * (display/position/flex/grid/order/width/height/margin/padding/
+ * top/right/bottom/left/float/...) are forbidden.
  *
  * Design source: Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h
  * (Drifter Console). Selected/active controls use the FILL language:
@@ -24,161 +34,429 @@
  * 全自动=blue. Panels mimic `.stateCard`: 135deg gradient #1c2430→#121821
  * plus a 1px frame drawn with `outline` (never shifts layout and never
  * clobbers Tailwind's box-shadow based drop shadows).
+ * (Hex values quoted in comments below are the cockpit palette values.)
  */
 
+/* ======================================================================
+ * Variable palette — cockpit dark values (status quo).
+ * ==================================================================== */
 html.theme-mus4 {
   color-scheme: dark;
+
+  /* surfaces */
+  --canvas: #101318;
+  --canvas-a80: rgba(16, 19, 24, 0.8);
+  --surface: #171c24;
+  --surface-a35: rgba(23, 28, 36, 0.35);
+  --surface-a50: rgba(23, 28, 36, 0.5);
+  --surface-a70: rgba(23, 28, 36, 0.7);
+  --surface-a90: rgba(23, 28, 36, 0.9);
+  --surface-a95: rgba(23, 28, 36, 0.95);
+  --surface2: #111820;
+  --surface2-a50: rgba(17, 24, 32, 0.5);
+  --surface2-a80: rgba(17, 24, 32, 0.8);
+  --raised: #232c3a;
+  --raised-2: #2b3441;
+  --raised-3: #3a4656;
+  --hover-surface2: #202a37;
+  --hover-surface2-a50: rgba(32, 42, 55, 0.5);
+  --hover-raised: #27313f;
+  --active-surface: #141a22;
+  --knob: #ffffff;
+  --panel-gradient: linear-gradient(135deg, #1c2430, #121821);
+  --off: #475569;
+
+  /* hairlines / lines */
+  --hairline: #344154;
+  --hairline-a85: rgba(52, 65, 84, 0.85);
+  --hairline-a55: rgba(52, 65, 84, 0.55);
+  --line-white10: rgba(52, 65, 84, 0.9);
+  --line-soft: #2b3441;
+  --line-soft-a50: rgba(43, 52, 65, 0.5);
+  --line-soft-a60: rgba(43, 52, 65, 0.6);
+  --line-soft-a90: rgba(43, 52, 65, 0.9);
+  --line-mid: #3a4656;
+
+  /* text */
+  --ink: #e8edf2;
+  --ink2: #b9c5d3;
+  --ink3: #8fa1b5;
+  --ink4: #6b7d90;
+  --ink5: #55677a;
+  --ink-strong: #eef3f8;
+  --ink-strong-hover: #ffffff;
+
+  /* accent (Drifter Console blue; dark skin uses one blue for all roles) */
+  --accent: #5cc8ff;
+  --accent-fill: #5cc8ff;
+  --accent-fill-hover: #8bdcff;
+  --accent-text-soft: #b7e5ff;
+  --accent-text-hover: #8bdcff;
+  --on-accent: #061019;
+  --accent-dim: #12202c;
+  --accent-wash-50: rgba(92, 200, 255, 0.5);
+  --accent-wash-20: rgba(92, 200, 255, 0.15);
+  --accent-wash-30: rgba(92, 200, 255, 0.3);
+  --accent-wash-08: rgba(92, 200, 255, 0.08);
+  --accent-a50: rgba(92, 200, 255, 0.5);
+  --accent-a60: rgba(92, 200, 255, 0.6);
+  --accent-a35: rgba(92, 200, 255, 0.35);
+  --accent-a45: rgba(92, 200, 255, 0.45);
+  --accent-a55: rgba(92, 200, 255, 0.55);
+  --accent-ui: #5cc8ff;
+  --accent-ui-a25: rgba(92, 200, 255, 0.25);
+
+  /* semantic: bad / ok / warn (dark skin keeps fill == functional color) */
+  --bad-fill: #ff6b6b;
+  --bad-fill-hover: #ff8585;
+  --bad: #ff6b6b;
+  --bad-soft1: #ffb3b3;
+  --bad-soft2: #ffc9c9;
+  --bad-soft3: #fad9d9;
+  --bad-soft1-a70: rgba(255, 179, 179, 0.7);
+  --bad-wash-40: rgba(255, 107, 107, 0.4);
+  --bad-wash-20: rgba(255, 107, 107, 0.18);
+  --bad-wash-30: rgba(255, 107, 107, 0.3);
+  --bad-wash-50: rgba(255, 107, 107, 0.16);
+  --bad-wash-60: rgba(255, 107, 107, 0.14);
+  --bad-wash-10: rgba(255, 107, 107, 0.1);
+  --bad-frame: rgba(255, 107, 107, 0.55);
+  --bad-frame-soft: rgba(255, 107, 107, 0.55);
+  --bad-record: rgba(255, 107, 107, 0.5);
+  --bad-a50: rgba(255, 107, 107, 0.5);
+  --bad-a40: rgba(255, 107, 107, 0.4);
+  --bad-a60: rgba(255, 107, 107, 0.6);
+  --ok-fill: #39d98a;
+  --ok: #39d98a;
+  --ok-hover: #5fe8a8;
+  --ok-wash-25: rgba(57, 217, 138, 0.25);
+  --ok-wash-10: rgba(57, 217, 138, 0.1);
+  --ok-wash-90: rgba(57, 217, 138, 0.12);
+  --ok-frame: rgba(57, 217, 138, 0.55);
+  --ok-a55: rgba(57, 217, 138, 0.55);
+  --ok-a65: rgba(57, 217, 138, 0.65);
+  --ok-a70: rgba(57, 217, 138, 0.7);
+  --ok-a40: rgba(57, 217, 138, 0.4);
+  --warn: #ffcc66;
+  --warn-text: #ffcc66;
+  --warn-soft1: #ffd88a;
+  --warn-soft2: #ffedc4;
+  --warn-wash-40: rgba(255, 204, 102, 0.14);
+  --warn-wash-10: rgba(255, 204, 102, 0.1);
+  --warn-frame: rgba(255, 204, 102, 0.45);
+  --warn-a55: rgba(255, 204, 102, 0.55);
+  --warn-mode: rgba(255, 204, 102, 0.55);
+  --warn-a60: rgba(255, 204, 102, 0.6);
+
+  /* radii (cards 8-12px, pill buttons) */
+  --r-sm: 6px;
+  --r: 8px;
+  --r-md: 10px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+  --r-logo: 8px;
+
+  /* typography (cockpit keeps Tailwind default weights, no title tracking) */
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+  --w-extrabold: 800;
+  --w-fill: 700;
+  --w-segment: 800;
+  --w-badge: 700;
+  --tracking-title: 0;
+
+  /* shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 24px -3px rgba(0, 0, 0, 0.45), 0 4px 8px -4px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 20px 36px -5px rgba(0, 0, 0, 0.5), 0 8px 14px -6px rgba(0, 0, 0, 0.45);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* ======================================================================
+ * Apple UI style override — pure variable re-theme, no rule bodies here.
+ * Active when uistyle.ts puts `ui-apple` on <html>. Tokens: canvas #000,
+ * surface #1c1c1e/#2c2c2e, ink #f5f5f7, accent #2997ff / fill #0a84ff,
+ * ok #30d158 / warn #ff9f0a / bad #ff453a / off #636366; flat cards
+ * (no gradient, no shadow, hairline only), radii 18/10/9999, title 600
+ * with -0.02em tracking, weights limited to 400/600. Non-token shades
+ * (hovers, softs, tints) are derived from the tokens and marked "派生".
+ * ==================================================================== */
+html.theme-mus4.ui-apple {
+  --canvas: #000000;
+  --canvas-a80: rgba(0, 0, 0, 0.8);
+  --surface: #1c1c1e;
+  --surface-a35: rgba(28, 28, 30, 0.35);
+  --surface-a50: rgba(28, 28, 30, 0.5);
+  --surface-a70: rgba(28, 28, 30, 0.7);
+  --surface-a90: rgba(28, 28, 30, 0.9);
+  --surface-a95: rgba(28, 28, 30, 0.95);
+  --surface2: #2c2c2e;
+  --surface2-a50: rgba(44, 44, 46, 0.5);
+  --surface2-a80: rgba(44, 44, 46, 0.8);
+  --raised: #3a3a3c; /* 派生：iOS dark gray5 */
+  --raised-2: #48484a; /* 派生：iOS dark gray4 */
+  --raised-3: #636366;
+  --hover-surface2: #3a3a3c; /* 派生 */
+  --hover-surface2-a50: rgba(58, 58, 60, 0.5); /* 派生 */
+  --hover-raised: #48484a; /* 派生 */
+  --active-surface: #1c1c1e; /* 派生 */
+  --panel-gradient: none;
+  --off: #636366;
+
+  --hairline: rgba(255, 255, 255, 0.1);
+  --hairline-a85: rgba(255, 255, 255, 0.16); /* 派生 */
+  --hairline-a55: rgba(255, 255, 255, 0.12); /* 派生 */
+  --line-white10: rgba(255, 255, 255, 0.16); /* 派生 */
+  --line-soft: rgba(255, 255, 255, 0.07); /* 派生 */
+  --line-soft-a50: rgba(255, 255, 255, 0.05); /* 派生 */
+  --line-soft-a60: rgba(255, 255, 255, 0.06); /* 派生 */
+  --line-soft-a90: rgba(255, 255, 255, 0.1); /* 派生 */
+  --line-mid: rgba(255, 255, 255, 0.16); /* 派生 */
+
+  --ink: #f5f5f7;
+  --ink2: rgba(235, 235, 245, 0.62);
+  --ink3: rgba(235, 235, 245, 0.45); /* 派生：tertiary label */
+  --ink4: rgba(235, 235, 245, 0.32); /* 派生：quaternary label */
+  --ink5: #636366;
+  --ink-strong: #f5f5f7;
+  --ink-strong-hover: #ffffff;
+
+  --accent: #2997ff;
+  --accent-fill: #0a84ff;
+  --accent-fill-hover: #2997ff; /* 派生：hover 向 accent 提亮 */
+  --accent-text-soft: #7dbdff; /* 派生 */
+  --accent-text-hover: #66b3ff; /* 派生 */
+  --on-accent: #ffffff;
+  --accent-dim: rgba(10, 132, 255, 0.18); /* 派生 */
+  --accent-wash-50: rgba(10, 132, 255, 0.5);
+  --accent-wash-20: rgba(10, 132, 255, 0.15);
+  --accent-wash-30: rgba(10, 132, 255, 0.3);
+  --accent-wash-08: rgba(10, 132, 255, 0.08);
+  --accent-a50: rgba(41, 151, 255, 0.5);
+  --accent-a60: rgba(41, 151, 255, 0.6);
+  --accent-a35: rgba(41, 151, 255, 0.35);
+  --accent-a45: rgba(41, 151, 255, 0.45);
+  --accent-a55: rgba(41, 151, 255, 0.55);
+  --accent-ui: #2997ff;
+  --accent-ui-a25: rgba(10, 132, 255, 0.28); /* 派生 */
+
+  --bad-fill: #ff453a;
+  --bad-fill-hover: #ff6961; /* 派生 */
+  --bad: #ff453a;
+  --bad-soft1: #ff8a80; /* 派生 */
+  --bad-soft2: #ffb3ad; /* 派生 */
+  --bad-soft3: #ffd6d2; /* 派生 */
+  --bad-soft1-a70: rgba(255, 138, 128, 0.7); /* 派生 */
+  --bad-wash-40: rgba(255, 69, 58, 0.4);
+  --bad-wash-20: rgba(255, 69, 58, 0.18);
+  --bad-wash-30: rgba(255, 69, 58, 0.3);
+  --bad-wash-50: rgba(255, 69, 58, 0.16);
+  --bad-wash-60: rgba(255, 69, 58, 0.14);
+  --bad-wash-10: rgba(255, 69, 58, 0.1);
+  --bad-frame: rgba(255, 69, 58, 0.55);
+  --bad-frame-soft: rgba(255, 69, 58, 0.55);
+  --bad-record: rgba(255, 69, 58, 0.5);
+  --bad-a50: rgba(255, 69, 58, 0.5);
+  --bad-a40: rgba(255, 69, 58, 0.4);
+  --bad-a60: rgba(255, 69, 58, 0.6);
+  --ok-fill: #30d158;
+  --ok: #30d158;
+  --ok-hover: #5ede84; /* 派生 */
+  --ok-wash-25: rgba(48, 209, 88, 0.25);
+  --ok-wash-10: rgba(48, 209, 88, 0.1);
+  --ok-wash-90: rgba(48, 209, 88, 0.12);
+  --ok-frame: rgba(48, 209, 88, 0.55);
+  --ok-a55: rgba(48, 209, 88, 0.55);
+  --ok-a65: rgba(48, 209, 88, 0.65);
+  --ok-a70: rgba(48, 209, 88, 0.7);
+  --ok-a40: rgba(48, 209, 88, 0.4);
+  --warn: #ff9f0a;
+  --warn-text: #ff9f0a;
+  --warn-soft1: #ffc069; /* 派生 */
+  --warn-soft2: #ffdd9e; /* 派生 */
+  --warn-wash-40: rgba(255, 159, 10, 0.14);
+  --warn-wash-10: rgba(255, 159, 10, 0.1);
+  --warn-frame: rgba(255, 159, 10, 0.45);
+  --warn-a55: rgba(255, 159, 10, 0.55);
+  --warn-mode: rgba(255, 159, 10, 0.55);
+  --warn-a60: rgba(255, 159, 10, 0.6);
+
+  --r-sm: 10px;
+  --r: 10px;
+  --r-md: 10px;
+  --r-lg: 18px;
+  --r-xl: 18px;
+  --r-pill: 9999px;
+
+  --w-medium: 600;
+  --w-bold: 600;
+  --w-extrabold: 600;
+  --w-fill: 600;
+  --w-segment: 600;
+  --w-badge: 600;
+  --tracking-title: -0.02em;
+
+  --shadow-sm: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
+
+  /* SkinSwitcher active thumb (iOS segmented control look) */
+  --segment-thumb: #3a3a3c; /* 派生 */
 }
 
 /* ---------- Surfaces ---------- */
 /* page background / deepest wells */
 html.theme-mus4 .bg-zinc-950 {
-  background-color: #101318;
+  background-color: var(--canvas);
 }
 html.theme-mus4 .bg-zinc-950\/80 {
-  background-color: rgba(16, 19, 24, 0.8);
+  background-color: var(--canvas-a80);
 }
 /* panels / cards */
 html.theme-mus4 .bg-zinc-900 {
-  background-color: #171c24;
+  background-color: var(--surface);
 }
 html.theme-mus4 .bg-zinc-900\/35 {
-  background-color: rgba(23, 28, 36, 0.35);
+  background-color: var(--surface-a35);
 }
 html.theme-mus4 .bg-zinc-900\/50,
 html.theme-mus4 .supports-\[backdrop-filter\]\:bg-zinc-900\/50 {
-  background-color: rgba(23, 28, 36, 0.5);
+  background-color: var(--surface-a50);
 }
 html.theme-mus4 .bg-zinc-900\/70 {
-  background-color: rgba(23, 28, 36, 0.7);
+  background-color: var(--surface-a70);
 }
 html.theme-mus4 .bg-zinc-900\/90 {
-  background-color: rgba(23, 28, 36, 0.9);
+  background-color: var(--surface-a90);
 }
 html.theme-mus4 .bg-zinc-900\/95 {
-  background-color: rgba(23, 28, 36, 0.95);
+  background-color: var(--surface-a95);
 }
 /* inner cards / inputs */
 html.theme-mus4 .bg-zinc-800,
 html.theme-mus4 .disabled\:bg-zinc-800:disabled {
-  background-color: #111820;
+  background-color: var(--surface2);
 }
 html.theme-mus4 .bg-zinc-800\/50 {
-  background-color: rgba(17, 24, 32, 0.5);
+  background-color: var(--surface2-a50);
 }
 html.theme-mus4 .bg-zinc-800\/80 {
-  background-color: rgba(17, 24, 32, 0.8);
+  background-color: var(--surface2-a80);
 }
 /* raised controls (slider tracks, joystick well) */
 html.theme-mus4 .bg-zinc-700 {
-  background-color: #232c3a;
+  background-color: var(--raised);
 }
 html.theme-mus4 .bg-zinc-600 {
-  background-color: #2b3441;
+  background-color: var(--raised-2);
 }
 html.theme-mus4 .bg-zinc-500 {
-  background-color: #3a4656;
+  background-color: var(--raised-3);
 }
 html.theme-mus4 .hover\:bg-zinc-800:hover {
-  background-color: #202a37;
+  background-color: var(--hover-surface2);
 }
 html.theme-mus4 .hover\:bg-zinc-800\/50:hover {
-  background-color: rgba(32, 42, 55, 0.5);
+  background-color: var(--hover-surface2-a50);
 }
 html.theme-mus4 .hover\:bg-zinc-700:hover {
-  background-color: #27313f;
+  background-color: var(--hover-raised);
 }
 html.theme-mus4 .active\:bg-zinc-900:active {
-  background-color: #141a22;
+  background-color: var(--active-surface);
 }
 /* toggle knob (ESP32 .slider:before is pure white) */
 html.theme-mus4 .bg-white {
-  background-color: #ffffff;
+  background-color: var(--knob);
 }
 
 /* ---------- Accent (Drifter Console blue) ---------- */
 html.theme-mus4 .bg-cyan-600,
 html.theme-mus4 .bg-cyan-500 {
-  background-color: #5cc8ff;
+  background-color: var(--accent-fill);
 }
 html.theme-mus4 .hover\:bg-cyan-700:hover {
-  background-color: #8bdcff;
+  background-color: var(--accent-fill-hover);
 }
 /* near-black text on bright accent buttons (ESP32 #061019) */
 html.theme-mus4 .bg-cyan-600.text-white,
 html.theme-mus4 .bg-cyan-500.text-white {
-  color: #061019;
+  color: var(--on-accent);
 }
 html.theme-mus4 .bg-cyan-500\/50 {
-  background-color: rgba(92, 200, 255, 0.5);
+  background-color: var(--accent-wash-50);
 }
 html.theme-mus4 .bg-cyan-500\/20,
 html.theme-mus4 .bg-cyan-600\/20 {
-  background-color: rgba(92, 200, 255, 0.15);
+  background-color: var(--accent-wash-20);
 }
 html.theme-mus4 .hover\:bg-cyan-500\/30:hover {
-  background-color: rgba(92, 200, 255, 0.3);
+  background-color: var(--accent-wash-30);
 }
 html.theme-mus4 .bg-cyan-950 {
-  background-color: #12202c;
+  background-color: var(--accent-dim);
 }
 html.theme-mus4 .bg-cyan-950\/30 {
-  background-color: rgba(92, 200, 255, 0.08);
+  background-color: var(--accent-wash-08);
 }
 
 /* ---------- Semantic surfaces (red #ff6b6b / green #39d98a / amber #ffcc66) ---------- */
 html.theme-mus4 .bg-red-600,
 html.theme-mus4 .bg-red-500 {
-  background-color: #ff6b6b;
+  background-color: var(--bad-fill);
 }
 html.theme-mus4 .hover\:bg-red-700:hover {
-  background-color: #ff8585;
+  background-color: var(--bad-fill-hover);
 }
 html.theme-mus4 .bg-red-500\/40 {
-  background-color: rgba(255, 107, 107, 0.4);
+  background-color: var(--bad-wash-40);
 }
 html.theme-mus4 .bg-red-500\/20 {
-  background-color: rgba(255, 107, 107, 0.18);
+  background-color: var(--bad-wash-20);
 }
 html.theme-mus4 .hover\:bg-red-500\/30:hover {
-  background-color: rgba(255, 107, 107, 0.3);
+  background-color: var(--bad-wash-30);
 }
 html.theme-mus4 .bg-red-900\/50,
 html.theme-mus4 .bg-red-950\/90 {
-  background-color: rgba(255, 107, 107, 0.16);
+  background-color: var(--bad-wash-50);
 }
 html.theme-mus4 .bg-red-950\/60 {
-  background-color: rgba(255, 107, 107, 0.14);
+  background-color: var(--bad-wash-60);
 }
 html.theme-mus4 .bg-emerald-600,
 html.theme-mus4 .bg-emerald-500,
 html.theme-mus4 .bg-emerald-400 {
-  background-color: #39d98a;
+  background-color: var(--ok-fill);
 }
 html.theme-mus4 .bg-emerald-500\/25 {
-  background-color: rgba(57, 217, 138, 0.25);
+  background-color: var(--ok-wash-25);
 }
 html.theme-mus4 .bg-emerald-400\/10 {
-  background-color: rgba(57, 217, 138, 0.1);
+  background-color: var(--ok-wash-10);
 }
 html.theme-mus4 .bg-emerald-950\/90 {
-  background-color: rgba(57, 217, 138, 0.12);
+  background-color: var(--ok-wash-90);
 }
 html.theme-mus4 .bg-amber-950\/40 {
-  background-color: rgba(255, 204, 102, 0.14);
+  background-color: var(--warn-wash-40);
 }
 html.theme-mus4 .bg-amber-400\/10 {
-  background-color: rgba(255, 204, 102, 0.1);
+  background-color: var(--warn-wash-10);
 }
 
 /* ---------- Panel frames (ESP32 .stateCard look) ---------- */
-/* diagonal gradient face, same as the Drifter Console state cards */
+/* diagonal gradient face, same as the Drifter Console state cards
+   (Apple style: --panel-gradient is none → flat card) */
 html.theme-mus4 .bg-zinc-900 {
-  background-image: linear-gradient(135deg, #1c2430, #121821);
+  background-image: var(--panel-gradient);
 }
 /* every panel/card gets a visible hairline frame */
 html.theme-mus4 .bg-zinc-900 {
-  outline: 1px solid #344154;
+  outline: 1px solid var(--hairline);
   outline-offset: -1px;
 }
 html.theme-mus4 .bg-zinc-900\/35,
@@ -186,23 +464,23 @@ html.theme-mus4 .bg-zinc-900\/50,
 html.theme-mus4 .supports-\[backdrop-filter\]\:bg-zinc-900\/50,
 html.theme-mus4 .bg-zinc-900\/90,
 html.theme-mus4 .bg-zinc-900\/95 {
-  outline: 1px solid rgba(52, 65, 84, 0.85);
+  outline: 1px solid var(--hairline-a85);
   outline-offset: -1px;
 }
 html.theme-mus4 .bg-zinc-800,
 html.theme-mus4 .disabled\:bg-zinc-800:disabled {
-  outline: 1px solid #2b3441;
+  outline: 1px solid var(--line-soft);
   outline-offset: -1px;
 }
 /* 主题/语言切换胶囊（ThemeSwitcher/LanguageSwitcher 容器）：DC 粗框语言——
    去掉与 border 重叠的 outline 描边，改为 inset 内圈，与 border 相加成视觉 2px */
 html.theme-mus4 div.rounded-full.bg-zinc-800.border {
   outline: none;
-  box-shadow: inset 0 0 0 1px #2b3441;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
 }
 html.theme-mus4 .bg-zinc-800\/50,
 html.theme-mus4 .bg-zinc-800\/80 {
-  outline: 1px solid rgba(43, 52, 65, 0.9);
+  outline: 1px solid var(--line-soft-a90);
   outline-offset: -1px;
 }
 
@@ -213,7 +491,7 @@ html.theme-mus4 .bg-emerald-400,
 html.theme-mus4 .bg-emerald-500\/25,
 html.theme-mus4 .bg-emerald-400\/10,
 html.theme-mus4 .bg-emerald-950\/90 {
-  outline: 1px solid rgba(57, 217, 138, 0.55);
+  outline: 1px solid var(--ok-frame);
   outline-offset: -1px;
 }
 html.theme-mus4 .bg-red-600,
@@ -223,19 +501,19 @@ html.theme-mus4 .bg-red-500\/20,
 html.theme-mus4 .bg-red-900\/50,
 html.theme-mus4 .bg-red-950\/90,
 html.theme-mus4 .bg-red-950\/60 {
-  outline: 1px solid rgba(255, 107, 107, 0.55);
+  outline: 1px solid var(--bad-frame);
   outline-offset: -1px;
 }
 html.theme-mus4 .bg-cyan-500\/20,
 html.theme-mus4 .bg-cyan-600\/20,
 html.theme-mus4 .bg-cyan-950,
 html.theme-mus4 .bg-cyan-950\/30 {
-  outline: 1px solid rgba(92, 200, 255, 0.45);
+  outline: 1px solid var(--accent-a45);
   outline-offset: -1px;
 }
 html.theme-mus4 .bg-amber-950\/40,
 html.theme-mus4 .bg-amber-400\/10 {
-  outline: 1px solid rgba(255, 204, 102, 0.45);
+  outline: 1px solid var(--warn-frame);
   outline-offset: -1px;
 }
 
@@ -244,28 +522,28 @@ html.theme-mus4 .text-zinc-100,
 html.theme-mus4 .text-zinc-200,
 html.theme-mus4 .hover\:text-zinc-100:hover,
 html.theme-mus4 .hover\:text-zinc-200:hover {
-  color: #e8edf2;
+  color: var(--ink);
 }
 html.theme-mus4 .text-zinc-300,
 html.theme-mus4 .hover\:text-zinc-300:hover {
-  color: #b9c5d3;
+  color: var(--ink2);
 }
 html.theme-mus4 .text-zinc-400 {
-  color: #8fa1b5;
+  color: var(--ink3);
 }
 html.theme-mus4 .text-zinc-500,
 html.theme-mus4 .placeholder\:text-zinc-500::placeholder {
-  color: #6b7d90;
+  color: var(--ink4);
 }
 html.theme-mus4 .text-zinc-600,
 html.theme-mus4 .disabled\:text-zinc-600:disabled {
-  color: #55677a;
+  color: var(--ink5);
 }
 html.theme-mus4 .text-white {
-  color: #eef3f8;
+  color: var(--ink-strong);
 }
 html.theme-mus4 .hover\:text-white:hover {
-  color: #ffffff;
+  color: var(--ink-strong-hover);
 }
 
 /* accent text */
@@ -273,179 +551,201 @@ html.theme-mus4 .text-cyan-400,
 html.theme-mus4 .text-cyan-500,
 html.theme-mus4 .text-cyan-600,
 html.theme-mus4 .text-blue-400 {
-  color: #5cc8ff;
+  color: var(--accent);
 }
 html.theme-mus4 .text-cyan-200 {
-  color: #b7e5ff;
+  color: var(--accent-text-soft);
 }
 html.theme-mus4 .hover\:text-cyan-400:hover,
 html.theme-mus4 .group-hover\:text-cyan-400 {
-  color: #8bdcff;
+  color: var(--accent-text-hover);
 }
 
 /* semantic text */
 html.theme-mus4 .text-red-400,
 html.theme-mus4 .text-red-500 {
-  color: #ff6b6b;
+  color: var(--bad);
 }
 html.theme-mus4 .text-red-300 {
-  color: #ffb3b3;
+  color: var(--bad-soft1);
 }
 html.theme-mus4 .text-red-200 {
-  color: #ffc9c9;
+  color: var(--bad-soft2);
 }
 html.theme-mus4 .text-red-100 {
-  color: #fad9d9;
+  color: var(--bad-soft3);
 }
 html.theme-mus4 .placeholder\:text-red-300\/70::placeholder {
-  color: rgba(255, 179, 179, 0.7);
+  color: var(--bad-soft1-a70);
 }
 html.theme-mus4 .text-emerald-400,
 html.theme-mus4 .text-green-400 {
-  color: #39d98a;
+  color: var(--ok);
 }
 html.theme-mus4 .hover\:text-emerald-400:hover {
-  color: #5fe8a8;
+  color: var(--ok-hover);
 }
 html.theme-mus4 .text-amber-400,
 html.theme-mus4 .text-yellow-400,
 html.theme-mus4 .text-yellow-500,
 html.theme-mus4 .text-orange-400 {
-  color: #ffcc66;
+  color: var(--warn-text);
 }
 html.theme-mus4 .text-amber-300 {
-  color: #ffd88a;
+  color: var(--warn-soft1);
 }
 html.theme-mus4 .text-amber-100 {
-  color: #ffedc4;
+  color: var(--warn-soft2);
 }
 
 /* ---------- Borders ---------- */
 html.theme-mus4 .border-zinc-800 {
-  border-color: #2b3441;
+  border-color: var(--line-soft);
 }
 html.theme-mus4 .border-zinc-700 {
-  border-color: #344154;
+  border-color: var(--hairline);
 }
 html.theme-mus4 .border-zinc-800\/50 {
-  border-color: rgba(43, 52, 65, 0.5);
+  border-color: var(--line-soft-a50);
 }
 html.theme-mus4 .border-zinc-700\/50 {
-  border-color: rgba(52, 65, 84, 0.55);
+  border-color: var(--hairline-a55);
 }
 html.theme-mus4 .border-zinc-800\/60 {
-  border-color: rgba(43, 52, 65, 0.6);
+  border-color: var(--line-soft-a60);
 }
 html.theme-mus4 .border-zinc-600 {
-  border-color: #3a4656;
+  border-color: var(--line-mid);
 }
 html.theme-mus4 .border-white\/10 {
-  border-color: rgba(52, 65, 84, 0.9);
+  border-color: var(--line-white10);
 }
 html.theme-mus4 .border-cyan-500,
 html.theme-mus4 .focus\:border-cyan-600:focus {
-  border-color: #5cc8ff;
+  border-color: var(--accent);
 }
 html.theme-mus4 .border-cyan-500\/50 {
-  border-color: rgba(92, 200, 255, 0.5);
+  border-color: var(--accent-a50);
 }
 html.theme-mus4 .border-cyan-500\/60 {
-  border-color: rgba(92, 200, 255, 0.6);
+  border-color: var(--accent-a60);
 }
 html.theme-mus4 .border-cyan-800\/60 {
-  border-color: rgba(92, 200, 255, 0.35);
+  border-color: var(--accent-a35);
 }
 html.theme-mus4 .border-red-500 {
-  border-color: #ff6b6b;
+  border-color: var(--bad);
 }
 html.theme-mus4 .border-red-800 {
-  border-color: rgba(255, 107, 107, 0.5);
+  border-color: var(--bad-a50);
 }
 html.theme-mus4 .border-red-700\/50 {
-  border-color: rgba(255, 107, 107, 0.4);
+  border-color: var(--bad-a40);
 }
 html.theme-mus4 .border-red-700,
 html.theme-mus4 .border-red-400 {
-  border-color: rgba(255, 107, 107, 0.6);
+  border-color: var(--bad-a60);
 }
 html.theme-mus4 .border-red-500\/50 {
-  border-color: rgba(255, 107, 107, 0.5);
+  border-color: var(--bad-a50);
 }
 html.theme-mus4 .border-red-500\/60,
 html.theme-mus4 .border-red-400\/60 {
-  border-color: rgba(255, 107, 107, 0.6);
+  border-color: var(--bad-a60);
 }
 html.theme-mus4 .border-emerald-500,
 html.theme-mus4 .border-emerald-400 {
-  border-color: rgba(57, 217, 138, 0.65);
+  border-color: var(--ok-a65);
 }
 html.theme-mus4 .border-emerald-400\/70 {
-  border-color: rgba(57, 217, 138, 0.7);
+  border-color: var(--ok-a70);
 }
 html.theme-mus4 .border-emerald-700,
 html.theme-mus4 .border-emerald-700\/50 {
-  border-color: rgba(57, 217, 138, 0.4);
+  border-color: var(--ok-a40);
 }
 html.theme-mus4 .border-amber-700 {
-  border-color: rgba(255, 204, 102, 0.55);
+  border-color: var(--warn-a55);
 }
 
 /* ---------- Focus rings & form accents ---------- */
 html.theme-mus4 .focus\:ring-cyan-500:focus,
 html.theme-mus4 .focus\:ring-cyan-600:focus {
-  --tw-ring-color: #5cc8ff;
+  --tw-ring-color: var(--accent);
 }
 html.theme-mus4 .focus\:ring-red-500:focus {
-  --tw-ring-color: #ff6b6b;
+  --tw-ring-color: var(--bad);
 }
 html.theme-mus4 .accent-cyan-500,
 html.theme-mus4 .accent-cyan-400 {
-  accent-color: #5cc8ff;
+  accent-color: var(--accent);
 }
 
-/* ---------- Radii (cards 8-12px, pill buttons) ---------- */
+/* ---------- Radii (cards 8-12px, pill buttons; Apple: 18/10/9999 via --r-*) ---------- */
 html.theme-mus4 .rounded-sm {
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 html.theme-mus4 .rounded {
-  border-radius: 8px;
+  border-radius: var(--r);
 }
 html.theme-mus4 .rounded-md {
-  border-radius: 10px;
+  border-radius: var(--r-md);
 }
 html.theme-mus4 .rounded-lg {
-  border-radius: 12px;
+  border-radius: var(--r-lg);
 }
 html.theme-mus4 .rounded-xl {
-  border-radius: 16px;
+  border-radius: var(--r-xl);
 }
 html.theme-mus4 button.rounded-sm,
 html.theme-mus4 button.rounded,
 html.theme-mus4 button.rounded-md,
 html.theme-mus4 button.rounded-lg {
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 /* ---------- Typography ---------- */
 html.theme-mus4 .font-sans {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
+/* 字重工具映射：座舱值即 Tailwind 默认（500/600/700/800），Apple 象限经变量收窄到 400/600。
+   规则顺序保持 medium→semibold→bold→extrabold，与 Tailwind 工具类生成顺序一致，
+   同类冲突时的胜负关系不变。 */
+html.theme-mus4 .font-medium {
+  font-weight: var(--w-medium);
+}
+html.theme-mus4 .font-semibold {
+  font-weight: var(--w-semibold);
+}
+html.theme-mus4 .font-bold {
+  font-weight: var(--w-bold);
+}
+html.theme-mus4 .font-extrabold {
+  font-weight: var(--w-extrabold);
+}
+/* 大标题字距：座舱 0（渲染上等价于 normal），Apple -0.02em。
+   仅 text-xl 及以上；tracking-* 工具类目前只用在 text-xs 小标签上，不冲突。 */
+html.theme-mus4 .text-xl,
+html.theme-mus4 .text-2xl,
+html.theme-mus4 .text-3xl {
+  letter-spacing: var(--tracking-title);
+}
 
 /* ---------- Shadows ---------- */
 html.theme-mus4 .shadow-sm {
-  --tw-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --tw-shadow: var(--shadow-sm);
   --tw-shadow-colored: 0 1px 2px 0 var(--tw-shadow-color);
 }
 html.theme-mus4 .shadow-lg {
-  --tw-shadow: 0 10px 24px -3px rgba(0, 0, 0, 0.45), 0 4px 8px -4px rgba(0, 0, 0, 0.4);
+  --tw-shadow: var(--shadow-lg);
   --tw-shadow-colored: 0 10px 24px -3px var(--tw-shadow-color), 0 4px 8px -4px var(--tw-shadow-color);
 }
 html.theme-mus4 .shadow-xl {
-  --tw-shadow: 0 20px 36px -5px rgba(0, 0, 0, 0.5), 0 8px 14px -6px rgba(0, 0, 0, 0.45);
+  --tw-shadow: var(--shadow-xl);
   --tw-shadow-colored: 0 20px 36px -5px var(--tw-shadow-color), 0 8px 14px -6px var(--tw-shadow-color);
 }
 html.theme-mus4 .shadow-2xl {
-  --tw-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  --tw-shadow: var(--shadow-2xl);
   --tw-shadow-colored: 0 25px 50px -12px var(--tw-shadow-color);
 }
 
@@ -459,112 +759,128 @@ html.theme-mus4 .shadow-2xl {
 /* ---------- Filled buttons: near-black bold text (ESP32 fill language) ---------- */
 html.theme-mus4 button.bg-cyan-600,
 html.theme-mus4 button.bg-cyan-500 {
-  font-weight: 700;
+  font-weight: var(--w-fill);
 }
 html.theme-mus4 button.bg-red-600.text-white,
 html.theme-mus4 button.bg-red-500.text-white,
 html.theme-mus4 button.bg-emerald-600.text-white,
 html.theme-mus4 button.bg-emerald-500.text-white,
 html.theme-mus4 button.bg-emerald-400.text-white {
-  color: #061019;
-  font-weight: 700;
+  color: var(--on-accent);
+  font-weight: var(--w-fill);
 }
 /* selected pill segments (trainer ModeTabs etc.) = blue fill, bold */
 html.theme-mus4 button.rounded-full.bg-cyan-600 {
-  font-weight: 800;
+  font-weight: var(--w-segment);
 }
 
 /* ---------- Selectable chips: solid blue fill + near-black text ---------- */
 /* small toggle chips only; wide w-full list rows keep the frame language */
 html.theme-mus4 button.border-cyan-500.bg-cyan-950,
 html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50 {
-  background-color: #5cc8ff;
-  border-color: #5cc8ff;
-  color: #061019;
-  font-weight: 800;
+  background-color: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: var(--w-segment);
   outline: none;
 }
 html.theme-mus4 button.border-cyan-500.bg-cyan-950:hover,
 html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50:hover {
-  background-color: #8bdcff;
-  border-color: #8bdcff;
+  background-color: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
 }
 html.theme-mus4 button.border-cyan-500.bg-cyan-950 > span,
 html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50 > span {
-  color: #061019;
+  color: var(--on-accent);
 }
 
 /* ---------- Drive mode selector: ESP32 mode colors (手动=绿, 半自动=黄, 全自动=蓝) ---------- */
 /* component: src/components/drive/DriveModeSelector.tsx (mode-active + data-mode) */
 html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden {
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 /* every segment is a pill: hover highlight follows the shape, not a rectangle */
 html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button {
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 html.theme-mus4 button.mode-active {
-  border-radius: 999px;
-  font-weight: 700;
+  border-radius: var(--r-pill);
+  font-weight: var(--w-fill);
 }
 html.theme-mus4 button.mode-active[data-mode="user"] {
-  outline: 1px solid rgba(57, 217, 138, 0.55);
+  outline: 1px solid var(--ok-a55);
   outline-offset: -1px;
 }
 html.theme-mus4 button.mode-active[data-mode="local_angle"] {
-  outline: 1px solid rgba(255, 204, 102, 0.55);
+  outline: 1px solid var(--warn-mode);
   outline-offset: -1px;
 }
 html.theme-mus4 button.mode-active[data-mode="local"] {
-  outline: 1px solid rgba(92, 200, 255, 0.55);
+  outline: 1px solid var(--accent-a55);
   outline-offset: -1px;
 }
 
 /* ---------- Status badges: pill shape, ESP32 statusPill language ---------- */
 html.theme-mus4 span.rounded {
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 html.theme-mus4 span.bg-zinc-800 {
-  color: #e8edf2;
-  font-weight: 700;
+  color: var(--ink);
+  font-weight: var(--w-badge);
 }
 /* 固件模式 badge (DrivePage, data-rc-mode): mode-colored text + frame */
 html.theme-mus4 span[data-rc-mode="0"] {
-  color: #39d98a;
-  outline-color: rgba(57, 217, 138, 0.55);
+  color: var(--ok);
+  outline-color: var(--ok-a55);
 }
 html.theme-mus4 span[data-rc-mode="1"] {
-  color: #ffcc66;
-  outline-color: rgba(255, 204, 102, 0.55);
+  color: var(--warn-text);
+  outline-color: var(--warn-mode);
 }
 html.theme-mus4 span[data-rc-mode="2"] {
-  color: #5cc8ff;
-  outline-color: rgba(92, 200, 255, 0.55);
+  color: var(--accent);
+  outline-color: var(--accent-a55);
 }
 
 /* ---------- Record button: 常驻红框（record = red，全局仅驾驶页录制键匹配该签名） ---------- */
 html.theme-mus4 button.inline-flex.rounded-lg.bg-zinc-800:not(.border) {
-  outline: 1px solid rgba(255, 107, 107, 0.5);
+  outline: 1px solid var(--bad-record);
   outline-offset: -1px;
 }
 
 /* ---------- Toggle switch: ESP32 .toggleSwitch colors ---------- */
 /* component: src/components/SimulatorConfig.tsx (DONKEY_GYM toggle) */
 html.theme-mus4 button[aria-label="Toggle simulator mode"].bg-zinc-700 {
-  background-color: #475569;
+  background-color: var(--off);
 }
 
 /* ---------- Dialogs: ESP32 .dialog amber frame (after generic panel rules) ---------- */
 html.theme-mus4 .rounded-xl.bg-zinc-900\/70 {
-  outline: 1px solid rgba(255, 204, 102, 0.6);
+  outline: 1px solid var(--warn-a60);
   outline-offset: -1px;
 }
 
 /* ---------- Degraded badge surface (VideoStream degraded badge) ---------- */
 html.theme-mus4 .bg-red-400\/10 {
-  background-color: rgba(255, 107, 107, 0.1);
-  outline: 1px solid rgba(255, 107, 107, 0.55);
+  background-color: var(--bad-wash-10);
+  outline: 1px solid var(--bad-frame-soft);
   outline-offset: -1px;
+}
+
+/* ---------- SkinSwitcher（座舱/Apple 分段切换器）：Apple 象限呈 iOS 分段控件观感 ---------- */
+/* 座舱象限由上方通用规则自然成形（容器吃 div.rounded-full.bg-zinc-800.border 的
+   inset 内圈，激活段吃 .bg-zinc-950 → --canvas 凹陷）；Apple 象限改为直角容器
+   + 凸起滑块（无渐变无投影，只明度分层）。 */
+html.theme-mus4.ui-apple .skin-switcher {
+  border-radius: var(--r-md);
+}
+html.theme-mus4.ui-apple .skin-switcher-segment {
+  border-radius: 8px;
+  color: var(--ink2);
+}
+html.theme-mus4.ui-apple .skin-switcher-segment[aria-pressed="true"] {
+  background-color: var(--segment-thumb);
+  color: var(--ink);
 }
 
 /* ---------- 主题/语言切换按钮（ThemeSwitcher/LanguageSwitcher）：三页面（DC/D/DD）统一渲染值 ---------- */
@@ -578,10 +894,10 @@ html.theme-mus4 .console-mute-btn,
 html.theme-mus4 .console-ota-btn,
 html.theme-mus4 .console-dev-toggle {
   outline: none;
-  background: #111820;
-  border-color: #344154;
-  box-shadow: inset 0 0 0 1px #2b3441;
-  color: #b9c5d3;
+  background: var(--surface2);
+  border-color: var(--hairline);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink2);
   /* 字体与 DC/D 逐值一致：根布局 .font-sans 被上方重映射为 system-ui 栈，
      会继承到按钮导致与 DC/D 字体不同，这里显式锁定 :root 字体栈 */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -595,38 +911,38 @@ html.theme-mus4 .console-dev-toggle {
 html.theme-mus4 .theme-switcher-btn:hover,
 html.theme-mus4 .language-switcher-btn:hover,
 html.theme-mus4 .console-mute-btn:not([aria-pressed="true"]):hover {
-  color: #e8edf2;
+  color: var(--ink);
 }
 html.theme-mus4 .console-ota-btn:not(:disabled):hover,
 html.theme-mus4 .console-dev-toggle:not([aria-checked="true"]):not(:disabled):hover {
-  color: #5cc8ff;
-  border-color: #5cc8ff;
-  box-shadow: inset 0 0 0 1px #5cc8ff;
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 /* DEV 开启态：DC 蓝 #5cc8ff 双层边框，压过基础覆盖（基础覆盖 specificity 高于 Tailwind 单类） */
 html.theme-mus4 .console-dev-toggle[aria-checked="true"] {
-  background: rgba(92, 200, 255, 0.25);
-  border-color: #5cc8ff;
-  box-shadow: inset 0 0 0 1px #5cc8ff;
-  color: #5cc8ff;
+  background: var(--accent-ui-a25);
+  border-color: var(--accent-ui);
+  box-shadow: inset 0 0 0 1px var(--accent-ui);
+  color: var(--accent-ui);
 }
 /* OTA 禁用态（设备不可达）：仅置灰文字，双层边框保持 */
 html.theme-mus4 .console-ota-btn:disabled {
-  color: #8fa1b5;
+  color: var(--ink3);
 }
 /* 静音激活态：DC 蓝 #5cc8ff（与 Drifter Console 一致），边框与内圈同色，保持双层视觉 */
 html.theme-mus4 .console-mute-btn[aria-pressed="true"] {
-  border-color: #5cc8ff;
-  box-shadow: inset 0 0 0 1px #5cc8ff;
-  color: #5cc8ff;
+  border-color: var(--accent-ui);
+  box-shadow: inset 0 0 0 1px var(--accent-ui);
+  color: var(--accent-ui);
 }
 /* 标题左侧 logo：对齐 Drifter Console headerLogo —— 32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px，与 DC 一致）、圆角 8px、深色主题边框 #2b3441
    （圆角显式锁定 8px：上方 html.theme-mus4 .rounded-lg 会把 rounded-lg 改成 12px，
      若 logo 用 rounded-lg 会与 DC 的 8px 不一致；box-sizing 显式 content-box：Tailwind
-     preflight 默认 border-box 会让 border 占进 32px 内使图标比 DC 小一圈） */
+     preflight 默认 border-box 会让 border 占进 32px 内使图标比 DC 小一圈；
+     --r-logo 在 Apple 象限同为 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
 html.theme-mus4 .header-logo {
   box-sizing: content-box;
-  border-radius: 8px;
-  border-color: #2b3441;
+  border-radius: var(--r-logo);
+  border-color: var(--line-soft);
 }
-

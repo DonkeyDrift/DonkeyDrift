@@ -496,8 +496,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                   <SectionCardTitle
                     icon={<Joystick className="w-5 h-5" />}
                     title={t('drive.virtualJoystick')}
-                    subtitle={t('drive.virtualJoystickSubtitle')}
-                    subtitleMarquee
                   />
                   <InputSourceSelector
                     value={inputSource}

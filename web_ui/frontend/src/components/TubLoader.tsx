@@ -66,7 +66,6 @@ export const TubLoader: React.FC = () => {
           title={t('tub.loaderTitle')}
           subtitle={t('tub.loaderHoverSubtitle')}
         />
-        <p className="text-sm text-zinc-400">{t('tub.loaderSubtitle')}</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-3">

@@ -16,6 +16,7 @@ import {
 } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
+import { useUiStyle } from '@/lib/uistyle';
 import {
   AlertCircle,
   ChevronLeft,
@@ -55,6 +56,17 @@ const MAX_CATCHUP_FRAMES = 10;
 // 落后墙钟超过这么多帧（~1s）视为长停顿（切后台/网络卡死）：
 // 从当前帧重新对表继续 1x 播放，不追帧、不快进。
 const MAX_RESUME_LAG_FRAMES = 60;
+
+/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
+ *  canvas 占位底色按 --surface 随主题与 UI 风格（座舱/Apple）切换自动重取色。 */
+const cssVarColor = (name: string, fallback: string): string => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 const formatDateTime = (ms: number | null) => {
   if (ms === null || ms === undefined) return null;
@@ -133,6 +145,8 @@ const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => {
 export const TubLibrary: React.FC = () => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
+  // 订阅 UI 风格（座舱/Apple）：切换时 canvas 占位底色按 --surface 重取色
+  const uiStyle = useUiStyle();
   const tubPath = useStore((state) => state.tubPath);
   // TM 页在 App 中常驻保活（#135）：据此在切走时停播并屏蔽全局快捷键
   const isTubManagerRoute = useLocation().pathname === '/';
@@ -367,7 +381,7 @@ export const TubLibrary: React.FC = () => {
 
     if (!currentImagePath) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = theme === 'light' ? '#f4f6f9' : '#18181b';
+      ctx.fillStyle = cssVarColor('--surface', theme === 'light' ? '#f4f6f9' : '#18181b');
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       setFrameAspect(null);
       return;
@@ -404,7 +418,7 @@ export const TubLibrary: React.FC = () => {
         img?.removeEventListener('error', onError);
       };
     }
-  }, [currentImagePath, tubPath, theme, touchImageCache]);
+  }, [currentImagePath, tubPath, theme, uiStyle, touchImageCache]);
 
   // Playback loop: wall-clock scheduled — position derives from elapsed time
   // (start frame + elapsed/frameInterval), each rAF tick draws the newest
@@ -648,14 +662,10 @@ export const TubLibrary: React.FC = () => {
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
-          <div className="space-y-1.5">
-            <SectionCardTitle
-              icon={<Clapperboard className="w-5 h-5" />}
-              title={t('tubLibrary.title')}
-              subtitle={t('tub.subtitle')}
-            />
-            <p className="text-sm text-zinc-400">{t('tubLibrary.subtitle')}</p>
-          </div>
+          <SectionCardTitle
+            icon={<Clapperboard className="w-5 h-5" />}
+            title={t('tubLibrary.title')}
+          />
           <Button
             size="sm"
             variant="secondary"
@@ -803,7 +813,7 @@ export const TubLibrary: React.FC = () => {
                 className="w-full bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
-                <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>
+                <div className="absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center shadow-lg">
                   <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
                   <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
                 </div>
