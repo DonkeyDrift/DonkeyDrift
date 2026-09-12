@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-12 (219)
+
+- feat(launcher): 上位机终端页支持 `?theme=&ui=` 四象限配色——跟随 DC 页面主题，缺省保持历史深色
+  - 背景：DC（Drifter Console）Serial 终端 iframe 固定黑色，浅色/Apple 主题下突兀；配套 Firmware v1.9.1（DC 页 `terminalUrl()` 拼参，同日本仓库 CHANGELOG v1.9.1 条目）。
+  - `donkeycar/launcher/terminal_static/terminal.html`：解析 `?theme=light|dark&ui=cockpit|apple`，四象限调色板驱动页面背景/遮罩/xterm 主题——cockpit-dark（缺省，`#101318`/`#e8edf2`/`#5cc8ff` 逐值保留）、cockpit-light（`#f4f7f5`/`#1a2330`/`#0c9bd6`）、apple-dark（`#000`/`#f5f5f7`/`#2997ff`）、apple-light（`#f5f5f7`/`#1d1d1f`/`#0066cc`）；launcher 菜单直开终端不带参数时外观完全不变。
+  - 生效路径：launcher 每次请求实时读盘（`server.py`「便于前端迭代免重启」），deploy-8000 ff 后即生效，无需重启 launcher。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增 `test_terminal_page_supports_theme_params`（真实 ThreadingHTTPServer 拉 `/terminal`，断言四象限调色板、参数解析与历史默认逐值保留）；23 全过。
+
 ## 2026-09-12 (218)
 
 - feat(drift): 俯拍漂移控制系统收尾合入 Tony——`feat/overhead-drift-control`（68 提交，含 `docs/rfc-overhead-drift-control` 全部 22 提交）集成合并

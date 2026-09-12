@@ -6,10 +6,10 @@
 <title>Terminal</title>
 <link rel="stylesheet" href="/terminal/static/xterm.css">
 <style>
-html,body{margin:0;height:100%;background:#101318;overflow:hidden}
+html,body{margin:0;height:100%;background:var(--tbg,#101318);overflow:hidden}
 #term{height:100%;padding:4px;box-sizing:border-box}
 #term .xterm{height:100%}
-#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(16,19,24,.85);color:#8fa1b5;font-family:system-ui,sans-serif;font-size:14px;cursor:pointer;user-select:none;text-align:center;padding:0 16px}
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tov,rgba(16,19,24,.85));color:var(--tovink,#8fa1b5);font-family:system-ui,sans-serif;font-size:14px;cursor:pointer;user-select:none;text-align:center;padding:0 16px}
 #overlay[hidden]{display:none}
 </style>
 </head>
@@ -38,6 +38,33 @@ html,body{margin:0;height:100%;background:#101318;overflow:hidden}
   }catch(e){}
 })();
 
+// 主题：?theme=light|dark & ?ui=cockpit|apple——跟随 Drifter Console 页面
+// （DC 的 Serial 终端 iframe 会把当前页面主题拼进 URL）；缺省 cockpit-dark，
+// 与历史配色逐值一致（launcher 菜单直开终端不带参数时保持原样）。
+var TERM_THEMES={
+  'cockpit-dark': {bg:'#101318',fg:'#e8edf2',cursor:'#5cc8ff',overlayBg:'rgba(16,19,24,.85)',overlayInk:'#8fa1b5'},
+  'cockpit-light':{bg:'#f4f7f5',fg:'#1a2330',cursor:'#0c9bd6',overlayBg:'rgba(244,247,245,.88)',overlayInk:'#51637a'},
+  'apple-dark':   {bg:'#000000',fg:'#f5f5f7',cursor:'#2997ff',overlayBg:'rgba(0,0,0,.82)',overlayInk:'#a1a1a6'},
+  'apple-light':  {bg:'#f5f5f7',fg:'#1d1d1f',cursor:'#0066cc',overlayBg:'rgba(245,245,247,.88)',overlayInk:'#6e6e73'}
+};
+var termPalette=(function(){
+  var ui='cockpit',theme='dark';
+  try{
+    var params=new URLSearchParams(location.search);
+    if(params.get('ui')==='apple')ui='apple';
+    if(params.get('theme')==='light')theme='light';
+  }catch(e){}
+  var key=ui+'-'+theme;
+  document.documentElement.dataset.termTheme=key;
+  return TERM_THEMES[key];
+})();
+(function(){
+  var s=document.documentElement.style;
+  s.setProperty('--tbg',termPalette.bg);
+  s.setProperty('--tov',termPalette.overlayBg);
+  s.setProperty('--tovink',termPalette.overlayInk);
+})();
+
 // 语言：与 Launcher 菜单页一致——显式存储优先，否则跟随浏览器语言
 var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
 var T={
@@ -63,7 +90,7 @@ var term=new Terminal({
   cursorBlink:true,
   fontSize:14,
   scrollback:5000,
-  theme:{background:'#101318',foreground:'#e8edf2',cursor:'#5cc8ff'}
+  theme:{background:termPalette.bg,foreground:termPalette.fg,cursor:termPalette.cursor}
 });
 var fit=new FitAddon.FitAddon();
 term.loadAddon(fit);
