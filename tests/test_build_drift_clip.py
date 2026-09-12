@@ -13,6 +13,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from donkeycar.parts.tub_v2 import Tub
 
@@ -24,6 +25,7 @@ from scripts.build_drift_clip import (
     apply_scale,
     resample_timeline,
     build_clip,
+    main,
 )
 
 
@@ -224,6 +226,81 @@ class BuildClipTest(unittest.TestCase):
         clip = build_clip(records, source="tub_test", speed=1.0)
         self.assertAlmostEqual(clip["samples"][0]["t_rel"], 0.0)
         self.assertAlmostEqual(clip["samples"][1]["t_rel"], 20.0)
+
+
+def _fake_user_records(base_ms, n):
+    """合成 mode='user' 记录：20ms 间隔，时戳从 base_ms 起。"""
+    return [
+        {"index": i, "t_ms": base_ms + i * 20,
+         "angle": 0.1, "throttle": 0.2, "mode": "user"}
+        for i in range(n)
+    ]
+
+
+class MainMultiTubTest(unittest.TestCase):
+    """main：多 tub 拼接 / 输出命名 / speed 校验。
+
+    load_tub_records 一律打桩为合成记录（第二个 tub 时戳早于第一个，
+    模拟两次独立录制会话），聚焦拼接与命名逻辑本身。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="drift_clip_main_test_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_two_tubs_t_rel_strictly_increasing(self):
+        # tub_b 时戳早于 tub_a：若不经 concat_segments 逐段平移，
+        # resample_timeline 会产出负 t_rel（回放端假设单调递增）
+        recs = {"tub_a": _fake_user_records(5000, 3),
+                "tub_b": _fake_user_records(1000, 3)}
+        out = os.path.join(self.tmp, "clip.json")
+        with mock.patch("scripts.build_drift_clip.load_tub_records",
+                        side_effect=lambda tp: recs[tp]):
+            rc = main(["--transition-ms=100", f"--out={out}", "tub_a", "tub_b"])
+        self.assertEqual(rc, 0)
+        with open(out, encoding="utf-8") as f:
+            clip = json.load(f)
+        self.assertEqual(clip["schema"], CLIP_SCHEMA)
+        t_rels = [s["t_rel"] for s in clip["samples"]]
+        # 3 + 3 帧数据 + 1 帧段间静置
+        self.assertEqual(len(t_rels), 7)
+        for prev, cur in zip(t_rels, t_rels[1:]):
+            self.assertGreater(cur, prev)
+        self.assertEqual(clip["meta"]["source"], "tub_a+tub_b")
+
+    def test_backslash_tub_path_default_out_name(self):
+        # Windows 反斜杠路径：输出名应取末级目录名而非退化为 "_clip.json"
+        recs = _fake_user_records(1000, 2)
+        cwd = os.getcwd()
+        os.chdir(self.tmp)
+        try:
+            with mock.patch("scripts.build_drift_clip.load_tub_records",
+                            return_value=recs):
+                rc = main(["C:\\data\\tubs\\tub_a\\"])
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(rc, 0)
+        expected = os.path.join(self.tmp, "data", "clips", "tub_a_clip.json")
+        self.assertTrue(os.path.isfile(expected),
+                        f"默认输出应为 {expected}")
+        with open(expected, encoding="utf-8") as f:
+            clip = json.load(f)
+        self.assertEqual(len(clip["samples"]), 2)
+
+    def test_speed_zero_rejected(self):
+        # speed<=0 会静默产全零时戳，必须拒绝
+        with mock.patch("scripts.build_drift_clip.load_tub_records") as loader:
+            rc = main(["--speed=0", "tub_a"])
+        self.assertEqual(rc, 1)
+        loader.assert_not_called()
+
+    def test_speed_negative_rejected(self):
+        with mock.patch("scripts.build_drift_clip.load_tub_records") as loader:
+            rc = main(["--speed=-1", "tub_a"])
+        self.assertEqual(rc, 1)
+        loader.assert_not_called()
 
 
 if __name__ == "__main__":
