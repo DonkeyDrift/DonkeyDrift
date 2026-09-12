@@ -64,3 +64,6 @@ secrets*
 # 本机 agent 工作目录
 .claude/
 .agents/
+
+# 俯拍漂移链路延迟测量报告（本机产物）
+latency_report.json

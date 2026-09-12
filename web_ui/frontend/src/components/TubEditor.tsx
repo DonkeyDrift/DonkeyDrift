@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from './ui/Card';
 import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
@@ -68,13 +67,13 @@ type RecordAction = {
 // 两次点击选择的锚点（模块级变量，避免组件重新挂载时 ref 重置导致锚点丢失）
 let globalSelectionAnchorIndex: number | null = null;
 
-export const TubEditor: React.FC = () => {
+export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
   // 订阅 UI 风格（座舱/Apple）：切换时 chart 数据/插件按新象限的 CSS 变量重取色
   const uiStyle = useUiStyle();
-  // TM 页在 App 中常驻保活（#135）：据此在切走时屏蔽全局快捷键
-  const isTubManagerRoute = useLocation().pathname === '/';
+  // TM 并入统一流程大页面（#178）：section 在视口内（active）时才响应全局快捷键
+  const isTubManagerActive = active;
   const themeRef = useRef(theme);
   const globalRecords = useStore((state) => state.records);
   const tubPath = useStore((state) => state.tubPath);
@@ -1094,7 +1093,7 @@ export const TubEditor: React.FC = () => {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (!records.length) return;
-      if (!isTubManagerRoute) return;
+      if (!isTubManagerActive) return;
       if (isEditableTarget(event.target)) return;
 
       if (event.key === 'Escape') {
@@ -1222,7 +1221,7 @@ export const TubEditor: React.FC = () => {
       handleZoomOut,
       handleZoomReset,
       redoSelectionRange,
-      isTubManagerRoute,
+      isTubManagerActive,
     ]
   );
 

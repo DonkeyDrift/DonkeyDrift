@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import atexit
 import uvicorn
 import os
 import sys
@@ -11,7 +12,7 @@ from contextlib import asynccontextmanager
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config, harness_updater
+from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config, harness_updater, drift
 from routers import findcar as findcar_router
 import findcar
 
@@ -35,7 +36,9 @@ async def lifespan(app: FastAPI):
     - findcar 心跳上报：原实现用 @app.on_event("startup")，但 Starlette 1.x
       在自定义 lifespan 存在时不再触发 on_event 处理器（会静默停摆），故并入；
     - findcar 下线标记：关停时补发一次 state=offline，网页立即显示「离线」；
-    - Harness 一键更新周期检查（issue #404）。
+    - Harness 一键更新周期检查（issue #404）；
+    - drift 驱动钩子安装与漂移相机释放（同因并入 lifespan，关停必须停相机循环
+      释放 DirectShow 句柄）。
     """
     try:
         findcar.start_heartbeat()
@@ -43,8 +46,16 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).warning("findcar 心跳启动失败", exc_info=True)
     harness_updater.start_background_check()
     try:
+        drift.install_drive_hooks()
+    except Exception:
+        logging.getLogger(__name__).warning("drift 驱动钩子安装失败", exc_info=True)
+    try:
         yield
     finally:
+        try:
+            drift.drift_engine.stop_camera_loop()
+        except Exception:
+            logging.getLogger(__name__).warning("drift 相机释放失败", exc_info=True)
         try:
             await findcar.stop_heartbeat()
         except Exception:
@@ -98,6 +109,12 @@ app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollec
 app.include_router(findcar_router.router, prefix="/api/findcar", tags=["findcar"])
 app.include_router(ai_config.router, prefix="/api/ai-config", tags=["ai-config"])
 app.include_router(harness_updater.router, prefix="/api/harness", tags=["harness"])
+app.include_router(drift.router, prefix="/api/drift", tags=["drift"])
+
+
+# 进程退出兜底：lifespan 关停钩子跑不到时（强杀/reload 边缘）也尽力释放相机；
+# stop_camera_loop 幂等，重复调用安全。
+atexit.register(drift.drift_engine.stop_camera_loop)
 
 # 前端静态文件目录（生产构建输出）
 FRONTEND_DIST = os.path.abspath(

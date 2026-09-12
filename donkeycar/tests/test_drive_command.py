@@ -10,6 +10,22 @@ import pytest
 from donkeycar.management.base import Drive
 
 
+@pytest.fixture(autouse=True)
+def _isolate_instance_registry(monkeypatch):
+    """隔离 Web UI 实例登记与车进程 PID 记录（#127 起 Drive.run 先
+    find_live_instance() 复用存活实例、_kill_previous_drive_processes()
+    清理上次车进程）——不 mock 会探测到本机真实在跑实例导致提前返回，
+    且 write_instance/write_drive_pids/remove_drive_pid_file 会读写真实
+    ~/.donkeycar/ 登记文件、误伤正在运行的真实进程。
+    """
+    monkeypatch.setattr("donkeycar.management.base.find_live_instance", lambda: None)
+    monkeypatch.setattr("donkeycar.management.base.write_instance", lambda *a, **k: None)
+    monkeypatch.setattr("donkeycar.management.base.remove_instance", lambda *a, **k: None)
+    monkeypatch.setattr("donkeycar.management.base._kill_previous_drive_processes", lambda: None)
+    monkeypatch.setattr("donkeycar.management.base.write_drive_pids", lambda pids: None)
+    monkeypatch.setattr("donkeycar.management.base.remove_drive_pid_file", lambda: None)
+
+
 # ---------------------------------------------------------------------------
 # 参数解析
 # ---------------------------------------------------------------------------
@@ -138,14 +154,14 @@ def test_drive_run_spawns_three_processes_and_injects_env(monkeypatch, tmp_path)
     monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
     monkeypatch.setattr("donkeycar.management.base.webbrowser.open", lambda _url: None)
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _s: None)
-    # 隔离 PID 记录文件，避免读写真实 ~/.donkeycar/drive.pid
-    monkeypatch.setattr("donkeycar.management.base._DRIVE_PID_FILE", tmp_path / "drive.pid")
 
     with pytest.raises(SystemExit):
+        # dev 模式才起 Vite 前端进程，三进程断言针对 dev（生产模式前端由后端托管，#135）
         Drive().run([
             "--path", str(web_ui),
             "--car", str(car_dir),
             "--backend-port", "8000",
+            "--dev",
         ])
 
     # 应拉起三个子进程：uvicorn 后端、npm 前端、manage.py drive
@@ -196,14 +212,13 @@ def test_drive_run_waits_for_frontend_port_before_opening_browser(monkeypatch, t
     monkeypatch.setattr("donkeycar.management.base.subprocess.Popen", fake_popen)
     monkeypatch.setattr("donkeycar.management.base.webbrowser.open", opened_urls.append)
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _s: None)
-    # 隔离 PID 记录文件，避免读写真实 ~/.donkeycar/drive.pid
-    monkeypatch.setattr("donkeycar.management.base._DRIVE_PID_FILE", tmp_path / "drive.pid")
 
     with pytest.raises(SystemExit):
         Drive().run([
             "--path", str(web_ui),
             "--car", str(car_dir),
             "--open",
+            "--dev",
         ])
 
     # _wait_for_backend_ready 被单独 monkeypatch，这里只应捕获前端端口等待
