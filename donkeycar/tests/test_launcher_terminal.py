@@ -549,3 +549,40 @@ def test_terminal_ws_grace_expiry_destroys_session(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_terminal_page_supports_theme_params():
+    """终端页应支持 ?theme=light|dark & ?ui=cockpit|apple 跟随 DC 页面主题。
+
+    DC 的 Serial 终端 iframe 会把当前页面主题拼进 URL；缺省（无参数）
+    必须保持历史 cockpit-dark 配色逐值不变。
+    """
+    import urllib.request
+
+    from donkeycar.launcher.server import LauncherHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LauncherHandler)
+    server.daemon_threads = True
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/terminal", timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    # 四象限调色板与 URL 参数解析
+    assert "TERM_THEMES" in body
+    for key in ("cockpit-dark", "cockpit-light", "apple-dark", "apple-light"):
+        assert f"'{key}'" in body
+    assert "params.get('theme')" in body
+    assert "params.get('ui')" in body
+    # 历史默认配色逐值保留（缺省 cockpit-dark）
+    assert "'#101318'" in body
+    assert "'#e8edf2'" in body
+    assert "'#5cc8ff'" in body
+    # xterm 主题改由调色板驱动
+    assert "theme:{background:termPalette.bg" in body
