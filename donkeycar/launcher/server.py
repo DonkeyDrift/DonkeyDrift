@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse, quote
 
 from donkeycar._version import __version__
+from donkeycar import findcar
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
 from donkeycar.launcher.dsh_web import launch_dsh_web
@@ -882,6 +883,65 @@ def _start_hostip_reporter():
     t.start()
 
 
+# ── Find DKC 主机心跳（findcar）────────────────────────────────────
+# 主机（type=dd）上报挂在常驻 launcher 上：只要开机、本服务在跑，Find DKC
+# （https://find-dkc.pages.dev/）就能找到本机——不再依赖按需启动的 DD Web。
+# 上报端口动态取值：DD Web 实例存活时报其实际端口（点 IP 直达 DD 控制台），
+# 否则报 launcher 自身端口（点 IP 落到本菜单页，可一键「打开 DonkeyDrifter」）。
+
+def _findcar_report_once(port_fallback):
+    """向 Find DKC 上报一次主机心跳；未配置时直接返回。"""
+    cfg = findcar.load_config()
+    if not findcar.is_configured(cfg):
+        return
+    inst = find_live_instance()
+    port = inst["backend_port"] if inst else port_fallback
+    findcar.report_once(cfg, port)
+
+
+def _findcar_reporter_loop(port_fallback):
+    """后台线程：启动立即上报一次，随后按配置间隔周期上报。
+
+    每轮重新读配置：网页 /api/findcar/config 改了开关/地址/间隔后
+    无需重启 launcher，下一跳即生效。
+    """
+    while True:
+        interval = findcar.DEFAULT_INTERVAL_SECONDS
+        try:
+            _findcar_report_once(port_fallback)
+            cfg = findcar.load_config()
+            if cfg.interval_seconds > 0:
+                interval = cfg.interval_seconds
+        except Exception:
+            pass
+        threading.Event().wait(interval)
+
+
+def _start_findcar_reporter(port_fallback):
+    """启动 Find DKC 主机心跳后台线程（daemon）。"""
+    t = threading.Thread(
+        target=_findcar_reporter_loop, args=(port_fallback,), daemon=True
+    )
+    t.start()
+
+
+def _report_findcar_offline(port):
+    """服务关停时向 Find DKC 补发下线标记（尽力而为，绝不卡住关停）。"""
+    try:
+        findcar.report_offline(port=port)
+    except Exception:
+        pass
+
+
+def _sigterm_raise_keyboard_interrupt(signum, frame):
+    """SIGTERM 处理器：抛 KeyboardInterrupt，让 run_server 走统一退出路径。
+
+    systemd stop / 关机关的是 SIGTERM 而非 SIGINT；不接管的话进程直接终止，
+    Find DKC 下线标记发不出去，网页要等在线窗口走完才显示「离线」。
+    """
+    raise KeyboardInterrupt
+
+
 # ── HTTP 请求处理 ──────────────────────────────────────────────────
 
 # /api/launch/kimi-code-web 等 launch 类端点的 CORS 响应头：DC 页面由 ESP32
@@ -1416,16 +1476,24 @@ def run_server(host="0.0.0.0", port=8090):
     """启动 Launcher HTTP 服务器。"""
     # 启动 HOSTIP 报告后台线程
     _start_hostip_reporter()
+    # 启动 Find DKC 主机心跳后台线程（无存活 DD Web 实例时上报 launcher 自身端口）
+    _start_findcar_reporter(port)
     server = http.server.ThreadingHTTPServer(
         (host, port), LauncherHandler
     )
     print(f"DonkeyDrifter Launcher 服务已启动: http://{host}:{port}")
     print(f"当前工作目录: {Path.cwd()}")
+    # 接管 SIGTERM（systemd stop / 关机），走统一退出路径补发下线标记；
+    # signal 只能在主线程注册，测试在子线程起服务时跳过（保留默认行为）
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_raise_keyboard_interrupt)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n正在停止服务...")
         server.shutdown()
+    finally:
+        _report_findcar_offline(port)
 
 
 # ── 菜单 HTML 页面（嵌入为字符串常量） ──────────────────────────────

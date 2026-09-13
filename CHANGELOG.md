@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-09-13 (220)
+
+- fix(findcar): 主机心跳从 DD Web 后端迁到常驻 launcher——修复「主机在线但 Find DKC 找不到」（DD Web 按需启动，不开网页主机就从找车页消失）
+  - 根因：type=dd 上报挂在 `web_ui/backend` lifespan 上（:8000 起才上报）；开机后只有 launcher（:8090，systemd enabled 常驻）在跑时无任何心跳，KV 记录 15 分钟过期后主机整行消失。
+  - 新增 `donkeycar/findcar.py`（纯标准库上报核心，供 launcher import）：`FindCarConfig` 改 dataclass（launcher 模块约定无第三方依赖）、`load_config()`（与 web 后端共用 `~/.donkeycar_findcar.json`，兼容旧 token 字段）、`build_payload(port, state)`（**端口改动态参数**，取代 `DRIVE_WEB_PORT` 环境变量）、`report_once()` / `report_offline()` 原样迁入（浏览器 UA 伪装、3s 短超时下线标记）。
+  - `donkeycar/launcher/server.py`：新增 `_findcar_reporter_loop()` / `_start_findcar_reporter()`（照 `_start_hostip_reporter` daemon 线程模式，启动即报一次、随后按配置间隔周期上报，**每轮重读配置**——网页 `/api/findcar/config` 改开关/地址/间隔无需重启 launcher 即生效）；每跳端口动态取值——`find_live_instance()` 存活时报其 `backend_port`（点 IP 直达 DD 控制台），否则报 launcher 自身端口（点 IP 落到菜单页可一键打开 DD）；`run_server()` 接管 SIGTERM（systemd stop / 关机）转 KeyboardInterrupt 走统一退出路径，finally 补发 `state=offline`——语义升级为「主机关机即离线」。
+  - 瘦身 `web_ui/backend`：`main.py` lifespan 摘掉 `findcar.start_heartbeat()`/`stop_heartbeat()`（web 后端不再上报，避免与 launcher 双写同一条 KV 记录）；`findcar.py` 只留配置读写（pydantic `FindCarConfig` + `load_config`/`save_config`，`/api/findcar/config` 接口行为不变）。
+  - KV 写入量不变（dd 576/天 + esp32 288/天 ≈ 864 < 免费层 1000）；取舍：脱离 launcher 单独 `donkey web` 运行的场景不再上报主机（本机 launcher 为 systemd 常驻，无此场景）。
+  - 测试同步：新增 `tests/test_findcar.py`（16 例：配置容错/token 兼容/payload 动态端口/report_once 请求契约含 UA/下线标记/型号与系统探测）与 `tests/test_launcher_findcar.py`（8 例：存活实例端口选取/回退 launcher 端口/未配置不上报/循环周期与容错/下线标记/SIGTERM 处理器/run_server 接线）；`web_ui/backend/tests/test_findcar.py` 收窄为配置 API 7 例（新增 lifespan 不再挂心跳的回归断言）。**后端 552 全过；tests/ 365 过、1 红为 origin/Tony 既有失败**（`test_build_drift_clip.py` Windows 反斜杠路径，stash 验证与本次无关，未动）。
+  - 真机冒烟：worktree 代码直接调 `_findcar_report_once(8090)`，云端 `GET /devices` 实测出现 `TONY007`（type=dd / 192.168.3.62:8090 / ADL-N / Ubuntu 26.04 LTS / online=true）。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；`cloudflare/find-car/README.md`（非 git）协议与心跳节奏段落同步为 launcher 口径。
+
 ## 2026-09-12 (219)
 
 - feat(launcher): 上位机终端页支持 `?theme=&ui=` 四象限配色——跟随 DC 页面主题，缺省保持历史深色

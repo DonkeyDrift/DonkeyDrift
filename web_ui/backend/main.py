@@ -14,7 +14,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 
 from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config, harness_updater, drift
 from routers import findcar as findcar_router
-import findcar
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -33,17 +32,14 @@ if not DEBUG:
 async def lifespan(app: FastAPI):
     """启动/关闭后台任务（issue #404）。
 
-    - findcar 心跳上报：原实现用 @app.on_event("startup")，但 Starlette 1.x
-      在自定义 lifespan 存在时不再触发 on_event 处理器（会静默停摆），故并入；
-    - findcar 下线标记：关停时补发一次 state=offline，网页立即显示「离线」；
+    Starlette 1.x 在自定义 lifespan 存在时不再触发 on_event 处理器（会静默
+    停摆），后台任务统一并入 lifespan：
     - Harness 一键更新周期检查（issue #404）；
-    - drift 驱动钩子安装与漂移相机释放（同因并入 lifespan，关停必须停相机循环
-      释放 DirectShow 句柄）。
+    - drift 驱动钩子安装与漂移相机释放（关停必须停相机循环释放 DirectShow 句柄）。
+
+    findcar 主机心跳已迁至常驻 launcher（donkeycar/launcher/server.py），
+    不再随本后端启停；本后端只保留 /api/findcar/config 配置接口。
     """
-    try:
-        findcar.start_heartbeat()
-    except Exception:
-        logging.getLogger(__name__).warning("findcar 心跳启动失败", exc_info=True)
     harness_updater.start_background_check()
     try:
         drift.install_drive_hooks()
@@ -56,10 +52,6 @@ async def lifespan(app: FastAPI):
             drift.drift_engine.stop_camera_loop()
         except Exception:
             logging.getLogger(__name__).warning("drift 相机释放失败", exc_info=True)
-        try:
-            await findcar.stop_heartbeat()
-        except Exception:
-            logging.getLogger(__name__).warning("findcar 下线标记发送失败", exc_info=True)
         await harness_updater.stop_background_check()
 
 
