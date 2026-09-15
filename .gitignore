@@ -67,3 +67,6 @@ secrets*
 
 # 俯拍漂移链路延迟测量报告（本机产物）
 latency_report.json
+
+# 本机科普 HTML 页面（保留本地、不入库）
+docs/architecture-guide.html

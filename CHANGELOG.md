@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-16 (222)
+
+- chore(repo): 将 `docs/architecture-guide.html` 移出 git 跟踪（本机保留，不改写历史）
+  - 背景：该 HTML 是写给本机看的架构科普页（配套 Firmware 侧同名文件），属本机资料，用户要求不再入库。
+  - `git rm --cached docs/architecture-guide.html`：仅从索引移除，本地文件保留；`.gitignore` 新增 `docs/architecture-guide.html` 条目防再次误入库。历史提交中原样保留旧版本（不改写历史），此后该文件不再被跟踪。
+  - Firmware 侧 `MUS4_FW/docs/architecture-guide.html` 同口径移除（见 Firmware 当日条目）。
+  - 测试同步：纯仓库维护改动，无代码/测试变更，无需本机部署。
+
 ## 2026-09-15 (221)
 
 - feat(web-ui): 三端「座舱 / Apple」切换器统一为同一规格；FAB 帮助改单击直达；全站视觉审查修复 16 项
