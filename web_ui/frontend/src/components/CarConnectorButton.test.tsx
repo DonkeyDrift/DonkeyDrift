@@ -24,7 +24,7 @@ describe('CarConnectorButton（Issue #406 顶栏图标入口）', () => {
     const link = screen.getByRole('link', { name: 'common.nav.carConnector' });
     expect(link).toHaveAttribute('href', '/connector');
     expect(link).toHaveAttribute('title', 'common.nav.carConnector');
-    expect(link.querySelector('svg.lucide-settings')).not.toBeNull();
+    expect(link.querySelector('svg.lucide-plug')).not.toBeNull();
   });
 
   it('renders the icon without the Car Connector text', () => {

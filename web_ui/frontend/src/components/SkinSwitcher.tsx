@@ -10,9 +10,11 @@ const SEGMENTS: Array<{ style: UiStyle; labelKey: string }> = [
 /**
  * 座舱 / Apple 双风格分段切换器（复活自历史 SkinSwitcher aa48b7ae，皮肤维度
  * 由 useUiPrefsStore 改为 src/lib/uistyle.ts 的 <html> ui-apple class 维度）。
- * 样式跟随风格：座舱象限由 theme-*.css 通用规则自然成形（DC 粗框胶囊容器 +
- * 激活段 canvas 凹陷）；Apple 象限由 theme-*.css 的 `.ui-apple .skin-switcher*`
- * 规则呈 iOS 分段控件观感（直角容器 + 凸起滑块）。
+ * 几何两象限统一（统一切换器规格 v1）：28px 轨道 / 2px 内边距 / 24px 滑块 /
+ * 12px 字号 600 字重；配色按象限分化——座舱象限靠 Tailwind 类吃 themes/*.css
+ * 通用 remap（轨道 --surface2/--hairline、激活段 accent 填充 + on-accent 字），
+ * Apple 象限由 theme-*.css 的 `.ui-apple .skin-switcher*` 规则呈 iOS 分段控件
+ * 语义（填充灰轨道、透明边、浮起滑块带阴影、hover 只变字色）。
  */
 export const SkinSwitcher: React.FC = () => {
   const { t } = useTranslation();
@@ -28,7 +30,7 @@ export const SkinSwitcher: React.FC = () => {
     <div
       role="group"
       aria-label={t('common.uiStyle.switchLabel')}
-      className="skin-switcher flex items-center gap-0.5 rounded-full bg-zinc-800 border border-zinc-700 p-0.5"
+      className="skin-switcher box-border inline-flex h-[28px] items-center gap-[2px] rounded-full border border-zinc-700 bg-zinc-800 p-[2px]"
     >
       {SEGMENTS.map(({ style, labelKey }) => {
         const active = uiStyle === style;
@@ -38,10 +40,10 @@ export const SkinSwitcher: React.FC = () => {
             type="button"
             aria-pressed={active}
             onClick={() => setUiStyle(style)}
-            className={`skin-switcher-segment px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
+            className={`skin-switcher-segment h-[24px] cursor-pointer whitespace-nowrap rounded-full border-none bg-transparent px-[12px] text-[12px] font-semibold leading-none transition-colors ${
               active
-                ? 'bg-zinc-950 text-zinc-100'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-cyan-500 text-white hover:bg-cyan-700'
+                : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
             }`}
           >
             {t(labelKey)}

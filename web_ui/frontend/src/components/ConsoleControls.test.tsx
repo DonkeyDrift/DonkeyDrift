@@ -171,6 +171,39 @@ describe('ConsoleOtaButton', () => {
     resolveUpload('ACK:UPDATE_OK');
     await waitFor(() => expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument());
   });
+
+  it('closes the upload dialog on Escape, but not while an upload is in flight', async () => {
+    let resolveUpload!: (v: string) => void;
+    mockPostForm.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+    render(<ConsoleOtaButton />);
+
+    // 未上传时 Esc 直接关闭
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    expect(await screen.findByText('console.otaTitle')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument();
+
+    // 上传进行中 Esc 被拦截（不打断传输），完成后 Esc 可关
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    const fileInput = await screen.findByLabelText('console.otaChooseFile');
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['binary'], 'firmware.bin', { type: 'application/octet-stream' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'console.otaUpload' }));
+    await screen.findByRole('button', { name: 'console.otaUploading' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByText('console.otaTitle')).toBeInTheDocument();
+
+    resolveUpload('ACK:UPDATE_OK');
+    await screen.findByText('console.otaSuccess');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument());
+  });
 });
 
 describe('ConsoleDevToggle', () => {

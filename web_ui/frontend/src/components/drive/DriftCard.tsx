@@ -311,8 +311,8 @@ export const DriftCard: React.FC = () => {
         <SectionCardTitle icon={<CircleDot className="h-4 w-4" />} title={t('drive.driftTitle')} />
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* 相机接入 */}
-        <div className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr_auto] gap-2 items-end">
+        {/* 相机接入：移动端单列堆叠（390px 下 5 列会压爆），sm 起恢复 6 列网格 */}
+        <div className="grid grid-cols-1 gap-2 items-end sm:grid-cols-[1fr_1fr_1fr_1fr_2fr_auto]">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCameraIndex')}</label>
             <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} className={fieldClass('cameraIndex')} />
@@ -395,8 +395,8 @@ export const DriftCard: React.FC = () => {
           </div>
         </div>
 
-        {/* 模式控制：录制/自动要求标定就绪（否则后端必 409） */}
-        <div className="flex gap-2">
+        {/* 模式控制：录制/自动要求标定就绪（否则后端必 409）；窄屏允许换行 */}
+        <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => startSession('calibrate')} disabled={busy || active || !cameraOn}>
             <CircleDot className="h-4 w-4" /> {t('drive.driftCalibrate')}
           </Button>

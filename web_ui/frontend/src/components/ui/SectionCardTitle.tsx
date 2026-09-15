@@ -42,7 +42,11 @@ export const SectionCardTitle: React.FC<SectionCardTitleProps> = ({
         {children}
       </div>
       {subtitle && (
-        <span className="ml-3 min-w-0 max-w-[300px] truncate text-[13px] font-normal text-zinc-300">
+        // title 悬浮全文：max-w 截断时（中英长文案均可能省略号）仍能读到完整说明
+        <span
+          className="ml-3 min-w-0 max-w-[300px] truncate text-[13px] font-normal text-zinc-300"
+          title={typeof subtitle === 'string' ? subtitle : undefined}
+        >
           {subtitle}
         </span>
       )}

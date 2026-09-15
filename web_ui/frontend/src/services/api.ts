@@ -713,7 +713,9 @@ export const getConnectorLocalIps = async () => {
 };
 
 export const discoverConnectorConsoles = async () => {
-  const response = await api.post('/connector/discover_console');
+  // 9s 前端超时：后端逐 IP 扫描可能远慢于浏览器耐心，超时按扫描失败处理，
+  // 让 #/console 的「正在扫描局域网…」能终结并落到失败引导文案（手动输入 IP）。
+  const response = await api.post('/connector/discover_console', undefined, { timeout: 9000 });
   return response.data as {
     status: boolean;
     found: { ip: string; port: number; reachable: boolean }[];

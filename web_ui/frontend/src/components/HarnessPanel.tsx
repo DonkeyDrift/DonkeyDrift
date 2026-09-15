@@ -186,10 +186,10 @@ export const HarnessPanel: React.FC = () => {
               {checking ? t('harness.checking') : t('harness.checkNow')}
             </Button>
           </div>
-          <p className="mt-1 text-xs text-zinc-500">{lastCheckText}</p>
+          <p className="mt-1 text-xs text-zinc-400">{lastCheckText}</p>
 
           {(status?.updates ?? []).length === 0 ? (
-            <p className="mt-3 text-xs text-zinc-500" data-testid="harness-no-update">
+            <p className="mt-3 text-xs text-zinc-400" data-testid="harness-no-update">
               {t('harness.noUpdate')}
             </p>
           ) : (
@@ -228,9 +228,9 @@ const HarnessGroup: React.FC<{
       <div className="flex items-center gap-2">
         <span className="text-cyan-400">{HARNESS_ICONS[harness.id] ?? <Bot className="h-4 w-4" />}</span>
         <span className="text-sm font-medium text-zinc-100">{harness.name}</span>
-        <span className="text-xs text-zinc-500">· {harness.vendor}</span>
+        <span className="text-xs text-zinc-400">· {harness.vendor}</span>
         {harness.remote_default && (
-          <span className="ml-auto truncate text-xs text-zinc-500" title={harness.remote_default}>
+          <span className="ml-auto truncate text-xs text-zinc-400" title={harness.remote_default}>
             {harness.remote_default}
           </span>
         )}
@@ -284,7 +284,7 @@ const ComponentRow: React.FC<{
               {component.version ? ' ' + component.version : ''}
             </span>
           ) : (
-            <span className="text-zinc-500">{t('harness.notInstalled')}</span>
+            <span className="text-zinc-400">{t('harness.notInstalled')}</span>
           )}
         </p>
       </div>
@@ -338,7 +338,7 @@ const UpdateRow: React.FC<{
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{kindLabel}</span>
           <span className="truncate text-sm text-zinc-200">{item.name}</span>
         </div>
-        <p className="mt-0.5 text-xs text-zinc-500">
+        <p className="mt-0.5 text-xs text-zinc-400">
           {item.installed_version ? item.installed_version + ' → ' : ''}
           {item.latest_version ?? t('harness.notInstalled')}
           {!item.updateable && <span className="ml-2 text-emerald-400">{t('harness.upToDate')}</span>}

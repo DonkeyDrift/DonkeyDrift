@@ -19,6 +19,8 @@ export const DrifterConsolePage: React.FC = () => {
   const uiStyle = useUiStyle();
   const [devices, setDevices] = useState<{ ip: string; port: number; reachable: boolean }[]>([]);
   const [scanning, setScanning] = useState(false);
+  // 扫描失败/超时/无设备：主区域给引导手动输入 IP 的失败态文案（discover 自带 9s 前端超时）
+  const [scanFailed, setScanFailed] = useState(false);
   const [selectedIp, setSelectedIp] = useState('');
   const [manualIp, setManualIp] = useState('');
   const [version, setVersion] = useState('');
@@ -27,10 +29,12 @@ export const DrifterConsolePage: React.FC = () => {
 
   const discover = useCallback(async () => {
     setScanning(true);
+    setScanFailed(false);
     try {
       const result = await discoverConnectorConsoles();
       const found = result.found || [];
       setDevices(found);
+      if (found.length === 0) setScanFailed(true);
       setSelectedIp((prev) => {
         if (found.length === 0) return prev; // 车暂时离线/扫描失败：保持现状
         // 车 DHCP 换 IP 后旧地址已不在列表中：切到新发现的第一台，避免 iframe 指向死地址。
@@ -38,7 +42,8 @@ export const DrifterConsolePage: React.FC = () => {
         return found.some((d) => d.ip === prev) ? prev : found[0].ip;
       });
     } catch {
-      // 扫描失败时保留现有选择，静默跳过
+      // 扫描超时/失败：保留现有选择，主区域落失败态引导手动输入
+      setScanFailed(true);
     } finally {
       setScanning(false);
     }
@@ -109,8 +114,9 @@ export const DrifterConsolePage: React.FC = () => {
           value={selectedIp}
           onChange={(e) => setSelectedIp(e.target.value)}
         >
+          {/* 占位项保持静态文案：扫描中/失败的动态状态只在主区域单独指示（同屏去重） */}
           {devices.length === 0 && (
-            <option value="">{scanning ? t('console.scanning') : t('console.noDevice')}</option>
+            <option value="">{scanning ? t('console.selectDevice') : t('console.noDevice')}</option>
           )}
           {devices.map((d) => (
             <option key={d.ip} value={d.ip}>
@@ -118,9 +124,9 @@ export const DrifterConsolePage: React.FC = () => {
             </option>
           ))}
         </select>
-        <Button onClick={discover} disabled={scanning} variant="secondary" size="sm">
+        <Button onClick={discover} disabled={scanning} variant="secondary" size="sm" aria-label={t('console.rescan')}>
           <RefreshCw className={`h-4 w-4 ${scanning ? 'animate-spin' : ''}`} />
-          {scanning ? t('console.scanning') : t('console.rescan')}
+          {t('console.rescan')}
         </Button>
         <Input
           value={manualIp}
@@ -152,7 +158,7 @@ export const DrifterConsolePage: React.FC = () => {
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center bg-zinc-900/30 px-6 text-center text-sm text-zinc-500">
-          {scanning ? t('console.scanning') : t('console.noDevice')}
+          {scanning ? t('console.scanning') : scanFailed ? t('console.scanFailed') : t('console.noDevice')}
         </div>
       )}
     </div>
