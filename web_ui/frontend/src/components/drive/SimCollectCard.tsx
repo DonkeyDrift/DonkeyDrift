@@ -113,7 +113,7 @@ export const SimCollectCard: React.FC = () => {
             {t('drive.simCollectAdvanced')}
           </button>
           {advancedOpen && (
-            <div className="mt-2 grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <NumberField label={t('drive.simCollectKp')} value={kp} onChange={setKp} disabled={running} step={0.05} />
               <NumberField label={t('drive.simCollectKd')} value={kd} onChange={setKd} disabled={running} step={0.05} />
               <NumberField label={t('drive.simCollectThrottle')} value={throttle} onChange={setThrottle} disabled={running} min={0} max={1} step={0.05} />

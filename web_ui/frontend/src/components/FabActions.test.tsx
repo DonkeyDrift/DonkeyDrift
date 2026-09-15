@@ -13,7 +13,7 @@ const renderFab = () =>
   );
 
 const openHelp = () => {
-  fireEvent.click(screen.getByRole('button', { name: /快捷入口|Quick actions/ }));
+  // 单动作 FAB：右下「?」按钮点击直达帮助弹窗（不再两级展开）
   fireEvent.click(screen.getByRole('button', { name: /功能说明|Feature guide/ }));
 };
 
@@ -36,6 +36,20 @@ describe('FabActions i18n', () => {
     openHelp();
     expect(screen.getByText('Keyboard Shortcuts')).toBeInTheDocument();
     expect(screen.getByText('Play / Pause')).toBeInTheDocument();
+  });
+
+  // 单动作 FAB：不再有两级展开的「快捷入口」小圆点
+  it('does not render the two-level quick-actions toggle dot', () => {
+    renderFab();
+    expect(screen.queryByRole('button', { name: /快捷入口|Quick actions/ })).not.toBeInTheDocument();
+  });
+
+  it('closes the help modal on Escape', () => {
+    renderFab();
+    openHelp();
+    expect(screen.getByText('快捷键说明')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('快捷键说明')).not.toBeInTheDocument();
   });
 
   // issue #139：语言入口统一为顶栏静音式单按钮，FAB 群不再包含语言按钮/菜单

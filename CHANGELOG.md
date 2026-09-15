@@ -1,5 +1,20 @@
 # 变更日志
 
+## 2026-09-15 (221)
+
+- feat(web-ui): 三端「座舱 / Apple」切换器统一为同一规格；FAB 帮助改单击直达；全站视觉审查修复 16 项
+  - 背景：用户反馈 DD/DC/FDC 三端的 UI 风格切换按键样式完全不一样，且 DD 右下角小圆点两级展开「点问号没反应」。本次定《统一切换器规格 v1》三端落地同一几何与象限配色（配套 Firmware v1.9.2、find-car v1.2.0 同口径）。
+  - 切换器：`SkinSwitcher.tsx` + `themes/theme-mus4.css`/`theme-light.css`——几何统一 28px 轨道（2px padding/gap）/24px 段/12px·font-600/999px 圆角；座舱象限激活段 = accent 填充（bg-cyan-500 语义类吃主题 remap）；Apple 象限 = iOS 填充灰轨道 + 浮起滑块（新增 `--segment-track`/`--segment-thumb-shadow` 变量，dark 滑块 #636366）+ 非激活 hover 字色反馈（原 Apple 象限 hover 被覆写压制零反馈）+ focus-visible 2px 描边。Layout 顶栏与移动端菜单两实例同生效。
+  - FAB 直达：`FabActions.tsx` 删两级展开（18px 小圆点、飞出 ? 球、document 点击收起监听全移除），改为单个 46px 圆形「?」按钮单击直接打开快捷键弹窗（语言入口早已迁顶栏，簇内只剩帮助一个动作）；弹窗补 Esc 关闭；组件注释注明与 ESP32 FAB 簇的刻意分歧。
+  - 视觉审查修复（三端 playwright 截图走查发现，修后均截图复验）：
+    - Drive 移动端响应式：`DriftCard` 相机表单窄屏单列堆叠 + 模式按钮行 flex-wrap；`SimCollectCard` 高级参数 `grid-cols-1 sm:2 lg:4`（原 390px 下标签逐字竖排、输入框压成 30px、按钮竖排药丸）。
+    - `DrifterConsolePage`：Console 离线扫描加 9s 前端超时（`services/api.ts discoverConnectorConsoles`）+ 失败态引导手动输入 IP（新增 i18n `console.scanFailed` 中英）；「正在扫描局域网…」同屏三处重复去重为一处。
+    - `ConsoleControls`：OTA 弹窗补 Esc 关闭（上传中拦截）；上传按钮 `disabled` 补 `!ip`——Console 离线时不再可点刷写。
+    - `HarnessPanel` 浅色象限死深灰块与副标题对比度：次级文字 zinc-500→zinc-400（6 处）；主题 css 新增 `bg-zinc-900/40 → --surface-a35`、`divide-zinc-800 → --line-soft` remap（tub 列表浅色下发黑分隔线同愈）。
+    - `SectionCardTitle` 副标题截断补 `title` 悬浮全文；`Layout` 版本号与 ≡Donkey 链接组加间距；`PilotArenaPage` 区间滑杆容器底色改吃主题 remap（浅色下起始帧/结束帧标签可读）、Import Model 按钮 nowrap 防英文折行、删「播放 17ms / 推理目标 250ms / 并发 1」性能小字（用户要求删无意义小字）；`CarConnectorButton` 齿轮图标改 Plug（原易被误认为设置）；`TubLibrary` 播放按钮加 max-w-[200px]（原独占整行失衡）；`SidePanel` 触发边条移动端隐藏（hidden lg:flex）。
+  - 测试同步：vitest **285/285**（基线 282，净增 3：FAB 单击打开/无小圆点残留/Esc 关闭；CarConnectorButton 图标断言与 ConsoleControls Esc 用例同步）；`tsc -b --noEmit` 零错误；`npm run build` 通过。
+  - 注：纯前端改动（无后端 Python 变更）；合并后按流程 ff deploy-8000 重建 dist 部署本机 8000 实例。
+
 ## 2026-09-13 (220)
 
 - fix(findcar): 主机心跳从 DD Web 后端迁到常驻 launcher——修复「主机在线但 Find DKC 找不到」（DD Web 按需启动，不开网页主机就从找车页消失）

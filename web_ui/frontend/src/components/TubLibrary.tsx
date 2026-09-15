@@ -879,7 +879,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                 <Button
                   size="sm"
                   variant={isPlaying ? 'danger' : 'primary'}
-                  className="flex-1"
+                  className="flex-1 max-w-[200px]"
                   disabled={!hasRecords}
                   aria-label={isPlaying ? t('tub.stopPlaybackAria') : t('tub.startPlaybackAria')}
                   onClick={() => setIsPlaying((v) => !v)}

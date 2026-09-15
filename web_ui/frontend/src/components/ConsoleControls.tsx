@@ -118,6 +118,16 @@ export const ConsoleOtaButton: React.FC = () => {
     setStatus({ kind: 'idle', text: '' });
   }, [uploading]);
 
+  // Esc 关闭上传弹窗（上传进行中由 close() 自身拦截，不打断传输）
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, close]);
+
   const upload = async () => {
     if (!ip || !file) {
       setStatus({ kind: 'error', text: t('console.otaNoFile') });
@@ -201,7 +211,9 @@ export const ConsoleOtaButton: React.FC = () => {
               <Button variant="secondary" onClick={close} disabled={uploading}>
                 {t('console.cancel')}
               </Button>
-              <Button onClick={upload} disabled={uploading || !file}>
+              {/* 离线（ip 丢失）时禁用刷写：入口按钮虽已在不可达时禁用，但弹窗打开后
+                  车端可能掉线，此时不允许把固件发给一个已不可达的设备 */}
+              <Button onClick={upload} disabled={uploading || !file || !ip}>
                 {uploading ? t('console.otaUploading') : t('console.otaUpload')}
               </Button>
             </div>

@@ -1,49 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from '@/i18n';
 
-// FAB cluster mirrored 1:1 from the ESP32 Drifter Console
-// (Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h):
-// .fabToggle (accent dot) + .fabActions (.helpFab) + .helpModal.
-// Only the help modal's shortcut list content differs (DonkeyDrifter shortcuts).
+// 单动作帮助 FAB：右下常驻 46px 圆形「?」按钮，点击直接打开快捷键说明弹窗。
+// 注意：这是用户要求的刻意分歧——不再 1:1 镜像 ESP32 Drifter Console 的两级
+// 展开 FAB 群（.fabToggle 小圆点 + 飞出 ? 球 + 任意点击收起），只保留帮助弹窗
+// 本体（快捷键列表内容与固件侧一致）。
 // 语言入口不在此处：顶栏 LanguageSwitcher 为静音式单按钮（issue #139）。
 // 颜色全部走标准 Tailwind 工具类，由 themes/*.css 皮肤按语义变量重映射——
 // Apple 象限无投影无 glow（--shadow-lg/xl = none），座舱保持原观感。
 export const FabActions: React.FC = () => {
   const { t } = useTranslation();
-  const [fabOpen, setFabOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // ESP: document.addEventListener('click', collapseFabActions) — any outside
-  // click collapses the FAB cluster. Inner buttons stopPropagation so they
-  // don't immediately retrigger this.
+  // Esc 关闭帮助弹窗（遮罩点击关闭在下方 overlay 上）
   useEffect(() => {
-    const collapse = () => {
-      setFabOpen(false);
+    if (!helpOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHelpOpen(false);
     };
-    document.addEventListener('click', collapse);
-    return () => document.removeEventListener('click', collapse);
-  }, []);
-
-  const toggleFab = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFabOpen((v) => !v);
-  };
-
-  const openHelp = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFabOpen(true);
-    setHelpOpen(true);
-  };
-
-  const fabBallBase =
-    'absolute bottom-0 right-0 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 font-black leading-none shadow-lg backdrop-blur-[4px] transition-[opacity,transform] duration-[180ms]';
-  const fabBallVisibility = fabOpen
-    ? 'pointer-events-auto scale-100 opacity-100'
-    : 'pointer-events-none scale-[0.55] opacity-0';
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [helpOpen]);
 
   // ESP32 fill 语言：accent 填充 + on-accent 文字（皮肤规则 .bg-cyan-500.text-white）
-  const fabToggleColors =
-    'border-cyan-500 bg-cyan-500 hover:bg-cyan-700 focus-visible:bg-cyan-700';
   const helpFabColors =
     'border-cyan-500/60 bg-cyan-500 text-white hover:border-cyan-500 hover:bg-cyan-700 focus-visible:border-cyan-500 focus-visible:bg-cyan-700';
   const helpModalColors = 'border-cyan-500/50 bg-zinc-900 shadow-xl';
@@ -54,28 +33,17 @@ export const FabActions: React.FC = () => {
 
   return (
     <>
-      {/* .fabToggle: accent dot that expands/collapses the cluster */}
+      {/* 右下常驻帮助按钮：点击直达快捷键说明弹窗 */}
       <button
         type="button"
-        onClick={toggleFab}
-        aria-label={t('fab.quickActions')}
-        className={`fixed bottom-[24px] right-[24px] z-50 h-[18px] w-[18px] min-w-0 rounded-full border ${fabToggleColors} p-0 hover:scale-[1.18] focus-visible:scale-[1.18] active:scale-[1.18]`}
-      />
+        onClick={() => setHelpOpen(true)}
+        aria-label={t('fab.help')}
+        className={`fixed bottom-[18px] right-[18px] z-50 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 text-[24px] font-black leading-none shadow-lg backdrop-blur-[4px] transition-colors ${helpFabColors}`}
+      >
+        ?
+      </button>
 
-      {/* .fabActions: anchor point; ball flies out left (help) */}
-      <div className="pointer-events-none fixed bottom-[18px] right-[18px] z-50">
-        {/* .helpFab */}
-        <button
-          type="button"
-          onClick={openHelp}
-          aria-label={t('fab.help')}
-          className={`${fabBallBase} ${helpFabColors} text-[24px] ${fabBallVisibility} ${fabOpen ? '-translate-x-[56px]' : ''}`}
-        >
-          ?
-        </button>
-      </div>
-
-      {/* Help modal chrome: mirrors ESP32 .helpOverlay/.helpModal 1:1; only the shortcut list content differs */}
+      {/* Help modal chrome: 与 ESP32 .helpOverlay/.helpModal 同款；快捷键列表内容为 DonkeyDrifter 特有 */}
       {helpOpen && (
         <>
           {/* .helpOverlay */}

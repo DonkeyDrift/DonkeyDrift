@@ -303,6 +303,8 @@ html.theme-light.ui-apple {
 
   /* SkinSwitcher active thumb (iOS segmented control look) */
   --segment-thumb: #ffffff;
+  --segment-track: rgba(120, 120, 128, 0.16); /* iOS light 分段控件轨道填充灰 */
+  --segment-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 /* ---------- Surfaces ---------- */
@@ -318,6 +320,10 @@ html.theme-light .bg-zinc-900 {
   background-color: var(--surface);
 }
 html.theme-light .bg-zinc-900\/35 {
+  background-color: var(--surface-a35);
+}
+/* 分组底（HarnessPanel/AiSettingsPanel 的分组块）：与 /35 同档语义，组件自带 border */
+html.theme-light .bg-zinc-900\/40 {
   background-color: var(--surface-a35);
 }
 html.theme-light .bg-zinc-900\/50,
@@ -600,6 +606,10 @@ html.theme-light .text-amber-100 {
 html.theme-light .border-zinc-800 {
   border-color: var(--line-soft);
 }
+/* divide-y 的分隔线走同一次级描边（Tailwind divide 色作用在子元素 border 上） */
+html.theme-light .divide-zinc-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--line-soft);
+}
 html.theme-light .border-zinc-700 {
   border-color: var(--hairline);
 }
@@ -864,20 +874,35 @@ html.theme-light .bg-red-400\/10 {
   outline-offset: -1px;
 }
 
-/* ---------- SkinSwitcher（座舱/Apple 分段切换器）：Apple 象限呈 iOS 分段控件观感 ---------- */
-/* 座舱象限由上方通用规则自然成形（容器吃 div.rounded-full.bg-zinc-800.border 的
-   inset 内圈，激活段吃 .bg-zinc-950 → --canvas 凹陷）；Apple 象限改为直角容器
-   + 凸起滑块（无渐变无投影，只明度分层）。 */
-html.theme-light.ui-apple .skin-switcher {
-  border-radius: var(--r-md);
+/* ---------- SkinSwitcher（座舱/Apple 分段切换器）：几何两象限统一，配色按象限分化 ---------- */
+/* 统一切换器规格 v1：28px 轨道 / 2px 内边距 / 24px 滑块 / 12px·600，几何由组件
+   Tailwind 类给定（src/components/SkinSwitcher.tsx）；本组规则只管配色——
+   座舱象限靠上方通用 remap 自然成形（轨道 --surface2 + --hairline 边 + inset 内圈，
+   激活段 .bg-cyan-500.text-white → --accent-fill + --on-accent）；Apple 象限呈
+   iOS 分段控件语义（填充灰轨道、透明边、浮起滑块带阴影、hover 只变字色不变底）。
+   容器选择器带 div 元素提级：压过上方 div.rounded-full.bg-zinc-800.border 的
+   inset 内圈规则（同 (0,3,2) 时靠源顺序在后取胜）。 */
+html.theme-light .skin-switcher-segment:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+html.theme-light.ui-apple div.skin-switcher {
+  background-color: var(--segment-track);
+  border-color: transparent;
+  box-shadow: none;
 }
 html.theme-light.ui-apple .skin-switcher-segment {
-  border-radius: 8px;
   color: var(--ink2);
 }
-html.theme-light.ui-apple .skin-switcher-segment[aria-pressed="true"] {
+html.theme-light.ui-apple .skin-switcher-segment:hover {
+  background-color: transparent;
+  color: var(--ink);
+}
+html.theme-light.ui-apple .skin-switcher-segment[aria-pressed="true"],
+html.theme-light.ui-apple .skin-switcher-segment[aria-pressed="true"]:hover {
   background-color: var(--segment-thumb);
   color: var(--ink);
+  box-shadow: var(--segment-thumb-shadow);
 }
 
 /* ---------- slate aliases (TelemetryChart panel uses the slate scale) ---------- */

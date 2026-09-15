@@ -29,8 +29,9 @@ export const SidePanel: React.FC = () => {
           anyOpen ? 'w-[min(24rem,calc(100vw-3.5rem))]' : 'w-0'
         }`}
       >
-        {/* Floating Trigger Buttons — outside overflow-hidden content */}
-        <div className="absolute left-full top-2 flex flex-col gap-1 items-start">
+        {/* Floating Trigger Buttons — outside overflow-hidden content；
+            移动端隐藏这条竖排边条（窄屏遮挡内容，抽屉入口仅桌面保留） */}
+        <div className="absolute left-full top-2 hidden lg:flex flex-col gap-1 items-start">
           {/* Loaders Button */}
           <button
             onClick={toggleLoaders}
