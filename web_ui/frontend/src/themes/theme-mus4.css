@@ -205,20 +205,26 @@ html.theme-mus4.ui-apple {
   --panel-gradient: none;
   --off: #636366;
 
+  /* 发丝线只保留 2 档（Apple separator 体系）：
+     弱档 = 卡片描边/页头 hairline（白 .10），强档 = 列表分隔线（白 .16）。
+     其余语义名一律解析到这两档之一，杜绝随机 6 档 alpha。 */
+  --separator: rgba(255, 255, 255, 0.16); /* Apple dark separator */
   --hairline: rgba(255, 255, 255, 0.1);
-  --hairline-a85: rgba(255, 255, 255, 0.16); /* 派生 */
-  --hairline-a55: rgba(255, 255, 255, 0.12); /* 派生 */
-  --line-white10: rgba(255, 255, 255, 0.16); /* 派生 */
-  --line-soft: rgba(255, 255, 255, 0.07); /* 派生 */
-  --line-soft-a50: rgba(255, 255, 255, 0.05); /* 派生 */
-  --line-soft-a60: rgba(255, 255, 255, 0.06); /* 派生 */
-  --line-soft-a90: rgba(255, 255, 255, 0.1); /* 派生 */
-  --line-mid: rgba(255, 255, 255, 0.16); /* 派生 */
+  --hairline-a85: rgba(255, 255, 255, 0.1);
+  --hairline-a55: rgba(255, 255, 255, 0.1);
+  --line-white10: rgba(255, 255, 255, 0.1);
+  --line-soft: rgba(255, 255, 255, 0.1);
+  --line-soft-a50: rgba(255, 255, 255, 0.1);
+  --line-soft-a60: rgba(255, 255, 255, 0.1);
+  --line-soft-a90: rgba(255, 255, 255, 0.1);
+  --line-mid: rgba(255, 255, 255, 0.16);
 
+  /* label 层级（规格 §1，对比度对 #000 实算）：ink2 12.6 / ink3 6.76 / ink4 4.93。
+     ink3 起为“结构性文字”下限（表头、字段名、标签、状态次级），ink4 只给纯 meta。 */
   --ink: #f5f5f7;
-  --ink2: rgba(235, 235, 245, 0.62);
-  --ink3: rgba(235, 235, 245, 0.45); /* 派生：tertiary label */
-  --ink4: rgba(235, 235, 245, 0.32); /* 派生：quaternary label */
+  --ink2: rgba(235, 235, 245, 0.85);
+  --ink3: rgba(235, 235, 245, 0.62);
+  --ink4: rgba(235, 235, 245, 0.52);
   --ink5: #636366;
   --ink-strong: #f5f5f7;
   --ink-strong-hover: #ffffff;
@@ -245,6 +251,7 @@ html.theme-mus4.ui-apple {
   --bad-fill: #ff453a;
   --bad-fill-hover: #ff6961; /* 派生 */
   --bad: #ff453a;
+  --bad-text: #ff453a; /* 深色底文字变体（6.16:1） */
   --bad-soft1: #ff8a80; /* 派生 */
   --bad-soft2: #ffb3ad; /* 派生 */
   --bad-soft3: #ffd6d2; /* 派生 */
@@ -263,6 +270,8 @@ html.theme-mus4.ui-apple {
   --bad-a60: rgba(255, 69, 58, 0.6);
   --ok-fill: #30d158;
   --ok: #30d158;
+  /* 文字变体（规格 §2）：填充继续用 --ok/--warn/--bad，文字一律走 *-text */
+  --ok-text: #30d158;
   --ok-hover: #5ede84; /* 派生 */
   --ok-wash-25: rgba(48, 209, 88, 0.25);
   --ok-wash-10: rgba(48, 209, 88, 0.1);
@@ -273,7 +282,7 @@ html.theme-mus4.ui-apple {
   --ok-a70: rgba(48, 209, 88, 0.7);
   --ok-a40: rgba(48, 209, 88, 0.4);
   --warn: #ff9f0a;
-  --warn-text: #ff9f0a;
+  --warn-text: #ff9f0a; /* 深色底文字变体 = 填充色本身（10.22:1） */
   --warn-soft1: #ffc069; /* 派生 */
   --warn-soft2: #ffdd9e; /* 派生 */
   --warn-wash-40: rgba(255, 159, 10, 0.14);
@@ -298,10 +307,12 @@ html.theme-mus4.ui-apple {
   --w-badge: 600;
   --tracking-title: -0.02em;
 
+  /* 卡片保持 hairline-only（--shadow-sm），浮层单独给 elevation：
+     一刀切成 none 会让弹出层读起来是“贴上去的方块”（规格 §5、审计 #4）。 */
   --shadow-sm: none;
-  --shadow-lg: none;
-  --shadow-xl: none;
-  --shadow-2xl: none;
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-2xl: 0 20px 56px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.45);
 
   /* SkinSwitcher active thumb (iOS segmented control look) */
   --segment-thumb: #636366; /* 派生：iOS dark 浮起面 */
@@ -545,6 +556,8 @@ html.theme-mus4 .text-zinc-600,
 html.theme-mus4 .disabled\:text-zinc-600:disabled {
   color: var(--ink5);
 }
+/* Apple 象限的灰阶层级重映射（zinc-500→ink3 等）不在这里：
+   这套规则体两象限共用，改它会连座舱一起动。见 themes/apple-deep.css 第 0 节。 */
 html.theme-mus4 .text-white {
   color: var(--ink-strong);
 }

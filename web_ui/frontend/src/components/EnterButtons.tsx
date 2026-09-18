@@ -72,7 +72,7 @@ const useLauncherEntry = (
 // 更小字号 + 更淡颜色 + 图标做弱化处理，一眼可辨为不常用的高级选项；
 // 外链入口不做路由激活态；Car Connector 复用同一样式（见 Layout.tsx）。
 export const entryLinkCls =
-  'flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors whitespace-nowrap cursor-pointer py-2.5';
+  'dd-nav-link flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors whitespace-nowrap cursor-pointer py-2.5';
 
 export const DonkeyEntryLink: React.FC = () => {
   const { t } = useTranslation();

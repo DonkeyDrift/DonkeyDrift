@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { applyTheme, readStoredTheme, setTheme, useResolvedTheme, type ThemeMode } from '@/lib/theme';
+import { useTranslation } from '@/i18n';
 
 export type { ThemeMode };
 
@@ -11,6 +12,7 @@ export type { ThemeMode };
  * 每次进入/刷新都会重新跟随系统。
  */
 export const ThemeSwitcher: React.FC = () => {
+  const { t } = useTranslation();
   const resolved = useResolvedTheme();
 
   // 与 index.html 的首屏内联脚本保持一致:挂载时按本地存储再应用一次,
@@ -26,7 +28,7 @@ export const ThemeSwitcher: React.FC = () => {
   return (
     <button
       type="button"
-      aria-label={resolved === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
+      aria-label={resolved === 'dark' ? t('common.themeSwitcher.toLight') : t('common.themeSwitcher.toDark')}
       onClick={handleClick}
       className="theme-switcher-btn flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 transition-colors"
     >

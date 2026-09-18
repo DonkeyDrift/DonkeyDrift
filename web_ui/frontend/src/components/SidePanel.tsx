@@ -37,7 +37,7 @@ export const SidePanel: React.FC = () => {
             onClick={toggleLoaders}
             onMouseEnter={() => setHovered('loaders')}
             onMouseLeave={() => setHovered(null)}
-            className={`border p-2 rounded-r-md transition-all duration-300 shadow-lg flex items-center ${
+            className={`dd-hit-h border p-2 rounded-r-md transition-all duration-300 shadow-lg flex items-center ${
               isLoadersOpen
                 ? 'bg-zinc-900 text-cyan-400 border-cyan-800/60'
                 : hovered === 'loaders'
@@ -56,7 +56,7 @@ export const SidePanel: React.FC = () => {
             onClick={toggleConnectors}
             onMouseEnter={() => setHovered('connectors')}
             onMouseLeave={() => setHovered(null)}
-            className={`border p-2 rounded-r-md transition-all duration-300 shadow-lg flex items-center ${
+            className={`dd-hit-h border p-2 rounded-r-md transition-all duration-300 shadow-lg flex items-center ${
               isConnectorsOpen
                 ? 'bg-zinc-900 text-cyan-400 border-cyan-800/60'
                 : hovered === 'connectors'
