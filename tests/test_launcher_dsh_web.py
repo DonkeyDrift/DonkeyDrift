@@ -18,7 +18,13 @@
   直接报错、未安装 dsh、banner 超时杀进程、进程提前退出报错、冷启动
   失败后固定端口兜底复用
 - _SPAWNED 登记：死进程剔除、探测失败剔除后走冷启动；登记为空
-  （模拟 launcher 重启）时经固定端口特征探测复用存活实例
+  （模拟 launcher 重启）时经固定端口特征探测复用存活实例；带 token
+  入口的登记条目复用前先经 _probe_token_entry 验证 token 仍有效
+  （失效则弃用走冷启动，杜绝把浏览器送进 401）
+- _kill_dsh_port_squatter：固定端口被 token 未知的存活 dsh 占用时确认
+  cmdline 是 dsh 才 SIGTERM 并等端口释放，随后重试冷启动；非 dsh 进程
+  一律不碰（_dsh_port_listener_pid 的 ss 输出解析、_is_dsh_process 的
+  /proc cmdline 判定一并覆盖）
 以及 POST /api/launch/dsh 端点：路由、参数校验、CORS 头（DC 从
 ESP32 origin 跨域调用依赖它）。不起真实 dsh。
 """
@@ -137,6 +143,18 @@ def _isolate_entry_state(tmp_path, monkeypatch):
 # 真实 _probe_dsh_fixed_port 的引用：下面的 autouse fixture 默认把它钉成
 # 返回 None，需要真实探测行为的用例先恢复它再 mock urlopen
 _REAL_PROBE_DSH_FIXED_PORT = dsh_web._probe_dsh_fixed_port
+
+# 真实 _kill_dsh_port_squatter 的引用：autouse fixture 默认把它钉成 False
+# （真跑会去 ss/kill 本机真实端口上的进程），单测该函数的用例直接用本引用
+_REAL_KILL_SQUATTER = dsh_web._kill_dsh_port_squatter
+
+
+@pytest.fixture(autouse=True)
+def _no_squatter_kill(monkeypatch):
+    """默认不真杀占位实例：_kill_dsh_port_squatter 会 ss 本机真实端口并
+    SIGTERM 真实进程（开发机上 58641 可能真有 dsh 在跑），一律钉成 False；
+    要覆盖杀占位行为的用例自行 monkeypatch 或调 _REAL_KILL_SQUATTER。"""
+    monkeypatch.setattr(dsh_web, "_kill_dsh_port_squatter", lambda: False)
 
 
 @pytest.fixture(autouse=True)
@@ -606,10 +624,13 @@ class TestFixedPortReuseTokenEra:
         assert dsh_web._SPAWNED == []
 
     def test_spawn_failure_with_occupied_port_reports_hint(self, monkeypatch):
-        # 冷启动 EADDRINUSE 且固定端口被存活的 dsh 占用但复用不了：
-        # 报"占用"提示而不是裸的退出码现场
+        # 冷启动 EADDRINUSE 且固定端口被存活的 dsh 占用但复用不了、自动
+        # 终止又未果：报"占用"提示而不是裸的退出码现场。
+        # _kill_dsh_port_squatter 必须钉死为 False——真跑会去 ss/kill 本机
+        # 真实端口上的进程
         monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port", lambda: None)
         monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        monkeypatch.setattr(dsh_web, "_kill_dsh_port_squatter", lambda: False)
         proc = _FakeProc(payload=b"Error: address already in use\r\n",
                          exit_code=1)
         result = launch_dsh_web(
@@ -620,21 +641,145 @@ class TestFixedPortReuseTokenEra:
         assert result["status"] == "error"
         assert "占用" in result["error"]
 
+    def test_squatter_killed_then_cold_start_retry_ok(self, monkeypatch):
+        # 占位自愈：冷启动 EADDRINUSE、固定端口复用探测不到可用入口、
+        # 端口被存活 dsh 占用 → 终止占位实例成功 → 重试冷启动拿全新 token
+        monkeypatch.setattr(dsh_web, "_probe_dsh_fixed_port", lambda: None)
+        monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        kills = []
+        monkeypatch.setattr(dsh_web, "_kill_dsh_port_squatter",
+                            lambda: kills.append(1) or True)
+        failed = _FakeProc(payload=b"Error: address already in use\r\n",
+                           exit_code=1)
+        fresh = _FakeProc(payload=_DSH_BANNER_TOKEN, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=5.0,
+            resolve_binary_fn=lambda: "/x/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([failed, fresh]))
+        assert result["status"] == "ok"
+        assert result["url"] == ("http://192.168.3.10:58641/?token=AbC_123"
+                                 "&dsh_new_session=1")
+        assert kills == [1]
+        # 失败的首发已杀净，重试的新实例登记在册（含带 token 入口）
+        assert failed.killed is True
+        assert [e["proc"] for e in dsh_web._SPAWNED] == [fresh]
+        assert dsh_web._SPAWNED[0]["url"] == \
+            "http://192.168.3.10:58641/?token=AbC_123"
+
+
+# ===========================================================================
+# _kill_dsh_port_squatter（占位 dsh 实例自愈）与其 pid/cmdline 判定
+# （autouse fixture 已把 dsh_web._kill_dsh_port_squatter 钉死，本类一律
+# 直接调 _REAL_KILL_SQUATTER）
+# ===========================================================================
+class TestKillDshPortSquatter:
+    def test_kills_dsh_and_waits_port_release(self, monkeypatch):
+        kills = []
+        pids = iter([4242, None])  # kill 后再次查询：端口已释放
+        monkeypatch.setattr(dsh_web, "_dsh_port_listener_pid",
+                            lambda port=58641: next(pids))
+        monkeypatch.setattr(dsh_web, "_is_dsh_process", lambda pid: True)
+        monkeypatch.setattr(dsh_web.os, "kill",
+                            lambda pid, sig: kills.append((pid, sig)))
+        assert _REAL_KILL_SQUATTER(wait_s=1.0) is True
+        assert kills == [(4242, dsh_web.signal.SIGTERM)]
+
+    def test_non_dsh_process_not_killed(self, monkeypatch):
+        # 专属端口被非 dsh 进程占用：一律不碰，保持手动报错路径
+        kills = []
+        monkeypatch.setattr(dsh_web, "_dsh_port_listener_pid",
+                            lambda port=58641: 4242)
+        monkeypatch.setattr(dsh_web, "_is_dsh_process", lambda pid: False)
+        monkeypatch.setattr(dsh_web.os, "kill",
+                            lambda pid, sig: kills.append((pid, sig)))
+        assert _REAL_KILL_SQUATTER(wait_s=1.0) is False
+        assert kills == []
+
+    def test_no_listener_returns_false(self, monkeypatch):
+        monkeypatch.setattr(dsh_web, "_dsh_port_listener_pid",
+                            lambda port=58641: None)
+        assert _REAL_KILL_SQUATTER(wait_s=1.0) is False
+
+    def test_port_not_released_in_time_returns_false(self, monkeypatch):
+        kills = []
+        monkeypatch.setattr(dsh_web, "_dsh_port_listener_pid",
+                            lambda port=58641: 4242)
+        monkeypatch.setattr(dsh_web, "_is_dsh_process", lambda pid: True)
+        monkeypatch.setattr(dsh_web.os, "kill",
+                            lambda pid, sig: kills.append((pid, sig)))
+        assert _REAL_KILL_SQUATTER(wait_s=0.3) is False
+        assert kills == [(4242, dsh_web.signal.SIGTERM)]
+
+    def test_parses_ss_output(self):
+        ss_out = (
+            "State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"
+            "LISTEN 0      511        0.0.0.0:58641      0.0.0.0:*    "
+            "users:((\"node-MainThread\",pid=486923,fd=23))\n"
+        )
+        assert dsh_web._dsh_port_listener_pid(
+            ss_run=lambda cmd: ss_out) == 486923
+        # 其它端口的行不匹配
+        other = ("LISTEN 0 5 0.0.0.0:8090 0.0.0.0:* "
+                 "users:((\"python3\",pid=1371,fd=3))\n")
+        assert dsh_web._dsh_port_listener_pid(
+            ss_run=lambda cmd: other) is None
+
+    def test_is_dsh_process(self, tmp_path):
+        d = tmp_path / "4242"
+        d.mkdir()
+        cmdline = d / "cmdline"
+        cmdline.write_bytes(b"node\0/home/u/env/bin/dsh\0web\0--port\0")
+        assert dsh_web._is_dsh_process(4242, proc_root=str(tmp_path)) is True
+        cmdline.write_bytes(b"python3\0-m\0http.server\0")
+        assert dsh_web._is_dsh_process(4242, proc_root=str(tmp_path)) is False
+        # cmdline 不可读（进程已消失）一律 False（不杀）
+        assert dsh_web._is_dsh_process(9999, proc_root=str(tmp_path)) is False
+
 
 class TestSpawnedRegistryTokenEra:
     def test_live_entry_reuses_registered_token_url(self, monkeypatch):
-        # 内存登记的新式条目（带 url）：复用时返回带 token 的入口
+        # 内存登记的新式条目（带 url）：复用时返回带 token 的入口——
+        # 但先经 _probe_token_entry 验证 token 仍有效（回环、query 保留）
         proc = _FakeProc(hold=True)
         dsh_web._SPAWNED.append({
             "proc": proc, "port": 58641,
             "url": "http://192.168.3.10:58641/?token=AbC"})
         monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        seen = []
+        monkeypatch.setattr(
+            dsh_web, "_probe_token_entry",
+            lambda url, timeout=None: seen.append(url) or 303)
         spawned = []
         result = launch_dsh_web(cwd=None, popen_fn=_make_popen(spawned))
         assert result == {"status": "ok",
                           "url": "http://192.168.3.10:58641/"
                                  "?token=AbC&dsh_new_session=1"}
         assert spawned == []
+        assert seen == ["http://127.0.0.1:58641/?token=AbC"]
+
+    def test_stale_token_entry_dropped_then_cold_start(self, monkeypatch):
+        # 登记条目进程活着、端口 401 应答，但 token 已失效（dsh 原地重启，
+        # 如插件安装会话自动升级 exec）：弃用旧入口走冷启动，绝不拿失效
+        # token 复用（否则浏览器落 "dsh web authentication required" 401）
+        stale = _FakeProc(hold=True)
+        dsh_web._SPAWNED.append({
+            "proc": stale, "port": 58641,
+            "url": "http://192.168.3.10:58641/?token=STALE"})
+        monkeypatch.setattr(dsh_web, "_probe_root", lambda *a: True)
+        seen = []
+        monkeypatch.setattr(
+            dsh_web, "_probe_token_entry",
+            lambda url, timeout=None: seen.append(url) or 401)
+        fresh = _FakeProc(payload=_DSH_BANNER_TOKEN, hold=True)
+        result = launch_dsh_web(
+            cwd=None, timeout_s=10.0,
+            resolve_binary_fn=lambda: "/x/dsh",
+            lan_ip_fn=lambda: "192.168.3.10",
+            popen_fn=_make_popen([fresh]))
+        assert result["status"] == "ok"
+        assert seen == ["http://127.0.0.1:58641/?token=STALE"]
+        assert [e["proc"] for e in dsh_web._SPAWNED] == [fresh]
 
     def test_spawn_success_writes_entry_state(self):
         # 新版 banner 带 token：URL 原样保留 token，内存登记与落盘登记

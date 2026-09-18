@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-18 (223)
+
+- fix(launcher): 打开 DSH 入口 token 复用校验 + 占位实例自愈——修复「点击打开 DSH 落 dsh web authentication required 401 页」
+  - 背景：用户在 Donkey 菜单页点「DeepSeek Harness」后浏览器落到 dsh 的 401 文案页（`dsh web authentication required; reopen the URL printed by dsh web.`）。排查实证：launcher 返回的新鲜带 token 入口在本机 curl 全程 303→200 正常；dsh 的 launchToken 按进程生成、只出现在启动 banner，进程原地重启（插件安装会话自动升级 exec，pid 不变）后旧 token 即作废，而 launcher 两处复用路径分不出这种状态，会把失效 token URL 发给浏览器。
+  - `donkeycar/launcher/dsh_web.py`：
+    - `_live_spawned_url` 复用前校验 token：新增 `_validate_entry_url`（登记入口改写回环、`_probe_token_entry` 看首响应，200/303 才复用）；`_SPAWNED` 带 url 条目 token 失效时弃用登记继续走固定端口探测/冷启动，不再把失效 token 交给浏览器（`_probe_root` 的 401 存活判定分不出进程原地重启）。
+    - 占位实例自愈：固定端口被 token 未知的存活 dsh 占用（自动升级后自我重启的新进程/旧 launcher 孤儿）时，原行为是冷启动永远 EADDRINUSE、只报「请手动关闭该实例」——新增 `_kill_dsh_port_squatter`（`ss -tlnp` 解析监听 pid → `/proc/<pid>/cmdline` 确认是 dsh 才 SIGTERM，非 dsh 进程一律不碰 → 轮询 ≤5s 等端口释放）+ 释放后重试一次冷启动拿全新 token；配套 `_dsh_port_listener_pid`/`_is_dsh_process` 两个判定与 `_register_spawn_success`（两处冷启动成功路径的登记/落盘/新会话标记统一收口）。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 81 全过（净增 9：登记 token 失效弃用转冷启动、复用前回环校验断言、占位杀后重试成功、ss 输出解析、cmdline 判定、非 dsh 不杀、端口不释放超时等；新增 autouse fixture 默认钉死 `_kill_dsh_port_squatter` 防测试误杀本机真实 dsh——首跑曾误杀一次，已补隔离）；launcher 相关 4 文件 122 全过。
+  - 注：仅 launcher（:8090）改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff deploy-8000 并重启 `donkeydrifter-launcher.service` 部署。
+
 ## 2026-09-16 (222)
 
 - chore(repo): 将 `docs/architecture-guide.html` 移出 git 跟踪（本机保留，不改写历史）

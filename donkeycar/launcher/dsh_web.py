@@ -55,19 +55,27 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   里那次性的 ``?token=``；有效 token 的 ``GET /`` 回 303 重定向并铸造
   会话 cookie（探测必须禁跳转看首响应，跟跳转会丢 cookie 二次 401）。
   旧版无此鉴权（``GET /`` 直接 200 + ``__DSH_BOOT__``），两时代并存。
-- 复用三通道（dsh 没有类似 kimi 的实例登记目录）：① ``_SPAWNED``
+- 复用与自愈四通道（dsh 没有类似 kimi 的实例登记目录）：① ``_SPAWNED``
   内存登记——本模块此前拉起且仍存活的子进程（``_probe_root`` 兼容
-  200/401 两时代），复用登记时抓到的带 token 入口；② 固定端口特征探测
-  ``_probe_dsh_fixed_port``——launcher 重启后 ① 即丢：旧版看 200 +
+  200/401 两时代），复用登记时抓到的带 token 入口，但先经
+  ``_validate_entry_url`` 验证 token 未随进程原地重启（自动升级 exec，
+  pid 不变、401 仍算存活）作废，作废则弃用继续往后找；② 固定端口特征
+  探测 ``_probe_dsh_fixed_port``——launcher 重启后 ① 即丢：旧版看 200 +
   ``__DSH_BOOT__``；新版看 401 专属文案 + ``~/.donkeycar/dsh_web_entry.json``
   登记的带 token 入口（``_probe_token_entry`` 验证 token 仍有效）；③
-  冷启动失败后再探一次 ② 兜底（端口可能被登记滞后的存活实例占用）。
+  冷启动失败后再探一次 ② 兜底（端口可能被登记滞后的存活实例占用）；④
+  固定端口被 token 未知的存活 dsh 占用（自动升级后自我重启的新进程、
+  或旧 launcher 孤儿子进程）时，``_kill_dsh_port_squatter`` 确认 cmdline
+  是 dsh 后 SIGTERM 终止并等端口释放，重试一次冷启动拿全新 token——
+  否则该状态下每次点击都只会得到 401/占用报错，无法自愈。
 """
 
 import json
 import logging
 import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -654,6 +662,21 @@ def _probe_dsh_fixed_port():
     return _lan_url(f"http://127.0.0.1:{DSH_WEB_PORT}/")
 
 
+def _validate_entry_url(url: str, port) -> bool:
+    """校验登记入口 URL 的 token 对本端口仍有效（回环探测，query 保留）。
+
+    dsh 的 launchToken 按进程生成：进程原地重启（如插件安装会话自动升级
+    后自我 exec，pid 不变）后旧 token 即作废，但 ``_probe_root`` 的 401
+    存活判定分不出这种情况——复用前必须用 ``_probe_token_entry`` 验证
+    首响应（200/303 有效、401 失效），否则会把浏览器送进
+    "dsh web authentication required" 401 页。
+    """
+    parts = urllib.parse.urlsplit(url)
+    loopback = urllib.parse.urlunsplit(
+        ("http", f"127.0.0.1:{port}", parts.path or "/", parts.query, ""))
+    return _probe_token_entry(loopback) in (200, 303)
+
+
 def _live_spawned_url():
     """找可复用的存活 dsh web 实例，返回入口 URL；没有返回 None。
 
@@ -661,7 +684,9 @@ def _live_spawned_url():
     条目（如 launcher 已重启、登记丢失）再直接探测固定端口
     （``_probe_dsh_fixed_port``），覆盖实例仍存活但登记已丢的场景。
     登记条目带 ``url``（启动 banner 抓到的带 token 入口，新版 dsh）时
-    复用它，否则退回无鉴权裸入口（旧版 dsh 的旧式登记）。
+    复用它——但先经 ``_validate_entry_url`` 验证 token 未随进程重启
+    作废；验证不过弃用该条目继续往后找。无 ``url`` 的旧式条目退回
+    无鉴权裸入口（旧版 dsh 的旧式登记）。
     """
     for entry in list(_SPAWNED):
         proc = entry["proc"]
@@ -670,10 +695,19 @@ def _live_spawned_url():
             continue
         # dsh 固定绑 0.0.0.0，用回环探测（_probe_root 兼容 200/401 两
         # 时代），返回前改写为局域网 IP（token query 保留）
-        if _probe_root("127.0.0.1", entry["port"]):
-            url = entry.get("url") or f"http://127.0.0.1:{entry['port']}/"
+        if not _probe_root("127.0.0.1", entry["port"]):
+            # 进程活着但端口探不通（僵死），清掉并走冷启动
+            _SPAWNED.remove(entry)
+            continue
+        url = entry.get("url")
+        if not url:
+            return _lan_url(f"http://127.0.0.1:{entry['port']}/")
+        if _validate_entry_url(url, entry["port"]):
             return _lan_url(url)
-        # 进程活着但端口探不通（僵死），清掉并走冷启动
+        # 进程活着、端口应答 401，但登记的 token 已失效：dsh 原地重启过
+        # （自动升级），旧入口作废——弃用登记，往后走固定端口探测/冷启动
+        logger.info("dsh 登记实例的入口 token 已失效（进程可能已自动升级"
+                    "重启），弃用旧入口: %s", url)
         _SPAWNED.remove(entry)
     return _probe_dsh_fixed_port()
 
@@ -809,16 +843,103 @@ def _mark_new_session(url: str) -> str:
         (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+def _dsh_port_listener_pid(port=DSH_WEB_PORT, *, ss_run=None):
+    """解析 ``ss -tlnp`` 输出里监听 ``port`` 的 pid；找不到/执行失败返回 None。
+
+    ``ss_run`` 是测试钩子：接收命令列表、返回其 stdout 文本。
+    """
+    if ss_run is None:
+        def ss_run(cmd):
+            return subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5).stdout
+    try:
+        out = ss_run(["ss", "-tlnp"])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        if f":{port} " not in line:
+            continue
+        m = re.search(r"pid=(\d+)", line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _is_dsh_process(pid, proc_root="/proc"):
+    """/proc/<pid>/cmdline 是否是 dsh（argv 里有 ``dsh`` 可执行名）。
+
+    杀占位实例前的最后防线：专属端口约定内占用者应是 launcher 拉起的
+    ``node …/dsh web …``（argv 某段为 ``dsh`` 或以 ``/dsh`` 结尾），
+    其它进程一律不碰。
+    """
+    try:
+        raw = (Path(proc_root) / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return False
+    return any(arg == b"dsh" or arg.endswith(b"/dsh")
+               for arg in raw.split(b"\0"))
+
+
+def _kill_dsh_port_squatter(port=DSH_WEB_PORT, wait_s=5.0):
+    """终止固定端口上 token 未知的占位 dsh 实例，等端口释放。
+
+    占位者是 launcher 专属端口上的 dsh（插件安装会话自动升级后自我重启、
+    或旧 launcher 留下的孤儿子进程）：它的 launchToken 只存在于它自己
+    的启动 banner 里，本进程拿不到——复用无门、冷启动又永远
+    EADDRINUSE，每次点击都失败。确认 cmdline 是 dsh 才发 SIGTERM；
+    端口在 ``wait_s`` 内释放返回 True，其它情况（找不到 pid、非 dsh
+    进程、kill 失败、端口不释放）返回 False，调用方保持原报错路径。
+    """
+    pid = _dsh_port_listener_pid(port)
+    if pid is None:
+        return False
+    if not _is_dsh_process(pid):
+        logger.warning("固定端口 %s 被非 dsh 进程占用（pid=%s），不自动终止",
+                       port, pid)
+        return False
+    logger.info("固定端口 %s 上的 dsh 实例（pid=%s）入口 token 未知，"
+                "终止后重新冷启动", port, pid)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as e:
+        logger.warning("终止占位 dsh 实例（pid=%s）失败: %s", pid, e)
+        return False
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        if _dsh_port_listener_pid(port) is None:
+            return True
+        time.sleep(_POLL_S)
+    logger.warning("占位 dsh 实例（pid=%s）未在 %ss 内释放端口 %s",
+                   pid, int(wait_s), port)
+    return False
+
+
+def _register_spawn_success(proc, url: str, log_msg: str) -> str:
+    """冷启动成功后的统一登记：内存/落盘登记带 token 入口，返回新会话 URL。"""
+    port = _url_port(url)
+    lan_entry = _lan_url(url)
+    # 登记 url（带 token）供复用：内存条目给本次 launcher 生命周期，
+    # 落盘登记给 launcher 重启后的固定端口探测（新版 dsh token 门）
+    _SPAWNED.append({"proc": proc, "port": port, "url": lan_entry})
+    _write_entry_state(lan_entry, port, proc.pid)
+    marked = _mark_new_session(lan_entry)
+    logger.info("%s: pid=%s url=%s", log_msg, proc.pid, marked)
+    return marked
+
+
 def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                    resolve_binary_fn=None, lan_ip_fn=None, mdns_fn=None,
                    popen_fn=None):
     """打开 DeepSeek Harness web：优先复用存活实例，否则拉起 ``dsh web``。
 
-    复用分两路（见 ``_live_spawned_url``）：``_SPAWNED`` 内存登记 →
-    固定端口特征探测（launcher 重启后登记丢失的兜底；新版 dsh token 门
-    下靠 ``_write_entry_state`` 落盘的带 token 入口）；冷启动绑固定
-    专属端口 ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能
-    被登记滞后的存活实例占用，对齐 ``kimi_web`` 的兜底语义）。
+    复用分两路（见 ``_live_spawned_url``）：``_SPAWNED`` 内存登记（带
+    token 入口先经 ``_validate_entry_url`` 验证未作废）→ 固定端口特征
+    探测（launcher 重启后登记丢失的兜底；新版 dsh token 门下靠
+    ``_write_entry_state`` 落盘的带 token 入口）；冷启动绑固定专属端口
+    ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能被登记滞后
+    的存活实例占用，对齐 ``kimi_web`` 的兜底语义）；端口被 token 未知
+    的存活 dsh 占用时经 ``_kill_dsh_port_squatter`` 终止占位实例并重试
+    一次冷启动（自愈，见模块 docstring 通道④）。
 
     无论复用还是冷启动，返回的 URL 都带 ``?dsh_new_session=1``——DSH
     前端检测到该参数时清除 ``localStorage["dsh.sessions.current"]``，
@@ -892,15 +1013,8 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     proc, url, error = _spawn_and_capture(
         binary, cwd_str, trusted_hosts, deadline, popen_fn=popen_fn)
     if url:
-        port = _url_port(url)
-        lan_entry = _lan_url(url)
-        # 登记 url（带 token）供复用：内存条目给本次 launcher 生命周期，
-        # 落盘登记给 launcher 重启后的固定端口探测（新版 dsh token 门）
-        _SPAWNED.append({"proc": proc, "port": port, "url": lan_entry})
-        _write_entry_state(lan_entry, port, proc.pid)
-        url = _mark_new_session(lan_entry)
-        logger.info("dsh web 已启动（新会话）: pid=%s url=%s", proc.pid, url)
-        return {"status": "ok", "url": url}
+        return {"status": "ok", "url": _register_spawn_success(
+            proc, url, "dsh web 已启动（新会话）")}
 
     # 冷启动失败兜底：固定端口可能被登记滞后的存活实例占用（如另一
     # launcher 此前拉起、本进程 _SPAWNED 没有登记的实例），再探一次复用
@@ -909,12 +1023,23 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         url = _mark_new_session(url)
         logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
-    # 端口被存活的 dsh 占用但复用不了（非 launcher 拉起、无 token 登记）：
-    # 冷启动永远 EADDRINUSE，给用户可行动的提示而不是裸的退出码现场
+    # 端口被存活的 dsh 占用但复用不了（入口 token 未知/已失效，如 dsh
+    # 自动升级后自我重启）：冷启动永远 EADDRINUSE——自动终止占位实例并
+    # 重试一次冷启动拿全新 token；终止未果才退回手动提示
     if _probe_root("127.0.0.1", DSH_WEB_PORT):
-        error = (f"{error}；固定端口 {DSH_WEB_PORT} 已被一个存活的 dsh web "
-                 "占用且其入口 token 未知（非 launcher 拉起或登记丢失），"
-                 "请手动关闭该实例后重试")
+        if _kill_dsh_port_squatter():
+            # 独立超时预算：杀占位 + 重启最多再花一个 timeout_s
+            proc, url, error = _spawn_and_capture(
+                binary, cwd_str, trusted_hosts,
+                time.monotonic() + timeout_s, popen_fn=popen_fn)
+            if url:
+                return {"status": "ok", "url": _register_spawn_success(
+                    proc, url, "占位 dsh 实例已终止，dsh web 已重新启动"
+                               "（新会话）")}
+        else:
+            error = (f"{error}；固定端口 {DSH_WEB_PORT} 已被一个存活的 dsh "
+                     "web 占用且其入口 token 未知（非 launcher 拉起或登记"
+                     "丢失），自动终止未果，请手动关闭该实例后重试")
     logger.warning("启动 dsh web 失败: %s", error)
     return {"status": "error", "error": error}
 
