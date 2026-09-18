@@ -9,6 +9,13 @@
     - 占位实例自愈：固定端口被 token 未知的存活 dsh 占用（自动升级后自我重启的新进程/旧 launcher 孤儿）时，原行为是冷启动永远 EADDRINUSE、只报「请手动关闭该实例」——新增 `_kill_dsh_port_squatter`（`ss -tlnp` 解析监听 pid → `/proc/<pid>/cmdline` 确认是 dsh 才 SIGTERM，非 dsh 进程一律不碰 → 轮询 ≤5s 等端口释放）+ 释放后重试一次冷启动拿全新 token；配套 `_dsh_port_listener_pid`/`_is_dsh_process` 两个判定与 `_register_spawn_success`（两处冷启动成功路径的登记/落盘/新会话标记统一收口）。
   - 测试同步：`tests/test_launcher_dsh_web.py` 81 全过（净增 9：登记 token 失效弃用转冷启动、复用前回环校验断言、占位杀后重试成功、ss 输出解析、cmdline 判定、非 dsh 不杀、端口不释放超时等；新增 autouse fixture 默认钉死 `_kill_dsh_port_squatter` 防测试误杀本机真实 dsh——首跑曾误杀一次，已补隔离）；launcher 相关 4 文件 122 全过。
   - 注：仅 launcher（:8090）改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff deploy-8000 并重启 `donkeydrifter-launcher.service` 部署。
+- fix(launcher): 打开 DSH 入口 host 跟随客户端请求 Host——修复「笔记本点打开 DSH 仍落 dsh web authentication required 401 页」（第二轮，真根因：笔记本对 mDNS 名 `tony007.local` 的解析不到本机）
+  - 背景：上一轮（token 复用校验 + 占位自愈，PR #435）部署后用户复测仍 401。决定性证据：journal 显示 launcher 两次正常返回有效 token URL（本机 curl 303→cookie→200 实测正常），但 `/proc/net/nf_conntrack` 里笔记本（192.168.3.14）→ dsh 端口 58641 的记录为零——笔记本浏览器从未把包发到本机 dsh：`tony007.local` 在笔记本上没解析到本机（hosts/代理/回环劫持所致），401 来自另一台 dsh（疑似笔记本自己回环上的实例）。笔记本访问 :8090 菜单页是通的，即「打开菜单页用的地址」已被证明可达——入口 host 跟随它即可根治。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_entry_url_for_client(url, host_header)` + `_strip_host_port`——Host 属于本机（局域网 IP / mDNS 主机名 / 回环，含 `[::1]` 方括号）时把入口 URL 的 netloc 换成该 host（端口/路径/`?token=` 全保留），不认识的 Host 原样返回（防 token 随改写泄给未知主机）；模块 docstring 补该机制说明。
+  - `donkeycar/launcher/server.py`：新增 `_client_host_header(headers, client_address)`——DD 后端转发带的 `X-Forwarded-Host` 仅回环直连采信（远端客户端可伪造 XFH，采信会泄 token），其余用 Host 头；`_handle_launch_dsh` 成功时用它把返回 URL 改写成客户端可达入口。
+  - `web_ui/backend/routers/launch.py`：`_forward_launch` 把客户端原始 Host 以 `X-Forwarded-Host` 传给 launcher（`_post_to_launcher` 新增 `forwarded_host` 参数）——否则经 DD 顶栏路径转发后 launcher 只看到回环 Host，会产出 127.0.0.1 入口害惨远端浏览器。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 97 全过（净增 16：`_entry_url_for_client` 各分支含 IPv6/无端口/未知域/未知 IP/缺省 Host、`_strip_host_port`、`_client_host_header` 三态、端点 Host 与 XFH 跟随、未知 Host 不改写；`_post` 支持自定义请求头；`test_endpoint_ok_with_cors_header` 期望值随新行为改为回环改写）；`web_ui/backend/tests/test_launch.py` 10 全过（净增 2：XFH 头断言、转发传递原始 Host；既有 mock 补 `forwarded_host` 参数）；launcher 全系列 152、后端 554 全过。
+  - 注：仅 launcher + DD 后端转发层改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff deploy-8000 并重启 `donkeydrifter-launcher.service` 部署（DD web :8000 当前未运行，launch.py 改动随下次启动生效）。
 
 ## 2026-09-16 (222)
 

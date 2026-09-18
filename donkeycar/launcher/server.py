@@ -26,7 +26,7 @@ from donkeycar._version import __version__
 from donkeycar import findcar
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
-from donkeycar.launcher.dsh_web import launch_dsh_web
+from donkeycar.launcher.dsh_web import _entry_url_for_client, launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 from donkeycar.webui_instance import (
     probe_http_ok,
@@ -1012,6 +1012,23 @@ def _write_cdp_port(port: int) -> None:
         pass
 
 
+def _client_host_header(headers, client_address):
+    """launch 类端点回给客户端的入口 URL 应跟随的 Host 值。
+
+    DD 后端转发（web_ui/backend/routers/launch.py）时把浏览器原始 Host
+    放进 ``X-Forwarded-Host``；它仅在直连客户端是回环（本机 DD 后端）
+    时才采信——远端客户端可伪造 XFH，采信会把 dsh 入口 token 改写泄给
+    伪造的主机名。其余情况用请求的 Host 头（客户端能到达 launcher 即
+    证明该地址对它可达）。
+    """
+    client_ip = client_address[0] if client_address else ""
+    if client_ip in ("127.0.0.1", "::1"):
+        forwarded = headers.get("X-Forwarded-Host")
+        if forwarded:
+            return forwarded
+    return headers.get("Host")
+
+
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
     """Launcher HTTP 请求处理器。"""
 
@@ -1223,7 +1240,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         kimi-code-web 同目录；dsh 以进程 cwd 作为新会话/工作区默认目录，
         见 dsh-host-apiproxy 的 process.cwd()）；
         cwd 不存在直接报错，绝不回退到其它目录。
-        返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理）。
+        返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理），入口
+        host 再跟随客户端请求实际用的 Host（可达性优先——客户端网络
+        解析不了 mDNS 名时会落到别处的 dsh 401 页；见
+        dsh_web._entry_url_for_client 与 _client_host_header）。
         长请求：dsh 冷启动数秒，服务端整体超时 60s，
         客户端超时必须 ≥60s。响应带 CORS 头（与 kimi-code-web 端点
         同款，供 DC 页面跨域调用）。
@@ -1259,6 +1279,13 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             # 默认目录（dsh-host-apiproxy 的 process.cwd()）
             cwd = str(Path.home() / "projects")
         result = launch_dsh_web(cwd=cwd)
+        if result.get("status") == "ok" and isinstance(result.get("url"), str):
+            # 入口 host 跟随客户端实际用的地址（X-Forwarded-Host 仅回环
+            # 直连采信）：客户端网络解析不了默认 mDNS 名时，不改写会把
+            # 浏览器送到不可达地址或别台 dsh 的 401 页
+            result["url"] = _entry_url_for_client(
+                result["url"],
+                _client_host_header(self.headers, self.client_address))
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
                          extra_headers=_KIMI_WEB_CORS_HEADERS)

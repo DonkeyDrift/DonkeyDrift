@@ -68,6 +68,16 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   或旧 launcher 孤儿子进程）时，``_kill_dsh_port_squatter`` 确认 cmdline
   是 dsh 后 SIGTERM 终止并等端口释放，重试一次冷启动拿全新 token——
   否则该状态下每次点击都只会得到 401/占用报错，无法自愈。
+- 入口 URL 的 host 跟随客户端请求实际用的 Host（``_entry_url_for_client``，
+  可达性优先）：入口默认用 mDNS 主机名（origin 稳定，见 ``_lan_url``），
+  但客户端所在网络解析不了该 mDNS 名时浏览器根本到不了本机 dsh；更糟
+  的是名字若解析到别的机器/回环上恰好也跑着 dsh，会落到那台 dsh 的
+  401 页（token 按进程生成，串台必然无效）。请求能到达 launcher 即证明
+  其 Host 地址对该浏览器可达，Host 属于本机（局域网 IP / mDNS 主机名 /
+  回环）时把入口 host 换成它（端口/路径/token 保留）；不认识的 Host
+  原样返回，防 token 随改写泄给未知主机。DD 后端转发路径的原始 Host
+  经 ``X-Forwarded-Host`` 传递（仅回环直连采信，见 server.py
+  ``_client_host_header``）。
 """
 
 import json
@@ -87,6 +97,7 @@ from pathlib import Path
 # 复用 kimi_web 的通用机制（同包内私有工具，见各引用处注释）
 from donkeycar.launcher.kimi_web import (
     _ANY_URL_RE,
+    _is_loopback_host,
     _lan_ip,
     _mdns_hostname,
     _lan_url,
@@ -675,6 +686,64 @@ def _validate_entry_url(url: str, port) -> bool:
     loopback = urllib.parse.urlunsplit(
         ("http", f"127.0.0.1:{port}", parts.path or "/", parts.query, ""))
     return _probe_token_entry(loopback) in (200, 303)
+
+
+def _strip_host_port(host_header):
+    """剥掉 Host 头的端口（含 ``[v6]`` 方括号），返回小写 host；非法返回 ""。
+
+    Host 头的端口是客户端访问 launcher/DD 后端用的端口，与 dsh 端口
+    无关，改写入口 URL 时必须丢弃（入口 URL 自己的端口保留）。
+    """
+    if not host_header:
+        return ""
+    value = str(host_header).strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        if end == -1:
+            return ""
+        return value[1:end]
+    if value.count(":") == 1:
+        return value.split(":", 1)[0]
+    # 无冒号（host 无端口）或多个冒号（裸 IPv6 字面量，无端口）：整体即 host
+    return value
+
+
+def _entry_url_for_client(url: str, host_header, *, lan_ip_fn=None,
+                          mdns_fn=None):
+    """把入口 URL 的 host 换成客户端请求实际用的 Host（可达性优先）。
+
+    入口默认用 mDNS 主机名（origin 稳定，见 ``_lan_url``），但客户端所在
+    网络解析不了该 mDNS 名时，浏览器到不了本机 dsh；更糟的是名字若解析
+    到别的机器/回环上恰好也跑着 dsh，用户会看到那台 dsh 的 401 页
+    （token 按进程生成，串台必然无效）。客户端请求能到达 launcher 即证明
+    其 Host 地址对该浏览器可达，因此 Host 属于本机（局域网 IP / mDNS
+    主机名 / 回环）时把入口 URL 的 netloc 换成该 host——端口、路径与
+    ``?token=`` query 全部保留。Host 不属于本机（域名反代、伪造值等）
+    时原样返回：token 是 dsh 的会话钥匙，不随改写泄给未知主机。
+
+    ``lan_ip_fn`` / ``mdns_fn`` 是测试钩子，缺省读本模块的 ``_lan_ip`` /
+    ``_mdns_hostname``（调用时读模块全局，monkeypatch 模块属性即生效）。
+    """
+    lan_ip_fn = lan_ip_fn or _lan_ip
+    mdns_fn = mdns_fn or _mdns_hostname
+    host = _strip_host_port(host_header)
+    if not host:
+        return url
+    own = {h.lower() for h in (lan_ip_fn(), mdns_fn()) if h}
+    if host not in own and not _is_loopback_host(host):
+        return url
+    parts = urllib.parse.urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        return url
+    if ":" in host:  # IPv6 字面量在 netloc 里需要方括号
+        netloc = f"[{host}]:{port}" if port is not None else f"[{host}]"
+    else:
+        netloc = f"{host}:{port}" if port is not None else host
+    return urllib.parse.urlunsplit(
+        (parts.scheme, netloc, parts.path or "/", parts.query,
+         parts.fragment))
 
 
 def _live_spawned_url():

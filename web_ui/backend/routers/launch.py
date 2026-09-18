@@ -6,6 +6,11 @@
 DD 前端与后端同源，相对路径 POST /api/launch/<端点名> 到达本后端，由
 本路由原样转发给 launcher，浏览器侧无跨域问题。launcher 侧的 CORS 头
 是为 DC（ESP32 origin 直连 :8090）准备的，与本转发路径无关。
+
+转发时把客户端原始 Host 以 ``X-Forwarded-Host`` 带给 launcher：转发后
+launcher 看到的 Host 已变成本机回环，客户端实际用的地址只能靠本后端
+显式传递——launcher 据此把返回的入口 URL host 跟随到客户端可达的
+地址（见 launcher dsh_web._entry_url_for_client）。
 """
 
 import asyncio
@@ -28,14 +33,24 @@ FORWARD_TIMEOUT_S = 125.0
 
 
 def _post_to_launcher(
-    path: str, body: bytes, timeout_s: float = FORWARD_TIMEOUT_S
+    path: str, body: bytes, timeout_s: float = FORWARD_TIMEOUT_S,
+    forwarded_host: str | None = None,
 ) -> tuple[int, bytes]:
-    """同步转发 POST 到 launcher，返回 (HTTP 状态码, 响应体)。"""
+    """同步转发 POST 到 launcher，返回 (HTTP 状态码, 响应体)。
+
+    ``forwarded_host``（浏览器访问本后端的原始 Host）非空时加
+    ``X-Forwarded-Host`` 头：launcher 用它把入口 URL 的 host 跟随到
+    客户端实际用的地址（转发后 launcher 看到的 Host 已是回环地址，
+    客户端可达地址只能靠本后端显式传递）。
+    """
+    headers = {"Content-Type": "application/json"} if body else {}
+    if forwarded_host:
+        headers["X-Forwarded-Host"] = forwarded_host
     req = urllib.request.Request(
         f"{LAUNCHER_BASE_URL}{path}",
         data=body if body else None,
         method="POST",
-        headers={"Content-Type": "application/json"} if body else {},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
@@ -75,11 +90,16 @@ async def launch_zcode_remote(request: Request):
 async def _forward_launch(
     request: Request, launcher_path: str, timeout_s: float = FORWARD_TIMEOUT_S
 ) -> JSONResponse:
-    """把 DD 前端的 launch 请求原样转发给 launcher 并回传其 JSON 响应。"""
+    """把 DD 前端的 launch 请求原样转发给 launcher 并回传其 JSON 响应。
+
+    客户端原始 Host 以 ``X-Forwarded-Host`` 传给 launcher（入口 URL 的
+    host 跟随客户端实际用的地址，见模块 docstring）。
+    """
     body = await request.body()
     try:
         status, payload = await asyncio.to_thread(
-            _post_to_launcher, launcher_path, body, timeout_s
+            _post_to_launcher, launcher_path, body, timeout_s,
+            request.headers.get("host"),
         )
     except Exception as e:
         logger.error("转发 launcher %s 失败: %s", launcher_path, e)
