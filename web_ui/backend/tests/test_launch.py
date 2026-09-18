@@ -14,10 +14,12 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 class _FakeRequest:
-    """starlette Request 替身：_forward_launch 只用到 await request.body()。"""
+    """starlette Request 替身：_forward_launch 用到 await request.body()
+    与 request.headers.get("host")（后者以 X-Forwarded-Host 传给 launcher）。"""
 
-    def __init__(self, body: bytes = b"{}"):
+    def __init__(self, body: bytes = b"{}", host: str = "testserver"):
         self._body = body
+        self.headers = {"host": host} if host else {}
 
     async def body(self):
         return self._body
@@ -87,7 +89,7 @@ def test_forward_launch_kimi_code_web_returns_launcher_json(monkeypatch):
     launch = importlib.import_module("routers.launch")
     captured = {}
 
-    def fake_post(path, body, timeout_s):
+    def fake_post(path, body, timeout_s, forwarded_host=None):
         captured["path"] = path
         captured["body"] = body
         return 200, json.dumps(
@@ -108,7 +110,7 @@ def test_forward_launch_zcode_returns_launcher_json(monkeypatch):
     launch = importlib.import_module("routers.launch")
     captured = {}
 
-    def fake_post(path, body, timeout_s):
+    def fake_post(path, body, timeout_s, forwarded_host=None):
         captured["path"] = path
         captured["body"] = body
         return 200, json.dumps(
@@ -131,7 +133,7 @@ def test_forward_launch_zcode_remote_uses_short_timeout(monkeypatch):
     launch = importlib.import_module("routers.launch")
     captured = {}
 
-    def fake_post(path, body, timeout_s):
+    def fake_post(path, body, timeout_s, forwarded_host=None):
         captured["path"] = path
         captured["body"] = body
         captured["timeout_s"] = timeout_s
@@ -152,7 +154,7 @@ def test_forward_launch_zcode_remote_uses_short_timeout(monkeypatch):
 def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
     launch = importlib.import_module("routers.launch")
 
-    def fake_post(path, body, timeout_s):
+    def fake_post(path, body, timeout_s, forwarded_host=None):
         raise ConnectionRefusedError("connection refused")
 
     monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
@@ -167,9 +169,59 @@ def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
 def test_forward_launch_non_json_response_returns_502(monkeypatch):
     launch = importlib.import_module("routers.launch")
     monkeypatch.setattr(
-        launch, "_post_to_launcher", lambda path, body, timeout_s: (200, b"not-json"))
+        launch, "_post_to_launcher",
+        lambda path, body, timeout_s, forwarded_host=None: (200, b"not-json"))
 
     resp = asyncio.run(launch.launch_kimi_code_web(_FakeRequest()))
 
     assert resp.status_code == 502
     assert json.loads(resp.body)["error"] == "launcher 返回了非 JSON 响应"
+
+
+def test_post_to_launcher_sends_x_forwarded_host(monkeypatch):
+    # 浏览器原始 Host 以 X-Forwarded-Host 传给 launcher（入口 URL 的 host
+    # 跟随客户端实际用的地址）；为空则不加该头
+    launch = importlib.import_module("routers.launch")
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def read(self):
+            return b'{"status":"ok"}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        captured["headers"] = dict(req.header_items())
+        return FakeResponse()
+
+    monkeypatch.setattr(launch.urllib.request, "urlopen", fake_urlopen)
+
+    launch._post_to_launcher("/api/launch/dsh", b"{}",
+                             forwarded_host="192.168.3.62:8000")
+    # urllib 把自定义头键名规范为首字母大写（"X-forwarded-host"）
+    assert captured["headers"].get("X-forwarded-host") == "192.168.3.62:8000"
+
+    launch._post_to_launcher("/api/launch/dsh", b"{}")
+    assert "X-forwarded-host" not in captured["headers"]
+
+
+def test_forward_launch_passes_client_host_as_x_forwarded_host(monkeypatch):
+    launch = importlib.import_module("routers.launch")
+    captured = {}
+
+    def fake_post(path, body, timeout_s, forwarded_host=None):
+        captured["forwarded_host"] = forwarded_host
+        return 200, b'{"status":"ok","url":"http://192.168.3.62:58641/"}'
+
+    monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
+
+    resp = asyncio.run(launch.launch_dsh(_FakeRequest(host="192.168.3.62:8000")))
+
+    assert captured["forwarded_host"] == "192.168.3.62:8000"
+    assert resp.status_code == 200

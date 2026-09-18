@@ -25,8 +25,12 @@
   cmdline 是 dsh 才 SIGTERM 并等端口释放，随后重试冷启动；非 dsh 进程
   一律不碰（_dsh_port_listener_pid 的 ss 输出解析、_is_dsh_process 的
   /proc cmdline 判定一并覆盖）
+- _entry_url_for_client / _strip_host_port：入口 URL 的 host 跟随客户
+  端请求的 Host（仅本机局域网 IP / mDNS 主机名 / 回环才改写，端口/
+  路径/token 保留；未知主机原样返回，防 token 随改写外泄）；
+  server._client_host_header 的 X-Forwarded-Host 仅回环直连采信
 以及 POST /api/launch/dsh 端点：路由、参数校验、CORS 头（DC 从
-ESP32 origin 跨域调用依赖它）。不起真实 dsh。
+ESP32 origin 跨域调用依赖它）、入口 host 跟随请求 Host/XFH。不起真实 dsh。
 """
 
 import io
@@ -1247,8 +1251,9 @@ def http_server(monkeypatch):
     thread.join(timeout=2)
 
 
-def _post(url, body: bytes):
-    req = urllib.request.Request(url, data=body, method="POST")
+def _post(url, body: bytes, headers=None):
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status, dict(resp.headers), resp.read()
@@ -1259,8 +1264,9 @@ def _post(url, body: bytes):
 def test_endpoint_ok_with_cors_header(http_server):
     code, headers, payload = _post(http_server + "/api/launch/dsh", b"{}")
     assert code == 200
+    # 入口 host 跟随客户端请求 Host：测试客户端走回环，URL 被改写为回环
     assert json.loads(payload) == {"status": "ok",
-                                   "url": "http://dsh.example/w"}
+                                   "url": "http://127.0.0.1/w"}
     # DC（ESP32 origin）跨域 fetch 依赖这个头
     assert headers.get("Access-Control-Allow-Origin") == "*"
 
@@ -1326,6 +1332,135 @@ def test_endpoint_error_from_automation_is_500(http_server, monkeypatch):
     assert code == 500
     assert json.loads(payload)["error"] == "boom"
     assert headers.get("Access-Control-Allow-Origin") == "*"
+
+
+# ===========================================================================
+# _entry_url_for_client（入口 host 跟随客户端请求的 Host）
+# ===========================================================================
+class TestEntryUrlForClient:
+    URL = "http://tony007.local:58641/?token=abc123&dsh_new_session=1"
+
+    def _call(self, host_header, lan="192.168.3.62", mdns="tony007.local"):
+        return dsh_web._entry_url_for_client(
+            self.URL, host_header,
+            lan_ip_fn=lambda: lan, mdns_fn=lambda: mdns)
+
+    def test_lan_ip_host_rewrites_netloc_keeps_port_path_token(self):
+        # Host 头的端口是 launcher 的，剥掉后换用 URL 自己的 58641
+        assert self._call("192.168.3.62:8090") == \
+            "http://192.168.3.62:58641/?token=abc123&dsh_new_session=1"
+
+    def test_mdns_host_kept(self):
+        assert self._call("tony007.local:8090") == self.URL
+
+    def test_host_matching_is_case_insensitive(self):
+        assert self._call("TONY007.LOCAL:8090") == self.URL
+
+    def test_loopback_hosts_rewritten(self):
+        assert self._call("localhost:8090") == \
+            "http://localhost:58641/?token=abc123&dsh_new_session=1"
+        assert self._call("127.0.0.1:8090") == \
+            "http://127.0.0.1:58641/?token=abc123&dsh_new_session=1"
+
+    def test_ipv6_loopback_host_rewritten_with_brackets(self):
+        assert self._call("[::1]:8090") == \
+            "http://[::1]:58641/?token=abc123&dsh_new_session=1"
+
+    def test_url_without_port_keeps_none(self):
+        assert dsh_web._entry_url_for_client(
+            "http://tony007.local/w", "192.168.3.62:8090",
+            lan_ip_fn=lambda: "192.168.3.62",
+            mdns_fn=lambda: "tony007.local") == "http://192.168.3.62/w"
+
+    def test_unknown_domain_left_untouched(self):
+        # 域名反代/伪造 Host：不改写，防 token 泄给未知主机
+        assert self._call("dsh.example.com:8090") == self.URL
+
+    def test_unknown_ip_left_untouched(self):
+        # 别人的 IP（不是本机接口地址）同样不改写
+        assert self._call("192.168.3.14:8090") == self.URL
+
+    def test_missing_or_invalid_host_left_untouched(self):
+        assert self._call(None) == self.URL
+        assert self._call("") == self.URL
+        assert self._call("[::1") == self.URL  # 方括号不闭合
+
+    def test_strip_host_port(self):
+        assert dsh_web._strip_host_port("192.168.3.62:8090") == "192.168.3.62"
+        assert dsh_web._strip_host_port("tony007.local") == "tony007.local"
+        assert dsh_web._strip_host_port("[::1]:8090") == "::1"
+        assert dsh_web._strip_host_port("::1") == "::1"  # 裸 IPv6 无端口
+        assert dsh_web._strip_host_port(None) == ""
+
+
+# ===========================================================================
+# _client_host_header（X-Forwarded-Host 仅回环直连采信）
+# ===========================================================================
+def test_client_host_header_prefers_xfh_from_loopback():
+    # DD 后端转发：回环直连 + XFH → 采信 XFH（浏览器原始 Host）
+    headers = {"Host": "localhost:8090",
+               "X-Forwarded-Host": "192.168.3.62:8000"}
+    assert launcher_server._client_host_header(
+        headers, ("127.0.0.1", 5000)) == "192.168.3.62:8000"
+
+
+def test_client_host_header_ignores_xfh_from_remote_client():
+    # 远端客户端可伪造 XFH，采信会把 dsh token 改写泄给伪造主机名
+    headers = {"Host": "192.168.3.62:8090",
+               "X-Forwarded-Host": "evil.example.com"}
+    assert launcher_server._client_host_header(
+        headers, ("192.168.3.14", 5000)) == "192.168.3.62:8090"
+
+
+def test_client_host_header_falls_back_to_host_header():
+    assert launcher_server._client_host_header(
+        {"Host": "tony007.local:8090"}, ("127.0.0.1", 5000)) == \
+        "tony007.local:8090"
+
+
+# ===========================================================================
+# 端点级：入口 host 跟随请求 Host / X-Forwarded-Host
+# ===========================================================================
+def _pin_own_hosts(monkeypatch):
+    """钉死本机地址判定，避免依赖测试机的真实 IP/mDNS。"""
+    monkeypatch.setattr(dsh_web, "_lan_ip", lambda: "192.168.3.62")
+    monkeypatch.setattr(dsh_web, "_mdns_hostname", lambda: "tony007.local")
+    monkeypatch.setattr(
+        launcher_server, "launch_dsh_web",
+        lambda cwd=None: {"status": "ok",
+                          "url": "http://tony007.local:58641/?token=T1"})
+
+
+def test_endpoint_entry_host_follows_request_host(http_server, monkeypatch):
+    # 客户端用 IP 打开菜单页：入口 host 跟随该 IP（端口/token 保留）
+    _pin_own_hosts(monkeypatch)
+    code, _h, payload = _post(http_server + "/api/launch/dsh", b"{}",
+                              headers={"Host": "192.168.3.62:8090"})
+    assert code == 200
+    assert json.loads(payload)["url"] == \
+        "http://192.168.3.62:58641/?token=T1"
+
+
+def test_endpoint_trusts_x_forwarded_host_from_loopback(http_server,
+                                                        monkeypatch):
+    # DD 后端转发（回环直连）带的 X-Forwarded-Host 优先于 Host 头
+    _pin_own_hosts(monkeypatch)
+    code, _h, payload = _post(
+        http_server + "/api/launch/dsh", b"{}",
+        headers={"X-Forwarded-Host": "192.168.3.62:8000"})
+    assert code == 200
+    assert json.loads(payload)["url"] == \
+        "http://192.168.3.62:58641/?token=T1"
+
+
+def test_endpoint_unknown_host_leaves_url_untouched(http_server, monkeypatch):
+    # Host 不是本机地址：原样返回（防 token 泄给未知主机）
+    _pin_own_hosts(monkeypatch)
+    code, _h, payload = _post(http_server + "/api/launch/dsh", b"{}",
+                              headers={"Host": "evil.example.com:8090"})
+    assert code == 200
+    assert json.loads(payload)["url"] == \
+        "http://tony007.local:58641/?token=T1"
 
 
 # ===========================================================================
