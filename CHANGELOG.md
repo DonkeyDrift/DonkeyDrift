@@ -1,5 +1,26 @@
 # 变更日志
 
+## 2026-09-18 (224)
+
+- feat(web-ui): Apple 象限深化——灰阶分层、语义色双轨、聚焦环、44pt 命中区、降级媒体特性与最小可用加载/错误态
+  - 背景：DD 的 Apple 象限此前只是 `html.theme-*.ui-apple` 的纯变量重映射 + 切换器少量规则，控件级可用性未收口。先做只读审计（89 张截图 + 31 条量化缺陷），再按工作区统一的《Apple 深化规格 v1》逐项落地。**座舱象限（不带 `ui-apple`）像素级冻结**：全部新增样式集中在 `src/themes/apple-deep.css`（71 条规则，除 @keyframes 百分位外每条都含 `.ui-apple`）+ 两个 theme 文件的 `ui-apple` token 块内，theme 共享规则体零改动（仅加一行说明注释）。
+  - `src/themes/apple-deep.css`（新增，总入口，`main.tsx` 引入）：
+    - **灰阶层级重映射**：`.text-zinc-500 → ink3`、`.text-zinc-600 → ink4` 只在 apple 作用域生效。ink3 深色 .45→**.62**（2.42 → 6.76:1）、浅色 .48→**.72**（1.93 → 4.53:1）；ink4 深 .32→**.52**（2.42 → 4.93）、浅 .36→**.62**（1.93 → 3.62）。全站可见文本对比度失败 **816/1482 → 130/1482（−84%）**，剩余 130 条为刻意保留的纯 meta（版本号、文件大小、时间戳，与 FDC/DC 同档）与「白字叠 Apple 系统红/蓝填充」的取舍。
+    - **语义色双轨**：新增 `--ok-text/--warn-text/--bad-text`（深 `#30d158/#ff9f0a/#ff453a`、浅 `#1a7f37/#c93400/#d70015`）只用于文字，点/条/描边等填充继续用 `--ok/--warn/--bad`。`TelemetryChart.tsx` 新增 `textVar`：图例文字走 text 变体、曲线仍用填充色。实测角度读数 2.04→4.66、标定提示 2.20→5.28、图例 2.02/3.26→4.85/4.94。
+    - **全局 `:focus-visible`**：原 9 种写法（含「与 hairline 同像素的 1px 环」「`outline:none`」「UA 默认 `rgb(16,16,16) auto 1px`」）统一为 `outline:3px solid var(--accent)`（浅 `#0066cc` 5.11:1 / 深 `#2997ff` 6.96:1），不透明的 3px 环，且不改元素填充色。
+    - **材质与前景匹配**：新增 `dd-overlay`（浮层自建 `rgba(0,0,0,.45)+blur(12px)` 材质、层内文字用亮色 vibrancy，不再继承主题灰阶）与 `dd-media`（视频/图像井底）。修掉 `/drive` 浅色下遥测覆盖层标题 **1.25:1**（浅色 ink 叠在 canvas 自绘的固定深底上，实测文字与底只差 8/255）→ 12.6:1；FPS 徽标 1.09 → 12.6。
+    - **可选取性**：`html,body,#root{user-select:none}` 下输入框三击无选区、IP/路径/报错全不可复制 → `input/textarea/[contenteditable]` 与 `.font-mono`、code/pre、日志、`[data-selectable]` 放开为 `text`（座舱保持 none）。
+    - **命中区 ≥44×44**：`::after` 不可见命中区（另有 `dd-hit-v`/`dd-hit-h` 两个按轴扩展的辅助类），交叉验证用视口内 44 盒四角 `elementFromPoint`。静态度量 876 个交互元素：**832 → 140 不达标**；点名项时间轴 862×8→862×44、Tub 滑杆 1198×24→1198×44、「展开控制器参数」84×16→84×44、模型行图标 22×22→22×44、W1–W5 18×36→18×44、顶栏图标 32×32→32×44、导航链高 20→44。曲线勾选按「只在非冲突轴扩展」只做横向（图例是 flex-wrap 行，44 高会跨行吞点击，实测点 A 行触发 B 行）。
+    - **降级媒体特性**：`prefers-reduced-transparency`（6 个 `backdrop-filter` 面 → 全部 `none` + 退实色）、`prefers-reduced-motion`（0.2/0.3s → 1e-05s、循环动画 iteration 1）、`prefers-contrast: more`（ink3 → .85、半透明面退实色）。原 CDP 实测这三个信号零变化。
+    - **吸顶页头材质**（`Layout.tsx` 加 `dd-header` 类 + `is-scrolled`，`scrollY > 2` 才浮现 hairline）：深色 `rgba(28,28,30,.72)`、浅色 `rgba(245,245,247,.72)` + `saturate(180%) blur(20px)`，与 FDC `html[data-ui="apple"] .headerRow` 同一套语言（原 DD 页头是不透明 `bg-zinc-950`，三端页头材质不统一）。实测：apple 深色顶部底边 `rgba(0,0,0,0)` → 滚动后 `rgba(255,255,255,.16)`；座舱象限页头计算值逐值不变（`#101318`、无 blur）。
+    - **其它**：浮层 elevation 恢复（`--shadow-lg/xl` 由 none → 浅 `0 8px 30px rgba(0,0,0,.12)` / 深 `…,.5`）；发丝线由 6 档收敛为 2 档（弱档 .10/.08、分隔线 .16/.29，`.divide-*` 走 separator）；`--ease-apple` 从「只被引用 1 次」到全站（`.32,.72,0,1`；过渡 100/200/300ms 三档，`transition:all` ×36 改显式属性表）；禁用态 `opacity:.5`（标签 1.46–1.94:1）→ `.85` + `saturate(.5)`（停止 1.77→2.90、OTA 1.94→3.43）；遮罩补 blur（深 .5 / 浅 .32）；CJK 行高触底（16px/16px）→ ≥1.3、12px 中文去掉 +0.6px 正字距、mono 栈统一 `ui-monospace…`、顶栏控件字体栈统一；FAB 去掉挂在实底上的 no-op `blur(4px)`；圆角/gap 离群值收敛（`0 6px 6px 0` → 10px、6px → 8px）；safe-area（`viewport-fit=cover` + `env(safe-area-inset-*)`）。
+  - `src/lib/apiHealth.ts` + `src/components/ApiStatusBar.tsx`（新增，仅 apple 象限渲染）：给既有 axios 实例挂**旁路观测**拦截器（请求/响应原样透传、失败不回显后端原文），据此渲染统一加载骨架与可关闭可重试的错误条——补上「6 个数据端点全部失败时页面零提示、零加载态」的缺口。`retryApiRequests()` 只清标记并重载当前页，不重放请求、不臆造数据。
+    - **误报防线**（本轮冒烟测试实测踩到后补）：只有「加载数据失败」才算失败——只认 **GET**（POST 等动作类请求的就地错误处理已存在，且「无相机/未配置」类 4xx 是预期状态：实测 `POST /api/drive/webrtc/session` 在无相机环境恒 400，若算失败会让正常使用中常挂一条红条），且只认**网络错误或 5xx**（GET 的 4xx 通常是「尚未配置」而非「服务不可用」）；任一请求成功即清掉标记（瞬时失败不长期挂红）。为此 `ApiStatusBar.test.tsx` 由 5 条扩到 8 条（POST 4xx 不触发 / GET 4xx 不触发而 5xx 触发 / 成功即清）。
+  - `index.html`：`viewport-fit=cover`；首屏 `lang` 跟随存储/浏览器语言（原 zh 模式写死 `en`，读屏念错、CJK 字体回退选错）。
+  - `i18n`：主题/语言切换钮的 `aria-label` 由中文写死改为词条；`ModelsList` 的模型行 4 个图标按钮补 `aria-label`。
+  - 测试同步：`src/themes/appleTokens.test.ts`（新增 12 条：apple 象限 token 值与规格一致、语义色文字/填充两套值、座舱象限 token 未被改动——冻结守卫）+ `components/ApiStatusBar.test.tsx`（新增 8 条）→ **48 文件 / 305 测试全绿**（原 285）；`npx tsc -b --noEmit` 零错误；`npm run build` 通过。
+  - 过程记录：第一版曾把 `zinc-500→ink3` 写进 theme 共享规则体，座舱实测被改（`107,125,144 → 143,161,181`），已回滚并只在 apple 作用域生效，另加守卫测试防回归。
+
 ## 2026-09-18 (223)
 
 - fix(launcher): 打开 DSH 入口 token 复用校验 + 占位实例自愈——修复「点击打开 DSH 落 dsh web authentication required 401 页」

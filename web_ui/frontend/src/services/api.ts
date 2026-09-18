@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { t } from '@/i18n';
+import { registerApiClient } from '@/lib/apiHealth';
 
 const DEFAULT_API_BASE = '/api';
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -50,6 +51,10 @@ export const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// 旁路观测（只统计在飞/失败，请求与响应原样透传）：apple 象限的统一加载骨架与
+// 错误提示条据此渲染，见 src/lib/apiHealth.ts 与 src/components/ApiStatusBar.tsx
+registerApiClient(api);
 
 export const getDriveCarWebSocketUrl = (clientId?: string) => {
   const apiBase = API_URL.replace(/\/$/, '');

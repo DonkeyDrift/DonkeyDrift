@@ -204,20 +204,25 @@ html.theme-light.ui-apple {
   --panel-gradient: none;
   --off: #8e8e93;
 
+  /* 发丝线只保留 2 档（Apple separator 体系）：
+     弱档 = 卡片描边/页头 hairline（黑 .08），强档 = 列表分隔线（Apple light separator）。 */
+  --separator: rgba(60, 60, 67, 0.29); /* Apple light separator */
   --hairline: rgba(0, 0, 0, 0.08);
-  --hairline-a85: rgba(0, 0, 0, 0.12); /* 派生 */
-  --hairline-a55: rgba(0, 0, 0, 0.1); /* 派生 */
-  --line-white10: rgba(0, 0, 0, 0.1); /* 派生 */
-  --line-soft: rgba(0, 0, 0, 0.05); /* 派生 */
-  --line-soft-a50: rgba(0, 0, 0, 0.04); /* 派生 */
-  --line-soft-a60: rgba(0, 0, 0, 0.05); /* 派生 */
-  --line-soft-a90: rgba(0, 0, 0, 0.07); /* 派生 */
-  --line-mid: rgba(0, 0, 0, 0.14); /* 派生 */
+  --hairline-a85: rgba(0, 0, 0, 0.08);
+  --hairline-a55: rgba(0, 0, 0, 0.08);
+  --line-white10: rgba(0, 0, 0, 0.08);
+  --line-soft: rgba(0, 0, 0, 0.08);
+  --line-soft-a50: rgba(0, 0, 0, 0.08);
+  --line-soft-a60: rgba(0, 0, 0, 0.08);
+  --line-soft-a90: rgba(0, 0, 0, 0.08);
+  --line-mid: rgba(60, 60, 67, 0.29);
 
+  /* label 层级（规格 §1，对比度对 #f5f5f7 实算）：ink2 6.51 / ink3 4.53(AA) / ink4 3.62。
+     ink3 起为“结构性文字”下限，ink4 只给纯 meta（时间戳、版本号、单位）。 */
   --ink: #1d1d1f;
-  --ink2: rgba(60, 60, 67, 0.62);
-  --ink3: rgba(60, 60, 67, 0.48); /* 派生:tertiary label */
-  --ink4: rgba(60, 60, 67, 0.36); /* 派生:quaternary label */
+  --ink2: rgba(60, 60, 67, 0.85);
+  --ink3: rgba(60, 60, 67, 0.72);
+  --ink4: rgba(60, 60, 67, 0.62);
   --ink5: #8e8e93;
   --ink-strong: #1d1d1f;
 
@@ -243,6 +248,7 @@ html.theme-light.ui-apple {
   --bad-fill: #ff3b30;
   --bad-fill-hover: #d92c22; /* 派生 */
   --bad: #ff3b30;
+  --bad-text: #d70015; /* 文字变体（4.94:1） */
   --bad-soft1: #c2261d; /* 派生 */
   --bad-soft2: #a01d18; /* 派生 */
   --bad-soft3: #7a1612; /* 派生 */
@@ -261,6 +267,8 @@ html.theme-light.ui-apple {
   --bad-a60: rgba(255, 59, 48, 0.5);
   --ok-fill: #34c759;
   --ok: #34c759;
+  /* 文字变体（规格 §2）：填充继续用 --ok/--warn/--bad，文字一律走 *-text */
+  --ok-text: #1a7f37;
   --ok-hover: #28a34c; /* 派生 */
   --ok-wash-25: rgba(52, 199, 89, 0.2);
   --ok-wash-10: rgba(52, 199, 89, 0.1);
@@ -271,7 +279,7 @@ html.theme-light.ui-apple {
   --ok-a70: rgba(52, 199, 89, 0.6);
   --ok-a40: rgba(52, 199, 89, 0.38);
   --warn: #ff9500;
-  --warn-text: #ff9500;
+  --warn-text: #c93400; /* 文字变体（4.85:1）；--warn 仍是填充色 */
   --warn-soft1: #b06a00; /* 派生 */
   --warn-soft2: #8a5300; /* 派生 */
   --warn-wash-40: rgba(255, 149, 0, 0.12);
@@ -296,10 +304,12 @@ html.theme-light.ui-apple {
   --w-badge: 600;
   --tracking-title: -0.02em;
 
+  /* 卡片保持 hairline-only（--shadow-sm），浮层单独给 elevation：
+     浅色下浮层只靠 1.12:1 的描边分界，读起来是“贴上去的方块”（规格 §5、审计 #4）。 */
   --shadow-sm: none;
-  --shadow-lg: none;
-  --shadow-xl: none;
-  --shadow-2xl: none;
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --shadow-2xl: 0 20px 56px rgba(0, 0, 0, 0.18), 0 4px 10px rgba(0, 0, 0, 0.1);
 
   /* SkinSwitcher active thumb (iOS segmented control look) */
   --segment-thumb: #ffffff;
@@ -543,6 +553,8 @@ html.theme-light .text-zinc-600,
 html.theme-light .disabled\:text-zinc-600:disabled {
   color: var(--ink5);
 }
+/* Apple 象限的灰阶层级重映射（zinc-500→ink3 等）不在这里：
+   这套规则体两象限共用，改它会连座舱一起动。见 themes/apple-deep.css 第 0 节。 */
 html.theme-light .text-white {
   color: var(--ink-strong);
 }

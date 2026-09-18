@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { MESSAGES } from './messages';
 
 // UI i18n: 'zh' mirrors the original (mixed zh/en) interface verbatim; 'en' is
@@ -46,8 +46,19 @@ const translate = (lang: UiLanguage, key: string, vars?: TranslateVars): string 
   return interpolate(text, vars);
 };
 
+// <html lang> 必须跟 UI 语言走：写死 en 会让读屏用英文音库念中文，也让 CJK
+// 字体回退挑错字面（审计 #24）。模块加载与每次切换都同步一次。
+const applyDocumentLang = (lang: UiLanguage): void => {
+  try {
+    if (typeof document !== 'undefined') document.documentElement.lang = lang;
+  } catch {
+    /* SSR/测试环境无 document：忽略 */
+  }
+};
+
 // Non-React access path (services, zustand stores): mirrors the provider state.
 let currentLanguage: UiLanguage = readInitialLanguage();
+applyDocumentLang(currentLanguage);
 
 export const getLanguage = (): UiLanguage => currentLanguage;
 
@@ -71,6 +82,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const setLanguage = useCallback((next: UiLanguage) => {
     currentLanguage = next;
+    applyDocumentLang(next);
     setLang(next);
     try {
       window.localStorage.setItem(LANG_STORAGE_KEY, next);
@@ -78,6 +90,11 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       /* localStorage unavailable: keep in-memory selection */
     }
   }, []);
+
+  // 首屏（含 index.html 内联脚本未覆盖的场景）与语言变化时同步 <html lang>
+  useEffect(() => {
+    applyDocumentLang(lang);
+  }, [lang]);
 
   const value = useMemo<I18nContextValue>(
     () => ({ lang, setLanguage, t: (key, vars) => translate(lang, key, vars) }),

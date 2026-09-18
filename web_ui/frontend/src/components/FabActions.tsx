@@ -38,7 +38,7 @@ export const FabActions: React.FC = () => {
         type="button"
         onClick={() => setHelpOpen(true)}
         aria-label={t('fab.help')}
-        className={`fixed bottom-[18px] right-[18px] z-50 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 text-[24px] font-black leading-none shadow-lg backdrop-blur-[4px] transition-colors ${helpFabColors}`}
+        className={`dd-fab fixed bottom-[18px] right-[18px] z-50 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 text-[24px] font-black leading-none shadow-lg transition-colors ${helpFabColors}`}
       >
         ?
       </button>

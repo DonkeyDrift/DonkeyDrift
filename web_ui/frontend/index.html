@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>DonkeyDrifter</title>
     <script>
       // 首屏防闪烁：渲染前按系统深浅色（prefers-color-scheme）直接解析，不读任何存储；
@@ -28,6 +28,15 @@
         } catch (e) {
           /* localStorage 不可用时回退默认 Apple 风格 */
           document.documentElement.classList.add('ui-apple');
+        }
+        // 首屏 lang 与 UI 语言一致（zh 下写死 en 会让读屏念错、CJK 字体回退选错）；
+        // 与 src/i18n/index.tsx 的解析规则同款：存储优先，其次浏览器语言。
+        try {
+          var raw = window.localStorage.getItem('donkeydrifter.ui.lang');
+          var lang = raw === 'zh' || raw === 'en' ? raw : ((navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+          document.documentElement.lang = lang;
+        } catch (e) {
+          /* localStorage 不可用时保持 index.html 的默认 lang */
         }
       })();
     </script>

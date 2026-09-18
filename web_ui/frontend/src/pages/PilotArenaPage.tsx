@@ -1024,8 +1024,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 </div>
               )}
 
-              <div className="aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
-                <div className="absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md shadow-lg">
+              <div className="dd-media aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
+                <div className="dd-overlay absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md shadow-lg">
                   <div>
                     <div className="text-[10px] uppercase leading-none text-zinc-400">{t('arena.playbackLabel')}</div>
                     <div className="font-mono text-sm leading-tight text-cyan-400">{viewer.playbackFps}</div>

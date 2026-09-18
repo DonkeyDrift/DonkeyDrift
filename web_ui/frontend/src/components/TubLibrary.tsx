@@ -809,10 +809,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
             {/* Right: player */}
             <div className="flex flex-col gap-3">
               <div
-                className="w-full max-w-[640px] mx-auto bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
+                className="dd-media w-full max-w-[640px] mx-auto bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
-                <div className="absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center shadow-lg">
+                <div className="dd-overlay absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center shadow-lg">
                   <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
                   <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
                 </div>

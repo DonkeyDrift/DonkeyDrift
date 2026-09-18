@@ -1,0 +1,480 @@
+/*
+ * Apple 深化补充层（apple-deep.css）—— 规格 v1 的“规则体”部分。
+ *
+ * 为什么单独一个文件：theme-mus4.css / theme-light.css 的规则体是两象限共用
+ * （靠 html.theme-* 前缀 + 变量切换配色），而本轮新增的是 **Apple 象限独有的
+ * 结构与无障碍行为**（命中区、聚焦环、材质、reduced-* 兜底、可选取性…）。
+ * 这类规则在座舱象限必须整体不存在，所以每条选择器都显式带上 `ui-apple`：
+ * 不带 `ui-apple` 时本文件零匹配，座舱计算样式逐值不变（冻结）。
+ *
+ * 导入顺序：main.tsx 中排在 theme-light.css 之后，同特异度时源顺序在后取胜。
+ *
+ * theme-*.css 头部那份“只改视觉属性、不得动 position/width/padding”的契约适用于
+ * 那两个共享规则体（两象限同时生效）；本文件是 apple 象限专属，且命中区、滑杆
+ * 触控高度、safe-area 内边距这些无障碍要求本质上只能靠几何实现，故此处允许出现
+ * position/height/margin/padding/gap/line-height。所有几何都在 ui-apple 下，
+ * 座舱象限一行都不匹配。
+ * 不改任何数据流与 API 调用。
+ */
+
+/* ======================================================================
+ * 0. 灰阶层级重映射（规格 §1）：结构性文字下限 ink3，纯 meta 才用 ink4。
+ *    只在这里改——theme-*.css 里同名规则体两象限共用，改它会把座舱一起动。
+ * ==================================================================== */
+html.theme-mus4.ui-apple .text-zinc-500,
+html.theme-mus4.ui-apple .placeholder\:text-zinc-500::placeholder,
+html.theme-light.ui-apple .text-zinc-500,
+html.theme-light.ui-apple .placeholder\:text-zinc-500::placeholder {
+  color: var(--ink3);
+}
+html.theme-mus4.ui-apple .text-zinc-600,
+html.theme-mus4.ui-apple .disabled\:text-zinc-600:disabled,
+html.theme-light.ui-apple .text-zinc-600,
+html.theme-light.ui-apple .disabled\:text-zinc-600:disabled {
+  color: var(--ink4);
+}
+
+/* ======================================================================
+ * 1. 语义色双轨（规格 §2）：填充用 --ok/--warn/--bad，文字一律走 *-text。
+ * ==================================================================== */
+html.theme-mus4.ui-apple .text-emerald-400,
+html.theme-mus4.ui-apple .text-green-400,
+html.theme-light.ui-apple .text-emerald-400,
+html.theme-light.ui-apple .text-green-400 {
+  color: var(--ok-text);
+}
+html.theme-mus4.ui-apple .text-red-400,
+html.theme-mus4.ui-apple .text-red-500,
+html.theme-light.ui-apple .text-red-400,
+html.theme-light.ui-apple .text-red-500 {
+  color: var(--bad-text);
+}
+/* 固件模式 badge（DrivePage data-rc-mode）与状态标签同规则 */
+html.theme-mus4.ui-apple span[data-rc-mode='0'],
+html.theme-light.ui-apple span[data-rc-mode='0'] {
+  color: var(--ok-text);
+}
+html.theme-mus4.ui-apple span[data-rc-mode='1'],
+html.theme-light.ui-apple span[data-rc-mode='1'] {
+  color: var(--warn-text);
+}
+/* 洗色底上的语义文字（浅色）：--ok-text 是按“白底”选的，压在同色洗底上只剩
+   4.3:1，再叠禁用态就不够 AA 了；这里给洗底专用更深一档（5.8+）。 */
+html.theme-light.ui-apple :is(.bg-emerald-400\/10, .bg-emerald-400\/20, .bg-emerald-500\/25, .bg-emerald-950\/90):is(.text-emerald-400, .text-green-400) {
+  color: #14682c;
+}
+html.theme-light.ui-apple :is(.bg-amber-400\/10, .bg-amber-950\/40):is(.text-amber-400, .text-amber-300) {
+  color: #a02a00;
+}
+html.theme-light.ui-apple :is(.bg-red-400\/10, .bg-red-500\/20, .bg-red-950\/60, .bg-red-900\/50):is(.text-red-400, .text-red-500) {
+  color: #b40012;
+}
+/* 发丝线：列表分隔线走 Apple separator 强档，卡片描边保持弱档（两档封顶） */
+html.theme-mus4.ui-apple .divide-zinc-800 > :not([hidden]) ~ :not([hidden]),
+html.theme-light.ui-apple .divide-zinc-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--separator);
+}
+
+/* ======================================================================
+ * 2. 聚焦环（规格 §4）：全站唯一写法，不透明，且不改填充色。
+ * ==================================================================== */
+html.theme-mus4.ui-apple :focus-visible,
+html.theme-light.ui-apple :focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+/* 皮肤切换分段控件原先把 outline 抹掉（只剩 1px inset 线）——ui-apple 下恢复 */
+html.theme-mus4.ui-apple .skin-switcher-segment:focus-visible,
+html.theme-light.ui-apple .skin-switcher-segment:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+/* 顶栏导航未选中态：弱化靠字重与尺寸，不靠把对比压到读不出来（审计 #2）。
+   用 :not(:hover) 让 hover/选中态的既有规则继续生效（源顺序在后也不抢占）。 */
+html.theme-mus4.ui-apple .dd-nav-link:not(:hover),
+html.theme-light.ui-apple .dd-nav-link:not(:hover) {
+  color: var(--ink2);
+}
+
+/* ======================================================================
+ * 3. 触控目标 ≥44×44（规格 §3）：视觉零变化，只加不可见命中层。
+ *    ::after 绝对定位铺在元素中心，尺寸 max(100%, 44px)；相邻冲突时
+ *    用 .dd-hit-v（仅纵向）/ .dd-hit-h（仅横向）在非冲突轴扩展。
+ * ==================================================================== */
+html.theme-mus4.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox']), label:has(> input[type='radio'])):not([class*='after:']):not([class*='sr-only']):not([class*='absolute']):not([class*='fixed']):not([class*='sticky']):not(.dd-hit-none),
+html.theme-light.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox']), label:has(> input[type='radio'])):not([class*='after:']):not([class*='sr-only']):not([class*='absolute']):not([class*='fixed']):not([class*='sticky']):not(.dd-hit-none) {
+  position: relative;
+}
+html.theme-mus4.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox']), label:has(> input[type='radio'])):not([class*='after:']):not([class*='sr-only']):not(.dd-hit-none)::after,
+html.theme-light.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox']), label:has(> input[type='radio'])):not([class*='after:']):not([class*='sr-only']):not(.dd-hit-none)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+/* 只在不冲突的轴扩展：密集横排（W1–W5、模型行图标按钮）用纵向，
+   竖排密集（抽屉触发器）用横向 */
+html.theme-mus4.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox'])).dd-hit-v::after,
+html.theme-light.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox'])).dd-hit-v::after {
+  width: 100%;
+  height: max(100%, 44px);
+}
+html.theme-mus4.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox'])).dd-hit-h::after,
+html.theme-light.ui-apple :is(button, a[href], [role='button'], summary, label:has(> input[type='checkbox'])).dd-hit-h::after {
+  width: max(100%, 44px);
+  height: 100%;
+}
+/* 滑杆：input 不支持伪元素，只能撑高盒子再用负外边距抵消布局影响 */
+html.theme-mus4.ui-apple input[type='range'],
+html.theme-light.ui-apple input[type='range'] {
+  height: 44px;
+  margin-block: -18px; /* 8px 轨道（.h-2 / 默认） */
+}
+html.theme-mus4.ui-apple input[type='range'].h-3,
+html.theme-light.ui-apple input[type='range'].h-3 {
+  margin-block: -16px; /* 12px 轨道 */
+}
+html.theme-mus4.ui-apple input[type='range'].tub-editor-scroll-slider,
+html.theme-light.ui-apple input[type='range'].tub-editor-scroll-slider {
+  margin-block: -10px; /* 24px 轨道（index.css .tub-editor-scroll-slider） */
+}
+/* 触屏档：表单控件高度 ≥44（规格 §3，桌面保持原高度） */
+@media (max-width: 560px), (pointer: coarse) {
+  html.theme-mus4.ui-apple :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea),
+  html.theme-light.ui-apple :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
+    min-height: 44px;
+  }
+}
+
+/* ======================================================================
+ * 4. 材质与浮层（规格 §5）：覆盖层自建材质 + vibrancy 文字，不继承主题灰阶。
+ *    浅色主题把 ink 叠在深色视频/自绘画布上会塌成 1.2:1（审计 #1）。
+ * ==================================================================== */
+html.theme-mus4.ui-apple .dd-overlay,
+html.theme-light.ui-apple .dd-overlay {
+  background-color: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f5f5f7;
+}
+html.theme-mus4.ui-apple .dd-overlay :is(.text-zinc-100, .text-zinc-200, .text-zinc-300, .text-white),
+html.theme-light.ui-apple .dd-overlay :is(.text-zinc-100, .text-zinc-200, .text-zinc-300, .text-white) {
+  color: #f5f5f7;
+}
+html.theme-mus4.ui-apple .dd-overlay :is(.text-zinc-400, .text-zinc-500, .text-zinc-600, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500),
+html.theme-light.ui-apple .dd-overlay :is(.text-zinc-400, .text-zinc-500, .text-zinc-600, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500) {
+  color: rgba(235, 235, 245, 0.85);
+}
+html.theme-mus4.ui-apple .dd-overlay :is(.text-cyan-400, .text-cyan-500, .text-cyan-600, .text-blue-400),
+html.theme-light.ui-apple .dd-overlay :is(.text-cyan-400, .text-cyan-500, .text-cyan-600, .text-blue-400) {
+  color: #2997ff;
+}
+html.theme-mus4.ui-apple .dd-overlay .text-emerald-400,
+html.theme-mus4.ui-apple .dd-overlay .text-green-400,
+html.theme-light.ui-apple .dd-overlay .text-emerald-400,
+html.theme-light.ui-apple .dd-overlay .text-green-400 {
+  color: #30d158;
+}
+html.theme-mus4.ui-apple .dd-overlay .text-amber-400,
+html.theme-light.ui-apple .dd-overlay .text-amber-400 {
+  color: #ff9f0a;
+}
+html.theme-mus4.ui-apple .dd-overlay .text-amber-300,
+html.theme-light.ui-apple .dd-overlay .text-amber-300 {
+  color: #ffc069;
+}
+html.theme-mus4.ui-apple .dd-overlay :is(.text-red-400, .text-red-500),
+html.theme-light.ui-apple .dd-overlay :is(.text-red-400, .text-red-500) {
+  color: #ff453a;
+}
+/* 媒体井（视频/画布容器）两主题同为深底：浅色主题下 bg-zinc-950 会映射到浅色
+   canvas，覆盖层里的亮色 vibrancy 文字就失去承托（实测 .45 黑底叠浅底后
+   FPS 标签只剩 2.64:1，蓝色读数 1.19:1）；媒体井像照片查看器一样恒为深底，
+   覆盖层文字在视频正常与缺失两种状态下都 ≥4.5。 */
+html.theme-mus4.ui-apple .dd-media,
+html.theme-light.ui-apple .dd-media {
+  background-color: #000000;
+}
+/* 遮罩（scrim）：浅色降强度并加轻 blur，深色保持压暗（规格 §8、审计 #20） */
+html.theme-mus4.ui-apple .bg-black\/60,
+html.theme-mus4.ui-apple .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+html.theme-light.ui-apple .bg-black\/60,
+html.theme-light.ui-apple .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.32);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* ======================================================================
+ * 5. 可选取性（规格 §0/审计 #3）：chrome 保持不可选，数据与输入可选中。
+ * ==================================================================== */
+html.theme-mus4.ui-apple :is(input, textarea, [contenteditable='true'], code, pre, kbd, samp, .font-mono, [class*='font-mono'], [class*='select-text'], [data-selectable], .dd-selectable),
+html.theme-light.ui-apple :is(input, textarea, [contenteditable='true'], code, pre, kbd, samp, .font-mono, [class*='font-mono'], [class*='select-text'], [data-selectable], .dd-selectable) {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* ======================================================================
+ * 6. 状态（规格 §10）：禁用 = 降饱和 + 保持文字 ≥3:1，不再叠乘 opacity:.5。
+ * ==================================================================== */
+html.theme-mus4.ui-apple :is(button, [role='button'], select, textarea, input:not([type='range']):not([type='checkbox']):not([type='radio'])):disabled,
+html.theme-light.ui-apple :is(button, [role='button'], select, textarea, input:not([type='range']):not([type='checkbox']):not([type='radio'])):disabled {
+  opacity: 0.85;
+  filter: saturate(0.5);
+}
+html.theme-mus4.ui-apple :is(button, [role='button']):disabled,
+html.theme-light.ui-apple :is(button, [role='button']):disabled {
+  cursor: not-allowed;
+}
+/* disabled:text-zinc-600 的规则体在上面抬到 ink4 会被 .8 透明度打到 3:1 以下，
+   这里统一到 ink3（降饱和已足够表达“不可用”） */
+html.theme-mus4.ui-apple .disabled\:text-zinc-600:disabled,
+html.theme-light.ui-apple .disabled\:text-zinc-600:disabled {
+  color: var(--ink3);
+}
+
+/* ======================================================================
+ * 7. 动效（规格 §7）：统一 --ease-apple，禁用 transition:all，时长封顶 300ms。
+ * ==================================================================== */
+html.theme-mus4.ui-apple *,
+html.theme-light.ui-apple * {
+  transition-timing-function: var(--ease-apple);
+}
+/* transition-all 改成显式属性表：不含 width/height/left/top 等布局属性，
+   中断时按键值重定向（规格 §7） */
+html.theme-mus4.ui-apple .transition-all,
+html.theme-light.ui-apple .transition-all {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, -webkit-backdrop-filter, backdrop-filter;
+}
+/* 单条 >300ms 的过渡（Drive 视频层 opacity .5s 等）收敛到 300ms */
+html.theme-mus4.ui-apple [class*='duration-500'],
+html.theme-mus4.ui-apple [class*='duration-700'],
+html.theme-mus4.ui-apple [class*='duration-1000'],
+html.theme-light.ui-apple [class*='duration-500'],
+html.theme-light.ui-apple [class*='duration-700'],
+html.theme-light.ui-apple [class*='duration-1000'] {
+  transition-duration: 300ms;
+}
+
+/* ======================================================================
+ * 8. 排版（规格 §9）：中文行高 ≥1.3、字距分级、控件字体继承、等宽栈统一。
+ * ==================================================================== */
+html.theme-mus4.ui-apple :is(.leading-none, .leading-tight),
+html.theme-light.ui-apple :is(.leading-none, .leading-tight) {
+  line-height: 1.3;
+}
+html.theme-mus4.ui-apple :is(.text-sm, .text-base),
+html.theme-light.ui-apple :is(.text-sm, .text-base) {
+  letter-spacing: -0.01em;
+}
+html.theme-mus4.ui-apple :is(.text-xs, .text-\[10px\], .text-\[11px\], .text-\[12px\], .text-\[13px\], .text-\[15px\]),
+html.theme-light.ui-apple :is(.text-xs, .text-\[10px\], .text-\[11px\], .text-\[12px\], .text-\[13px\], .text-\[15px\]) {
+  letter-spacing: 0; /* 中文不加正字距 */
+}
+html.theme-mus4.ui-apple :is(.tracking-wider, .tracking-wide, .tracking-widest),
+html.theme-light.ui-apple :is(.tracking-wider, .tracking-wide, .tracking-widest) {
+  letter-spacing: 0;
+}
+html.theme-mus4.ui-apple :is(button, input, select, textarea),
+html.theme-light.ui-apple :is(button, input, select, textarea) {
+  font-family: inherit;
+}
+html.theme-mus4.ui-apple :is(.font-mono, [class*='font-mono']),
+html.theme-light.ui-apple :is(.font-mono, [class*='font-mono']) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+/* 两套 sans 栈统一：顶栏 DC 风格按钮的“有意例外”在 apple 象限回到同一栈
+   （座舱象限保持原样，不动冻结值） */
+html.theme-mus4.ui-apple :is(.theme-switcher-btn, .language-switcher-btn, .console-mute-btn, .console-ota-btn, .console-dev-toggle),
+html.theme-light.ui-apple :is(.theme-switcher-btn, .language-switcher-btn, .console-mute-btn, .console-ota-btn, .console-dev-toggle) {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ======================================================================
+ * 9. 圆角离群值收敛（规格 §10 旁边项）：侧栏触发器 0 6px 6px 0 → 项目刻度 10px
+ * ==================================================================== */
+html.theme-mus4.ui-apple .gap-1\.5,
+html.theme-light.ui-apple .gap-1\.5 {
+  gap: 8px; /* 6px 离群值 → 项目刻度 4/8/12/16/24 */
+}
+html.theme-mus4.ui-apple .rounded-r-md,
+html.theme-light.ui-apple .rounded-r-md {
+  border-top-right-radius: var(--r-md);
+  border-bottom-right-radius: var(--r-md);
+}
+
+/* ======================================================================
+ * 10. safe-area（规格 §8）：固定/吸底元素给 env 内边距（index.html 已加
+ *     viewport-fit=cover）。座舱象限不加，保持冻结。
+ * ==================================================================== */
+html.theme-mus4.ui-apple .dd-fab,
+html.theme-light.ui-apple .dd-fab {
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+html.theme-mus4.ui-apple .dd-safe-top,
+html.theme-light.ui-apple .dd-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+html.theme-mus4.ui-apple,
+html.theme-light.ui-apple {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ======================================================================
+ * 11. 系统级无障碍开关（规格 §8）——实飞必须生效。
+ * ==================================================================== */
+@media (prefers-reduced-transparency: reduce) {
+  /* 所有毛玻璃面退实色、去掉 blur */
+  html.theme-mus4.ui-apple [class*='backdrop-blur'],
+  html.theme-mus4.ui-apple :is(.dd-overlay, .dd-material),
+  html.theme-light.ui-apple [class*='backdrop-blur'],
+  html.theme-light.ui-apple :is(.dd-overlay, .dd-material) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  html.theme-mus4.ui-apple .dd-overlay {
+    background-color: #1c1c1e;
+  }
+  html.theme-light.ui-apple .dd-overlay {
+    background-color: #1c1c1e; /* 覆盖层恒为深底（视频/画布之上），两主题同材质 */
+  }
+  html.theme-mus4.ui-apple .dd-material {
+    background-color: var(--surface);
+  }
+  html.theme-light.ui-apple .dd-material {
+    background-color: var(--surface);
+  }
+  html.theme-mus4.ui-apple .bg-black\/60,
+  html.theme-mus4.ui-apple .bg-black\/50 {
+    background-color: rgba(0, 0, 0, 0.72);
+  }
+  html.theme-light.ui-apple .bg-black\/60,
+  html.theme-light.ui-apple .bg-black\/50 {
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+}
+@media (prefers-contrast: more) {
+  html.theme-mus4.ui-apple {
+    --ink2: #f5f5f7;
+    --ink3: rgba(235, 235, 245, 0.85);
+    --ink4: rgba(235, 235, 245, 0.72);
+    --hairline: rgba(255, 255, 255, 0.28);
+    --separator: rgba(255, 255, 255, 0.4);
+    --line-soft: rgba(255, 255, 255, 0.28);
+  }
+  html.theme-light.ui-apple {
+    --ink2: #1d1d1f;
+    --ink3: rgba(60, 60, 67, 0.9);
+    --ink4: rgba(60, 60, 67, 0.8);
+    --hairline: rgba(0, 0, 0, 0.3);
+    --separator: rgba(0, 0, 0, 0.45);
+    --line-soft: rgba(0, 0, 0, 0.3);
+  }
+  /* 半透明面退实色 + 明确描边 */
+  html.theme-mus4.ui-apple [class*='backdrop-blur'],
+  html.theme-light.ui-apple [class*='backdrop-blur'] {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  html.theme-mus4.ui-apple :is(.bg-zinc-900\/35, .bg-zinc-900\/50, .bg-zinc-900\/70, .bg-zinc-900\/90, .bg-zinc-900\/95, .bg-zinc-800\/50, .bg-zinc-800\/80),
+  html.theme-light.ui-apple :is(.bg-zinc-900\/35, .bg-zinc-900\/50, .bg-zinc-900\/70, .bg-zinc-900\/90, .bg-zinc-900\/95, .bg-zinc-800\/50, .bg-zinc-800\/80) {
+    background-color: var(--surface);
+  }
+  html.theme-mus4.ui-apple .dd-overlay {
+    background-color: #000000;
+  }
+  html.theme-light.ui-apple .dd-overlay {
+    background-color: #000000;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-mus4.ui-apple *,
+  html.theme-mus4.ui-apple *::before,
+  html.theme-mus4.ui-apple *::after,
+  html.theme-light.ui-apple *,
+  html.theme-light.ui-apple *::before,
+  html.theme-light.ui-apple *::after {
+    /* 位移/尺寸类过渡换成“即时”，状态反馈不丢失（颜色仍在下一帧到位） */
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (forced-colors: active) {
+  html.theme-mus4.ui-apple :is(.dd-overlay, .dd-material),
+  html.theme-light.ui-apple :is(.dd-overlay, .dd-material) {
+    background-color: Canvas;
+    color: CanvasText;
+    border: 1px solid CanvasText;
+  }
+  html.theme-mus4.ui-apple .divide-zinc-800 > :not([hidden]) ~ :not([hidden]),
+  html.theme-light.ui-apple .divide-zinc-800 > :not([hidden]) ~ :not([hidden]) {
+    border-color: CanvasText;
+  }
+}
+
+/* ======================================================================
+ * 12. 异步状态（加载骨架 / 错误提示条）：只在 apple 象限渲染与着色，
+ *     座舱 DOM 与计算样式不受影响。骨架遵守 reduced-motion（上面已全局收敛）。
+ * ==================================================================== */
+html.theme-mus4.ui-apple .dd-skeleton,
+html.theme-light.ui-apple .dd-skeleton {
+  background-color: var(--surface2);
+  border-radius: var(--r-sm);
+  animation: dd-skeleton-pulse 1.6s var(--ease-apple) infinite;
+}
+@keyframes dd-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+html.theme-mus4.ui-apple .dd-errorbar,
+html.theme-light.ui-apple .dd-errorbar {
+  /* 底色用 wash-10 而非 20：--bad-text（浅 #d70015）在 wash-20 上实测 4.23:1，
+     压到 wash-10 后 ≥4.5:1（错误条上的文字属结构性信息，不是纯 meta） */
+  background-color: var(--bad-wash-10);
+  border: 1px solid var(--bad-frame);
+  color: var(--bad-text);
+}
+
+/* ------------------------------------------------------------------
+ * §12 吸顶页头材质（iOS 导航栏：半透明 + 背景模糊 + 滚动才现的 hairline）
+ * 与 FDC `html[data-ui="apple"] .headerRow` 同一套语言：滚离顶部前底边透明，
+ * scrollY > 2 时（Layout 给 header 加 .is-scrolled）才浮现 hairline。
+ * 深色取 surface #1c1c1e 的 72% 而非纯黑——纯黑半透明叠在黑画布上肉眼与不透明
+ * 无异，材质的价值（能看见下方内容在动）就丢了。
+ * ------------------------------------------------------------------ */
+html.theme-mus4.ui-apple .dd-header {
+  background-color: rgba(28, 28, 30, 0.72);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid transparent;
+  transition: background-color 0.32s ease, border-color 0.2s ease;
+}
+html.theme-light.ui-apple .dd-header {
+  background-color: rgba(245, 245, 247, 0.72);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid transparent;
+  transition: background-color 0.32s ease, border-color 0.2s ease;
+}
+html.theme-mus4.ui-apple .dd-header.is-scrolled,
+html.theme-light.ui-apple .dd-header.is-scrolled {
+  border-bottom-color: var(--separator);
+}

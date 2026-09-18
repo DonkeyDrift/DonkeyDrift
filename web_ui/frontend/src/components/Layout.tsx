@@ -11,6 +11,8 @@ import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './Console
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { SkinSwitcher } from './SkinSwitcher';
 import { useTranslation } from '@/i18n';
+import { useUiStyle } from '@/lib/uistyle';
+import { ApiStatusBar } from './ApiStatusBar';
 import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
 
 /** 统一流程大页面（#178）中四个导航锚点：点击滚动到对应 section，
@@ -24,6 +26,8 @@ const FLOW_NAV_ITEMS: { path: string; section: FlowSectionId; labelKey: string }
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t } = useTranslation();
+  // 风格维度：统一异步状态条只在 Apple 象限渲染（座舱 DOM 保持冻结）
+  const uiStyle = useUiStyle();
   const location = useLocation();
   const activeSection = useFlowStore((s) => s.activeSection);
   // Car Connector 是独立路由，只在 /connector 上高亮
@@ -43,6 +47,16 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setMobileMenuOpen(false);
     setMoreMenuOpen(false);
   }, [location.pathname]);
+
+  // Apple 象限的吸顶页头材质：滚离顶部（scrollY > 2）才浮现底部 hairline
+  // （apple.com 同款；座舱象限无对应样式，类名存在也无视觉影响）
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setHeaderScrolled(window.scrollY > 2);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // 点击溢出菜单外部或按 Esc 时收起
   useEffect(() => {
@@ -65,12 +79,14 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   const flowClass = (section: FlowSectionId) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
-      !isConnector && !isFullBleed && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
+      !isConnector && !isFullBleed && activeSection === section
+        ? 'text-cyan-500'
+        : 'text-zinc-400 dd-nav-link'
     }`;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
-      <header className="bg-zinc-950 sticky top-0 z-50">
+      <header className={`dd-header dd-safe-top bg-zinc-950 sticky top-0 z-50${headerScrolled ? ' is-scrolled' : ''}`}>
         <div className="px-3">
           <div className="h-14 flex items-center">
             {/* 标题左侧 logo：与 Drifter Console 独立页 headerLogo 完全一致 —— 32px 内容 + 1px 边框外凸（box-sizing content-box，总 34px）、圆角 8px、边框随主题（深色 #2b3441 / 浅色 #d5dce4，见 theme-*.css 的 .header-logo）、与标题 gap 12px */}
@@ -189,6 +205,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         )}
       </header>
       <main className={isFullBleed ? 'py-0' : 'container mx-auto px-4 py-6 space-y-6'}>
+        {uiStyle === 'apple' && !isFullBleed && <ApiStatusBar />}
         {children}
       </main>
       {/* /donkey 是铺满的 launcher 内嵌页，右下角帮助小球应由 Donkey 自己提供，

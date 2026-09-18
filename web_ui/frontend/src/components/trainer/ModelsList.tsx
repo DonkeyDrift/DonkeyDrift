@@ -213,6 +213,7 @@ export const ModelsList: React.FC = () => {
             disabled={importing}
             className="inline-flex items-center gap-1 text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
             title={t('trainer.importModel')}
+            aria-label={t('trainer.importModel')}
           >
             <Upload className="w-3.5 h-3.5" />
             {t('trainer.importModel')}
@@ -281,7 +282,8 @@ export const ModelsList: React.FC = () => {
                   href={downloadModelUrl(m.path)}
                   onClick={(e) => e.stopPropagation()}
                   title={t('trainer.downloadModel')}
-                  className="p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
+                  aria-label={t('trainer.downloadModel')}
+                  className="dd-hit-v p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
                   download
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -297,7 +299,8 @@ export const ModelsList: React.FC = () => {
                     }
                   }}
                   title={t('trainer.loadToCar')}
-                  className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
+                  aria-label={t('trainer.loadToCar')}
+                  className="dd-hit-v p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -307,7 +310,8 @@ export const ModelsList: React.FC = () => {
                     navigator.clipboard.writeText(m.path);
                   }}
                   title={t('trainer.copyPath')}
-                  className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  aria-label={t('trainer.copyPath')}
+                  className="dd-hit-v p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </button>
@@ -317,7 +321,8 @@ export const ModelsList: React.FC = () => {
                     setConfirmDelete(m);
                   }}
                   title={t('trainer.deleteModel')}
-                  className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                  aria-label={t('trainer.deleteModel')}
+                  className="dd-hit-v p-1 text-red-400 hover:text-red-300 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
