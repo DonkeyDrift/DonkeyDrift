@@ -23,6 +23,9 @@ from donkeycar.launcher import server as launcher_server
 _CONFIGURED = findcar.FindCarConfig(
     url="https://find-dkc.pages.dev", enabled=True, interval_seconds=1
 )
+_CONFIGURED_SLOW = findcar.FindCarConfig(
+    url="https://find-dkc.pages.dev", enabled=True, interval_seconds=300
+)
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +79,16 @@ def test_findcar_report_once_skips_when_not_configured(monkeypatch):
     monkeypatch.setattr(launcher_server, "find_live_instance", must_not_be_called)
     monkeypatch.setattr(findcar, "report_once", must_not_be_called)
 
-    launcher_server._findcar_report_once(8090)  # 不抛异常、不上报
+    assert launcher_server._findcar_report_once(8090) is None
+
+
+def test_findcar_report_once_returns_success_flag(monkeypatch):
+    """上报成败标志透传给循环（False 触发快速补跳，True/None 按正常间隔）。"""
+    monkeypatch.setattr(findcar, "load_config", lambda: _CONFIGURED)
+    monkeypatch.setattr(launcher_server, "find_live_instance", lambda: None)
+    monkeypatch.setattr(findcar, "report_once", lambda cfg, port: False)
+
+    assert launcher_server._findcar_report_once(8090) is False
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +160,41 @@ def test_findcar_reporter_loop_survives_exceptions(monkeypatch):
     assert calls == [8090, 8090]
     # 配置读取失败时间隔退回默认值
     assert waits == [findcar.DEFAULT_INTERVAL_SECONDS] * 2
+
+
+def test_findcar_reporter_loop_retries_quickly_after_failure(monkeypatch):
+    """上报失败不睡满整个间隔：30s 后补一跳；恢复成功后回到配置间隔。"""
+    results = [False, True]
+    monkeypatch.setattr(
+        launcher_server, "_findcar_report_once", lambda port: results.pop(0)
+    )
+    monkeypatch.setattr(findcar, "load_config", lambda: _CONFIGURED_SLOW)
+
+    waits = []
+    monkeypatch.setattr(
+        launcher_server.threading, "Event", _fake_event_factory(waits, 2)
+    )
+
+    with pytest.raises(_StopLoop):
+        launcher_server._findcar_reporter_loop(8090)
+
+    assert waits == [findcar.RETRY_INTERVAL_SECONDS, 300]
+
+
+def test_findcar_reporter_loop_not_configured_keeps_normal_interval(monkeypatch):
+    """未配置（返回 None）不算失败，按正常间隔走，不触发快速补跳。"""
+    monkeypatch.setattr(launcher_server, "_findcar_report_once", lambda port: None)
+    monkeypatch.setattr(findcar, "load_config", lambda: _CONFIGURED_SLOW)
+
+    waits = []
+    monkeypatch.setattr(
+        launcher_server.threading, "Event", _fake_event_factory(waits, 2)
+    )
+
+    with pytest.raises(_StopLoop):
+        launcher_server._findcar_reporter_loop(8090)
+
+    assert waits == [300, 300]
 
 
 # ---------------------------------------------------------------------------

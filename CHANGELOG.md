@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-20 (225)
+## 2026-09-20 (226)
 
 - fix(security): 隐私泄露审计清理——测试真实 Wi-Fi 凭据占位化、私人路径/内网 IP 脱敏、TestSprite 产物取消跟踪
   - 背景：与 Firmware 同步做两仓库 .gitignore / 文档 / 私人文件全面审计（固件侧见 Firmware v1.9.4 条目），清理 DonkeyDrift 侧已入库的私人信息：测试用例里的真实家庭 Wi-Fi SSID/密码、systemd 模板与代码默认值里的本机绝对路径、前端 i18n 占位文案与多份文档中的用户名/内网 IP。
@@ -15,6 +15,17 @@
   - 取消跟踪：`web_ui/frontend/testsprite_tests/tmp/` 下 6 个 TestSprite 运行产物（含本机路径的 config.json / raw_report.md / test_results.json 等）`git rm --cached`（本地保留）。
   - 文档脱敏：9 份 docs（arch/Rfc/guide/plan/superpowers/valid）中的 `/home/dkc` → `/home/user`、`C:/Users/cross` → `C:/Users/<user>`。
   - 测试同步：`tests/test_launcher_service_unit.py`（断言跟随模板占位）、`tests/test_launcher_dsh_web.py` 与 `tests/test_launcher_kimi_web.py`（fixture 路径 `/home/testuser/`，其中 `test_reuses_live_instance_without_spawning` 的 cwd 改用 `tmp_path`——原用例隐式依赖本机 `/home/dkc/projects` 真实存在）、`web_ui/backend/tests/test_simcollect.py`、`web_ui/frontend/src/components/drive/SimCollectCard.test.tsx`、`donkeycar/tests/test_dc_discovery.py`（fixture IP `192.168.3.123`）。pytest 全量 958 通过（`tests/test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 为 origin/Tony 既有失败，与本改动无关——还原 base.py 后仍失败，反斜杠路径在 POSIX 下的 stem 提取问题）；web_ui 后端 554 项、SimCollectCard vitest 5 项通过。
+## 2026-09-20 (225)
+
+- fix(findcar): Find DKC 主机心跳加 DNS 抖动韧性——修复「主机在线、Find DKC 却搜不到」（根因：本机 DNS 解析连续故障时心跳全丢）
+  - 背景：2026-09-20 19:34–19:56 本机 systemd-resolved 对 `find-dkc.pages.dev` 的解析连续失败约 25 分钟（`socket.gaierror: [Errno -3] Temporary failure in name resolution`，journal 实测 15 次失败），同期 ESP32 心跳正常（网络通、只有本机 DNS 坏）；心跳 150s 一跳全部落空、超过网页 5.5 分钟在线窗口，Find DKC 显示主机离线。旧代码 `report_once` 无重试无兜底，launcher 循环失败后照样睡满 150s，DNS 一抖就丢跳。
+  - `donkeycar/findcar.py`：
+    - `report_once` 在线心跳对 DNS 失败有韧性：系统 DNS 失败（`_is_dns_failure` 沿 `URLError.reason`/`__cause__`/`__context__` 链识别 `socket.gaierror`）→ 隔 `DNS_RETRY_DELAY_SECONDS`(3s) 快重试一次 → 仍失败走 **DoH 兜底**：`_resolve_via_doh` 按 IP 直连阿里公共 DNS（`223.5.5.5`/`223.6.6.6`，`/resolve` dns-json，证书含 IP SAN；Cloudflare 1.1.1.1/1.0.0.1 本机实测超时不可用）解析 A 记录 → `_PinnedHTTPSConnection`（`http.client.HTTPSConnection` 子类：TCP 拨 IP、TLS SNI 与 `Host` 头保持原域名，Cloudflare anycast 按 SNI 路由）直连完成 POST。下线标记（state=offline）保持尽力而为单发，不在退出路径上拖延关停。
+    - 新增常量 `RETRY_INTERVAL_SECONDS`(30)、`USER_AGENT`（原内联 UA 提取共用）；全程纯标准库，兜底任何失败只记日志返回 False。
+    - DoH + 直连路径已在真实网络端到端实测：DoH 解析出 `172.66.44.129`、直连 IP POST `/report` 成功、`/devices` 确认心跳落库。
+  - `donkeycar/launcher/server.py`：`_findcar_report_once` 返回上报成败（未配置返回 None 不算失败）；`_findcar_reporter_loop` 上报失败时按 `min(RETRY_INTERVAL_SECONDS, 配置间隔)`（30s）快速补跳，恢复后回到正常间隔——故障恢复后半分钟内重新上线，不再干等 150s。
+  - 测试同步：`tests/test_findcar.py` 净增 5 条（`_is_dns_failure` 链识别、快重试成功不走 DoH、DoH 兜底直连成功（断言 SNI/Host/IP/path）、全兜底失败返回 False 不抛异常、offline 单发不重试）；`tests/test_launcher_findcar.py` 净增 3 条（成败标志透传、失败 30s 补跳后恢复 300s、未配置 None 保持正常间隔）→ 两文件 38 全过；全量套件除 `test_build_drift_clip.py::test_backslash_tub_path_default_out_name`（origin/Tony 上既有失败，与本改动无关，已实测确认）外通过。
+  - 注：仅 launcher 常驻服务（:8090）改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff `deploy-8000` 并重启 `donkeydrifter-launcher.service` 部署。
 
 ## 2026-09-18 (224)
 
