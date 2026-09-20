@@ -38,7 +38,7 @@ interface DriveModeSelectorProps {
 
 // Active-segment colors mirror the ESP32 Drifter Console mode cards
 // (mode0=手动 green, mode1=半自动 amber, mode2=全自动 blue)。
-// 语义类由 theme-*.css 映射到 --ok/--warn/--accent 变量，四象限（深/浅 × 座舱/Apple）自动取色。
+// 语义类由 theme-*.css 映射到 --ok/--warn/--accent 变量，深/浅主题自动取色。
 const MODE_OPTIONS: { value: DriveMode; labelKey: string; activeClass: string }[] = [
   { value: 'user', labelKey: 'drive.modeUser', activeClass: 'bg-emerald-500/25 text-emerald-400' },
   { value: 'local_angle', labelKey: 'drive.modeSemiAuto', activeClass: 'bg-amber-400/10 text-amber-400' },

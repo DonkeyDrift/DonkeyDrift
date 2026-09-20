@@ -11,10 +11,6 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': '菜单',
     'common.nav.more': '更多入口',
-    // SkinSwitcher（座舱/Apple 双风格切换，见 src/lib/uistyle.ts）
-    'common.uiStyle.switchLabel': '界面风格',
-    'common.uiStyle.cockpit': '座舱',
-    'common.uiStyle.apple': 'Apple',
     // App shell
     'common.app.somethingWentWrong': '出错了。',
     'common.app.failedToRefreshTub': '刷新 Tub 失败',
@@ -106,10 +102,6 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.nav.carConnector': 'Car Connector',
     'common.nav.menu': 'Menu',
     'common.nav.more': 'More',
-    // SkinSwitcher (cockpit / Apple dual UI style, see src/lib/uistyle.ts)
-    'common.uiStyle.switchLabel': 'Interface style',
-    'common.uiStyle.cockpit': 'Cockpit',
-    'common.uiStyle.apple': 'Apple',
     // App shell
     'common.app.somethingWentWrong': 'Something went wrong.',
     'common.app.failedToRefreshTub': 'Failed to refresh tub',

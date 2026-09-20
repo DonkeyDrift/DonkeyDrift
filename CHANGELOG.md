@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-09-20 (227)
+
+- feat(ui)!: 移除座舱(cockpit)/Apple 双象限体系，Apple 成为唯一界面风格——与 find-car v1.6.0、Drifter Console v1.10.0 同款手术；页头「座舱 / Apple」切换器删除，`<html>` 不再挂载 `ui-apple` class，localStorage 键 `donkeydrifter.ui.style` 不再读取（老用户残留键被静默忽略、渲染恒为 Apple，无需任何操作）
+  - CSS 拍平（apple 覆写值成为唯一取值）：
+    - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`html.theme-*.ui-apple` 变量覆写块的值并入基值定义、覆写块与 SkinSwitcher 样式段删除。
+    - `web_ui/frontend/src/themes/apple-deep.css`：151 处 `.ui-apple` 作用域前缀精确去除（保留 `html.theme-*` 前缀维持特异度；加载顺序不变，同特异度后置胜出机制保持）。基础滑杆规则拍平后特异度 (0,3,2)→(0,2,2) 会输给 Tailwind `.space-y-*` 通用子选择器 (0,3,0)，用重复类技巧 `html.theme-mus4.theme-mus4 input[type='range']` 回到原特异度并注释说明（Playwright 前后对比当场抓到的回归，修复后归零）。
+  - JS 机制删除：`src/lib/uistyle.ts`（UiStyle/useUiStyle/applyUiStyle/UI_STYLE_STORAGE_KEY 整文件）、`src/components/SkinSwitcher.tsx` 与其测试删除；`src/components/Layout.tsx` 两处切换器用法与 import 移除；`index.html` 启动脚本删 ui.style 分支（theme 分支原样）；`src/main.tsx` 注释同步。
+  - 消费方恒 Apple 展开：`TelemetryChart.tsx`/`TubLibrary.tsx`/`CarSettingsPanel.tsx`/`TubEditor.tsx`/`PilotArenaPage.tsx`/`DrifterConsolePage.tsx` 的 useUiStyle 双配色分支删除、恒用 Apple 取值；`ApiStatusBar` 原仅 apple 象限渲染 → 恒渲染。
+  - i18n：`src/i18n/messages/common.ts` 中英各删 3 条 uiStyle 文案。
+  - 固件 iframe 参数 `&ui=apple` 保留硬编码（车端 v1.10.0 起忽略该参数，无害兼容）。
+  - 测试同步：`appleTokens.test.ts` 重写为拍平后 token 断言（净 +1，含「旧键=cockpit 仍渲染 Apple」回归）；`DrifterConsolePage.test.tsx` 座舱用例改写；`SkinSwitcher.test.tsx` 删除（−6）→ **47 文件 / 300 测试全绿**（基线 48/305）；`npx tsc --noEmit` 零错误；`npm run build` 通过（bundle `index-ioH0aZAj.js`）。
+  - 等价验证：Playwright 计算样式前后对比（冻结 Date.now + 禁动画）——基线（强制 ui-apple）vs 改后（无 class 机制）dark/light 各 16 元素 × 26 属性 + 40 CSS 变量**全部一致**；旧键=cockpit 场景浏览器级实测渲染恒 Apple（dark/light 均 0 差异）。
+
 ## 2026-09-20 (226)
 
 - fix(security): 隐私泄露审计清理——测试真实 Wi-Fi 凭据占位化、私人路径/内网 IP 脱敏、TestSprite 产物取消跟踪
@@ -15,6 +28,7 @@
   - 取消跟踪：`web_ui/frontend/testsprite_tests/tmp/` 下 6 个 TestSprite 运行产物（含本机路径的 config.json / raw_report.md / test_results.json 等）`git rm --cached`（本地保留）。
   - 文档脱敏：9 份 docs（arch/Rfc/guide/plan/superpowers/valid）中的 `/home/dkc` → `/home/user`、`C:/Users/cross` → `C:/Users/<user>`。
   - 测试同步：`tests/test_launcher_service_unit.py`（断言跟随模板占位）、`tests/test_launcher_dsh_web.py` 与 `tests/test_launcher_kimi_web.py`（fixture 路径 `/home/testuser/`，其中 `test_reuses_live_instance_without_spawning` 的 cwd 改用 `tmp_path`——原用例隐式依赖本机 `/home/dkc/projects` 真实存在）、`web_ui/backend/tests/test_simcollect.py`、`web_ui/frontend/src/components/drive/SimCollectCard.test.tsx`、`donkeycar/tests/test_dc_discovery.py`（fixture IP `192.168.3.123`）。pytest 全量 958 通过（`tests/test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 为 origin/Tony 既有失败，与本改动无关——还原 base.py 后仍失败，反斜杠路径在 POSIX 下的 stem 提取问题）；web_ui 后端 554 项、SimCollectCard vitest 5 项通过。
+
 ## 2026-09-20 (225)
 
 - fix(findcar): Find DKC 主机心跳加 DNS 抖动韧性——修复「主机在线、Find DKC 却搜不到」（根因：本机 DNS 解析连续故障时心跳全丢）

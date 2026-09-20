@@ -9,9 +9,7 @@ import { VersionBadge } from './VersionBadge';
 import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, FindCarEntryLink, KimiCodeWebEntryLink, ZCodeEntryLink } from './EnterButtons';
 import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './ConsoleControls';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { SkinSwitcher } from './SkinSwitcher';
 import { useTranslation } from '@/i18n';
-import { useUiStyle } from '@/lib/uistyle';
 import { ApiStatusBar } from './ApiStatusBar';
 import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
 
@@ -26,8 +24,6 @@ const FLOW_NAV_ITEMS: { path: string; section: FlowSectionId; labelKey: string }
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t } = useTranslation();
-  // 风格维度：统一异步状态条只在 Apple 象限渲染（座舱 DOM 保持冻结）
-  const uiStyle = useUiStyle();
   const location = useLocation();
   const activeSection = useFlowStore((s) => s.activeSection);
   // Car Connector 是独立路由，只在 /connector 上高亮
@@ -48,8 +44,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setMoreMenuOpen(false);
   }, [location.pathname]);
 
-  // Apple 象限的吸顶页头材质：滚离顶部（scrollY > 2）才浮现底部 hairline
-  // （apple.com 同款；座舱象限无对应样式，类名存在也无视觉影响）
+  // 吸顶页头材质（apple-deep.css §12）：滚离顶部（scrollY > 2）才浮现底部 hairline
+  // （apple.com 同款）
   const [headerScrolled, setHeaderScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setHeaderScrolled(window.scrollY > 2);
@@ -115,7 +111,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   {t(item.labelKey)}
                 </Link>
               ))}
-              {/* 高级工具入口收进「⋯」溢出菜单（顶栏空间让给主导航与风格切换） */}
+              {/* 高级工具入口收进「⋯」溢出菜单（顶栏空间让给主导航） */}
               <div className="relative" ref={moreMenuRef}>
                 <button
                   type="button"
@@ -144,7 +140,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <CarConnectorButton />
               <ConsoleMuteButton />
               <ThemeSwitcher />
-              <SkinSwitcher />
               <LanguageSwitcher />
               <ConsoleOtaButton />
               <ConsoleDevToggle />
@@ -173,7 +168,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         </div>
         {/* 手机菜单面板：导航项 + 高级入口（Donkey / Drifter Console / Kimi Code Web /
-            DeepSeek Harness，弱化样式与桌面一致）+ 座舱/Apple 风格切换；
+            DeepSeek Harness，弱化样式与桌面一致）；
             主题/语言/版本号与 Car Connector 已移至标题区 */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-zinc-800 bg-zinc-900">
@@ -196,16 +191,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <DshEntryLink />
                 <FindCarEntryLink />
               </div>
-              {/* 风格切换（座舱/Apple）：移动端放在折叠菜单里，与桌面顶栏控制组同款 */}
-              <div className="mt-1 border-t border-zinc-800/60 pt-3 pb-2">
-                <SkinSwitcher />
-              </div>
             </nav>
           </div>
         )}
       </header>
       <main className={isFullBleed ? 'py-0' : 'container mx-auto px-4 py-6 space-y-6'}>
-        {uiStyle === 'apple' && !isFullBleed && <ApiStatusBar />}
+        {!isFullBleed && <ApiStatusBar />}
         {children}
       </main>
       {/* /donkey 是铺满的 launcher 内嵌页，右下角帮助小球应由 Donkey 自己提供，

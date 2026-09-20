@@ -8,14 +8,13 @@
  * Every rule stays prefixed with `html.theme-mus4`
  * so the skin beats the original Tailwind utilities on specificity alone.
  *
- * UI style dimension (cockpit / Apple): all colors, gradients, shadows,
- * radii, font-weights and title tracking live in the variable palette
- * below (`html.theme-mus4 { --* }`, values = cockpit status quo); rules
- * reference `var(--语义名)` only. `src/lib/uistyle.ts` toggles the
- * `ui-apple` class on <html>, and the pure-variable override block
- * `html.theme-mus4.ui-apple { --* }` re-themes every rule to Apple
- * tokens without touching any rule body. Without `ui-apple` the palette
- * resolves every rule back to the exact cockpit values.
+ * Apple is the only UI style: all colors, gradients, shadows, radii,
+ * font-weights and title tracking live in the variable palette below
+ * (`html.theme-mus4 { --* }`); rules reference `var(--语义名)` only.
+ * (2026-09-20: the cockpit / Apple dual-style mechanism was removed —
+ * the former `html.theme-mus4.ui-apple` override values were merged
+ * into the palette as the single set of values; the cockpit palette,
+ * the `ui-apple` <html> class and src/lib/uistyle.ts were deleted.)
  *
  * Visual-only skin: rules may only touch color, background-color,
  * background-image (gradients), border-color, border-radius, box-shadow,
@@ -25,165 +24,23 @@
  * (display/position/flex/grid/order/width/height/margin/padding/
  * top/right/bottom/left/float/...) are forbidden.
  *
- * Design source: Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h
- * (Drifter Console). Selected/active controls use the FILL language:
- * solid blue #5cc8ff + near-black text #061019 + bold, hover #8bdcff.
- * State uses the FRAME language: green #39d98a = normal/on, amber
- * #ffcc66 = transitional/warn, red #ff6b6b = locked/danger, grey
- * #475569 = off/disconnected; drive modes map to 手动=green, 半自动=amber,
- * 全自动=blue. Panels mimic `.stateCard`: 135deg gradient #1c2430→#121821
- * plus a 1px frame drawn with `outline` (never shifts layout and never
- * clobbers Tailwind's box-shadow based drop shadows).
- * (Hex values quoted in comments below are the cockpit palette values.)
+ * Design source: originally derived from
+ * Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h
+ * (Drifter Console). The palette is now the Apple dark token set
+ * (canvas #000, surface #1c1c1e/#2c2c2e, accent fill #0a84ff,
+ * ok #30d158 / warn #ff9f0a / bad #ff453a); drive modes still map to
+ * 手动=green, 半自动=amber, 全自动=blue. Panel frames keep the 1px
+ * `outline` technique (never shifts layout and never clobbers
+ * Tailwind's box-shadow based drop shadows).
  */
 
 /* ======================================================================
- * Variable palette — cockpit dark values (status quo).
+ * Variable palette — Apple dark tokens (single UI style).
  * ==================================================================== */
 html.theme-mus4 {
   color-scheme: dark;
 
   /* surfaces */
-  --canvas: #101318;
-  --canvas-a80: rgba(16, 19, 24, 0.8);
-  --surface: #171c24;
-  --surface-a35: rgba(23, 28, 36, 0.35);
-  --surface-a50: rgba(23, 28, 36, 0.5);
-  --surface-a70: rgba(23, 28, 36, 0.7);
-  --surface-a90: rgba(23, 28, 36, 0.9);
-  --surface-a95: rgba(23, 28, 36, 0.95);
-  --surface2: #111820;
-  --surface2-a50: rgba(17, 24, 32, 0.5);
-  --surface2-a80: rgba(17, 24, 32, 0.8);
-  --raised: #232c3a;
-  --raised-2: #2b3441;
-  --raised-3: #3a4656;
-  --hover-surface2: #202a37;
-  --hover-surface2-a50: rgba(32, 42, 55, 0.5);
-  --hover-raised: #27313f;
-  --active-surface: #141a22;
-  --knob: #ffffff;
-  --panel-gradient: linear-gradient(135deg, #1c2430, #121821);
-  --off: #475569;
-
-  /* hairlines / lines */
-  --hairline: #344154;
-  --hairline-a85: rgba(52, 65, 84, 0.85);
-  --hairline-a55: rgba(52, 65, 84, 0.55);
-  --line-white10: rgba(52, 65, 84, 0.9);
-  --line-soft: #2b3441;
-  --line-soft-a50: rgba(43, 52, 65, 0.5);
-  --line-soft-a60: rgba(43, 52, 65, 0.6);
-  --line-soft-a90: rgba(43, 52, 65, 0.9);
-  --line-mid: #3a4656;
-
-  /* text */
-  --ink: #e8edf2;
-  --ink2: #b9c5d3;
-  --ink3: #8fa1b5;
-  --ink4: #6b7d90;
-  --ink5: #55677a;
-  --ink-strong: #eef3f8;
-  --ink-strong-hover: #ffffff;
-
-  /* accent (Drifter Console blue; dark skin uses one blue for all roles) */
-  --accent: #5cc8ff;
-  --accent-fill: #5cc8ff;
-  --accent-fill-hover: #8bdcff;
-  --accent-text-soft: #b7e5ff;
-  --accent-text-hover: #8bdcff;
-  --on-accent: #061019;
-  --accent-dim: #12202c;
-  --accent-wash-50: rgba(92, 200, 255, 0.5);
-  --accent-wash-20: rgba(92, 200, 255, 0.15);
-  --accent-wash-30: rgba(92, 200, 255, 0.3);
-  --accent-wash-08: rgba(92, 200, 255, 0.08);
-  --accent-a50: rgba(92, 200, 255, 0.5);
-  --accent-a60: rgba(92, 200, 255, 0.6);
-  --accent-a35: rgba(92, 200, 255, 0.35);
-  --accent-a45: rgba(92, 200, 255, 0.45);
-  --accent-a55: rgba(92, 200, 255, 0.55);
-  --accent-ui: #5cc8ff;
-  --accent-ui-a25: rgba(92, 200, 255, 0.25);
-
-  /* semantic: bad / ok / warn (dark skin keeps fill == functional color) */
-  --bad-fill: #ff6b6b;
-  --bad-fill-hover: #ff8585;
-  --bad: #ff6b6b;
-  --bad-soft1: #ffb3b3;
-  --bad-soft2: #ffc9c9;
-  --bad-soft3: #fad9d9;
-  --bad-soft1-a70: rgba(255, 179, 179, 0.7);
-  --bad-wash-40: rgba(255, 107, 107, 0.4);
-  --bad-wash-20: rgba(255, 107, 107, 0.18);
-  --bad-wash-30: rgba(255, 107, 107, 0.3);
-  --bad-wash-50: rgba(255, 107, 107, 0.16);
-  --bad-wash-60: rgba(255, 107, 107, 0.14);
-  --bad-wash-10: rgba(255, 107, 107, 0.1);
-  --bad-frame: rgba(255, 107, 107, 0.55);
-  --bad-frame-soft: rgba(255, 107, 107, 0.55);
-  --bad-record: rgba(255, 107, 107, 0.5);
-  --bad-a50: rgba(255, 107, 107, 0.5);
-  --bad-a40: rgba(255, 107, 107, 0.4);
-  --bad-a60: rgba(255, 107, 107, 0.6);
-  --ok-fill: #39d98a;
-  --ok: #39d98a;
-  --ok-hover: #5fe8a8;
-  --ok-wash-25: rgba(57, 217, 138, 0.25);
-  --ok-wash-10: rgba(57, 217, 138, 0.1);
-  --ok-wash-90: rgba(57, 217, 138, 0.12);
-  --ok-frame: rgba(57, 217, 138, 0.55);
-  --ok-a55: rgba(57, 217, 138, 0.55);
-  --ok-a65: rgba(57, 217, 138, 0.65);
-  --ok-a70: rgba(57, 217, 138, 0.7);
-  --ok-a40: rgba(57, 217, 138, 0.4);
-  --warn: #ffcc66;
-  --warn-text: #ffcc66;
-  --warn-soft1: #ffd88a;
-  --warn-soft2: #ffedc4;
-  --warn-wash-40: rgba(255, 204, 102, 0.14);
-  --warn-wash-10: rgba(255, 204, 102, 0.1);
-  --warn-frame: rgba(255, 204, 102, 0.45);
-  --warn-a55: rgba(255, 204, 102, 0.55);
-  --warn-mode: rgba(255, 204, 102, 0.55);
-  --warn-a60: rgba(255, 204, 102, 0.6);
-
-  /* radii (cards 8-12px, pill buttons) */
-  --r-sm: 6px;
-  --r: 8px;
-  --r-md: 10px;
-  --r-lg: 12px;
-  --r-xl: 16px;
-  --r-pill: 999px;
-  --r-logo: 8px;
-
-  /* typography (cockpit keeps Tailwind default weights, no title tracking) */
-  --w-medium: 500;
-  --w-semibold: 600;
-  --w-bold: 700;
-  --w-extrabold: 800;
-  --w-fill: 700;
-  --w-segment: 800;
-  --w-badge: 700;
-  --tracking-title: 0;
-
-  /* shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 24px -3px rgba(0, 0, 0, 0.45), 0 4px 8px -4px rgba(0, 0, 0, 0.4);
-  --shadow-xl: 0 20px 36px -5px rgba(0, 0, 0, 0.5), 0 8px 14px -6px rgba(0, 0, 0, 0.45);
-  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-}
-
-/* ======================================================================
- * Apple UI style override — pure variable re-theme, no rule bodies here.
- * Active when uistyle.ts puts `ui-apple` on <html>. Tokens: canvas #000,
- * surface #1c1c1e/#2c2c2e, ink #f5f5f7, accent #2997ff / fill #0a84ff,
- * ok #30d158 / warn #ff9f0a / bad #ff453a / off #636366; flat cards
- * (no gradient, no shadow, hairline only), radii 18/10/9999, title 600
- * with -0.02em tracking, weights limited to 400/600. Non-token shades
- * (hovers, softs, tints) are derived from the tokens and marked "派生".
- * ==================================================================== */
-html.theme-mus4.ui-apple {
   --canvas: #000000;
   --canvas-a80: rgba(0, 0, 0, 0.8);
   --surface: #1c1c1e;
@@ -202,12 +59,13 @@ html.theme-mus4.ui-apple {
   --hover-surface2-a50: rgba(58, 58, 60, 0.5); /* 派生 */
   --hover-raised: #48484a; /* 派生 */
   --active-surface: #1c1c1e; /* 派生 */
+  --knob: #ffffff;
   --panel-gradient: none;
   --off: #636366;
 
-  /* 发丝线只保留 2 档（Apple separator 体系）：
+  /* hairlines / lines —— 只保留 2 档（Apple separator 体系）：
      弱档 = 卡片描边/页头 hairline（白 .10），强档 = 列表分隔线（白 .16）。
-     其余语义名一律解析到这两档之一，杜绝随机 6 档 alpha。 */
+     其余语义名一律解析到这两档之一，杜绝随机多档 alpha。 */
   --separator: rgba(255, 255, 255, 0.16); /* Apple dark separator */
   --hairline: rgba(255, 255, 255, 0.1);
   --hairline-a85: rgba(255, 255, 255, 0.1);
@@ -219,7 +77,7 @@ html.theme-mus4.ui-apple {
   --line-soft-a90: rgba(255, 255, 255, 0.1);
   --line-mid: rgba(255, 255, 255, 0.16);
 
-  /* label 层级（规格 §1，对比度对 #000 实算）：ink2 12.6 / ink3 6.76 / ink4 4.93。
+  /* text —— label 层级（对比度对 #000 实算）：ink2 12.6 / ink3 6.76 / ink4 4.93。
      ink3 起为“结构性文字”下限（表头、字段名、标签、状态次级），ink4 只给纯 meta。 */
   --ink: #f5f5f7;
   --ink2: rgba(235, 235, 245, 0.85);
@@ -229,6 +87,7 @@ html.theme-mus4.ui-apple {
   --ink-strong: #f5f5f7;
   --ink-strong-hover: #ffffff;
 
+  /* accent (Apple 蓝：文字/描边 #2997ff，填充 #0a84ff) */
   --accent: #2997ff;
   --accent-fill: #0a84ff;
   --accent-fill-hover: #2997ff; /* 派生：hover 向 accent 提亮 */
@@ -248,6 +107,7 @@ html.theme-mus4.ui-apple {
   --accent-ui: #2997ff;
   --accent-ui-a25: rgba(10, 132, 255, 0.28); /* 派生 */
 
+  /* semantic: bad / ok / warn (dark skin keeps fill == functional color) */
   --bad-fill: #ff453a;
   --bad-fill-hover: #ff6961; /* 派生 */
   --bad: #ff453a;
@@ -270,7 +130,8 @@ html.theme-mus4.ui-apple {
   --bad-a60: rgba(255, 69, 58, 0.6);
   --ok-fill: #30d158;
   --ok: #30d158;
-  /* 文字变体（规格 §2）：填充继续用 --ok/--warn/--bad，文字一律走 *-text */
+  /* 文字变体：填充继续用 --ok/--warn/--bad，文字一律走 *-text
+     （深色下系统色本身过 AA，文字变体 = 填充色是有意的） */
   --ok-text: #30d158;
   --ok-hover: #5ede84; /* 派生 */
   --ok-wash-25: rgba(48, 209, 88, 0.25);
@@ -292,14 +153,18 @@ html.theme-mus4.ui-apple {
   --warn-mode: rgba(255, 159, 10, 0.55);
   --warn-a60: rgba(255, 159, 10, 0.6);
 
+  /* radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊；logo 图标 8px) */
   --r-sm: 10px;
   --r: 10px;
   --r-md: 10px;
   --r-lg: 18px;
   --r-xl: 18px;
   --r-pill: 9999px;
+  --r-logo: 8px;
 
+  /* typography (Apple: 字重收窄到 400/600，大标题 -0.02em 字距) */
   --w-medium: 600;
+  --w-semibold: 600;
   --w-bold: 600;
   --w-extrabold: 600;
   --w-fill: 600;
@@ -307,17 +172,12 @@ html.theme-mus4.ui-apple {
   --w-badge: 600;
   --tracking-title: -0.02em;
 
-  /* 卡片保持 hairline-only（--shadow-sm），浮层单独给 elevation：
-     一刀切成 none 会让弹出层读起来是“贴上去的方块”（规格 §5、审计 #4）。 */
+  /* shadows —— 卡片保持 hairline-only（--shadow-sm: none），浮层单独给 elevation：
+     一刀切成 none 会让弹出层读起来是“贴上去的方块”。 */
   --shadow-sm: none;
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --shadow-2xl: 0 20px 56px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.45);
-
-  /* SkinSwitcher active thumb (iOS segmented control look) */
-  --segment-thumb: #636366; /* 派生：iOS dark 浮起面 */
-  --segment-track: rgba(120, 120, 128, 0.24); /* iOS dark 分段控件轨道填充灰 */
-  --segment-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.35); /* 派生 */
 }
 
 /* ---------- Surfaces ---------- */
@@ -390,7 +250,7 @@ html.theme-mus4 .bg-white {
   background-color: var(--knob);
 }
 
-/* ---------- Accent (Drifter Console blue) ---------- */
+/* ---------- Accent (Apple blue) ---------- */
 html.theme-mus4 .bg-cyan-600,
 html.theme-mus4 .bg-cyan-500 {
   background-color: var(--accent-fill);
@@ -398,7 +258,7 @@ html.theme-mus4 .bg-cyan-500 {
 html.theme-mus4 .hover\:bg-cyan-700:hover {
   background-color: var(--accent-fill-hover);
 }
-/* near-black text on bright accent buttons (ESP32 #061019) */
+/* white text on bright accent buttons (--on-accent) */
 html.theme-mus4 .bg-cyan-600.text-white,
 html.theme-mus4 .bg-cyan-500.text-white {
   color: var(--on-accent);
@@ -465,9 +325,8 @@ html.theme-mus4 .bg-amber-400\/10 {
   background-color: var(--warn-wash-10);
 }
 
-/* ---------- Panel frames (ESP32 .stateCard look) ---------- */
-/* diagonal gradient face, same as the Drifter Console state cards
-   (Apple style: --panel-gradient is none → flat card) */
+/* ---------- Panel frames ---------- */
+/* flat card face（--panel-gradient = none）+ 1px hairline 描边 */
 html.theme-mus4 .bg-zinc-900 {
   background-image: var(--panel-gradient);
 }
@@ -489,7 +348,7 @@ html.theme-mus4 .disabled\:bg-zinc-800:disabled {
   outline: 1px solid var(--line-soft);
   outline-offset: -1px;
 }
-/* 主题/语言切换胶囊（ThemeSwitcher/LanguageSwitcher 容器）：DC 粗框语言——
+/* 主题/语言切换胶囊（ThemeSwitcher/LanguageSwitcher 容器）：
    去掉与 border 重叠的 outline 描边，改为 inset 内圈，与 border 相加成视觉 2px */
 html.theme-mus4 div.rounded-full.bg-zinc-800.border {
   outline: none;
@@ -556,8 +415,8 @@ html.theme-mus4 .text-zinc-600,
 html.theme-mus4 .disabled\:text-zinc-600:disabled {
   color: var(--ink5);
 }
-/* Apple 象限的灰阶层级重映射（zinc-500→ink3 等）不在这里：
-   这套规则体两象限共用，改它会连座舱一起动。见 themes/apple-deep.css 第 0 节。 */
+/* 灰阶层级重映射（zinc-500→ink3、zinc-600→ink4）不在这份共享规则体里，
+   由 themes/apple-deep.css 第 0 节后置覆盖（同特异度、加载顺序在后胜出）。 */
 html.theme-mus4 .text-white {
   color: var(--ink-strong);
 }
@@ -704,7 +563,7 @@ html.theme-mus4 .accent-cyan-400 {
   accent-color: var(--accent);
 }
 
-/* ---------- Radii (cards 8-12px, pill buttons; Apple: 18/10/9999 via --r-*) ---------- */
+/* ---------- Radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊，经 --r-* 变量) ---------- */
 html.theme-mus4 .rounded-sm {
   border-radius: var(--r-sm);
 }
@@ -731,7 +590,7 @@ html.theme-mus4 button.rounded-lg {
 html.theme-mus4 .font-sans {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
-/* 字重工具映射：座舱值即 Tailwind 默认（500/600/700/800），Apple 象限经变量收窄到 400/600。
+/* 字重工具映射：经变量收窄到 Apple 的 400/600 体系（--w-semibold 保持 600）。
    规则顺序保持 medium→semibold→bold→extrabold，与 Tailwind 工具类生成顺序一致，
    同类冲突时的胜负关系不变。 */
 html.theme-mus4 .font-medium {
@@ -746,7 +605,7 @@ html.theme-mus4 .font-bold {
 html.theme-mus4 .font-extrabold {
   font-weight: var(--w-extrabold);
 }
-/* 大标题字距：座舱 0（渲染上等价于 normal），Apple -0.02em。
+/* 大标题字距：--tracking-title = -0.02em（Apple 标题字距）。
    仅 text-xl 及以上；tracking-* 工具类目前只用在 text-xs 小标签上，不冲突。 */
 html.theme-mus4 .text-xl,
 html.theme-mus4 .text-2xl,
@@ -890,42 +749,11 @@ html.theme-mus4 .bg-red-400\/10 {
   outline-offset: -1px;
 }
 
-/* ---------- SkinSwitcher（座舱/Apple 分段切换器）：几何两象限统一，配色按象限分化 ---------- */
-/* 统一切换器规格 v1：28px 轨道 / 2px 内边距 / 24px 滑块 / 12px·600，几何由组件
-   Tailwind 类给定（src/components/SkinSwitcher.tsx）；本组规则只管配色——
-   座舱象限靠上方通用 remap 自然成形（轨道 --surface2 + --hairline 边 + inset 内圈，
-   激活段 .bg-cyan-500.text-white → --accent-fill + --on-accent）；Apple 象限呈
-   iOS 分段控件语义（填充灰轨道、透明边、浮起滑块带阴影、hover 只变字色不变底）。
-   容器选择器带 div 元素提级：压过上方 div.rounded-full.bg-zinc-800.border 的
-   inset 内圈规则（同 (0,3,2) 时靠源顺序在后取胜）。 */
-html.theme-mus4 .skin-switcher-segment:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-html.theme-mus4.ui-apple div.skin-switcher {
-  background-color: var(--segment-track);
-  border-color: transparent;
-  box-shadow: none;
-}
-html.theme-mus4.ui-apple .skin-switcher-segment {
-  color: var(--ink2);
-}
-html.theme-mus4.ui-apple .skin-switcher-segment:hover {
-  background-color: transparent;
-  color: var(--ink);
-}
-html.theme-mus4.ui-apple .skin-switcher-segment[aria-pressed="true"],
-html.theme-mus4.ui-apple .skin-switcher-segment[aria-pressed="true"]:hover {
-  background-color: var(--segment-thumb);
-  color: var(--ink);
-  box-shadow: var(--segment-thumb-shadow);
-}
-
-/* ---------- 主题/语言切换按钮（ThemeSwitcher/LanguageSwitcher）：三页面（DC/D/DD）统一渲染值 ---------- */
-/* 显式锁定 DC/D 深色皮肤：底 #111820、边框 #344154、inset 内圈 #2b3441、
-   图标/文字 #b9c5d3、hover #e8edf2。放在文件末尾压过上方 .bg-zinc-800 的通用
-   outline 描边规则（button 不匹配 div.rounded-full… 的胶囊规则，会漏吃
-   outline 而非 inset 内圈），保证与 DC/D 的 border+内圈双层视觉一致。 */
+/* ---------- 主题/语言切换按钮（ThemeSwitcher/LanguageSwitcher）：统一样式 ---------- */
+/* 底 --surface2、边框 --hairline、inset 内圈 --line-soft、文字 --ink2、hover --ink。
+   放在文件末尾压过上方 .bg-zinc-800 的通用 outline 描边规则（button 不匹配
+   div.rounded-full… 的胶囊规则，会漏吃 outline 而非 inset 内圈），
+   保证 border+内圈的双层视觉一致。 */
 html.theme-mus4 .theme-switcher-btn,
 html.theme-mus4 .language-switcher-btn,
 html.theme-mus4 .console-mute-btn,
@@ -936,8 +764,8 @@ html.theme-mus4 .console-dev-toggle {
   border-color: var(--hairline);
   box-shadow: inset 0 0 0 1px var(--line-soft);
   color: var(--ink2);
-  /* 字体与 DC/D 逐值一致：根布局 .font-sans 被上方重映射为 system-ui 栈，
-     会继承到按钮导致与 DC/D 字体不同，这里显式锁定 :root 字体栈 */
+  /* 字体栈在此显式锁定一份完整栈；apple-deep.css §8 会把这组按钮的字体
+     统一回 system-ui 栈（同特异度、加载顺序在后胜出），此行为兜底基值 */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -957,7 +785,7 @@ html.theme-mus4 .console-dev-toggle:not([aria-checked="true"]):not(:disabled):ho
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
-/* DEV 开启态：DC 蓝 #5cc8ff 双层边框，压过基础覆盖（基础覆盖 specificity 高于 Tailwind 单类） */
+/* DEV 开启态：accent 双层边框，压过基础覆盖（基础覆盖 specificity 高于 Tailwind 单类） */
 html.theme-mus4 .console-dev-toggle[aria-checked="true"] {
   background: var(--accent-ui-a25);
   border-color: var(--accent-ui);
@@ -968,17 +796,16 @@ html.theme-mus4 .console-dev-toggle[aria-checked="true"] {
 html.theme-mus4 .console-ota-btn:disabled {
   color: var(--ink3);
 }
-/* 静音激活态：DC 蓝 #5cc8ff（与 Drifter Console 一致），边框与内圈同色，保持双层视觉 */
+/* 静音激活态：accent 双层边框，边框与内圈同色，保持双层视觉 */
 html.theme-mus4 .console-mute-btn[aria-pressed="true"] {
   border-color: var(--accent-ui);
   box-shadow: inset 0 0 0 1px var(--accent-ui);
   color: var(--accent-ui);
 }
-/* 标题左侧 logo：对齐 Drifter Console headerLogo —— 32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px，与 DC 一致）、圆角 8px、深色主题边框 #2b3441
-   （圆角显式锁定 8px：上方 html.theme-mus4 .rounded-lg 会把 rounded-lg 改成 12px，
-     若 logo 用 rounded-lg 会与 DC 的 8px 不一致；box-sizing 显式 content-box：Tailwind
-     preflight 默认 border-box 会让 border 占进 32px 内使图标比 DC 小一圈；
-     --r-logo 在 Apple 象限同为 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
+/* 标题左侧 logo：32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px）、圆角 8px、边框 --line-soft
+   （圆角显式锁定 8px：上方 html.theme-mus4 .rounded-lg 会把 rounded-lg 改成 18px；
+     box-sizing 显式 content-box：Tailwind preflight 默认 border-box 会让 border
+     占进 32px 内使图标小一圈；--r-logo 保持 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
 html.theme-mus4 .header-logo {
   box-sizing: content-box;
   border-radius: var(--r-logo);

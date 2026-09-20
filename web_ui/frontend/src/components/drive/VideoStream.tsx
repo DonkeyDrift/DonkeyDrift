@@ -37,7 +37,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const { videoRef, state, stats, metrics, videoReady } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline });
 
   const streamUrl = `${API_URL}/drive/video`;
-  // 浮层阴影走语义 shadow-lg（--shadow-lg）：Apple 象限为 none（扁平），座舱深/浅各有软阴影
+  // 浮层阴影走语义 shadow-lg（--shadow-lg）：Apple 扁平浮层阴影（深/浅各有取值）
   const webRtcConnected = state === 'connected' && !stats.degraded;
   const webRtcVisible = webRtcConnected && videoReady;
   const degraded = forceMjpeg || mjpegFallbackAllowed;

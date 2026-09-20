@@ -6,7 +6,6 @@ import { discoverConnectorConsoles } from '../services/api';
 import { consoleGetText } from '../services/console';
 import { DEV_MODE_CHANGED_EVENT, MUTE_CHANGED_EVENT } from '../components/ConsoleControls';
 import { useTranslation } from '@/i18n';
-import { useUiStyle } from '@/lib/uistyle';
 
 /**
  * Drifter Console（Issue #234）：先把车端原版 Drifter Console 的 UI 1:1 原样呈现到这里，
@@ -15,8 +14,6 @@ import { useUiStyle } from '@/lib/uistyle';
  */
 export const DrifterConsolePage: React.FC = () => {
   const { t, lang } = useTranslation();
-  // UI 风格（座舱/Apple）：拼进内嵌 DC 的 ?ui= 参数（固件 v1.9.0 契约），切换时经 key 触发重载
-  const uiStyle = useUiStyle();
   const [devices, setDevices] = useState<{ ip: string; port: number; reachable: boolean }[]>([]);
   const [scanning, setScanning] = useState(false);
   // 扫描失败/超时/无设备：主区域给引导手动输入 IP 的失败态文案（discover 自带 9s 前端超时）
@@ -148,9 +145,9 @@ export const DrifterConsolePage: React.FC = () => {
       {selectedIp ? (
         <div className="min-h-0 flex-1">
           <iframe
-            key={`${reloadKey}-${uiStyle}`}
+            key={reloadKey}
             ref={iframeRef}
-            src={`http://${selectedIp}/?embedded=1&lang=${lang}&ui=${uiStyle}`}
+            src={`http://${selectedIp}/?embedded=1&lang=${lang}&ui=apple`}
             title="Drifter Console"
             allowFullScreen
             className="h-full w-full border-0 bg-zinc-950"

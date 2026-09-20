@@ -7,7 +7,7 @@ import { useTranslation } from '@/i18n';
 // 本体（快捷键列表内容与固件侧一致）。
 // 语言入口不在此处：顶栏 LanguageSwitcher 为静音式单按钮（issue #139）。
 // 颜色全部走标准 Tailwind 工具类，由 themes/*.css 皮肤按语义变量重映射——
-// Apple 象限无投影无 glow（--shadow-lg/xl = none），座舱保持原观感。
+// Apple 扁平观感：大投影为 none 或柔化（--shadow-lg/xl 语义变量）。
 export const FabActions: React.FC = () => {
   const { t } = useTranslation();
   const [helpOpen, setHelpOpen] = useState(false);

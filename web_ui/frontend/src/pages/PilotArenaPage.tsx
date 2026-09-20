@@ -31,7 +31,6 @@ import {
 } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
-import { useUiStyle } from '@/lib/uistyle';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -89,7 +88,7 @@ const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
  * canvas 绘制线 / chart.js 数据系列的 JS 配色（回退值表，深色值即现状；
  * 浅色值对标 theme-light.css 色板:同色相、保饱和、适度降明度）。
  * 语义角色（user=--ok、pilot=--accent、legend=--ink2、ticks=--ink3）实际取色走
- * CSS 变量，随主题与 UI 风格（座舱/Apple）切换自动变化；userThrottle/pilotThrottle
+ * CSS 变量，随主题（深/浅）切换自动变化；userThrottle/pilotThrottle
  * 为数据可视化专用色相，保持固定。
  */
 const ARENA_SERIES_COLORS = {
@@ -182,9 +181,8 @@ type PilotArenaPageProps = {
 export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true }: PilotArenaPageProps) {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
-  // 订阅 UI 风格（座舱/Apple）：切换时语义系列色（--ok/--accent/--ink2/--ink3）重取色
-  const uiStyle = useUiStyle();
-  const seriesColors = useMemo(() => resolveArenaSeriesColors(theme), [theme, uiStyle]);
+  // 主题切换时语义系列色（--ok/--accent/--ink2/--ink3）随 CSS 变量重取色
+  const seriesColors = useMemo(() => resolveArenaSeriesColors(theme), [theme]);
   const configPath = useStore((state) => state.configPath);
   const tubPath = useStore((state) => state.tubPath);
   const records = useStore((state) => state.records);

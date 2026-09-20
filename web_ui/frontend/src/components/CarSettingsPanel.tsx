@@ -4,7 +4,6 @@ import { Button } from './ui/Button';
 import { discoverConnectorConsoles } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
-import { useUiStyle } from '@/lib/uistyle';
 
 /**
  * 车辆设置（Issue #234 后续）：设备发现/选择（连接）+ 内嵌车端 DC 的设置视图。
@@ -24,7 +23,6 @@ import { useUiStyle } from '@/lib/uistyle';
 export const CarSettingsPanel: React.FC = () => {
   const { t, lang } = useTranslation();
   const theme = useResolvedTheme();
-  const uiStyle = useUiStyle();
   const [devices, setDevices] = useState<{ ip: string; port: number; reachable: boolean }[]>([]);
   const [scanning, setScanning] = useState(false);
   const [selectedIp, setSelectedIp] = useState('');
@@ -102,8 +100,8 @@ export const CarSettingsPanel: React.FC = () => {
         <div className="min-h-[70vh]">
           <iframe
             ref={iframeRef}
-            key={`${selectedIp}-${theme}-${uiStyle}`}
-            src={`http://${selectedIp}/?embedded=1&settings=1&lang=${lang}&theme=${theme}&ui=${uiStyle}`}
+            key={`${selectedIp}-${theme}`}
+            src={`http://${selectedIp}/?embedded=1&settings=1&lang=${lang}&theme=${theme}&ui=apple`}
             title={t('connector.carSettingsTitle')}
             allowFullScreen
             className="h-[80vh] min-h-[560px] w-full rounded-md border-0 bg-zinc-950"

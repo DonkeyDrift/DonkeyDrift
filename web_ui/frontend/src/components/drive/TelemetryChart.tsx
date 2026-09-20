@@ -15,7 +15,6 @@ import type { Telemetry } from '../../hooks/useDriveWebsocket';
 import { useTelemetryStore } from '../../store/useTelemetryStore';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
-import { useUiStyle } from '@/lib/uistyle';
 
 ChartJS.register(
   CategoryScale,
@@ -49,7 +48,7 @@ interface CurveConfig {
   lightColor?: string;
   /**
    * 语义 CSS 变量名（如 '--ok'）：设置后优先从根元素 computed style 取色，
-   * 随主题与 UI 风格（座舱/Apple）切换自动变化；取不到（jsdom 等）回退 color/lightColor。
+   * 随主题（深/浅）切换自动变化；取不到（jsdom 等）回退 color/lightColor。
    * 仅语义角色曲线使用（油门=ok、转向=accent、陀螺仪 Z=bad、陀螺仪 X=warn），
    * 其余数据可视化专用色相保持固定。
    */
@@ -83,7 +82,7 @@ const cssVarColor = (name: string, fallback: string): string => {
   }
 };
 
-/** 按当前生效主题/风格取曲线颜色：语义曲线读 CSS 变量，其余浅色用墨色版、缺省回退深色值。 */
+/** 按当前生效主题取曲线颜色：语义曲线读 CSS 变量，其余浅色用墨色版、缺省回退深色值。 */
 const curveColor = (c: CurveConfig, theme: ResolvedTheme): string => {
   const fallback = theme === 'light' ? c.lightColor ?? c.color : c.color;
   return c.cssVar ? cssVarColor(c.cssVar, fallback) : fallback;
@@ -138,8 +137,6 @@ export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
 }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
-  // 订阅 UI 风格：切换座舱/Apple 时语义曲线（cssVar）重取色
-  useUiStyle();
   const curves = group ? curvesByGroup(group) : CURVES;
   const selectedCount = curves.reduce((n, c) => (visibleKeys.has(c.key as string) ? n + 1 : n), 0);
   const allSelected = curves.length > 0 && selectedCount === curves.length;
@@ -229,8 +226,6 @@ export const TelemetryChart = React.memo(function TelemetryChart({
 }: TelemetryChartProps) {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
-  // 订阅 UI 风格（座舱/Apple）：切换时下方 chart 重建，语义曲线按新象限的 CSS 变量重取色
-  const uiStyle = useUiStyle();
   // 本实例管理的曲线子集
   const curves = useMemo(() => (group ? curvesByGroup(group) : CURVES), [group]);
   // 各曲线的环形缓冲与显示缓冲：恒为 BUFFER_SIZE 的 number[]，未填满处为 NaN
@@ -301,7 +296,7 @@ export const TelemetryChart = React.memo(function TelemetryChart({
     }
   }, []);
 
-  // 创建/重建 chart 实例：仅当曲线集合、显隐、主题、UI 风格变化时重建（用户操作，低频）。
+  // 创建/重建 chart 实例：仅当曲线集合、显隐、主题变化时重建（用户操作，低频）。
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -338,7 +333,7 @@ export const TelemetryChart = React.memo(function TelemetryChart({
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [curves, visibleKeys, theme, uiStyle, chartOptions, t, syncDisplay]);
+  }, [curves, visibleKeys, theme, chartOptions, t, syncDisplay]);
 
   // 从旁路遥测 feed 订阅新帧并写入环形缓冲；重绘直接改写 chart dataset，不再触发 React 渲染。
   useEffect(() => {

@@ -82,7 +82,7 @@ export const AutoSyncPanel: React.FC = () => {
             aria-label={t('connector.autoSyncToggle')}
             className="h-5 w-9 cursor-pointer appearance-none rounded-full bg-zinc-700 transition-colors relative after:absolute after:top-0.5 after:left-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform checked:after:translate-x-4"
             // checked: 变体类皮肤 CSS 覆盖不到（选择器只匹配字面 .bg-cyan-600），
-            // 用内联 var(--accent-fill) 让开启态跟随语义变量（座舱/Apple/浅色一致）
+            // 用内联 var(--accent-fill) 让开启态跟随语义变量（深/浅色一致）
             style={enabled ? { backgroundColor: 'var(--accent-fill)' } : undefined}
             checked={enabled}
             disabled={toggling}
