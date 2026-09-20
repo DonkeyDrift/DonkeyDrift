@@ -1,9 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DrifterConsolePage } from './DrifterConsolePage';
-import { applyUiStyle, getUiStyle } from '@/lib/uistyle';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
@@ -131,18 +130,8 @@ describe('DrifterConsolePage 扫描状态显示（Issue #234）', () => {
   });
 });
 
-describe('DrifterConsolePage 内嵌 DC 的 ?ui= 契约（固件 v1.9.0 双风格）', () => {
-  afterEach(() => {
-    // 复位风格，避免污染同文件其它用例（applyUiStyle 写 localStorage 并切 <html> class）
-    act(() => {
-      applyUiStyle('cockpit');
-    });
-  });
-
-  it('iframe src 带 ui= 参数且与当前 UI 风格一致', async () => {
-    act(() => {
-      applyUiStyle('cockpit');
-    });
+describe('DrifterConsolePage 内嵌 DC 的 ?ui= 契约（Apple 唯一风格）', () => {
+  it('iframe src 恒为 ui=apple', async () => {
     mockDiscover.mockResolvedValue({
       status: true,
       found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
@@ -151,36 +140,34 @@ describe('DrifterConsolePage 内嵌 DC 的 ?ui= 契约（固件 v1.9.0 双风格
       message: '',
     });
     render(<DrifterConsolePage />);
-    await waitFor(() => {
-      const src = document.querySelector('iframe')?.getAttribute('src') ?? '';
-      expect(src).toContain(`ui=${getUiStyle()}`);
-      expect(src).toContain('ui=cockpit');
-    });
-  });
-
-  it('切换 UI 风格后 iframe 经 key 重载，src 变为 ui=apple', async () => {
-    act(() => {
-      applyUiStyle('cockpit');
-    });
-    mockDiscover.mockResolvedValue({
-      status: true,
-      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
-      count: 1,
-      scanned: 256,
-      message: '',
-    });
-    render(<DrifterConsolePage />);
-    await waitFor(() => {
-      expect(document.querySelector('iframe')?.getAttribute('src')).toContain('ui=cockpit');
-    });
-
-    act(() => {
-      applyUiStyle('apple');
-    });
     await waitFor(() => {
       const src = document.querySelector('iframe')?.getAttribute('src') ?? '';
       expect(src).toContain('http://192.168.3.46/');
       expect(src).toContain('ui=apple');
     });
+  });
+
+  it('残留旧键 donkeydrifter.ui.style=cockpit 被静默忽略：仍渲染 Apple', async () => {
+    // 2026-09-20 双风格机制移除后不再读取该键：不迁移、不清除，渲染恒为 Apple。
+    window.localStorage.setItem('donkeydrifter.ui.style', 'cockpit');
+    try {
+      mockDiscover.mockResolvedValue({
+        status: true,
+        found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+        count: 1,
+        scanned: 256,
+        message: '',
+      });
+      render(<DrifterConsolePage />);
+      await waitFor(() => {
+        const src = document.querySelector('iframe')?.getAttribute('src') ?? '';
+        expect(src).toContain('ui=apple');
+        expect(src).not.toContain('ui=cockpit');
+      });
+      // <html> 不再被挂 ui-apple class（类机制已随 uistyle.ts 删除）
+      expect(document.documentElement.classList.contains('ui-apple')).toBe(false);
+    } finally {
+      window.localStorage.removeItem('donkeydrifter.ui.style');
+    }
   });
 });

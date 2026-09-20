@@ -1,19 +1,16 @@
 /*
  * MUS4 Light — DonkeyDrifter Web UI 浅色皮肤,与深色皮肤 theme-mus4.css
- * 同源同构:同一份 ESP32 Drifter Console 设计语言,色板直接对标固件
- * 自带的浅色主题(Firmware/MUS4_FW/libraries/mus4_web/src/WebConsoleAssets.h
- * 中 `html[data-theme="light"]` 与 CHART_THEMES.light 的定义)。
+ * 同源同构:同一套语义变量名与规则体,色板填 Apple 浅色 token。
  *
  * 主题切换:`theme-light` class 由 ThemeSwitcher / src/lib/theme.ts 写到
  * <html> 上(与 `theme-mus4` 互斥),index.html 内联脚本负责首屏前应用。
  * 每条规则都以 `html.theme-light` 开头,靠优先级压过原始 Tailwind 工具类。
  *
- * UI style dimension (cockpit / Apple): 与深色侧同一套变量机制——全部
- * 颜色/渐变/投影/圆角/字重/标题字距集中在下方变量调色板
- * (`html.theme-light { --* }`,值 = 座舱现状),规则体只引用 `var(--语义名)`;
- * `src/lib/uistyle.ts` 在 <html> 上切换 `ui-apple` class 后,纯变量覆写块
- * `html.theme-light.ui-apple { --* }` 把整套规则重映射为 Apple 浅色 token,
- * 规则体零改动。不带 `ui-apple` 时调色板把每条规则解析回座舱原值。
+ * Apple 是唯一界面风格:全部颜色/渐变/投影/圆角/字重/标题字距集中在下方
+ * 变量调色板(`html.theme-light { --* }`),规则体只引用 `var(--语义名)`。
+ * (2026-09-20:座舱/Apple 双风格机制移除——原 `html.theme-light.ui-apple`
+ * 覆写值并入调色板成为唯一取值;座舱调色板、`ui-apple` class 与
+ * src/lib/uistyle.ts 一并删除。)
  *
  * Visual-only skin: rules may only touch color, background-color,
  * background-image (gradients), border-color, border-radius, box-shadow,
@@ -23,32 +20,28 @@
  * (display/position/flex/grid/order/width/height/margin/padding/
  * top/right/bottom/left/float/...) are forbidden.
  *
- * 浅色化原则(v3,对齐固件浅色版,避免“深色反色”感):
- * - 中性面用高明度近中性灰,不带蓝灰染色:页面 #eef1f5,面板 #fff,
- *   状态卡片沿用 ESP32 的 135deg 渐变 #fff→#edf1f6 + 细框 #ccd5df;
- *   凹槽 #f4f6f9、凸起 #e2e8f0,层次靠明度而非色相。
+ * 浅色化原则(Apple 浅色):
+ * - 中性面用高明度近中性灰:页面 #f5f5f7,面板 #fff(平板卡片、无渐变),
+ *   发丝线两档(卡片黑 .08 / 分隔线 Apple light separator)。
  * - 标志性颜色集中在该出现的位置并保持饱和:FILL 实色填充
- *   (蓝 #5cc8ff / 绿 #39d98a / 红 #ff6b6b + 近黑文字 #061019)、
- *   状态细框、辉光、图表线;状态文字/描边用固件浅色版的饱和色
- *   (蓝 #0c9bd6、绿 #1fae6b、红 #e5484d、琥珀 #d99a17→文字 #b57d0e)。
+ *   (蓝 #0071e3 / 绿 #34c759 / 红 #ff3b30 + 白文字)、状态细框、图表线;
+ *   状态文字走 *-text 变体(绿 #1a7f37、琥珀 #c93400、红 #d70015)。
  * - FRAME 语言不变:绿=正常/开、琥珀=过渡/警告、红=锁定/危险、
- *   灰 #94a3b8 = 关/断开;驾驶模式 手动=绿、半自动=琥珀、全自动=蓝。
+ *   灰 #8e8e93 = 关/断开;驾驶模式 手动=绿、半自动=琥珀、全自动=蓝。
  * - 状态薄底只给极低透明度的同色相晕染,主要靠细框+彩色文字表意,
- *   避免大面积粉彩洗刷感;hover 填充加深(蓝 #3eb6f0 / 红 #f25454),
- *   镜像深色的变亮。
- *   (注释中引用的 hex 均为座舱调色板原值。)
+ *   避免大面积粉彩洗刷感;hover 填充加深(蓝 #0062c4 / 红 #d92c22)。
  */
 
 /* ======================================================================
- * Variable palette — cockpit light values (status quo).
+ * Variable palette — Apple light tokens (single UI style).
  * 与 theme-mus4.css 同一套语义名;两侧同名的槽位语义一致、各填各的值。
  * ==================================================================== */
 html.theme-light {
   color-scheme: light;
 
   /* surfaces */
-  --canvas: #eef1f5;
-  --canvas-a80: rgba(238, 241, 245, 0.8);
+  --canvas: #f5f5f7;
+  --canvas-a80: rgba(245, 245, 247, 0.8);
   --surface: #ffffff;
   --surface-a35: rgba(255, 255, 255, 0.45);
   --surface-a50: rgba(255, 255, 255, 0.75);
@@ -56,141 +49,6 @@ html.theme-light {
   --surface-a78: rgba(255, 255, 255, 0.78);
   --surface-a90: rgba(255, 255, 255, 0.93);
   --surface-a95: rgba(255, 255, 255, 0.96);
-  --surface2: #f4f6f9;
-  --surface2-a50: rgba(244, 246, 249, 0.6);
-  --surface2-a80: rgba(244, 246, 249, 0.88);
-  --raised: #e2e8f0;
-  --raised-2: #dde4ec;
-  --raised-3: #d3dbe5;
-  --hover-surface2: #eaf0f6;
-  --hover-surface2-a50: rgba(234, 240, 246, 0.55);
-  --hover-raised: #e8eef5;
-  --active-surface: #f4f6f9;
-  --knob: #ffffff;
-  --panel-gradient: linear-gradient(135deg, #ffffff, #edf1f6);
-  --off: #94a3b8;
-  --on-scrim: #ffffff;
-
-  /* hairlines / lines */
-  --hairline: #ccd5df;
-  --hairline-a85: rgba(204, 213, 223, 0.9);
-  --hairline-a55: rgba(30, 41, 59, 0.12);
-  --line-white10: #ccd5df;
-  --line-soft: #d5dce4;
-  --line-soft-a50: rgba(30, 41, 59, 0.08);
-  --line-soft-a60: rgba(30, 41, 59, 0.1);
-  --line-soft-a90: rgba(213, 220, 228, 0.9);
-  --line-mid: #c3ccd6;
-
-  /* text */
-  --ink: #1a2330;
-  --ink2: #3f4f63;
-  --ink3: #5b6b7d;
-  --ink4: #7c8da0;
-  --ink5: #9aa8b8;
-  --ink-strong: #101820;
-  --ink-strong-hover: #000000;
-
-  /* accent (浅色版双色:FILL 亮蓝 #5cc8ff / 功能蓝 #0c9bd6) */
-  --accent: #0c9bd6;
-  --accent-fill: #5cc8ff;
-  --accent-fill-hover: #3eb6f0;
-  --accent-text-soft: #0a6f9e;
-  --accent-text-hover: #0a7eb2;
-  --on-accent: #061019;
-  --accent-dim: #def0fa;
-  --accent-wash-50: rgba(12, 155, 214, 0.3);
-  --accent-wash-20: rgba(12, 155, 214, 0.12);
-  --accent-wash-30: rgba(12, 155, 214, 0.2);
-  --accent-wash-08: rgba(12, 155, 214, 0.08);
-  --accent-a50: rgba(12, 155, 214, 0.4);
-  --accent-a60: rgba(12, 155, 214, 0.45);
-  --accent-a35: rgba(12, 155, 214, 0.28);
-  --accent-a45: rgba(12, 155, 214, 0.45);
-  --accent-a55: rgba(12, 155, 214, 0.6);
-  --accent-ui: #5cc8ff;
-  --accent-ui-a25: rgba(92, 200, 255, 0.25);
-
-  /* semantic: bad / ok / warn(浅色填充色与功能色分离) */
-  --bad-fill: #ff6b6b;
-  --bad-fill-hover: #f25454;
-  --bad: #e5484d;
-  --bad-soft1: #c73237;
-  --bad-soft2: #ad2a2f;
-  --bad-soft3: #8c2226;
-  --bad-soft1-a70: rgba(199, 50, 55, 0.65);
-  --bad-wash-40: rgba(229, 72, 77, 0.3);
-  --bad-wash-20: rgba(229, 72, 77, 0.12);
-  --bad-wash-30: rgba(229, 72, 77, 0.2);
-  --bad-wash-50: rgba(229, 72, 77, 0.08);
-  --bad-wash-60: rgba(229, 72, 77, 0.07);
-  --bad-wash-10: rgba(229, 72, 77, 0.07);
-  --bad-frame: rgba(229, 72, 77, 0.5);
-  --bad-frame-soft: rgba(229, 72, 77, 0.45);
-  --bad-record: rgba(229, 72, 77, 0.5);
-  --bad-a50: rgba(229, 72, 77, 0.4);
-  --bad-a40: rgba(229, 72, 77, 0.32);
-  --bad-a60: rgba(229, 72, 77, 0.5);
-  --ok-fill: #39d98a;
-  --ok: #1fae6b;
-  --ok-hover: #178a55;
-  --ok-wash-25: rgba(31, 174, 107, 0.2);
-  --ok-wash-10: rgba(31, 174, 107, 0.1);
-  --ok-wash-90: rgba(31, 174, 107, 0.12);
-  --ok-frame: rgba(31, 174, 107, 0.5);
-  --ok-a55: rgba(31, 174, 107, 0.6);
-  --ok-a65: rgba(31, 174, 107, 0.55);
-  --ok-a70: rgba(31, 174, 107, 0.6);
-  --ok-a40: rgba(31, 174, 107, 0.38);
-  --warn: #d99a17;
-  --warn-text: #b57d0e;
-  --warn-soft1: #96680b;
-  --warn-soft2: #7a570a;
-  --warn-wash-40: rgba(217, 154, 23, 0.12);
-  --warn-wash-10: rgba(217, 154, 23, 0.08);
-  --warn-frame: rgba(217, 154, 23, 0.55);
-  --warn-a55: rgba(217, 154, 23, 0.5);
-  --warn-mode: rgba(217, 154, 23, 0.6);
-  --warn-a60: rgba(217, 154, 23, 0.6);
-
-  /* radii (cards 8-12px, pill buttons) */
-  --r-sm: 6px;
-  --r: 8px;
-  --r-md: 10px;
-  --r-lg: 12px;
-  --r-xl: 16px;
-  --r-pill: 999px;
-  --r-logo: 8px;
-
-  /* typography (cockpit keeps Tailwind default weights, no title tracking) */
-  --w-medium: 500;
-  --w-semibold: 600;
-  --w-bold: 700;
-  --w-extrabold: 800;
-  --w-fill: 700;
-  --w-segment: 800;
-  --w-badge: 700;
-  --tracking-title: 0;
-
-  /* shadows (ESP32 light: soft slate) */
-  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 10px 24px -3px rgba(15, 23, 42, 0.1), 0 4px 8px -4px rgba(15, 23, 42, 0.06);
-  --shadow-xl: 0 20px 36px -5px rgba(15, 23, 42, 0.12), 0 8px 14px -6px rgba(15, 23, 42, 0.08);
-  --shadow-2xl: 0 25px 50px -12px rgba(15, 23, 42, 0.16);
-}
-
-/* ======================================================================
- * Apple UI style override — pure variable re-theme, no rule bodies here.
- * Tokens: canvas #f5f5f7, surface #fff, ink #1d1d1f,
- * ink2 rgba(60,60,67,.62), hairline rgba(0,0,0,.08), accent #0066cc /
- * fill #0071e3, ok #34c759 / warn #ff9500 / bad #ff3b30 / off #8e8e93;
- * flat cards (no gradient, no shadow, hairline only), radii 18/10/9999,
- * title 600 with -0.02em tracking, weights limited to 400/600.
- * 面板 surface 浅色两侧同为 #fff,无需覆写;非 token 色均为派生(标“派生”)。
- * ==================================================================== */
-html.theme-light.ui-apple {
-  --canvas: #f5f5f7;
-  --canvas-a80: rgba(245, 245, 247, 0.8);
   --surface2: #f5f5f7; /* 派生:iOS grouped secondary 背景,与 canvas 同值 */
   --surface2-a50: rgba(245, 245, 247, 0.6); /* 派生 */
   --surface2-a80: rgba(245, 245, 247, 0.88); /* 派生 */
@@ -201,11 +59,14 @@ html.theme-light.ui-apple {
   --hover-surface2-a50: rgba(235, 235, 240, 0.55); /* 派生 */
   --hover-raised: #d9d9de; /* 派生 */
   --active-surface: #f5f5f7; /* 派生 */
+  --knob: #ffffff;
   --panel-gradient: none;
   --off: #8e8e93;
+  --on-scrim: #ffffff;
 
-  /* 发丝线只保留 2 档（Apple separator 体系）：
-     弱档 = 卡片描边/页头 hairline（黑 .08），强档 = 列表分隔线（Apple light separator）。 */
+  /* hairlines / lines —— 只保留 2 档（Apple separator 体系）：
+     弱档 = 卡片描边/页头 hairline（黑 .08），强档 = 列表分隔线（Apple light separator）。
+     其余语义名一律解析到这两档之一。 */
   --separator: rgba(60, 60, 67, 0.29); /* Apple light separator */
   --hairline: rgba(0, 0, 0, 0.08);
   --hairline-a85: rgba(0, 0, 0, 0.08);
@@ -217,7 +78,7 @@ html.theme-light.ui-apple {
   --line-soft-a90: rgba(0, 0, 0, 0.08);
   --line-mid: rgba(60, 60, 67, 0.29);
 
-  /* label 层级（规格 §1，对比度对 #f5f5f7 实算）：ink2 6.51 / ink3 4.53(AA) / ink4 3.62。
+  /* text —— label 层级（对比度对 #f5f5f7 实算）：ink2 6.51 / ink3 4.53(AA) / ink4 3.62。
      ink3 起为“结构性文字”下限，ink4 只给纯 meta（时间戳、版本号、单位）。 */
   --ink: #1d1d1f;
   --ink2: rgba(60, 60, 67, 0.85);
@@ -225,10 +86,12 @@ html.theme-light.ui-apple {
   --ink4: rgba(60, 60, 67, 0.62);
   --ink5: #8e8e93;
   --ink-strong: #1d1d1f;
+  --ink-strong-hover: #000000;
 
+  /* accent (Apple 浅色双色:功能蓝 #0066cc / FILL #0071e3) */
   --accent: #0066cc;
   --accent-fill: #0071e3;
-  --accent-fill-hover: #0062c4; /* 派生:hover 加深,镜像座舱浅色行为 */
+  --accent-fill-hover: #0062c4; /* 派生:hover 加深 */
   --accent-text-soft: #004c99; /* 派生 */
   --accent-text-hover: #0059b3; /* 派生 */
   --on-accent: #ffffff;
@@ -245,6 +108,7 @@ html.theme-light.ui-apple {
   --accent-ui: #0066cc;
   --accent-ui-a25: rgba(0, 113, 227, 0.15); /* 派生 */
 
+  /* semantic: bad / ok / warn(浅色填充色与功能色分离) */
   --bad-fill: #ff3b30;
   --bad-fill-hover: #d92c22; /* 派生 */
   --bad: #ff3b30;
@@ -267,7 +131,8 @@ html.theme-light.ui-apple {
   --bad-a60: rgba(255, 59, 48, 0.5);
   --ok-fill: #34c759;
   --ok: #34c759;
-  /* 文字变体（规格 §2）：填充继续用 --ok/--warn/--bad，文字一律走 *-text */
+  /* 文字变体：填充继续用 --ok/--warn/--bad，文字一律走 *-text（浅色填充色
+     当文字不够 AA，故文字变体是更深一档的独立取值） */
   --ok-text: #1a7f37;
   --ok-hover: #28a34c; /* 派生 */
   --ok-wash-25: rgba(52, 199, 89, 0.2);
@@ -289,14 +154,18 @@ html.theme-light.ui-apple {
   --warn-mode: rgba(255, 149, 0, 0.6);
   --warn-a60: rgba(255, 149, 0, 0.6);
 
+  /* radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊；logo 图标 8px) */
   --r-sm: 10px;
   --r: 10px;
   --r-md: 10px;
   --r-lg: 18px;
   --r-xl: 18px;
   --r-pill: 9999px;
+  --r-logo: 8px;
 
+  /* typography (Apple: 字重收窄到 400/600，大标题 -0.02em 字距) */
   --w-medium: 600;
+  --w-semibold: 600;
   --w-bold: 600;
   --w-extrabold: 600;
   --w-fill: 600;
@@ -304,17 +173,12 @@ html.theme-light.ui-apple {
   --w-badge: 600;
   --tracking-title: -0.02em;
 
-  /* 卡片保持 hairline-only（--shadow-sm），浮层单独给 elevation：
-     浅色下浮层只靠 1.12:1 的描边分界，读起来是“贴上去的方块”（规格 §5、审计 #4）。 */
+  /* shadows —— 卡片保持 hairline-only（--shadow-sm: none），浮层单独给 elevation：
+     浅色下浮层只靠 1.12:1 的描边分界会读起来是“贴上去的方块”。 */
   --shadow-sm: none;
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   --shadow-2xl: 0 20px 56px rgba(0, 0, 0, 0.18), 0 4px 10px rgba(0, 0, 0, 0.1);
-
-  /* SkinSwitcher active thumb (iOS segmented control look) */
-  --segment-thumb: #ffffff;
-  --segment-track: rgba(120, 120, 128, 0.16); /* iOS light 分段控件轨道填充灰 */
-  --segment-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 /* ---------- Surfaces ---------- */
@@ -387,7 +251,7 @@ html.theme-light .bg-white {
   background-color: var(--knob);
 }
 
-/* ---------- Accent (Drifter Console blue, original #5cc8ff kept) ---------- */
+/* ---------- Accent (Apple blue) ---------- */
 html.theme-light .bg-cyan-600,
 html.theme-light .bg-cyan-500 {
   background-color: var(--accent-fill);
@@ -395,7 +259,7 @@ html.theme-light .bg-cyan-500 {
 html.theme-light .hover\:bg-cyan-700:hover {
   background-color: var(--accent-fill-hover);
 }
-/* near-black text on bright accent buttons (ESP32 #061019) */
+/* white text on bright accent buttons (--on-accent) */
 html.theme-light .bg-cyan-600.text-white,
 html.theme-light .bg-cyan-500.text-white {
   color: var(--on-accent);
@@ -417,7 +281,7 @@ html.theme-light .bg-cyan-950\/30 {
   background-color: var(--accent-wash-08);
 }
 
-/* ---------- Semantic surfaces (firmware light inks: red #e5484d / green #1fae6b / amber #d99a17) ---------- */
+/* ---------- Semantic surfaces (Apple light: red #ff3b30 / green #34c759 / amber #ff9500) ---------- */
 html.theme-light .bg-red-600,
 html.theme-light .bg-red-500 {
   background-color: var(--bad-fill);
@@ -463,8 +327,7 @@ html.theme-light .bg-amber-400\/10 {
 }
 
 /* ---------- Panel frames (ESP32 .stateCard look, light edition) ---------- */
-/* diagonal gradient face, same as the Drifter Console state cards
-   (Apple style: --panel-gradient is none → flat card) */
+/* flat card face（--panel-gradient = none）+ 1px hairline 描边（见下方通用规则） */
 html.theme-light .bg-zinc-900 {
   background-image: var(--panel-gradient);
 }
@@ -486,7 +349,7 @@ html.theme-light .disabled\:bg-zinc-800:disabled {
   outline: 1px solid var(--line-soft);
   outline-offset: -1px;
 }
-/* 主题/语言切换胶囊（ThemeSwitcher/LanguageSwitcher 容器）：DC 粗框语言——
+/* 主题/语言切换胶囊（ThemeSwitcher/LanguageSwitcher 容器）：
    去掉与 border 重叠的 outline 描边，改为 inset 内圈，与 border 相加成视觉 2px */
 html.theme-light div.rounded-full.bg-zinc-800.border {
   outline: none;
@@ -553,8 +416,8 @@ html.theme-light .text-zinc-600,
 html.theme-light .disabled\:text-zinc-600:disabled {
   color: var(--ink5);
 }
-/* Apple 象限的灰阶层级重映射（zinc-500→ink3 等）不在这里：
-   这套规则体两象限共用，改它会连座舱一起动。见 themes/apple-deep.css 第 0 节。 */
+/* 灰阶层级重映射（zinc-500→ink3、zinc-600→ink4）不在这份共享规则体里，
+   由 themes/apple-deep.css 第 0 节后置覆盖（同特异度、加载顺序在后胜出）。 */
 html.theme-light .text-white {
   color: var(--ink-strong);
 }
@@ -562,7 +425,7 @@ html.theme-light .hover\:text-white:hover {
   color: var(--ink-strong-hover);
 }
 
-/* accent text (firmware light chart/border blue #0c9bd6) */
+/* accent text (Apple 功能蓝 #0066cc) */
 html.theme-light .text-cyan-400,
 html.theme-light .text-cyan-500,
 html.theme-light .text-cyan-600,
@@ -577,7 +440,7 @@ html.theme-light .group-hover\:text-cyan-400 {
   color: var(--accent-text-hover);
 }
 
-/* semantic text (firmware light state colors) */
+/* semantic text (Apple 浅色文字变体 *-text) */
 html.theme-light .text-red-400,
 html.theme-light .text-red-500 {
   color: var(--bad);
@@ -701,7 +564,7 @@ html.theme-light .accent-cyan-400 {
   accent-color: var(--accent);
 }
 
-/* ---------- Radii (cards 8-12px, pill buttons; Apple: 18/10/9999 via --r-*) ---------- */
+/* ---------- Radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊，经 --r-* 变量) ---------- */
 html.theme-light .rounded-sm {
   border-radius: var(--r-sm);
 }
@@ -728,7 +591,7 @@ html.theme-light button.rounded-lg {
 html.theme-light .font-sans {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
-/* 字重工具映射:座舱值即 Tailwind 默认(500/600/700/800),Apple 象限经变量收窄到 400/600。
+/* 字重工具映射:经变量收窄到 Apple 的 400/600 体系(--w-semibold 保持 600)。
    规则顺序保持 medium→semibold→bold→extrabold,与 Tailwind 工具类生成顺序一致。 */
 html.theme-light .font-medium {
   font-weight: var(--w-medium);
@@ -742,7 +605,7 @@ html.theme-light .font-bold {
 html.theme-light .font-extrabold {
   font-weight: var(--w-extrabold);
 }
-/* 大标题字距:座舱 0(渲染上等价于 normal),Apple -0.02em。
+/* 大标题字距:--tracking-title = -0.02em(Apple 标题字距)。
    仅 text-xl 及以上;tracking-* 工具类目前只用在 text-xs 小标签上,不冲突。 */
 html.theme-light .text-xl,
 html.theme-light .text-2xl,
@@ -886,37 +749,6 @@ html.theme-light .bg-red-400\/10 {
   outline-offset: -1px;
 }
 
-/* ---------- SkinSwitcher（座舱/Apple 分段切换器）：几何两象限统一，配色按象限分化 ---------- */
-/* 统一切换器规格 v1：28px 轨道 / 2px 内边距 / 24px 滑块 / 12px·600，几何由组件
-   Tailwind 类给定（src/components/SkinSwitcher.tsx）；本组规则只管配色——
-   座舱象限靠上方通用 remap 自然成形（轨道 --surface2 + --hairline 边 + inset 内圈，
-   激活段 .bg-cyan-500.text-white → --accent-fill + --on-accent）；Apple 象限呈
-   iOS 分段控件语义（填充灰轨道、透明边、浮起滑块带阴影、hover 只变字色不变底）。
-   容器选择器带 div 元素提级：压过上方 div.rounded-full.bg-zinc-800.border 的
-   inset 内圈规则（同 (0,3,2) 时靠源顺序在后取胜）。 */
-html.theme-light .skin-switcher-segment:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-html.theme-light.ui-apple div.skin-switcher {
-  background-color: var(--segment-track);
-  border-color: transparent;
-  box-shadow: none;
-}
-html.theme-light.ui-apple .skin-switcher-segment {
-  color: var(--ink2);
-}
-html.theme-light.ui-apple .skin-switcher-segment:hover {
-  background-color: transparent;
-  color: var(--ink);
-}
-html.theme-light.ui-apple .skin-switcher-segment[aria-pressed="true"],
-html.theme-light.ui-apple .skin-switcher-segment[aria-pressed="true"]:hover {
-  background-color: var(--segment-thumb);
-  color: var(--ink);
-  box-shadow: var(--segment-thumb-shadow);
-}
-
 /* ---------- slate aliases (TelemetryChart panel uses the slate scale) ---------- */
 /* dark theme leaves these at Tailwind defaults; light maps them onto the
  * same roles as their zinc counterparts above. */
@@ -959,7 +791,7 @@ html.theme-light .bg-black\/70.text-white {
    [&::-moz-range-track]:bg-zinc-800），Tailwind 生成的类名不是字面 .bg-zinc-800，
    上方通用重映射规则匹配不到，导致浅色下轨道仍是黑色。此处按生成的转义类名
    精确覆盖（Issue #169），只改颜色不动尺寸；轨道走 --raised 档（本就是为滑块
-   轨道设计的档位，Apple 象限自动跟随）。 */
+   轨道设计的档位）。 */
 html.theme-light .\[\&\:\:-webkit-slider-runnable-track\]\:bg-zinc-800::-webkit-slider-runnable-track {
   background-color: var(--raised);
 }
@@ -967,10 +799,10 @@ html.theme-light .\[\&\:\:-moz-range-track\]\:bg-zinc-800::-moz-range-track {
   background-color: var(--raised);
 }
 
-/* ---------- 主题/语言切换按钮（ThemeSwitcher/LanguageSwitcher）：三页面（DC/D/DD）统一渲染值 ---------- */
-/* 显式锁定 DC/D 浅色皮肤：底 #f4f6f9、边框 #ccd5df、inset 内圈 #d5dce4、
-   图标/文字 #3f4f63、hover #1a2330。放在文件末尾压过通用 .bg-zinc-800 的
-   outline 描边规则，保证与 DC/D 的 border+内圈双层视觉一致。 */
+/* ---------- 主题/语言切换按钮（ThemeSwitcher/LanguageSwitcher）：统一样式 ---------- */
+/* 底 --surface2、边框 --hairline、inset 内圈 --line-soft、文字 --ink2、hover --ink。
+   放在文件末尾压过通用 .bg-zinc-800 的 outline 描边规则，
+   保证 border+内圈的双层视觉一致。 */
 html.theme-light .theme-switcher-btn,
 html.theme-light .language-switcher-btn,
 html.theme-light .console-mute-btn,
@@ -982,7 +814,8 @@ html.theme-light .console-dev-toggle {
   border-color: var(--hairline);
   box-shadow: inset 0 0 0 1px var(--line-soft);
   color: var(--ink2);
-  /* 字体与 DC/D 逐值一致（同 theme-mus4 侧说明） */
+  /* 字体栈在此显式锁定一份完整栈；apple-deep.css §8 会把这组按钮的字体
+     统一回 system-ui 栈（同特异度、加载顺序在后胜出），此行为兜底基值 */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -1003,7 +836,7 @@ html.theme-light .console-dev-toggle:not([aria-checked="true"]):not(:disabled):h
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
-/* DEV 开启态：DC 蓝 #5cc8ff 双层边框，压过基础覆盖（基础覆盖 specificity 高于 Tailwind 单类） */
+/* DEV 开启态：accent 双层边框，压过基础覆盖（基础覆盖 specificity 高于 Tailwind 单类） */
 html.theme-light .console-dev-toggle[aria-checked="true"] {
   background: var(--accent-ui-a25);
   border-color: var(--accent-ui);
@@ -1014,7 +847,7 @@ html.theme-light .console-dev-toggle[aria-checked="true"] {
 html.theme-light .console-ota-btn:disabled {
   color: var(--ink3);
 }
-/* 静音激活态：DC 蓝 #5cc8ff（与 Drifter Console 一致），边框与内圈同色，保持双层视觉 */
+/* 静音激活态：accent 双层边框，边框与内圈同色，保持双层视觉 */
 html.theme-light .console-mute-btn[aria-pressed="true"] {
   border-color: var(--accent-ui);
   box-shadow: inset 0 0 0 1px var(--accent-ui);
@@ -1026,10 +859,10 @@ html.theme-light .car-connector-btn[aria-current="page"] {
   box-shadow: inset 0 0 0 1px var(--accent-ui);
   color: var(--accent-ui);
 }
-/* 标题左侧 logo：对齐 Drifter Console headerLogo —— 32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px，与 DC 一致）、圆角 8px、浅色主题边框 #d5dce4
-   （圆角显式锁定 8px，原因同深色侧：.rounded-lg 被主题改写为 12px；
-     box-sizing 显式 content-box：避免 Tailwind border-box 使边框占进 32px、图标比 DC 小一圈；
-     --r-logo 在 Apple 象限同为 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
+/* 标题左侧 logo：32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px）、圆角 8px、边框 --line-soft
+   （圆角显式锁定 8px，原因同深色侧：.rounded-lg 被主题改写为 18px；
+     box-sizing 显式 content-box：避免 Tailwind border-box 使边框占进 32px、图标小一圈；
+     --r-logo 保持 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
 html.theme-light .header-logo {
   box-sizing: content-box;
   border-radius: var(--r-logo);

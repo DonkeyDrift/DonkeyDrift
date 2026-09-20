@@ -15,7 +15,6 @@ import {
 } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
-import { useUiStyle } from '@/lib/uistyle';
 import {
   AlertCircle,
   ChevronLeft,
@@ -57,7 +56,7 @@ const MAX_CATCHUP_FRAMES = 10;
 const MAX_RESUME_LAG_FRAMES = 60;
 
 /** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
- *  canvas 占位底色按 --surface 随主题与 UI 风格（座舱/Apple）切换自动重取色。 */
+ *  canvas 占位底色按 --surface 随主题（深/浅）切换自动重取色。 */
 const cssVarColor = (name: string, fallback: string): string => {
   try {
     const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -144,8 +143,6 @@ const RecordStats = React.memo(({ steering, throttle }: RecordStatsProps) => {
 export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
-  // 订阅 UI 风格（座舱/Apple）：切换时 canvas 占位底色按 --surface 重取色
-  const uiStyle = useUiStyle();
   const tubPath = useStore((state) => state.tubPath);
   // TM 并入统一流程大页面（#178）：section 在视口内（active）时才响应全局快捷键
   const isTubManagerActive = active;
@@ -417,7 +414,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
         img?.removeEventListener('error', onError);
       };
     }
-  }, [currentImagePath, tubPath, theme, uiStyle, touchImageCache]);
+  }, [currentImagePath, tubPath, theme, touchImageCache]);
 
   // Playback loop: wall-clock scheduled — position derives from elapsed time
   // (start frame + elapsed/frameInterval), each rAF tick draws the newest

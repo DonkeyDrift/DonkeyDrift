@@ -15,7 +15,6 @@ import {
 } from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
-import { useUiStyle } from '@/lib/uistyle';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -49,7 +48,7 @@ const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
 /** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
  *  canvas 配色按语义角色（转向=--accent、油门=--warn、选区=--ok、删除标记=--bad）
- *  随主题与 UI 风格（座舱/Apple）切换自动重取色；fallback 为原深/浅硬编码值。 */
+ *  随主题（深/浅）切换自动重取色；fallback 为原深/浅硬编码值。 */
 const cssVarColor = (name: string, fallback: string): string => {
   try {
     const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -70,8 +69,6 @@ let globalSelectionAnchorIndex: number | null = null;
 export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) => {
   const { t } = useTranslation();
   const theme = useResolvedTheme();
-  // 订阅 UI 风格（座舱/Apple）：切换时 chart 数据/插件按新象限的 CSS 变量重取色
-  const uiStyle = useUiStyle();
   // TM 并入统一流程大页面（#178）：section 在视口内（active）时才响应全局快捷键
   const isTubManagerActive = active;
   const themeRef = useRef(theme);
@@ -247,11 +244,11 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     [ensureChartRenderLoop]
   );
 
-  // 主题/风格切换时同步 ref(供 canvas 插件读取)并触发一次重绘
+  // 主题切换时同步 ref(供 canvas 插件读取)并触发一次重绘
   useEffect(() => {
     themeRef.current = theme;
     requestChartRender();
-  }, [theme, uiStyle, requestChartRender]);
+  }, [theme, requestChartRender]);
 
   const flushPendingSelectionRange = useCallback(() => {
     selectionRangeFrameRef.current = null;
@@ -1308,7 +1305,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       },
       sampledIndices: sampledX,
     };
-  }, [records, zoomPercent, isSessionScoped, t, theme, uiStyle]);
+  }, [records, zoomPercent, isSessionScoped, t, theme]);
 
   useEffect(() => {
     sampledIndicesRef.current = sampledIndices;
