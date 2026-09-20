@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-09-20 (225)
+
+- fix(findcar): Find DKC 主机心跳加 DNS 抖动韧性——修复「主机在线、Find DKC 却搜不到」（根因：本机 DNS 解析连续故障时心跳全丢）
+  - 背景：2026-09-20 19:34–19:56 本机 systemd-resolved 对 `find-dkc.pages.dev` 的解析连续失败约 25 分钟（`socket.gaierror: [Errno -3] Temporary failure in name resolution`，journal 实测 15 次失败），同期 ESP32 心跳正常（网络通、只有本机 DNS 坏）；心跳 150s 一跳全部落空、超过网页 5.5 分钟在线窗口，Find DKC 显示主机离线。旧代码 `report_once` 无重试无兜底，launcher 循环失败后照样睡满 150s，DNS 一抖就丢跳。
+  - `donkeycar/findcar.py`：
+    - `report_once` 在线心跳对 DNS 失败有韧性：系统 DNS 失败（`_is_dns_failure` 沿 `URLError.reason`/`__cause__`/`__context__` 链识别 `socket.gaierror`）→ 隔 `DNS_RETRY_DELAY_SECONDS`(3s) 快重试一次 → 仍失败走 **DoH 兜底**：`_resolve_via_doh` 按 IP 直连阿里公共 DNS（`223.5.5.5`/`223.6.6.6`，`/resolve` dns-json，证书含 IP SAN；Cloudflare 1.1.1.1/1.0.0.1 本机实测超时不可用）解析 A 记录 → `_PinnedHTTPSConnection`（`http.client.HTTPSConnection` 子类：TCP 拨 IP、TLS SNI 与 `Host` 头保持原域名，Cloudflare anycast 按 SNI 路由）直连完成 POST。下线标记（state=offline）保持尽力而为单发，不在退出路径上拖延关停。
+    - 新增常量 `RETRY_INTERVAL_SECONDS`(30)、`USER_AGENT`（原内联 UA 提取共用）；全程纯标准库，兜底任何失败只记日志返回 False。
+    - DoH + 直连路径已在真实网络端到端实测：DoH 解析出 `172.66.44.129`、直连 IP POST `/report` 成功、`/devices` 确认心跳落库。
+  - `donkeycar/launcher/server.py`：`_findcar_report_once` 返回上报成败（未配置返回 None 不算失败）；`_findcar_reporter_loop` 上报失败时按 `min(RETRY_INTERVAL_SECONDS, 配置间隔)`（30s）快速补跳，恢复后回到正常间隔——故障恢复后半分钟内重新上线，不再干等 150s。
+  - 测试同步：`tests/test_findcar.py` 净增 5 条（`_is_dns_failure` 链识别、快重试成功不走 DoH、DoH 兜底直连成功（断言 SNI/Host/IP/path）、全兜底失败返回 False 不抛异常、offline 单发不重试）；`tests/test_launcher_findcar.py` 净增 3 条（成败标志透传、失败 30s 补跳后恢复 300s、未配置 None 保持正常间隔）→ 两文件 38 全过；全量套件除 `test_build_drift_clip.py::test_backslash_tub_path_default_out_name`（origin/Tony 上既有失败，与本改动无关，已实测确认）外通过。
+  - 注：仅 launcher 常驻服务（:8090）改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff `deploy-8000` 并重启 `donkeydrifter-launcher.service` 部署。
+
 ## 2026-09-18 (224)
 
 - feat(web-ui): Apple 象限深化——灰阶分层、语义色双轨、聚焦环、44pt 命中区、降级媒体特性与最小可用加载/错误态
