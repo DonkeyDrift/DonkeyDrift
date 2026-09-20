@@ -8,7 +8,7 @@
 ## Symptoms
 - **Error**: `net::ERR_ABORTED http://172.24.53.251:5188/api/trainer/models/preview?path=%2Fhome%2Fdkc%2Fprojects%2Fmycar%2Fmodels%2Fpilot_1778591936253.png`
 - **Endpoint**: `/api/trainer/models/preview`
-- **File**: `/home/dkc/projects/mycar/models/pilot_1778591936253.png` (PNG 图片)
+- **File**: `/home/user/projects/mycar/models/pilot_1778591936253.png` (PNG 图片)
 
 ## Environment
 - Frontend: Vite dev server on port 5188

@@ -49,8 +49,8 @@ class TestProbe:
 
         monkeypatch.setattr(dc_discovery.urllib.request, "urlopen", fake_urlopen)
 
-        assert dc_discovery._probe("192.168.3.46") == "http://192.168.3.46/"
-        assert calls == ["http://192.168.3.46/api/status"]
+        assert dc_discovery._probe("192.168.3.123") == "http://192.168.3.123/"
+        assert calls == ["http://192.168.3.123/api/status"]
 
     def test_missing_feature_returns_none(self, monkeypatch):
         # 缺 ap_ip= 字段：不是 MUS4 Drifter Console，不能命中
@@ -58,7 +58,7 @@ class TestProbe:
             dc_discovery.urllib.request, "urlopen",
             lambda url, timeout=None: make_urlopen_response(text="version=1.8.65"),
         )
-        assert dc_discovery._probe("192.168.3.46") is None
+        assert dc_discovery._probe("192.168.3.123") is None
 
     def test_no_features_returns_none(self, monkeypatch):
         # 普通路由器/其它设备首页特征：version= / ap_ip= 都没有
@@ -73,7 +73,7 @@ class TestProbe:
             dc_discovery.urllib.request, "urlopen",
             lambda url, timeout=None: make_urlopen_response(status=500, text=MUS4_STATUS_TEXT),
         )
-        assert dc_discovery._probe("192.168.3.46") is None
+        assert dc_discovery._probe("192.168.3.123") is None
 
     def test_network_error_returns_none(self, monkeypatch):
         def raise_timeout(url, timeout=None):
@@ -90,17 +90,17 @@ class TestProbe:
 
 class TestFindDrifterConsole:
     def test_cache_hit_skips_probing(self, monkeypatch):
-        dc_discovery._cache["url"] = "http://192.168.3.46/"
+        dc_discovery._cache["url"] = "http://192.168.3.123/"
         dc_discovery._cache["expires"] = dc_discovery.time.monotonic() + 60.0
 
         probe = MagicMock()
         monkeypatch.setattr(dc_discovery, "_probe", probe)
 
-        assert dc_discovery.find_drifter_console() == "http://192.168.3.46/"
+        assert dc_discovery.find_drifter_console() == "http://192.168.3.123/"
         probe.assert_not_called()
 
     def test_expired_cache_probes_again(self, monkeypatch):
-        dc_discovery._cache["url"] = "http://192.168.3.46/"
+        dc_discovery._cache["url"] = "http://192.168.3.123/"
         dc_discovery._cache["expires"] = dc_discovery.time.monotonic() - 1.0  # 已过期
 
         monkeypatch.setattr(
@@ -112,7 +112,7 @@ class TestFindDrifterConsole:
         assert dc_discovery._cache["url"] == "http://192.168.4.1/"
 
     def test_force_bypasses_cache(self, monkeypatch):
-        dc_discovery._cache["url"] = "http://192.168.3.46/"
+        dc_discovery._cache["url"] = "http://192.168.3.123/"
         dc_discovery._cache["expires"] = dc_discovery.time.monotonic() + 60.0
 
         monkeypatch.setattr(
@@ -147,18 +147,18 @@ class TestFindDrifterConsole:
 
         def fake_probe(ip):
             probed.append(ip)
-            if ip == "192.168.3.46":
-                return "http://192.168.3.46/"
+            if ip == "192.168.3.123":
+                return "http://192.168.3.123/"
             return None
 
         monkeypatch.setattr(dc_discovery, "_probe", fake_probe)
         monkeypatch.setattr(dc_discovery, "_local_lan_ip", lambda: "192.168.3.45")
 
-        assert dc_discovery.find_drifter_console() == "http://192.168.3.46/"
+        assert dc_discovery.find_drifter_console() == "http://192.168.3.123/"
         assert probed[0] == "192.168.4.1"  # AP 固定地址先探
-        assert "192.168.3.46" in probed
+        assert "192.168.3.123" in probed
         assert "192.168.3.45" not in probed  # 不探本机地址
-        assert dc_discovery._cache["url"] == "http://192.168.3.46/"
+        assert dc_discovery._cache["url"] == "http://192.168.3.123/"
         assert dc_discovery._cache["expires"] > dc_discovery.time.monotonic()
 
     def test_scan_skips_local_ip_candidates(self, monkeypatch):

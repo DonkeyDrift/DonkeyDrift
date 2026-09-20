@@ -220,9 +220,9 @@ class TestProtocolParseWifiRequest:
         """正常帧：WIFI|ssid|password。"""
         from donkeycar.parts.provisioning import ProvisioningProtocol
 
-        result = ProvisioningProtocol.parse_wifi_request("WIFI|newhome_iot|wxl922922")
+        result = ProvisioningProtocol.parse_wifi_request("WIFI|TestSSID|testpass123")
         assert result is not None
-        assert result == ("newhome_iot", "wxl922922")
+        assert result == ("TestSSID", "testpass123")
 
     def test_parse_ssid_empty(self):
         """SSID 为空字符串的情况。"""

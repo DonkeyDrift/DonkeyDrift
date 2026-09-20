@@ -77,8 +77,8 @@ def _find_mycar_project():
     cwd = Path.cwd()
     if _is_valid_project_dir(cwd):
         return cwd
-    # 搜索 /home/dkc/projects/mycar
-    known_path = Path("/home/dkc/projects/mycar")
+    # 搜索 ~/projects/mycar（按运行用户家目录展开）
+    known_path = Path.home() / "projects" / "mycar"
     if _is_valid_project_dir(known_path):
         return known_path
     return None

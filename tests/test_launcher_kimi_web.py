@@ -436,10 +436,10 @@ class TestLiveInstanceUrl:
         _write_instance(inst_dir, pid=os.getpid())
         token_file = tmp_path / "server.token"
         token_file.write_text("tok-xyz\n", encoding="utf-8")
-        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/dkc/projects")
+        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/testuser/projects")
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         url = kimi_web._live_instance_url(inst_dir, token_file,
-                                          cwd="/home/dkc/projects")
+                                          cwd="/home/testuser/projects")
         assert url == "http://192.168.3.10:58627/#token=tok-xyz"
 
     def test_mdns_preferred_for_local_instance(self, tmp_path, monkeypatch):
@@ -459,10 +459,10 @@ class TestLiveInstanceUrl:
         # 由调用方在目标目录另起（issue #168）
         inst_dir = tmp_path / "instances"
         _write_instance(inst_dir, pid=os.getpid())
-        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/dkc/projects/mycar")
+        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/testuser/projects/mycar")
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         assert kimi_web._live_instance_url(
-            inst_dir, tmp_path / "tk", cwd="/home/dkc/projects") is None
+            inst_dir, tmp_path / "tk", cwd="/home/testuser/projects") is None
 
     def test_cwd_proc_gone_treated_as_mismatch(self, tmp_path, monkeypatch):
         # /proc 读不到（进程刚消失/无权限）时按不匹配处理，不误复用
@@ -471,7 +471,7 @@ class TestLiveInstanceUrl:
         monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: None)
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         assert kimi_web._live_instance_url(
-            inst_dir, tmp_path / "tk", cwd="/home/dkc/projects") is None
+            inst_dir, tmp_path / "tk", cwd="/home/testuser/projects") is None
 
     def test_loopback_instance_not_lan_reachable_skipped(
             self, tmp_path, monkeypatch):
@@ -541,7 +541,7 @@ class TestLiveInstanceUrl:
 # launch_kimi_code_web
 # ===========================================================================
 class TestLaunchKimiCodeWeb:
-    def test_reuses_live_instance_without_spawning(self):
+    def test_reuses_live_instance_without_spawning(self, tmp_path):
         spawned = []
         seen = {}
 
@@ -552,7 +552,7 @@ class TestLaunchKimiCodeWeb:
             return "http://127.0.0.1:58627/#token=t0k"
 
         result = launch_kimi_code_web(
-            cwd="/home/dkc/projects", timeout_s=5.0,
+            cwd=str(tmp_path), timeout_s=5.0,
             live_url_fn=_live,
             popen_fn=_make_popen(spawned),
             create_session_fn=lambda port, token, cwd: "session_test-id")
@@ -560,7 +560,7 @@ class TestLaunchKimiCodeWeb:
                           "url": "http://192.168.3.10:58627/sessions/session_test-id?kimi_onboarded=1&kimi_origin=http%3A%2F%2F192.168.3.10%3A58627#token=t0k"}
         assert spawned == []  # 复用路径不起子进程
         # 复用探测带上了请求的 cwd（issue #168）
-        assert seen["cwd"] == "/home/dkc/projects"
+        assert seen["cwd"] == str(tmp_path)
 
     def test_spawn_success_captures_url_and_keeps_proc(self):
         proc = _FakeProc(payload=_WEB_BANNER, hold=True)
@@ -680,7 +680,7 @@ class TestEnsureSessionUrl:
         url = "http://192.168.3.10:58640/sessions/abc-123#token=t0k"
         called = []
         result = kimi_web._ensure_session_url(
-            url, "/home/dkc/projects",
+            url, "/home/testuser/projects",
             create_session_fn=lambda *a: called.append(a) or "should-not-be-used")
         assert result == url
         assert called == []  # create_session_fn 未被调用
@@ -695,15 +695,15 @@ class TestEnsureSessionUrl:
             return "new-sess-42"
 
         result = kimi_web._ensure_session_url(
-            url, "/home/dkc/projects", create_session_fn=fake_create)
+            url, "/home/testuser/projects", create_session_fn=fake_create)
         assert result == "http://192.168.3.10:58640/sessions/new-sess-42#token=t0k"
-        assert calls == [(58640, "t0k", "/home/dkc/projects")]
+        assert calls == [(58640, "t0k", "/home/testuser/projects")]
 
     def test_ensure_session_url_fails_gracefully(self):
         # create_session_fn 返回 None（创建失败）——返回原裸入口，浏览器显示会话列表
         url = "http://192.168.3.10:58640/#token=t0k"
         result = kimi_web._ensure_session_url(
-            url, "/home/dkc/projects",
+            url, "/home/testuser/projects",
             create_session_fn=lambda *a: None)
         assert result == url  # 原样返回，路径仍是 /
 
@@ -738,12 +738,12 @@ class TestCreateSession:
         monkeypatch.setattr(kimi_web.urllib.request, "urlopen", _fake_urlopen)
 
         result = kimi_web._create_session(
-            58640, "tok-xyz", "/home/dkc/projects")
+            58640, "tok-xyz", "/home/testuser/projects")
         assert result == "sess-abc"
         assert captured["url"] == "http://127.0.0.1:58640/api/v1/sessions"
         assert captured["method"] == "POST"
         assert json.loads(captured["data"]) == \
-            {"metadata": {"cwd": "/home/dkc/projects"}}
+            {"metadata": {"cwd": "/home/testuser/projects"}}
         assert captured["headers"]["Authorization"] == "Bearer tok-xyz"
         assert captured["headers"]["Content-type"] == "application/json"
 
