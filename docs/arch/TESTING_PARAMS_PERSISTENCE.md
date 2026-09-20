@@ -10,7 +10,7 @@ python manage.py drive
 
 **预期输出:**
 ```
-Parameters manager initialized. Config file: /home/dkc/mycar/drive_params.json
+Parameters manager initialized. Config file: /home/user/mycar/drive_params.json
 ```
 
 ### 2. 在浏览器中访问控制页面
@@ -128,7 +128,7 @@ nano ~/mycar/drive_params.json
 **服务器日志应该显示:**
 ```
 Parameters saved via WebSocket: True
-Parameters saved to /home/dkc/mycar/drive_params.json
+Parameters saved to /home/user/mycar/drive_params.json
 ```
 
 ### 11. 测试 Kd 参数范围
@@ -285,20 +285,20 @@ EOF
 
 ### 正常启动日志
 ```
-Parameters manager initialized. Config file: /home/dkc/mycar/drive_params.json
-Parameters loaded from /home/dkc/mycar/drive_params.json
+Parameters manager initialized. Config file: /home/user/mycar/drive_params.json
+Parameters loaded from /home/user/mycar/drive_params.json
 ```
 
 ### 首次运行日志
 ```
-Parameters manager initialized. Config file: /home/dkc/mycar/drive_params.json
+Parameters manager initialized. Config file: /home/user/mycar/drive_params.json
 No saved parameters found, using defaults
 ```
 
 ### 参数保存日志
 ```
 Parameters saved via WebSocket: True
-Parameters saved to /home/dkc/mycar/drive_params.json
+Parameters saved to /home/user/mycar/drive_params.json
 ```
 
 ### 参数验证失败日志

@@ -21,7 +21,7 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     // TubLoader
     'tub.loaderTitle': 'Tub 加载器',
     'tub.loaderHoverSubtitle': '选择 Tub 目录',
-    'tub.pathPlaceholder': 'Tub 路径，例如 /home/dkc/projects/mycar/data',
+    'tub.pathPlaceholder': 'Tub 路径，例如 ~/projects/mycar/data',
     'tub.pathInputAria': 'Tub 路径输入框',
     'tub.browse': '浏览',
     'tub.browseAria': '浏览 Tub 目录',
@@ -78,7 +78,7 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     // TubLoader
     'tub.loaderTitle': 'Tub Loader',
     'tub.loaderHoverSubtitle': 'Select a tub directory',
-    'tub.pathPlaceholder': 'Tub path, e.g. /home/dkc/projects/mycar/data',
+    'tub.pathPlaceholder': 'Tub path, e.g. ~/projects/mycar/data',
     'tub.pathInputAria': 'Tub path input field',
     'tub.browse': 'Browse',
     'tub.browseAria': 'Browse tub directory',

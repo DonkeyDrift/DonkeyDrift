@@ -1280,8 +1280,8 @@ def test_endpoint_passes_cwd_through(http_server, monkeypatch):
 
     monkeypatch.setattr(launcher_server, "launch_dsh_web", fake)
     _post(http_server + "/api/launch/dsh",
-          json.dumps({"cwd": "/home/dkc/projects"}).encode())
-    assert seen == ["/home/dkc/projects"]
+          json.dumps({"cwd": "/home/testuser/projects"}).encode())
+    assert seen == ["/home/testuser/projects"]
 
 
 def test_endpoint_defaults_cwd_to_projects(http_server, monkeypatch):

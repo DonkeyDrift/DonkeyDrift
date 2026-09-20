@@ -236,7 +236,7 @@ MVP 可先返回常见 image-only 类型：
   "models": [
     {
       "name": "pilot.tflite",
-      "path": "/home/dkc/projects/mycar/models/pilot.tflite",
+      "path": "/home/user/projects/mycar/models/pilot.tflite",
       "format": "tflite",
       "size": 123456,
       "modified": "2026-05-25T10:00:00",
@@ -252,9 +252,9 @@ MVP 可先返回常见 image-only 类型：
 
 ```json
 {
-  "model_path": "/home/dkc/projects/mycar/models/pilot.tflite",
+  "model_path": "/home/user/projects/mycar/models/pilot.tflite",
   "model_type": "tflite_linear",
-  "config_path": "/home/dkc/projects/mycar"
+  "config_path": "/home/user/projects/mycar"
 }
 ```
 
@@ -273,7 +273,7 @@ MVP 可先返回常见 image-only 类型：
   "pilot": {
     "id": "pilot-abc123",
     "name": "pilot.tflite",
-    "model_path": "/home/dkc/projects/mycar/models/pilot.tflite",
+    "model_path": "/home/user/projects/mycar/models/pilot.tflite",
     "model_type": "tflite_linear"
   }
 }
@@ -295,7 +295,7 @@ MVP 可先返回常见 image-only 类型：
     {
       "id": "pilot-abc123",
       "name": "pilot.tflite",
-      "model_path": "/home/dkc/projects/mycar/models/pilot.tflite",
+      "model_path": "/home/user/projects/mycar/models/pilot.tflite",
       "model_type": "tflite_linear",
       "loaded_at": "2026-05-25T10:00:00"
     }
@@ -323,7 +323,7 @@ MVP 可先返回常见 image-only 类型：
 ```json
 {
   "record_index": 0,
-  "config_path": "/home/dkc/projects/mycar",
+  "config_path": "/home/user/projects/mycar",
   "user_angle_field": "user/angle",
   "user_throttle_field": "user/throttle",
   "pilot_angle_field": "pilot/angle",
@@ -400,8 +400,8 @@ MVP 可先返回常见 image-only 类型：
 
 ```json
 {
-  "config_path": "/home/dkc/projects/mycar",
-  "tub_path": "/home/dkc/projects/mycar/data",
+  "config_path": "/home/user/projects/mycar",
+  "tub_path": "/home/user/projects/mycar/data",
   "start": 0,
   "limit": 1000,
   "user_angle_field": "user/angle",

@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-09-20 (225)
+
+- fix(security): 隐私泄露审计清理——测试真实 Wi-Fi 凭据占位化、私人路径/内网 IP 脱敏、TestSprite 产物取消跟踪
+  - 背景：与 Firmware 同步做两仓库 .gitignore / 文档 / 私人文件全面审计（固件侧见 Firmware v1.9.4 条目），清理 DonkeyDrift 侧已入库的私人信息：测试用例里的真实家庭 Wi-Fi SSID/密码、systemd 模板与代码默认值里的本机绝对路径、前端 i18n 占位文案与多份文档中的用户名/内网 IP。
+  - 凭据清理：`donkeycar/tests/test_provisioning.py` 的 `WIFI|newhome_iot|wxl922922` 解析用例改占位 `TestSSID`/`testpass123`（与第 20 条「测试一律用占位凭据」对齐）。
+  - 代码与默认值脱敏：
+    - `donkeycar/launcher/donkeydrifter-launcher.service` 改为 `<user>` 占位部署模板（本机实际 unit 在 `~/.config/systemd/user/`，不受影响）；
+    - `donkeycar/launcher/server.py` mycar 回退搜索路径 `/home/dkc/projects/mycar` → `Path.home() / "projects" / "mycar"`（本机行为完全等价）；
+    - `donkeycar/management/base.py` 三处 `--path` 死默认值（指向本机已不存在的 `/home/dkc/projects/donkeycar/web_ui`）→ `./web_ui`（与 README 用法一致）；
+    - `web_ui/backend/simcollect_engine.py` 默认采集脚本路径 → `os.path.expanduser("~/projects/mycar/collect_sim_mac.sh")`；
+    - `donkeycar/launcher/terminal.py`、`dc_discovery.py`、`kimi_web.py`、`donkeycar/parts/provisioning.py`、`donkeycar/templates/myconfig.py` 注释/docstring 中的用户名与内网 IP 示例中性化。
+  - 前端：`web_ui/frontend/src/i18n/messages/common.ts`、`tubnav.ts` 共 4 条路径占位文案 `/home/dkc/projects/mycar` → `~/projects/mycar`；`web_ui/frontend/.gitignore` 补 `testsprite_tests/tmp/`。
+  - 取消跟踪：`web_ui/frontend/testsprite_tests/tmp/` 下 6 个 TestSprite 运行产物（含本机路径的 config.json / raw_report.md / test_results.json 等）`git rm --cached`（本地保留）。
+  - 文档脱敏：9 份 docs（arch/Rfc/guide/plan/superpowers/valid）中的 `/home/dkc` → `/home/user`、`C:/Users/cross` → `C:/Users/<user>`。
+  - 测试同步：`tests/test_launcher_service_unit.py`（断言跟随模板占位）、`tests/test_launcher_dsh_web.py` 与 `tests/test_launcher_kimi_web.py`（fixture 路径 `/home/testuser/`，其中 `test_reuses_live_instance_without_spawning` 的 cwd 改用 `tmp_path`——原用例隐式依赖本机 `/home/dkc/projects` 真实存在）、`web_ui/backend/tests/test_simcollect.py`、`web_ui/frontend/src/components/drive/SimCollectCard.test.tsx`、`donkeycar/tests/test_dc_discovery.py`（fixture IP `192.168.3.123`）。pytest 全量 958 通过（`tests/test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 为 origin/Tony 既有失败，与本改动无关——还原 base.py 后仍失败，反斜杠路径在 POSIX 下的 stem 提取问题）；web_ui 后端 554 项、SimCollectCard vitest 5 项通过。
+
 ## 2026-09-18 (224)
 
 - feat(web-ui): Apple 象限深化——灰阶分层、语义色双轨、聚焦环、44pt 命中区、降级媒体特性与最小可用加载/错误态

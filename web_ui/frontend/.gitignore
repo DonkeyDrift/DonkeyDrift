@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# TestSprite 运行产物（本机生成，不入库）
+testsprite_tests/tmp/

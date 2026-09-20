@@ -872,8 +872,8 @@ class Tui(BaseCommand):
 class Web(BaseCommand):
     def parse_args(self, args):
         parser = argparse.ArgumentParser(prog='web', usage='%(prog)s [options]')
-        parser.add_argument('--path', default='/home/dkc/projects/donkeycar/web_ui',
-                            help='web_ui 根目录路径 (默认: /home/dkc/projects/donkeycar/web_ui)')
+        parser.add_argument('--path', default='./web_ui',
+                            help='web_ui 根目录路径 (默认: ./web_ui)')
         parser.add_argument('--frontend-port', type=int, default=5188,
                             help='前端端口 (默认: 5188)')
         parser.add_argument('--backend-port', type=int, default=8000,
@@ -1268,8 +1268,8 @@ class Drive(Web):
 
     def parse_args(self, args):
         parser = argparse.ArgumentParser(prog='drive', usage='%(prog)s [options]')
-        parser.add_argument('--path', default='/home/dkc/projects/donkeycar/web_ui',
-                            help='web_ui 根目录路径 (默认: /home/dkc/projects/donkeycar/web_ui)')
+        parser.add_argument('--path', default='./web_ui',
+                            help='web_ui 根目录路径 (默认: ./web_ui)')
         parser.add_argument('--car', default=None,
                             help='车目录路径（须含 manage.py，默认: 当前目录）')
         parser.add_argument('--model', default=None,
@@ -1441,8 +1441,8 @@ class InstallWebUI(BaseCommand):
             description='Install/repair Web UI backend (Python) and frontend (Node) dependencies.'
         )
         parser.add_argument(
-            '--path', default='/home/dkc/projects/donkeycar/web_ui',
-            help='web_ui 根目录路径 (默认: /home/dkc/projects/donkeycar/web_ui)',
+            '--path', default='./web_ui',
+            help='web_ui 根目录路径 (默认: ./web_ui)',
         )
         parser.add_argument(
             '--no-backend', action='store_true',

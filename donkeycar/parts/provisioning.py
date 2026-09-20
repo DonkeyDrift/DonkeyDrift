@@ -98,7 +98,7 @@ def _enum_inet_entries():
     entries = []
     for line in result.stdout.splitlines():
         # -o 单行格式：
-        # "2: wlp1s0    inet 192.168.3.41/24 brd 192.168.3.255 scope global ..."
+        # "2: wlp1s0    inet 192.168.3.x/24 brd 192.168.3.255 scope global ..."
         parts = line.split()
         if len(parts) < 4 or parts[2] != "inet":
             continue

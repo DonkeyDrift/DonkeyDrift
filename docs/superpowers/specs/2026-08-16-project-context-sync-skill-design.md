@@ -25,7 +25,7 @@
 ## 3. Skill 元数据
 
 - `name`: `project-context-sync`
-- 文件路径: `~/.agents/skills/project-context-sync/SKILL.md`（Windows 本机为 `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md`）
+- 文件路径: `~/.agents/skills/project-context-sync/SKILL.md`（Windows 本机为 `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md`）
 - frontmatter 格式遵循 Kimi Code skill 约定：
 
 ```markdown
