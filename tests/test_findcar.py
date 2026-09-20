@@ -148,14 +148,24 @@ def test_build_payload_lan_ip_failure_falls_back_to_empty(monkeypatch):
 
 
 class _FakeResponse:
+    def __init__(self, payload=b"ok"):
+        self._payload = payload
+
     def read(self):
-        return b"ok"
+        return self._payload
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         return False
+
+
+def _dns_error():
+    """模拟系统 DNS 失效：urllib 把 socket.gaierror 包进 URLError.reason。"""
+    return urllib.error.URLError(
+        socket.gaierror(-3, "Temporary failure in name resolution")
+    )
 
 
 def test_report_once_posts_json_and_returns_true(monkeypatch):
@@ -220,6 +230,130 @@ def test_report_once_empty_url_returns_false(monkeypatch, caplog):
     )
 
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# DNS 抖动韧性（快重试 + DoH 兜底直连）
+# ---------------------------------------------------------------------------
+
+
+def test_is_dns_failure_recognizes_gaierror_in_chain():
+    dns_err = urllib.error.URLError(
+        socket.gaierror(-3, "Temporary failure in name resolution")
+    )
+    assert findcar._is_dns_failure(dns_err) is True
+    assert findcar._is_dns_failure(socket.gaierror(-2, "Name or service not known")) is True
+    assert findcar._is_dns_failure(urllib.error.URLError("boom")) is False
+    assert findcar._is_dns_failure(urllib.error.URLError(TimeoutError("timed out"))) is False
+
+
+def test_report_once_dns_failure_quick_retry_succeeds(monkeypatch):
+    """系统 DNS 秒级抖动：快重试一次即恢复，不触发 DoH 兜底。"""
+    calls = []
+
+    def flaky_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        if len(calls) == 1:
+            raise _dns_error()
+        return _FakeResponse()
+
+    monkeypatch.setattr(findcar.urllib.request, "urlopen", flaky_urlopen)
+    monkeypatch.setattr(findcar.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(findcar, "_detect_lan_ip", lambda: "192.168.3.10")
+
+    cfg = findcar.FindCarConfig(url="https://find-dkc.pages.dev", enabled=True)
+    assert findcar.report_once(cfg, 8000) is True
+    # 首发 + 快重试共两次，未走 DoH
+    assert calls == ["https://find-dkc.pages.dev/report"] * 2
+
+
+def test_report_once_dns_failure_recovers_via_doh(monkeypatch):
+    """系统 DNS 持续失效：DoH 兜底解析 + 直连 IP（SNI/Host 保持原域名）上报成功。"""
+    report_calls = []
+
+    def urlopen(req, timeout=None):
+        if "/resolve?" in req.full_url:
+            payload = json.dumps(
+                {"Answer": [{"type": 1, "data": "104.21.36.120"}]}
+            ).encode("utf-8")
+            return _FakeResponse(payload)
+        report_calls.append(req.full_url)
+        raise _dns_error()
+
+    monkeypatch.setattr(findcar.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(findcar.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(findcar, "_detect_lan_ip", lambda: "192.168.3.10")
+
+    connections = []
+
+    class _FakeConn:
+        def __init__(self, sni_host, ip, timeout):
+            self.sni_host = sni_host
+            self.ip = ip
+            connections.append(self)
+
+        def request(self, method, path, body=None, headers=None):
+            self.method = method
+            self.path = path
+            self.headers = headers
+
+        def getresponse(self):
+            class _Resp:
+                status = 200
+
+                def read(self):
+                    return b""
+
+            return _Resp()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(findcar, "_PinnedHTTPSConnection", _FakeConn)
+
+    cfg = findcar.FindCarConfig(url="https://find-dkc.pages.dev", enabled=True)
+    assert findcar.report_once(cfg, 8000) is True
+
+    # 常规路径首发 + 快重试都 DNS 失败，随后走 DoH 直连
+    assert report_calls == ["https://find-dkc.pages.dev/report"] * 2
+    assert len(connections) == 1
+    conn = connections[0]
+    assert conn.sni_host == "find-dkc.pages.dev"
+    assert conn.ip == "104.21.36.120"
+    assert conn.method == "POST"
+    assert conn.path == "/report"
+    assert conn.headers["Host"] == "find-dkc.pages.dev"
+
+
+def test_report_once_dns_failure_all_fallbacks_fail_returns_false(monkeypatch):
+    """系统 DNS 与 DoH 兜底都失败：返回 False、不抛异常（循环下一跳再试）。"""
+    def raise_urlopen(req, timeout=None):
+        raise _dns_error()
+
+    monkeypatch.setattr(findcar.urllib.request, "urlopen", raise_urlopen)
+    monkeypatch.setattr(findcar.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(findcar, "_detect_lan_ip", lambda: "192.168.3.10")
+
+    cfg = findcar.FindCarConfig(url="https://find-dkc.pages.dev", enabled=True)
+    assert findcar.report_once(cfg, 8000) is False
+
+
+def test_report_once_offline_state_skips_dns_retry(monkeypatch):
+    """下线标记保持尽力而为单发：DNS 失败不重试、不走 DoH，绝不拖延关停。"""
+    calls = []
+
+    def raise_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        raise _dns_error()
+
+    monkeypatch.setattr(findcar.urllib.request, "urlopen", raise_urlopen)
+    monkeypatch.setattr(findcar, "_detect_lan_ip", lambda: "192.168.3.10")
+
+    cfg = findcar.FindCarConfig(url="https://find-dkc.pages.dev", enabled=True)
+    result = findcar.report_once(cfg, 8090, state=findcar.STATE_OFFLINE, timeout=1)
+
+    assert result is False
+    assert calls == ["https://find-dkc.pages.dev/report"]  # 只发一次
 
 
 # ---------------------------------------------------------------------------

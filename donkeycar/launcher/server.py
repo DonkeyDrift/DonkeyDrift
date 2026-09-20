@@ -890,13 +890,17 @@ def _start_hostip_reporter():
 # 否则报 launcher 自身端口（点 IP 落到本菜单页，可一键「打开 DonkeyDrifter」）。
 
 def _findcar_report_once(port_fallback):
-    """向 Find DKC 上报一次主机心跳；未配置时直接返回。"""
+    """向 Find DKC 上报一次主机心跳。
+
+    返回 True/False 表示上报成败（循环据此决定是否快速补跳）；
+    未配置时返回 None（不算失败，按正常间隔走）。
+    """
     cfg = findcar.load_config()
     if not findcar.is_configured(cfg):
-        return
+        return None
     inst = find_live_instance()
     port = inst["backend_port"] if inst else port_fallback
-    findcar.report_once(cfg, port)
+    return findcar.report_once(cfg, port)
 
 
 def _findcar_reporter_loop(port_fallback):
@@ -904,14 +908,20 @@ def _findcar_reporter_loop(port_fallback):
 
     每轮重新读配置：网页 /api/findcar/config 改了开关/地址/间隔后
     无需重启 launcher，下一跳即生效。
+
+    上报失败时不睡满整个间隔，按 findcar.RETRY_INTERVAL_SECONDS（30s）
+    快速补跳——DNS/网络抖动期间也能在恢复后半分钟内重新上线，而不是
+    干等 150s 间隔，避免 Find DKC 网页上「主机其实在、却显示离线」。
     """
     while True:
         interval = findcar.DEFAULT_INTERVAL_SECONDS
         try:
-            _findcar_report_once(port_fallback)
+            ok = _findcar_report_once(port_fallback)
             cfg = findcar.load_config()
             if cfg.interval_seconds > 0:
                 interval = cfg.interval_seconds
+            if ok is False:
+                interval = min(findcar.RETRY_INTERVAL_SECONDS, interval)
         except Exception:
             pass
         threading.Event().wait(interval)

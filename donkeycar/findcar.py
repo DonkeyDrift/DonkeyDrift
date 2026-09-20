@@ -11,11 +11,15 @@ https://find-dkc.pages.dev/ 打开即列出本机。去 token 公开上报，无
 接口读写（web_ui/backend/findcar.py，与本模块共用 ~/.donkeycar_findcar.json）。
 """
 
+import http.client
 import json
 import logging
 import socket
+import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +35,20 @@ CONFIG_PATH: Path = Path.home() / ".donkeycar_findcar.json"
 DEFAULT_INTERVAL_SECONDS = 150
 # 下线标记是尽力而为：超时短、失败只记日志，绝不在退出路径上卡住关停。
 OFFLINE_TIMEOUT_SECONDS = 3
+# DNS 解析失败后的快重试间隔（吸收秒级抖动）；仍失败再走 DoH 兜底。
+DNS_RETRY_DELAY_SECONDS = 3
+# 上报失败后的快速补跳间隔（launcher 循环用）：不等完整 150s，30s 后补一跳，
+# 缩短 DNS/网络抖动的恢复时间。
+RETRY_INTERVAL_SECONDS = 30
+# DoH 兜底解析端点：按 IP 直连（证书含 IP SAN），系统 DNS 失效时仍可解析。
+# 用阿里公共 DNS（223.5.5.5/223.6.6.6，dns-json 协议 /resolve 路径）——
+# Cloudflare 的 1.1.1.1/1.0.0.1 在家庭宽带下实测超时不可用（2026-09-20 实测）。
+DOH_SERVERS = ("223.5.5.5", "223.6.6.6")
+# Cloudflare 会拦截 Python-urllib 默认 UA（403）；伪装成浏览器 UA 才能通过。
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/152 Safari/537.36 DonkeyDrift-FindCar/1.0"
+)
 
 STATE_ONLINE = "online"
 STATE_OFFLINE = "offline"
@@ -139,33 +157,160 @@ def build_payload(port: int, state: str = STATE_ONLINE) -> dict:
     }
 
 
+def _post_report(url: str, body: bytes, timeout: int) -> None:
+    """经系统 DNS 常规 POST 一次心跳；成功静默返回，失败抛异常由调用方分类。"""
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        response.read()
+
+
+def _is_dns_failure(err: BaseException) -> bool:
+    """异常链（URLError.reason / __cause__ / __context__）里是否是 DNS 解析失败。"""
+    seen = set()
+    current = err
+    while current is not None and id(current) not in seen:
+        if isinstance(current, socket.gaierror):
+            return True
+        seen.add(id(current))
+        if not isinstance(current, BaseException):
+            break  # URLError.reason 可能是字符串等非异常对象
+        reason = getattr(current, "reason", None)
+        if reason is not None:
+            current = reason
+        else:
+            current = current.__cause__ or current.__context__
+    return False
+
+
+def _resolve_via_doh(hostname: str, timeout: int) -> Optional[str]:
+    """系统 DNS 失效时的兜底解析：按 IP 直连阿里 DoH（dns-json）取 A 记录，失败返回 None。"""
+    for server in DOH_SERVERS:
+        url = f"https://{server}/resolve?name={hostname}&type=A"
+        request = urllib.request.Request(
+            url, headers={"Accept": "application/dns-json", "User-Agent": USER_AGENT}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            logger.warning("findcar DoH 兜底解析失败（server=%s）", server, exc_info=True)
+            continue
+        for answer in data.get("Answer", []):
+            if answer.get("type") != 1:
+                continue
+            candidate = str(answer.get("data", "")).strip()
+            try:
+                return str(IPv4Address(candidate))
+            except ValueError:
+                continue
+    return None
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """直连指定 IP 的 HTTPS 连接：TCP 拨 IP，TLS SNI 与 Host 头保持原域名。
+
+    Cloudflare 是 anycast：系统 DNS 失效时按 DoH 解析出的 IP 直连，SNI 带上
+    原域名即可正确路由，证书校验也仍按原域名进行。
+    """
+
+    def __init__(self, sni_host: str, ip: str, timeout: int):
+        super().__init__(ip, timeout=timeout)
+        self._sni_host = sni_host
+
+    def connect(self):
+        self.sock = socket.create_connection((self.host, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._sni_host)
+
+
+def _post_report_via_ip(parsed: urllib.parse.SplitResult, ip: str, body: bytes, timeout: int) -> None:
+    """DoH 兜底路径：直连 IP 完成 POST；非 2xx 或传输异常都抛出。"""
+    host = parsed.hostname
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+    conn = _PinnedHTTPSConnection(host, ip, timeout)
+    try:
+        conn.request(
+            "POST",
+            path,
+            body=body,
+            headers={
+                "Host": host,
+                "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
+            },
+        )
+        response = conn.getresponse()
+        response.read()
+        if response.status >= 400:
+            raise OSError(f"HTTP {response.status}")
+    finally:
+        conn.close()
+
+
 def report_once(
     cfg: FindCarConfig, port: int, state: str = STATE_ONLINE, timeout: int = 8
 ) -> bool:
-    """通过 HTTPS POST 上报一次心跳；成功返回 True，异常返回 False。"""
+    """通过 HTTPS POST 上报一次心跳；成功返回 True，异常返回 False。
+
+    在线心跳对 DNS 抖动有韧性：系统 DNS 解析失败时先隔几秒快重试一次，
+    仍失败则走 DoH 兜底解析 + 按 IP 直连（SNI/Host 保持原域名）再试——
+    「网络通、只是本机 DNS 坏」时心跳仍能送达。下线标记（state=offline）
+    保持尽力而为的单发，不在退出路径上拖延关停。
+    """
     base = cfg.url.strip().rstrip("/")
     if not base:
         logger.warning("findcar 心跳未上报：未配置 Pages Functions URL")
         return False
     url = base + "/report"
     body = json.dumps(build_payload(port, state), ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            # Cloudflare 会拦截 Python-urllib 默认 UA（403）；伪装成浏览器 UA 才能通过。
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/152 Safari/537.36 DonkeyDrift-FindCar/1.0",
-        },
-        method="POST",
-    )
+
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            response.read()
+        _post_report(url, body, timeout)
+        return True
+    except Exception as err:
+        if state != STATE_ONLINE or not _is_dns_failure(err):
+            logger.warning("findcar 心跳上报失败（url=%s）", url, exc_info=True)
+            return False
+
+    # 系统 DNS 失败：先快重试一次，吸收秒级抖动
+    logger.warning(
+        "findcar 心跳 DNS 解析失败（url=%s），%ds 后重试一次",
+        url,
+        DNS_RETRY_DELAY_SECONDS,
+    )
+    time.sleep(DNS_RETRY_DELAY_SECONDS)
+    try:
+        _post_report(url, body, timeout)
+        return True
+    except Exception as err:
+        if not _is_dns_failure(err):
+            logger.warning("findcar 心跳上报失败（url=%s）", url, exc_info=True)
+            return False
+
+    # 系统 DNS 仍不可用：DoH 兜底解析 + 直连 IP
+    parsed = urllib.parse.urlsplit(url)
+    host = parsed.hostname
+    ip = _resolve_via_doh(host, timeout) if host and parsed.scheme == "https" else None
+    if not ip:
+        logger.warning("findcar 心跳上报失败：DoH 兜底也解析不出 %s", host)
+        return False
+    try:
+        _post_report_via_ip(parsed, ip, body, timeout)
+        logger.info("findcar 心跳经 DoH 兜底直连 %s（%s）上报成功", host, ip)
         return True
     except Exception:
-        logger.warning("findcar 心跳上报失败（url=%s）", url, exc_info=True)
+        logger.warning(
+            "findcar 心跳 DoH 兜底直连失败（%s -> %s）", host, ip, exc_info=True
+        )
         return False
 
 
