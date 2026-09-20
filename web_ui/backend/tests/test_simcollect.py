@@ -52,14 +52,14 @@ def test_parse_step_line_no_match():
 
 def test_parse_result_line():
     from simcollect_engine import parse_result_line
-    line = "RESULT steps=1500 mean_cte=2.4094 max_cte=7.0614 crashed=0 out=/home/dkc/projects/mycar/sim_collect_x"
+    line = "RESULT steps=1500 mean_cte=2.4094 max_cte=7.0614 crashed=0 out=/home/testuser/projects/mycar/sim_collect_x"
     res = parse_result_line(line)
     assert res == {
         "steps": 1500,
         "mean_cte": 2.4094,
         "max_cte": 7.0614,
         "crashed": False,
-        "result_out": "/home/dkc/projects/mycar/sim_collect_x",
+        "result_out": "/home/testuser/projects/mycar/sim_collect_x",
     }
 
 

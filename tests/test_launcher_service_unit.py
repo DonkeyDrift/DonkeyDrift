@@ -31,4 +31,4 @@ def test_launcher_unit_still_runs_console_module():
     source = _unit_source()
 
     assert "python3 -m donkeycar.launcher" in source
-    assert "WorkingDirectory=/home/dkc/projects/mycar" in source
+    assert "WorkingDirectory=/home/<user>/projects/mycar" in source

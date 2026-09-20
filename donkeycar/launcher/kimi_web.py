@@ -35,7 +35,7 @@ issue #168（打开后是"全新状态"）的三处约束：
   实例、kimi 默认端口被占时又会自动顺延，origin 漂移会让 KCW 表现为
   首次使用。固定专属端口后入口 URL 的 origin 稳定，偏好不再"被清空"。
 - 入口 host 用 mDNS 主机名优先、局域网 IP 兜底：origin 还含 host。本机
-  在家庭 Wi-Fi 下走 DHCP，实测一天内 IP 连续变化（192.168.3.57 → .103 →
+  在家庭 Wi-Fi 下走 DHCP，实测一天内 IP 连续变化（192.168.3.x 网段内 .57 → .103 →
   .62），用 IP 做 origin 时每次换 IP 都会让 KCW 的 localStorage（置顶
   ``kimi-web.pinned-sessions``/权限模式 ``kimi-web.permission``/收藏模型
   ``kimi-web.starred-models`` 等）被"清空"，用户反复丢置顶、自主模式变
@@ -299,7 +299,7 @@ def _entry_host():
     """KCW 入口 URL 的入口 host：mDNS 主机名优先，其次本机局域网 IP。
 
     origin 含 host，而本机在家庭 Wi-Fi 下走 DHCP，IP 会随时变化（实测一天
-    内 192.168.3.57 → .103 → .62）。用 IP 做 origin 时，IP 每变一次，KCW
+    内 .57 → .103 → .62 漂移）。用 IP 做 origin 时，IP 每变一次，KCW
     浏览器端的 localStorage（置顶 ``kimi-web.pinned-sessions``、权限模式
     ``kimi-web.permission``、收藏模型 ``kimi-web.starred-models`` 等）就按
     新 origin 重新隔离，用户表现为"置顶全没了、自主模式变逐条确认、收藏

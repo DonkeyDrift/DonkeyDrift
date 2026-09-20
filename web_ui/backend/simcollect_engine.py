@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # 采集编排脚本路径（可被环境变量覆盖）
 SIM_COLLECT_SCRIPT = os.environ.get(
-    "SIM_COLLECT_SCRIPT", "/home/dkc/projects/mycar/collect_sim_mac.sh"
+    "SIM_COLLECT_SCRIPT", os.path.expanduser("~/projects/mycar/collect_sim_mac.sh")
 )
 
 # 进度行：[collect] step 123: steer=-0.55 thr=0.18 ... cte=1.024 speed=1.566

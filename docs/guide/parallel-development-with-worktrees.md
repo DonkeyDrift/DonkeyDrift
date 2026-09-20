@@ -9,9 +9,9 @@
 当前仓库已配置以下两个独立工作区：
 
 ```
-/home/dkc/projects/DonkeyDrifter                                v1.6.0-UX          [主仓库]
-/home/dkc/projects/DonkeyDrifter/.worktrees/ui-enhancements     feature/ui-enhancements
-/home/dkc/projects/DonkeyDrifter/.worktrees/connector-features  feature/connector-features
+/home/user/projects/DonkeyDrifter                                v1.6.0-UX          [主仓库]
+/home/user/projects/DonkeyDrifter/.worktrees/ui-enhancements     feature/ui-enhancements
+/home/user/projects/DonkeyDrifter/.worktrees/connector-features  feature/connector-features
 ```
 
 ---
@@ -21,7 +21,7 @@
 ### 进入目录
 
 ```bash
-cd /home/dkc/projects/DonkeyDrifter/.worktrees/ui-enhancements
+cd /home/user/projects/DonkeyDrifter/.worktrees/ui-enhancements
 ```
 
 ### 负责范围
@@ -40,7 +40,7 @@ cd /home/dkc/projects/DonkeyDrifter/.worktrees/ui-enhancements
 
 启动 Kimi CLI 时，请明确告知其工作目录和分支：
 
-> 你在 `/home/dkc/projects/DonkeyDrifter/.worktrees/ui-enhancements` 目录下工作，分支是 `feature/ui-enhancements`。请专注于修改 `web_ui` 前端相关的代码。不要修改 connector 相关的后端逻辑。
+> 你在 `/home/user/projects/DonkeyDrifter/.worktrees/ui-enhancements` 目录下工作，分支是 `feature/ui-enhancements`。请专注于修改 `web_ui` 前端相关的代码。不要修改 connector 相关的后端逻辑。
 
 ---
 
@@ -49,7 +49,7 @@ cd /home/dkc/projects/DonkeyDrifter/.worktrees/ui-enhancements
 ### 进入目录
 
 ```bash
-cd /home/dkc/projects/DonkeyDrifter/.worktrees/connector-features
+cd /home/user/projects/DonkeyDrifter/.worktrees/connector-features
 ```
 
 ### 负责范围
@@ -66,7 +66,7 @@ cd /home/dkc/projects/DonkeyDrifter/.worktrees/connector-features
 
 启动 Kimi CLI 时，请明确告知其工作目录和分支：
 
-> 你在 `/home/dkc/projects/DonkeyDrifter/.worktrees/connector-features` 目录下工作，分支是 `feature/connector-features`。请专注于 Connectors 后端功能和车辆端桥接代码。不要修改前端 UI 组件。
+> 你在 `/home/user/projects/DonkeyDrifter/.worktrees/connector-features` 目录下工作，分支是 `feature/connector-features`。请专注于 Connectors 后端功能和车辆端桥接代码。不要修改前端 UI 组件。
 
 ---
 
@@ -87,7 +87,7 @@ cd /home/dkc/projects/DonkeyDrifter/.worktrees/connector-features
 ### 查看所有 Worktree
 
 ```bash
-cd /home/dkc/projects/DonkeyDrifter
+cd /home/user/projects/DonkeyDrifter
 git worktree list
 ```
 
@@ -114,7 +114,7 @@ git rebase origin/v1.6.0-UX
 开发完成后，回到主仓库依次合并两个分支：
 
 ```bash
-cd /home/dkc/projects/DonkeyDrifter
+cd /home/user/projects/DonkeyDrifter
 
 # 先合并 UI 分支
 git merge feature/ui-enhancements

@@ -73,7 +73,7 @@ def _scan_subnet():
 
 
 def find_drifter_console(force=False):
-    """定位 Drifter Console，返回其 URL（如 http://192.168.3.46/），找不到返回 None。
+    """定位 Drifter Console，返回其 URL（如 http://192.168.3.x/），找不到返回 None。
 
     顺序：60 秒缓存 → 车辆 AP 固定地址 192.168.4.1 → 本机所在 /24 网段并行扫描。
     """
