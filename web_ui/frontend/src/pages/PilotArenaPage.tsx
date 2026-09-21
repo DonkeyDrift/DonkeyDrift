@@ -19,6 +19,8 @@ import {
   ArenaModel,
   ArenaPilot,
   ArenaPredictionPoint,
+  ArenaMetricSummary,
+  ArenaPredictionsSummary,
   getArenaPredictions,
   getImageUrl,
   importModel,
@@ -210,6 +212,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const [plotPoints, setPlotPoints] = useState<ArenaPredictionPoint[]>([]);
   const [plotError, setPlotError] = useState<string | null>(null);
   const [plotLoading, setPlotLoading] = useState(false);
+  const [plotSummary, setPlotSummary] = useState<ArenaPredictionsSummary | null>(null);
   const [imageProcessingCollapsed, setImageProcessingCollapsed] = useState(true);
   const [displayRecordIndex, setDisplayRecordIndex] = useState(currentIndex);
   const autoScanDoneRef = useRef<Set<string>>(new Set());
@@ -821,6 +824,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     }
     setPlotLoading(true);
     setPlotError(null);
+    setPlotSummary(null);
     try {
       const data = await getArenaPredictions(plotPilotId, {
         config_path: configPath,
@@ -828,11 +832,38 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         limit: Math.max(1, plotEnd - plotStart + 1),
       });
       setPlotPoints(data.points);
+      setPlotSummary(data.summary ?? null);
     } catch (error) {
       setPlotError(getApiErrorMessage(error));
     } finally {
       setPlotLoading(false);
     }
+  };
+
+  const formatSigned = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+
+  const renderMetricSeries = (label: string, series: ArenaMetricSummary | null) => {
+    if (!series) {
+      return (
+        <div className="rounded-md bg-zinc-950 px-3 py-2 text-xs text-zinc-500">
+          {label}: {t('arena.metricNoData')}
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-md bg-zinc-950 px-3 py-2 text-xs text-zinc-300">
+        <span className="text-zinc-500">{label}</span>{' '}
+        <span className="font-mono">{t('arena.metricMae', { v: series.mae.toFixed(3) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono">{t('arena.metricRmse', { v: series.rmse.toFixed(3) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono">{t('arena.metricBias', { v: formatSigned(series.bias) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono">{t('arena.metricMaxErr', { v: series.max_abs_error.toFixed(3) })}</span>
+        <span className="mx-1 text-zinc-600">·</span>
+        <span className="font-mono text-zinc-400">{t('arena.metricFrames', { n: String(series.count) })}</span>
+      </div>
+    );
   };
 
   const plotData = {
@@ -1218,6 +1249,15 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           {plotPoints.length > 0 && (
             <div className="rounded-md border border-zinc-800 bg-zinc-950 p-4">
               <Line data={plotData} options={{ responsive: true, plugins: { legend: { labels: { color: seriesColors.legend } } }, scales: { x: { ticks: { color: seriesColors.ticks } }, y: { ticks: { color: seriesColors.ticks } } } }} />
+            </div>
+          )}
+          {plotSummary && (plotSummary.angle || plotSummary.throttle) && (
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-zinc-500">{t('arena.plotSummary')}</p>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {renderMetricSeries(t('arena.metricAngle'), plotSummary.angle)}
+                {renderMetricSeries(t('arena.metricThrottle'), plotSummary.throttle)}
+              </div>
             </div>
           )}
         </CardContent>
