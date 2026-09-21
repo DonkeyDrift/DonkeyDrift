@@ -18,6 +18,7 @@ vi.mock('./services/api', () => ({
   launchKimiCodeWeb: vi.fn(),
   launchDsh: vi.fn(),
   launchZcode: vi.fn(),
+  launchZcodeRemote: vi.fn(),
   launchClaudeCode: vi.fn(),
   getDonkeyUrl: vi.fn(() => 'http://localhost:8090/'),
 }));

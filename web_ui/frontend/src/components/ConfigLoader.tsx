@@ -128,8 +128,6 @@ export const ConfigLoader: React.FC = () => {
           title={t('common.configLoader.title')}
           subtitle={t('common.configLoader.hoverSubtitle')}
         />
-        <p className="text-sm text-zinc-400">{t('common.configLoader.description')}</p>
-        <p className="text-xs text-zinc-600">{t('common.configLoader.apiLabel', { origin: window.location.origin })}</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-3">

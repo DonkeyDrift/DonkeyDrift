@@ -6,6 +6,11 @@ import gym_donkeycar  # noqa: F401  -- registers donkey envs with gymnasium
 
 from donkeycar.config import Config
 
+try:
+    import cv2
+except Exception:  # pragma: no cover - 缺少 OpenCV 时预览下采样退化为原样返回
+    cv2 = None
+
 
 def is_exe(fpath):
     return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
@@ -13,7 +18,7 @@ def is_exe(fpath):
 
 class DonkeyGymEnv(object):
 
-    def __init__(self, sim_path, host="127.0.0.1", port=9091, headless=0, env_name="donkey-generated-track-v0", sync="asynchronous", conf={}, record_location=False, record_gyroaccel=False, record_velocity=False, record_lidar=False, delay=0):
+    def __init__(self, sim_path, host="127.0.0.1", port=9091, headless=0, env_name="donkey-generated-track-v0", sync="asynchronous", conf={}, record_location=False, record_gyroaccel=False, record_velocity=False, record_lidar=False, delay=0, output_preview=False):
 
         # 保存原始配置，以便运行时重连复用
         self._sim_path = sim_path
@@ -36,9 +41,18 @@ class DonkeyGymEnv(object):
             self._myconfig_mtime = os.path.getmtime(self._myconfig_path)
 
         # 空帧占位
-        img_h = self._conf.get("img_h", 120)
-        img_w = self._conf.get("img_w", 160)
-        self._empty_frame = np.zeros((img_h, img_w, 3), dtype=np.uint8)
+        self._img_h = int(self._conf.get("img_h", 120))
+        self._img_w = int(self._conf.get("img_w", 160))
+        # 模拟器渲染分辨率与 NN 输入分辨率解耦：默认渲染分辨率 == NN 输入分辨率（向后兼容）。
+        # 设置 render_img_w/render_img_h 后，向模拟器请求更高渲染分辨率用于预览，
+        # 而 NN 输入（cam/image_array）仍为 img_w×img_h（在 dgym 内下采样）。
+        self._render_img_h = int(self._conf.get("render_img_h") or self._img_h)
+        self._render_img_w = int(self._conf.get("render_img_w") or self._img_w)
+        self._output_preview = bool(output_preview)
+        self._empty_frame = np.zeros((self._img_h, self._img_w, 3), dtype=np.uint8)
+        self._empty_preview_frame = np.zeros((self._render_img_h, self._render_img_w, 3), dtype=np.uint8)
+        self.frame = self._empty_frame.copy()
+        self.preview_frame = self._empty_preview_frame.copy()
 
         # 看门狗：记录最近一次 env.step() 成功返回的时间戳。底层 gym_donkeycar 的
         # observe() 在模拟器断连后会无限自旋（无超时），update() 线程会被卡死在
@@ -74,6 +88,7 @@ class DonkeyGymEnv(object):
                 print(f"[DonkeyGymEnv] 模拟器路径不存在: {self._sim_path}")
                 self.env = None
                 self.frame = self._empty_frame.copy()
+                self.preview_frame = self._empty_preview_frame.copy()
                 self.connected = False
                 return
 
@@ -81,6 +96,7 @@ class DonkeyGymEnv(object):
                 print(f"[DonkeyGymEnv] 模拟器路径不是可执行文件: {self._sim_path}")
                 self.env = None
                 self.frame = self._empty_frame.copy()
+                self.preview_frame = self._empty_preview_frame.copy()
                 self.connected = False
                 return
 
@@ -90,16 +106,24 @@ class DonkeyGymEnv(object):
         conf["port"] = self._port
         conf["guid"] = 0
         conf["frame_skip"] = 1
+        # 渲染分辨率与 NN 输入解耦：仅当设置了更高的渲染分辨率时才覆盖 img_w/img_h
+        # 与 cam_resolution，未设置时 conf 与旧行为逐字段一致（向后兼容）。
+        if (self._render_img_w, self._render_img_h) != (self._img_w, self._img_h):
+            conf["img_w"] = self._render_img_w
+            conf["img_h"] = self._render_img_h
+            conf["cam_resolution"] = (self._render_img_h, self._render_img_w, 3)
 
         try:
             self.env = gym.make(self._env_name, conf=conf)
-            self.frame, _ = self.env.reset()
+            raw_frame, _ = self.env.reset()
+            self._set_frame(raw_frame)
             self.connected = True
             self._last_frame_ts = time.time()
             print(f"[DonkeyGymEnv] 已连接到模拟器 {self._host}:{self._port}")
         except Exception as e:
             self.env = None
             self.frame = self._empty_frame.copy()
+            self.preview_frame = self._empty_preview_frame.copy()
             self.connected = False
             print(f"[DonkeyGymEnv] 无法连接到模拟器 ({self._host}:{self._port}): {e}")
             print("[DonkeyGymEnv] 将在后台持续尝试重连。请启动 DonkeySim 或通过 Web UI 配置正确的 SIM_HOST。")
@@ -157,7 +181,32 @@ class DonkeyGymEnv(object):
                 pass
             self.env = None
             self.frame = self._empty_frame.copy()
+            self.preview_frame = self._empty_preview_frame.copy()
             self.connected = False
+
+    def _set_frame(self, raw_frame):
+        """把模拟器返回的原始渲染帧拆分为 NN 输入帧与预览帧。
+
+        模拟器按渲染分辨率（render_img_w×render_img_h）出图；NN 输入
+        （cam/image_array）需要 IMAGE_W×IMAGE_H（img_w×img_h），故在渲染
+        分辨率更高时下采样；预览帧（preview/image_array）保留渲染分辨率
+        原始帧，供 Drive 页面展示最高画质。
+        """
+        if raw_frame is None:
+            return
+        h, w = raw_frame.shape[:2]
+        if h == self._img_h and w == self._img_w:
+            self.frame = raw_frame
+            self.preview_frame = raw_frame
+            return
+        self.preview_frame = raw_frame
+        if cv2 is not None:
+            try:
+                self.frame = cv2.resize(raw_frame, (self._img_w, self._img_h))
+            except Exception:
+                self.frame = raw_frame
+        else:
+            self.frame = raw_frame
 
     def delay_buffer(self, frame, info):
         now = time.time()
@@ -169,7 +218,7 @@ class DonkeyGymEnv(object):
         for buf in self.buffer:
             if now - buf[0] >= self.delay:
                 num_to_remove += 1
-                self.frame = buf[1]
+                self._set_frame(buf[1])
             else:
                 break
 
@@ -219,7 +268,9 @@ class DonkeyGymEnv(object):
                     self.delay_buffer(current_frame, current_info)
                 else:
                     step_result = self.env.step(self.action)
-                    self.frame, _, _, _, self.info = step_result
+                    current_frame, _, _, _, current_info = step_result
+                    self._set_frame(current_frame)
+                    self.info = current_info
                 self._last_frame_ts = time.time()
             except Exception as e:
                 print(f"[DonkeyGymEnv] 模拟器连接异常: {e}")
@@ -249,6 +300,8 @@ class DonkeyGymEnv(object):
 
         # Output Sim-car position information if configured
         outputs = [self.frame]
+        if self._output_preview:
+            outputs.append(self.preview_frame)
         if self.record_location:
             outputs += self.info['pos'][0],  self.info['pos'][1],  self.info['pos'][2],  self.info['speed'], self.info['cte']
         if self.record_gyroaccel:

@@ -1,5 +1,395 @@
 # 变更日志
 
+## 2026-09-20 (227)
+
+- feat(ui)!: 移除座舱(cockpit)/Apple 双象限体系，Apple 成为唯一界面风格——与 find-car v1.6.0、Drifter Console v1.10.0 同款手术；页头「座舱 / Apple」切换器删除，`<html>` 不再挂载 `ui-apple` class，localStorage 键 `donkeydrifter.ui.style` 不再读取（老用户残留键被静默忽略、渲染恒为 Apple，无需任何操作）
+  - CSS 拍平（apple 覆写值成为唯一取值）：
+    - `web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`：`html.theme-*.ui-apple` 变量覆写块的值并入基值定义、覆写块与 SkinSwitcher 样式段删除。
+    - `web_ui/frontend/src/themes/apple-deep.css`：151 处 `.ui-apple` 作用域前缀精确去除（保留 `html.theme-*` 前缀维持特异度；加载顺序不变，同特异度后置胜出机制保持）。基础滑杆规则拍平后特异度 (0,3,2)→(0,2,2) 会输给 Tailwind `.space-y-*` 通用子选择器 (0,3,0)，用重复类技巧 `html.theme-mus4.theme-mus4 input[type='range']` 回到原特异度并注释说明（Playwright 前后对比当场抓到的回归，修复后归零）。
+  - JS 机制删除：`src/lib/uistyle.ts`（UiStyle/useUiStyle/applyUiStyle/UI_STYLE_STORAGE_KEY 整文件）、`src/components/SkinSwitcher.tsx` 与其测试删除；`src/components/Layout.tsx` 两处切换器用法与 import 移除；`index.html` 启动脚本删 ui.style 分支（theme 分支原样）；`src/main.tsx` 注释同步。
+  - 消费方恒 Apple 展开：`TelemetryChart.tsx`/`TubLibrary.tsx`/`CarSettingsPanel.tsx`/`TubEditor.tsx`/`PilotArenaPage.tsx`/`DrifterConsolePage.tsx` 的 useUiStyle 双配色分支删除、恒用 Apple 取值；`ApiStatusBar` 原仅 apple 象限渲染 → 恒渲染。
+  - i18n：`src/i18n/messages/common.ts` 中英各删 3 条 uiStyle 文案。
+  - 固件 iframe 参数 `&ui=apple` 保留硬编码（车端 v1.10.0 起忽略该参数，无害兼容）。
+  - 测试同步：`appleTokens.test.ts` 重写为拍平后 token 断言（净 +1，含「旧键=cockpit 仍渲染 Apple」回归）；`DrifterConsolePage.test.tsx` 座舱用例改写；`SkinSwitcher.test.tsx` 删除（−6）→ **47 文件 / 300 测试全绿**（基线 48/305）；`npx tsc --noEmit` 零错误；`npm run build` 通过（bundle `index-ioH0aZAj.js`）。
+  - 等价验证：Playwright 计算样式前后对比（冻结 Date.now + 禁动画）——基线（强制 ui-apple）vs 改后（无 class 机制）dark/light 各 16 元素 × 26 属性 + 40 CSS 变量**全部一致**；旧键=cockpit 场景浏览器级实测渲染恒 Apple（dark/light 均 0 差异）。
+
+## 2026-09-20 (226)
+
+- fix(security): 隐私泄露审计清理——测试真实 Wi-Fi 凭据占位化、私人路径/内网 IP 脱敏、TestSprite 产物取消跟踪
+  - 背景：与 Firmware 同步做两仓库 .gitignore / 文档 / 私人文件全面审计（固件侧见 Firmware v1.9.4 条目），清理 DonkeyDrift 侧已入库的私人信息：测试用例里的真实家庭 Wi-Fi SSID/密码、systemd 模板与代码默认值里的本机绝对路径、前端 i18n 占位文案与多份文档中的用户名/内网 IP。
+  - 凭据清理：`donkeycar/tests/test_provisioning.py` 的 `WIFI|newhome_iot|wxl922922` 解析用例改占位 `TestSSID`/`testpass123`（与第 20 条「测试一律用占位凭据」对齐）。
+  - 代码与默认值脱敏：
+    - `donkeycar/launcher/donkeydrifter-launcher.service` 改为 `<user>` 占位部署模板（本机实际 unit 在 `~/.config/systemd/user/`，不受影响）；
+    - `donkeycar/launcher/server.py` mycar 回退搜索路径 `/home/dkc/projects/mycar` → `Path.home() / "projects" / "mycar"`（本机行为完全等价）；
+    - `donkeycar/management/base.py` 三处 `--path` 死默认值（指向本机已不存在的 `/home/dkc/projects/donkeycar/web_ui`）→ `./web_ui`（与 README 用法一致）；
+    - `web_ui/backend/simcollect_engine.py` 默认采集脚本路径 → `os.path.expanduser("~/projects/mycar/collect_sim_mac.sh")`；
+    - `donkeycar/launcher/terminal.py`、`dc_discovery.py`、`kimi_web.py`、`donkeycar/parts/provisioning.py`、`donkeycar/templates/myconfig.py` 注释/docstring 中的用户名与内网 IP 示例中性化。
+  - 前端：`web_ui/frontend/src/i18n/messages/common.ts`、`tubnav.ts` 共 4 条路径占位文案 `/home/dkc/projects/mycar` → `~/projects/mycar`；`web_ui/frontend/.gitignore` 补 `testsprite_tests/tmp/`。
+  - 取消跟踪：`web_ui/frontend/testsprite_tests/tmp/` 下 6 个 TestSprite 运行产物（含本机路径的 config.json / raw_report.md / test_results.json 等）`git rm --cached`（本地保留）。
+  - 文档脱敏：9 份 docs（arch/Rfc/guide/plan/superpowers/valid）中的 `/home/dkc` → `/home/user`、`C:/Users/cross` → `C:/Users/<user>`。
+  - 测试同步：`tests/test_launcher_service_unit.py`（断言跟随模板占位）、`tests/test_launcher_dsh_web.py` 与 `tests/test_launcher_kimi_web.py`（fixture 路径 `/home/testuser/`，其中 `test_reuses_live_instance_without_spawning` 的 cwd 改用 `tmp_path`——原用例隐式依赖本机 `/home/dkc/projects` 真实存在）、`web_ui/backend/tests/test_simcollect.py`、`web_ui/frontend/src/components/drive/SimCollectCard.test.tsx`、`donkeycar/tests/test_dc_discovery.py`（fixture IP `192.168.3.123`）。pytest 全量 958 通过（`tests/test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 为 origin/Tony 既有失败，与本改动无关——还原 base.py 后仍失败，反斜杠路径在 POSIX 下的 stem 提取问题）；web_ui 后端 554 项、SimCollectCard vitest 5 项通过。
+
+## 2026-09-20 (225)
+
+- fix(findcar): Find DKC 主机心跳加 DNS 抖动韧性——修复「主机在线、Find DKC 却搜不到」（根因：本机 DNS 解析连续故障时心跳全丢）
+  - 背景：2026-09-20 19:34–19:56 本机 systemd-resolved 对 `find-dkc.pages.dev` 的解析连续失败约 25 分钟（`socket.gaierror: [Errno -3] Temporary failure in name resolution`，journal 实测 15 次失败），同期 ESP32 心跳正常（网络通、只有本机 DNS 坏）；心跳 150s 一跳全部落空、超过网页 5.5 分钟在线窗口，Find DKC 显示主机离线。旧代码 `report_once` 无重试无兜底，launcher 循环失败后照样睡满 150s，DNS 一抖就丢跳。
+  - `donkeycar/findcar.py`：
+    - `report_once` 在线心跳对 DNS 失败有韧性：系统 DNS 失败（`_is_dns_failure` 沿 `URLError.reason`/`__cause__`/`__context__` 链识别 `socket.gaierror`）→ 隔 `DNS_RETRY_DELAY_SECONDS`(3s) 快重试一次 → 仍失败走 **DoH 兜底**：`_resolve_via_doh` 按 IP 直连阿里公共 DNS（`223.5.5.5`/`223.6.6.6`，`/resolve` dns-json，证书含 IP SAN；Cloudflare 1.1.1.1/1.0.0.1 本机实测超时不可用）解析 A 记录 → `_PinnedHTTPSConnection`（`http.client.HTTPSConnection` 子类：TCP 拨 IP、TLS SNI 与 `Host` 头保持原域名，Cloudflare anycast 按 SNI 路由）直连完成 POST。下线标记（state=offline）保持尽力而为单发，不在退出路径上拖延关停。
+    - 新增常量 `RETRY_INTERVAL_SECONDS`(30)、`USER_AGENT`（原内联 UA 提取共用）；全程纯标准库，兜底任何失败只记日志返回 False。
+    - DoH + 直连路径已在真实网络端到端实测：DoH 解析出 `172.66.44.129`、直连 IP POST `/report` 成功、`/devices` 确认心跳落库。
+  - `donkeycar/launcher/server.py`：`_findcar_report_once` 返回上报成败（未配置返回 None 不算失败）；`_findcar_reporter_loop` 上报失败时按 `min(RETRY_INTERVAL_SECONDS, 配置间隔)`（30s）快速补跳，恢复后回到正常间隔——故障恢复后半分钟内重新上线，不再干等 150s。
+  - 测试同步：`tests/test_findcar.py` 净增 5 条（`_is_dns_failure` 链识别、快重试成功不走 DoH、DoH 兜底直连成功（断言 SNI/Host/IP/path）、全兜底失败返回 False 不抛异常、offline 单发不重试）；`tests/test_launcher_findcar.py` 净增 3 条（成败标志透传、失败 30s 补跳后恢复 300s、未配置 None 保持正常间隔）→ 两文件 38 全过；全量套件除 `test_build_drift_clip.py::test_backslash_tub_path_default_out_name`（origin/Tony 上既有失败，与本改动无关，已实测确认）外通过。
+  - 注：仅 launcher 常驻服务（:8090）改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff `deploy-8000` 并重启 `donkeydrifter-launcher.service` 部署。
+
+## 2026-09-18 (224)
+
+- feat(web-ui): Apple 象限深化——灰阶分层、语义色双轨、聚焦环、44pt 命中区、降级媒体特性与最小可用加载/错误态
+  - 背景：DD 的 Apple 象限此前只是 `html.theme-*.ui-apple` 的纯变量重映射 + 切换器少量规则，控件级可用性未收口。先做只读审计（89 张截图 + 31 条量化缺陷），再按工作区统一的《Apple 深化规格 v1》逐项落地。**座舱象限（不带 `ui-apple`）像素级冻结**：全部新增样式集中在 `src/themes/apple-deep.css`（71 条规则，除 @keyframes 百分位外每条都含 `.ui-apple`）+ 两个 theme 文件的 `ui-apple` token 块内，theme 共享规则体零改动（仅加一行说明注释）。
+  - `src/themes/apple-deep.css`（新增，总入口，`main.tsx` 引入）：
+    - **灰阶层级重映射**：`.text-zinc-500 → ink3`、`.text-zinc-600 → ink4` 只在 apple 作用域生效。ink3 深色 .45→**.62**（2.42 → 6.76:1）、浅色 .48→**.72**（1.93 → 4.53:1）；ink4 深 .32→**.52**（2.42 → 4.93）、浅 .36→**.62**（1.93 → 3.62）。全站可见文本对比度失败 **816/1482 → 130/1482（−84%）**，剩余 130 条为刻意保留的纯 meta（版本号、文件大小、时间戳，与 FDC/DC 同档）与「白字叠 Apple 系统红/蓝填充」的取舍。
+    - **语义色双轨**：新增 `--ok-text/--warn-text/--bad-text`（深 `#30d158/#ff9f0a/#ff453a`、浅 `#1a7f37/#c93400/#d70015`）只用于文字，点/条/描边等填充继续用 `--ok/--warn/--bad`。`TelemetryChart.tsx` 新增 `textVar`：图例文字走 text 变体、曲线仍用填充色。实测角度读数 2.04→4.66、标定提示 2.20→5.28、图例 2.02/3.26→4.85/4.94。
+    - **全局 `:focus-visible`**：原 9 种写法（含「与 hairline 同像素的 1px 环」「`outline:none`」「UA 默认 `rgb(16,16,16) auto 1px`」）统一为 `outline:3px solid var(--accent)`（浅 `#0066cc` 5.11:1 / 深 `#2997ff` 6.96:1），不透明的 3px 环，且不改元素填充色。
+    - **材质与前景匹配**：新增 `dd-overlay`（浮层自建 `rgba(0,0,0,.45)+blur(12px)` 材质、层内文字用亮色 vibrancy，不再继承主题灰阶）与 `dd-media`（视频/图像井底）。修掉 `/drive` 浅色下遥测覆盖层标题 **1.25:1**（浅色 ink 叠在 canvas 自绘的固定深底上，实测文字与底只差 8/255）→ 12.6:1；FPS 徽标 1.09 → 12.6。
+    - **可选取性**：`html,body,#root{user-select:none}` 下输入框三击无选区、IP/路径/报错全不可复制 → `input/textarea/[contenteditable]` 与 `.font-mono`、code/pre、日志、`[data-selectable]` 放开为 `text`（座舱保持 none）。
+    - **命中区 ≥44×44**：`::after` 不可见命中区（另有 `dd-hit-v`/`dd-hit-h` 两个按轴扩展的辅助类），交叉验证用视口内 44 盒四角 `elementFromPoint`。静态度量 876 个交互元素：**832 → 140 不达标**；点名项时间轴 862×8→862×44、Tub 滑杆 1198×24→1198×44、「展开控制器参数」84×16→84×44、模型行图标 22×22→22×44、W1–W5 18×36→18×44、顶栏图标 32×32→32×44、导航链高 20→44。曲线勾选按「只在非冲突轴扩展」只做横向（图例是 flex-wrap 行，44 高会跨行吞点击，实测点 A 行触发 B 行）。
+    - **降级媒体特性**：`prefers-reduced-transparency`（6 个 `backdrop-filter` 面 → 全部 `none` + 退实色）、`prefers-reduced-motion`（0.2/0.3s → 1e-05s、循环动画 iteration 1）、`prefers-contrast: more`（ink3 → .85、半透明面退实色）。原 CDP 实测这三个信号零变化。
+    - **吸顶页头材质**（`Layout.tsx` 加 `dd-header` 类 + `is-scrolled`，`scrollY > 2` 才浮现 hairline）：深色 `rgba(28,28,30,.72)`、浅色 `rgba(245,245,247,.72)` + `saturate(180%) blur(20px)`，与 FDC `html[data-ui="apple"] .headerRow` 同一套语言（原 DD 页头是不透明 `bg-zinc-950`，三端页头材质不统一）。实测：apple 深色顶部底边 `rgba(0,0,0,0)` → 滚动后 `rgba(255,255,255,.16)`；座舱象限页头计算值逐值不变（`#101318`、无 blur）。
+    - **其它**：浮层 elevation 恢复（`--shadow-lg/xl` 由 none → 浅 `0 8px 30px rgba(0,0,0,.12)` / 深 `…,.5`）；发丝线由 6 档收敛为 2 档（弱档 .10/.08、分隔线 .16/.29，`.divide-*` 走 separator）；`--ease-apple` 从「只被引用 1 次」到全站（`.32,.72,0,1`；过渡 100/200/300ms 三档，`transition:all` ×36 改显式属性表）；禁用态 `opacity:.5`（标签 1.46–1.94:1）→ `.85` + `saturate(.5)`（停止 1.77→2.90、OTA 1.94→3.43）；遮罩补 blur（深 .5 / 浅 .32）；CJK 行高触底（16px/16px）→ ≥1.3、12px 中文去掉 +0.6px 正字距、mono 栈统一 `ui-monospace…`、顶栏控件字体栈统一；FAB 去掉挂在实底上的 no-op `blur(4px)`；圆角/gap 离群值收敛（`0 6px 6px 0` → 10px、6px → 8px）；safe-area（`viewport-fit=cover` + `env(safe-area-inset-*)`）。
+  - `src/lib/apiHealth.ts` + `src/components/ApiStatusBar.tsx`（新增，仅 apple 象限渲染）：给既有 axios 实例挂**旁路观测**拦截器（请求/响应原样透传、失败不回显后端原文），据此渲染统一加载骨架与可关闭可重试的错误条——补上「6 个数据端点全部失败时页面零提示、零加载态」的缺口。`retryApiRequests()` 只清标记并重载当前页，不重放请求、不臆造数据。
+    - **误报防线**（本轮冒烟测试实测踩到后补）：只有「加载数据失败」才算失败——只认 **GET**（POST 等动作类请求的就地错误处理已存在，且「无相机/未配置」类 4xx 是预期状态：实测 `POST /api/drive/webrtc/session` 在无相机环境恒 400，若算失败会让正常使用中常挂一条红条），且只认**网络错误或 5xx**（GET 的 4xx 通常是「尚未配置」而非「服务不可用」）；任一请求成功即清掉标记（瞬时失败不长期挂红）。为此 `ApiStatusBar.test.tsx` 由 5 条扩到 8 条（POST 4xx 不触发 / GET 4xx 不触发而 5xx 触发 / 成功即清）。
+  - `index.html`：`viewport-fit=cover`；首屏 `lang` 跟随存储/浏览器语言（原 zh 模式写死 `en`，读屏念错、CJK 字体回退选错）。
+  - `i18n`：主题/语言切换钮的 `aria-label` 由中文写死改为词条；`ModelsList` 的模型行 4 个图标按钮补 `aria-label`。
+  - 测试同步：`src/themes/appleTokens.test.ts`（新增 12 条：apple 象限 token 值与规格一致、语义色文字/填充两套值、座舱象限 token 未被改动——冻结守卫）+ `components/ApiStatusBar.test.tsx`（新增 8 条）→ **48 文件 / 305 测试全绿**（原 285）；`npx tsc -b --noEmit` 零错误；`npm run build` 通过。
+  - 过程记录：第一版曾把 `zinc-500→ink3` 写进 theme 共享规则体，座舱实测被改（`107,125,144 → 143,161,181`），已回滚并只在 apple 作用域生效，另加守卫测试防回归。
+
+## 2026-09-18 (223)
+
+- fix(launcher): 打开 DSH 入口 token 复用校验 + 占位实例自愈——修复「点击打开 DSH 落 dsh web authentication required 401 页」
+  - 背景：用户在 Donkey 菜单页点「DeepSeek Harness」后浏览器落到 dsh 的 401 文案页（`dsh web authentication required; reopen the URL printed by dsh web.`）。排查实证：launcher 返回的新鲜带 token 入口在本机 curl 全程 303→200 正常；dsh 的 launchToken 按进程生成、只出现在启动 banner，进程原地重启（插件安装会话自动升级 exec，pid 不变）后旧 token 即作废，而 launcher 两处复用路径分不出这种状态，会把失效 token URL 发给浏览器。
+  - `donkeycar/launcher/dsh_web.py`：
+    - `_live_spawned_url` 复用前校验 token：新增 `_validate_entry_url`（登记入口改写回环、`_probe_token_entry` 看首响应，200/303 才复用）；`_SPAWNED` 带 url 条目 token 失效时弃用登记继续走固定端口探测/冷启动，不再把失效 token 交给浏览器（`_probe_root` 的 401 存活判定分不出进程原地重启）。
+    - 占位实例自愈：固定端口被 token 未知的存活 dsh 占用（自动升级后自我重启的新进程/旧 launcher 孤儿）时，原行为是冷启动永远 EADDRINUSE、只报「请手动关闭该实例」——新增 `_kill_dsh_port_squatter`（`ss -tlnp` 解析监听 pid → `/proc/<pid>/cmdline` 确认是 dsh 才 SIGTERM，非 dsh 进程一律不碰 → 轮询 ≤5s 等端口释放）+ 释放后重试一次冷启动拿全新 token；配套 `_dsh_port_listener_pid`/`_is_dsh_process` 两个判定与 `_register_spawn_success`（两处冷启动成功路径的登记/落盘/新会话标记统一收口）。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 81 全过（净增 9：登记 token 失效弃用转冷启动、复用前回环校验断言、占位杀后重试成功、ss 输出解析、cmdline 判定、非 dsh 不杀、端口不释放超时等；新增 autouse fixture 默认钉死 `_kill_dsh_port_squatter` 防测试误杀本机真实 dsh——首跑曾误杀一次，已补隔离）；launcher 相关 4 文件 122 全过。
+  - 注：仅 launcher（:8090）改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff deploy-8000 并重启 `donkeydrifter-launcher.service` 部署。
+- fix(launcher): 打开 DSH 入口 host 跟随客户端请求 Host——修复「笔记本点打开 DSH 仍落 dsh web authentication required 401 页」（第二轮，真根因：笔记本对 mDNS 名 `tony007.local` 的解析不到本机）
+  - 背景：上一轮（token 复用校验 + 占位自愈，PR #435）部署后用户复测仍 401。决定性证据：journal 显示 launcher 两次正常返回有效 token URL（本机 curl 303→cookie→200 实测正常），但 `/proc/net/nf_conntrack` 里笔记本（192.168.3.14）→ dsh 端口 58641 的记录为零——笔记本浏览器从未把包发到本机 dsh：`tony007.local` 在笔记本上没解析到本机（hosts/代理/回环劫持所致），401 来自另一台 dsh（疑似笔记本自己回环上的实例）。笔记本访问 :8090 菜单页是通的，即「打开菜单页用的地址」已被证明可达——入口 host 跟随它即可根治。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_entry_url_for_client(url, host_header)` + `_strip_host_port`——Host 属于本机（局域网 IP / mDNS 主机名 / 回环，含 `[::1]` 方括号）时把入口 URL 的 netloc 换成该 host（端口/路径/`?token=` 全保留），不认识的 Host 原样返回（防 token 随改写泄给未知主机）；模块 docstring 补该机制说明。
+  - `donkeycar/launcher/server.py`：新增 `_client_host_header(headers, client_address)`——DD 后端转发带的 `X-Forwarded-Host` 仅回环直连采信（远端客户端可伪造 XFH，采信会泄 token），其余用 Host 头；`_handle_launch_dsh` 成功时用它把返回 URL 改写成客户端可达入口。
+  - `web_ui/backend/routers/launch.py`：`_forward_launch` 把客户端原始 Host 以 `X-Forwarded-Host` 传给 launcher（`_post_to_launcher` 新增 `forwarded_host` 参数）——否则经 DD 顶栏路径转发后 launcher 只看到回环 Host，会产出 127.0.0.1 入口害惨远端浏览器。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 97 全过（净增 16：`_entry_url_for_client` 各分支含 IPv6/无端口/未知域/未知 IP/缺省 Host、`_strip_host_port`、`_client_host_header` 三态、端点 Host 与 XFH 跟随、未知 Host 不改写；`_post` 支持自定义请求头；`test_endpoint_ok_with_cors_header` 期望值随新行为改为回环改写）；`web_ui/backend/tests/test_launch.py` 10 全过（净增 2：XFH 头断言、转发传递原始 Host；既有 mock 补 `forwarded_host` 参数）；launcher 全系列 152、后端 554 全过。
+  - 注：仅 launcher + DD 后端转发层改动，无前端/Firmware 变更，无需 npm build、无需 OTA；合并后 ff deploy-8000 并重启 `donkeydrifter-launcher.service` 部署（DD web :8000 当前未运行，launch.py 改动随下次启动生效）。
+
+## 2026-09-16 (222)
+
+- chore(repo): 将 `docs/architecture-guide.html` 移出 git 跟踪（本机保留，不改写历史）
+  - 背景：该 HTML 是写给本机看的架构科普页（配套 Firmware 侧同名文件），属本机资料，用户要求不再入库。
+  - `git rm --cached docs/architecture-guide.html`：仅从索引移除，本地文件保留；`.gitignore` 新增 `docs/architecture-guide.html` 条目防再次误入库。历史提交中原样保留旧版本（不改写历史），此后该文件不再被跟踪。
+  - Firmware 侧 `MUS4_FW/docs/architecture-guide.html` 同口径移除（见 Firmware 当日条目）。
+  - 测试同步：纯仓库维护改动，无代码/测试变更，无需本机部署。
+
+## 2026-09-15 (221)
+
+- feat(web-ui): 三端「座舱 / Apple」切换器统一为同一规格；FAB 帮助改单击直达；全站视觉审查修复 16 项
+  - 背景：用户反馈 DD/DC/FDC 三端的 UI 风格切换按键样式完全不一样，且 DD 右下角小圆点两级展开「点问号没反应」。本次定《统一切换器规格 v1》三端落地同一几何与象限配色（配套 Firmware v1.9.2、find-car v1.2.0 同口径）。
+  - 切换器：`SkinSwitcher.tsx` + `themes/theme-mus4.css`/`theme-light.css`——几何统一 28px 轨道（2px padding/gap）/24px 段/12px·font-600/999px 圆角；座舱象限激活段 = accent 填充（bg-cyan-500 语义类吃主题 remap）；Apple 象限 = iOS 填充灰轨道 + 浮起滑块（新增 `--segment-track`/`--segment-thumb-shadow` 变量，dark 滑块 #636366）+ 非激活 hover 字色反馈（原 Apple 象限 hover 被覆写压制零反馈）+ focus-visible 2px 描边。Layout 顶栏与移动端菜单两实例同生效。
+  - FAB 直达：`FabActions.tsx` 删两级展开（18px 小圆点、飞出 ? 球、document 点击收起监听全移除），改为单个 46px 圆形「?」按钮单击直接打开快捷键弹窗（语言入口早已迁顶栏，簇内只剩帮助一个动作）；弹窗补 Esc 关闭；组件注释注明与 ESP32 FAB 簇的刻意分歧。
+  - 视觉审查修复（三端 playwright 截图走查发现，修后均截图复验）：
+    - Drive 移动端响应式：`DriftCard` 相机表单窄屏单列堆叠 + 模式按钮行 flex-wrap；`SimCollectCard` 高级参数 `grid-cols-1 sm:2 lg:4`（原 390px 下标签逐字竖排、输入框压成 30px、按钮竖排药丸）。
+    - `DrifterConsolePage`：Console 离线扫描加 9s 前端超时（`services/api.ts discoverConnectorConsoles`）+ 失败态引导手动输入 IP（新增 i18n `console.scanFailed` 中英）；「正在扫描局域网…」同屏三处重复去重为一处。
+    - `ConsoleControls`：OTA 弹窗补 Esc 关闭（上传中拦截）；上传按钮 `disabled` 补 `!ip`——Console 离线时不再可点刷写。
+    - `HarnessPanel` 浅色象限死深灰块与副标题对比度：次级文字 zinc-500→zinc-400（6 处）；主题 css 新增 `bg-zinc-900/40 → --surface-a35`、`divide-zinc-800 → --line-soft` remap（tub 列表浅色下发黑分隔线同愈）。
+    - `SectionCardTitle` 副标题截断补 `title` 悬浮全文；`Layout` 版本号与 ≡Donkey 链接组加间距；`PilotArenaPage` 区间滑杆容器底色改吃主题 remap（浅色下起始帧/结束帧标签可读）、Import Model 按钮 nowrap 防英文折行、删「播放 17ms / 推理目标 250ms / 并发 1」性能小字（用户要求删无意义小字）；`CarConnectorButton` 齿轮图标改 Plug（原易被误认为设置）；`TubLibrary` 播放按钮加 max-w-[200px]（原独占整行失衡）；`SidePanel` 触发边条移动端隐藏（hidden lg:flex）。
+  - 测试同步：vitest **285/285**（基线 282，净增 3：FAB 单击打开/无小圆点残留/Esc 关闭；CarConnectorButton 图标断言与 ConsoleControls Esc 用例同步）；`tsc -b --noEmit` 零错误；`npm run build` 通过。
+  - 注：纯前端改动（无后端 Python 变更）；合并后按流程 ff deploy-8000 重建 dist 部署本机 8000 实例。
+
+## 2026-09-13 (220)
+
+- fix(findcar): 主机心跳从 DD Web 后端迁到常驻 launcher——修复「主机在线但 Find DKC 找不到」（DD Web 按需启动，不开网页主机就从找车页消失）
+  - 根因：type=dd 上报挂在 `web_ui/backend` lifespan 上（:8000 起才上报）；开机后只有 launcher（:8090，systemd enabled 常驻）在跑时无任何心跳，KV 记录 15 分钟过期后主机整行消失。
+  - 新增 `donkeycar/findcar.py`（纯标准库上报核心，供 launcher import）：`FindCarConfig` 改 dataclass（launcher 模块约定无第三方依赖）、`load_config()`（与 web 后端共用 `~/.donkeycar_findcar.json`，兼容旧 token 字段）、`build_payload(port, state)`（**端口改动态参数**，取代 `DRIVE_WEB_PORT` 环境变量）、`report_once()` / `report_offline()` 原样迁入（浏览器 UA 伪装、3s 短超时下线标记）。
+  - `donkeycar/launcher/server.py`：新增 `_findcar_reporter_loop()` / `_start_findcar_reporter()`（照 `_start_hostip_reporter` daemon 线程模式，启动即报一次、随后按配置间隔周期上报，**每轮重读配置**——网页 `/api/findcar/config` 改开关/地址/间隔无需重启 launcher 即生效）；每跳端口动态取值——`find_live_instance()` 存活时报其 `backend_port`（点 IP 直达 DD 控制台），否则报 launcher 自身端口（点 IP 落到菜单页可一键打开 DD）；`run_server()` 接管 SIGTERM（systemd stop / 关机）转 KeyboardInterrupt 走统一退出路径，finally 补发 `state=offline`——语义升级为「主机关机即离线」。
+  - 瘦身 `web_ui/backend`：`main.py` lifespan 摘掉 `findcar.start_heartbeat()`/`stop_heartbeat()`（web 后端不再上报，避免与 launcher 双写同一条 KV 记录）；`findcar.py` 只留配置读写（pydantic `FindCarConfig` + `load_config`/`save_config`，`/api/findcar/config` 接口行为不变）。
+  - KV 写入量不变（dd 576/天 + esp32 288/天 ≈ 864 < 免费层 1000）；取舍：脱离 launcher 单独 `donkey web` 运行的场景不再上报主机（本机 launcher 为 systemd 常驻，无此场景）。
+  - 测试同步：新增 `tests/test_findcar.py`（16 例：配置容错/token 兼容/payload 动态端口/report_once 请求契约含 UA/下线标记/型号与系统探测）与 `tests/test_launcher_findcar.py`（8 例：存活实例端口选取/回退 launcher 端口/未配置不上报/循环周期与容错/下线标记/SIGTERM 处理器/run_server 接线）；`web_ui/backend/tests/test_findcar.py` 收窄为配置 API 7 例（新增 lifespan 不再挂心跳的回归断言）。**后端 552 全过；tests/ 365 过、1 红为 origin/Tony 既有失败**（`test_build_drift_clip.py` Windows 反斜杠路径，stash 验证与本次无关，未动）。
+  - 真机冒烟：worktree 代码直接调 `_findcar_report_once(8090)`，云端 `GET /devices` 实测出现 `TONY007`（type=dd / 192.168.3.62:8090 / ADL-N / Ubuntu 26.04 LTS / online=true）。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；`cloudflare/find-car/README.md`（非 git）协议与心跳节奏段落同步为 launcher 口径。
+
+## 2026-09-12 (219)
+
+- feat(launcher): 上位机终端页支持 `?theme=&ui=` 四象限配色——跟随 DC 页面主题，缺省保持历史深色
+  - 背景：DC（Drifter Console）Serial 终端 iframe 固定黑色，浅色/Apple 主题下突兀；配套 Firmware v1.9.1（DC 页 `terminalUrl()` 拼参，同日本仓库 CHANGELOG v1.9.1 条目）。
+  - `donkeycar/launcher/terminal_static/terminal.html`：解析 `?theme=light|dark&ui=cockpit|apple`，四象限调色板驱动页面背景/遮罩/xterm 主题——cockpit-dark（缺省，`#101318`/`#e8edf2`/`#5cc8ff` 逐值保留）、cockpit-light（`#f4f7f5`/`#1a2330`/`#0c9bd6`）、apple-dark（`#000`/`#f5f5f7`/`#2997ff`）、apple-light（`#f5f5f7`/`#1d1d1f`/`#0066cc`）；launcher 菜单直开终端不带参数时外观完全不变。
+  - 生效路径：launcher 每次请求实时读盘（`server.py`「便于前端迭代免重启」），deploy-8000 ff 后即生效，无需重启 launcher。
+  - 测试同步：`donkeycar/tests/test_launcher_terminal.py` 新增 `test_terminal_page_supports_theme_params`（真实 ThreadingHTTPServer 拉 `/terminal`，断言四象限调色板、参数解析与历史默认逐值保留）；23 全过。
+
+## 2026-09-12 (218)
+
+- feat(drift): 俯拍漂移控制系统收尾合入 Tony——`feat/overhead-drift-control`（68 提交，含 `docs/rfc-overhead-drift-control` 全部 22 提交）集成合并
+  - 功能内容（详见 (171)(172)(173) 历史条目）：AprilTag 顶视位姿检测 → β 估计 → 级联 PID + 油门脉冲 → ws 下发车控的漂移自动控制整链；漂移会话状态机、相机帧时戳同步录制、WebRTC/MJPEG 双链路相机、DriftCard 前端面板、`measure_loop_latency`/`analyze_throttle_pulses`/`calibrate_field_homography`/`build_drift_clip` 脚本链、RFC/实操/交接四份文档。人工控制始终走 RC 遥控器，笔记本只接管、随时可夺回。
+  - 合并冲突解决（5 文件，基点为 Tony `fb853f13`）：
+    - `web_ui/backend/main.py`：import 与路由注册取并集（Tony 的 findcar/ai-config/harness + feat 的 drift）；feat 的 `@app.on_event` 漂移钩子**改写进 lifespan**——Starlette 1.x 在自定义 lifespan 存在时 on_event 静默不触发（findcar 心跳同款教训，issue #404 注释已载），启动装 `install_drive_hooks()`、关停 `stop_camera_loop()` 释放 DirectShow 句柄，`atexit` 兜底保留。
+    - `web_ui/frontend/src/components/TubEditor.tsx`：快捷键门控采用 feat 的 `active` prop 方案（#178 TM 已并入 Flow 大页面，section 在视口内才响应全局快捷键），取代 Tony 侧 #135 保活时代的 `pathname==='/'` 判断（ Flow 架构下 '/' 恒真已失效）；保留 Tony 的 `useUiStyle()` 图表配色订阅（#429 双风格）。
+    - `web_ui/backend/requirements.txt`：保留 Tony 的 `httpx2`/`zeroconf`/`packaging`，新增 feat 的 `pupil-apriltags`；feat 侧的 `httpx` 未采纳（全库无 `import httpx`，且 `httpx2` 包不提供 `httpx` 模块、Tony 代码亦不引用）。
+    - `.gitignore`：并集——Tony 防泄露凭据块 + feat 的 `latency_report.json`。
+    - `CHANGELOG.md`：Tony 条目 (165)–(217) 在前，feat 三条 (171)(172)(173) 保留原编号接其后——与 Tony 既有 (171)(172)(173) 撞号属并行分支各自计数的文档痕迹，日期为权威顺序。
+  - 架构对齐说明：Tony 已含 #178（TM 并入 Flow 大页面、App 路由 `*` → FlowPage），feat 在其上补了 `active` 逐级下传（FlowPage → TubManagerPage → TubLibrary/TubEditor），合并后 TM 段内快捷键按视口可见性门控；feat 的 FlowPage/TubManagerPage 改动与 Tony 同构、自动合并无冲突。
+  - 验证：`python -c "import main"` 通过（123 路由，drift 链路 import 全通）；后端 `pytest tests/` **574 全过**；前端 vitest **46 文件 282 全过**（含 feat 带入的 `DriftCard.test.tsx` 16 例）、`tsc -b` 零错误、`npm run build` 通过；`pupil-apriltags` 已补装本机 donkey env（feat 新依赖，requirements.txt 已载）。
+  - 顺带修复 Tony 既有红测试（#127 遗留，非本次合并引入）：`donkeycar/tests/test_web_command.py`（5 例）与 `test_drive_command.py`（2 例）自 #127/#135 后一直红——① 未 mock `find_live_instance`，本机常驻 8000 在线实例使 `Web.run` 走复用路径直接返回（DID NOT RAISE SystemExit），且 `write_instance` 有覆盖真实 `~/.donkeycar/webui.json` 风险；② `monkeypatch.setattr` 已删除的 `_DRIVE_PID_FILE` 直接 AttributeError；③ 全部用例按旧默认（dev 模式）编写，#135 默认改生产模式后前端不再起 Vite 进程。修复：两文件各加 autouse fixture 隔离实例登记与车进程 PID 记录（含 `_kill_previous_drive_processes`/`write_drive_pids`/`remove_drive_pid_file`，防误杀真实 `manage.py drive`），删除两处失效 `_DRIVE_PID_FILE` 引用，7 个用例显式加 `--dev` 恢复其编写时的执行环境，1 处等待断言随 #127「登记前先等后端就绪」更新为 `[8000, 5188]`。修复后 18 例全过、真实登记文件零改动。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；合并后按流程部署本机 8000 实例。分支 `docs/rfc-overhead-drift-control` 全部提交已含于 feat 分支，随本次一并购入、无需单独 PR。
+
+## 2026-09-11 (217)
+
+- feat(web-ui): 全站新增「座舱 / Apple」双 UI 风格切换——Apple 风为新默认，座舱风逐值保留可随时切回；删除无意义说明小字
+  - 背景：用户要求按 Apple 设计语言重设计 DD 界面（高级感），同时完整保留现有座舱风并提供切换入口；历史上曾有 `SkinSwitcher`（aa48b7ae）后被统一视觉移除，本次按新架构复活。
+  - 主题地基（变量化）：`src/themes/theme-mus4.css`、`src/themes/theme-light.css` 从「逐类名覆盖 Tailwind 工具类 + 硬编码 hex」改造为「变量驱动」——顶部各定义 114/116 个语义变量（`--canvas/--surface/--ink/--hairline/--accent/--ok/--warn/--bad`、`--r-*`、`--w-*`、`--tracking-title` 等），全部覆盖规则改引 `var(--*)`；新增 `html.theme-mus4.ui-apple` / `html.theme-light.ui-apple` 纯变量覆写块（Apple token：accent `#2997ff`/`#0066cc`、canvas `#000`/`#f5f5f7`、surface `#1c1c1e`/`#fff`、iOS system 状态色、卡片去渐变去投影只留 hairline、圆角卡片 18/控件 10/胶囊 9999）。座舱象限（无 `ui-apple` class）计算样式经「变量递归解析回字面值逐条对比」脚本验证与旧版一致。
+  - 风格机制：新建 `src/lib/uistyle.ts`（`<html>` `ui-apple` class + localStorage `donkeydrifter.ui.style`（默认 apple）+ `donkeydrifter:ui-style-changed` CustomEvent 广播，`useSyncExternalStore` 写法与 `lib/theme.ts` 一致）；`index.html` 防闪烁脚本同步解析 style；删除遗留死代码 `src/hooks/useTheme.ts`。
+  - 切换器：新建 `src/components/SkinSwitcher.tsx`（座舱 / Apple 分段控件，i18n `common.uiStyle.*`，Apple 象限呈 iOS 分段观感），进 `Layout.tsx` 桌面顶栏右侧控制组与移动端折叠菜单。
+  - 顶栏治理：`Layout.tsx` 高级工具入口（Kimi Code Web / ZCode / DeepSeek Harness / FindCar）收进「⋯」溢出菜单（点外/Esc/切路由收起），Donkey/DrifterConsole 入口在 lg 档（1024–1279px）也收进溢出菜单、≥xl 回到主导航；GitHub/版本号移到标题旁全宽度显示；间距收紧。顶栏 min-content 从 1554px 降到 ~1000px，1440/1280/1024 三档实测零横向溢出（旧版 1440 即溢出 114px）。
+  - 组件与反馈：`EnterButtons.tsx` 3 处 `alert()` 改为页面内 inline 错误 banner（`role="alert"`、可关闭）；`Empty.tsx` 空状态重做（图标 + 标题 + 一句引导）；`SectionCardTitle.tsx` 副标题从 hover 展开改常驻 Footnote（13px `--ink2`，移动端可达），删除 marquee 动效与 `subtitleMarquee` prop；`FabActions.tsx` 等组件删除发光 glow 与 isLight 三元选色；域内 JS 硬编码色约 70 处清零（全部走语义变量）。
+  - 页面清扫：8 个页面 + drive/、trainer/、TubEditor/TubLibrary 的 arbitrary-value 颜色、阴影三元全部语义化；canvas/图表配色（TelemetryChart、TubEditor、PilotArena、TubLibrary）订阅 `useUiStyle()`，风格切换时重取 CSS 变量配色；原生 select/input 视觉对齐 ui/Input 配方。
+  - 内嵌契约对接固件 v1.9.0：`DrifterConsolePage` 与 `CarSettingsPanel` 的 iframe src 拼 `&ui=<cockpit|apple>`（key 含 uiStyle，切换即重载），与车端 DC 双风格联动。
+  - 删小字（用户要求）：删除渲染点 + zh/en 词条——FlowPage section 描述（`flow.*.desc` ×4）、drive 虚拟摇杆副标题与鼠标触屏说明、SimCollect 说明段、ParameterPanel autoSaveNote、PilotArena 6 个 subtitle + plotRangeHint + pageDescription、TubEditor/TubLibrary subtitle、Trainer 7 个 subtitle 与 3 个 hint、TubLoader/SimulatorConfig subtitle、ConfigLoader description/apiLabel、Harness 后台检查说明、aiClean 机制解释句（保留软删除安全句）；功能性标签、安全警示、快捷键列表、错误信息全部保留。
+  - `src/index.css`：全局 `:active scale(.97)` 按压反馈（排除拖拽控件，`data-no-press` 豁免口，`prefers-reduced-motion` 降级）、`--ease-apple` 标准缓动、`.tnum` 数字等宽工具类。
+  - 测试同步：新增 `SkinSwitcher.test.tsx`（7 例）与 `DrifterConsolePage` `?ui=` 契约用例（2 例），EnterButtons/ConsoleControls/DriveModeSelector/SimCollectCard 等断言随 DOM/文案更新；**vitest 45 文件 264 例全过**，`tsc` 零错误，`npm run build` 通过。
+  - 性能红线：FlowPage 的 content-visibility / scroll-spy / 滑动动画、100Hz 遥测旁路 store 全部未动；未新增大面积 backdrop-blur。
+
+## 2026-09-10 (216)
+
+- fix(findcar): 一键找车「离线仍显示在线」+「类型显示 DonkeyDrift」——下线即时标记、在线窗口收紧、上报本机型号与系统
+  - 背景：用户反馈 find-dkc 网页（Find Donkey Car）两处问题：① DD 已经不在线，网页仍显示「在线」；② 「类型」列显示 DonkeyDrift，希望改成这台 Ubuntu 主机的型号或名称。根因：① 云端在线窗口与 KV 记录 TTL 同为 12 分钟，DD 停止心跳后要干等 12 分钟记录才过期、且到期即整行消失，期间一直显示「在线」，优雅退出也不发任何下线信号；② 上报字段只有 device_id/hostname/version，缺主机型号，网页只能按 `type` 显示软件名。
+  - `web_ui/backend/findcar.py`：新增 `_os_name()`（读 os-release 的 PRETTY_NAME）、`_read_dmi()`/`_machine_model()`（DMI `product_name`，缺则 `board_name`；有厂商标识时补 `sys_vendor` 前缀），上报 body 新增 `model` / `os` / `state` 三个字段；新增 `report_offline()` 与 `stop_heartbeat()`——优雅退出（lifespan 关闭 / systemctl stop / Ctrl-C）补发一次 `state=offline`（3 秒超时、尽力而为），网页立即显示「离线」而不必等窗口走完；心跳默认间隔 300s → 150s（576 次写/天，与 ESP32 的约 288 次/天 合计仍在 Cloudflare KV 免费层 1000 写/天 之内），配合云端 dd 在线窗口 5.5 分钟可容忍漏跳一次。
+  - `web_ui/backend/main.py`：lifespan 的 `finally` 中 `await findcar.stop_heartbeat()`（Starlette 1.x 下 `on_event` 不再触发，下线钩子必须挂在 lifespan）。
+  - 测试同步：`web_ui/backend/tests/test_findcar.py` 新增 12 例（DMI 型号四态、os-release 读取与缺文件、离线标记的 state 与短超时、未配置不发请求、异常吞掉、stop_heartbeat 成功/异常路径、main.py 下线钩子必须留在 lifespan），默认间隔断言 300 → 150。backend 347 例全过。
+  - 云端侧（`/home/dkc/projects/cloudflare/find-car/`，非 git 仓库，已 `wrangler pages deploy` 到 find-dkc）：`functions/report.js` 接收并存储 `model`/`os`/`state`，TTL 改 900s（离线标记 600s）；`functions/devices.js` 在线窗口按类型收紧（dd 5.5 分钟 / esp32 8 分钟）、`state=offline` 立即判离线、返回 model/os、在线设备排前；`public/index.html` 「类型」列 DD 行改显示主机型号（取不到退回主机名）、状态列加最近心跳「x 分钟前」、轮询 1s → 5s 且后台标签页暂停（1s 轮询每天 8.6 万次会打满 Cloudflare 免费额度）。
+  - 配套（另一仓库，详见 Firmware CHANGELOG v1.8.78）：车在线却在网页上查不到 ESP32 的根因是 v1.8.77 在干净 worktree 里编译、gitignore 的 `WirelessSecrets.h` 缺失导致 `CLOUD_REPORT_URL` 未定义、整块云端上报被静默编译掉——已改为仓库内默认上报地址并 OTA 刷车。
+
+## 2026-09-08 (215)
+
+- fix(launcher): 局域网选模型报「settings are unavailable in this browser」——0.1.2-rc.1 镜像门锚点改版未命中，补丁升级支持两代锚点
+  - 背景：接 214 的 405 修复后，下一层暴露：局域网浏览器选模型/设置页报"加载提供方目录失败: settings are unavailable in this browser"。根因：0.1.2-rc.1 里 `dsh-client-ui-settings` 的镜像门只剩一处且写法变了（`const persistence = ctx.remote.$host.isLoopback ? "host" : "memory";`），launcher 的 `_patch_settings_mirror_gate` 旧锚点（`connection.isLoopback ? "host" : "memory"`）未命中被跳过——局域网浏览器镜像落 "memory"、恒 unavailable；而该版服务端 settings/credentials RPC 对 trusted-host 实测已放行（PRIVILEGED_METHODS 栅栏重构移除），卡局域网的只剩这个前端门。
+  - `donkeycar/launcher/dsh_web.py`：`_patch_settings_mirror_gate` 升级为两代锚点按序尝试（`_PATCH_GATE_GENERATIONS`：旧代两处三目 + rc.1 代单处 const），幂等检查认任一代标记（含手工热修同款文本）。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 2 例（rc.1 代锚点命中并强制 host、rc.1 热修标记幂等互认）。实测本文件 73 例全绿、launcher 全家 216 例全绿。
+  - 真机端到端验证（Playwright + 系统 Chrome，非回环域名 tony007.local）：模型选择器打开且提供方（DeepSeek）可见、设置页零报错；`/api/settings/describe` 与 `/api/credentials/describe` 局域网实测 200。残留 403 仅 web-all 家族自有桥接路由（`/api/dsh-web-ui-settings/*`、doctor/task-board/ssh，"回环或已配对"门），不影响核心提供方目录。
+
+## 2026-09-08 (214)
+
+- fix(launcher): 局域网浏览器全部 API 报 405——remote-web-ui 卸载后 web-all 聚合 client 仍自装 fetch 劫持
+  - 背景：卸载 remote-web-ui（用户要求，配对窗口问题）后，编译进 web-all 聚合 client 的其通道逻辑仍在非回环页面激活：读 `/api/pair/status` 拿 404（插件已不在）即兜底假定"需要配对"，给页面装 fetch/WebSocket 劫持，把所有 `/api/*` 请求改写到已不存在的 `/remote/*` 通道——局域网浏览器每个 RPC 都报 `transport failure … HTTP 405`（实测 `/api/llm/listProviders` 直连 200、`/remote/api/` 前缀 405），模型选择/设置页全挂；服务端任何探测都 200，纯客户端行为。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_patch_remote_channel_client` 幂等自愈补丁——把聚合 client.js 的 `remoteChannelRequired` 强制恒 false（API 全部直连，安全边界回到 trusted-host 栅栏）；定位走 web profile（`~/.dsh/profiles/<DSH_PROFILE|web>/node_modules/@linxin666/dsh-web-all/lib/client.js`，非 dsh 安装树）；幂等标记与手工热修文本一致（已打过/升级未命中/包未安装均静默跳过）；`launch_dsh_web` 冷启动路径在其余三个补丁之后调用。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 7 例（补丁生效、幂等、识别热修标记、升级未命中跳过、包未安装跳过、缺省 HOME 定位、launch 先打补丁再拉进程）。实测本文件 71 例全绿、launcher 全家 214 例全绿。
+  - 真机端到端验证（Playwright + 系统 Chrome，非回环域名 tony007.local）：`/api/llm/listProviders` 网络层实测 200、零 `/remote/` 请求、`window.__DSH_TRANSPORT__` 未定义（无劫持）、模型选择器可正常打开、无任何"加载提供方目录失败"/405/配对弹窗。
+
+## 2026-09-08 (213)
+
+- fix(zcode-remote): 取链复用活动远控会话，不再误判 status 未运行而强制重启（根治「桌面端已离线」弹窗）
+  - 背景：用户反馈远控页面偶尔弹「桌面端已离线」，必须手动点击重连。经 CDP 实测，桌面端 v3.8.1 的 `getWebRemoteControlStatus()` 返回 `status="active"`（含 `connectUrl`），而 `_cdp_remote_url()` 判断 `status != "running"` 即调 `startWebRemoteControl`——于是**每次取链（DC 点 ZCode / 调 `/api/zcode-remote/link`）都会重启远控会话**（桌面端日志 `web-remote-control stopped reason=restart`），relay 向已连接的手机/浏览器端广播 `desktop-disconnected`，页面即弹「桌面端已离线」；当日日志 2 次 restart 与 2 次 /link 调用时刻完全吻合。
+  - `web_ui/backend/routers/zcode_remote.py`：`_cdp_remote_url()` 改为——status 返回带 `connectUrl` 即直接复用（仅刷新 `t`），不再依据 status 词表判定（active/running 皆复用），绝不动活动会话；仅当返回 dict 且无 `connectUrl`（远控确实未开启）才 `startWebRemoteControl`；status 为 null 的瞬态维持原兜底路径（不动会话、走凭证现拼）。
+  - 测试同步：`web_ui/backend/tests/test_zcode_remote.py` 注入假 websockets 模块直测 `_cdp_remote_url` 决策，新增 4 例——active 带 connectUrl 复用且只发 1 条 CDP 查询（绝不 start）/ 旧词表 running 同样复用 / 无 connectUrl 才 start（2 条消息）/ status null 不 start 返回 None 走兜底；backend 334 例全过。
+  - 真机端到端实测：部署 8000 后连续 4 次 /link 全部成功且 sid 不变，桌面端日志 restart 计数保持 2 不变（零新增），CDP 确认已连接的 Mac Safari 端全程 `mobileConnected=true` 未被踢。
+  - 关联排查结论（不改动）：用户另报 Mac Safari 里「用 Z.AI 登录」不弹窗直接「登录失败」——该登录界面属远控页面自带账号登录（i18n `loginTitle`「登录后继续使用 Web 远程控制」），其按钮先 `await startOAuthWithPolling`（网络请求）再 `window.open`，Safari 会因瞬态激活丢失拦截此类弹窗；属 z.ai 页面侧问题，绕开方式：Safari 设置允许 zcode.z.ai 弹窗或改用 Chrome 打开远控页；本修复落地后用户不应再落到该登录界面。
+
+## 2026-09-08 (212)
+
+- fix(launcher): dsh 入口 URL 提取锚定 ``dsh web:`` banner 行——插件噪声行抢跑导致抓丢 token
+  - 背景：装上 web-all 全家桶后其成员 `dsh-remote-web-ui` 在 dsh 就绪 banner 之前打印自己的 LAN 可达行（"reachable on LAN at http://…"，无 token），launcher 沿用 kimi_web 的通用提取（文本里第一个 URL 先到先得）抓到该噪声 URL：入口丢失 `?token=`（浏览器 401），落盘登记同样带不上 token；垂死进程打印任意 URL 还会被误判为启动成功（实测一次 duplicate-route 崩溃被当成功返回）。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_extract_dsh_web_url`——只认 ``dsh web:`` 开头的 banner 行、取该行第一个 URL（句读剥离与 kimi_web 同款）；找不到 banner 行返回 None（ready banner 未出现即未就绪，走超时/退出路径报现场），不再退回通用兜底；`_spawn_and_capture` 两处调用点切换到新提取器。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 5 例（噪声先于 banner 仍取 banner token、旧版无 token banner、只有噪声无 banner 返回 None、空输出、带噪声输出端到端冷启动抓 token 并落盘登记）。实测本文件 64 例全绿、launcher 全家 207 例全绿。
+
+## 2026-09-08 (211)
+
+- fix(launcher): 「打开 dsh」about:blank——dsh 自动升级 0.1.2-rc.1 引入根页面 token 鉴权，打断 launcher 的复用/探测链路
+  - 背景：dsh 被插件安装会话于 2026-09-08 20:16 自动升级到 0.1.2-rc.1，两层断裂：① 升级时仍在跑的旧 dsh web 进程用内存里的旧 manifest 组装器吐出无 `batches` 的 boot manifest，磁盘上的新前端解析器抛 "client-modules: boot manifest batches must be an array"（Failed to load plugins）；② 重启实例后新版对根页面启用 per-process token 鉴权——无 token `GET /` 一律 401，`_probe_root`/`_probe_dsh_fixed_port` 均判"实例不在"→ 每次点击「打开 dsh」都走冷启动 → 端口被存活实例占用 EADDRINUSE 退出（码 1）→ 浏览器 about:blank。
+  - `donkeycar/launcher/dsh_web.py`：`_probe_root` 兼容 200/401 两时代（401 即新版 token 门在应答）；`_probe_dsh_fixed_port` 新增 token 时代判定——401 响应体须含 dsh 专属文案 `dsh web authentication required`（外部服务的 401 不认），且 `~/.donkeycar/dsh_web_entry.json` 登记的带 token 入口经 `_probe_token_entry` 验证有效（303/200）才复用（token query 保留、`_lan_url` 改写当前局域网入口）；新增 `_write_entry_state`/`_read_entry_state` 把 banner 抓到的带 token 入口原子落盘（跨 launcher 重启的复用通道）；`_probe_token_entry` 用 http.client 禁跳转取首响应（有效 token 回 303 铸会话 cookie，跟跳转会丢 cookie 二次 401 误判失效）；`_SPAWNED` 登记条目新增 `url` 字段（复用返回带 token 入口，旧式无 url 条目退回裸入口）；冷启动失败且固定端口被存活 dsh 占用但复用不了时，报"占用且 token 未知"的可行动提示而非裸退出码现场。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 14 例（401 存活判定/500 判死、401+登记有效复用、无登记/坏 token/外部 401 文案/登记端口不符均不复用、launcher 重启后纯靠登记复用、内存登记带 token 复用、启动成功写登记、端口占用提示、`_probe_token_entry` 真实 HTTP 服务器验证禁跳转 303/无效 401/连接失败 None）；`test_dead_entry_removed` 断言改 proc/port 子集（登记条目新增 url 字段）；autouse fixture 把登记文件钉到 tmp_path 隔离真实 HOME。实测本文件 59 例全绿、launcher 全家 202 例全绿。
+  - 真机端到端实测：冷启动 3.3s 抓到带 token 入口并落盘登记；二次调用 0.03s 复用同 token 入口（内存登记）；跨进程（模拟 launcher 重启、空内存登记）0.02s 纯靠登记文件复用成功；页面 200 且 boot manifest 含 batches（Failed to load plugins 消失）。
+
+## 2026-09-08 (210)
+
+- fix(cc): 静音键禁用态误报修复——发现中显示「连接中」，代理请求加兜底超时
+  - 背景：用户反馈 DD 页面静音按键「点不了」。实测按钮是禁用态（title「Drifter Console 不在线」），根因是页面加载后局域网扫描发现车端需要数秒，这期间按钮禁用且误报「不在线」；另外前端代理 fetch 无超时，车端 IP 失效导致请求挂起时失败分支永不触发、按钮会永久卡死禁用态。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：静音键改用 `useConsoleDevice` 的 `resolving` 状态——扫描进行中 title 显示 `console.connecting`（连接中…），扫描失败/确不可达才显示不在线。
+  - `web_ui/frontend/src/services/console.ts`：`consoleRequest` 在调用方未提供 signal 时附加 12s `AbortController` 兜底超时（后端代理自身 10s 超时留余量），挂起请求也能触发失败分支自愈（refresh 重扫换新 IP）。
+  - 测试同步：`ConsoleControls.test.tsx` +1（resolving→连接中）；新增 `services/console.test.ts` 2 例（超时中止 / 显式 signal 透传）。实测 `vitest run` 254 例全绿、`npm run build` 通过。
+
+## 2026-09-08 (209)
+
+- fix(zcode): ZCode 远控点击卡死在「等待桌面端确认配对…」——取活链 CDP 端口改专用候选，避开被占用的 9222
+  - 背景：DC「ZCode」点击后手机端一直停在「等待桌面端确认配对…/手机端已就绪，等待桌面端会话匹配当前连接。」。根因链：① 8000 曾被 8-23 旧构建（dd-deploy）占住，/api/zcode-remote/link 404（launcher systemd override 指向旧 worktree，已由入口治理修正，见当日另一条目）；② 端点硬编码 CDP :9222，而 9222 被本机 Chrome 调试会话占用——ZCode 带着被占端口拉起时 CDP 静默失效，取不到活链只能走本地凭证现拼兜底，手机端永远等不到桌面端会话匹配。
+  - `web_ui/backend/routers/zcode_remote.py`：CDP 端口改候选 9333-9336 + 绑定探测选空闲 + 所有权校验（/json 目标须含 ZCode renderer/index.html 才认领，外部进程占用一律不认）；选中端口持久化 `~/.zcode/v2/dd-zcode-cdp.json`；`_cdp_remote_url` 按端口文件定位并兼容旧版 9222；`_launch_app` 带空闲端口拉起并写端口文件。
+  - `donkeycar/launcher/server.py`：`_handle_launch_zcode_remote` 拉起桌面端同样带 `--no-sandbox` 与空闲 CDP 端口并写同一端口文件，保证 DD /link 端点能经 CDP 取活链/代开远控。
+  - 测试同步：`web_ui/backend/tests/test_zcode_remote.py` +8（端口文件读写/损坏、所有权校验、9222 兼容回退、空闲端口选择、拉起参数与持久化）；`tests/test_launcher_zcode_remote.py` 更新拉起参数断言。实测 launcher 9 绿、backend 15 绿。
+  - 端到端实测（本机 8023 临时实例 + 无头 Chrome 模拟手机端）：9222 被 Chrome 占用时，冷启动 /link 3.9s 返回活链；桌面端日志 external relay device state paired + workspace bridge active，手机端页面 2s 内显示「已连接到当前桌面窗口」并列出工作区。
+
+## 2026-09-08 (208)
+
+- fix(cc): CC 齿轮按钮样式对齐静音键——激活态整框蓝化（浅蓝底 + 蓝边框 + 蓝图标）
+  - 背景：用户反馈顶栏右侧的齿轮按钮小框与旁边按键（静音/主题/语言）大小与 UI 设计不一致；进入设置（/connector）时只有齿轮图标变蓝、外框仍是灰色，与静音键激活态（整框蓝化）不对称。
+  - `web_ui/frontend/src/components/CarConnectorButton.tsx`：类名与 `ConsoleMuteButton` 逐类对齐——基础 `w-8 h-8 rounded-full border transition-colors`；激活态（/connector）`bg-[#5cc8ff]/10 border-[#5cc8ff]/60 text-[#5cc8ff]`（浅蓝底 + 蓝边框 + 蓝图标）；非激活态 `bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100`；新增 `aria-current={active ? 'page' : undefined}` 作激活语义标记。
+  - `web_ui/frontend/src/themes/theme-light.css`：`car-connector-btn` 加入顶栏按钮基础覆盖组（浅色底 `#f4f6f9`、边框 `#ccd5df`、inset 内圈 `#d5dce4`、字号 12px/600——此前齿轮缺这组覆盖，浅色主题下字号 16px 且无内圈，观感比邻居大、设计不一致）；补悬停 `:not([aria-current="page"]):hover` 与激活态 `[aria-current="page"]`（边框 + inset 内圈 `#5cc8ff`，镜像静音键 `[aria-pressed="true"]` 双层蓝框规则）。
+  - 测试同步：`CarConnectorButton.test.tsx` 激活/非激活断言更新为整框蓝化类名 + `aria-current`。实测 `vitest run` 251 例全绿、`npm run build` 通过；部署后以系统 Chrome 实测两种主题下激活/非激活逐值一致（HashRouter 路由 `#/connector`）。
+
+## 2026-09-07 (207)
+
+- fix(drive): 模拟器预览画质与 NN 输入解耦——Drive 页面显示模拟器最高画质（Issue #401/#405）
+  - 背景：DONKEY_GYM 连接模拟器时 Drive 页画质被锁在 NN 输入分辨率 160×120，经 320×240 上采样 + 有损压缩，与模拟器原生画面差距大；要求预览显示最高画质、处理分辨率不变。
+  - `donkeycar/parts/dgym.py`：新增 render_img_w/render_img_h（缺省回退 img_w/img_h 向后兼容）；渲染帧下采样回 IMAGE_W×IMAGE_H 作为 cam/image_array，渲染原始帧作为 preview/image_array（output_preview）。
+  - `donkeycar/parts/drive_api_bridge.py`：新增 jpeg_quality（默认 95）与 preserve_source_resolution；MJPEG 可配置质量编码；帧缓冲 upscale_only——预览源分辨率≥目标时不有损降采样。
+  - `donkeycar/templates/simulator.py`：cam 输出双通道、DriveApiBridge 视频源换为 preview/image_array（签名零改动）；cfg_simulator.py 默认渲染 640×480 + DRIVE_VIDEO_JPEG_QUALITY=95；cfg_complete.py/complete.py 实车模板保持旧行为。
+  - 测试同步：test_dgym_preview.py / test_template_simulator_preview.py 新增、test_drive_api_bridge.py 更新。实测相关单测 77+25 全过、后端 269 全过。
+  - 已知限制：本机无真实 DonkeySim，E2E 画质对比未实测（单测以假 env 覆盖渲染→预览链路）。
+
+## 2026-09-07 (206)
+
+- feat(cc): CC 新增 Harness 下载板块与一键更新——CLI+桌面端联动下载、Harness/项目/组件/OTA 固件统一更新 + 定期自动检查（Issue #404）
+  - 背景：对标 CC Switch：主流 Harness（Codex/Claude/DeepSeek Harness/Z-Code）选择下载（CLI 与桌面端联动），一键检查更新 Harness、DonkeyDrift 本体、donkeycar 组件与 OTA 固件；后台周期检查，下次打开即是最新。
+  - 后端 `web_ui/backend/routers/harness_updater.py`（新增，`main.py` lifespan 注册 `/api/harness`）：目录 + 检测（PATH/安装目录/注册表）+ 下载安装（本地-only `~/.donkeycar/downloads`，npm/.deb 优先）+ 更新检查 + HTTP OTA 刷写复用（`:3232` 提示）+ asyncio 周期检查（默认首检 30s、间隔 24h，HARNESS_*_S 可覆盖）+ 状态持久化本地-only。
+  - `web_ui/backend/main.py`：findcar 心跳由 `on_event` 并入 lifespan——Starlette 1.x 自定义 lifespan 下 on_event 不触发，否则 find-dkc 心跳静默停摆。
+  - 前端 `web_ui/frontend/src/components/HarnessPanel.tsx`（新增）：目录列表（已装/未装/版本、CLI+桌面端分组）+ 一键更新区 + 周期检查状态；CarConnectorPage 挂载。
+  - 测试同步：`test_harness_updater.py` 19 例；`HarnessPanel.test.tsx` 7 例。实测 pytest 19 全过、vitest 39 文件 238 例全绿、`npm run build` 通过。
+  - 已知限制：macOS/Windows 安装器未实测；Firmware 仓库暂无 release 产物，OTA 下载走降级分支（待发布对齐）。
+
+## 2026-09-07 (205)
+
+- feat(cc): CC 新增「AI 配置」板块——多供应商 AI 模型配置（API Key + Codex OAuth 设备码登录）（Issue #403）
+  - 背景：集中配置 AI 模型供应商供各 AI 功能统一调用（TE「AI 一键筛选」#402 是第一个消费方）；参考 CC Switch 设计（供应商预设 + 自定义 + 一键切换当前 + Codex ChatGPT 设备码登录）。
+  - 后端 `web_ui/backend/routers/ai_config.py`（新增，`main.py` 注册 `/api/ai-config`）：预设供应商 zhipu/codex/anthropic/moonshot/qwen/deepseek + 自定义；凭据本地-only 持久化 `~/.donkeycar/ai_config.json`（绝不进仓库）；API Key/OAuth token 只返回掩码（sk-***last4）与「是否已配置」；CRUD + 切换当前 + 多账号 + Codex 设备码 OAuth（client_id 可覆盖）+ `/test` 连通测试；`resolve_active_credentials()` 供 #402 消费。
+  - 前端 `web_ui/frontend/src/components/AiSettingsPanel.tsx`（新增）作为 Car Connector 第三块面板：供应商列表/编辑/切换/自定义增删/设备码 UI/连接测试；`services/api.ts` 新增 aiConfig 服务。
+  - 测试同步：`test_ai_config.py` 12 例；`AiSettingsPanel.test.tsx` 3 例。实测 pytest 12 全过、vitest 39 文件 234 例全绿、`npm run build` 通过。
+  - 已知限制：Codex 设备码端点无法用真实账号联调（client_id 按 cc-switch 实现，可环境变量覆盖）；`/test` 对 Codex OAuth 账号暂不支持。
+
+## 2026-09-07 (204)
+
+- feat(tub): TE 新增「AI 一键筛选」——识别碰撞后倒车片段、曲线高亮、确认删除可撤销（Issue #402）
+  - 背景：用户要求提交训练的数据里不能有倒车；入弯前减速不能误删，复用 `CollisionReverseHeuristic` 智能识别（碰撞特征前置的连续负油门）。
+  - 后端 `web_ui/backend/routers/tub.py`：`/ai_clean/scan` 可选 `session_id` 缩小到当前录制会话（向后兼容）。
+  - 前端 `web_ui/frontend/src/components/TubEditor.tsx`：Sparkles「AI 一键筛选」按钮；识别片段在转向/油门曲线上琥珀色高亮（verticalLinePlugin 区间）；确认层 `TubEditorAiCleanModal.tsx`（新增）列片段+统计；删除复用 `runRecordAction`（manifest 级软删除，纳入撤销栈）。
+  - 测试同步：`test_tub_ai_clean.py` +1；`TubEditor.aiclean.test.tsx`、`TubEditorAiCleanModal.test.tsx` 新增。实测 pytest 21 全过、vitest 40 文件 235 例全绿、`npm run build` 通过。
+
+## 2026-09-07 (203)
+
+- fix(trainer): 导入模型支持 loss 曲线与元数据——补传接口 + 列表悬停预览（Issue #407）
+  - 背景：外部导入的模型没有训练产物，列表里没有 loss 徽章入口；用户期望悬停即可看到 model loss 图。
+  - 后端 `web_ui/backend/routers/trainer.py`：`POST /models/import` 可选 `loss_image`（PNG/JPG，JPEG 自动转 PNG）与 `meta_json`（final_loss/best_loss），落盘 `<stem>.png`/`<stem>_meta.json` 让 list_models 自动关联；新增 `POST /models/{name}/loss` 补传接口（basename 防穿越、模型存在性校验）。
+  - 前端 `web_ui/frontend/src/components/trainer/ModelsList.tsx`：有 loss 数据的模型悬停 300ms 浮层显示曲线（移出消失），保留点击绿色徽章弹窗；导入对话框支持附带 loss 图与 meta；无 loss 模型显示「补传 loss」入口；`services/api.ts` 新增 `uploadModelLoss`。
+  - 测试同步：`test_trainer_models.py` +6；`ModelsList.test.tsx` 更新+新增。实测 pytest 15 全过、vitest 38 文件 233 例全绿、`npm run build` 通过。
+
+
+## 2026-09-07 (202)
+
+- fix(cc): CC 导航入口改造——删除「Car Connector」文字标题，小齿轮移入顶栏右侧控制区（Issue #406）
+  - 背景：用户要求顶栏导航不再显示 CC 文字，把齿轮做成右侧控制区（语言/静音/深浅色）同款纯图标按钮。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行与手机汉堡菜单移除「齿轮 + 文字」条目；桌面右侧控制区（GitHubLink 后）与手机标题区第二行（静音前）挂载新按钮，位置逻辑一致。
+  - `web_ui/frontend/src/components/CarConnectorButton.tsx`（新增）：w-8 h-8 圆形图标按钮，Link `/connector`，aria-label/title 复用 `common.nav.carConnector`；`/connector` 激活态 `text-cyan-400`。
+  - 测试同步：新增 `CarConnectorButton.test.tsx` 4 例。实测 `vitest run` 39 文件 235 例全绿、`npm run build` 通过。
+
+## 2026-09-07 (201)
+
+- feat(findcar): 一键找车恢复云端上报并去 token——网站 `find-dkc.pages.dev` 打开即列，无需任何口令；措辞统一「Donkey Car」（ESP32）/「DonkeyDrift」（DD）
+  - 背景：(200) 曾按「DD 网页局域网直连发现、去 token 去云端」落地，但用户实际想要的是**公网网站**（Cloudflare Pages 域名）里点一下就能查到局域网内小车/DD，且明确不要 token。公网网页扫不了局域网，只能靠车与 DD 上报到 Cloudflare KV、网页读 KV；去 token 即完全公开查询（用户已接受）。因此恢复云端上报，但删除共享口令，并把项目从 `find-car` 改为 `find-dkc`、把「小车」措辞改为「Donkey Car」。
+  - 后端：新增 `web_ui/backend/findcar.py`（`FindCarConfig` 不再含 `token` 字段；`_is_configured` 只判 `enabled and url`；`_report_payload` 无 token；`load_config` 对旧配置 `data.pop("token", None)` 容错）；新增 `web_ui/backend/routers/findcar.py`（`FindCarConfigUpdate` 无 token；`GET/POST /api/findcar/config`）。
+  - `web_ui/backend/main.py`：import `findcar` 与 `routers.findcar`、`include_router(..., prefix="/api/findcar")`、`@app.on_event("startup")` 启动 `findcar.start_heartbeat()`。
+  - 测试同步：新增 `web_ui/backend/tests/test_findcar.py` 16 例（配置读写容错、去 token 断言、`_report_payload` 无 token、`report_once` 成功/失败/UA、`heartbeat_loop`、`start_heartbeat` 开关、路由契约）。实测后端 `pytest web_ui/backend/tests/` 285 全过。
+  - Cloudflare 站点（非 git，目录 `cloudflare/find-car/`）：`public/index.html` 去 token 输入框、打开自动 `fetch('/devices')`、标题「Find Donkey Car」；`functions/devices.js` 去 token 校验、KV prefix `dev:`；`functions/report.js` 去 token 校验、KV 键 `dev:<device_id>`、TTL 720s；`wrangler.toml` name 改 `find-dkc`。已部署 `https://find-dkc.pages.dev/`，实测 `/devices` 返回 200。
+  - Firmware 侧对应恢复云端上报并去 token（见 Firmware v1.8.75）。
+
+## 2026-09-06 (200)
+
+- feat(findcar): 一键找车——改为局域网直连发现（去 token、去云端），DD 网页一键扫描出本机 DD 与小车 ESP32 的 IP
+  - 背景：用户希望在一个网页里点击一下就能搜索局域网内有没有小车，看到 ESP32 的 IP 或 DonkeyDrift 的 IP。最初方案 A 是车辆与 DD 后端周期上报到 Cloudflare Pages Functions + KV、网页输共享 token 查询；用户随后明确要求去掉 token、在 DD 网页里一键查询，故废弃云端方案，改为纯局域网直连发现——DD 后端复用既有 `discover_hosts(port=80)` + `_check_drifter_console` 扫描，前端新增「找小车」入口与结果弹窗，零 token、零云端依赖。Firmware 侧对应关闭云端上报（见 Firmware v1.8.74）。
+  - 后端：删除 `web_ui/backend/findcar.py`、`web_ui/backend/routers/findcar.py`、`web_ui/backend/tests/test_findcar.py`；`web_ui/backend/main.py` 移除 findcar 路由/心跳/启动钩子（复用既有 `GET /api/connector/local_ips` 与 `POST /api/connector/discover_console` 即可，无需新端点）。
+  - 前端：新增 `web_ui/frontend/src/components/FindCarModal.tsx`（打开时并行调用上述两端点，列出「本机 DD」`http://<ip>:8000` 与「小车 ESP32」`http://<ip>` 可点击链接，loading/notFound 状态）；`EnterButtons.tsx` 新增 `FindCarEntryLink` 入口；`Layout.tsx` 桌面/手机导航各挂载该入口；i18n 新增 `common.enterButtons.findCar*` 与 `common.findCar.*` 词条（zh/en）。
+  - 测试同步：新增 `web_ui/frontend/src/components/FindCarModal.test.tsx`。实测后端 `pytest web_ui/backend/tests/` 269 全过；前端 `vitest run` 与 `npm run build` 通过。
+  - 已知限制：今日两仓库 PR 数已达上限，本改动暂未合入 Tony；本机 8000 实例按本分支部署，明日（9-07）合并后 ff 对齐。
+
+## 2026-09-06 (199)
+
+- fix(trainer): Trainer 页「本机」标签改回「车载电脑」——仅改显示名，不动机器枚举与逻辑；「局域网主机」「云端」保持不变
+  - 背景：用户要求把 DD 页面 Trainer 的「本机」（指运行 Web UI 的车端电脑，内部枚举 local）显示名改为「车载电脑」，「局域网主机」（mypc）维持现名不动。
+  - `web_ui/frontend/src/i18n/messages/trainer.ts`：`trainer.tabLocal` zh「本机」→「车载电脑」、en「Local Host」→「Car Computer」；文件头命名约定注释（tabLocal = 车载电脑（Car Computer））同步。
+  - 测试同步：`web_ui/frontend/src/components/trainer/ModeTabs.test.tsx` 断言「本机」→「车载电脑」。实测：`vitest run src/components/trainer` 6 文件 27 例全过、`src/pages/TrainerPage.test.tsx` 6 例全过；全量 `vitest run` 37 文件 226 例全绿。
+  - 已知限制：今日两仓库 PR 数已达上限（DD #397–#400、FW #146–#148 共 7 个），本改动暂未合入 Tony；本机 8000 实例按 (197) 同款先例破例按本分支部署，明日（9-07）合并后 ff 对齐。
+
+## 2026-09-06 (198)
+
+- fix(console): DD 页面整页三步审查修复——console 代理 SSRF 防护兑现（拒绝公网 IP）+ OTA 期间 503 识别在线 + 静音键失败自愈 + DC/CC 内嵌页换 IP 自愈 + iframe 全屏修复 + OTA 弹窗不再中途消失
+  - 背景：对 Drift Console（固件侧，见 Firmware v1.8.72）与 DD 页面整体做「边界情况 / 陌生 CodeReviewer 复审 / 上线严重 Bug 预演」三步审查，DD 侧发现 5 条实锤问题，本次全部修复。
+  - `web_ui/backend/routers/console.py`：`_validate_ip` 补 `addr.is_private` 检查——docstring 一直宣称"仅允许局域网地址防 SSRF"但实现只查 IPv4 版本，`8.8.8.8` 等公网地址原样放行；现公网 400 拒绝，私网/回环/链路本地放行（docstring 写明语义）。
+  - `web_ui/backend/routers/connector.py`：`_check_drifter_console` 新增 HTTPError 分支——固件 OTA 上传期间中间件对所有非 /update 请求回 `503 "OTA in progress"`（固件 `WebConsoleServer.cpp:1509-1515`），此前一律判离线，导致 OTA 进行中 DD 重扫把正在刷机的车误判消失；现"503 且 body 含 OTA 标记"判定为在线（OTA 忙），其余错误路径不变。
+  - `web_ui/frontend/src/components/ConsoleControls.tsx`：① 静音状态 fetch 失败补调 `refresh()`（照抄 DEV 的"缓存 IP 失效→重扫"自愈模式）——此前 ESP32 换 IP 后静音键永久 502 只能刷新页面；② 静音未知态（`muted===null`）按钮显式禁用并提示 unreachable，与 DEV 侧"不伪装成关"语义对齐；③ OTA 弹窗渲染条件 `{open && ip && …}` → `{open && (ip || uploading) && …}`——上传期间 ip 被重扫暂时置 null 不再导致弹窗中途消失。
+  - `web_ui/frontend/src/pages/DrifterConsolePage.tsx`、`web_ui/frontend/src/components/CarSettingsPanel.tsx`：① `selectedIp` 自愈——`prev || found[0].ip` 保留旧值导致车换 IP（DHCP/OTA 重启）后 iframe 永久指向死地址白屏；现发现结果非空且 prev 已不在列表中则切到 `found[0].ip`，found 为空保持 prev（注释说明手动 IP 会被切走的可接受语义）；② 两处 iframe 补 `allowFullScreen`——此前 DD 内嵌时车端图表/终端两个全屏键被浏览器拒绝（跨源 iframe 无该属性必败）。
+  - 测试同步：`web_ui/backend/tests/test_console.py` +1（公网拒绝/私网回环链路本地放行矩阵）；`web_ui/backend/tests/test_connector.py` +2（503 带/不带 OTA 标记）；`ConsoleControls.test.tsx` +3（mute 失败调 refresh、未知态禁用、上传中 ip=null 弹窗仍在）；`DrifterConsolePage.test.tsx`/`CarSettingsPanel.test.tsx` 各 +3（换 IP 自愈切换、found 空保持、allowFullScreen 断言）。实测：后端 `pytest web_ui/backend/tests/` 269 全过、根 `pytest tests/` 288 全过；前端 `vitest run` 37 文件 226 例全绿、`tsc -b --noEmit` 与 `npm run build` 通过。
+
+## 2026-09-06 (197)
+
+- feat(nav): ZCode 远控点击即取活链、零弹框零粘贴——DD 后端新增 `/api/zcode-remote/link` 端点实时向桌面端取当前远控链接，单击直接打开，彻底告别「手机连接已失效」与粘贴弹框
+  - 背景：(194)(195) 把链接保鲜做到了「存档凭证 + 本地刷新 t」，但仍要求用户先从桌面端「复制链接」手工录入一次；无存档或存档失效时仍弹 prompt。本次逆向了桌面端协议后彻底自动化：链接由 sid（中继注册下发，持久化于 `~/.zcode/v2/setting.json`）+ passHash（`credentials.json` 中 aes-256-gcm 加密存储，key 为本机派生）+ 新鲜 t 现拼而成，后端可实时取/现拼，前端点击即用。
+  - `web_ui/backend/routers/zcode_remote.py`（新增）：POST `/api/zcode-remote/link`——优先走 CDP（`http://127.0.0.1:9222/json` 找渲染页 target，WS 发 `Runtime.evaluate` 调 preload 暴露的 `window.zcode.getWebRemoteControlStatus()`，非 running 则 `startWebRemoteControl({workspacePath})`）取桌面端实时 connectUrl；桌面端进程不在（扫 `/proc`）则 detached 拉起并最多等 25s；CDP 路径失败兜底 `_mint_link_from_store()`——读 `setting.json`/`credentials.json`/`telemetry-state.json`，本地解密 passHash 现拼 `?sid=…&hash=…&t=Date.now()&mid&name&app_version`（`_refresh_t()` 保证 t 新鲜）；凭证缺失 409、其它异常 500。数据目录 `_v2_dir()` 读 `ZCODE_DATA_BASE_DIR` env（缺省 home）便于测试隔离。
+  - `web_ui/backend/main.py`：import + `include_router(zcode_remote.router, prefix="/api/zcode-remote")`。
+  - `web_ui/frontend/src/services/api.ts`：新增 `fetchZcodeRemoteLink()`（POST `/zcode-remote/link`，30s 超时——覆盖桌面端冷启动，validateStatus 全放行自行判定）。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：openRemote 改为先同步 `window.open('about:blank','_blank')` 占位标签（`opener=null`，保住用户手势链不被浏览器拦截）→ `fetchZcodeRemoteLink()` 取活链 → 成功则落 localStorage 存档 + 占位标签 `location.href` 导航（占位被拦则 `window.open` 直开）→ 失败回落存档归一化现拼，无存档才 prompt 录入（此时已脱离点击手势，录入后直接导航占位标签而非新开窗口，取消/无效输入关占位）。**与 (196) 审查补强融合**：回落读取走 `readStoredRemoteUrl()` 容错、prompt 保存 setItem try/catch、无双击手势路径仍走 `openFresh()`。正常点击全程零弹框。
+  - 测试同步：新增 `web_ui/backend/tests/test_zcode_remote.py` 8 例（CDP 取链成功/非 running 先 start/进程不在拉起后取链/CDP 失败兜底本地现拼/凭证缺失 409/环境变量隔离等）；`EnterButtons.test.tsx` ZCode 块按新流程重写为 18 例（占位标签导航、占位被拦直开、取链失败回落存档、无档 prompt 后导航同一占位、活链落存档，含 (196) 的 setItem/getItem 抛错两例适配新流程）。实测：后端 `pytest web_ui/backend/tests/` 266 全过、根 `pytest tests/` 288 全过；前端 `vitest run` 37 文件 217 例全绿、`tsc -b --noEmit` 通过、`npm run build` 通过。端点真机实测 26ms 返回活链。
+  - 注：安全红线不变——远控链接是凭证，仅经后端内存传递 + 浏览器 localStorage，代码与测试中仅占位示例；Firmware 侧 DC 顶栏 ZCode 按钮同款改造为 v1.8.71（POST 到 `http://<launcherIp>:8000/api/zcode-remote/link`）。
+  - 已知限制：今日 PR 数已达上限，本改动暂未合入 Tony；本机 8000 实例破例按本分支部署（deploy-8000 detached 于本分支头），明日合并后 ff 对齐。
+
+## 2026-09-06 (196)
+
+- fix(nav): ZCode 远控入口审查补强——DD 侧 localStorage 读写容错（存储禁用/隐私模式下点击不再整个失效）、消除 prompt→open 递归；launcher /proc 扫描参数化可直测
+  - 背景：(194)(195) 合并前对两仓库该功能做三步审查（边界情况+测试补充、陌生 CodeReviewer 复审、上线严重 Bug 预演）发现：DD 侧 `localStorage.getItem/setItem` 未 try/catch（固件侧 `zcodeRemoteGet`/`zcodeRemotePrompt` 已包）——浏览器存储被禁用/隐私模式时 `setItem` 抛 QuotaExceededError、`getItem` 抛 SecurityError，点击「ZCode」会以未捕获异常整个失效。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：新增 `readStoredRemoteUrl()`（getItem 抛错按无存档处理走 prompt）；`promptForUrl` 的 setItem 包 try/catch（写入失败本次仍按手中链接打开，下次点击再 prompt）；抽出 `openFresh(url)`（复制+打开+唤醒三合一），`promptForUrl` 末尾由递归调 `openRemote()` 改为直接 `openFresh(url)`——消除递归路径，打开的链接与刚存入的值一致。
+  - `donkeycar/launcher/server.py`：`_zcode_desktop_running(proc_root="/proc")` 参数化 proc 根目录（行为不变），/proc 扫描逻辑可直接单测。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块 13 → 15 例（setItem 抛错仍打开+唤醒 / getItem 抛错按无存档走 prompt 且预填空串；prompt 取消用例补「不唤醒桌面端」断言）；`tests/test_launcher_zcode_remote.py` 5 → 9 例（假 /proc 检出运行中进程 / 无匹配 / proc 根不可读返回 False / 单进程 cmdline 读不出跳过不误判）。Firmware 侧同款审查补测：node 行为测试固化入库（`MUS4_FW/tests/zcode_remote_url.test.mjs` 23 例 + pytest 包装）。
+  - 刻意不改（审查记录）：① DC 双击重录后不打开 vs DD 双击后立即打开——不一致自 v1.8.68/(193) 起即存在，非本功能引入，保持现状待用户拍板；② `remoteControlToken` 链接不刷 t 为有意设计（token 链接形态未经真机凭证验证——若 z.ai 对其同样校验 t 新鲜度，会复发「手机连接已失效」，预演头号嫌疑，记录在案）；③ `_launcherIp` 硬编码默认值系 Donkey/DonkeyDrifter 入口链接同款既有模式，本功能未引入、未扩大。
+
+## 2026-09-06 (195)
+
+- fix(nav): ZCode 远控链接宽容归一化——兼容桌面端「Copy link」参数在 `#` fragment 后的链接、remoteControlToken 链接原样通过、无效存档不再预填诱导回车（修复 (194) 粘贴桌面端链接被误判"链接无效"）
+  - 背景：(194) 上线后用户反馈粘贴桌面端复制的链接被误判「链接无效」——根因一：桌面端链接的参数可能跟在 `#` fragment 后（形如 `https://zcode.z.ai/remote/v4#sid=…&hash=…`），而 (194) 的校验只认 query；根因二：prompt 会预填早期存的无效裸链接，诱导用户直接回车再次触发"无效"。本次把解析换成与固件侧同语义的宽容归一化函数。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`parseRemoteUrl()`/`buildFreshRemoteUrl()` 合并替换为 `normalizeRemoteUrl(raw)`——trim + 去首尾引号（含「」“”‘’）→ `new URL`，非 `https:` 返回 null → hash 长度 >1 时去掉 `#`（内部若还有 `?` 取其后半），含 `=` 则用 `URLSearchParams` 把参数归并进 query（query 已有同名参数不覆盖）并清空 hash → 含 `remoteControlToken` 参数原样返回 → 否则必须含 sid+hash 且把 `t` 刷成 `Date.now()`。单击逻辑：存档归一化有效就直接用、无效才 prompt；prompt 预填改为 `saved ? (normalizeRemoteUrl(saved) ?? '') : ''`（无效存档预填空串，不再诱导回车）；用户输入经归一化，null 则 alert 不保存，保存归一化后的值。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块 10 例 → 13 例——3 处「存入值 === 原 URL」断言改为解析存入 URL 断言 sid/hash 保留、`t` 为全新毫秒戳（归一化会刷新 t）；新增 3 例（fragment 形式链接被接受且参数归并进 query、remoteControlToken 链接原样通过不刷 t、无效存档时 prompt 预填为 ''）。实测：`vitest run` 全量 37 文件 212 例全绿、`tsc --noEmit` 通过、`npm run build` 通过。
+  - 注：与固件侧 DC 顶栏 ZCode 按钮的同款宽容归一化（`zcodeRemoteNormalize`）语义对齐；安全红线不变——真实远程链接是凭证，测试中仅出现占位示例。
+
+## 2026-09-06 (194)
+
+- feat(nav): 「ZCode」远控入口点击即新鲜、正常点击零弹框——单击用已存凭证现拼带全新时间戳的远控链接，复制到剪贴板后直接新标签打开，并后台唤醒 PC 上的 Z Code 桌面端
+  - 背景：(193) 的远控链接入口是原样打开 localStorage 里保存的链接，但链接里的 `t` 生成时间戳会过期（z.ai 远控页明示"不要复用旧复制的链接"），旧链接打开即显示「手机连接已失效」；无存档时还会 prompt 弹框。远控链接形如 `https://zcode.z.ai/remote/v4?sid=<设备 sid>&hash=<配对 hash>&t=<生成毫秒戳>&mid=…&name=…&app_version=…`，其中 sid/hash 为持久化设备凭证，`t` 需保持新鲜。本次让每次点击都现拼带全新 `t` 的链接，只有点击后才向 Z Code 发请求，复制到剪贴板再打开，并新增 launcher 唤醒端点确保桌面端在线。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`ZCodeEntryLink` 改造——新增 `parseRemoteUrl()`（校验 `https://` 且必须含 `sid`/`hash` 参数，裸 `/remote/v4` 一律视为无效）、`buildFreshRemoteUrl()`（用已存链接现拼 `t=Date.now()` 的新鲜 URL，无存档/参数不全返回 null）、`copyRemoteUrl()`（clipboard API + textarea/execCommand 降级，失败不阻塞）；单击去抖后走「buildFreshRemoteUrl → 无则 prompt（预填当前存档）→ 复制 + `window.open(fresh,'_blank','noopener')` + fire-and-forget `launchZcodeRemote()` 唤醒桌面端」，正常点击零弹框；双击重新录入不变。保存成功的当次也按 fresh-t 重建后打开。
+  - `web_ui/frontend/src/services/api.ts`：新增 `launchZcodeRemote()`（POST `/api/launch/zcode-remote`，validateStatus 全放行）。
+  - `web_ui/backend/routers/launch.py`：新增 `/zcode-remote` 转发路由；`_post_to_launcher`/`_forward_launch` 增加 `timeout_s` 参数（缺省仍为 `FORWARD_TIMEOUT_S` 125s，zcode-remote 用 10s 短超时——唤醒是即时动作）。
+  - `donkeycar/launcher/server.py`：新增 `_handle_launch_zcode_remote`（POST `/api/launch/zcode-remote`，带 CORS 头）——扫 `/proc` 判断 Z Code 桌面端进程（`.zcode-app/zcode`）在否；不在则 `subprocess.Popen(..., start_new_session=True)` detached 拉起 `Path.home()/".zcode-app/zcode"`（动态推导不硬编码，DISPLAY 环境兜底 `:0`），靠桌面端 App 启动自愈恢复上次开启的 Web 远控会话；二进制不存在 400、拉起 OSError 500；返回 `{"status":"ok","running":...,"started":...}`。
+  - i18n `web_ui/frontend/src/i18n/messages/common.ts`：`zcodeTitle`/`zcodePrompt`/`zcodeInvalid` 中英词条更新（引导粘贴桌面端「Copy link」完整链接；无效文案明确须含 sid/hash）。
+  - 测试同步：`EnterButtons.test.tsx` ZCode 块改写为 10 例（无存档 prompt+保存+打开 fresh-t 副本、有存档零弹框打开 fresh-t 重建链接、点击复制剪贴板、唤醒失败仍打开、双击重录且旧链接被去抖抑制、非 https 拒存、缺 sid/hash 裸链接拒存、存档缺参数回退 prompt、取消无动作、title 断言）；`web_ui/backend/tests/test_launch.py` 3 处 fake 签名同步 `timeout_s` + 新增 zcode-remote 短超时转发用例 + 路由注册断言；新增 `tests/test_launcher_zcode_remote.py` 5 例（已在运行不重复拉起/未运行 detached 拉起含 DISPLAY 兜底/二进制缺失 400/拉起 OSError 500/路径动态 home 栅栏）。实测：`pytest tests/ -k launcher` 184 passed、`pytest web_ui/backend/tests/` 258 passed、前端 `vitest run` 37 文件 209 例全绿、`tsc --noEmit` 通过、`npm run build` 通过。
+  - 注：安全红线——真实远程链接是凭证，只存浏览器 localStorage，代码与测试中仅出现占位示例；Firmware 侧同款改造为 v1.8.69（DC 顶栏 ZCode 按钮）。
+  - 已知限制：运行中的 8090 launcher 实例仍为他人 worktree 旧码，唤醒端点待合并 Tony 并重部署 launcher 后生效；前端对该端点失败静默，不影响跳转。
+
+## 2026-09-06 (193)
+
+- feat(nav): 导航区「ZCode」入口行为替换为远程控制链接跳转——不再新增独立入口，复用旧 ZCode 按钮（标签/图标/样式不变），单击打开 localStorage 链接、双击重录
+  - 背景：(192) 以独立「ZCode 远程」按钮上线后，用户明确不要新增按钮，要求把旧「ZCode」入口（原 launcher 网页终端 `/terminal?cmd=zcode`）的行为直接替换为远程链接跳转。交互规格不变：单击读 localStorage `zcodeRemoteUrl`——有值 `window.open(url, '_blank', 'noopener')`，无值 `window.prompt` 录入（校验 `https://` 开头，非法输入 alert 且不保存）后打开；双击重新 prompt 更新；单击 300ms 去抖避免双击误开旧链接。
+  - `web_ui/frontend/src/components/EnterButtons.tsx`：`ZCodeEntryLink` 由 `useLauncherEntry(launchZcode)` 改为本地 localStorage/prompt 逻辑（导出 `ZCODE_REMOTE_STORAGE_KEY`，Code2 图标与 `entryLinkCls` 不变）；删除 `launchZcode` 引用（`services/api.ts` 的封装保留未动，launcher 端点仍在）。
+  - 删除 (192) 引入的独立组件：`ZcodeRemoteLink.tsx` / `ZcodeRemoteLink.test.tsx` 删除，`Layout.tsx` 两处引用与 import 撤除（Layout 恢复原状），i18n `common.zcodeRemote.*` 词条撤除。
+  - i18n `web_ui/frontend/src/i18n/messages/common.ts`：`common.enterButtons.zcodeTitle` 改为「单击打开 ZCode 远程控制，双击更新链接」/英文对应文案；新增 `zcodePrompt`/`zcodeInvalid` 中英文案；移除不再使用的 `zcodeStarting`/`zcodeFailed`/`zcodeNetworkError`。
+  - 测试同步：`EnterButtons.test.tsx` 的 `ZCodeEntryLink` 旧 launcher 行为 2 例替换为新行为 6 例（title 提示、无链接 prompt+保存+打开、有链接直接打开不 prompt、双击重录且旧链接被去抖抑制、非 https alert 不保存不打开、取消 prompt 无动作），并清理 mock 中的 `launchZcode`。实测：`npm run check`（tsc）通过、`vitest run` 全量 37 文件 205 例全绿、`npm run build` 通过。
+  - 注：仅 DD 前端改动，无需 OTA；安全红线——真实远程链接是凭证，代码与测试中仅出现占位示例 `https://zcode.z.ai/remote/v4`。
+
+## 2026-09-06 (192)
+
+- feat(nav): 导航区新增「ZCode 远程」入口——单击新标签页打开 localStorage 中的 ZCode 远程控制链接，双击重新录入；与 Firmware Web Console 侧统一交互规格
+  - 背景：ZCode 桌面端可生成「远程控制」链接（形如 `https://zcode.z.ai/remote/v4#配对凭证`，链接本身即凭证），用户希望在 DD 网页导航一键打开。链接只存浏览器 localStorage（键 `zcodeRemoteUrl`），绝不入库。
+  - 前端 `web_ui/frontend/src/components/ZcodeRemoteLink.tsx`（新增）：复用 EnterButtons 的 `entryLinkCls` 弱化高级入口样式（Satellite 图标）；单击读 localStorage——有值 `window.open(url, '_blank', 'noopener')`，无值 `window.prompt` 录入（校验 `https://` 开头，非法输入 alert 且不保存）后打开；双击重新 prompt 更新；单击动作 300ms 去抖，避免双击更新时先误开旧链接，组件卸载清理定时器。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面导航行与手机汉堡菜单的既有 ZCode（网页终端）入口之后各加一处。
+  - i18n `web_ui/frontend/src/i18n/messages/common.ts`：新增 `common.zcodeRemote.*` 中英文案（label/title/prompt/invalid），title 写明「单击打开 ZCode 远程控制，双击更新链接」。
+  - 测试同步：`web_ui/frontend/src/components/ZcodeRemoteLink.test.tsx`（新增 6 例：无链接 prompt+保存+打开、有链接直接打开不 prompt、双击重新录入且旧链接不被打开、非法输入 alert 不保存不打开、取消 prompt 无动作、弱化样式与 title 断言）。实测：`npm run check`（tsc）通过、`vitest run` 全量 38 文件 207 例全绿、`npm run build` 通过。
+  - 注：仅 DD 前端改动，本仓库无固件内容、无需 OTA；安全红线——真实远程链接是凭证，代码与测试中仅出现占位示例 `https://zcode.z.ai/remote/v4`。
+
+## 2026-09-06 (191)
+
+- fix(launcher): DSH 局域网设置页/模型选择修复——新增设置镜像回环门自愈补丁，根治「加载提供方目录失败： settings are unavailable in this browser」（issue #164 后续）
+  - 根因：8.18 的栅栏补丁只放宽了服务端（`dsh-client-connection/lib/index.js` 的 `PRIVILEGED_METHODS` 空信任表→trustedHosts），但 `dsh-client-ui-settings/lib/client.js` 前端还有一道门——共享设置镜像 `SettingsDescribeMirror` 与命名空间作用域 `SettingsScopeController` 按 `connection.isLoopback ? "host" : "memory"` 选持久化模式（上游假定 settings RPC 仅回环可达）；局域网浏览器落 `"memory"` 后镜像初始即 unavailable、`ensure()` 空转、永不发起 `settings.describe`，`dsh-client-ui-settings-models` 的 `load()` 在 `mirrored.view === void 0` 时抛出该报错。dsh 8.21 重装（0.1.1-rc.2）后栅栏补丁自愈重打仍正常（服务端 LAN Host curl `settings.describe`/`llm.providers` 实测 200），前端门从未被补过，本次复发即它所致。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_patch_settings_mirror_gate()`——把前端三目 `connection.isLoopback ? "host" : "memory"` 强制为 host（`(true) /* [donkey-launcher] ... */ ? "host" : "memory"`，内联注释作幂等标记），文件内镜像与作用域两处一次替换；配套 `_ui_settings_client_path()`（同 realpath 布局定位 `dsh-client-ui-settings/lib/client.js`）与 `_PATCH_GATE_OLD/_PATCH_GATE_NEW` 常量；在 `launch_dsh_web` 冷启动路径既有两个补丁后追加调用；幂等（已打跳过）、升级还原后自动重打（未命中仅告警）、失败只告警不抛。安全边界不扩大：非 trusted-host 仍被服务端栅栏 403，前端只是让 trusted-host 浏览器用上服务端本就放行的 RPC。模块 docstring 同步补第三条补丁说明。
+  - 实机验证：本机已装 dsh 的 `dsh-client-ui-settings/lib/client.js` 按同款替换就地补丁（2 处，留 `.donkey-bak` 备份），运行中实例立即生效——served `/plugins/@deepseek-ai/dsh-client-ui-settings/client.js` 的 rev 自动更新（`5d1695c62b38`→`a47a350fa5f5`）、旧片段归零，浏览器硬刷新即可用，dsh web 无需重启。
+  - 测试同步：`tests/test_launcher_dsh_web.py` 新增 `TestPatchSettingsMirrorGate` 5 例（两处一并替换/幂等/锚点未命中不动文件/缺包跳过/launch 冷启动调用时机）。实测：`pytest tests/test_launcher_dsh_web.py` 45 passed；`pytest tests/ -k launcher` 179 passed。
+  - 注：仅 DD 改动（launcher 启动补丁），Firmware 无改动、无需 OTA；`dsh-client-ui-settings-general` 的 raw 文档编辑器与 `dsh-client-ui-deliverables` 的 `canOpenPath` 回环门为上游有意设计，保留不动。
+
 ## 2026-09-05 (190)
 
 - feat(tub): TM 录制视频库新增「AI 清理」——启发式自动识别「碰撞后倒车」片段，扫描 → 清单确认 → 批量软删除 (fixes #373)
@@ -3029,4 +3419,3 @@
 - ESP32 串口协议与 Arduino 控制器
 - CLI 工具链（createcar、calibrate、web、train 等）
 - 模拟器集成（DonkeyGym）
-

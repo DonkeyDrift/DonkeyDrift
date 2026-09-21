@@ -22,7 +22,7 @@ export const ProgrammableButtons: React.FC<ProgrammableButtonsProps> = ({ classN
           key={btn.id}
           disabled
           title={t(btn.hintKey)}
-          className="flex-1 h-9 rounded text-xs font-bold transition-colors bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-60"
+          className="dd-hit-v flex-1 h-9 rounded text-xs font-bold transition-colors bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-60"
         >
           {btn.label}
         </button>

@@ -127,6 +127,9 @@ NUM_LAST_LAYERS_TO_TRAIN = 7        #when freezing layers, how many layers from 
 #新 Web UI 驾驶后端的 WebSocket 回连地址。donkey drive 自动注入；留空(默认)连本机 ws://127.0.0.1:8000/api/drive/ws。
 DRIVE_API_SERVER_URL = None
 
+# MJPEG 降级路径的 JPEG 编码质量（0-100，默认 95 接近无损，保证降级路径最高画质）。
+DRIVE_VIDEO_JPEG_QUALITY = 95
+
 #JOYSTICK
 USE_JOYSTICK_AS_DEFAULT = False      #when starting the manage.py, when True, will not require a --js option to use the joystick
 JOYSTICK_MAX_THROTTLE = 0.5         #this scalar is multiplied with the -1 to 1 throttle value to limit the maximum throttle. This can help if you drop the controller or just don't need the full speed available.
@@ -239,6 +242,14 @@ GYM_CONF = { "img_h" : IMAGE_H, "img_w" : IMAGE_W, "body_style" : "donkey", "bod
 GYM_CONF["racer_name"] = "Your Name"
 GYM_CONF["country"] = "Place"
 GYM_CONF["bio"] = "I race robots."
+
+# 模拟器相机渲染分辨率（预览用），与 NN 输入 IMAGE_W×IMAGE_H 解耦：
+# - img_w/img_h 仍为 NN 输入分辨率（160×120），训练/推理不受影响；
+# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 640×480 高画质），
+#   dgym 内部会把渲染帧下采样回 img_w×img_h 作为 cam/image_array，
+#   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示最高画质。
+GYM_CONF["render_img_w"] = 640
+GYM_CONF["render_img_h"] = 480
 
 def get_wsl_host_ip():
     # 尝试 1: 使用 ipconfig.exe (最准确，能获取 Windows 局域网 IP)

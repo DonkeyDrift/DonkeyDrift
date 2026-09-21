@@ -57,8 +57,22 @@ export interface ConsoleTelemetry {
 export const consoleProxyUrl = (ip: string, path: string): string =>
   `${API_URL}/console/proxy/${encodeURIComponent(ip)}/${path.replace(/^\//, '')}`;
 
-export const consoleRequest = (ip: string, path: string, init?: RequestInit): Promise<Response> =>
-  fetch(consoleProxyUrl(ip, path), init);
+// 代理请求兜底超时（毫秒）：车端 IP 失效/网络黑洞时 fetch 可能长时间挂起，
+// 导致调用方（静音/DEV/OTA）的失败分支永远不触发、按钮卡死在禁用态。
+// 后端代理本身有 10s 超时，这里取 12s 留出余量；调用方显式传入 signal 时尊重之。
+export const CONSOLE_REQUEST_TIMEOUT_MS = 12000;
+
+export const consoleRequest = (ip: string, path: string, init?: RequestInit): Promise<Response> => {
+  const hasSignal = init && init.signal !== undefined && init.signal !== null;
+  if (hasSignal) {
+    return fetch(consoleProxyUrl(ip, path), init);
+  }
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), CONSOLE_REQUEST_TIMEOUT_MS);
+  return fetch(consoleProxyUrl(ip, path), { ...init, signal: controller.signal }).finally(() =>
+    window.clearTimeout(timer),
+  );
+};
 
 const ensureOk = async (res: Response): Promise<Response> => {
   if (!res.ok) {

@@ -3,7 +3,6 @@
 export const arena: { zh: Record<string, string>; en: Record<string, string> } = {
   zh: {
     'arena.pageTitle': 'Pilot Arena',
-    'arena.pageDescription': '并排加载多个 pilot，比较当前 Tub record 的用户控制与模型预测。',
     'arena.columnCount': '{value} 列',
     'arena.addPilot': '添加 Pilot',
     'arena.currentData': '当前数据',
@@ -55,7 +54,6 @@ export const arena: { zh: Record<string, string>; en: Record<string, string> } =
     'arena.generatePlot': '生成曲线',
     'arena.plotStartFrame': '起始帧 {value}',
     'arena.plotEndFrame': '结束帧 {value}',
-    'arena.plotRangeHint': '按记录位置（0..{max}）选择切片',
     'arena.plotUserAngle': 'user angle',
     'arena.plotPilotAngle': 'pilot angle',
     'arena.plotUserThrottle': 'user throttle',
@@ -80,7 +78,6 @@ export const arena: { zh: Record<string, string>; en: Record<string, string> } =
   },
   en: {
     'arena.pageTitle': 'Pilot Arena',
-    'arena.pageDescription': 'Load multiple pilots side by side and compare user control vs. model predictions on the current Tub record.',
     'arena.columnCount': '{value} columns',
     'arena.addPilot': 'Add Pilot',
     'arena.currentData': 'Current Data',
@@ -132,7 +129,6 @@ export const arena: { zh: Record<string, string>; en: Record<string, string> } =
     'arena.generatePlot': 'Generate Plot',
     'arena.plotStartFrame': 'Start frame {value}',
     'arena.plotEndFrame': 'End frame {value}',
-    'arena.plotRangeHint': 'Select slice by record position (0..{max})',
     'arena.plotUserAngle': 'user angle',
     'arena.plotPilotAngle': 'pilot angle',
     'arena.plotUserThrottle': 'user throttle',

@@ -151,6 +151,26 @@ def _make_tub(base_path: Path, throttles):
     tub.close()
 
 
+def _make_tub_sessions(base_path: Path, sessions):
+    """写一个多会话 tub：sessions 为 [(session_id, throttles), ...]。
+
+    手动设置 manifest.session_id 模拟多次录制：会话 id 显式给出，确保
+    断言可预测（不依赖 create_new_session_id 的日期字符串）。
+    """
+    from donkeycar.parts.tub_v2 import Tub
+
+    tub = Tub(
+        str(base_path),
+        inputs=["cam/image_array", "user/angle", "user/throttle"],
+        types=["image_array", "float", "float"],
+    )
+    for i, (sid, throttles) in enumerate(sessions):
+        tub.manifest.session_id = (i, sid)
+        for t in throttles:
+            tub.write_record({"user/angle": 0.0, "user/throttle": t})
+    tub.close()
+
+
 def _build_client():
     from routers import tub as tub_router
 
@@ -226,6 +246,40 @@ class TestAiCleanApi:
         by_path = {t["tub_path"]: t for t in payload["tubs"]}
         assert by_path[str(tub_a)]["segment_count"] == 1
         assert "error" in by_path[str(tmp_path / "missing")]
+
+    def test_scan_filters_by_session_id(self, tmp_path):
+        """issue #402：TE 会话视图按 _session_id 缩小扫描范围，只识别当前会话。"""
+        tub = tmp_path / "data"
+        # 会话 a 含碰撞后倒车；会话 b 干净；整个 tub 扫描应命中 1 段
+        _make_tub_sessions(
+            tub,
+            [("session_a", COLLISION_SEQ), ("session_b", [0.4] * 10)],
+        )
+        client = _build_client()
+
+        whole = client.post("/api/tub/ai_clean/scan", json={"tub_paths": [str(tub)]}).json()
+        assert whole["total_segments"] == 1
+
+        only_a = client.post(
+            "/api/tub/ai_clean/scan",
+            json={"tub_paths": [str(tub)], "session_id": "session_a"},
+        ).json()
+        assert only_a["total_segments"] == 1
+        assert only_a["tubs"][0]["record_count"] == len(COLLISION_SEQ)
+
+        only_b = client.post(
+            "/api/tub/ai_clean/scan",
+            json={"tub_paths": [str(tub)], "session_id": "session_b"},
+        ).json()
+        assert only_b["total_segments"] == 0
+        assert only_b["tubs"][0]["record_count"] == 10
+
+        # 会话 c 不存在：不报错，按 0 段处理
+        missing = client.post(
+            "/api/tub/ai_clean/scan",
+            json={"tub_paths": [str(tub)], "session_id": "session_c"},
+        ).json()
+        assert missing["total_segments"] == 0
 
     def test_execute_deletes_indexes_and_preserves_rest(self, tmp_path):
         _make_tub(tmp_path, COLLISION_SEQ)

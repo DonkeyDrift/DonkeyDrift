@@ -58,12 +58,20 @@ describe('ConsoleMuteButton', () => {
     expect(btn).toHaveAttribute('title', 'console.unreachable');
   });
 
+  it('shows a connecting title while the console is still being discovered', () => {
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: true, refresh: mockRefresh });
+    render(<ConsoleMuteButton />);
+    const btn = screen.getByRole('button');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'console.connecting');
+  });
+
   it('turns blue when muted', async () => {
     mockGetJson.mockResolvedValue({ muted: 1 });
     render(<ConsoleMuteButton />);
     const btn = await screen.findByRole('button', { name: 'console.unmuteAria' });
     expect(btn).toHaveAttribute('aria-pressed', 'true');
-    expect(btn.className).toContain('text-[#5cc8ff]');
+    expect(btn.className).toContain('text-cyan-400');
   });
 
   it('broadcasts MUTE_CHANGED_EVENT after toggling so the embedded console updates immediately', async () => {
@@ -81,6 +89,21 @@ describe('ConsoleMuteButton', () => {
     } finally {
       window.removeEventListener(MUTE_CHANGED_EVENT, listener);
     }
+  });
+
+  it('re-scans for the console when the mute fetch fails (stale cached IP)', async () => {
+    mockGetJson.mockRejectedValue(new Error('boom'));
+    render(<ConsoleMuteButton />);
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it('shows a disabled unreachable state instead of "unmuted" while the mute state is unknown', async () => {
+    mockGetJson.mockRejectedValue(new Error('boom'));
+    render(<ConsoleMuteButton />);
+    const btn = await screen.findByRole('button', { name: 'console.muteAria' });
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(btn).toHaveAttribute('title', 'console.unreachable');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
   });
 });
 
@@ -121,6 +144,65 @@ describe('ConsoleOtaButton', () => {
     render(<ConsoleOtaButton />);
     const btn = screen.getByRole('button', { name: 'OTA' });
     expect(btn).toBeDisabled();
+  });
+
+  it('keeps the upload dialog open for the whole upload even if the console IP is lost mid-upload', async () => {
+    let resolveUpload!: (v: string) => void;
+    mockPostForm.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+    const { rerender } = render(<ConsoleOtaButton />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    const fileInput = await screen.findByLabelText('console.otaChooseFile');
+    const file = new File(['binary'], 'firmware.bin', { type: 'application/octet-stream' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: 'console.otaUpload' }));
+    await screen.findByRole('button', { name: 'console.otaUploading' });
+
+    // 上传进行中车端 503，DD 重扫把 ip 置 null：弹窗不得消失
+    mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false, refresh: mockRefresh });
+    rerender(<ConsoleOtaButton />);
+    expect(screen.getByText('console.otaTitle')).toBeInTheDocument();
+
+    resolveUpload('ACK:UPDATE_OK');
+    await waitFor(() => expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument());
+  });
+
+  it('closes the upload dialog on Escape, but not while an upload is in flight', async () => {
+    let resolveUpload!: (v: string) => void;
+    mockPostForm.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+    render(<ConsoleOtaButton />);
+
+    // 未上传时 Esc 直接关闭
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    expect(await screen.findByText('console.otaTitle')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument();
+
+    // 上传进行中 Esc 被拦截（不打断传输），完成后 Esc 可关
+    fireEvent.click(screen.getByRole('button', { name: 'OTA' }));
+    const fileInput = await screen.findByLabelText('console.otaChooseFile');
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['binary'], 'firmware.bin', { type: 'application/octet-stream' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'console.otaUpload' }));
+    await screen.findByRole('button', { name: 'console.otaUploading' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByText('console.otaTitle')).toBeInTheDocument();
+
+    resolveUpload('ACK:UPDATE_OK');
+    await screen.findByText('console.otaSuccess');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('console.otaTitle')).not.toBeInTheDocument());
   });
 });
 
@@ -182,10 +264,9 @@ describe('ConsoleDevToggle', () => {
 
     const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle.className).toContain('bg-[#5cc8ff]/25');
-    expect(toggle.className).toContain('border-[#5cc8ff]');
-    expect(toggle.className).toContain('text-[#5cc8ff]');
-    expect(toggle.className).toContain('shadow-[inset_0_0_0_1px_#5cc8ff]');
+    expect(toggle.className).toContain('bg-cyan-500/20');
+    expect(toggle.className).toContain('border-cyan-500');
+    expect(toggle.className).toContain('text-cyan-400');
   });
 
   it('is disabled when the console is unreachable', () => {

@@ -28,7 +28,6 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
       <SectionCardTitle
         icon={<SlidersHorizontal className="w-5 h-5" />}
         title={t('trainer.trainingConfig')}
-        subtitle={t('trainer.trainingConfigSubtitle')}
       />
 
       <div className="space-y-1">
@@ -48,7 +47,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
           value={config.model}
           onChange={(e) => onConfigChange({ model: e.target.value })}
           placeholder={t('trainer.modelNamePlaceholder')}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
         />
       </div>
 
@@ -57,7 +56,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
         <select
           value={config.modelType}
           onChange={(e) => onConfigChange({ modelType: e.target.value })}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
         >
           {MODEL_TYPES.map((type) => (
             <option key={type} value={type}>{type}</option>
@@ -72,7 +71,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
           value={config.transfer}
           onChange={(e) => onConfigChange({ transfer: e.target.value })}
           placeholder={t('trainer.transferPlaceholder')}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
         />
       </div>
 
@@ -96,7 +95,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 type="number"
                 value={config.batchSize}
                 onChange={(e) => onConfigChange({ batchSize: parseInt(e.target.value, 10) })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               />
             </div>
 
@@ -109,7 +108,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 max="1"
                 value={config.trainTestSplit}
                 onChange={(e) => onConfigChange({ trainTestSplit: parseFloat(e.target.value) })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               />
             </div>
 
@@ -119,7 +118,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 type="number"
                 value={config.maxEpochs}
                 onChange={(e) => onConfigChange({ maxEpochs: parseInt(e.target.value, 10) })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               />
             </div>
 
@@ -130,7 +129,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 step="0.0001"
                 value={config.learningRate}
                 onChange={(e) => onConfigChange({ learningRate: parseFloat(e.target.value) })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               />
             </div>
 
@@ -140,7 +139,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 type="number"
                 value={config.earlyStopPatience}
                 onChange={(e) => onConfigChange({ earlyStopPatience: parseInt(e.target.value, 10) })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               />
             </div>
 
@@ -151,7 +150,7 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
                 step="0.1"
                 value={config.pruneValLossDegradationLimit}
                 onChange={(e) => onConfigChange({ pruneValLossDegradationLimit: parseFloat(e.target.value) })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               />
             </div>
 

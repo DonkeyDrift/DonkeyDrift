@@ -1,14 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, Settings, X } from 'lucide-react';
+import { Menu, MoreHorizontal, X } from 'lucide-react';
 import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
+import { CarConnectorButton } from './CarConnectorButton';
 import { VersionBadge } from './VersionBadge';
-import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, entryLinkCls, KimiCodeWebEntryLink, ZCodeEntryLink } from './EnterButtons';
+import { DonkeyEntryLink, DshEntryLink, DrifterConsoleEntryLink, FindCarEntryLink, KimiCodeWebEntryLink, ZCodeEntryLink } from './EnterButtons';
 import { ConsoleDevToggle, ConsoleMuteButton, ConsoleOtaButton } from './ConsoleControls';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useTranslation } from '@/i18n';
+import { ApiStatusBar } from './ApiStatusBar';
 import { useFlowStore, type FlowSectionId } from '../store/useFlowStore';
 
 /** 统一流程大页面（#178）中四个导航锚点：点击滚动到对应 section，
@@ -32,58 +34,110 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const isDonkey = location.pathname === '/donkey';
   const isFullBleed = isConsole || isDonkey;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // 桌面端「更多入口」溢出菜单（KCW / ZCode / DSH / FindCar）——顶栏拥挤时收起
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
 
-  // 切换路由后收起手机菜单
+  // 切换路由后收起手机菜单与溢出菜单
   useEffect(() => {
     setMobileMenuOpen(false);
+    setMoreMenuOpen(false);
   }, [location.pathname]);
+
+  // 吸顶页头材质（apple-deep.css §12）：滚离顶部（scrollY > 2）才浮现底部 hairline
+  // （apple.com 同款）
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setHeaderScrolled(window.scrollY > 2);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // 点击溢出菜单外部或按 Esc 时收起
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMoreMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [moreMenuOpen]);
 
   const flowClass = (section: FlowSectionId) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
-      !isConnector && !isFullBleed && activeSection === section ? 'text-cyan-500' : 'text-zinc-400'
+      !isConnector && !isFullBleed && activeSection === section
+        ? 'text-cyan-500'
+        : 'text-zinc-400 dd-nav-link'
     }`;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
-      <header className="bg-zinc-950 sticky top-0 z-50">
+      <header className={`dd-header dd-safe-top bg-zinc-950 sticky top-0 z-50${headerScrolled ? ' is-scrolled' : ''}`}>
         <div className="px-3">
           <div className="h-14 flex items-center">
             {/* 标题左侧 logo：与 Drifter Console 独立页 headerLogo 完全一致 —— 32px 内容 + 1px 边框外凸（box-sizing content-box，总 34px）、圆角 8px、边框随主题（深色 #2b3441 / 浅色 #d5dce4，见 theme-*.css 的 .header-logo）、与标题 gap 12px */}
-            <div className="font-bold text-xl lg:mr-8">
+            <div className="font-bold text-xl lg:mr-4">
               {/* logo 与标题文字同包一个链接（Issue #179）：点击任意一处均可跳转官网，文字继承主题色无链接默认样式 */}
               <a href="https://www.donkeydrift.com" target="_blank" rel="noopener" className="flex items-center gap-3"><img src="/logo.png" alt="DonkeyDrift" className="w-8 h-8 border header-logo" />DonkeyDrift</a>
             </div>
-            {/* 手机端：GitHub 图标 + 版本号紧跟标题右侧，菜单收起时也可见 */}
-            <div className="ml-2 flex items-center gap-2 lg:hidden">
+            {/* GitHub 图标 + 版本号紧跟标题右侧（全宽度显示，不占右侧控制区空间）；
+                与后续导航组之间由 nav 的 ml-4 隔开（版本号不贴着「≡ Donkey」链接组） */}
+            <div className="ml-2 flex items-center gap-2">
               <GitHubLink />
               <VersionBadge />
             </div>
             {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。
-                前四项是流程页锚点（#178），CC 仍是独立路由；高级入口（Donkey /
-                Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
+                流程页锚点（#178）；Car Connector 已改为右侧控制区图标按钮（Issue #406）；
+                高级入口（Donkey / Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
                 见 EnterButtons.tsx（Issue #175） */}
-            <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14">
-              <DonkeyEntryLink />
-              <DrifterConsoleEntryLink />
+            <nav className="hidden lg:flex items-center space-x-4 text-sm font-medium h-14 ml-4">
+              {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单 */}
+              <div className="hidden xl:contents">
+                <DonkeyEntryLink />
+                <DrifterConsoleEntryLink />
+              </div>
               {FLOW_NAV_ITEMS.map((item) => (
                 <Link key={item.path} to={item.path} className={flowClass(item.section)}>
                   {t(item.labelKey)}
                 </Link>
               ))}
-              <Link
-                to="/connector"
-                className={`${entryLinkCls} ${isConnector ? 'text-cyan-400' : ''}`}
-              >
-                <Settings className="w-3.5 h-3.5 shrink-0" />
-                {t('common.nav.carConnector')}
-              </Link>
-              <KimiCodeWebEntryLink />
-              <ZCodeEntryLink />
-              <DshEntryLink />
+              {/* 高级工具入口收进「⋯」溢出菜单（顶栏空间让给主导航） */}
+              <div className="relative" ref={moreMenuRef}>
+                <button
+                  type="button"
+                  aria-label={t('common.nav.more')}
+                  aria-expanded={moreMenuOpen}
+                  onClick={() => setMoreMenuOpen((open) => !open)}
+                  className="flex items-center justify-center w-8 h-8 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors"
+                >
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
+                {moreMenuOpen && (
+                  <div className="absolute right-0 top-10 z-50 flex min-w-[180px] flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-xl">
+                    <div className="flex flex-col gap-1 xl:hidden">
+                      <DonkeyEntryLink />
+                      <DrifterConsoleEntryLink />
+                    </div>
+                    <KimiCodeWebEntryLink />
+                    <ZCodeEntryLink />
+                    <DshEntryLink />
+                    <FindCarEntryLink />
+                  </div>
+                )}
+              </div>
             </nav>
-            <div className="ml-auto hidden lg:flex items-center gap-4">
-              <VersionBadge />
-              <GitHubLink />
+            <div className="ml-auto hidden lg:flex items-center gap-3">
+              <CarConnectorButton />
               <ConsoleMuteButton />
               <ThemeSwitcher />
               <LanguageSwitcher />
@@ -103,8 +157,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </button>
             </div>
           </div>
-          {/* 手机端标题区第二行：静音 + 主题 + 语言 + OTA + DEV（与桌面顶栏顺序一致） */}
+          {/* 手机端标题区第二行：CC + 静音 + 主题 + 语言 + OTA + DEV（与桌面顶栏顺序一致） */}
           <div className="flex items-center gap-3 pb-3 lg:hidden">
+            <CarConnectorButton />
             <ConsoleMuteButton />
             <ThemeSwitcher />
             <LanguageSwitcher />
@@ -113,7 +168,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         </div>
         {/* 手机菜单面板：导航项 + 高级入口（Donkey / Drifter Console / Kimi Code Web /
-            DeepSeek Harness，弱化样式与桌面一致）；主题/语言/版本号已移至标题区 */}
+            DeepSeek Harness，弱化样式与桌面一致）；
+            主题/语言/版本号与 Car Connector 已移至标题区 */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-zinc-800 bg-zinc-900">
             <nav className="container mx-auto px-4 py-2 flex flex-col text-sm font-medium">
@@ -127,26 +183,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   {t(item.labelKey)}
                 </Link>
               ))}
-              <Link
-                to="/connector"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`${entryLinkCls} ${isConnector ? 'text-cyan-400' : ''}`}
-              >
-                <Settings className="w-3.5 h-3.5 shrink-0" />
-                {t('common.nav.carConnector')}
-              </Link>
               <div className="mt-1 border-t border-zinc-800/60">
                 <DonkeyEntryLink />
                 <DrifterConsoleEntryLink />
                 <KimiCodeWebEntryLink />
                 <ZCodeEntryLink />
                 <DshEntryLink />
+                <FindCarEntryLink />
               </div>
             </nav>
           </div>
         )}
       </header>
       <main className={isFullBleed ? 'py-0' : 'container mx-auto px-4 py-6 space-y-6'}>
+        {!isFullBleed && <ApiStatusBar />}
         {children}
       </main>
       {/* /donkey 是铺满的 launcher 内嵌页，右下角帮助小球应由 Donkey 自己提供，

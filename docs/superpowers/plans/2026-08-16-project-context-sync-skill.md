@@ -10,14 +10,14 @@
 
 **Reference spec:** `docs/superpowers/specs/2026-08-16-project-context-sync-skill-design.md`
 
-**Note on location:** The skill file is written OUTSIDE the git working directory, to the user-scope skills dir `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md`, per the user's explicit "user scope / cross-project" choice. No git commits are performed (the skill lives outside the repo; the spec doc was explicitly left uncommitted).
+**Note on location:** The skill file is written OUTSIDE the git working directory, to the user-scope skills dir `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md`, per the user's explicit "user scope / cross-project" choice. No git commits are performed (the skill lives outside the repo; the spec doc was explicitly left uncommitted).
 
 ---
 
 ## File Structure
 
-- **Create:** `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md` — the complete skill (frontmatter, principles, 6-phase workflow, templates, fallback, report).
-- **Read (reference, do not modify):** existing skill frontmatter examples at `C:/Users/cross/.agents/skills/brainstorming/SKILL.md` and `C:/Users/cross/.kimi-code/plugins/managed/superpowers/skills/writing-skills/SKILL.md` to confirm format.
+- **Create:** `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md` — the complete skill (frontmatter, principles, 6-phase workflow, templates, fallback, report).
+- **Read (reference, do not modify):** existing skill frontmatter examples at `C:/Users/<user>/.agents/skills/brainstorming/SKILL.md` and `C:/Users/<user>/.kimi-code/plugins/managed/superpowers/skills/writing-skills/SKILL.md` to confirm format.
 - **Modify (only during smoke test, and only per the skill's own rules):** `C:/Dev/DDC/DonkeyDrift/AGENTS.md`, `C:/Dev/DDC/DonkeyDrift/CLAUDE.md`.
 
 ---
@@ -25,7 +25,7 @@
 ## Task 1: Create skill directory and write the frontmatter + intro sections
 
 **Files:**
-- Create: `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md`
+- Create: `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md`
 
 - [ ] **Step 1: Create the directory**
 
@@ -37,7 +37,7 @@ Expected: exit code 0, directory exists.
 
 - [ ] **Step 2: Write the frontmatter + title + Invocation + Principles**
 
-Write the following to `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md` (this is the first chunk; later tasks append to the same file):
+Write the following to `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md` (this is the first chunk; later tasks append to the same file):
 
 ```markdown
 ---
@@ -77,7 +77,7 @@ Expected: exactly the `---`, `name:`, `description:`, `---` block shown above.
 ## Task 2: Write Phase 1 (fact collection) and Phase 2 (comparison)
 
 **Files:**
-- Modify: `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md` (append)
+- Modify: `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md` (append)
 
 - [ ] **Step 1: Append Phase 1 and Phase 2**
 
@@ -133,7 +133,7 @@ Expected: both `grep` commands print matching line numbers.
 ## Task 3: Write Phase 3 (detection) and Phase 4 (fix)
 
 **Files:**
-- Modify: `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md` (append)
+- Modify: `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md` (append)
 
 - [ ] **Step 1: Append Phase 3 and Phase 4**
 
@@ -175,7 +175,7 @@ Expected: both print matching line numbers.
 ## Task 4: Write Phase 5 (templates), Phase 6 (verify), Fallback, and Report
 
 **Files:**
-- Modify: `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md` (append)
+- Modify: `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md` (append)
 
 - [ ] **Step 1: Append Phase 5, Phase 6, Fallback, and Report**
 
@@ -257,7 +257,7 @@ Expected: `wc -l` reports a non-zero line count; `grep` lists `Phase 1` through 
 ## Task 5: Self-review the SKILL.md against the spec
 
 **Files:**
-- Read: `C:/Users/cross/.agents/skills/project-context-sync/SKILL.md`
+- Read: `C:/Users/<user>/.agents/skills/project-context-sync/SKILL.md`
 - Read: `docs/superpowers/specs/2026-08-16-project-context-sync-skill-design.md`
 
 - [ ] **Step 1: Read both files**

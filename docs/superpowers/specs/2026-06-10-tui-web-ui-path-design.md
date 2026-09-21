@@ -2,7 +2,7 @@
 
 ## 背景
 
-在车辆项目目录（例如 `/home/dkc/projects/mycar`）中打开 Donkey Car 交互式管理终端并选择 `web` 功能时，TUI 当前预览并执行裸命令：
+在车辆项目目录（例如 `/home/user/projects/mycar`）中打开 Donkey Car 交互式管理终端并选择 `web` 功能时，TUI 当前预览并执行裸命令：
 
 ```bash
 donkey web
@@ -70,6 +70,6 @@ pytest tests/test_tui_web_command.py -q
 
 ## 验收标准
 
-- 在 `/home/dkc/projects/mycar` 中打开 TUI 并选择 `web`，命令预览显示 `donkey web --path .../web_ui`。
+- 在 `/home/user/projects/mycar` 中打开 TUI 并选择 `web`，命令预览显示 `donkey web --path .../web_ui`。
 - 确认执行后，不再因为当前车辆目录缺少 `web_ui` 而立即失败。
 - 新增测试通过。

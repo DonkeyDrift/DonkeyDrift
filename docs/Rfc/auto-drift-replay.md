@@ -1,8 +1,8 @@
 # 自动漂移回放（Auto Drift Replay）技术方案 RFC
 
 > 状态：草案，待审批
-> 宿主项目：DonkeyDrift（`/home/dkc/projects/DonkeyDrift`）
-> 固件侧：不改动（`/home/dkc/projects/Firmware/MUS4_FW`）
+> 宿主项目：DonkeyDrift（`/home/user/projects/DonkeyDrift`）
+> 固件侧：不改动（`/home/user/projects/Firmware/MUS4_FW`）
 > 创建：2026-07-12
 
 ## 0. 摘要

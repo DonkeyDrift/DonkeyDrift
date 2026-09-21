@@ -46,7 +46,6 @@ Package/
 # Trainer SSH 配置（用户本机/云端连接信息，不入库）
 web_ui/backend/train_my_pc.conf
 web_ui/backend/train_online.conf
-latency_report.json
 
 # 密钥、证书与本机凭据（防再漏）
 .env
@@ -69,3 +68,9 @@ secrets*
 # Playwright 运行产物
 web_ui/frontend/test-results/
 web_ui/frontend/playwright-report/
+
+# 俯拍漂移链路延迟测量报告（本机产物）
+latency_report.json
+
+# 本机科普 HTML 页面（保留本地、不入库）
+docs/architecture-guide.html

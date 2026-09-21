@@ -4,7 +4,15 @@ import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore, type TubRecord } from '../store/useStore';
-import { deleteRecords, getRecords, getSessionRecords, restoreRecords } from '../services/api';
+import {
+  deleteRecords,
+  getApiErrorMessage,
+  getRecords,
+  getSessionRecords,
+  restoreRecords,
+  scanAiClean,
+  type AiCleanSegment,
+} from '../services/api';
 import { useTranslation } from '@/i18n';
 import { useResolvedTheme } from '@/lib/theme';
 import {
@@ -18,7 +26,8 @@ import {
 } from 'chart.js';
 import type { Chart as ChartInstance, Plugin } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { LineChart, Redo2, RotateCcw, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { LineChart, Redo2, RotateCcw, Sparkles, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { TubEditorAiCleanModal } from './TubEditorAiCleanModal';
 
 ChartJS.register(
   CategoryScale,
@@ -36,6 +45,18 @@ const MAX_UNDO_HISTORY = 10;
 const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
 const DRAG_SELECTION_THRESHOLD_PX = 5;
 const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
+
+/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
+ *  canvas 配色按语义角色（转向=--accent、油门=--warn、选区=--ok、删除标记=--bad）
+ *  随主题（深/浅）切换自动重取色；fallback 为原深/浅硬编码值。 */
+const cssVarColor = (name: string, fallback: string): string => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 type RecordAction = {
   mode: 'delete' | 'restore';
@@ -119,6 +140,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const recordsRef = useRef(records);
   const sampledIndicesRef = useRef<number[]>([]);
   const isSessionScopedRef = useRef(isSessionScoped);
+  // AI 一键筛选高亮区间（已换算为图表 x 坐标），供画布插件 afterDraw 读取
+  const aiCleanHighlightsRef = useRef<{ startXValue: number; endXValue: number }[]>([]);
 
   useEffect(() => {
     recordsRef.current = records;
@@ -132,6 +155,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMode, setProcessingMode] = useState<'delete' | 'restore' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // AI 一键筛选（issue #402）：待删片段、确认层开关、扫描/删除状态与提示
+  const [aiCleanSegments, setAiCleanSegments] = useState<AiCleanSegment[]>([]);
+  const [aiCleanModalOpen, setAiCleanModalOpen] = useState(false);
+  const [aiCleanBusy, setAiCleanBusy] = useState(false);
+  const [aiCleanError, setAiCleanError] = useState<string | null>(null);
+  const [aiCleanInfo, setAiCleanInfo] = useState<string | null>(null);
   const [actionHistory, setActionHistory] = useState<RecordAction[]>([]);
   const [redoHistory, setRedoHistory] = useState<RecordAction[]>([]);
   const [zoomPercent, setZoomPercent] = useState(MIN_ZOOM_PERCENT);
@@ -526,6 +555,67 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       });
     }
   }, [redoHistory, runRecordAction]);
+
+  // AI 一键筛选（issue #402）：扫描当前 tub（或当前录制会话）里的「碰撞后倒车」
+  // 片段 → 高亮 + 弹确认层；确认后复用 runRecordAction，与框选删除走同一套
+  // manifest 级软删除 + 撤销栈，保证体验一致。
+  const handleAiCleanScan = useCallback(async () => {
+    if (!tubPath || aiCleanBusy) return;
+    setAiCleanBusy(true);
+    setAiCleanError(null);
+    setAiCleanInfo(null);
+    try {
+      const data = await scanAiClean([tubPath], activeSessionId);
+      const tub = data.tubs?.[0];
+      if (tub?.error) {
+        setAiCleanError(tub.error);
+        return;
+      }
+      const segments = (tub?.segments ?? []).filter(
+        (seg) => (seg.indexes?.length ?? 0) > 0
+      );
+      setAiCleanSegments(segments);
+      if (segments.length === 0) {
+        setAiCleanInfo(t('tubEditor.aiFilterNoSegments'));
+      } else {
+        setAiCleanModalOpen(true);
+      }
+    } catch (err) {
+      setAiCleanError(getApiErrorMessage(err, t('tubEditor.aiFilterScanFailed')));
+    } finally {
+      setAiCleanBusy(false);
+    }
+  }, [tubPath, activeSessionId, aiCleanBusy, t]);
+
+  const handleAiCleanConfirm = useCallback(async () => {
+    if (aiCleanSegments.length === 0) return;
+    const indexes = Array.from(
+      new Set(aiCleanSegments.flatMap((seg) => seg.indexes ?? []))
+    ).sort((a, b) => a - b);
+    if (indexes.length === 0) {
+      setAiCleanError(t('tubEditor.aiFilterNoSegments'));
+      return;
+    }
+    setAiCleanBusy(true);
+    setAiCleanError(null);
+    const succeeded = await runRecordAction('delete', indexes, true);
+    setAiCleanBusy(false);
+    if (succeeded) {
+      setAiCleanSegments([]);
+      setAiCleanModalOpen(false);
+      setAiCleanInfo(null);
+      clearSelectionRange();
+      visualSelectionRef.current = null;
+    } else {
+      setAiCleanError(t('tubEditor.aiFilterDeleteFailed'));
+    }
+  }, [aiCleanSegments, runRecordAction, clearSelectionRange, t]);
+
+  const handleAiCleanClose = useCallback(() => {
+    setAiCleanModalOpen(false);
+    setAiCleanSegments([]);
+    setAiCleanError(null);
+  }, []);
 
   // 播放竖线位置计算（60fps 回放优化）：经 chart 比例尺换算后直接写叠加层 DOM
   // style——竖线移动不再触发 chart.js 全量重绘（原先每次索引变化都 chart.update，
@@ -1194,8 +1284,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
           {
             label: t('tubEditor.datasetSteering'),
             data: angleData,
-            borderColor: theme === 'light' ? '#0c9bd6' : 'rgb(6, 182, 212)',
-            backgroundColor: theme === 'light' ? 'rgba(12, 155, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)',
+            borderColor: cssVarColor('--accent', theme === 'light' ? '#0c9bd6' : 'rgb(6, 182, 212)'),
+            backgroundColor: cssVarColor('--accent-a50', theme === 'light' ? 'rgba(12, 155, 214, 0.5)' : 'rgba(6, 182, 212, 0.5)'),
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1204,8 +1294,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
           {
             label: t('tubEditor.datasetThrottle'),
             data: throttleData,
-            borderColor: theme === 'light' ? '#d99a17' : 'rgb(234, 179, 8)',
-            backgroundColor: theme === 'light' ? 'rgba(217, 154, 23, 0.5)' : 'rgba(234, 179, 8, 0.5)',
+            borderColor: cssVarColor('--warn', theme === 'light' ? '#d99a17' : 'rgb(234, 179, 8)'),
+            backgroundColor: cssVarColor('--warn-a55', theme === 'light' ? 'rgba(217, 154, 23, 0.5)' : 'rgba(234, 179, 8, 0.5)'),
             borderWidth: 1,
             pointRadius: 0,
             tension: 0.1,
@@ -1230,7 +1320,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       legend: {
         position: 'top' as const,
         labels: {
-            color: theme === 'light' ? '#1a2330' : '#e4e4e7' // zinc-200
+            color: cssVarColor('--ink', theme === 'light' ? '#1a2330' : '#e4e4e7')
         }
       },
       tooltip: {
@@ -1247,19 +1337,19 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
               ? visibleRange.endIndex
               : records.length > 0 && records[visibleRange.endIndex] ? records[visibleRange.endIndex]._index : visibleRange.endIndex,
             ticks: {
-              color: theme === 'light' ? '#5b6b7d' : '#71717a',
+              color: cssVarColor('--ink3', theme === 'light' ? '#5b6b7d' : '#71717a'),
               callback: (value: string | number) => `${Math.round(Number(value))}`,
             },
-            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
+            grid: { color: cssVarColor('--line-soft', theme === 'light' ? '#dbe2ea' : '#27272a') }
         },
         y: {
             min: -1,
             max: 1,
             ticks: {
-              color: theme === 'light' ? '#5b6b7d' : '#71717a',
+              color: cssVarColor('--ink3', theme === 'light' ? '#5b6b7d' : '#71717a'),
               stepSize: 0.2,
             },
-            grid: { color: theme === 'light' ? '#dbe2ea' : '#27272a' }
+            grid: { color: cssVarColor('--line-soft', theme === 'light' ? '#dbe2ea' : '#27272a') }
         }
     },
     animation: {
@@ -1288,12 +1378,37 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         const chartArea = chart.chartArea;
         // 播放竖线已改 DOM 叠加层：chart 因数据/缩放/主题/resize 重绘后顺带对齐一次
         positionPlayhead();
-        // 浅色主题下的 canvas 配色;深色保持原值不变
+        // canvas 配色按语义变量取色（选区=--ok、AI 高亮=--warn），随主题/UI 风格自动切换
         const isLightTheme = themeRef.current === 'light';
-        const selectionColor = isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)';
-        const selectionFillColor = isLightTheme ? 'rgba(31, 174, 107, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+        const selectionColor = cssVarColor('--ok', isLightTheme ? '#1fae6b' : 'rgb(34, 197, 94)');
         const totalRecords = records.length;
-        
+
+        // AI 一键筛选高亮（issue #402）：待删「碰撞后倒车」片段用琥珀色区间标注
+        const aiHighlights = aiCleanHighlightsRef.current;
+        if (aiHighlights && aiHighlights.length) {
+          const highlightAlpha = isLightTheme ? 0.2 : 0.16;
+          const highlightStroke = cssVarColor('--warn', isLightTheme ? '#b45309' : 'rgb(234, 179, 8)');
+          for (const hl of aiHighlights) {
+            const startX = xAxis.getPixelForValue(hl.startXValue);
+            const endX = xAxis.getPixelForValue(hl.endXValue);
+            if (!isNaN(startX) && !isNaN(endX) && endX > startX) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.clip();
+              ctx.globalAlpha = highlightAlpha;
+              ctx.fillStyle = highlightStroke;
+              ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.globalAlpha = 1;
+              ctx.lineWidth = 1.5;
+              ctx.setLineDash([4, 4]);
+              ctx.strokeStyle = highlightStroke;
+              ctx.strokeRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+              ctx.restore();
+            }
+          }
+        }
+
         const drawSelectionBox = (startValue: number, endValue: number, isDraft: boolean) => {
             const chartArea = chart.chartArea;
             
@@ -1327,14 +1442,17 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 
                 if (isDraft) {
                     // 拖动过程中也使用绿色，确保用户体验一致
-                    ctx.fillStyle = selectionFillColor;
+                    ctx.globalAlpha = 0.15;
+                    ctx.fillStyle = selectionColor;
                     ctx.strokeStyle = selectionColor;
                 } else {
-                    ctx.fillStyle = selectionFillColor;
+                    ctx.globalAlpha = 0.15;
+                    ctx.fillStyle = selectionColor;
                     ctx.strokeStyle = selectionColor;
                 }
 
                 ctx.fillRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
+                ctx.globalAlpha = 1;
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
                 ctx.strokeRect(startX, chartArea.top, endX - startX, chartArea.bottom - chartArea.top);
@@ -1358,10 +1476,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 ctx.clip();
 
                 ctx.lineDashOffset = -lineDashOffsetRef.current;
-                ctx.fillStyle = selectionFillColor;
+                ctx.globalAlpha = 0.15;
+                ctx.fillStyle = selectionColor;
                 ctx.strokeStyle = selectionColor;
 
                 ctx.fillRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
+                ctx.globalAlpha = 1;
                 ctx.lineWidth = 2;
                 ctx.setLineDash([6, 4]);
                 ctx.strokeRect(minX, chartArea.top, draftWidth, chartArea.bottom - chartArea.top);
@@ -1485,6 +1605,32 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     },
     [records]
   );
+
+  // AI 一键筛选高亮：把待删片段的物理 _index 区间换算成图表 x 坐标——
+  // 会话视图用「会话内数组下标」，全局视图用物理 _index（与曲线 x 轴一致）。
+  const aiCleanHighlights = useMemo(() => {
+    if (!aiCleanSegments.length) {
+      return [] as { startXValue: number; endXValue: number }[];
+    }
+    return aiCleanSegments.map((seg) => {
+      if (isSessionScoped) {
+        return {
+          startXValue: physicalToArrayPos(seg.start_index),
+          endXValue: physicalToArrayPos(seg.end_index + 1),
+        };
+      }
+      return { startXValue: seg.start_index, endXValue: seg.end_index + 1 };
+    });
+  }, [aiCleanSegments, isSessionScoped, physicalToArrayPos]);
+
+  useEffect(() => {
+    aiCleanHighlightsRef.current = aiCleanHighlights;
+  }, [aiCleanHighlights]);
+
+  // 片段变化（扫描出新结果 / 删除后清空）时触发一次画布重绘以更新高亮
+  useEffect(() => {
+    requestChartRender();
+  }, [aiCleanSegments, requestChartRender]);
 
   // 选区在底部滑条上的起止百分比（数值），绿条样式与三角手柄定位共用同一换算
   const sliderSelectionPercents = useMemo<{ startPct: number; endPct: number } | null>(() => {
@@ -1728,7 +1874,6 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
           <SectionCardTitle
             icon={<LineChart className="w-5 h-5" />}
             title={t('tubEditor.title')}
-            subtitle={t('tubEditor.subtitle')}
           />
         </CardHeader>
         <CardContent>
@@ -1747,12 +1892,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
    const containerCursorClass = selectionDraft ? 'cursor-ew-resize' : 'cursor-crosshair';
 
   return (
+    <>
     <Card className={chartCardClassName}>
       <CardHeader className="relative flex flex-col items-start justify-between gap-4 space-y-0">
         <SectionCardTitle
           icon={<LineChart className="w-5 h-5" />}
           title={t('tubEditor.title')}
-          subtitle={t('tubEditor.subtitle')}
         >
           {isDragging && (
             <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-400 animate-pulse">
@@ -1847,6 +1992,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                   {actionError}
                 </span>
               )}
+              {aiCleanInfo && !aiCleanError && (
+                <span className="ml-2 text-xs text-emerald-400">{aiCleanInfo}</span>
+              )}
+              {aiCleanError && (
+                <span className="ml-2 text-xs text-red-400">{aiCleanError}</span>
+              )}
               <Button
                 size="sm"
                 variant="secondary"
@@ -1872,6 +2023,20 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             </div>
           </div>
           <div className="order-first flex min-h-[30px] items-center justify-start gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void handleAiCleanScan()}
+              disabled={aiCleanBusy || isProcessing || !tubPath}
+              aria-label={t('tubEditor.aiFilterEntryAria')}
+              title={t('tubEditor.aiFilterEntryAria')}
+              className="h-full text-xs"
+            >
+              <Sparkles className="h-4 w-4 text-cyan-400" />
+              <span className="text-xs">
+                {aiCleanBusy ? t('tubEditor.aiFilterScanning') : t('tubEditor.aiFilterEntry')}
+              </span>
+            </Button>
             <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0">
               <div className="h-4 box-content text-xs text-zinc-400 uppercase">{t('tubEditor.zoomLabel')}</div>
               <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
@@ -1942,17 +2107,17 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             className="pointer-events-none absolute left-0 w-0"
             style={{
               display: 'none',
-              borderLeft: `2px dashed ${theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)'}`,
+              borderLeft: '2px dashed var(--bad)',
               opacity: 0.9,
             }}
           >
             <div
               className="absolute -top-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
-              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+              style={{ background: 'var(--bad)' }}
             />
             <div
               className="absolute -bottom-[3px] -left-[4px] h-1.5 w-1.5 rounded-full"
-              style={{ background: theme === 'light' ? '#e5484d' : 'rgb(239, 68, 68)' }}
+              style={{ background: 'var(--bad)' }}
             />
           </div>
           {tooltipData && (
@@ -2058,5 +2223,15 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         </div>
       </CardContent>
     </Card>
+    {aiCleanModalOpen && aiCleanSegments.length > 0 && (
+      <TubEditorAiCleanModal
+        segments={aiCleanSegments}
+        busy={aiCleanBusy}
+        error={aiCleanError}
+        onClose={handleAiCleanClose}
+        onConfirm={() => void handleAiCleanConfirm()}
+      />
+    )}
+    </>
   );
 };

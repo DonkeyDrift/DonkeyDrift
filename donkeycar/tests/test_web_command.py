@@ -5,6 +5,18 @@ import pytest
 from donkeycar.management.base import Web
 
 
+@pytest.fixture(autouse=True)
+def _isolate_instance_registry(monkeypatch):
+    """隔离 Web UI 实例登记（#127 起 Web.run 先 find_live_instance() 复用
+    存活实例）——不 mock 会探测到本机真实在跑实例导致 run() 直接复用返回
+    （DID NOT RAISE SystemExit），且 write_instance 会覆盖真实
+    ~/.donkeycar/webui.json 登记。
+    """
+    monkeypatch.setattr("donkeycar.management.base.find_live_instance", lambda: None)
+    monkeypatch.setattr("donkeycar.management.base.write_instance", lambda *a, **k: None)
+    monkeypatch.setattr("donkeycar.management.base.remove_instance", lambda *a, **k: None)
+
+
 def test_web_command_accepts_open_route_options():
     args = Web().parse_args(["--open", "--route", "/drive"])
 
@@ -62,7 +74,8 @@ def test_web_command_passes_backend_url_to_frontend_when_port_changes(monkeypatc
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
 
     with pytest.raises(SystemExit):
-        Web().run(["--path", str(tmp_path / "web_ui"), "--backend-port", "8001"])
+        # dev 模式才起 Vite 前端进程（生产模式前端由后端托管，不起前端进程，#135）
+        Web().run(["--path", str(tmp_path / "web_ui"), "--backend-port", "8001", "--dev"])
 
     _, frontend_kwargs = popen_calls[1]
     # 前端不再需要 VITE_API_BASE_URL，使用相对路径 /api 并依赖 Vite 代理转发
@@ -113,7 +126,7 @@ def test_web_command_opens_requested_route(monkeypatch, tmp_path):
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
 
     with pytest.raises(SystemExit):
-        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive"])
+        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive", "--dev"])
 
     assert opened_urls == ["http://localhost:5188/#/drive"]
     assert len(popen_calls) == 2
@@ -162,7 +175,7 @@ def test_web_command_sets_vite_proxy_target_to_actual_backend_port(monkeypatch, 
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
 
     with pytest.raises(SystemExit):
-        Web().run(["--path", str(tmp_path / "web_ui"), "--backend-port", "8100"])
+        Web().run(["--path", str(tmp_path / "web_ui"), "--backend-port", "8100", "--dev"])
 
     _, frontend_kwargs = popen_calls[1]
     assert frontend_kwargs["env"]["VITE_API_PROXY_TARGET"] == "http://127.0.0.1:8100"
@@ -232,10 +245,10 @@ def test_web_command_waits_for_frontend_port_before_opening_browser(monkeypatch,
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
 
     with pytest.raises(SystemExit):
-        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive"])
+        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive", "--dev"])
 
-    # 等待的是前端端口（5188），且浏览器最终打开正确的 URL
-    assert wait_calls == [5188]
+    # #127 起登记实例前先等后端端口（8000）就绪；浏览器仍需等前端端口（5188）就绪后再打开
+    assert wait_calls == [8000, 5188]
     assert opened_urls == ["http://localhost:5188/#/drive"]
 
 
@@ -281,6 +294,6 @@ def test_web_command_opens_browser_even_when_frontend_wait_times_out(monkeypatch
     monkeypatch.setattr("donkeycar.management.base.time.sleep", lambda _seconds: None)
 
     with pytest.raises(SystemExit):
-        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive"])
+        Web().run(["--path", str(tmp_path / "web_ui"), "--open", "--route", "/drive", "--dev"])
 
     assert opened_urls == ["http://localhost:5188/#/drive"]

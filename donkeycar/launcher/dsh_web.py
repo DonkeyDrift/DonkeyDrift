@@ -27,25 +27,65 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   局域网浏览器打开设置页/模型选择会 403（"正在加载"、"加载提供方目录
   失败"）。修法见 ``_patch_privileged_methods``：启动前对安装文件做
   幂等自愈补丁，把特权方法的信任表放宽为 trustedHosts。
+- 仅放宽服务端还不够：dsh-client-ui-settings 前端的共享设置镜像与
+  命名空间作用域按 ``isLoopback ? "host" : "memory"`` 选模式（上游
+  假定 settings RPC 仅回环可达），局域网浏览器落 "memory" 后镜像恒
+  unavailable、永不读 settings.describe，设置页/选模型仍报"加载提供方
+  目录失败: settings are unavailable in this browser"（2026-09-06 rc.2
+  重装后实测）。修法见 ``_patch_settings_mirror_gate``：把前端三目条件
+  幂等强制为 host（镜像与作用域两处一并替换）。
 - 局域网浏览器处于非安全上下文（``http://<局域网 IP>``，非 localhost），
   ``crypto.randomUUID`` 不可用；dsh-client-connection 铸造 RPC id 时抛
   ``TypeError``，连接永远到不了 connected、DSH 停在"选择工作区"不会
   自动进入 Projects。修法见 ``_patch_client_uuid_polyfill``：启动前对
   client.js 顶部插入 getRandomValues 版 UUID 兜底（幂等自愈）。
-- 就绪 banner 一行：``dsh web: http://127.0.0.1:<port> (LAN: ...)``，
+- web-all 聚合 client 里编译了 remote-web-ui 的通道逻辑：该插件卸载后
+  聚合 client 仍会在读配对策略失败（/api/pair/status 404）时兜底假定
+  "需要配对"，给非回环页面自装 fetch/WebSocket 劫持，把 /api 请求改写
+  到已不存在的 /remote/* 通道——局域网浏览器全部 API 报 HTTP 405。
+  修法见 ``_patch_remote_channel_client``：启动前对聚合 client.js 的
+  remoteChannelRequired 强制恒 false（幂等自愈；目标在 web profile 的
+  node_modules，非 dsh 安装树）。
+- 就绪 banner 一行：``dsh web: http://127.0.0.1:<port>/?token=…``，
   抓第一个 URL（回环）后改写为局域网 IP（复用 kimi_web 的 _lan_url，
   issue #125 同款问题）。
-- 复用双通道（dsh 没有类似 kimi 的实例登记文件）：① ``_SPAWNED``
-  内存登记——本模块此前拉起且仍存活（HTTP GET / 返回 200）的子进程；
-  ② 固定端口特征探测 ``_probe_dsh_fixed_port``——launcher 重启后 ①
-  即丢，直接探 ``DSH_WEB_PORT``：GET / 返回 200 且响应体含 dsh 特征
-  标记 ``__DSH_BOOT__`` 才复用（仅 200 可能是占用该端口的外部服务）；
-  冷启动失败后再探一次 ② 兜底（端口可能被登记滞后的存活实例占用）。
+- 新版 dsh（≥0.1.2-rc.1，2026-09-08 插件安装会话自动升级后）根页面有
+  per-process token 鉴权：无 token ``GET /`` 返回 401（响应体是 dsh 专属
+  文案 ``dsh web authentication required``），入口 URL 必须带启动 banner
+  里那次性的 ``?token=``；有效 token 的 ``GET /`` 回 303 重定向并铸造
+  会话 cookie（探测必须禁跳转看首响应，跟跳转会丢 cookie 二次 401）。
+  旧版无此鉴权（``GET /`` 直接 200 + ``__DSH_BOOT__``），两时代并存。
+- 复用与自愈四通道（dsh 没有类似 kimi 的实例登记目录）：① ``_SPAWNED``
+  内存登记——本模块此前拉起且仍存活的子进程（``_probe_root`` 兼容
+  200/401 两时代），复用登记时抓到的带 token 入口，但先经
+  ``_validate_entry_url`` 验证 token 未随进程原地重启（自动升级 exec，
+  pid 不变、401 仍算存活）作废，作废则弃用继续往后找；② 固定端口特征
+  探测 ``_probe_dsh_fixed_port``——launcher 重启后 ① 即丢：旧版看 200 +
+  ``__DSH_BOOT__``；新版看 401 专属文案 + ``~/.donkeycar/dsh_web_entry.json``
+  登记的带 token 入口（``_probe_token_entry`` 验证 token 仍有效）；③
+  冷启动失败后再探一次 ② 兜底（端口可能被登记滞后的存活实例占用）；④
+  固定端口被 token 未知的存活 dsh 占用（自动升级后自我重启的新进程、
+  或旧 launcher 孤儿子进程）时，``_kill_dsh_port_squatter`` 确认 cmdline
+  是 dsh 后 SIGTERM 终止并等端口释放，重试一次冷启动拿全新 token——
+  否则该状态下每次点击都只会得到 401/占用报错，无法自愈。
+- 入口 URL 的 host 跟随客户端请求实际用的 Host（``_entry_url_for_client``，
+  可达性优先）：入口默认用 mDNS 主机名（origin 稳定，见 ``_lan_url``），
+  但客户端所在网络解析不了该 mDNS 名时浏览器根本到不了本机 dsh；更糟
+  的是名字若解析到别的机器/回环上恰好也跑着 dsh，会落到那台 dsh 的
+  401 页（token 按进程生成，串台必然无效）。请求能到达 launcher 即证明
+  其 Host 地址对该浏览器可达，Host 属于本机（局域网 IP / mDNS 主机名 /
+  回环）时把入口 host 换成它（端口/路径/token 保留）；不认识的 Host
+  原样返回，防 token 随改写泄给未知主机。DD 后端转发路径的原始 Host
+  经 ``X-Forwarded-Host`` 传递（仅回环直连采信，见 server.py
+  ``_client_host_header``）。
 """
 
+import json
 import logging
 import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -56,10 +96,11 @@ from pathlib import Path
 
 # 复用 kimi_web 的通用机制（同包内私有工具，见各引用处注释）
 from donkeycar.launcher.kimi_web import (
+    _ANY_URL_RE,
+    _is_loopback_host,
     _lan_ip,
     _mdns_hostname,
     _lan_url,
-    extract_web_url,
     strip_ansi,
 )
 
@@ -164,6 +205,57 @@ _PATCH_UUID_NEW = (
     "\t\t//#region lib/types/client/connection.js\n"
 )
 
+# dsh-client-ui-settings/lib/client.js 的前端回环自锁：共享设置镜像
+# （SettingsDescribeMirror）与命名空间作用域（SettingsScopeController）按
+# ``connection.isLoopback ? "host" : "memory"`` 选持久化模式——上游这么做
+# 是因为上游 settings RPC 仅回环可达；但 _patch_privileged_methods 已把
+# 服务端栅栏对 --trusted-host 放行，局域网浏览器却被前端这个门锁在
+# "memory"：mirror 初始即 unavailable、ensure() 空转、永不发起
+# settings.describe，设置页/选模型报"加载提供方目录失败: settings are
+# unavailable in this browser"（dsh-client-ui-settings-models 的 load()
+# 在 mirrored.view 为 undefined 时抛错）。补丁把三目条件强制为 host
+# （保留原结构、内联注释作幂等标记），文件里两处（mirror + scope）一次
+# 替换完成。回环行为不变；非 trusted-host 仍被服务端栅栏 403，安全边界
+# 不扩大。
+_PATCH_GATE_OLD = 'connection.isLoopback ? "host" : "memory"'
+_PATCH_GATE_NEW = ('(true) /* [donkey-launcher] trusted-host browsers reach '
+                   'settings RPCs via the fence patch */ ? "host" : "memory"')
+# 0.1.2-rc.1 起镜像门只剩一处且写法变了（apply() 里带 const 前缀）；
+# 2026-09-08 实测该版服务端 settings/credentials RPC 对 trusted-host 已
+# 放行（PRIVILEGED_METHODS 栅栏已重构移除），卡局域网的只剩这个前端门
+_PATCH_GATE_OLD_RC1 = ('const persistence = ctx.remote.$host.isLoopback '
+                       '? "host" : "memory";')
+_PATCH_GATE_NEW_RC1 = ('const persistence = /* [donkey-launcher] trusted-host '
+                       'browsers reach settings RPCs via the fence patch */ '
+                       '"host";')
+# 两代锚点按序尝试：旧代（<0.1.2-rc.1，文件里 mirror/scope 两处）与新代
+# （0.1.2-rc.1+，单处带 const）
+_PATCH_GATE_GENERATIONS = (
+    (_PATCH_GATE_OLD, _PATCH_GATE_NEW),
+    (_PATCH_GATE_OLD_RC1, _PATCH_GATE_NEW_RC1),
+)
+
+# web-all 聚合 client.js（web profile 的 node_modules 里，非 dsh 安装树）的
+# remote-channel 判定：remote-web-ui 卸载后，其编译进聚合 client 的通道
+# 逻辑仍会在"读配对策略失败"（/api/pair/status 404）时兜底假定"需要
+# 配对"，主动给页面装 fetch/WebSocket 劫持，把所有 /api 请求改写到已
+# 不存在的 /remote/* 通道——局域网浏览器全部 API 报 HTTP 405（2026-09-08
+# 实测：/api/llm/listProviders 直连 200、/remote/ 前缀 405）。补丁把
+# remoteChannelRequired 强制恒 false：永不走 /remote 通道，API 全部直连
+# （安全边界回到 trusted-host 栅栏，与卸载该插件的决定一致）。
+_PATCH_REMOTE_CHANNEL_OLD = (
+    "\t\t\tif (snapshot.status === \"ready\") return "
+    "(snapshot.value?.enabled ?? true) && "
+    "(snapshot.value?.requirePairingForLan ?? true);\n"
+    "\t\t\treturn hostPairingPolicy !== false;"
+)
+_PATCH_REMOTE_CHANNEL_NEW = (
+    "\t\t\t/* [donkey-launcher] remote-web-ui host uninstalled: "
+    "/api/pair/status 404 must not default to \"pairing required\" — "
+    "never route /api through the gated /remote channel */\n"
+    "\t\t\treturn false;"
+)
+
 # 补丁锁：launcher 多线程，防并发重打
 _PATCH_LOCK = threading.Lock()
 
@@ -228,6 +320,23 @@ def _connection_client_path(binary: str):
         pkg_root = bin_real.parent.parent  # <pkg>/lib/bin.js -> <pkg>
         candidate = (pkg_root / "node_modules" / "@deepseek-ai"
                      / "dsh-client-connection" / "lib" / "client.js")
+        return candidate if candidate.is_file() else None
+    except OSError:
+        return None
+
+
+def _ui_settings_client_path(binary: str):
+    """从 dsh 可执行文件定位 dsh-client-ui-settings/lib/client.js。
+
+    与 ``_connection_index_path`` 同布局，只是目标是 dsh-client-ui-settings
+    包（设置镜像回环门补丁要改的文件）。找不到（如 pnpm 布局）返回
+    None，调用方跳过补丁。
+    """
+    try:
+        bin_real = Path(os.path.realpath(binary))
+        pkg_root = bin_real.parent.parent  # <pkg>/lib/bin.js -> <pkg>
+        candidate = (pkg_root / "node_modules" / "@deepseek-ai"
+                     / "dsh-client-ui-settings" / "lib" / "client.js")
         return candidate if candidate.is_file() else None
     except OSError:
         return None
@@ -326,27 +435,204 @@ def _patch_client_uuid_polyfill(binary: str):
             e)
 
 
+def _patch_settings_mirror_gate(binary: str):
+    """对 dsh 安装里的设置镜像回环门做幂等自愈补丁（issue #164 后续）。
+
+    dsh-client-ui-settings 前端的共享设置镜像（SettingsDescribeMirror）与
+    命名空间作用域（SettingsScopeController）按 ``isLoopback ? "host" :
+    "memory"`` 选模式：局域网浏览器落到 "memory" 后镜像恒 unavailable、
+    永不发起 settings.describe，设置页/选模型报 "加载提供方目录失败:
+    settings are unavailable in this browser"。服务端栅栏补丁
+    （``_patch_privileged_methods``）已把 settings.* 对 --trusted-host
+    放行，这里把前端三目条件强制为 "host"（文件内 mirror 与 scope 两处
+    一并替换），让局域网浏览器真正用上服务端已放行的 RPC。
+
+    幂等/自愈语义与 ``_patch_privileged_methods`` 一致：已打过（任一代
+    新代码段在）跳过；按 ``_PATCH_GATE_GENERATIONS`` 两代锚点依次尝试
+    （<0.1.2-rc.1 两处三目、0.1.2-rc.1+ 单处 const），都未命中说明源码
+    又改版，跳过；任何失败只告警不抛——dsh 仍可启动，仅局域网设置页/
+    模型选择不可用。
+    """
+    target = _ui_settings_client_path(binary)
+    if target is None:
+        logger.warning("dsh 设置镜像门补丁：未找到 dsh-client-ui-settings，跳过")
+        return
+    try:
+        with _PATCH_LOCK:
+            text = target.read_text(encoding="utf-8")
+            if any(new in text for _, new in _PATCH_GATE_GENERATIONS):
+                return  # 已打过（任一代标记，幂等）
+            for old, new in _PATCH_GATE_GENERATIONS:
+                if old not in text:
+                    continue
+                tmp = target.with_name(target.name + ".donkey-patch.tmp")
+                tmp.write_text(
+                    text.replace(old, new),
+                    encoding="utf-8")
+                os.replace(tmp, target)
+                logger.info("dsh 设置镜像门补丁：局域网镜像/作用域已切 host "
+                            "模式: %s", target)
+                return
+            logger.warning(
+                "dsh 设置镜像门补丁：目标代码段未命中（dsh 可能已升级改版），"
+                "跳过: %s", target)
+    except OSError as e:
+        logger.warning(
+            "dsh 设置镜像门补丁失败（dsh 仍可启动，局域网设置页可能不可用）: %s",
+            e)
+
+
+def _web_all_client_path(profile_dir=None):
+    """定位 web profile 里 @linxin666/dsh-web-all 的聚合 client.js。
+
+    与其它三个补丁不同，目标不在 dsh 安装树里，而在 dsh 的 profile
+    目录（``~/.dsh/profiles/<profile>/node_modules``）。profile 跟随
+    ``DSH_PROFILE`` 环境变量（与 remote-web-ui 自己的默认一致），缺省
+    ``web``。找不到（聚合包未安装）返回 None，调用方跳过补丁。
+    """
+    if profile_dir is None:
+        profile = os.environ.get("DSH_PROFILE", "web")
+        profile_dir = Path.home() / ".dsh" / "profiles" / profile
+    candidate = (Path(profile_dir) / "node_modules" / "@linxin666"
+                 / "dsh-web-all" / "lib" / "client.js")
+    return candidate if candidate.is_file() else None
+
+
+def _patch_remote_channel_client(profile_dir=None):
+    """对 web-all 聚合 client.js 的 remote-channel 判定做幂等自愈补丁。
+
+    remote-web-ui 卸载后（见 cordis.patch.yml 的 disabled 覆盖行），其
+    编译进聚合 client 的通道逻辑仍会在非回环页面上自装 fetch/WebSocket
+    劫持（读 /api/pair/status 拿 404 即兜底"需要配对"），把 /api 请求
+    改写到已不存在的 /remote/* 通道，局域网浏览器全部 API 报 HTTP 405。
+    补丁把 remoteChannelRequired 强制恒 false——API 全部直连。
+
+    幂等/自愈语义与 ``_patch_settings_mirror_gate`` 一致：已打过（新代码
+    段在，含手工热修的同款标记）跳过；聚合包升级后未命中旧代码段也跳过
+    （下次启动若代码段仍在会自动重打）；任何失败只告警不抛——dsh 仍可
+    启动，仅局域网浏览器可能复现 405。
+    """
+    target = _web_all_client_path(profile_dir)
+    if target is None:
+        logger.warning("dsh remote-channel 补丁：未找到 web-all 聚合 client，跳过")
+        return
+    try:
+        with _PATCH_LOCK:
+            text = target.read_text(encoding="utf-8")
+            if _PATCH_REMOTE_CHANNEL_NEW in text:
+                return  # 已打过（幂等，含手工热修的同款标记）
+            if _PATCH_REMOTE_CHANNEL_OLD not in text:
+                logger.warning(
+                    "dsh remote-channel 补丁：目标代码段未命中（web-all 可能已"
+                    "升级改版），跳过: %s", target)
+                return
+            tmp = target.with_name(target.name + ".donkey-patch.tmp")
+            tmp.write_text(
+                text.replace(_PATCH_REMOTE_CHANNEL_OLD,
+                             _PATCH_REMOTE_CHANNEL_NEW),
+                encoding="utf-8")
+            os.replace(tmp, target)
+            logger.info("dsh remote-channel 补丁：remoteChannelRequired 已强制"
+                        "恒 false（API 直连，不走 /remote 通道）: %s", target)
+    except OSError as e:
+        logger.warning(
+            "dsh remote-channel 补丁失败（dsh 仍可启动，局域网可能复现 405）: %s",
+            e)
+
+
 def _probe_root(host: str, port: int, timeout=PROBE_TIMEOUT_S) -> bool:
-    """GET / 返回 200 视为 web 服务仍存活。"""
+    """GET / 返回 200（旧版 dsh）或 401（新版 token 门）视为存活。
+
+    新版 dsh（≥0.1.2-rc.1）根页面有 per-process token 鉴权，无 token 的
+    GET / 返回 401——仍是 dsh web 在应答。探测目标端口是 dsh 专属固定
+    端口或本模块自己拉起的子进程，401 不会与"其它服务占用"混淆。
+    """
     import urllib.error
     import urllib.request
     try:
         with urllib.request.urlopen(
                 f"http://{host}:{port}/", timeout=timeout) as resp:
             return resp.status == 200
+    except urllib.error.HTTPError as e:
+        return e.code == 401
     except (urllib.error.URLError, OSError):
         return False
+
+
+def _entry_state_path() -> Path:
+    """新版 dsh 入口登记文件路径（跨 launcher 重启复用的 token 来源）。"""
+    return Path.home() / ".donkeycar" / "dsh_web_entry.json"
+
+
+def _write_entry_state(url: str, port, pid) -> None:
+    """把带 token 的入口 URL 原子落盘，供 launcher 重启后复用（见
+    ``_probe_dsh_fixed_port``）。写失败只告警——本次启动已成功，仅影响
+    下次 launcher 重启后的复用。"""
+    path = _entry_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(
+            {"url": url, "port": port, "pid": pid}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.warning("dsh 入口登记写入失败（不影响本次入口）: %s", e)
+
+
+def _read_entry_state():
+    """读入口登记；缺失/坏 JSON/非对象一律返回 None（容忍升级残留）。"""
+    try:
+        data = json.loads(_entry_state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _probe_token_entry(url: str, timeout=PROBE_TIMEOUT_S):
+    """带 token 的入口探测：GET 首响应状态码；连接失败返回 None。
+
+    必须禁用重定向：新版 dsh 对有效 token 的 GET / 回 303 到 ``/`` 并在
+    响应里铸造会话 cookie，跟跳转的第二个请求没有 cookie 会 401，误判
+    token 失效。因此用 http.client 直连取首响应：200（直出）或 303
+    （铸造 cookie）都算 token 有效，401 算失效。
+    """
+    import http.client
+    parts = urllib.parse.urlsplit(url)
+    conn = None
+    try:
+        conn = http.client.HTTPConnection(
+            parts.hostname, parts.port or 80, timeout=timeout)
+        target = urllib.parse.urlunsplit(
+            ("", "", parts.path or "/", parts.query, ""))
+        conn.request("GET", target)
+        resp = conn.getresponse()
+        resp.read(65536)
+        return resp.status
+    except OSError:
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except OSError:
+                pass
 
 
 def _probe_dsh_fixed_port():
     """探测固定端口 ``DSH_WEB_PORT`` 上的存活 dsh web，命中返回入口 URL。
 
     跨 launcher 重启的复用通道：launcher 重启后 ``_SPAWNED`` 内存登记
-    即丢，但此前拉起的 dsh web 可能还绑在固定端口上。仅 GET / 返回 200
-    不够——该端口也可能被外部服务占用，必须响应体含 dsh 特征标记
-    ``__DSH_BOOT__``（dsh web 根 HTML 里的 ``window.__DSH_BOOT__``）才
-    视为 dsh 复用；命中返回已改写为局域网入口（``_lan_url``）的 URL，
-    探测失败/非 200/无标记一律返回 None。
+    即丢，但此前拉起的 dsh web 可能还绑在固定端口上。两个时代两种判定：
+
+    - 旧版（<0.1.2-rc.1）：GET / 返回 200 且响应体含 dsh 特征标记
+      ``__DSH_BOOT__``（dsh web 根 HTML 里的 ``window.__DSH_BOOT__``），
+      复用无鉴权裸入口（仅 200 可能是占用该端口的外部服务）。
+    - 新版（≥0.1.2-rc.1）：无 token GET / 返回 401，响应体是 dsh 专属
+      文案（无文案的 401 视为外部服务，不复用）。入口必须带 token——
+      从 ``_entry_state_path`` 登记取上次启动 banner 抓到的 URL，改写为
+      回环后用 ``_probe_token_entry`` 验证 token 仍有效（303/200），
+      有效才复用（返回前 ``_lan_url`` 改写为当前局域网入口，token
+      query 保留）；登记缺失/端口不符/token 失效一律返回 None 走冷启动。
     """
     import urllib.error
     import urllib.request
@@ -358,11 +644,106 @@ def _probe_dsh_fixed_port():
                 return None
             # 特征标记在根 HTML 头部，读前几十 KB 足够判定
             body = resp.read(65536)
+    except urllib.error.HTTPError as e:
+        if e.code != 401:
+            return None
+        try:
+            body = e.read(65536)
+        except OSError:
+            body = b""
+        # 401 但无 dsh 专属文案：端口被外部服务占用，不能当 dsh
+        if b"dsh web authentication required" not in body:
+            return None
+        # 新版 token 门：登记的带 token 入口验证后复用
+        state = _read_entry_state()
+        url = state.get("url") if state else None
+        if not isinstance(url, str) or _url_port(url) != DSH_WEB_PORT:
+            return None
+        parts = urllib.parse.urlsplit(url)
+        loopback = urllib.parse.urlunsplit(
+            ("http", f"127.0.0.1:{DSH_WEB_PORT}",
+             parts.path or "/", parts.query, ""))
+        if _probe_token_entry(loopback) not in (200, 303):
+            return None  # token 已随旧进程失效
+        return _lan_url(loopback)
     except (urllib.error.URLError, OSError):
         return None
     if b"__DSH_BOOT__" not in body:
         return None
     return _lan_url(f"http://127.0.0.1:{DSH_WEB_PORT}/")
+
+
+def _validate_entry_url(url: str, port) -> bool:
+    """校验登记入口 URL 的 token 对本端口仍有效（回环探测，query 保留）。
+
+    dsh 的 launchToken 按进程生成：进程原地重启（如插件安装会话自动升级
+    后自我 exec，pid 不变）后旧 token 即作废，但 ``_probe_root`` 的 401
+    存活判定分不出这种情况——复用前必须用 ``_probe_token_entry`` 验证
+    首响应（200/303 有效、401 失效），否则会把浏览器送进
+    "dsh web authentication required" 401 页。
+    """
+    parts = urllib.parse.urlsplit(url)
+    loopback = urllib.parse.urlunsplit(
+        ("http", f"127.0.0.1:{port}", parts.path or "/", parts.query, ""))
+    return _probe_token_entry(loopback) in (200, 303)
+
+
+def _strip_host_port(host_header):
+    """剥掉 Host 头的端口（含 ``[v6]`` 方括号），返回小写 host；非法返回 ""。
+
+    Host 头的端口是客户端访问 launcher/DD 后端用的端口，与 dsh 端口
+    无关，改写入口 URL 时必须丢弃（入口 URL 自己的端口保留）。
+    """
+    if not host_header:
+        return ""
+    value = str(host_header).strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        if end == -1:
+            return ""
+        return value[1:end]
+    if value.count(":") == 1:
+        return value.split(":", 1)[0]
+    # 无冒号（host 无端口）或多个冒号（裸 IPv6 字面量，无端口）：整体即 host
+    return value
+
+
+def _entry_url_for_client(url: str, host_header, *, lan_ip_fn=None,
+                          mdns_fn=None):
+    """把入口 URL 的 host 换成客户端请求实际用的 Host（可达性优先）。
+
+    入口默认用 mDNS 主机名（origin 稳定，见 ``_lan_url``），但客户端所在
+    网络解析不了该 mDNS 名时，浏览器到不了本机 dsh；更糟的是名字若解析
+    到别的机器/回环上恰好也跑着 dsh，用户会看到那台 dsh 的 401 页
+    （token 按进程生成，串台必然无效）。客户端请求能到达 launcher 即证明
+    其 Host 地址对该浏览器可达，因此 Host 属于本机（局域网 IP / mDNS
+    主机名 / 回环）时把入口 URL 的 netloc 换成该 host——端口、路径与
+    ``?token=`` query 全部保留。Host 不属于本机（域名反代、伪造值等）
+    时原样返回：token 是 dsh 的会话钥匙，不随改写泄给未知主机。
+
+    ``lan_ip_fn`` / ``mdns_fn`` 是测试钩子，缺省读本模块的 ``_lan_ip`` /
+    ``_mdns_hostname``（调用时读模块全局，monkeypatch 模块属性即生效）。
+    """
+    lan_ip_fn = lan_ip_fn or _lan_ip
+    mdns_fn = mdns_fn or _mdns_hostname
+    host = _strip_host_port(host_header)
+    if not host:
+        return url
+    own = {h.lower() for h in (lan_ip_fn(), mdns_fn()) if h}
+    if host not in own and not _is_loopback_host(host):
+        return url
+    parts = urllib.parse.urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        return url
+    if ":" in host:  # IPv6 字面量在 netloc 里需要方括号
+        netloc = f"[{host}]:{port}" if port is not None else f"[{host}]"
+    else:
+        netloc = f"{host}:{port}" if port is not None else host
+    return urllib.parse.urlunsplit(
+        (parts.scheme, netloc, parts.path or "/", parts.query,
+         parts.fragment))
 
 
 def _live_spawned_url():
@@ -371,18 +752,61 @@ def _live_spawned_url():
     先查 ``_SPAWNED`` 内存登记（本模块拉起且仍存活的子进程）；无存活
     条目（如 launcher 已重启、登记丢失）再直接探测固定端口
     （``_probe_dsh_fixed_port``），覆盖实例仍存活但登记已丢的场景。
+    登记条目带 ``url``（启动 banner 抓到的带 token 入口，新版 dsh）时
+    复用它——但先经 ``_validate_entry_url`` 验证 token 未随进程重启
+    作废；验证不过弃用该条目继续往后找。无 ``url`` 的旧式条目退回
+    无鉴权裸入口（旧版 dsh 的旧式登记）。
     """
     for entry in list(_SPAWNED):
         proc = entry["proc"]
         if proc.poll() is not None:
             _SPAWNED.remove(entry)
             continue
-        # dsh 固定绑 0.0.0.0，用回环探测，返回前改写为局域网 IP
-        if _probe_root("127.0.0.1", entry["port"]):
+        # dsh 固定绑 0.0.0.0，用回环探测（_probe_root 兼容 200/401 两
+        # 时代），返回前改写为局域网 IP（token query 保留）
+        if not _probe_root("127.0.0.1", entry["port"]):
+            # 进程活着但端口探不通（僵死），清掉并走冷启动
+            _SPAWNED.remove(entry)
+            continue
+        url = entry.get("url")
+        if not url:
             return _lan_url(f"http://127.0.0.1:{entry['port']}/")
-        # 进程活着但端口探不通（僵死），清掉并走冷启动
+        if _validate_entry_url(url, entry["port"]):
+            return _lan_url(url)
+        # 进程活着、端口应答 401，但登记的 token 已失效：dsh 原地重启过
+        # （自动升级），旧入口作废——弃用登记，往后走固定端口探测/冷启动
+        logger.info("dsh 登记实例的入口 token 已失效（进程可能已自动升级"
+                    "重启），弃用旧入口: %s", url)
         _SPAWNED.remove(entry)
     return _probe_dsh_fixed_port()
+
+
+# dsh web 就绪 banner 的行前缀（剥 ANSI 后按行匹配）：banner 行是权威
+# 入口来源（新版必带 ?token=）。URL 行尾可能粘着的句读（与 kimi_web 的
+# _URL_TRAILING_PUNCT 同款语义）
+_DSH_BANNER_PREFIX = "dsh web:"
+_DSH_URL_TRAILING_PUNCT = ".,;:!?"
+
+
+def _extract_dsh_web_url(plain: str):
+    """从（已剥 ANSI 的）dsh 输出提取就绪 banner 行里的入口 URL。
+
+    只认 ``dsh web:`` 开头的 banner 行、取该行第一个 URL：新版 banner
+    必带 ``?token=``（0.1.2-rc.1 实测），是唯一可用入口；插件可能更早
+    打印自己的 URL（如 dsh-remote-web-ui 的 "reachable on LAN at
+    http://…" 行），通用提取（kimi_web.extract_web_url 的"文本里第一个
+    URL"兜底）会先到先得抓丢 token、甚至把垂死进程打印的任意 URL 误判
+    为启动成功。找不到 banner 行返回 None——ready banner 没出现就当未
+    就绪（超时/退出路径各自报现场），绝不退回通用兜底。
+    """
+    for line in plain.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(_DSH_BANNER_PREFIX):
+            continue
+        m = _ANY_URL_RE.search(stripped)
+        if m:
+            return m.group(0).rstrip(_DSH_URL_TRAILING_PUNCT)
+    return None
 
 
 def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
@@ -441,14 +865,14 @@ def _spawn_and_capture(binary: str, cwd_str, trusted_hosts, deadline: float,
     error = None
     while True:
         plain = _text()
-        url = extract_web_url(plain)
+        url = _extract_dsh_web_url(plain)
         if url:
             return proc, url, None
         if proc.poll() is not None:
             # 进程退出后管道里可能还有未读尽的残余输出，稍等补读再判定
             time.sleep(0.3)
             plain = _text()
-            url = extract_web_url(plain)
+            url = _extract_dsh_web_url(plain)
             if url:
                 return proc, url, None
             error = (f"dsh web 进程提前退出（码 {proc.returncode}）；"
@@ -488,15 +912,103 @@ def _mark_new_session(url: str) -> str:
         (parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+def _dsh_port_listener_pid(port=DSH_WEB_PORT, *, ss_run=None):
+    """解析 ``ss -tlnp`` 输出里监听 ``port`` 的 pid；找不到/执行失败返回 None。
+
+    ``ss_run`` 是测试钩子：接收命令列表、返回其 stdout 文本。
+    """
+    if ss_run is None:
+        def ss_run(cmd):
+            return subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5).stdout
+    try:
+        out = ss_run(["ss", "-tlnp"])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        if f":{port} " not in line:
+            continue
+        m = re.search(r"pid=(\d+)", line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _is_dsh_process(pid, proc_root="/proc"):
+    """/proc/<pid>/cmdline 是否是 dsh（argv 里有 ``dsh`` 可执行名）。
+
+    杀占位实例前的最后防线：专属端口约定内占用者应是 launcher 拉起的
+    ``node …/dsh web …``（argv 某段为 ``dsh`` 或以 ``/dsh`` 结尾），
+    其它进程一律不碰。
+    """
+    try:
+        raw = (Path(proc_root) / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return False
+    return any(arg == b"dsh" or arg.endswith(b"/dsh")
+               for arg in raw.split(b"\0"))
+
+
+def _kill_dsh_port_squatter(port=DSH_WEB_PORT, wait_s=5.0):
+    """终止固定端口上 token 未知的占位 dsh 实例，等端口释放。
+
+    占位者是 launcher 专属端口上的 dsh（插件安装会话自动升级后自我重启、
+    或旧 launcher 留下的孤儿子进程）：它的 launchToken 只存在于它自己
+    的启动 banner 里，本进程拿不到——复用无门、冷启动又永远
+    EADDRINUSE，每次点击都失败。确认 cmdline 是 dsh 才发 SIGTERM；
+    端口在 ``wait_s`` 内释放返回 True，其它情况（找不到 pid、非 dsh
+    进程、kill 失败、端口不释放）返回 False，调用方保持原报错路径。
+    """
+    pid = _dsh_port_listener_pid(port)
+    if pid is None:
+        return False
+    if not _is_dsh_process(pid):
+        logger.warning("固定端口 %s 被非 dsh 进程占用（pid=%s），不自动终止",
+                       port, pid)
+        return False
+    logger.info("固定端口 %s 上的 dsh 实例（pid=%s）入口 token 未知，"
+                "终止后重新冷启动", port, pid)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as e:
+        logger.warning("终止占位 dsh 实例（pid=%s）失败: %s", pid, e)
+        return False
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        if _dsh_port_listener_pid(port) is None:
+            return True
+        time.sleep(_POLL_S)
+    logger.warning("占位 dsh 实例（pid=%s）未在 %ss 内释放端口 %s",
+                   pid, int(wait_s), port)
+    return False
+
+
+def _register_spawn_success(proc, url: str, log_msg: str) -> str:
+    """冷启动成功后的统一登记：内存/落盘登记带 token 入口，返回新会话 URL。"""
+    port = _url_port(url)
+    lan_entry = _lan_url(url)
+    # 登记 url（带 token）供复用：内存条目给本次 launcher 生命周期，
+    # 落盘登记给 launcher 重启后的固定端口探测（新版 dsh token 门）
+    _SPAWNED.append({"proc": proc, "port": port, "url": lan_entry})
+    _write_entry_state(lan_entry, port, proc.pid)
+    marked = _mark_new_session(lan_entry)
+    logger.info("%s: pid=%s url=%s", log_msg, proc.pid, marked)
+    return marked
+
+
 def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
                    resolve_binary_fn=None, lan_ip_fn=None, mdns_fn=None,
                    popen_fn=None):
     """打开 DeepSeek Harness web：优先复用存活实例，否则拉起 ``dsh web``。
 
-    复用分两路（见 ``_live_spawned_url``）：``_SPAWNED`` 内存登记 →
-    固定端口特征探测（launcher 重启后登记丢失的兜底）；冷启动绑固定
-    专属端口 ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能
-    被登记滞后的存活实例占用，对齐 ``kimi_web`` 的兜底语义）。
+    复用分两路（见 ``_live_spawned_url``）：``_SPAWNED`` 内存登记（带
+    token 入口先经 ``_validate_entry_url`` 验证未作废）→ 固定端口特征
+    探测（launcher 重启后登记丢失的兜底；新版 dsh token 门下靠
+    ``_write_entry_state`` 落盘的带 token 入口）；冷启动绑固定专属端口
+    ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能被登记滞后
+    的存活实例占用，对齐 ``kimi_web`` 的兜底语义）；端口被 token 未知
+    的存活 dsh 占用时经 ``_kill_dsh_port_squatter`` 终止占位实例并重试
+    一次冷启动（自愈，见模块 docstring 通道④）。
 
     无论复用还是冷启动，返回的 URL 都带 ``?dsh_new_session=1``——DSH
     前端检测到该参数时清除 ``localStorage["dsh.sessions.current"]``，
@@ -552,6 +1064,12 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     # client.js 注入 crypto.randomUUID 兜底 + ?dsh_new_session=1 清理逻辑
     # （幂等，失败只影响局域网自动进入 Projects 和新会话清理，不影响 dsh 启动）
     _patch_client_uuid_polyfill(binary)
+    # 设置镜像回环门补丁：局域网浏览器切 host 模式（幂等，失败只影响
+    # 局域网设置页/模型选择，不影响 dsh 启动）
+    _patch_settings_mirror_gate(binary)
+    # web-all remote-channel 补丁：remote-web-ui 卸载后防止聚合 client 自装
+    # fetch 劫持把 /api 改写到已不存在的 /remote 通道（局域网 405）
+    _patch_remote_channel_client()
 
     lan_ip = lan_ip_fn()
     mdns = mdns_fn()
@@ -564,10 +1082,8 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     proc, url, error = _spawn_and_capture(
         binary, cwd_str, trusted_hosts, deadline, popen_fn=popen_fn)
     if url:
-        _SPAWNED.append({"proc": proc, "port": _url_port(url)})
-        url = _mark_new_session(_lan_url(url))
-        logger.info("dsh web 已启动（新会话）: pid=%s url=%s", proc.pid, url)
-        return {"status": "ok", "url": url}
+        return {"status": "ok", "url": _register_spawn_success(
+            proc, url, "dsh web 已启动（新会话）")}
 
     # 冷启动失败兜底：固定端口可能被登记滞后的存活实例占用（如另一
     # launcher 此前拉起、本进程 _SPAWNED 没有登记的实例），再探一次复用
@@ -576,6 +1092,23 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
         url = _mark_new_session(url)
         logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例（新会话）: %s", url)
         return {"status": "ok", "url": url}
+    # 端口被存活的 dsh 占用但复用不了（入口 token 未知/已失效，如 dsh
+    # 自动升级后自我重启）：冷启动永远 EADDRINUSE——自动终止占位实例并
+    # 重试一次冷启动拿全新 token；终止未果才退回手动提示
+    if _probe_root("127.0.0.1", DSH_WEB_PORT):
+        if _kill_dsh_port_squatter():
+            # 独立超时预算：杀占位 + 重启最多再花一个 timeout_s
+            proc, url, error = _spawn_and_capture(
+                binary, cwd_str, trusted_hosts,
+                time.monotonic() + timeout_s, popen_fn=popen_fn)
+            if url:
+                return {"status": "ok", "url": _register_spawn_success(
+                    proc, url, "占位 dsh 实例已终止，dsh web 已重新启动"
+                               "（新会话）")}
+        else:
+            error = (f"{error}；固定端口 {DSH_WEB_PORT} 已被一个存活的 dsh "
+                     "web 占用且其入口 token 未知（非 launcher 拉起或登记"
+                     "丢失），自动终止未果，请手动关闭该实例后重试")
     logger.warning("启动 dsh web 失败: %s", error)
     return {"status": "error", "error": error}
 

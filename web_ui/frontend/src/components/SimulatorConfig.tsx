@@ -160,7 +160,6 @@ export const SimulatorConfig: React.FC = () => {
           title={t('tub.simTitle')}
           subtitle={t('tub.simHoverSubtitle')}
         />
-        <p className="text-sm text-zinc-400">{t('tub.simSubtitle')}</p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">

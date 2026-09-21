@@ -50,7 +50,6 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.resetDefault': '重置默认',
     'driveViz.export': '导出',
     'driveViz.import': '导入',
-    'driveViz.autoSaveNote': '参数自动保存到本地和服务器',
     // VerticalThrottleBar
     'driveViz.forward': '前进',
     'driveViz.throttleLabel': '油 门',
@@ -105,7 +104,6 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.resetDefault': 'Reset to Defaults',
     'driveViz.export': 'Export',
     'driveViz.import': 'Import',
-    'driveViz.autoSaveNote': 'Parameters are automatically saved locally and to the server',
     // VerticalThrottleBar
     'driveViz.forward': 'Forward',
     'driveViz.throttleLabel': 'Throttle',

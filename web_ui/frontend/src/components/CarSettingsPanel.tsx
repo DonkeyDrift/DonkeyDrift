@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Gamepad2, RefreshCw } from 'lucide-react';
+import { Gamepad2, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from './ui/Button';
 import { discoverConnectorConsoles } from '../services/api';
 import { useTranslation } from '@/i18n';
@@ -11,7 +11,7 @@ import { useResolvedTheme } from '@/lib/theme';
  * 「RC Channels（置顶常开）/ 漂移设置 / Judge 设置（子 iframe 默认展开）」板块——
  * v1.8.64 起不再带 `&wifi=1`，AP 名称配置 / STA Wi-Fi 配置配网板块不在该视图出现
  * （配网仍走车端独立 DC 页的 Network ⚙ 入口）；DEV / OTA 不在该视图内。
- * `lang`/`theme` 与 DD 当前语言/主题一致（theme 变化通过 `key` 触发 iframe 重载），
+ * `lang`/`theme`/`ui` 与 DD 当前语言/主题/UI 风格一致（变化通过 `key` 触发 iframe 重载），
  * 使内嵌视图跟随 DD 主题；v1.8.65 起车端 embedded 作用域的小标题/卡片样式对齐 DD 原生。
  * DonkeyDrifter 的 /console 入口保持不变。
  * 外层不再套 Card 与「车辆设置」标题（CC 页整页即是车辆设置，避免与内嵌视图里的
@@ -34,7 +34,12 @@ export const CarSettingsPanel: React.FC = () => {
       const result = await discoverConnectorConsoles();
       const found = result.found || [];
       setDevices(found);
-      setSelectedIp((prev) => prev || (found.length > 0 ? found[0].ip : ''));
+      setSelectedIp((prev) => {
+        if (found.length === 0) return prev; // 车暂时离线/扫描失败：保持现状
+        // 车 DHCP 换 IP 后旧地址已不在列表中：切到新发现的第一台，避免 iframe 指向死地址。
+        // 手动输入的 IP 不在 devices 列表里，重扫非空时会切走——可接受的自愈语义。
+        return found.some((d) => d.ip === prev) ? prev : found[0].ip;
+      });
     } catch {
       // 扫描失败时保留现有选择，静默跳过
     } finally {
@@ -96,13 +101,15 @@ export const CarSettingsPanel: React.FC = () => {
           <iframe
             ref={iframeRef}
             key={`${selectedIp}-${theme}`}
-            src={`http://${selectedIp}/?embedded=1&settings=1&lang=${lang}&theme=${theme}`}
+            src={`http://${selectedIp}/?embedded=1&settings=1&lang=${lang}&theme=${theme}&ui=apple`}
             title={t('connector.carSettingsTitle')}
+            allowFullScreen
             className="h-[80vh] min-h-[560px] w-full rounded-md border-0 bg-zinc-950"
           />
         </div>
       ) : (
-        <div className="flex h-40 items-center justify-center rounded-md bg-zinc-900/30 text-sm text-zinc-500">
+        <div className="flex h-40 items-center justify-center gap-2 rounded-md bg-zinc-900/30 text-sm text-zinc-500">
+          {scanning && <Loader2 className="h-4 w-4 animate-spin" />}
           {scanning ? t('console.scanning') : t('console.noDevice')}
         </div>
       )}

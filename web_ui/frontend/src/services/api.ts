@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { t } from '@/i18n';
+import { registerApiClient } from '@/lib/apiHealth';
 
 const DEFAULT_API_BASE = '/api';
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -50,6 +51,10 @@ export const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// 旁路观测（只统计在飞/失败，请求与响应原样透传）：apple 象限的统一加载骨架与
+// 错误提示条据此渲染，见 src/lib/apiHealth.ts 与 src/components/ApiStatusBar.tsx
+registerApiClient(api);
 
 export const getDriveCarWebSocketUrl = (clientId?: string) => {
   const apiBase = API_URL.replace(/\/$/, '');
@@ -258,8 +263,11 @@ export const listAiCleanCandidates = async (tubPath: string) => {
   return response.data as { status: boolean; current: string; tubs: AiCleanCandidate[] };
 };
 
-export const scanAiClean = async (tubPaths: string[]) => {
-  const response = await api.post('/tub/ai_clean/scan', { tub_paths: tubPaths });
+export const scanAiClean = async (tubPaths: string[], sessionId?: string | null) => {
+  const response = await api.post('/tub/ai_clean/scan', {
+    tub_paths: tubPaths,
+    ...(sessionId ? { session_id: sessionId } : {}),
+  });
   return response.data as {
     status: boolean;
     tubs: AiCleanTubScan[];
@@ -400,15 +408,49 @@ export const deleteModel = async (path: string) => {
   return response.data;
 };
 
-export const importModel = async (file: File, workingDir?: string) => {
+export const importModel = async (
+  file: File,
+  workingDir?: string,
+  lossImage?: File,
+  metaJson?: File,
+) => {
   const form = new FormData();
   form.append('file', file);
+  if (lossImage) {
+    form.append('loss_image', lossImage);
+  }
+  if (metaJson) {
+    form.append('meta_json', metaJson);
+  }
   if (workingDir) {
     form.append('working_dir', workingDir);
   }
   // 不手动设置 Content-Type：axios 对 FormData 会在浏览器侧自动设置
   // multipart/form-data 边界，手动设置反而会丢失 boundary。
   const response = await api.post('/trainer/models/import', form);
+  return response.data;
+};
+
+export const uploadModelLoss = async (
+  name: string,
+  workingDir?: string,
+  lossImage?: File,
+  metaJson?: File,
+) => {
+  const form = new FormData();
+  if (lossImage) {
+    form.append('loss_image', lossImage);
+  }
+  if (metaJson) {
+    form.append('meta_json', metaJson);
+  }
+  if (workingDir) {
+    form.append('working_dir', workingDir);
+  }
+  const response = await api.post(
+    `/trainer/models/${encodeURIComponent(name)}/loss`,
+    form,
+  );
   return response.data;
 };
 
@@ -676,7 +718,9 @@ export const getConnectorLocalIps = async () => {
 };
 
 export const discoverConnectorConsoles = async () => {
-  const response = await api.post('/connector/discover_console');
+  // 9s 前端超时：后端逐 IP 扫描可能远慢于浏览器耐心，超时按扫描失败处理，
+  // 让 #/console 的「正在扫描局域网…」能终结并落到失败引导文案（手动输入 IP）。
+  const response = await api.post('/connector/discover_console', undefined, { timeout: 9000 });
   return response.data as {
     status: boolean;
     found: { ip: string; port: number; reachable: boolean }[];
@@ -723,10 +767,152 @@ export const launchZcode = async (signal?: AbortSignal): Promise<LaunchKimiCodeW
   return response.data as LaunchKimiCodeWebResult;
 };
 
+export const launchZcodeRemote = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
+  // zcode-remote 唤醒端点：确保 Z Code 桌面端进程在线（不在则拉起），
+  // 毫秒级响应；点击「ZCode」远控入口时 fire-and-forget 调用，失败静默。
+  const response = await api.post('/launch/zcode-remote', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as LaunchKimiCodeWebResult;
+};
+
+export interface ZcodeRemoteLinkResult {
+  status: string;
+  url?: string;
+  error?: string;
+}
+
+export const fetchZcodeRemoteLink = async (
+  signal?: AbortSignal,
+): Promise<ZcodeRemoteLinkResult> => {
+  // zcode-remote 取链端点：向本机 Z Code 桌面端实时取一条新鲜远控链接
+  // （未开启则代开启；桌面端不在线则拉起或用持久化凭证现拼）。点击
+  // 「ZCode」时调用，冷启动可能耗时数十秒，调用方需给足超时。
+  const response = await api.post('/zcode-remote/link', {}, {
+    signal,
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+  return response.data as ZcodeRemoteLinkResult;
+};
+
 // Donkey 菜单/启动页由 launcher（:8090）服务，与后端 launch.py 的
 // LAUNCHER_BASE_URL 约定一致；从浏览器侧按当前访问主机推导。
 export const getDonkeyUrl = (): string =>
   `${window.location.protocol}//${window.location.hostname}:8090/`;
+
+// ------------------------------------------------------------------
+// Harness Updater APIs（CC 页「Harness 下载 + 一键更新」板块，issue #404）
+// ------------------------------------------------------------------
+export interface HarnessComponentInstall {
+  type: 'npm' | 'url';
+  package?: string | null;
+  download_url?: string | null;
+  linux_deb?: string | null;
+  doc_url?: string | null;
+}
+
+export interface HarnessComponent {
+  id: string;
+  kind: 'cli' | 'desktop';
+  name: string;
+  installed: boolean;
+  version: string | null;
+  path: string | null;
+  install: HarnessComponentInstall;
+}
+
+export interface HarnessInfo {
+  id: string;
+  name: string;
+  vendor: string;
+  remote_default: string | null;
+  components: HarnessComponent[];
+}
+
+export interface HarnessCatalog {
+  ok: boolean;
+  harnesses: HarnessInfo[];
+  checked_at: string;
+}
+
+export interface HarnessUpdateItem {
+  kind: 'harness' | 'project' | 'component' | 'firmware';
+  harness_id?: string;
+  component_id?: string;
+  id?: string;
+  name: string;
+  installed: boolean;
+  installed_version: string | null;
+  latest_version: string | null;
+  updateable: boolean;
+  install_type?: string;
+  package?: string | null;
+  doc_url?: string | null;
+  asset?: string | null;
+  asset_name?: string | null;
+  vehicle_ip?: string | null;
+  note?: string | null;
+}
+
+export interface HarnessCheckResult {
+  ok: boolean;
+  checked_at: string;
+  updates: HarnessUpdateItem[];
+  updateable_count: number;
+  errors: string[];
+}
+
+export interface HarnessStatus {
+  background_enabled: boolean;
+  interval_s: number;
+  last_check_at: string | null;
+  last_check_ok: boolean | null;
+  updateable_count: number | null;
+  updates: HarnessUpdateItem[];
+}
+
+export const getHarnessCatalog = async (): Promise<HarnessCatalog> => {
+  const response = await api.get('/harness/catalog');
+  return response.data as HarnessCatalog;
+};
+
+export const getHarnessStatus = async (): Promise<HarnessStatus> => {
+  const response = await api.get('/harness/status');
+  return response.data as HarnessStatus;
+};
+
+export const downloadHarness = async (harnessId: string, componentId: string) => {
+  const response = await api.post('/harness/download', {
+    harness_id: harnessId,
+    component_id: componentId,
+  });
+  return response.data as { status: string; path?: string; url?: string; message: string };
+};
+
+export const installHarness = async (harnessId: string, componentId: string) => {
+  const response = await api.post('/harness/install', {
+    harness_id: harnessId,
+    component_id: componentId,
+  });
+  return response.data as { status: string; path?: string; url?: string; message: string };
+};
+
+export const checkHarnessUpdates = async (): Promise<HarnessCheckResult> => {
+  const response = await api.post('/harness/check');
+  return response.data as HarnessCheckResult;
+};
+
+export const installHarnessUpdate = async (kind: string, id: string) => {
+  const response = await api.post('/harness/install-update', { kind, id });
+  return response.data as { status: string; message: string };
+};
+
+export const flashFirmware = async (ip: string, assetPath?: string) => {
+  const response = await api.post('/harness/ota/flash', { ip, asset_path: assetPath });
+  return response.data as { status: string; message: string };
+};
 
 // ------------------------------------------------------------------
 // Pilot Arena APIs
@@ -946,4 +1132,156 @@ export const stopSimCollect = async (jobId: string) => {
 
 export const createSimCollectEventStream = (jobId: string) => {
   return new EventSource(`${API_URL}/simcollect/${jobId}/events`);
+};
+
+// ------------------------------------------------------------------
+// AI Config APIs（多供应商 AI 模型配置，issue #403；供 TE「AI 一键筛选」#402 等消费）
+// 安全约定：后端永不返回明文 api_key / oauth token，只返回掩码与「是否已配置」。
+// ------------------------------------------------------------------
+export interface AiConfigAccount {
+  id: string;
+  name: string;
+  api_key_masked: string | null;
+  has_api_key: boolean;
+  oauth_connected: boolean;
+  base_url: string | null;
+  models: string[] | null;
+}
+
+export interface AiConfigProvider {
+  id: string;
+  name: string;
+  icon: string;
+  base_url: string;
+  oauth: boolean;
+  api_format: 'openai' | 'anthropic' | string;
+  custom: boolean;
+  default_models: string[];
+  accounts: AiConfigAccount[];
+}
+
+export interface AiConfigProvidersResponse {
+  providers: AiConfigProvider[];
+  active_provider: string | null;
+  active_account: string | null;
+}
+
+export interface AiActiveConfig {
+  active_provider: string | null;
+  name?: string;
+  account_id?: string | null;
+  account_name?: string | null;
+  model?: string | null;
+  base_url?: string;
+  oauth?: boolean;
+  configured: boolean;
+}
+
+export const listAiConfigProviders = async (): Promise<AiConfigProvidersResponse> => {
+  const response = await api.get('/ai-config/providers');
+  return response.data;
+};
+
+export const fetchActiveAiConfig = async (): Promise<AiActiveConfig> => {
+  const response = await api.get('/ai-config/active');
+  return response.data;
+};
+
+export const saveAiConfigAccount = async (
+  providerId: string,
+  payload: {
+    account_id?: string;
+    name?: string;
+    api_key?: string;
+    base_url?: string;
+    models?: string[];
+  },
+): Promise<{ status: boolean; account: AiConfigAccount }> => {
+  const response = await api.post(`/ai-config/providers/${providerId}`, payload);
+  return response.data;
+};
+
+export const deleteAiConfigAccount = async (
+  providerId: string,
+  accountId: string,
+): Promise<{ status: boolean }> => {
+  const response = await api.delete(`/ai-config/providers/${providerId}/accounts/${accountId}`);
+  return response.data;
+};
+
+export const setActiveAiProvider = async (
+  providerId: string,
+  accountId?: string | null,
+): Promise<AiActiveConfig> => {
+  const response = await api.post(`/ai-config/providers/${providerId}/active`, {
+    account_id: accountId ?? null,
+  });
+  return response.data;
+};
+
+export const createCustomAiProvider = async (payload: {
+  name: string;
+  base_url: string;
+  models?: string[];
+  api_format?: string;
+  provider_id?: string;
+}): Promise<{ status: boolean; provider_id: string }> => {
+  const response = await api.post('/ai-config/custom', payload);
+  return response.data;
+};
+
+export const deleteCustomAiProvider = async (
+  providerId: string,
+): Promise<{ status: boolean }> => {
+  const response = await api.delete(`/ai-config/custom/${providerId}`);
+  return response.data;
+};
+
+export interface AiOAuthDeviceCode {
+  status: boolean;
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+export const startAiOAuthDeviceCode = async (
+  providerId = 'codex',
+): Promise<AiOAuthDeviceCode> => {
+  const response = await api.post('/ai-config/oauth/device-code', { provider_id: providerId });
+  return response.data;
+};
+
+export interface AiOAuthPollResult {
+  status: 'pending' | 'expired' | 'success' | 'error';
+  account?: AiConfigAccount;
+  detail?: string;
+}
+
+export const pollAiOAuthDeviceCode = async (
+  deviceCode: string,
+  userCode?: string,
+): Promise<AiOAuthPollResult> => {
+  const response = await api.post('/ai-config/oauth/poll', {
+    device_code: deviceCode,
+    user_code: userCode,
+  });
+  return response.data;
+};
+
+export interface AiConfigTestResult {
+  ok: boolean;
+  message: string;
+  status_code?: number;
+  latency_ms?: number;
+  detail?: string;
+}
+
+export const testAiConfigConnection = async (payload?: {
+  provider_id?: string;
+  account_id?: string;
+}): Promise<AiConfigTestResult> => {
+  const response = await api.post('/ai-config/test', payload ?? {});
+  return response.data;
 };

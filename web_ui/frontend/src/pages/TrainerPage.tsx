@@ -352,7 +352,6 @@ export const TrainerPage = React.memo(function TrainerPage() {
               <RemoteConfigForm
                 titleKey="trainer.myPcTraining"
                 icon={<Cpu className="w-5 h-5" />}
-                subtitleKey="trainer.myPcTrainingSubtitle"
                 compact
                 host={myPcForm.host}
                 onHostChange={(v) => {
@@ -389,7 +388,6 @@ export const TrainerPage = React.memo(function TrainerPage() {
                   <SectionCardTitle
                     icon={<Database className="w-5 h-5" />}
                     title={t('trainer.trainingData')}
-                    subtitle={t('trainer.trainingDataSubtitle')}
                   />
                   <TubSelector
                     tub={myPcForm.tub}
@@ -418,7 +416,6 @@ export const TrainerPage = React.memo(function TrainerPage() {
             </>
           ) : (
             <RemoteConfigForm
-              subtitleKey="trainer.cloudTrainingSubtitle"
               host={onlineForm.host}
               onHostChange={(v) => setOnlineForm((f) => ({ ...f, host: v }))}
               user={onlineForm.user}

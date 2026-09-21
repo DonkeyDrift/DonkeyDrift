@@ -46,6 +46,19 @@ interface CurveConfig {
   color: string;
   /** 浅色主题（theme-light）下的墨色版本；缺省表示该颜色两主题通用。 */
   lightColor?: string;
+  /**
+   * 语义 CSS 变量名（如 '--ok'）：设置后优先从根元素 computed style 取色，
+   * 随主题（深/浅）切换自动变化；取不到（jsdom 等）回退 color/lightColor。
+   * 仅语义角色曲线使用（油门=ok、转向=accent、陀螺仪 Z=bad、陀螺仪 X=warn），
+   * 其余数据可视化专用色相保持固定。
+   */
+  cssVar?: string;
+  /**
+   * 语义 CSS 变量名（如 '--ok-text'）：只用于**图例文字**。
+   * --ok/--warn/--bad 是 Apple 的 fill 色，直接当文字用会掉到 2–3:1（浅色主题
+   * 实测 2.02/2.04/3.26），文字要走 *-text 变体；曲线本身仍用 fill 色。
+   */
+  textVar?: string;
   /** 从 Telemetry 取值的键。 */
   key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle' | 'rc_steering' | 'rc_throttle'>;
   /** 所属分组。 */
@@ -59,25 +72,43 @@ interface CurveConfig {
   scale?: number;
 }
 
-/** 按当前生效主题取曲线颜色：浅色用墨色版，缺省回退深色值。 */
-const curveColor = (c: CurveConfig, theme: ResolvedTheme): string =>
-  theme === 'light' ? c.lightColor ?? c.color : c.color;
+/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。 */
+const cssVarColor = (name: string, fallback: string): string => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+/** 按当前生效主题取曲线颜色：语义曲线读 CSS 变量，其余浅色用墨色版、缺省回退深色值。 */
+const curveColor = (c: CurveConfig, theme: ResolvedTheme): string => {
+  const fallback = theme === 'light' ? c.lightColor ?? c.color : c.color;
+  return c.cssVar ? cssVarColor(c.cssVar, fallback) : fallback;
+};
+
+/** 图例文字颜色：语义曲线走 *-text 变体（fill 色当文字只有 2–3:1）。 */
+const curveTextColor = (c: CurveConfig, theme: ResolvedTheme): string => {
+  const fill = curveColor(c, theme);
+  return c.textVar ? cssVarColor(c.textVar, fill) : fill;
+};
 
 /** 全部遥测曲线。分组：steering=转向/姿态（RC 转向、Pilot 角度、转向、陀螺仪三轴），
  *  throttle=油门/加速度（RC 油门、Pilot 油门、油门、加速度三轴）。 */
 export const CURVES: CurveConfig[] = [
-  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1fae6b', key: 'throttle', group: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0c9bd6', key: 'steering', group: 'steering', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', key: 'gz', group: 'steering', defaultOn: true, scale: 0.2 },
-  { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1a7f37', cssVar: '--ok', textVar: '--ok-text', key: 'throttle', group: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0066cc', cssVar: '--accent', textVar: '--accent', key: 'steering', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#d70015', cssVar: '--bad', textVar: '--bad-text', key: 'gz', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', lightColor: '#1d4ed8', key: 'rc_steering', group: 'steering', defaultOn: true },
   { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', group: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', key: 'gx', group: 'steering', defaultOn: true, scale: 0.2 },
-  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', group: 'steering', defaultOn: true, scale: 0.2 },
-  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', group: 'steering', defaultOn: true },
-  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', group: 'throttle', defaultOn: true },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#c93400', cssVar: '--warn', textVar: '--warn-text', key: 'gx', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#a21caf', key: 'gy', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#4d7c0f', key: 'ax', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#c2410c', key: 'ay', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#be185d', key: 'az', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0e7490', key: 'pilot_angle', group: 'steering', defaultOn: true },
+  { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#7e22ce', key: 'pilot_throttle', group: 'throttle', defaultOn: true },
 ];
 
 /** 按分组取曲线子集（保持 CURVES 顺序）。 */
@@ -118,7 +149,7 @@ export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
   return (
     <div className={cn('flex flex-wrap gap-x-3 gap-y-1', className)}>
       {onToggleAll && (
-        <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-slate-300 hover:text-slate-100">
+        <label className="dd-hit-h flex items-center gap-1 cursor-pointer text-xs font-medium text-slate-300 hover:text-slate-100">
           <input
             ref={selectAllRef}
             type="checkbox"
@@ -135,7 +166,7 @@ export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
         return (
           <label
             key={c.key as string}
-            className="flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
+            className="dd-hit-h flex items-center gap-1 cursor-pointer text-xs text-slate-400 hover:text-slate-200"
           >
             <input
               type="checkbox"
@@ -144,7 +175,7 @@ export const TelemetryLegend: React.FC<TelemetryLegendProps> = ({
               className="accent-[var(--curve-color)]"
               style={{ ['--curve-color' as string]: color }}
             />
-            <span style={{ color: on ? color : undefined }}>{t(c.labelKey)}</span>
+            <span style={{ color: on ? curveTextColor(c, theme) : undefined }}>{t(c.labelKey)}</span>
           </label>
         );
       })}
@@ -377,7 +408,7 @@ export const TelemetryChart = React.memo(function TelemetryChart({
     <div
       className={cn(
         overlay
-          ? 'p-2'
+          ? 'dd-overlay rounded-lg p-2'
           : 'panel rounded-lg border border-slate-700 p-3 bg-slate-900/60',
         className,
       )}

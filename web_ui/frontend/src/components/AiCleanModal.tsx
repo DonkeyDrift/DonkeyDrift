@@ -122,7 +122,7 @@ export const AiCleanModal: React.FC<AiCleanModalProps> = ({ tubPath, onClose, on
     <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl max-w-2xl w-full p-5 shadow-2xl max-h-[85vh] flex flex-col">
         <div className="flex items-start gap-3">
-          <div className="p-2 rounded-full bg-cyan-500/15 shrink-0">
+          <div className="p-2 rounded-full bg-cyan-500/20 shrink-0">
             <Sparkles className="w-5 h-5 text-cyan-400" />
           </div>
           <div className="min-w-0">
@@ -230,7 +230,7 @@ export const AiCleanModal: React.FC<AiCleanModalProps> = ({ tubPath, onClose, on
                                 frames: seg.frame_count,
                               })}
                             </span>
-                            <span className="ml-2 text-amber-400/90">
+                            <span className="ml-2 text-amber-400">
                               {t(reasonKey(seg.reason_code))}
                             </span>
                             {typeof seg.detail?.collision_index === 'number' && (

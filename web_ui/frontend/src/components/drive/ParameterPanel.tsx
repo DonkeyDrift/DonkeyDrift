@@ -188,9 +188,6 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               </button>
             </label>
           </div>
-          <p className="text-[10px] text-zinc-600 text-center">
-            {t('driveViz.autoSaveNote')}
-          </p>
         </div>
       )}
     </div>

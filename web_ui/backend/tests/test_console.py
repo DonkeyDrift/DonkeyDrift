@@ -29,6 +29,23 @@ def test_validate_ip_accepts_ipv4_and_rejects_others():
         console._validate_ip("::1")
 
 
+def test_validate_ip_rejects_public_and_accepts_private():
+    """公网地址一律拒绝（SSRF 防护）；RFC1918 私网放行。
+
+    回环（127.x）与链路本地（169.254.x）在 ipaddress.is_private 下均为
+    private，按 _validate_ip docstring 的约定同样放行并在此钉住该行为。
+    """
+    console = importlib.import_module("routers.console")
+    with pytest.raises(HTTPException):
+        console._validate_ip("8.8.8.8")
+    with pytest.raises(HTTPException):
+        console._validate_ip("1.1.1.1")
+    assert console._validate_ip("192.168.1.10") == "192.168.1.10"
+    assert console._validate_ip("10.0.0.5") == "10.0.0.5"
+    assert console._validate_ip("127.0.0.1") == "127.0.0.1"
+    assert console._validate_ip("169.254.1.1") == "169.254.1.1"
+
+
 def test_forward_sync_preserves_method_body_and_headers(monkeypatch):
     console = importlib.import_module("routers.console")
     captured = {}

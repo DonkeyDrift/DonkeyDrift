@@ -7,11 +7,13 @@ import uvicorn
 import os
 import sys
 import logging
+from contextlib import asynccontextmanager
 
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, drift
+from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config, harness_updater, drift
+from routers import findcar as findcar_router
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -26,7 +28,34 @@ if not DEBUG:
     # 抑制后端业务路由日志（连接/断连统计等）
     logging.getLogger("routers.drive").setLevel(logging.WARNING)
 
-app = FastAPI(title="DonkeyDrift Web API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动/关闭后台任务（issue #404）。
+
+    Starlette 1.x 在自定义 lifespan 存在时不再触发 on_event 处理器（会静默
+    停摆），后台任务统一并入 lifespan：
+    - Harness 一键更新周期检查（issue #404）；
+    - drift 驱动钩子安装与漂移相机释放（关停必须停相机循环释放 DirectShow 句柄）。
+
+    findcar 主机心跳已迁至常驻 launcher（donkeycar/launcher/server.py），
+    不再随本后端启停；本后端只保留 /api/findcar/config 配置接口。
+    """
+    harness_updater.start_background_check()
+    try:
+        drift.install_drive_hooks()
+    except Exception:
+        logging.getLogger(__name__).warning("drift 驱动钩子安装失败", exc_info=True)
+    try:
+        yield
+    finally:
+        try:
+            drift.drift_engine.stop_camera_loop()
+        except Exception:
+            logging.getLogger(__name__).warning("drift 相机释放失败", exc_info=True)
+        await harness_updater.stop_background_check()
+
+
+app = FastAPI(title="DonkeyDrifter", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -66,22 +95,16 @@ app.include_router(drive.router, prefix="/api/drive", tags=["drive"])
 app.include_router(arena.router, prefix="/api/arena", tags=["arena"])
 app.include_router(connector.router, prefix="/api/connector", tags=["connector"])
 app.include_router(launch.router, prefix="/api/launch", tags=["launch"])
+app.include_router(zcode_remote.router, prefix="/api/zcode-remote", tags=["zcode-remote"])
 app.include_router(console.router, prefix="/api/console", tags=["console"])
 app.include_router(simcollect.router, prefix="/api/simcollect", tags=["simcollect"])
+app.include_router(findcar_router.router, prefix="/api/findcar", tags=["findcar"])
+app.include_router(ai_config.router, prefix="/api/ai-config", tags=["ai-config"])
+app.include_router(harness_updater.router, prefix="/api/harness", tags=["harness"])
 app.include_router(drift.router, prefix="/api/drift", tags=["drift"])
 
-@app.on_event("startup")
-async def _install_drift_hooks():
-    drift.install_drive_hooks()
 
-
-@app.on_event("shutdown")
-async def _stop_drift_engine():
-    """应用关闭必须停掉漂移相机循环（释放 DirectShow 句柄）。"""
-    drift.drift_engine.stop_camera_loop()
-
-
-# 进程退出兜底：shutdown 钩子跑不到时（强杀/reload 边缘）也尽力释放相机；
+# 进程退出兜底：lifespan 关停钩子跑不到时（强杀/reload 边缘）也尽力释放相机；
 # stop_camera_loop 幂等，重复调用安全。
 atexit.register(drift.drift_engine.stop_camera_loop)
 
@@ -120,6 +143,7 @@ else:
     @app.get("/")
     async def root():
         return {"message": "DonkeyDrift Web UI is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("DRIVE_WEB_PORT", 8000))

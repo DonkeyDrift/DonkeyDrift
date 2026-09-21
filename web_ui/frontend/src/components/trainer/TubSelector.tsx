@@ -33,7 +33,7 @@ export const TubSelector: React.FC<TubSelectorProps> = ({
               onTubChange(e.target.value);
             }
           }}
-          className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+          className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
           aria-label={t('trainer.tubPath')}
         >
           <option value="">{t('trainer.tubPathManual')}</option>
@@ -50,7 +50,7 @@ export const TubSelector: React.FC<TubSelectorProps> = ({
             type="text"
             value={tub}
             onChange={(e) => onTubChange(e.target.value)}
-            className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-cyan-600"
+            className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
           />
         )}
       </div>

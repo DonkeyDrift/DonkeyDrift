@@ -54,12 +54,10 @@ describe('SimCollectCard', () => {
     mock.stop.mockClear();
   });
 
-  it('renders title, hint and start button in idle state', () => {
+  it('renders title and start button in idle state', () => {
     renderCard();
     expect(screen.getByText('模拟器采集')).toBeInTheDocument();
     expect(screen.getByText('开始采集')).toBeInTheDocument();
-    // 说明文字含 Mac
-    expect(screen.getByText(/SSH 控制 Mac/)).toBeInTheDocument();
   });
 
   it('calls start with the configured steps when Start clicked', () => {
@@ -101,7 +99,7 @@ describe('SimCollectCard', () => {
         mean_cte: 2.4094,
         max_cte: 7.0614,
         crashed: 0,
-        result_out: '/home/dkc/projects/mycar/sim_collect_x',
+        result_out: '/home/testuser/projects/mycar/sim_collect_x',
       },
       error: null,
       logs: [],
@@ -112,7 +110,7 @@ describe('SimCollectCard', () => {
     expect(screen.getByText('2.4094')).toBeInTheDocument();
     expect(screen.getByText('7.0614')).toBeInTheDocument();
     expect(screen.getByText('否')).toBeInTheDocument(); // crashed=0 -> 否
-    expect(screen.getByText('/home/dkc/projects/mycar/sim_collect_x')).toBeInTheDocument();
+    expect(screen.getByText('/home/testuser/projects/mycar/sim_collect_x')).toBeInTheDocument();
   });
 
   it('shows error message and logs when failed', () => {

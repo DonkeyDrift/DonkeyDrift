@@ -23,9 +23,10 @@ from pathlib import Path
 from urllib.parse import urlparse, quote
 
 from donkeycar._version import __version__
+from donkeycar import findcar
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
-from donkeycar.launcher.dsh_web import launch_dsh_web
+from donkeycar.launcher.dsh_web import _entry_url_for_client, launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws
 from donkeycar.webui_instance import (
     probe_http_ok,
@@ -77,8 +78,8 @@ def _find_mycar_project():
     cwd = Path.cwd()
     if _is_valid_project_dir(cwd):
         return cwd
-    # 搜索 /home/dkc/projects/mycar
-    known_path = Path("/home/dkc/projects/mycar")
+    # 搜索 ~/projects/mycar（按运行用户家目录展开）
+    known_path = Path.home() / "projects" / "mycar"
     if _is_valid_project_dir(known_path):
         return known_path
     return None
@@ -897,6 +898,75 @@ def _start_hostip_reporter():
     t.start()
 
 
+# ── Find DKC 主机心跳（findcar）────────────────────────────────────
+# 主机（type=dd）上报挂在常驻 launcher 上：只要开机、本服务在跑，Find DKC
+# （https://find-dkc.pages.dev/）就能找到本机——不再依赖按需启动的 DD Web。
+# 上报端口动态取值：DD Web 实例存活时报其实际端口（点 IP 直达 DD 控制台），
+# 否则报 launcher 自身端口（点 IP 落到本菜单页，可一键「打开 DonkeyDrifter」）。
+
+def _findcar_report_once(port_fallback):
+    """向 Find DKC 上报一次主机心跳。
+
+    返回 True/False 表示上报成败（循环据此决定是否快速补跳）；
+    未配置时返回 None（不算失败，按正常间隔走）。
+    """
+    cfg = findcar.load_config()
+    if not findcar.is_configured(cfg):
+        return None
+    inst = find_live_instance()
+    port = inst["backend_port"] if inst else port_fallback
+    return findcar.report_once(cfg, port)
+
+
+def _findcar_reporter_loop(port_fallback):
+    """后台线程：启动立即上报一次，随后按配置间隔周期上报。
+
+    每轮重新读配置：网页 /api/findcar/config 改了开关/地址/间隔后
+    无需重启 launcher，下一跳即生效。
+
+    上报失败时不睡满整个间隔，按 findcar.RETRY_INTERVAL_SECONDS（30s）
+    快速补跳——DNS/网络抖动期间也能在恢复后半分钟内重新上线，而不是
+    干等 150s 间隔，避免 Find DKC 网页上「主机其实在、却显示离线」。
+    """
+    while True:
+        interval = findcar.DEFAULT_INTERVAL_SECONDS
+        try:
+            ok = _findcar_report_once(port_fallback)
+            cfg = findcar.load_config()
+            if cfg.interval_seconds > 0:
+                interval = cfg.interval_seconds
+            if ok is False:
+                interval = min(findcar.RETRY_INTERVAL_SECONDS, interval)
+        except Exception:
+            pass
+        threading.Event().wait(interval)
+
+
+def _start_findcar_reporter(port_fallback):
+    """启动 Find DKC 主机心跳后台线程（daemon）。"""
+    t = threading.Thread(
+        target=_findcar_reporter_loop, args=(port_fallback,), daemon=True
+    )
+    t.start()
+
+
+def _report_findcar_offline(port):
+    """服务关停时向 Find DKC 补发下线标记（尽力而为，绝不卡住关停）。"""
+    try:
+        findcar.report_offline(port=port)
+    except Exception:
+        pass
+
+
+def _sigterm_raise_keyboard_interrupt(signum, frame):
+    """SIGTERM 处理器：抛 KeyboardInterrupt，让 run_server 走统一退出路径。
+
+    systemd stop / 关机关的是 SIGTERM 而非 SIGINT；不接管的话进程直接终止，
+    Find DKC 下线标记发不出去，网页要等在线窗口走完才显示「离线」。
+    """
+    raise KeyboardInterrupt
+
+
 # ── HTTP 请求处理 ──────────────────────────────────────────────────
 
 # /api/launch/kimi-code-web 等 launch 类端点的 CORS 响应头：DC 页面由 ESP32
@@ -904,6 +974,84 @@ def _start_hostip_reporter():
 # simple request，无预检）；没有 Access-Control-Allow-Origin 浏览器会拦截
 # 响应，DC 按钮永远失败。仅 launch 类端点放行，不扩散到其它端点。
 _KIMI_WEB_CORS_HEADERS = (("Access-Control-Allow-Origin", "*"),)
+
+# Z Code 桌面端（Electron AppImage 解包目录）二进制路径：动态推导 home，
+# 避免硬编码本机路径入库
+_ZCODE_DESKTOP_BIN = Path.home() / ".zcode-app" / "zcode"
+
+
+def _zcode_desktop_running(proc_root: str = "/proc") -> bool:
+    """扫 /proc 判断 Z Code 桌面端进程是否在运行（不依赖 pgrep 路径）。
+
+    proc_root 可替换（测试用假 /proc 目录）；目录不可读（非 Linux）返回
+    False，单个进程 cmdline 读不出（竞争退出/权限）跳过不误判。
+    """
+    needle = ".zcode-app/zcode"
+    try:
+        pids = os.listdir(proc_root)
+    except OSError:
+        return False
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc_root, pid, "cmdline"), "rb") as f:
+                cmdline = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if needle in cmdline:
+            return True
+    return False
+
+
+# launcher 拉起 Z Code 桌面端时也带 CDP 调试口：候选端口与端口文件路径和
+# web_ui/backend/routers/zcode_remote.py 保持一致，DD /api/zcode-remote/link
+# 才能经 CDP 取活链/代开远控（9222 常被浏览器自动化占用，不能硬编码）。
+_ZCODE_CDP_PORT_CANDIDATES = (9333, 9334, 9335, 9336)
+_ZCODE_CDP_PORT_FILE_NAME = "dd-zcode-cdp.json"
+
+
+def _pick_free_cdp_port() -> int | None:
+    """挑一个空闲的 CDP 调试端口（绑定测试即代表无进程占用）。"""
+    for port in _ZCODE_CDP_PORT_CANDIDATES:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    return None
+
+
+def _write_cdp_port(port: int) -> None:
+    """把选中的 CDP 端口写进端口文件（与 zcode_remote.py 同路径）。"""
+    try:
+        base = os.environ.get("ZCODE_DATA_BASE_DIR", "").strip() or str(Path.home())
+        v2 = Path(base) / ".zcode" / "v2"
+        v2.mkdir(parents=True, exist_ok=True)
+        (v2 / _ZCODE_CDP_PORT_FILE_NAME).write_text(
+            json.dumps({"port": port}), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _client_host_header(headers, client_address):
+    """launch 类端点回给客户端的入口 URL 应跟随的 Host 值。
+
+    DD 后端转发（web_ui/backend/routers/launch.py）时把浏览器原始 Host
+    放进 ``X-Forwarded-Host``；它仅在直连客户端是回环（本机 DD 后端）
+    时才采信——远端客户端可伪造 XFH，采信会把 dsh 入口 token 改写泄给
+    伪造的主机名。其余情况用请求的 Host 头（客户端能到达 launcher 即
+    证明该地址对它可达）。
+    """
+    client_ip = client_address[0] if client_address else ""
+    if client_ip in ("127.0.0.1", "::1"):
+        forwarded = headers.get("X-Forwarded-Host")
+        if forwarded:
+            return forwarded
+    return headers.get("Host")
 
 
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
@@ -974,6 +1122,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._handle_launch_dsh()
         elif path == "/api/launch/zcode":
             self._handle_launch_zcode()
+        elif path == "/api/launch/zcode-remote":
+            self._handle_launch_zcode_remote()
         elif path == "/api/createcar":
             body, err = self._read_json_body()
             if err is not None:
@@ -1115,7 +1265,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         kimi-code-web 同目录；dsh 以进程 cwd 作为新会话/工作区默认目录，
         见 dsh-host-apiproxy 的 process.cwd()）；
         cwd 不存在直接报错，绝不回退到其它目录。
-        返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理）。
+        返回的 URL 已改写为上位机局域网 IP（issue #125 同款处理），入口
+        host 再跟随客户端请求实际用的 Host（可达性优先——客户端网络
+        解析不了 mDNS 名时会落到别处的 dsh 401 页；见
+        dsh_web._entry_url_for_client 与 _client_host_header）。
         长请求：dsh 冷启动数秒，服务端整体超时 60s，
         客户端超时必须 ≥60s。响应带 CORS 头（与 kimi-code-web 端点
         同款，供 DC 页面跨域调用）。
@@ -1151,6 +1304,13 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             # 默认目录（dsh-host-apiproxy 的 process.cwd()）
             cwd = str(Path.home() / "projects")
         result = launch_dsh_web(cwd=cwd)
+        if result.get("status") == "ok" and isinstance(result.get("url"), str):
+            # 入口 host 跟随客户端实际用的地址（X-Forwarded-Host 仅回环
+            # 直连采信）：客户端网络解析不了默认 mDNS 名时，不改写会把
+            # 浏览器送到不可达地址或别台 dsh 的 401 页
+            result["url"] = _entry_url_for_client(
+                result["url"],
+                _client_host_header(self.headers, self.client_address))
         code = 200 if result.get("status") == "ok" else 500
         self._serve_json(result, code=code,
                          extra_headers=_KIMI_WEB_CORS_HEADERS)
@@ -1202,6 +1362,58 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         url = f"http://{_entry_host()}:8090/terminal?cmd={quote(cmd, safe='')}&title=ZCode&icon=zcode.png"
         self._serve_json(
             {"status": "ok", "url": url},
+            extra_headers=_KIMI_WEB_CORS_HEADERS,
+        )
+
+    def _handle_launch_zcode_remote(self):
+        """POST /api/launch/zcode-remote：确保 Z Code 桌面端在线（不在则拉起）。
+
+        DC/DD 的「ZCode」按钮点击时调用（只有点击才发这个请求）：远控链接
+        只有在桌面端 Web 远控会话在线时才有效，否则 z.ai 页面显示
+        "手机连接已失效"；桌面端 App 启动时会恢复上次开启的远控会话，
+        所以这里只需保证桌面端进程在跑。响应带 CORS 头（供 DC 页面跨域调用）。
+        """
+        # 读取并丢弃请求体（如有）
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+        if _zcode_desktop_running():
+            self._serve_json(
+                {"status": "ok", "running": True, "started": False},
+                extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        if not _ZCODE_DESKTOP_BIN.is_file():
+            self._serve_json(
+                {"status": "error", "error": f"Z Code 桌面端不存在: {_ZCODE_DESKTOP_BIN}"},
+                code=400, extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        try:
+            env = dict(os.environ)
+            env.setdefault("DISPLAY", ":0")
+            port = _pick_free_cdp_port()
+            cmd = [str(_ZCODE_DESKTOP_BIN), "--no-sandbox"]
+            if port:
+                cmd.append(f"--remote-debugging-port={port}")
+            subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=env,
+            )
+            if port:
+                _write_cdp_port(port)
+        except OSError as e:
+            self._serve_json(
+                {"status": "error", "error": f"拉起 Z Code 桌面端失败: {e}"},
+                code=500, extra_headers=_KIMI_WEB_CORS_HEADERS,
+            )
+            return
+        self._serve_json(
+            {"status": "ok", "running": False, "started": True},
             extra_headers=_KIMI_WEB_CORS_HEADERS,
         )
 
@@ -1316,16 +1528,24 @@ def run_server(host="0.0.0.0", port=8090):
     """启动 Launcher HTTP 服务器。"""
     # 启动 HOSTIP 报告后台线程
     _start_hostip_reporter()
+    # 启动 Find DKC 主机心跳后台线程（无存活 DD Web 实例时上报 launcher 自身端口）
+    _start_findcar_reporter(port)
     server = http.server.ThreadingHTTPServer(
         (host, port), LauncherHandler
     )
     print(f"DonkeyDrifter Launcher 服务已启动: http://{host}:{port}")
     print(f"当前工作目录: {Path.cwd()}")
+    # 接管 SIGTERM（systemd stop / 关机），走统一退出路径补发下线标记；
+    # signal 只能在主线程注册，测试在子线程起服务时跳过（保留默认行为）
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_raise_keyboard_interrupt)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n正在停止服务...")
         server.shutdown()
+    finally:
+        _report_findcar_offline(port)
 
 
 # ── 菜单 HTML 页面（嵌入为字符串常量） ──────────────────────────────

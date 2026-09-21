@@ -1,5 +1,6 @@
 import { arena } from './arena';
 import { aiclean } from './aiclean';
+import { aiconfig } from './aiconfig';
 import { common } from './common';
 import { connector } from './connector';
 import { console as consoleNs } from './console';
@@ -7,6 +8,7 @@ import { drive } from './drive';
 import { drivehooks } from './drivehooks';
 import { driveviz } from './driveviz';
 import { fab } from './fab';
+import { harness } from './harness';
 import { trainer } from './trainer';
 import { tubeditor } from './tubeditor';
 import { tublibrary } from './tublibrary';
@@ -16,6 +18,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
   zh: {
     ...arena.zh,
     ...aiclean.zh,
+    ...aiconfig.zh,
     ...common.zh,
     ...connector.zh,
     ...consoleNs.zh,
@@ -23,6 +26,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
     ...drivehooks.zh,
     ...driveviz.zh,
     ...fab.zh,
+    ...harness.zh,
     ...trainer.zh,
     ...tubeditor.zh,
     ...tublibrary.zh,
@@ -31,6 +35,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
   en: {
     ...arena.en,
     ...aiclean.en,
+    ...aiconfig.en,
     ...common.en,
     ...connector.en,
     ...consoleNs.en,
@@ -38,6 +43,7 @@ export const MESSAGES: Record<'zh' | 'en', Record<string, string>> = {
     ...drivehooks.en,
     ...driveviz.en,
     ...fab.en,
+    ...harness.en,
     ...trainer.en,
     ...tubeditor.en,
     ...tublibrary.en,

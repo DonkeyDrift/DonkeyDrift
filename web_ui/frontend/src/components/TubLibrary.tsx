@@ -55,6 +55,17 @@ const MAX_CATCHUP_FRAMES = 10;
 // 从当前帧重新对表继续 1x 播放，不追帧、不快进。
 const MAX_RESUME_LAG_FRAMES = 60;
 
+/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
+ *  canvas 占位底色按 --surface 随主题（深/浅）切换自动重取色。 */
+const cssVarColor = (name: string, fallback: string): string => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 const formatDateTime = (ms: number | null) => {
   if (ms === null || ms === undefined) return null;
   const date = new Date(ms);
@@ -366,7 +377,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
 
     if (!currentImagePath) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = theme === 'light' ? '#f4f6f9' : '#18181b';
+      ctx.fillStyle = cssVarColor('--surface', theme === 'light' ? '#f4f6f9' : '#18181b');
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       setFrameAspect(null);
       return;
@@ -647,14 +658,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
-          <div className="space-y-1.5">
-            <SectionCardTitle
-              icon={<Clapperboard className="w-5 h-5" />}
-              title={t('tubLibrary.title')}
-              subtitle={t('tub.subtitle')}
-            />
-            <p className="text-sm text-zinc-400">{t('tubLibrary.subtitle')}</p>
-          </div>
+          <SectionCardTitle
+            icon={<Clapperboard className="w-5 h-5" />}
+            title={t('tubLibrary.title')}
+          />
           <Button
             size="sm"
             variant="secondary"
@@ -799,10 +806,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
             {/* Right: player */}
             <div className="flex flex-col gap-3">
               <div
-                className="w-full max-w-[640px] mx-auto bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
+                className="dd-media w-full max-w-[640px] mx-auto bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center relative"
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
-                <div className={`absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center ${theme === 'light' ? 'shadow-[0_8px_24px_rgba(15,23,42,0.12)]' : 'shadow-[0_8px_24px_rgba(0,0,0,0.25)]'}`}>
+                <div className="dd-overlay absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center shadow-lg">
                   <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
                   <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
                 </div>
@@ -869,7 +876,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                 <Button
                   size="sm"
                   variant={isPlaying ? 'danger' : 'primary'}
-                  className="flex-1"
+                  className="flex-1 max-w-[200px]"
                   disabled={!hasRecords}
                   aria-label={isPlaying ? t('tub.stopPlaybackAria') : t('tub.startPlaybackAria')}
                   onClick={() => setIsPlaying((v) => !v)}

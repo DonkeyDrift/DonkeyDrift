@@ -13,7 +13,7 @@ Web 驾驶控制台是 Donkeycar 新一代统一 Web UI 的核心模块，将原
 ```bash
 donkey createcar --path ~/mycar --template complete    # 首次创建车目录
 cd ~/mycar
-donkey drive --path /home/dkc/projects/DonkeyDrift/web_ui --car ~/mycar
+donkey drive --path /home/user/projects/DonkeyDrift/web_ui --car ~/mycar
 ```
 
 可选参数：`--model ./models/mypilot.h5`（指定推理模型）、`--type linear`、`--js`（物理摇杆）、`--open`（自动打开浏览器）、`--backend-port`/`--frontend-port`（端口）。
@@ -26,7 +26,7 @@ donkey drive --path /home/dkc/projects/DonkeyDrift/web_ui --car ~/mycar
 
 ```bash
 # 终端 1：Web UI（后端 8000 + 前端 5188）
-donkey web --path /home/dkc/projects/DonkeyDrift/web_ui
+donkey web --path /home/user/projects/DonkeyDrift/web_ui
 
 # 终端 2：车端（自动连本机 8000）
 cd ~/mycar

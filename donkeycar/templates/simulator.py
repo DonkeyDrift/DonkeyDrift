@@ -65,11 +65,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     inputs = []
 
-    cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF, delay=cfg.SIM_ARTIFICIAL_LATENCY)
+    cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF, delay=cfg.SIM_ARTIFICIAL_LATENCY, output_preview=True)
     threaded = True
     inputs = ['angle', 'throttle', 'brake', 'reconnect_simulator']
 
-    V.add(cam, inputs=inputs, outputs=['cam/image_array'], threaded=threaded)
+    # cam/image_array 保持 NN 输入分辨率（IMAGE_W×IMAGE_H）；preview/image_array 为
+    # 模拟器渲染分辨率原始帧，供 Drive 页面展示最高画质，与 NN 输入解耦。
+    V.add(cam, inputs=inputs, outputs=['cam/image_array', 'preview/image_array'], threaded=threaded)
 
     class SimConnectionState:
         """把 DonkeyGymEnv 的 TCP 连接状态发布为 sim/connected，供遥测透传到前端。"""
@@ -126,6 +128,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
             webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
             webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+            jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
+            preserve_source_resolution=True,
         )
         # outputs 顺序必须与 DriveApiBridge.run_threaded 的 7 元组返回值严格一致
         # (Vehicle/Memory 按位置配对)：少写或错序会导致重连标志被静默丢弃。
