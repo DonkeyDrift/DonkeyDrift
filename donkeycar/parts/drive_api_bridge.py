@@ -316,7 +316,8 @@ class DriveApiBridge:
                  video_width: int = 320, video_height: int = 240,
                  video_fps: int = 60, webrtc_enabled: bool = True,
                  webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0,
-                 jpeg_quality: int = 95, preserve_source_resolution: bool = False):
+                 jpeg_quality: int = 95, preserve_source_resolution: bool = False,
+                 model_loader=None):
         self.server_url = self._with_role(server_url, role)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
@@ -327,6 +328,9 @@ class DriveApiBridge:
         self.webrtc_ice_servers = parse_webrtc_ice_servers(os.environ.get("DRIVE_WEBRTC_ICE_SERVERS") or webrtc_ice_servers)
         self.jpeg_quality = jpeg_quality
         self.preserve_source_resolution = preserve_source_resolution
+        # issue #003 热加载：车端常驻的可原子替换模型容器（PilotHolder）。
+        # 为 None 表示当前车端不支持热加载（legacy json / 漂移回放占用 pilot 输出）。
+        self.model_loader = model_loader
         self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height,
                                                  upscale_only=preserve_source_resolution)
 
@@ -457,13 +461,10 @@ class DriveApiBridge:
         if msg.get("type") == "reconnect_simulator":
             self.reconnect_simulator = True
             return
-        if msg.get("type") == "restart_with_model":
-            # 选模型后要求带模型重启：车端运行时无法热切换模型，仅记录并提示，
-            # 由人工/看门狗重启车端进程后按 selected_model.json 加载所选模型。
-            logger.info(
-                "收到带模型重启请求（model_path=%s），请重启车端进程使其生效",
-                msg.get("model_path"),
-            )
+        if msg.get("type") in ("load_model", "restart_with_model"):
+            # issue #003 热加载：运行时原子替换推理模型，无需重启车端进程。
+            # restart_with_model 是旧后端的兼容别名（无 request_id，best-effort）。
+            self._handle_load_model(msg)
             return
         if msg.get("type") == "request_car_state":
             self._send_car_state(self.last_num_records)
@@ -487,6 +488,57 @@ class DriveApiBridge:
                 logger.warning("忽略非法 car_mode 命令: %r", msg["car_mode"])
         if "buttons" in msg:
             self.buttons.update(msg["buttons"])
+
+    def _handle_load_model(self, msg: dict):
+        """处理 Web 端「热加载模型」请求：后台线程加载，完成后回 model_loaded ACK。"""
+        request_id = msg.get("request_id")
+        model_path = msg.get("model_path")
+        model_type = msg.get("model_type")
+
+        def _fail(error: str):
+            self._send_json({
+                "type": "model_loaded",
+                "request_id": request_id,
+                "success": False,
+                "error": error,
+            })
+
+        if self.model_loader is None:
+            _fail("车端未启用模型热加载（legacy json 或漂移回放占用 pilot 输出）")
+            return
+        if not model_path or not isinstance(model_path, str):
+            _fail("model_path 无效")
+            return
+        path = os.path.abspath(os.path.expanduser(model_path))
+        if not os.path.exists(path):
+            _fail(f"模型文件不存在: {path}")
+            return
+        # 放到线程池加载：TFLite/TF 载入可能耗时数百毫秒到数秒，
+        # 不能阻塞 WS 事件循环，否则心跳/遥测会停顿。
+        self._run_async(self._async_load_model(request_id, path, model_type))
+
+    async def _async_load_model(self, request_id, path: str, model_type):
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, self.model_loader.load, path, model_type)
+        except Exception as e:
+            logger.error("热加载模型失败: %s", e, exc_info=True)
+            self._send_json({
+                "type": "model_loaded",
+                "request_id": request_id,
+                "success": False,
+                "error": str(e),
+            })
+            return
+        logger.info("热加载模型完成: %s (%s)", path, model_type)
+        self._send_json({
+            "type": "model_loaded",
+            "request_id": request_id,
+            "success": True,
+            "model": path,
+            "model_type": model_type,
+        })
 
     def _send_json(self, payload: dict):
         if not self.loop or not self.ws:

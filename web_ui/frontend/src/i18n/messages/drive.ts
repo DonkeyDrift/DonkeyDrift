@@ -37,6 +37,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.modelRestarting': '正在重启车端加载模型…',
     'drive.modelRestartTimeout': '车端重启超时未上线，请检查车端进程',
     'drive.modelLoadFailed': '模型加载失败',
+    'drive.modelLoading': '正在加载模型…',
+    'drive.modelLoaded': '模型已热加载，可直接推理',
     // ProgrammableButtons
     'drive.hintW1': '增加油门上限',
     'drive.hintW2': '降低油门上限',
@@ -147,6 +149,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.modelRestarting': 'Restarting car to load model…',
     'drive.modelRestartTimeout': 'Car restart timed out; check the car process',
     'drive.modelLoadFailed': 'Failed to load model',
+    'drive.modelLoading': 'Loading model…',
+    'drive.modelLoaded': 'Model hot-loaded — ready for inference',
     // ProgrammableButtons
     'drive.hintW1': 'Increase throttle limit',
     'drive.hintW2': 'Decrease throttle limit',

@@ -20,28 +20,25 @@ def test_drive_page_does_not_mount_config_loaders():
 
 
 # ===========================================================================
-# issue #003：选模型 = 车端带模型重启 + 重启后恢复全自动/半自动模式
+# issue #003（热加载）：选模型 = 车端运行期热加载，无需重启车端进程
 # ===========================================================================
 DRIVE_PAGE = REPO_ROOT / "web_ui" / "frontend" / "src" / "pages" / "DrivePage.tsx"
 
 
-def test_drive_page_model_change_triggers_restart_state_machine():
+def test_drive_page_model_change_requests_hot_load_without_restart():
     source = DRIVE_PAGE.read_text(encoding="utf-8")
 
-    # 模式恢复状态机：后端确认重启后 begin，车端再上线时补发当前模式
-    assert "useModelRestart" in source
-    assert "beginModelRestart()" in source
-    assert "res?.restarting" in source
+    # 选模型经后端下发车端热加载；只有车端离线/旧版才回退提示重启
+    assert "loadModelToCar" in source
+    assert "res?.restart_required" in source
+    assert "drive.modelLoaded" in source
+    assert "drive.modelLoading" in source
 
 
-def test_drive_page_suppresses_mode_sync_and_disables_selectors_during_restart():
+def test_drive_page_hot_load_shows_loading_and_disables_model_selector():
     source = DRIVE_PAGE.read_text(encoding="utf-8")
 
-    # 重启窗口内不跟随车端回报的默认 user 模式（否则全自动选择被冲掉）
-    assert "if (!modelRestarting)" in source
-    # 重启完成前禁用模式/模型切换
-    assert "disabled={!carState.online || modelRestarting}" in source
-    assert "disabled={!carState.online || modelsLoading || modelRestarting}" in source
-    # 重启中与失败/需手动重启的可见提示
-    assert "drive.modelRestarting" in source
+    # 加载期间禁用模型选择并显示加载态；结果用 modelNotice 展示
+    assert "disabled={!carState.online || modelsLoading || modelLoading}" in source
+    assert "data-model-loading" in source
     assert "modelNotice" in source

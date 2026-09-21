@@ -10,6 +10,9 @@
   - 文档：`docs/issues/001-006` + README、`docs/guide/pilot-arena-handoff.md`、pilot-arena-testing 计划（拷入前逐文件脱敏）；`web-drive-console-user-guide.md`「加载到车」行为描述与代码对齐（持久化 + 带模型重启）；`setup.cfg` url 死链修复（DonkeyDrifter→DonkeyDrift）。
   - 测试：vitest **48 文件 / 305 全绿**（净 +5）、tsc 零错误、build 通过；pytest 后端 **559 + 1 skip**、`tests/` 397（1 条 origin/Tony 既有失败）、telemetry 12 全过；真实模型集成测试本机实跑 1 passed。
   - 注：仅 DD 改动，Firmware 无改动、无需 OTA；合并后 ff deploy-8000 并重建前端部署。
+- feat(drive): 选模型改为车端运行期**热加载**，无需重启车端进程（issues/003）——车端常驻 `PilotHolder`（新增 `donkeycar/parts/pilot_holder.py`）在运行期原子替换 KerasPilot；`DriveApiBridge` 消费 `load_model` 消息并回 `model_loaded` ACK；后端 `/drive/load_model` 经 WebSocket 下发并等待 ACK（`DRIVE_MODEL_HOT_LOAD_TIMEOUT` 默认 30s），车端离线/旧版超时回退为「模型已记录，需重启车端后生效」；前端选模型显示「正在加载模型…」→「模型已热加载，可直接推理」，不再走重启状态机。
+  - 车端：`complete.py` 无 `--model` 时也注册空的 `PilotHolder` 并接线 `DriveApiBridge(model_loader=...)`；有 `--model` 时启动即载入并保留文件变更自动重载；legacy `.json`（结构+权重分离）与漂移回放仍走原静态路径、不支持热切换。
+  - 测试：`donkeycar/tests/test_pilot_holder_hot_load.py` 9 例（原子替换/空容器/失败保留旧模型/ACK/兼容别名）；后端 `test_drive.py` load_model 改为离线回退 + ACK 热加载 + 超时回退三例；前端 `test_drive_page_layout.py` 改为热加载断言。后端 31 例、车端 9 例、前端 334 例全绿。
 
 ## 2026-09-20 (227)
 
