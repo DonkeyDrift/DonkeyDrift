@@ -60,6 +60,7 @@ def test_drive_command_opens_web_console_drive_page(monkeypatch, tmp_path):
     cmd = tui.DriveCommand().get_command_line({})
 
     assert cmd[:2] == ["donkey", "web"]
+    assert "--install-deps" in cmd
     assert "--path" in cmd
     assert "--open" in cmd
     assert cmd[cmd.index("--route") + 1] == "/drive"
@@ -92,6 +93,7 @@ def test_drive_command_starts_web_console_and_car_process(monkeypatch, tmp_path)
     car_cmd, car_kwargs = popen_calls[1]
 
     assert web_cmd[:2] == ["donkey", "web"]
+    assert "--install-deps" in web_cmd
     assert "--route" in web_cmd
     assert web_cmd[web_cmd.index("--route") + 1] == "/drive"
 
@@ -126,6 +128,7 @@ def test_drive_command_sets_car_url_to_chosen_backend_port(monkeypatch, tmp_path
     _, car_kwargs = popen_calls[1]
 
     assert "--backend-port" in web_cmd
+    assert "--install-deps" in web_cmd
     assert web_cmd[web_cmd.index("--backend-port") + 1] == "8001"
     assert car_kwargs["env"]["DRIVE_API_SERVER_URL"] == "ws://localhost:8001/api/drive/ws"
 

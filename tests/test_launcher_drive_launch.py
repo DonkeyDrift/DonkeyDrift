@@ -188,6 +188,7 @@ class TestLaunchDrive:
         web_cmd = popen.call_args_list[0].args[0]
         car_cmd = popen.call_args_list[1].args[0]
         assert web_cmd[0] == "donkey" and "web" in web_cmd
+        assert "--install-deps" in web_cmd
         assert car_cmd[-2:] == ["drive"] or car_cmd[1:] == ["manage.py", "drive"]
         # 车进程 env 指向实际后端端口
         car_env = popen.call_args_list[1].kwargs["env"]
@@ -235,6 +236,7 @@ class TestLaunchDrive:
         # 只起了 web（随后退出），车进程未起
         assert popen.call_count == 1
         assert popen.call_args_list[0].args[0][0] == "donkey"
+        assert "--install-deps" in popen.call_args_list[0].args[0]
         pids.assert_not_called()
 
     def test_timeout_production_mode_corrects_frontend_port(self):

@@ -1339,7 +1339,9 @@ class DriveCommand(DonkeyCommand):
 
     def get_command_line(self, params, backend_port=None):
         web_ui_path = _get_bundled_web_ui_path()
-        cmd = ["donkey", "web"]
+        # 首次启动常见前端依赖未装齐；这里显式带上 --install-deps，
+        # 让 TUI 的“一键打开”真正具备自恢复能力。
+        cmd = ["donkey", "web", "--install-deps"]
         if web_ui_path is not None:
             cmd.extend(["--path", str(web_ui_path)])
         if backend_port is not None:
@@ -1513,8 +1515,8 @@ class WebUICommand(DonkeyCommand):
     def get_command_line(self, params):
         web_ui_path = _get_bundled_web_ui_path()
         if web_ui_path is None:
-            return ["donkey", "web", "--open"]
-        return ["donkey", "web", "--path", str(web_ui_path), "--open"]
+            return ["donkey", "web", "--install-deps", "--open"]
+        return ["donkey", "web", "--install-deps", "--path", str(web_ui_path), "--open"]
 
 # -----------------------------------------------------------------------------
 # 菜单系统

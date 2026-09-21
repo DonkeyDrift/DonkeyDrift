@@ -218,7 +218,9 @@ def _launch_drive():
             backend_port = _choose_available_backend_port(8000)
             frontend_port = _choose_available_backend_port(5188)
             web_ui_path = _get_bundled_web_ui_path()
-            web_cmd = ["donkey", "web"]
+            # 首次启动常见前后端依赖未完整安装；交给 donkey web 自恢复，
+            # 避免 launcher 只给出提示却仍直接进入构建失败。
+            web_cmd = ["donkey", "web", "--install-deps"]
             if web_ui_path is not None:
                 web_cmd.extend(["--path", str(web_ui_path)])
             web_cmd.extend(["--backend-port", str(backend_port)])
