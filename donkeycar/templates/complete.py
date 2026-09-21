@@ -40,6 +40,7 @@ from donkeydrifter.parts.behavior import BehaviorPart
 from donkeydrifter.parts.controller import JoystickController
 from donkeydrifter.parts.datastore import TubHandler
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
+from donkeydrifter.parts.pilot_holder import PilotHolder
 from donkeydrifter.parts.explode import ExplodeDict
 from donkeydrifter.parts.file_watcher import FileWatcher
 from donkeydrifter.parts.kinematics import (Bicycle,
@@ -171,7 +172,22 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     # - it will optionally add any configured 'joystick' controller
     #
     has_input_controller = hasattr(cfg, "CONTROLLER_TYPE") and cfg.CONTROLLER_TYPE != "mock"
-    ctr = add_user_controller(V, cfg, use_joystick)
+
+    # issue #003 热加载：常驻一个可在运行期原子替换模型的容器。有 --model 时启动
+    # 即载入；无 --model 且未启用漂移回放时注册空容器，等待 Web 端选模型后直接
+    # 热加载，无需重启车端进程。legacy .json（模型结构+权重分离）不支持热切换，
+    # 保持原有静态注册路径。
+    _full_model_exts = ('.h5', '.trt', '.tflite', '.savedmodel', '.pth')
+    _is_legacy_json = bool(model_path) and ('.json' in model_path) \
+        and not any(ext in model_path for ext in _full_model_exts)
+    _replay_no_model = bool(getattr(cfg, 'DRIFT_REPLAY_ENABLED', False)) and not model_path
+    if _is_legacy_json or _replay_no_model:
+        pilot_holder = None
+    else:
+        pilot_holder = PilotHolder(
+            cfg, output_count=3 if cfg.TRAIN_LOCALIZER else 2)
+
+    ctr = add_user_controller(V, cfg, use_joystick, model_loader=pilot_holder)
 
     #
     # convert 'user/steering' to 'user/angle' to be backward compatible with deep learning data
@@ -343,29 +359,10 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     #
     # load and configure model for inference
     #
-    if model_path:
-        # If we have a model, create an appropriate Keras part
-        kl = dk.utils.get_model_by_type(model_type, cfg)
-
-        #
-        # get callback function to reload the model
-        # for the configured model format
-        #
-        model_reload_cb = None
-        if '.h5' in model_path or '.trt' in model_path or '.tflite' in \
-            model_path or '.savedmodel' in model_path or '.pth' in model_path:
-            # load the whole model with weigths, etc
-            load_model(kl, model_path)
-
-            def reload_model(filename):
-                load_model(kl, filename)
-
-            model_reload_cb = reload_model
-
-        elif '.json' in model_path:
-            # when we have a .json extension
-            # load the model from there and look for a matching
-            # .wts file with just weights
+    if model_path or pilot_holder is not None:
+        # legacy .json：模型结构 + 权重分离，走静态注册，不支持热切换
+        if model_path and _is_legacy_json:
+            kl = dk.utils.get_model_by_type(model_type, cfg)
             load_model_json(kl, model_path)
             weights_path = model_path.replace('.json', '.weights')
             load_weights(kl, weights_path)
@@ -375,23 +372,37 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
                 load_weights(kl, weights_path)
 
             model_reload_cb = reload_weights
-
+            pilot_part = kl
         else:
-            print("ERR>> Unknown extension type on model file!!")
-            return
+            # 常规格式：由常驻 PilotHolder 持有模型，支持运行期原子替换。
+            # 无 --model 时不预载，等待 Web 端 load_model 热加载。
+            if model_path:
+                if not any(ext in model_path for ext in _full_model_exts):
+                    print("ERR>> Unknown extension type on model file!!")
+                    return
+                pilot_holder.load(model_path, model_type)
 
-        # this part will signal visual LED, if connected
-        V.add(FileWatcher(model_path, verbose=True),
-              outputs=['modelfile/modified'])
+                def reload_model(filename):
+                    pilot_holder.load(filename, model_type)
 
-        # these parts will reload the model file, but only when ai is running
-        # so we don't interrupt user driving
-        V.add(FileWatcher(model_path), outputs=['modelfile/dirty'],
-              run_condition="run_pilot")
-        V.add(DelayedTrigger(100), inputs=['modelfile/dirty'],
-              outputs=['modelfile/reload'], run_condition="run_pilot")
-        V.add(TriggeredCallback(model_path, model_reload_cb),
-              inputs=["modelfile/reload"], run_condition="run_pilot")
+                model_reload_cb = reload_model
+            else:
+                model_reload_cb = None
+            pilot_part = pilot_holder
+
+        if model_path:
+            # this part will signal visual LED, if connected
+            V.add(FileWatcher(model_path, verbose=True),
+                  outputs=['modelfile/modified'])
+
+            # these parts will reload the model file, but only when ai is running
+            # so we don't interrupt user driving
+            V.add(FileWatcher(model_path), outputs=['modelfile/dirty'],
+                  run_condition="run_pilot")
+            V.add(DelayedTrigger(100), inputs=['modelfile/dirty'],
+                  outputs=['modelfile/reload'], run_condition="run_pilot")
+            V.add(TriggeredCallback(model_path, model_reload_cb),
+                  inputs=["modelfile/reload"], run_condition="run_pilot")
 
         #
         # collect inputs to model for inference
@@ -452,7 +463,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
                   inputs=['cam/image_array'], outputs=['cam/image_array_trans'])
             inputs = ['cam/image_array_trans'] + inputs[1:]
 
-        V.add(kl, inputs=inputs, outputs=outputs, run_condition='run_pilot')
+        V.add(pilot_part, inputs=inputs, outputs=outputs, run_condition='run_pilot')
 
     #
     # 漂移操作回放：用录制的转向/油门时间序列替代模型推理。
@@ -783,7 +794,8 @@ class UserPilotCondition:
             return False, True, pilot_image if self.show_pilot_image else user_image
 
 
-def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
+def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array',
+                        model_loader=None):
     """
     Add the web controller and any other
     configured user input controller.
@@ -807,6 +819,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
         webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
         webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
         jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
+        model_loader=model_loader,
     )
     # inputs 顺序必须与 DriveApiBridge.run_threaded 签名严格一致（Vehicle 按位置解包）：
     # (img_arr, num_records, mode, recording, imu_gz, imu_gx, imu_gy,

@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-09-21 (228)
+
+- feat(drive): 选模型改为车端运行期**热加载**，无需重启车端进程（issues/003）——车端常驻 `PilotHolder`（新增 `donkeycar/parts/pilot_holder.py`）在运行期原子替换 KerasPilot；`DriveApiBridge` 消费 `load_model` 消息并回 `model_loaded` ACK；后端 `/drive/load_model` 经 WebSocket 下发并等待 ACK（`DRIVE_MODEL_HOT_LOAD_TIMEOUT` 默认 30s），车端离线/旧版超时回退为「模型已记录，需重启车端后生效」；前端选模型显示「正在加载模型…」→「模型已热加载，可直接推理」，不再走重启状态机。
+  - 车端：`complete.py` 无 `--model` 时也注册空的 `PilotHolder` 并接线 `DriveApiBridge(model_loader=...)`；有 `--model` 时启动即载入并保留文件变更自动重载；legacy `.json`（结构+权重分离）与漂移回放仍走原静态路径、不支持热切换。
+  - 测试：`donkeycar/tests/test_pilot_holder_hot_load.py` 9 例（原子替换/空容器/失败保留旧模型/ACK/兼容别名）；后端 `test_drive.py` load_model 改为离线回退 + ACK 热加载 + 超时回退三例；前端 `test_drive_page_layout.py` 改为热加载断言。后端 31 例、车端 9 例、前端 334 例全绿。
+
 ## 2026-09-20 (227)
 
 - feat(ui)!: 移除座舱(cockpit)/Apple 双象限体系，Apple 成为唯一界面风格——与 find-car v1.6.0、Drifter Console v1.10.0 同款手术；页头「座舱 / Apple」切换器删除，`<html>` 不再挂载 `ui-apple` class，localStorage 键 `donkeydrifter.ui.style` 不再读取（老用户残留键被静默忽略、渲染恒为 Apple，无需任何操作）

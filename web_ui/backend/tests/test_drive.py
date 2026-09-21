@@ -620,7 +620,7 @@ def test_load_model_rejects_non_models_prefix(monkeypatch, tmp_path):
     assert "models" in response.json()["detail"]
 
 
-def test_load_model_persists_selection_and_requires_restart(monkeypatch, tmp_path):
+def test_load_model_persists_selection_and_requires_restart_when_offline(monkeypatch, tmp_path):
     client, _ = _make_model_client(monkeypatch, tmp_path)
 
     response = client.post("/api/drive/load_model", json={
@@ -640,12 +640,40 @@ def test_load_model_persists_selection_and_requires_restart(monkeypatch, tmp_pat
     assert saved["working_dir"] == str(tmp_path)
 
 
-def test_load_model_notifies_online_car(monkeypatch, tmp_path):
+def test_load_model_hot_loads_when_car_acks(monkeypatch, tmp_path):
     client, drive = _make_model_client(monkeypatch, tmp_path, online=True)
     sent_to_car = []
 
     async def fake_send_to_car(payload):
         sent_to_car.append(payload)
+        future = drive.drive_state.pending_model_loads[payload["request_id"]]
+        future.set_result({
+            "type": "model_loaded", "success": True,
+            "model": payload["model_path"],
+        })
+        return True
+
+    monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
+
+    response = client.post("/api/drive/load_model", json={
+        "model_path": "./models/bar.tflite",
+        "working_dir": str(tmp_path),
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["restart_required"] is False
+    assert sent_to_car[0]["type"] == "load_model"
+    assert sent_to_car[0]["model_path"] == "./models/bar.tflite"
+    assert sent_to_car[0]["model_type"] == "tflite_linear"
+
+
+def test_load_model_falls_back_when_car_never_acks(monkeypatch, tmp_path):
+    client, drive = _make_model_client(monkeypatch, tmp_path, online=True)
+    monkeypatch.setattr(drive, "HOT_LOAD_TIMEOUT_S", 0.05)
+
+    async def fake_send_to_car(payload):
         return True
 
     monkeypatch.setattr(drive.drive_state, "send_to_car", fake_send_to_car)
@@ -656,4 +684,4 @@ def test_load_model_notifies_online_car(monkeypatch, tmp_path):
     })
 
     assert response.status_code == 200
-    assert sent_to_car == [{"type": "restart_with_model", "model_path": "./models/bar.h5"}]
+    assert response.json()["restart_required"] is True

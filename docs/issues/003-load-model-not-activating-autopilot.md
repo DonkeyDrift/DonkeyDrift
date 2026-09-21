@@ -46,3 +46,15 @@
 4. **前端** `DrivePage.tsx` + 新 hook `hooks/useModelRestart.ts`：后端确认重启后进入 restarting 状态——期间抑制车端→页面的模式回同步（车端重启后默认报 user，不抑制会冲掉全自动/半自动选择）、禁用模式/模型切换控件、显示「正在重启车端加载模型…」；车端掉线再上线时补发当前 `{drive_mode, car_mode}`；车端回报收敛或 3s settle 窗口后结束，120s 整体超时兜底并提示。`ModelsList` 的「加载到车端」提示改用服务端返回消息。
 
 测试：`tests/test_webui_instance.py`（持久化读写 6 项）、`tests/test_launcher_drive_launch.py`（带模型启动 4 项）、`web_ui/backend/tests/test_drive.py`（load_model 校验/重启/降级 9 项）、`web_ui/frontend/src/hooks/useModelRestart.test.tsx`（状态机 7 项）、`tests/test_drive_page_layout.py`（接线 2 项）。
+
+## 热加载实现（2026-09-21，最终形态）
+
+上述「带模型重启」在合并（e39c0f96，issue 修复取 Tony 侧）后仅剩 `selected_model.json + restart_with_model`（bridge 只 log 不重启），既不自动重启，也因 `_get_config_dir`（回退到 `web_ui/backend/data`）与车端 `_selected_model_from_disk`（只认 `$DONKEY_CAR_DIR` / `~/mycar`）路径不一致而常常读不到模型。现收敛为**运行期热加载**，选模型不再需要任何重启：
+
+1. **车端** `donkeycar/parts/pilot_holder.py` 新增 `PilotHolder`：常驻 Part，内部持有一个 KerasPilot，`load()` 在锁外构建新模型、锁内原子替换；空容器 `run()` 输出全 None（等价于原「无 pilot」，DriveMode 按 0 处理）。
+2. **模板** `complete.py`：无 `--model` 时也注册空 `PilotHolder`（漂移回放/legacy `.json` 除外），并 `DriveApiBridge(model_loader=pilot_holder)`；有 `--model` 时启动即载入，保留 FileWatcher 自动重载。
+3. **桥接** `drive_api_bridge.py`：消费 `load_model`（旧 `restart_with_model` 作为兼容别名），后台线程加载后回 `model_loaded` ACK。
+4. **后端** `/drive/load_model`：写持久化记录 → 在线则下发 `load_model` 并 `wait_for` ACK（超时/离线回退 `restart_required`）；车端 WS 侧用 `request_id → Future` 关联 ACK。
+5. **前端** `DrivePage.tsx`：加载期间禁用模型选择、显示「正在加载模型…」，完成显示「模型已热加载」。`useModelRestart` 状态机不再接线（文件保留）。
+
+注意：车端模板改动需部署到实际车目录的 `manage.py`（本机已同步 `/home/aidlux/projects/mycar/manage.py`）；后端与车端进程各需**重启一次**以加载新代码，之后换模型均为热加载。

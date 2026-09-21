@@ -97,7 +97,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [recordingLock, setRecordingLock] = useState(false);
   const recordingLockRef = useRef(false);
   const [currentModel, setCurrentModel] = useState<string>('');
-  const [modelRestartRequired, setModelRestartRequired] = useState(false);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelNotice, setModelNotice] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [inputSource, setInputSource] = useState<InputSource>('joystick');
@@ -324,19 +325,27 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   const handleModelChange = useCallback((modelName: string) => {
     setCurrentModel(modelName);
-    setModelRestartRequired(false);
-    if (modelName && configPath) {
-      const modelPath = `./models/${modelName}`;
-      loadModelToCar(modelPath, configPath)
-        .then((res) => {
-          // 后端现在只记录选择，需重启车端后生效（#362）
-          setModelRestartRequired(Boolean(res?.restart_required));
-        })
-        .catch((err) => {
-          console.warn('加载模型到车端失败:', getApiErrorMessage(err));
-        });
-    }
-  }, [configPath]);
+    setModelNotice(null);
+    // 「无模型」仅清空页面选择，不请求车端（车端暂无卸载通道）。
+    if (!modelName || !configPath) return;
+    // 选模型 = 请求车端运行期热加载（issue #003），无需重启车端进程。
+    const modelPath = `./models/${modelName}`;
+    setModelLoading(true);
+    loadModelToCar(modelPath, configPath)
+      .then((res) => {
+        if (res?.success && !res?.restart_required) {
+          setModelNotice(t('drive.modelLoaded'));
+        } else if (res?.restart_required) {
+          setModelNotice(t('drive.modelRestartRequired'));
+        } else {
+          setModelNotice(res?.message || t('drive.modelLoadFailed'));
+        }
+      })
+      .catch((err) => {
+        setModelNotice(`${t('drive.modelLoadFailed')}: ${getApiErrorMessage(err)}`);
+      })
+      .finally(() => setModelLoading(false));
+  }, [configPath, t]);
 
   const cycleMode = useCallback(() => {
     const modes: DriveMode[] = ['user', 'local_angle', 'local'];
@@ -411,14 +420,23 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                 value={currentModel}
                 options={models}
                 onChange={handleModelChange}
-                disabled={!carState.online || modelsLoading}
+                disabled={!carState.online || modelsLoading || modelLoading}
               />
-              {modelRestartRequired && (
+              {modelLoading && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/20 text-cyan-400 text-xs font-medium whitespace-nowrap animate-pulse"
+                  data-model-loading="true"
+                >
+                  {t('drive.modelLoading')}
+                </span>
+              )}
+              {!modelLoading && modelNotice && (
                 <span
                   className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
-                  data-model-restart-required="true"
+                  data-model-notice="true"
+                  role="status"
                 >
-                  {t('drive.modelRestartRequired')}
+                  {modelNotice}
                 </span>
               )}
             </div>
