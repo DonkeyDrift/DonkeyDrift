@@ -40,6 +40,8 @@ except Exception:
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.webui_instance import (
     find_live_instance,
+    read_instance,
+    probe_http_ok,
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
@@ -1283,6 +1285,7 @@ class DriveCommand(DonkeyCommand):
             # 将子进程的 stdin 重定向，避免它们干扰父进程终端（如修改回显、cbreak 等）
             web_process = None
             if inst is None:
+                web_started_after = time.time()
                 web_process = subprocess.Popen(
                     web_cmd,
                     stdin=subprocess.DEVNULL,
@@ -1291,6 +1294,17 @@ class DriveCommand(DonkeyCommand):
                 processes.append(web_process)
                 # 新起实例：TUI 不走 --dev，生产模式前端由后端托管，前端端口即后端端口
                 frontend_port = backend_port
+                ready = self.wait_for_web_ready(
+                    web_process,
+                    started_after=web_started_after,
+                    frontend_port=frontend_port,
+                    backend_port=backend_port,
+                )
+                if ready is None:
+                    self.stop_processes(processes)
+                    Prompt.ask("\n按回车键返回菜单...")
+                    return
+                frontend_port, backend_port = ready
             else:
                 # 复用实例：车端连回已有后端
                 backend_port = inst["backend_port"]
@@ -1389,6 +1403,44 @@ class DriveCommand(DonkeyCommand):
         if sys.platform == "win32":
             return subprocess.CREATE_NEW_PROCESS_GROUP
         return 0
+
+    def wait_for_web_ready(
+        self,
+        web_process,
+        started_after,
+        frontend_port,
+        backend_port,
+        timeout=90.0,
+    ):
+        """等待 donkey web 写入实例登记并可访问；失败时不再启动车辆进程。"""
+        deadline = time.time() + timeout
+        with console.status("[bold]正在等待 Web Console 就绪...[/bold]"):
+            while time.time() < deadline:
+                inst = read_instance()
+                if inst and float(inst.get("started_at") or 0.0) >= started_after:
+                    actual_frontend = int(inst["frontend_port"])
+                    actual_backend = int(inst["backend_port"])
+                    if (
+                        probe_http_ok(actual_backend, "/docs")
+                        and probe_http_ok(actual_frontend, "/")
+                    ):
+                        return actual_frontend, actual_backend
+
+                if web_process.poll() is not None:
+                    console.print(
+                        "\n[bold red]Web Console 启动失败，已取消启动车辆进程。[/bold red]\n"
+                        "[red]请先处理上方 donkey web 的错误后重试。"
+                        "若提示找不到 npm，请先系统级安装 Node.js/npm，"
+                        "再运行 donkey installweb。[/red]"
+                    )
+                    return None
+                time.sleep(0.5)
+
+        console.print(
+            f"\n[bold red]Web Console 在 {timeout:.0f}s 内未就绪，已取消启动车辆进程。[/bold red]\n"
+            "[red]请向上查看 donkey web 输出，确认依赖安装与端口占用情况。[/red]"
+        )
+        return None
 
     def stop_processes(self, processes):
         import signal

@@ -18,6 +18,12 @@ def _isolate_process_registry(monkeypatch):
     monkeypatch.setattr(tui, "kill_previous_car_processes", lambda: None)
     monkeypatch.setattr(tui, "write_drive_pids", lambda pids: None)
     monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
+    monkeypatch.setattr(
+        tui.DriveCommand,
+        "wait_for_web_ready",
+        lambda self, web_process, started_after, frontend_port, backend_port,
+        timeout=90.0: (frontend_port, backend_port),
+    )
 
 
 class FakeProcess:
@@ -99,6 +105,41 @@ def test_drive_command_starts_web_console_and_car_process(monkeypatch, tmp_path)
     assert car_kwargs["cwd"] == tmp_path
     assert car_kwargs["env"]["DRIVE_API_SERVER_URL"].endswith(":8000/api/drive/ws")
     assert all("DRIVE_API_SERVER_URL=" not in str(cmd) for cmd, _ in popen_calls)
+
+
+def test_drive_command_does_not_start_car_when_web_console_fails(monkeypatch, tmp_path):
+    popen_calls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(
+        tui.DriveCommand,
+        "choose_available_backend_port",
+        lambda self, preferred_port=8100: 8000,
+    )
+    monkeypatch.setattr(
+        tui.DriveCommand,
+        "wait_for_web_ready",
+        lambda self, web_process, started_after, frontend_port, backend_port,
+        timeout=90.0: None,
+    )
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+
+    tui.DriveCommand().execute()
+
+    assert len(popen_calls) == 1
+    assert popen_calls[0][0][:2] == ["donkey", "web"]
 
 
 def test_drive_command_sets_car_url_to_chosen_backend_port(monkeypatch, tmp_path):
