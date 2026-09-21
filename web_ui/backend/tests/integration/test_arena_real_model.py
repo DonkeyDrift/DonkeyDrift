@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-MYCAR = Path(os.environ.get("MYCAR_DIR", "/home/dkc/projects/mycar"))
+MYCAR = Path(os.environ.get("MYCAR_DIR", "~/projects/mycar")).expanduser()
 MODEL = MYCAR / "models" / "DKG-1.tflite"
 
 pytestmark = pytest.mark.skipif(

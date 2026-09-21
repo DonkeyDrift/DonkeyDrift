@@ -37,7 +37,7 @@
 
 ## 备注
 
-根因 A、B 位于 editable 安装的 `gym_donkeycar`（`/home/dkc/projects/gym-donkeycar`，v1.3.1），修复需要改该仓库或在本仓库侧用看门狗（建议 4）规避。
+根因 A、B 位于 editable 安装的 `gym_donkeycar`（`~/projects/gym-donkeycar`，v1.3.1），修复需要改该仓库或在本仓库侧用看门狗（建议 4）规避。
 
 ## 修复记录（2026-09-04）
 

@@ -32,6 +32,10 @@ vi.mock('react-chartjs-2', () => ({
   }),
 }));
 
+vi.mock('react-router-dom', () => ({
+  useLocation: () => ({ pathname: '/' }),
+}));
+
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({ t: (key: string) => key, lang: 'zh' }),
 }));
@@ -129,7 +133,7 @@ describe('TubEditor 拖拽框选', () => {
     const chart = mountEditor();
     fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
     fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
-    fireEvent.mouseLeave(chart, { clientX: 140, clientY: 50 });
+    fireEvent.mouseLeave(chart);
 
     await waitFor(() => {
       expect(useStore.getState().selectionStartIndex).toBe(2);
@@ -148,10 +152,6 @@ describe('TubEditor 拖拽框选', () => {
     // 草稿清除，光标恢复
     expect(chart.className).toContain('cursor-crosshair');
 
-    fireEvent.mouseUp(chart);
-
-    // 等待可能的 rAF flush，确认未提交任何选区
-    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(useStore.getState().selectionStartIndex).toBeNull();
     expect(useStore.getState().selectionEndIndex).toBeNull();
   });

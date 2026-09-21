@@ -1,6 +1,8 @@
 from configparser import ConfigParser
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -114,7 +116,12 @@ def test_docs_include_compatibility_and_attribution_guides():
 
 def test_agent_docs_describe_donkeydrifter_migration_contract():
     for relative_path in ("AGENTS.md", "CLAUDE.md"):
-        text = read_text(PROJECT_ROOT / relative_path)
+        doc_path = PROJECT_ROOT / relative_path
+        if not doc_path.exists():
+            # AGENTS.md/CLAUDE.md 是本机私有 agent 指南，按防隐私泄露铁规不入库，
+            # 干净 clone 中不存在，此时跳过（存在时仍校验迁移契约内容）。
+            pytest.skip(f"{relative_path} 为本机私有文档、未入库，跳过契约校验")
+        text = read_text(doc_path)
         # 品牌已迁移到 DonkeyDrift，但 PyPI 包名 / import 别名 donkeydrifter 仍保留。
         assert "DonkeyDrift" in text
         assert "donkeydrifter" in text

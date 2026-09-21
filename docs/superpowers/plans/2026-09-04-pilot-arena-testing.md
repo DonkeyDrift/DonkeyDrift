@@ -15,7 +15,7 @@
 - 后端：`cd web_ui/backend && python -m pytest tests/ -q` → **340 passed + 2 skipped + 4 failed**。4 例失败 = `tests/test_drift_vision.py::TestAdaptiveDetection`（4 个），根因见 Task 1。
 - 前端：`cd web_ui/frontend && npx vitest run` → **158 passed**（27 文件）；无 `PilotArenaPage` 组件测试。
 - E2E：`@playwright/test@1.58.2` 已装但无 `playwright.config`、无 `e2e/` 目录、浏览器未下载（`~/.cache/ms-playwright` 为空）。
-- 本机存在真实工程 `/home/dkc/projects/mycar`（config.py + myconfig.py + `models/DKG-1.tflite`）→ 集成测试可直接跑真实模型。
+- 本机存在真实工程 `~/projects/mycar`（config.py + myconfig.py + `models/DKG-1.tflite`）→ 集成测试可直接跑真实模型。
 - 本机 Python 3.11.14，无 `pupil_apriltags`（Windows 开发机已装）。
 
 任务间相互独立，推荐顺序执行 1→2→3→4→5→6。
@@ -149,7 +149,7 @@ git commit -m "test(arena): predict 逐帧不重编译 car config 的 API 级回
 - Create: `web_ui/backend/tests/integration/test_arena_real_model.py`
 - Create: `web_ui/backend/tests/integration/__init__.py`（空文件）
 
-用本机真实工程 `/home/dkc/projects/mycar`（DKG-1.tflite）做三件事：①热缓存单帧 predict 时延 < 30ms 预算（实测基线 ~1.7ms，预算留 15× 余量防 CI 机器抖动）；②`load_config` 全程只执行 1 次；③预测阶段 `donkeycar.config` 无一条 "loading config" 日志（直接消灭用户看到的刷屏症状）。
+用本机真实工程 `~/projects/mycar`（DKG-1.tflite）做三件事：①热缓存单帧 predict 时延 < 30ms 预算（实测基线 ~1.7ms，预算留 15× 余量防 CI 机器抖动）；②`load_config` 全程只执行 1 次；③预测阶段 `donkeycar.config` 无一条 "loading config" 日志（直接消灭用户看到的刷屏症状）。
 
 opt-in 门控：`ARENA_INTEGRATION=1` 才运行，默认套件中显示 skipped、不污染常规基线。predict 缓存按 (pilot, record_index, options) 键控，故用 20 条假记录、测量阶段只遍历 index 3..19（预热用 0..2），保证每帧都是**真实模型 invoke** 而非缓存命中。
 
@@ -186,7 +186,7 @@ pytestmark = pytest.mark.skipif(
     reason="opt-in 集成测试：需真实 mycar 工程与 DKG-1 模型（ARENA_INTEGRATION=1 启用）",
 )
 
-MYCAR = Path(os.environ.get("MYCAR_DIR", "/home/dkc/projects/mycar"))
+MYCAR = Path(os.environ.get("MYCAR_DIR", "~/projects/mycar"))
 MODEL = MYCAR / "models" / "DKG-1.tflite"
 
 

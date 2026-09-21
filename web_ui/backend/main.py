@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         await harness_updater.stop_background_check()
 
 
-app = FastAPI(title="DonkeyDrifter", lifespan=lifespan)
+app = FastAPI(title="DonkeyDrift Web API", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(

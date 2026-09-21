@@ -226,6 +226,7 @@ def test_sim_connected_omitted_when_none(monkeypatch):
     assert "sim_connected" not in telemetry_msgs[0]
 
 
+
 def test_send_json_serializes_numpy_scalars(monkeypatch):
     """_send_json 必须能序列化 numpy 标量：json.dumps 只认精确内建类型，
     np.float32（模拟器/推理输出的 pilot/angle 等）曾抛
@@ -278,3 +279,4 @@ def test_telemetry_send_failure_does_not_propagate(monkeypatch):
     bridge.last_car_state = 2000.0
 
     bridge.run_threaded(img_arr=None, pilot_angle=0.1)  # 不抛异常即通过
+
