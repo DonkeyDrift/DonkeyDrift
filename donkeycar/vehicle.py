@@ -7,6 +7,7 @@ Created on Sun Jun 25 10:44:24 2017
 """
 
 import time
+import signal
 import numpy as np
 import logging
 from threading import Thread
@@ -15,6 +16,17 @@ from prettytable import PrettyTable
 import traceback
 
 logger = logging.getLogger(__name__)
+
+
+def _sigterm_as_keyboard_interrupt(signum, frame):
+    """把 SIGTERM 转成 KeyboardInterrupt，让 Vehicle 走正常收尾路径。
+
+    默认的 SIGTERM 会立即终止解释器，``Vehicle.start`` 的 ``finally`` 不会
+    执行，于是 ``stop()`` 末尾的 part 耗时表（Part Profile Summary）也打不
+    出来。``donkey drive`` 停止车端子进程用的正是 SIGTERM，因此这里接管它，
+    使其等价于终端 Ctrl+C，保证耗时表仍能输出，便于做系统状态校验。
+    """
+    raise KeyboardInterrupt
 
 
 class PartProfiler:
@@ -134,6 +146,17 @@ class Vehicle:
             If debug output should be printed into shell
         """
 
+        # 外部链路（donkey drive 等）通过 SIGTERM 停止车进程，默认行为会直接
+        # 终止解释器而跳过 finally。这里接管 SIGTERM，使其等价于 Ctrl+C，从而
+        # 在退出前执行 stop() 并打印 part 耗时表。非主线程无法安装信号处理器，
+        # 此时退化为系统默认行为。
+        prev_sigterm = None
+        try:
+            prev_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, _sigterm_as_keyboard_interrupt)
+        except (ValueError, OSError):
+            prev_sigterm = None
+
         try:
 
             self.on = True
@@ -181,6 +204,11 @@ class Vehicle:
         except Exception as e:
             traceback.print_exc()
         finally:
+            if prev_sigterm is not None:
+                try:
+                    signal.signal(signal.SIGTERM, prev_sigterm)
+                except (ValueError, OSError):
+                    pass
             self.stop()
 
     def update_parts(self):
