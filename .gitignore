@@ -65,6 +65,10 @@ secrets*
 .claude/
 .agents/
 
+# Playwright 运行产物
+web_ui/frontend/test-results/
+web_ui/frontend/playwright-report/
+
 # 俯拍漂移链路延迟测量报告（本机产物）
 latency_report.json
 

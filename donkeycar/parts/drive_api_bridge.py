@@ -784,7 +784,7 @@ class DriveApiBridge:
     def update(self):
         return None
 
-    def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None, sim_connected=None,
+    def run_threaded(self, img_arr=None, num_records=0, mode=None, recording=None,
                     imu_gz=None, imu_gx=None, imu_gy=None,
                     imu_ax=None, imu_ay=None, imu_az=None,
                     steering=None, throttle=None,
@@ -792,7 +792,7 @@ class DriveApiBridge:
                     rc_steering=None, rc_throttle=None,
                     rc_mode=None, rc_park=None,
                     drift_yaw_error=None, drift_steering_correction=None,
-                    drift_throttle_mode=None):
+                    drift_throttle_mode=None, sim_connected=None):
         if img_arr is not None and self.video_transport == "webrtc":
             self.frame_buffer.update(img_arr)
             now = time.time()
@@ -867,7 +867,7 @@ class DriveApiBridge:
             rc_steering=None, rc_throttle=None,
             rc_mode=None, rc_park=None,
             drift_yaw_error=None, drift_steering_correction=None,
-            drift_throttle_mode=None):
+            drift_throttle_mode=None, sim_connected=None):
         return self.run_threaded(img_arr, num_records, mode, recording,
                                  imu_gz=imu_gz, imu_gx=imu_gx, imu_gy=imu_gy,
                                  imu_ax=imu_ax, imu_ay=imu_ay, imu_az=imu_az,
@@ -877,7 +877,8 @@ class DriveApiBridge:
                                  rc_mode=rc_mode, rc_park=rc_park,
                                  drift_yaw_error=drift_yaw_error,
                                  drift_steering_correction=drift_steering_correction,
-                                 drift_throttle_mode=drift_throttle_mode)
+                                 drift_throttle_mode=drift_throttle_mode,
+                                 sim_connected=sim_connected)
 
     def shutdown(self):
         self.running = False

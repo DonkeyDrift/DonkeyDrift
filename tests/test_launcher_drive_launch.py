@@ -139,7 +139,9 @@ class TestWaitForWebReady:
 # ===========================================================================
 class TestLaunchDrive:
     def _patch_common(self, inst=None, ready=(5189, 8001, None)):
-        """公共桩：项目路径/杀车进程/实例探测/登记回读/就绪等待。"""
+        """公共桩：项目路径/杀车进程/实例探测/登记回读/就绪等待。
+        read_drive_model 默认 None（隔离真实 ~/.donkeycar/drive_model.json），
+        需要带模型启动的用例在 TestLaunchDriveWithModel 里自行覆写。"""
         return {
             "kill": mock.patch.object(launcher_server,
                                       "kill_previous_car_processes"),
@@ -152,6 +154,8 @@ class TestLaunchDrive:
             "wait": mock.patch.object(launcher_server, "_wait_for_web_ready",
                                       return_value=ready),
             "pids": mock.patch.object(launcher_server, "write_drive_pids"),
+            "model": mock.patch.object(launcher_server, "read_drive_model",
+                                       return_value=None),
         }
 
     def test_cold_start_waits_ready_then_car_uses_actual_ports(self):
@@ -170,7 +174,8 @@ class TestLaunchDrive:
             side_effect=lambda *a, **k: procs.pop(0),
         ) as popen:
             with patches["kill"] as kill, patches["project"], \
-                 patches["find"], patches["wait"] as wait, patches["pids"]:
+                 patches["find"], patches["wait"] as wait, patches["pids"], \
+                 patches["model"]:
                 result = launcher_server._launch_drive()
 
         assert result["status"] == "launched"
@@ -203,7 +208,7 @@ class TestLaunchDrive:
             side_effect=lambda *a, **k: procs.pop(0),
         ):
             with patches["kill"], patches["project"], patches["find"], \
-                 patches["wait"], patches["pids"]:
+                 patches["wait"], patches["pids"], patches["model"]:
                 result = launcher_server._launch_drive()
         assert result["status"] == "launched"
         assert "未就绪" in result["warning"]
@@ -249,7 +254,7 @@ class TestLaunchDrive:
             launcher_server, "read_instance", return_value=None,
         ):
             with patches["kill"], patches["project"], patches["find"], \
-                 patches["wait"], patches["pids"]:
+                 patches["wait"], patches["pids"], patches["model"]:
                 result = launcher_server._launch_drive()
         assert result["status"] == "launched"
         assert result["frontend_port"] == 8000
@@ -270,7 +275,7 @@ class TestLaunchDrive:
             launcher_server, "_get_bundled_web_ui_path", return_value=None,
         ):
             with patches["kill"], patches["project"], patches["find"], \
-                 patches["wait"], patches["pids"]:
+                 patches["wait"], patches["pids"], patches["model"]:
                 result = launcher_server._launch_drive()
         assert result["status"] == "launched"
         assert result["frontend_port"] == 5188
@@ -287,7 +292,8 @@ class TestLaunchDrive:
             return_value=car_proc,
         ) as popen:
             with patches["kill"], patches["project"], \
-                 patches["find"], patches["wait"] as wait, patches["pids"]:
+                 patches["find"], patches["wait"] as wait, patches["pids"], \
+                 patches["model"]:
                 result = launcher_server._launch_drive()
         assert result["status"] == "launched"
         assert result["url"] == "http://localhost:5188/#/drive"
@@ -309,8 +315,77 @@ class TestLaunchDrive:
         )
         with mock.patch.object(launcher_server.subprocess, "Popen") as popen:
             with patches["kill"], patches["project"], patches["find"], \
-                 patches["wait"], patches["pids"]:
+                 patches["wait"], patches["pids"], patches["model"]:
                 result = launcher_server._launch_drive()
         assert result["status"] == "error"
         assert "mycar" in result["error"]
         popen.assert_not_called()
+
+
+# ===========================================================================
+# _launch_drive 带模型启动（issue #003：web_ui 选定模型经
+# ~/.donkeycar/drive_model.json 持久化，launcher 起车进程时附加 --model/--type）
+# ===========================================================================
+class TestLaunchDriveWithModel:
+    def _reuse_inst(self):
+        return {"pid": 999, "backend_port": 8000, "frontend_port": 5188,
+                "started_at": time.time()}
+
+    def _launch_reusing_instance(self, model_record=None):
+        """复用实例路径跑一次 _launch_drive，返回 (result, popen mock)。
+        持久化模型经 model_record 注入（None = 无持久化文件）：
+        先由 _patch_common 的 model 桩（return_value=None）隔离真实
+        ~/.donkeycar/drive_model.json，再在桩上覆写返回值。"""
+        patches = TestLaunchDrive._patch_common(self, inst=self._reuse_inst())
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: _FakeProc(),
+        ) as popen:
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"], \
+                 patches["model"] as read_model:
+                read_model.return_value = model_record
+                result = launcher_server._launch_drive()
+        return result, popen
+
+    def test_persisted_model_appends_model_and_type_flags(self, tmp_path):
+        """有持久化模型且文件存在：车命令带 --model/--type。"""
+        model = tmp_path / "models" / "DKG-1.tflite"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"tflite")
+        record = {"model": str(model), "model_type": "tflite_linear"}
+        result, popen = self._launch_reusing_instance(model_record=record)
+        assert result["status"] == "launched"
+        car_cmd = popen.call_args_list[0].args[0]
+        assert "--model" in car_cmd
+        assert car_cmd[car_cmd.index("--model") + 1] == str(model)
+        assert car_cmd[car_cmd.index("--type") + 1] == "tflite_linear"
+
+    def test_persisted_model_without_type_omits_type_flag(self, tmp_path):
+        """持久化记录无 model_type：只带 --model，--type 交给 cfg 默认。"""
+        model = tmp_path / "models" / "m.h5"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"h5")
+        record = {"model": str(model), "model_type": None}
+        result, popen = self._launch_reusing_instance(model_record=record)
+        assert result["status"] == "launched"
+        car_cmd = popen.call_args_list[0].args[0]
+        assert "--model" in car_cmd
+        assert "--type" not in car_cmd
+
+    def test_no_persisted_model_launches_without_model(self):
+        """无持久化记录：保持旧行为，不带 --model。"""
+        result, popen = self._launch_reusing_instance(model_record=None)
+        assert result["status"] == "launched"
+        car_cmd = popen.call_args_list[0].args[0]
+        assert "--model" not in car_cmd
+
+    def test_missing_model_file_falls_back_to_no_model(self):
+        """持久化记录指向已删除的文件：不带 --model 启动并告警，
+        避免 manage.py 因模型缺失直接退出导致车进程反复起不来。"""
+        record = {"model": "/gone/models/deleted.tflite",
+                  "model_type": "tflite_linear"}
+        result, popen = self._launch_reusing_instance(model_record=record)
+        assert result["status"] == "launched"
+        car_cmd = popen.call_args_list[0].args[0]
+        assert "--model" not in car_cmd

@@ -586,6 +586,38 @@
   - 测试同步：后端 `web_ui/backend/tests/test_launch.py` 新增 zcode 注册断言与转发用例；launcher 侧新建 `tests/test_launcher_zcode.py` 4 用例（happy path URL 形态含 shlex.quote 防注入 + CORS、cwd 不存在 400、缺省 cwd 动态 Path.home() 回归栅栏、非 JSON 400），IP 一律 RFC 5737 TEST-NET-1（192.0.2.x）占位；前端 `EnterButtons.test.tsx` 新增 `ZCodeEntryLink` 2 用例（成功开新标签/失败关标签告警），`App.test.tsx` 的 api mock 补 `launchZcode`（缺导出导致 App 渲染抛错 4 例失败，补齐后全绿）。
   - 实测：后端 `pytest tests/` 179 passed、仓库根 `pytest tests/` 272 passed、前端 `vitest run` 30 文件 159 passed、`tsc -b` 无错、`npm run build` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
 
+## 2026-09-04 (176)
+
+- fix(trainer): Trainer 三档训练目标命名第四次定稿——「本机」→「局域网主机」（Lan Host）、「车载电脑」→「本机」（Local Host），视角约定写死为「以车上操作视角为准」（docs/issues/006）
+  - 背景：「本机 / 车载电脑」命名与实际含义颠倒——「本机」档实际要求填写 SSH 连接信息、指远程开发电脑，「车载电脑」档实际指运行 Web UI 的本机/车端。该命名此前已翻转三次（2026-08-18 (19)、(28) 等），本次为第四次并定稿：**以车上操作视角为准，「本机」= 手边这台跑 Web UI 的车端电脑**，约定已写入用户手册与 `trainer.ts` 文件头注释，避免再次翻转。
+  - 改动范围（只动显示字符串，内部枚举 `mypc` / `local` / `online`、i18n key 名、API 路径 `/train/mypc` 等一律不变）：
+    - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc` 本机→局域网主机、`tabLocal` 车载电脑→本机、`startMyPcTraining`→「在局域网主机上训练」、`startLocalTraining`→「在本机上训练」、`myPcTraining`→「局域网主机训练」、`myPcFirstUseHint` / `myPcProbeReady` / `myPcTrainingSubtitle` 等派生文案同步；en 同步 `Lan Host / Local Host / Train on Lan Host / Train on Local Host / Lan Host Training`。文件头新增命名约定注释（key 名与显示语方向相反属可接受的内部债务）。
+    - `web_ui/backend/mypc_probe.py`：直出文案「环境就绪，可以开始本机训练。」→「…局域网主机训练。」、Windows WSL 建议文案同步；`routers/trainer.py` mypc 探测路由 docstring 术语同步。
+    - 测试同步：`ModeTabs.test.tsx` 三档渲染与点击断言、`test_trainer_mypc.py` 探测建议断言。
+    - 文档：`docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」章节改为「局域网主机训练（Lan Host）」并在章首写入视角约定。
+  - 注：语义独立的「本机」（`network_utils.py`、`routers/connector.py`、`drive.ts`、手册快速开始章节的「本机场景」）未动。Firmware 无改动，无需 OTA。
+
+## 2026-09-04 (175)
+
+- perf(frontend, backend) + feat(web-ui): Pilot Arena 推理链路优化（config 按 mtime 缓存 + 评估节流 250ms→逐帧）+ 批量预测新增「模型贴合摘要」
+  - **背景（实测分解）**：DKG-1.tflite(120×160 float32) 裸 TFLite 推理 1.24ms(≈807FPS)、`pilot.run` 1.33ms(≈750FPS)，模型本身非瓶颈；真瓶颈是 ① `web_ui/backend/routers/arena.py` 每次 predict 重新 `load_config()` 编译执行 config.py+myconfig.py ≈**75~80ms/帧**（占 97%，且每帧刷两行 `INFO:donkeycar.config` 日志）② 前端 `PilotArenaPage.tsx` 评估节流硬下限 250ms → 观察到的"4~5FPS"。
+  - **后端**：`arena.load_car_config` 按 (config.py, myconfig.py) mtime 缓存（线程锁 + 变化即重载；`arena.py` 模块级 `_car_config_cache`）。效果：单帧预测（缓存 config+磁盘读图+解码+TFLite）**79ms → 1.72ms（≈580FPS）**；config INFO 日志仅在首次/配置保存后出现一次。全部调用点（predict/preview/批量/load）共享缓存，无行为回归（mtime 变化即失效）。
+  - **前端**：推理评估节流下限 250→**16ms**（与图像加载一致，评估节奏=逐帧播放 `DRIVE_LOOP_HZ`，60Hz 时每播放帧一次推理）；新增 config 旋钮 `ARENA_PREDICTION_INTERVAL_MS`（可调大限流）；`ARENA_INFERENCE_CONCURRENCY` 上限 2→4。inference 徽标预期从 ~4 提升到接近播放帧率（受 DRIVE_LOOP_HZ=60 约束 ≈60）。
+  - **新功能（规划 §3.3「模型性能指标摘要」）**：`POST /api/arena/pilots/{id}/predictions` 响应新增 `summary`——角度/油门两序列各自的 MAE/RMSE/平均偏差(bias=pilot−user)/max|err|/count，非有限值所在帧自动剔除；纯函数 `compute_prediction_metrics`（arena.py）+ 前端 Tub Plot 图下「贴合摘要」展示区（i18n zh/en 各 10 词条）。批量 200 帧含摘要 330ms（≈606FPS 当量）；摘要计算 ~0.27µs/点（20 万点 53ms），开销可忽略；全缓存命中重跑 1.1ms。
+  - **测试（本会话补齐分层体系，全部已提交分支 `test/pilot-arena-testing`）**：
+    - 后端：修复 `test_drift_vision.py::TestAdaptiveDetection` 4 例（测试基建 bug——替身注入改 `raising=False` 并置位可用性守卫，本不需真库；根因是缺库时模块无 `_PupilDetector` 属性）；本机补装 `pupil-apriltags` 1.0.4 后全量 **351 passed + 1 skipped**（仅剩 opt-in 集成测试需 `ARENA_INTEGRATION=1`）。
+    - 回归护栏：`test_arena.py` +4 例（config mtime 缓存语义 1 + 摘要 3，TDD 先红后绿）+ 预测逐帧不重编译 config 的 API 级护栏（计数断言 `load_config` 全程仅 1 次）。
+    - 集成测试（opt-in）：`tests/integration/test_arena_real_model.py`——真实 DKG-1.tflite + mycar，`ARENA_INTEGRATION=1` 实测热缓存单帧 predict **4.23ms（≈236FPS 当量）**，预算 <30ms；caplog 断言 predict 期间 0 条 config 日志。
+    - 前端：vitest **160 passed**（28 文件，新增 `PilotArenaPage.test.tsx` 摘要面板组件测试 2 例）；Playwright E2E **1 passed**（route-mocked 全流程：加载配置→加载 Tub→选模型→加载并预测→生成曲线→摘要面板；`playwright.config.ts` + `e2e/pilot-arena.spec.ts`，vitest 已 exclude `e2e/**`、`.gitignore` 增补 Playwright 产物）。
+  - 注：仅 DD 改动，已全部提交于分支 `test/pilot-arena-testing`（自 345f6f7d 起，含用户 Nowhere_X 并行提交 5698f176，未推送）；浏览器端 FPS 徽标提升与真机多 viewer 并发负载仍待用户 Windows 机器人工确认。
+
+## 2026-09-03 (174)
+
+- chore(security): 隐私防漏加固与泄露清理——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则；移除被旧分支合并复活的 `AGENTS.md`/`CLAUDE.md` 跟踪
+  - 背景：两仓库安全审计（GitHub 均为公开）确认本仓库文件内容（含全历史）无密钥/邮箱实质泄露；但发现 main 尖端被旧分支（eed2e4d4 "init"/27dbd9e1 "Rename to DonkeyDrift" 经今日合并）复活了 `AGENTS.md`/`CLAUDE.md` 的跟踪——内容为旧版开发指南、无凭据，但按约定 agent 说明文件不入库，本次重新解除跟踪（本地文件保留，`.gitignore` 的 `/AGENTS.md`、`/CLAUDE.md` 规则本已存在、此前被跟踪导致无效）。**注意：旧基点分支合并进 main 会复活早已移除的文件，合并前务必检查 diff。**
+  - `.gitignore` 新增：`.env`/`.env.*`、`*.pem`/`*.key`/`id_rsa*`/`known_hosts`/`*.ovpn`/`*.p12`/`*.keystore`/`credentials*`/`secrets*`、`*.log`、`.claude/`/`.agents/`。经 `git ls-files` 确认无被这些规则命中的其余已跟踪文件。
+  - 无代码行为变化、无需本机部署（纯仓库卫生）；Tony 分支同等改动见 2026-09-03 (165)；Firmware 侧配套清理见 `Firmware/MUS4_FW/CHANGELOG.md` v1.8.66。
+
 ## 2026-09-03 (169)
 
 - fix(trainer): mypc 环境发现稳健性重写 + 训练静默期进度/时长 UX 改进（2026-08-23 开发于 dd-deploy，本次由主会话移植收尾合入）
@@ -704,7 +736,7 @@
     - `web_ui/frontend/src/services/api.ts`：新增 `SimCollectStartParams`/`SimCollectJobState`/`SimCollectResult`/`SimCollectStatus` 类型与 `startSimCollect`/`getSimCollectStatus`/`stopSimCollect`/`createSimCollectEventStream` 四函数。
     - `web_ui/frontend/src/hooks/useSimCollectJob.ts`（新增）：自包含 local state，SSE 优先推送 progress/log/status，SSE 断开且未到终态自动降级 2s 轮询 status 兜底；409 → 已有任务在跑提示。
     - `web_ui/frontend/src/components/drive/SimCollectCard.tsx`（新增）：卡片 UI——标题/说明、步数输入、可折叠高级参数（KP/KD/油门/最低油门）、开始/停止按钮、运行中进度条+实时 cte/速度、完成结果摘要（步数/mean|cte|/max|cte|/是否冲出/输出目录）、出错信息+可展开日志；全文案走 i18n。
-    - `web_ui/frontend/src/pages/DrivePage.tsx`：`<SimCollectCard />` 放在页面最顶部（视频区上方），进入 Drive 页即可见；初始版本放在视频区下方，因桌面端视频占 `calc(100vh-9rem)` 导致卡片在视口外不可见，后修正移至顶部。
+    - `web_ui/frontend/src/pages/DrivePage.tsx`：根容器主 flex 行后插入 `<SimCollectCard />` 全宽卡片（最小侵入，未重排其它结构）。
     - `web_ui/frontend/src/i18n/messages/drive.ts`：新增 `drive.simCollect*` 词条 25 条（zh/en 双份）。
   - 测试同步：`web_ui/backend/tests/test_simcollect.py` 12 项（行解析纯函数 + start/status/stop/conflict 404/错误退出，子进程级 FakeProcess mock）；后端 `pytest tests/` 118 项全绿。前端 `SimCollectCard.test.tsx` 5 项（mock `useSimCollectJob` 控制 idle/running/done/error 状态断言文案与参数）；前端 `vitest run` 25 文件 138 项、`tsc -b`、`npm run build` 全绿。端到端实测：worktree 后端（8123）跑 `POST /simcollect/start {steps:20}` → SSH 启 Mac sim → 采 20 步 → status=done、result 正确解析、数据落 `mycar/sim_collect_20260823_141731`。
   - 注：仅 DD 改动，Firmware 无改动、无需 OTA。采集编排脚本与采集脚本（`mycar/collect_sim_mac.sh`、`mycar/collect_sim_data.py`）为本机工作目录文件、非 git 仓库，不在本次 commit 范围（已在前序 mycar 工作中就绪）。全程纯本地，未碰 GitHub。
@@ -3398,4 +3430,3 @@
 - ESP32 串口协议与 Arduino 控制器
 - CLI 工具链（createcar、calibrate、web、train 等）
 - 模拟器集成（DonkeyGym）
-
