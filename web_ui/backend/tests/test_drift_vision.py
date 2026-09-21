@@ -317,7 +317,8 @@ class TestAdaptiveDetection:
                                          dtype=np.float32))]
                 return []
 
-        monkeypatch.setattr(drift_vision, "_PupilDetector", FakePupil)
+        monkeypatch.setattr(drift_vision, "_PupilDetector", FakePupil, raising=False)
+        monkeypatch.setattr(drift_vision, "_PUPIL_APRILTAGS_AVAILABLE", True)
 
     def test_sharpening_passed_to_backend(self, monkeypatch):
         """decode_sharpening 提升模糊标签解码率，默认必须高于库默认 0.25。"""

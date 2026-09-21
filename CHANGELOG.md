@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-21 (228)
+
+- feat(arena,drive): 移植 beta 分支独有功能——Pilot Arena 贴合摘要与推理缓存、遥测 numpy 序列化防护（beta 废弃前的选择性集成）
+  - 背景：`beta` 分支（2026-09-06 停更）曾与本线双轨合并同批功能的不同实现。经逐文件去重分析（124 个差异文件：52 个双方已一致、56 个大部分为重复实现/品牌分叉/隐私回灌、16 个新增文件），仅移植 Tony 真正缺失的以下内容，其余（品牌改名、副标题小字、旧实现、含真实路径的内容）一律不搬；移植完成后 beta 分支删除废弃。
+  - 遥测防护（issue #003 崩溃半，beta `d64f7ece`）：`donkeycar/parts/drive_api_bridge.py` 新增 `_json_safe()` 递归转换 numpy 标量，`_send_json` 经它序列化，遥测发送 try/except 隔离——修全自动模式下 pilot 输出 np.float32 → json.dumps TypeError → 整车进程退出。测试：`test_drive_api_bridge_telemetry.py` +2 例（序列化不抛异常、发送失败不穿透）。
+  - Pilot Arena（beta `999ebe6a`）：后端 `web_ui/backend/routers/arena.py` car config mtime 缓存（predict 热路径不再每帧重编译 config.py+myconfig.py，~75ms→~1.7ms）+ `compute_prediction_metrics`/`_series_summary`（MAE/RMSE/bias/max_abs，口径 pilot−user）+ predictions 响应 `summary` 字段；前端 `PilotArenaPage.tsx` 贴合摘要 UI（按 Tony 恒 Apple 现状改写）、`api.ts` Summary 类型、`i18n arena.ts` plotSummary/metric* 中英词条。
+  - 测试与设施：`test_arena.py` +5 例、`PilotArenaPage.test.tsx` 新增 4 例（贴合摘要×2 + 帧区间切片×2，Tony 页已有切片功能直接通过）、`test_drift_vision.py` fixture 无 pupil_apriltags 环境修复、`TubEditor.test.tsx` 阈值锚点用例（挂载对齐 `<TubEditor active />`）、`web_ui/backend/tests/integration/`（真实模型集成测试，opt-in `ARENA_INTEGRATION=1`，无模型优雅 skip）、`e2e/pilot-arena.spec.ts` + `playwright.config.ts`（vitest 经 vite.config `exclude e2e/**` 不受影响）。
+  - 文档：`docs/issues/001-006` + README、`docs/guide/pilot-arena-handoff.md`、pilot-arena-testing 计划（拷入前逐文件脱敏）；`web-drive-console-user-guide.md`「加载到车」行为描述与代码对齐（持久化 + 带模型重启）；`setup.cfg` url 死链修复（DonkeyDrifter→DonkeyDrift）。
+  - 测试：vitest **48 文件 / 305 全绿**（净 +5）、tsc 零错误、build 通过；pytest 后端 **559 + 1 skip**、`tests/` 397（1 条 origin/Tony 既有失败）、telemetry 12 全过；真实模型集成测试本机实跑 1 passed。
+  - 注：仅 DD 改动，Firmware 无改动、无需 OTA；合并后 ff deploy-8000 并重建前端部署。
+
 ## 2026-09-20 (227)
 
 - feat(ui)!: 移除座舱(cockpit)/Apple 双象限体系，Apple 成为唯一界面风格——与 find-car v1.6.0、Drifter Console v1.10.0 同款手术；页头「座舱 / Apple」切换器删除，`<html>` 不再挂载 `ui-apple` class，localStorage 键 `donkeydrifter.ui.style` 不再读取（老用户残留键被静默忽略、渲染恒为 Apple，无需任何操作）
