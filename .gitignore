@@ -74,3 +74,4 @@ latency_report.json
 
 # 本机科普 HTML 页面（保留本地、不入库）
 docs/architecture-guide.html
+web_ui/backend/data/selected_model.json
