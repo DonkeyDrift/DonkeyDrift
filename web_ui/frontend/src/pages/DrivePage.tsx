@@ -12,10 +12,12 @@ import { useDriveHotkeys } from '../hooks/useDriveHotkeys';
 import { ProgrammableButtons } from '../components/drive/ProgrammableButtons';
 import { ParameterPanel } from '../components/drive/ParameterPanel';
 import { InputSourceSelector, InputSource } from '../components/drive/InputSourceSelector';
+import { GamepadConfigPanel } from '../components/drive/GamepadConfigPanel';
 import { ModelSelector } from '../components/drive/ModelSelector';
 import { SimCollectCard } from '../components/drive/SimCollectCard';
 import { DriftCard } from '../components/drive/DriftCard';
 import { useDriveStore } from '../store/useDriveStore';
+import { useGamepadStore } from '../store/useGamepadStore';
 import { useStore } from '../store/useStore';
 import { useTelemetryStore } from '../store/useTelemetryStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
@@ -224,8 +226,17 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     },
   });
 
-  const { connected: gamepadConnected } = useGamepadDrive({
+  const { config: gamepadConfig } = useGamepadStore();
+  const {
+    connected: gamepadConnected,
+    padId: gamepadPadId,
+    mapping: gamepadMapping,
+    axes: gamepadAxes,
+  } = useGamepadDrive({
     enabled: active && inputSource === 'gamepad',
+    // 抽屉打开时也要轴快照：手柄设置面板/校准向导需要实时轴值
+    monitor: active && joystickOpen,
+    config: gamepadConfig,
     onChange: (a, t) => {
       gamepadRef.current = { angle: a, throttle: t };
       lastInputType.current = 'gamepad';
@@ -585,6 +596,14 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                     </div>
                   </div>
                   <ProgrammableButtons className="w-full max-w-[240px]" />
+                  <GamepadConfigPanel
+                    axes={gamepadAxes}
+                    padId={gamepadPadId}
+                    mapping={gamepadMapping}
+                    connected={gamepadConnected}
+                    defaultOpen={inputSource === 'gamepad'}
+                    className="max-w-[360px]"
+                  />
                   <ParameterPanel className="w-full max-w-[360px]" />
                   <div className="text-[10px] text-zinc-500 text-center">
                     {t('drive.hotkeysLine1')}<br />

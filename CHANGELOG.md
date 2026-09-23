@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-09-23 (233)
+
+- feat(gamepad): 实现Web端手柄输入轴可配置化功能——自 A1-v1.0 分支提交 `adba4b5c` 移植合并到 main，解决「不同手柄轴向不一致（如某手柄转向在 axes[2]）导致切到手柄输入源后转向不生效或方向相反」
+  - `lib/gamepadMapping.ts`（新）：标准化轴映射（去死区 → 中位校准 → 反向 → 限幅），内置 Xbox 标准 / Z 轴转向 / 方向盘三套预设
+  - `store/useGamepadStore.ts`（新）：localStorage 持久化（键 `donkey-gamepad-config`），按手柄 id 记忆，避免跨设备配置串用
+  - `components/drive/GamepadConfigPanel.tsx`（新）：虚拟摇杆抽屉内嵌「手柄设置」折叠卡（设计文档方案 A）——预设切换、转向/油门轴选择、反向勾选、死区与上限滑块、迷你轴监视；选中手柄输入源时自动展开
+  - `components/drive/GamepadCalibrationWizard.tsx`（新）：4 步一键校准向导（方案 B 并入 A 的「一键校准」入口）——自动识别转向/油门轴并计算最优死区
+  - `hooks/useGamepadDrive.ts` 重构：硬编码 `axes[0]/axes[1]` → 可配置映射 + 轴监视快照；连接检测常驻（不受 enabled 门控）
+  - 设计文档：`docs/plan/gamepad-config-design.md` + 可交互原型 `docs/design/gamepad-config-mockup.html`
+  - 行为变化：默认预设由左摇杆（axes[0]/[1]、死区 0.1）改为 Z 轴预设（转向 axes[2]、死区 0.08）——原设计即针对 Z 轴手柄，Xbox 标准手柄用户在面板一键切回或跑校准向导
+  - 验证：`npm run check` 零错误、vitest 53 文件 / 337 全绿（含新增手柄相关 23 例）、`npm run build` 通过；cherry-pick 与原提交逐行一致（+2278/−46），无文本冲突
+
 ## 2026-09-23 (232)
 
 - fix(web): web 后端（uvicorn）自动切换 NPU 环境——修「Arena 加载 .aidem 报 import aidlite 失败」。Arena 的 pilot 加载推理跑在 uvicorn 进程内（`routers/arena.py` → `get_model_by_type('aidlite_linear')` → `npu_pilot`），而 `_launch_web_ui` 固定用 `sys.executable` 拉后端：用户从 3.11 venv 启动 `donkey web`/`donkey drive` → 后端无 aidlite（车进程早已修过同类问题，后端漏了）。三处联动：
