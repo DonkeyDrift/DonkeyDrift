@@ -8,6 +8,7 @@
   - 边界：Arena「导入模型」暂不收 `.aidem`——裸 `.aidem` 缺同目录 `qnn_model_info.json` 无法加载，单文件导入会产生坏模型；scp 把 `.aidem` + `qnn_model_info.json` 一起放到 `models/` 顶层即可被扫描到。
   - 运行前提：web 后端进程需能 `import aidlite`（本机以 `.venv-npu` 启动后端）；无 aidlite 的解释器下加载报 `npu_pilot` 的明确 RuntimeError（不再是无从下手的 500 堆栈）。
   - 验证：`pytest web_ui/backend/tests` 557 过/2 跳（3.11 venv，含新增 model-types 含 aidlite_linear、按类型过滤只返 `.aidem`、aidlite_linear 加载、卸载触发 shutdown 四个用例）；`.venv-npu` 实机冒烟——扫描到 Sim01 `.aidem`（format=aidem）、`load_pilot(cfg=None)` 真实加载 NPU、`run()` 输出与 `npu_pilot` 直连逐位一致（+0.265195/+0.347023）、卸载后二次加载推理正常。
+  - 前端兜底：`PilotArenaPage` 模型类型下拉的硬编码初始值 `['tflite_linear','linear']` 补入 `aidlite_linear`（该数组是 `/arena/model-types` 拉取前/失败时的兜底）；vitest 4 过、`tsc -b` 零错误。
 
 ## 2026-09-22 (230)
 

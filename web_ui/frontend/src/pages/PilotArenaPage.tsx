@@ -198,7 +198,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const isLooping = useStore((state) => state.isLooping);
   const setIsLooping = useStore((state) => state.setIsLooping);
 
-  const [modelTypes, setModelTypes] = useState<string[]>(['tflite_linear', 'linear']);
+  // 兜底列表（/arena/model-types 拉取成功后整体替换）：包含 .aidem NPU 模型对应的 aidlite_linear
+  const [modelTypes, setModelTypes] = useState<string[]>(['tflite_linear', 'linear', 'aidlite_linear']);
   const [columns, setColumns] = useState<1 | 2 | 3 | 4>(2);
   const [viewers, setViewers] = useState<ViewerState[]>([defaultViewer()]);
   const [pageError, setPageError] = useState<string | null>(null);
