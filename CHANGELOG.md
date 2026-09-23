@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-22 (230)
+
+- feat(drive): 虚拟摇杆抽屉右缘常驻 + 连续缩放——窄屏（<1024px）不再整体折叠到视频下方（docs/issues/008，交互原型经 demo 页 A/B 评估确认）
+  - `DrivePage.tsx` 视频行容器去掉 `flex-col` 断点（任何屏宽左右并排 + `relative`）；抽屉 aside 以 `scale(clamp(0.62, (行宽−360)/422, 1))`、`transform-origin: top right` 连续缩放，贴地时负 margin-left 把缩放省出的占位还给视频列（负右边距不会使抽屉左移，实测踩坑），桌面 sticky 行为不变。
+  - 视频列保不住 320px 底线时自动切「悬浮模式」：aside 绝对定位吸附右缘、面板整体 40% 半透明（评估确认值）+ 2px 背景模糊浮于视频之上，顶部实测工具栏高度让过（不遮录制按钮）；收起/展开按「展开态等效宽」判定阈值，模式不随收起跳变。
+  - 新增 `hooks/useElementWidth.ts`（`useElementWidth`/`useElementHeight`，ResizeObserver）：行宽/抽屉自然宽（随语言横竖排把手 30↔60px 变化）/工具栏高全实测，替代常量；缩放分母保留设计常量稳定手感。
+  - `VirtualJoystick.tsx` 新增 `scale` prop：指针位移按 1/scale 换算回元素坐标（s=0.62 拖 40px→摇杆头 64.5px，实测精确），任意缩放下行程映射一致；scale 变化重算中心。
+  - 验证：tsc + vitest 316/316；Playwright 11 档宽度几何断言（≥1024 桌面原样、768–1023 贴地 0.891/视频 321px、≤767 悬浮视频全宽）+ 截图目检；评估原型存 `web_ui/joystick-scaling-demo.html`（可 A/B 对比旧版行为）。
+
 ## 2026-09-22 (229)
 
 - feat(drive): 接入 Qualcomm QCS6490 NPU 推理（AidLite/QNN240）——`aidlite_linear` 模型类型，AIMO 云转换产物（`*.ctx.bin.aidem` + 同目录 `qnn_model_info.json`）可直接经 Web 端热加载上车，invoke 实测 ~0.8ms（CPU TFLite 3.8ms，5×+）

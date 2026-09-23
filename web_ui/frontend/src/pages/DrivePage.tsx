@@ -21,6 +21,7 @@ import { useTelemetryStore } from '../store/useTelemetryStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
+import { useElementWidth, useElementHeight } from '../hooks/useElementWidth';
 import { useTranslation } from '@/i18n';
 import { cn } from '../lib/utils';
 import { Circle, ChevronLeft, ChevronRight, Joystick, Maximize2, Minimize2 } from 'lucide-react';
@@ -34,6 +35,16 @@ type DrivePageProps = {
 // ESP32 手柄输入源：rc 遥测断流判定阈值。车端正常按 100Hz 上行 rc 通道，
 // 超过该间隔未收到数据（车离线/固件未上行）时输出 0，不沿用旧油门（#371）。
 const ESP32_RC_STALE_MS = 500;
+
+// 右侧摇杆抽屉「右缘常驻 + 连续缩放」布局（docs/issues/008）：窄屏不再折叠到视频下方。
+// 抽屉（面板 + 把手）以 transform-origin:top right 随所在行宽连续缩放，负 margin-left 把
+// 缩放省下的占位还给视频列；视频列保不住 DOCK_MIN_VIDEO_W 时切「悬浮模式」——
+// 抽屉绝对定位吸附右缘、面板降为 DOCK_OVERLAY_OPACITY 半透明浮层浮于视频之上。
+const DOCK_PANEL_W = 384; // 与面板 w-96（24rem）一致
+const DOCK_CLUSTER_W = DOCK_PANEL_W + 8 + 30; // 设计基准：面板 + 簇内 gap-2 + 把手（zh 竖排）
+const DOCK_MIN_SCALE = 0.62;
+const DOCK_MIN_VIDEO_W = 320;
+const DOCK_OVERLAY_OPACITY = 0.4; // 悬浮模式面板整体不透明度（设计方案确认值）
 
 export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
   const { t, lang } = useTranslation();
@@ -104,6 +115,20 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     inputSourceRef.current = inputSource;
   }, [inputSource]);
   const [joystickOpen, setJoystickOpen] = useState(false);
+  // 摇杆抽屉布局：观测「视频 + 抽屉」行的实际宽度，驱动连续缩放与悬浮模式（docs/issues/008）。
+  // 注意 main 用的是 Tailwind container（640/768/1024/1280 断点量化），行宽非连续变化属预期。
+  const [dockRowRef, dockRowW] = useElementWidth<HTMLDivElement>();
+  // 抽屉自然宽随语言（把手横/竖排）与展开态变化：实测值用于对齐（负 margin）与悬浮阈值；
+  // 缩放分母用设计常量，保证缩放手感不随语言抖动
+  const [dockAsideRef, dockAsideW] = useElementWidth<HTMLElement>(DOCK_CLUSTER_W);
+  // 缩放分支内视频列恒剩 348px（320 底线 + 12 gap + 16 余量）
+  const dockScale = Math.min(1, Math.max(DOCK_MIN_SCALE, (dockRowW - 360) / DOCK_CLUSTER_W));
+  // 悬浮阈值按「展开态等效宽」判定（收起时 = 把手 + 面板 + gap，恰与展开自然宽相等），
+  // 保证收起/展开切换时模式不跳变
+  const dockOpenW = joystickOpen ? dockAsideW : dockAsideW + DOCK_PANEL_W + 8;
+  const dockOverlay = dockRowW < DOCK_MIN_VIDEO_W + 12 + DOCK_MIN_SCALE * dockOpenW;
+  // 悬浮模式下面板顶对齐视频顶：实测工具栏高度让过（工具栏 mb-4 = 16px 间距）
+  const [driveToolbarRef, driveToolbarH] = useElementHeight<HTMLDivElement>();
   const [fullscreen, setFullscreen] = useState(false);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
@@ -381,11 +406,12 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     <div className="space-y-4">
       <DriftCard />
       <SimCollectCard />
-      {/* 视频 + 遥测 | 右侧抽屉：桌面端左右并排，抽屉 sticky 顶部对齐视频、滚动时留在顶部不跟走 */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:gap-3">
+      {/* 视频 + 遥测 | 右侧抽屉：任何屏宽保持左右并排，抽屉右缘常驻、随宽度连续缩放（008）；
+          窄屏抽屉转悬浮半透明浮层，不再折叠到视频下方 */}
+      <div ref={dockRowRef} className="relative flex flex-row items-start gap-3">
         {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
         <div className="flex-1 min-w-0 flex flex-col lg:h-[calc(100vh-9rem)]">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
+          <div ref={driveToolbarRef} className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
             {/* 左：Park 状态 + 驾驶模式 + 模型 */}
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
               {rcPark === 1 && (
@@ -506,11 +532,30 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           </div>
         </div>
 
-        {/* 右：抽屉（sticky 顶部对齐视频，滚动时留在顶部不跟走；四角圆角对齐视频边框） */}
-        <aside className="z-40 lg:sticky lg:top-16 lg:shrink-0">
+        {/* 右：摇杆抽屉（面板 + 把手）——右缘常驻（008）：贴地时以负 margin-left 把缩放省出的
+            占位还给视频列（负左边距使抽屉整体左移、右缘仍齐容器右缘），悬浮模式绝对定位
+            吸附右缘浮于视频之上；缩放锚定右上角，sticky 行为在贴地分支保持不变 */}
+        <aside
+          ref={dockAsideRef}
+          className={cn(
+            'z-40 shrink-0 transition-[margin,transform] duration-300 ease-in-out will-change-transform',
+            dockOverlay ? 'absolute right-2.5' : 'lg:sticky lg:top-16',
+          )}
+          style={{
+            transform: `scale(${dockScale})`,
+            transformOrigin: 'top right',
+            top: dockOverlay ? driveToolbarH + 16 : undefined,
+            marginLeft: dockOverlay ? undefined : -Math.round(dockAsideW * (1 - dockScale)),
+          }}
+        >
           <div className="flex items-start gap-2">
-            {/* 面板内容：夹在视频画面与把手（展开开关）之间 */}
-            <div className={`${joystickOpen ? 'w-[min(24rem,calc(100vw-3.5rem))] border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg will-change-[width] transition-[width] duration-300 ease-in-out`}>
+            {/* 面板内容：夹在视频画面与把手（展开开关）之间；宽度固定自然宽，缩放交给 transform */}
+            <div
+              className={`${joystickOpen ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
+                joystickOpen && dockOverlay ? 'border-cyan-500/30 backdrop-blur-[2px]' : ''
+              }`}
+              style={joystickOpen && dockOverlay ? { opacity: DOCK_OVERLAY_OPACITY } : undefined}
+            >
               <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
                 <div className="flex items-center justify-between gap-2">
                   <SectionCardTitle
@@ -529,6 +574,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                     <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
                     <div className="flex flex-col items-center gap-2 w-[220px]">
                       <VirtualJoystick
+                        scale={dockScale}
                         onChange={(a, t) => {
                           joystickRef.current = { angle: a, throttle: t };
                           lastInputType.current = 'joystick';

@@ -10,3 +10,4 @@
 | [004](004-simulator-reconnect-fails.md) | [#363](https://github.com/DonkeyDrift/DonkeyDrift/issues/363) | 模拟器断连后自动重连不成功 | bug | `dgym.py` / `simulator.py` / `gym_donkeycar` |
 | [005](005-tub-plot-frame-range-slicing.md) | [#364](https://github.com/DonkeyDrift/DonkeyDrift/issues/364) | Tub 曲线图支持首尾帧切片分析 | enhancement | `PilotArenaPage.tsx` / `arena.py` |
 | [006](006-trainer-naming-local-vs-car-computer.md) | [#365](https://github.com/DonkeyDrift/DonkeyDrift/issues/365) | Trainer「本机」与「车载电脑」命名颠倒 | bug / 文案 | `i18n/messages/trainer.ts` |
+| [008](008-drive-joystick-dock-right-anchor-scaling.md) | - | Drive 摇杆抽屉右缘常驻 + 连续缩放，窄屏不再折叠到视频下方 | enhancement | `pages/DrivePage.tsx` / `hooks/useElementWidth.ts` / `drive/VirtualJoystick.tsx` |
