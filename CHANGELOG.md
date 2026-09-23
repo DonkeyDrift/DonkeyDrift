@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-23 (231)
+
+- feat(arena): Pilot Arena 支持 `.aidem` NPU 模型的扫描与推理（AidLite/QNN240）
+  - `routers/arena.py`：MODEL_TYPES 加 `aidlite_linear`——复用 `utils.get_model_by_type` 的 `aidlite_` 分支（`NpuLinearPilot`，`run(uint8 RGB)→(angle,throttle)` 与 Arena 的 `pilot.run(image)` 接口天然对齐，`cfg=None` 时用默认 IMAGE_* 且以模型 json 为准）；`_model_extensions` 加 aidlite→`{.aidem}`、默认集合补 `.aidem`，`/models` 扫描与按类型过滤即生效。前端零改动：模型类型下拉本就动态拉取 `/arena/model-types`，模型列表由后端按类型过滤。
+  - `unload_pilot` 补解释器释放：此前只删字典，NPU 解释器持有 Hexagon 硬件上下文会泄漏；卸载时调用 `pilot.shutdown()`（有该方法才调，Keras 等类型不受影响），失败仅告警不阻断卸载。
+  - 边界：Arena「导入模型」暂不收 `.aidem`——裸 `.aidem` 缺同目录 `qnn_model_info.json` 无法加载，单文件导入会产生坏模型；scp 把 `.aidem` + `qnn_model_info.json` 一起放到 `models/` 顶层即可被扫描到。
+  - 运行前提：web 后端进程需能 `import aidlite`（本机以 `.venv-npu` 启动后端）；无 aidlite 的解释器下加载报 `npu_pilot` 的明确 RuntimeError（不再是无从下手的 500 堆栈）。
+  - 验证：`pytest web_ui/backend/tests` 557 过/2 跳（3.11 venv，含新增 model-types 含 aidlite_linear、按类型过滤只返 `.aidem`、aidlite_linear 加载、卸载触发 shutdown 四个用例）；`.venv-npu` 实机冒烟——扫描到 Sim01 `.aidem`（format=aidem）、`load_pilot(cfg=None)` 真实加载 NPU、`run()` 输出与 `npu_pilot` 直连逐位一致（+0.265195/+0.347023）、卸载后二次加载推理正常。
+
 ## 2026-09-22 (230)
 
 - feat(drive): 虚拟摇杆抽屉右缘常驻 + 连续缩放——窄屏（<1024px）不再整体折叠到视频下方（docs/issues/008，交互原型经 demo 页 A/B 评估确认）

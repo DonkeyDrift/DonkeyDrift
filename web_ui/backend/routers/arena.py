@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import threading
@@ -20,6 +21,7 @@ from donkeycar.utils import get_model_by_type
 from routers import tub as tub_router
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 MODEL_TYPES = [
     "linear",
@@ -28,6 +30,9 @@ MODEL_TYPES = [
     "tflite_categorical",
     "tensorrt_linear",
     "tensorrt_categorical",
+    # AIMO 云转 NPU 模型（*.ctx.bin.aidem）：需在后端解释器可 import aidlite
+    # （本机 .venv-npu，aidlite 只装在系统 python3.12）时才能加载推理
+    "aidlite_linear",
 ]
 
 IMAGE_FIELD_CANDIDATES = [
@@ -104,8 +109,10 @@ def _serialise_pilot(pilot: LoadedPilot) -> dict[str, Any]:
 
 def _model_extensions(model_type: Optional[str]) -> set[str]:
     if not model_type:
-        return {".h5", ".tflite", ".savedmodel", ".trt"}
+        return {".h5", ".tflite", ".savedmodel", ".trt", ".aidem"}
     lower = model_type.lower()
+    if "aidlite" in lower:
+        return {".aidem"}
     if "tflite" in lower:
         return {".tflite"}
     if "tensorrt" in lower:
@@ -422,8 +429,16 @@ async def list_pilots():
 async def unload_pilot(pilot_id: str):
     if pilot_id not in loaded_pilots:
         raise HTTPException(status_code=404, detail="Pilot not loaded")
-    del loaded_pilots[pilot_id]
+    loaded = loaded_pilots.pop(pilot_id)
     _clear_prediction_cache(pilot_id)
+    # NPU 解释器（AidLite/QNN）持有硬件上下文，卸载时必须显式释放；
+    # 其余 pilot 类型没有 shutdown，按有无该方法兼容处理
+    shutdown = getattr(loaded.pilot, "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown()
+        except Exception:
+            logger.warning("释放 pilot %s 的解释器失败", pilot_id, exc_info=True)
     return {"status": True, "pilot_id": pilot_id}
 
 
