@@ -16,11 +16,12 @@ vi.mock('@/i18n', () => ({
 }));
 
 const mockListModels = vi.fn();
+const mockLoadModelToCar = vi.fn((..._args: unknown[]) => Promise.resolve({ message: 'ok' }));
 vi.mock('../../services/api', () => ({
   listModels: (...args: unknown[]) => mockListModels(...args),
   deleteModel: vi.fn(() => Promise.resolve()),
   downloadModelUrl: vi.fn(() => '/download'),
-  loadModelToCar: vi.fn(() => Promise.resolve()),
+  loadModelToCar: (...args: unknown[]) => mockLoadModelToCar(...args),
   importModel: vi.fn(() => Promise.resolve()),
   uploadModelLoss: vi.fn(() => Promise.resolve()),
   API_URL: 'http://localhost',
@@ -165,5 +166,18 @@ describe('ModelsList', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'trainer.uploadLoss' })[1]);
 
     expect(screen.getByTestId('upload-loss-dialog')).toBeInTheDocument();
+  });
+
+  it('加载到车端传相对路径 ./models/<name>（后端拒绝绝对路径）', async () => {
+    // 回归：列表项 m.path 是绝对路径，而 /drive/load_model 只接受 models/
+    // 内的相对路径；直接传 m.path 会 400「model_path 必须是相对路径」。
+    render(<ModelsList />);
+    await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'trainer.loadToCar' })[0]);
+
+    await waitFor(() =>
+      expect(mockLoadModelToCar).toHaveBeenCalledWith('./models/m1.tflite', '/models'),
+    );
   });
 });

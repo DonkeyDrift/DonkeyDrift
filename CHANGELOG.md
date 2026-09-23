@@ -8,6 +8,10 @@
   - 新增 `hooks/useElementWidth.ts`（`useElementWidth`/`useElementHeight`，ResizeObserver）：行宽/抽屉自然宽（随语言横竖排把手 30↔60px 变化）/工具栏高全实测，替代常量；缩放分母保留设计常量稳定手感。
   - `VirtualJoystick.tsx` 新增 `scale` prop：指针位移按 1/scale 换算回元素坐标（s=0.62 拖 40px→摇杆头 64.5px，实测精确），任意缩放下行程映射一致；scale 变化重算中心。
   - 验证：tsc + vitest 316/316；Playwright 11 档宽度几何断言（≥1024 桌面原样、768–1023 贴地 0.891/视频 321px、≤767 悬浮视频全宽）+ 截图目检；评估原型存 `web_ui/joystick-scaling-demo.html`（可 A/B 对比旧版行为）。
+- fix(trainer): 修复 Trainer「导入模型」422 与「加载到车端」400（docs/issues/007）
+  - `services/api.ts`：axios 实例默认 `Content-Type: application/json` 对 FormData 请求会原样发出（经真实 axios + XHR 全链路复现；此前单测整体 mock 了 api 层故零覆盖）→ 后端按 JSON 解析 multipart 体报 422。FormData 请求统一显式 `Content-Type: null`——axios 序列化阶段丢弃该头，由浏览器生成带 boundary 的 multipart（不能手动设 multipart 值，会丢 boundary）。
+  - `ModelsList.tsx`「加载到车端」改传相对路径 `` `./models/${m.name}` ``：`/drive/load_model` 的 `_validate_model_path`（#003 安全设计）只收 models/ 内相对路径，列表项 `m.path` 是绝对路径会 400。
+  - 回归测试：新增 `services/apiFormData.test.ts`（2 项，断言 FormData 请求置空 Content-Type）与 `ModelsList.test.tsx` 用例（1 项，断言传 `./models/<name>`）；真实链路端到端复现修复前 422 → 修复后 200 入列表。全量 vitest 316 过、`tsc -b` 零错误、`npm run build` 通过，后端 45 过。
 
 ## 2026-09-22 (229)
 
