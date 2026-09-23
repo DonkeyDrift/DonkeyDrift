@@ -49,12 +49,19 @@ def _suffix_matches(path: str, exts) -> bool:
 
 
 class _quiet_c:
-    """AidLite/QNN 插件用 printf 打噪声且不走日志系统，从 fd 层临时吞掉（含 fflush）"""
+    """AidLite/QNN 插件用 printf 打噪声且不走日志系统，从 fd 层临时吞掉（含 fflush）。
+
+    进程级锁：并发推理（web 后端线程池）下多个 _quiet_c 交错 enter/exit 会互相
+    还原 fd，stdout/stderr 可能被永久指到 devnull；quiet 区全局串行化后，
+    最后一个退出的上下文总能把真实 fd 还原回去。"""
+
+    _lock = threading.Lock()
 
     def __init__(self, path=os.devnull):
         self.path, self.saved = path, None
 
     def __enter__(self):
+        self._lock.acquire()
         try:
             sys.stdout.flush()
             sys.stderr.flush()
@@ -68,20 +75,19 @@ class _quiet_c:
         return self
 
     def __exit__(self, *exc):
-        if self.saved is None:
-            return False
         try:
-            sys.stdout.flush()
-            sys.stderr.flush()
-            ctypes.CDLL(None).fflush(None)
-            os.dup2(self.saved, 1)
-            os.dup2(self.saved2, 2)
-            for fd in (self.fd, self.saved, self.saved2):
-                os.close(fd)
-            ctypes.CDLL(None).fflush(None)
-        except Exception:
-            pass
-        self.saved = None
+            if self.saved is not None:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                ctypes.CDLL(None).fflush(None)
+                os.dup2(self.saved, 1)
+                os.dup2(self.saved2, 2)
+                for fd in (self.fd, self.saved, self.saved2):
+                    os.close(fd)
+                ctypes.CDLL(None).fflush(None)
+        finally:
+            self.saved = None
+            self._lock.release()
         return False
 
 

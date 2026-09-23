@@ -83,10 +83,24 @@ const TRANSFORMATION_OPTIONS = [
 const ARENA_IMAGE_CACHE_LIMIT = 40;
 const ARENA_IMAGE_MAX_IN_FLIGHT = 1;
 const ARENA_IMAGE_MIN_INTERVAL_MS = 16;
+// 播放前瞻预取帧数：当前帧显示的同时提前加载其后 N 帧（60Hz 下 N=12 ≈ 200ms），
+// 把逐帧 HTTP 取图的 RTT 隐藏在读秒之前——不预取时当前帧到显示时刻才发起请求，
+// 响应成批到达造成画面忽停忽跳（卡顿感的主因，与播放/推理 FPS 计数无关）。
+const ARENA_IMAGE_PREFETCH_FRAMES = 12;
+// 播放中预测数值读数的节流间隔：canvas 上的控制线每 rAF 直读 ref 缓存（不走 React），
+// React state 仅喂角/油门的数字读数，53 次/秒的响应若每次都 setState 会带崩整页
+// 重渲染（含 Chart.js 全量重绘），10Hz 对人眼读数足够。
+const ARENA_PREDICTION_DISPLAY_INTERVAL_MS = 100;
 // 推理评估节流下限。后端曾每帧重载 config(≈75ms)，故原用 250ms 防堆积；config 已缓存后
 // 放宽到与逐帧播放一致(≤60Hz)，推理节奏改由实际能力决定。可用 ARENA_PREDICTION_INTERVAL_MS 调大。
 const ARENA_PREDICTION_MIN_INTERVAL_MS = 16;
 const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
+// 每 viewer 推理并发默认 2：单请求 RTT 含浏览器/网络开销（真机实测本机回环 ~8ms、
+// 经浏览器访问更高），并发 1 时推理帧率被 1/RTT 硬封顶（RTT 20ms → 上限 50FPS、
+// 30ms → 33FPS），并发 2 让第 N+1 帧的请求在第 N 帧 invoke 期间发出，CPU 准备与
+// NPU 执行流水线化（后端 predict 已在线程池执行，天然支持重叠）。瓶颈在 RTT 时才
+// 继续调大（上限 4），纯本机超低延迟场景用 ARENA_INFERENCE_CONCURRENCY=1 还原。
+const ARENA_INFERENCE_CONCURRENCY_DEFAULT = 2;
 
 /**
  * canvas 绘制线 / chart.js 数据系列的 JS 配色（回退值表，深色值即现状；
@@ -227,6 +241,11 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   const predictionBatchInFlightRef = useRef<Record<string, boolean>>({});
   const predictionLastRequestAtRef = useRef<Record<string, number>>({});
   const predictionBatchLastRequestAtRef = useRef<Record<string, number>>({});
+  // 播放中预测数值读数的节流合并：60Hz 推理响应不直接 setState（整页重渲染带崩 rAF，
+  // 造成卡顿感），canvas 控制线走 predictionCacheRef 每 rAF 直读，React state 仅喂
+  // 角/油门数字读数，按 ARENA_PREDICTION_DISPLAY_INTERVAL_MS 批量 flush
+  const pendingPredictionPatchRef = useRef<Record<string, { prediction: { angle: number; throttle: number }; lastEvaluatedIndex: number; loading: boolean }>>({});
+  const predictionPatchTimerRef = useRef<number | undefined>(undefined);
   const pendingViewerIndexRef = useRef<Record<string, number>>({});
   const pendingBatchStartRef = useRef<Record<string, number>>({});
   const predictionCacheRef = useRef<Record<string, Record<number, { pilot: { angle: number; throttle: number } }>>>({});
@@ -259,7 +278,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     Number(config?.ARENA_PREDICTION_INTERVAL_MS) || ARENA_PREDICTION_MIN_INTERVAL_MS,
   );
   const evaluationIntervalMs = Math.max(playbackSpeed, predictionMinIntervalMs);
-  const maxInferenceConcurrency = Math.max(1, Math.min(4, Number(config?.ARENA_INFERENCE_CONCURRENCY) || 1));
+  const maxInferenceConcurrency = Math.max(1, Math.min(4, Number(config?.ARENA_INFERENCE_CONCURRENCY) || ARENA_INFERENCE_CONCURRENCY_DEFAULT));
   const prefetchFrameCount = Math.max(0, Math.min(8, Number(config?.ARENA_PREFETCH_FRAMES) || 0));
   const predictionOptions = useMemo(() => ({
     preTransformations,
@@ -355,7 +374,25 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     }
   }, [updateViewer]);
 
-  const cacheImage = useCallback((imageUrl: string, onLoadKey?: string, onLoad?: (image: HTMLImageElement) => void) => {
+  const trimImageCache = useCallback(() => {
+    while (imageCacheRef.current.size > ARENA_IMAGE_CACHE_LIMIT) {
+      const oldestUrl = imageCacheRef.current.keys().next().value;
+      if (!oldestUrl) break;
+      const oldestImage = imageCacheRef.current.get(oldestUrl);
+      if (oldestImage) {
+        oldestImage.onload = null;
+        oldestImage.onerror = null;
+        oldestImage.src = '';
+      }
+      imageLoadCallbacksRef.current.delete(oldestUrl);
+      imageInFlightRef.current.delete(oldestUrl);
+      imageCacheRef.current.delete(oldestUrl);
+    }
+  }, []);
+
+  // 加载核心：注册/复用 Image 并启动网络加载，不带节流。命中缓存时补挂未完成图的回调；
+  // 调用方按需自行节流（cacheImage 限制当前帧突发，prefetchImageFrames 前瞻不受限）。
+  const startImageLoad = useCallback((imageUrl: string, onLoadKey?: string, onLoad?: (image: HTMLImageElement) => void) => {
     const cachedImage = imageCacheRef.current.get(imageUrl);
     if (cachedImage) {
       if (onLoadKey && onLoad && !cachedImage.complete) {
@@ -367,12 +404,6 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
       imageCacheRef.current.set(imageUrl, cachedImage);
       return cachedImage;
     }
-    const now = window.performance.now();
-    if (imageInFlightRef.current.size >= ARENA_IMAGE_MAX_IN_FLIGHT || now - lastImageRequestAtRef.current < ARENA_IMAGE_MIN_INTERVAL_MS) {
-      return undefined;
-    }
-    lastImageRequestAtRef.current = now;
-
     const image = new Image();
     imageInFlightRef.current.add(imageUrl);
     if (onLoadKey && onLoad) {
@@ -391,21 +422,37 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     };
     image.src = imageUrl;
     imageCacheRef.current.set(imageUrl, image);
-    while (imageCacheRef.current.size > ARENA_IMAGE_CACHE_LIMIT) {
-      const oldestUrl = imageCacheRef.current.keys().next().value;
-      if (!oldestUrl) break;
-      const oldestImage = imageCacheRef.current.get(oldestUrl);
-      if (oldestImage) {
-        oldestImage.onload = null;
-        oldestImage.onerror = null;
-        oldestImage.src = '';
-      }
-      imageLoadCallbacksRef.current.delete(oldestUrl);
-      imageInFlightRef.current.delete(oldestUrl);
-      imageCacheRef.current.delete(oldestUrl);
-    }
+    trimImageCache();
     return image;
-  }, []);
+  }, [trimImageCache]);
+
+  const cacheImage = useCallback((imageUrl: string, onLoadKey?: string, onLoad?: (image: HTMLImageElement) => void) => {
+    if (imageCacheRef.current.has(imageUrl)) {
+      return startImageLoad(imageUrl, onLoadKey, onLoad);
+    }
+    const now = window.performance.now();
+    if (imageInFlightRef.current.size >= ARENA_IMAGE_MAX_IN_FLIGHT || now - lastImageRequestAtRef.current < ARENA_IMAGE_MIN_INTERVAL_MS) {
+      return undefined;
+    }
+    lastImageRequestAtRef.current = now;
+    return startImageLoad(imageUrl, onLoadKey, onLoad);
+  }, [startImageLoad]);
+
+  // 播放前瞻预取：把 centerIndex 之后 count 帧的取图请求立即发出（循环播放到尾自动回卷），
+  // 让帧到达显示时刻时 image.complete 已为 true；后端有内存缓存+ETag，预取代价极小
+  const prefetchImageFrames = useCallback((centerIndex: number, count: number) => {
+    if (!records.length || count <= 0) return;
+    for (let offset = 1; offset <= count; offset += 1) {
+      const index = centerIndex + offset;
+      if (index > maxIndex) {
+        if (!isLoopingRef.current) break;
+      }
+      const record = records[index % records.length];
+      const imagePath = getRecordImagePath(record);
+      if (!imagePath) continue;
+      startImageLoad(getImageUrl(imagePath, tubPath));
+    }
+  }, [records, maxIndex, tubPath, startImageLoad]);
 
   const cachePilotPrediction = useCallback((localId: string, recordIndex: number, pilot: { angle: number; throttle: number }) => {
     predictionCacheRef.current[localId] = {
@@ -431,6 +478,20 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     delete pendingViewerIndexRef.current[localId];
     delete pendingBatchStartRef.current[localId];
     delete predictionCacheRef.current[localId];
+    delete pendingPredictionPatchRef.current[localId];
+    const remaining = Object.keys(pendingPredictionPatchRef.current).length;
+    if (remaining === 0 && predictionPatchTimerRef.current !== undefined) {
+      window.clearTimeout(predictionPatchTimerRef.current);
+      predictionPatchTimerRef.current = undefined;
+    }
+  }, []);
+
+  // 卸载时清掉未 flush 的读数合并定时器，避免 setState on unmounted
+  useEffect(() => () => {
+    if (predictionPatchTimerRef.current !== undefined) {
+      window.clearTimeout(predictionPatchTimerRef.current);
+      predictionPatchTimerRef.current = undefined;
+    }
   }, []);
 
   const drawViewerFrame = useCallback((viewer: ViewerState, recordIndex: number) => {
@@ -491,6 +552,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         currentIndexRef.current = nextIndex;
         if (advancedFrames > 0) {
           viewersRef.current.forEach((viewer) => updateFps(viewer.localId, 'playback', advancedFrames));
+          // 前瞻预取后续帧图像，把逐帧取图 RTT 挡在显示时刻之前（卡顿修复的关键）
+          prefetchImageFrames(nextIndex, ARENA_IMAGE_PREFETCH_FRAMES);
         }
         if (time - lastDisplaySyncTimeRef.current > 120 || nextIndex === maxIndex) {
           setDisplayRecordIndex(nextIndex);
@@ -513,7 +576,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         window.cancelAnimationFrame(playbackFrameRef.current);
       }
     };
-  }, [active, drawViewerFrame, hasRecords, isPlaying, maxIndex, playbackSpeed, records.length, setCurrentIndex, setIsPlaying, updateFps]);
+  }, [active, drawViewerFrame, hasRecords, isPlaying, maxIndex, playbackSpeed, prefetchImageFrames, records.length, setCurrentIndex, setIsPlaying, updateFps]);
 
   useEffect(() => {
     if (!hasRecords || isPlaying) return;
@@ -550,6 +613,22 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
       setImportingViewerId(null);
     }
   }, [configPath, refreshModels, updateViewer]);
+
+  // 播放中预测读数（数字角/油门 + 已评估帧号）的节流合并入口：60Hz 路径（推理响应、
+  // 缓存命中分支）都走这里批量 flush，避免逐次 setState 带崩整页重渲染；
+  // 画面上的控制线不经过它（每 rAF 直读 predictionCacheRef）。
+  const schedulePlaybackPredictionPatch = useCallback((localId: string, prediction: { angle: number; throttle: number }, lastEvaluatedIndex: number) => {
+    pendingPredictionPatchRef.current[localId] = { prediction, lastEvaluatedIndex, loading: false };
+    if (predictionPatchTimerRef.current !== undefined) return;
+    predictionPatchTimerRef.current = window.setTimeout(() => {
+      predictionPatchTimerRef.current = undefined;
+      const pendings = { ...pendingPredictionPatchRef.current };
+      pendingPredictionPatchRef.current = {};
+      Object.entries(pendings).forEach(([id, pendingPatch]) => {
+        updateViewer(id, pendingPatch);
+      });
+    }, ARENA_PREDICTION_DISPLAY_INTERVAL_MS);
+  }, [updateViewer]);
 
   const refreshPrediction = useCallback(async (
     viewer: ViewerState,
@@ -592,7 +671,13 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         lastEvaluatedIndex: recordIndex,
         loading: false,
       };
-      updateViewer(viewer.localId, patch);
+      if (options.playback) {
+        // 播放路径：合并节流后批量更新 state（见 schedulePlaybackPredictionPatch 注释），
+        // 画面上的控制线不依赖这次 setState（每 rAF 直读 ref 缓存）
+        schedulePlaybackPredictionPatch(viewer.localId, data.pilot, recordIndex);
+      } else {
+        updateViewer(viewer.localId, patch);
+      }
     } catch (error) {
       if (!options.playback && predictionRequestRef.current[viewer.localId] !== requestId) return;
       if (!options.playback) {
@@ -607,7 +692,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         delete pendingViewerIndexRef.current[viewer.localId];
       }
     }
-  }, [cachePilotPrediction, configPath, hasRecords, maxInferenceConcurrency, predictionMinIntervalMs, predictionOptions, updateFps, updateViewer]);
+  }, [cachePilotPrediction, configPath, hasRecords, maxInferenceConcurrency, predictionMinIntervalMs, predictionOptions, schedulePlaybackPredictionPatch, updateFps, updateViewer]);
 
   const prefetchPredictions = useCallback(async (viewer: ViewerState, start: number, limit: number) => {
     if (!viewer.pilot || !hasRecords || limit <= 0) return;
@@ -726,10 +811,16 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
       const targetIndex = playback && pendingIndex !== undefined ? pendingIndex : recordIndex;
       const cachedPrediction = predictionCacheRef.current[viewer.localId]?.[targetIndex];
       if (cachedPrediction) {
-        updateViewer(viewer.localId, {
-          prediction: cachedPrediction.pilot,
-          lastEvaluatedIndex: targetIndex,
-        });
+        if (playback) {
+          // 播放路径同样合并节流，60Hz 缓存命中分支不得直接 setState（见
+          // schedulePlaybackPredictionPatch 注释）
+          schedulePlaybackPredictionPatch(viewer.localId, cachedPrediction.pilot, targetIndex);
+        } else {
+          updateViewer(viewer.localId, {
+            prediction: cachedPrediction.pilot,
+            lastEvaluatedIndex: targetIndex,
+          });
+        }
       } else {
         if (pendingIndex === targetIndex) {
           delete pendingViewerIndexRef.current[viewer.localId];
@@ -745,7 +836,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         }
       }
     });
-  }, [maxIndex, prefetchFrameCount, prefetchPredictions, refreshPrediction, updateViewer]);
+  }, [maxIndex, prefetchFrameCount, prefetchPredictions, refreshPrediction, schedulePlaybackPredictionPatch, updateViewer]);
 
   useEffect(() => {
     if (isPlaying) return;
@@ -787,18 +878,28 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
   };
 
   const jumpToRecord = useCallback((recordIndex: number) => {
+    const target = Math.max(0, Math.min(maxIndex, recordIndex));
     setIsPlaying(false);
-    setCurrentIndex(Math.max(0, Math.min(maxIndex, recordIndex)));
-  }, [maxIndex, setCurrentIndex, setIsPlaying]);
+    setCurrentIndex(target);
+    currentIndexRef.current = target;
+    // 跳帧后预取后续帧，紧跟着点播放时画面即刻顺滑
+    prefetchImageFrames(target, ARENA_IMAGE_PREFETCH_FRAMES);
+  }, [maxIndex, prefetchImageFrames, setCurrentIndex, setIsPlaying]);
 
   const togglePlayback = useCallback(() => {
     if (!hasRecords) return;
+    let startIndex = currentIndex;
     if (!isPlaying && currentIndex >= maxIndex && !isLooping) {
+      startIndex = 0;
       setCurrentIndex(0);
       currentIndexRef.current = 0;
     }
+    if (!isPlaying) {
+      // 起播即预取后续帧，避免开头几帧逐帧等网络
+      prefetchImageFrames(startIndex, ARENA_IMAGE_PREFETCH_FRAMES);
+    }
     setIsPlaying(!isPlaying);
-  }, [currentIndex, hasRecords, isLooping, isPlaying, maxIndex, setCurrentIndex, setIsPlaying]);
+  }, [currentIndex, hasRecords, isLooping, isPlaying, maxIndex, prefetchImageFrames, setCurrentIndex, setIsPlaying]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -873,7 +974,9 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
     );
   };
 
-  const plotData = {
+  // useMemo：推理读数 60Hz 更新 viewer state 会整页重渲染，plotPoints 未变时
+  // 必须保持 data/options 引用不变，否则 Chart.js 每次渲染全量重绘（万级点 = 几十 ms 主线程）
+  const plotData = useMemo(() => ({
     labels: plotPoints.map((point) => String(point.index)),
     datasets: [
       {
@@ -905,7 +1008,13 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         tension: 0.2,
       },
     ],
-  };
+  }), [plotPoints, seriesColors, t]);
+
+  const plotOptions = useMemo(() => ({
+    responsive: true,
+    plugins: { legend: { labels: { color: seriesColors.legend } } },
+    scales: { x: { ticks: { color: seriesColors.ticks } }, y: { ticks: { color: seriesColors.ticks } } },
+  }), [seriesColors]);
 
   return (
     <div className="space-y-6">
@@ -1074,9 +1183,13 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 {hasRecords ? (
                   <canvas
                     ref={(canvas) => {
+                      const previous = canvasRefs.current[viewer.localId];
                       canvasRefs.current[viewer.localId] = canvas;
-                      if (canvas && hasRecords) {
-                        window.requestAnimationFrame(() => drawViewerFrame(viewer, isPlaying ? currentIndexRef.current : currentIndex));
+                      // 内联 ref 回调每次重渲染都会 detach/attach：仅在 canvas 元素真正
+                      // 变化（挂载）时补一次绘制——播放中由 rAF 循环逐帧画，暂停时由
+                      // currentIndex effect 画；全部走 ref 取最新帧号/播放态，避免闭包过期
+                      if (canvas && previous !== canvas && hasRecords) {
+                        window.requestAnimationFrame(() => drawViewerFrame(viewer, currentIndexRef.current));
                       }
                     }}
                     className="h-full w-full object-contain"
@@ -1255,7 +1368,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
           )}
           {plotPoints.length > 0 && (
             <div className="rounded-md border border-zinc-800 bg-zinc-950 p-4">
-              <Line data={plotData} options={{ responsive: true, plugins: { legend: { labels: { color: seriesColors.legend } } }, scales: { x: { ticks: { color: seriesColors.ticks } }, y: { ticks: { color: seriesColors.ticks } } } }} />
+              <Line data={plotData} options={plotOptions} />
             </div>
           )}
           {plotSummary && (plotSummary.angle || plotSummary.throttle) && (

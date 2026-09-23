@@ -1,6 +1,16 @@
 # 变更日志
 
-## 2026-09-23 (233)
+## 2026-09-23 (234)
+
+- fix(arena): 修复 Pilot Arena 加载 `.aidem` NPU 模型后推理帧率过低（实测仅 30 余 FPS、NPU 占用率低）
+  - 根因（真机 QCS6490 实测拆解）：NPU invoke 本身 ~0.8-1.8ms（`run()` 全程 ~1.4ms，非瓶颈），单帧全链路本机回环 RTT ~8ms 中框架/HTTP 占 ~5ms；浏览器经网络访问 RTT 升至 20-30ms，而前端每 viewer 推理并发默认为 1——并发 1 时推理帧率被 `1/RTT` 硬封顶（RTT 30ms → 上限 33FPS），NPU 每 33ms 只忙 0.8ms，故占用率看起来很低
+  - `routers/arena.py`：`load`/`predict`/`preview`/`predictions`/`unload` 五个端点 `async def` → 同步 `def`（Starlette 线程池执行，沿用 `routers/tub.py` 取图端点既定做法）。原先阻塞调用（NPU 解释器初始化、PIL 解码、cv 预处理、NPU invoke、PNG 编码、批量循环、解释器 destroy）全部压在 uvicorn 事件循环上，并发预测无法重叠（帧 N 的 Python 侧准备只能串行等帧 N-1 的 invoke），批量切片（数千帧、秒级）会冻结整个后端；同步 def 后 invoke 期间释放 GIL，多帧 CPU 准备与 NPU 执行真正流水线化
+  - `routers/arena.py`：预测缓存（OrderedDict）读写加锁。同步端点引入线程池并发后，原单线程事件循环下不可能发生的 move_to_end/迭代竞态需显式防护（锁外执行 invoke，不损并行度）
+  - `PilotArenaPage.tsx`：每 viewer 推理并发默认值 1 → 2（`ARENA_INFERENCE_CONCURRENCY_DEFAULT`，config 旋钮覆盖不变、上限 4），第 N+1 帧请求在第 N 帧 invoke 期间即可发出
+  - 实测（本机 QCS6490，`.aidem` 模型 100 帧真实 HTTP 压测，多轮取区间）：并发 2 吞吐 187~311 req/s、RTT 均值 6.3~10.3ms（改造前 async 端点并发 2 仅 210 req/s 且无法真正并行；并发 1 各轮 80~123 req/s，经浏览器网络访问 RTT 增至 20-30ms 后即掉到 30-50FPS）；并发 2/4 下 ~200-300 req/s 的服务端容量已覆盖前端 60Hz 评估循环，浏览器侧重新成为上限
+  - 验证：`pytest web_ui/backend/tests` 全绿；vitest `PilotArenaPage.test.tsx` 4/4 过
+
+
 
 - feat(gamepad): 实现Web端手柄输入轴可配置化功能——自 A1-v1.0 分支提交 `adba4b5c` 移植合并到 main，解决「不同手柄轴向不一致（如某手柄转向在 axes[2]）导致切到手柄输入源后转向不生效或方向相反」
   - `lib/gamepadMapping.ts`（新）：标准化轴映射（去死区 → 中位校准 → 反向 → 限幅），内置 Xbox 标准 / Z 轴转向 / 方向盘三套预设

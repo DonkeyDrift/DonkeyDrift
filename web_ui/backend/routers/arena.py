@@ -89,6 +89,9 @@ class PredictionsRequest(BaseModel):
 loaded_pilots: dict[str, LoadedPilot] = {}
 prediction_cache: OrderedDict[tuple[Any, ...], dict[str, float]] = OrderedDict()
 PREDICTION_CACHE_LIMIT_PER_PILOT = 1500
+# predict/preview/predictions 都是同步 def（Starlette 线程池执行，见各端点注释），
+# 缓存的读-改-写会跨线程并发，必须加锁（move_to_end/迭代时另一线程插入会 RuntimeError）
+_prediction_cache_lock = threading.Lock()
 
 # Car config 按文件内容(mtime)缓存：推理热路径每帧调用 load_car_config，
 # 而 load_config 每次都会重新编译执行整份 config.py + myconfig.py(实测约 75ms)。
@@ -203,19 +206,21 @@ def _prediction_cache_key(pilot_id: str, request: PredictRequest) -> tuple[Any, 
 
 
 def _cache_prediction(key: tuple[Any, ...], pilot: dict[str, float]) -> None:
-    prediction_cache[key] = pilot
-    prediction_cache.move_to_end(key)
-    pilot_id = key[0]
-    pilot_keys = [cache_key for cache_key in prediction_cache if cache_key[0] == pilot_id]
-    while len(pilot_keys) > PREDICTION_CACHE_LIMIT_PER_PILOT:
-        key_to_delete = pilot_keys.pop(0)
-        del prediction_cache[key_to_delete]
+    with _prediction_cache_lock:
+        prediction_cache[key] = pilot
+        prediction_cache.move_to_end(key)
+        pilot_id = key[0]
+        pilot_keys = [cache_key for cache_key in prediction_cache if cache_key[0] == pilot_id]
+        while len(pilot_keys) > PREDICTION_CACHE_LIMIT_PER_PILOT:
+            key_to_delete = pilot_keys.pop(0)
+            del prediction_cache[key_to_delete]
 
 
 def _clear_prediction_cache(pilot_id: str) -> None:
-    for key in list(prediction_cache):
-        if key[0] == pilot_id:
-            del prediction_cache[key]
+    with _prediction_cache_lock:
+        for key in list(prediction_cache):
+            if key[0] == pilot_id:
+                del prediction_cache[key]
 
 
 def _build_processing_config(base_cfg: Any, request: PredictRequest) -> Any:
@@ -323,9 +328,11 @@ def _predict_loaded_pilot(pilot_id: str, request: PredictRequest) -> tuple[dict[
         "throttle": _get_number(record, request.user_throttle_field),
     }
     cache_key = _prediction_cache_key(pilot_id, request)
-    cached_pilot = prediction_cache.get(cache_key)
+    with _prediction_cache_lock:
+        cached_pilot = prediction_cache.get(cache_key)
+        if cached_pilot is not None:
+            prediction_cache.move_to_end(cache_key)
     if cached_pilot is not None:
-        prediction_cache.move_to_end(cache_key)
         return user, cached_pilot
 
     base_cfg = load_car_config(request.config_path) if request.config_path else None
@@ -393,7 +400,8 @@ async def list_models(working_dir: Optional[str] = None, model_type: Optional[st
 
 
 @router.post("/pilots/load")
-async def load_pilot(request: LoadPilotRequest):
+def load_pilot(request: LoadPilotRequest):
+    # 同步 def：模型加载含 NPU 解释器初始化（.aidem 实测 ~0.5s 阻塞），放线程池执行
     # SavedModel 是目录形式，文件与目录都允许
     if not os.path.exists(request.model_path):
         raise HTTPException(status_code=404, detail="Model file not found")
@@ -426,7 +434,9 @@ async def list_pilots():
 
 
 @router.delete("/pilots/{pilot_id}")
-async def unload_pilot(pilot_id: str):
+def unload_pilot(pilot_id: str):
+    # 同步 def：NPU 解释器 destroy 是阻塞调用（释放 Hexagon 上下文），放线程池执行，
+    # 避免卸载时卡住事件循环（影响并发的取图/预测请求）。线程竞态由 AidLite._lock 兜底。
     if pilot_id not in loaded_pilots:
         raise HTTPException(status_code=404, detail="Pilot not loaded")
     loaded = loaded_pilots.pop(pilot_id)
@@ -443,7 +453,12 @@ async def unload_pilot(pilot_id: str):
 
 
 @router.post("/pilots/{pilot_id}/predict")
-async def predict_pilot(pilot_id: str, request: PredictRequest):
+def predict_pilot(pilot_id: str, request: PredictRequest):
+    # 同步 def（非 async）：Starlette 线程池执行。逐帧推理包含 PIL 解码、cv 预处理与
+    # NPU invoke（aidlite C 扩展会释放 GIL），async 会把这些阻塞全部压给事件循环——
+    # 并发预测无法重叠（帧 N 的 Python 侧准备只能串行等帧 N-1 的 invoke），还会卡住
+    # 并发的 60fps 取图流。同步 def 后多帧预测的 CPU 准备期与 NPU 执行期真正并行，
+    # 事件循环只承担廉价的解析/序列化（同 routers/tub.py 取图端点的既定做法）。
     user, pilot = _predict_loaded_pilot(pilot_id, request)
     return {
         "status": True,
@@ -460,7 +475,7 @@ async def predict_pilot(pilot_id: str, request: PredictRequest):
 
 
 @router.get("/pilots/{pilot_id}/preview")
-async def preview_pilot(
+def preview_pilot(
     pilot_id: str,
     record_index: int = Query(...),
     config_path: Optional[str] = None,
@@ -472,6 +487,7 @@ async def preview_pilot(
     brightness: Optional[float] = None,
     blur: Optional[float] = None,
 ):
+    # 同步 def：PNG 编码是阻塞重活，放线程池，理由同 predict_pilot
     request = PredictRequest(
         record_index=record_index,
         config_path=config_path,
@@ -499,7 +515,9 @@ async def preview_pilot(
 
 
 @router.post("/pilots/{pilot_id}/predictions")
-async def predict_pilot_records(pilot_id: str, request: PredictionsRequest):
+def predict_pilot_records(pilot_id: str, request: PredictionsRequest):
+    # 同步 def：批量循环逐帧推理+解码，整 tub 切片（可达数千帧）是秒级阻塞，
+    # 绝不能在事件循环里跑；放线程池后与其他请求自然并行（预测缓存有锁保护）
     if pilot_id not in loaded_pilots:
         raise HTTPException(status_code=404, detail="Pilot not loaded")
 
