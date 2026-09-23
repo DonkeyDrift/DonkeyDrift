@@ -87,6 +87,23 @@ def _selected_model_from_disk():
     return None
 
 
+def _model_type_for_model_file(model_path):
+    """按模型文件扩展名推导 model_type（与 Web 端 routers/drive.py 的映射一致）。
+
+    使「Web 选模型后重启车端」与「--model 显式指定」时无需 --type 也能选对
+    解释器（如 .aidem → aidlite_linear 走 NPU）；未知扩展名返回 None 走 myconfig 默认。
+    """
+    if not model_path:
+        return None
+    suffix = os.path.splitext(model_path)[1].lower()
+    return {
+        '.tflite': 'tflite_linear',
+        '.trt': 'tensorrt_linear',
+        '.aidem': 'aidlite_linear',
+        '.ckpt': 'torch_linear',
+    }.get(suffix)
+
+
 def drive(cfg, model_path=None, use_joystick=False, model_type=None,
           camera_type='single', meta=[]):
     """
@@ -113,6 +130,11 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             model_type = "behavior"
         else:
             model_type = cfg.DEFAULT_MODEL_TYPE
+            # .tflite/.aidem 等扩展名蕴含解释器类型，按文件推导优先于 myconfig 默认
+            derived = _model_type_for_model_file(model_path)
+            if derived:
+                logger.info("按扩展名推导 model_type=%s（%s）", derived, model_path)
+                model_type = derived
 
     # Initialize car
     V = dk.vehicle.Vehicle()
@@ -177,7 +199,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     # 即载入；无 --model 且未启用漂移回放时注册空容器，等待 Web 端选模型后直接
     # 热加载，无需重启车端进程。legacy .json（模型结构+权重分离）不支持热切换，
     # 保持原有静态注册路径。
-    _full_model_exts = ('.h5', '.trt', '.tflite', '.savedmodel', '.pth')
+    _full_model_exts = ('.h5', '.trt', '.tflite', '.savedmodel', '.pth',
+                        '.aidem', '.ckpt')
     _is_legacy_json = bool(model_path) and ('.json' in model_path) \
         and not any(ext in model_path for ext in _full_model_exts)
     _replay_no_model = bool(getattr(cfg, 'DRIFT_REPLAY_ENABLED', False)) and not model_path

@@ -21,6 +21,7 @@
 import json
 import os
 import signal
+import sys
 import threading
 import time
 import urllib.request
@@ -286,3 +287,24 @@ def kill_previous_car_processes(pid_file=None):
         except OSError:
             pass
     remove_drive_pid_file(pid_file)
+
+
+# ── 车进程解释器选择 ────────────────────────────────────────────────
+
+def select_car_python() -> str:
+    """车进程解释器选择：NPU 环境 .venv-npu 优先，DONKEY_CAR_PYTHON 可覆盖。
+
+    车端 NPU(.aidem)与无 TF 的 .tflite 推理都依赖 aidlite——只存在于系统
+    python3.12（.venv-npu 挂系统站点包）；web/训练环境可以是任意 python。
+    供 base.py（donkey web/drive）、tui.py、launcher 三条拉车链路共用，
+    本模块仅依赖标准库，各链路均可安全导入。
+    找不到 .venv-npu 时退回 sys.executable，保持原有行为。
+    """
+    override = os.environ.get('DONKEY_CAR_PYTHON', '').strip()
+    if override:
+        return override
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidate = os.path.join(repo_root, '.venv-npu', 'bin', 'python')
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return sys.executable

@@ -597,8 +597,9 @@ async def list_models(working_dir: Optional[str] = None):
     """List local models in ./models directory.
 
     Shows .tflite / .h5 model files and TensorFlow SavedModel directories
-    (``<name>.savedmodel/``). Training loss charts (.png) are hidden from
-    the list but linked to their corresponding model via previewPath.
+    (``<name>.savedmodel/``). AIMO NPU artifacts (``*.aidem``) are listed too
+    so the Drive page can hot-load them. Training loss charts (.png) are
+    hidden from the list but linked to their corresponding model via previewPath.
     """
     cwd = working_dir or os.getcwd()
     models_dir = os.path.join(cwd, "models")
@@ -615,7 +616,8 @@ async def list_models(working_dir: Optional[str] = None):
     for name in sorted(os.listdir(models_dir)):
         full = os.path.join(models_dir, name)
         is_savedmodel_dir = os.path.isdir(full) and name.lower().endswith(".savedmodel")
-        is_model_file = os.path.isfile(full) and name.lower().endswith((".tflite", ".h5"))
+        is_model_file = os.path.isfile(full) and name.lower().endswith(
+            (".tflite", ".h5", ".aidem", ".ckpt"))
         if not (is_model_file or is_savedmodel_dir):
             continue
 

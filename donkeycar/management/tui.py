@@ -43,6 +43,7 @@ from donkeycar.webui_instance import (
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
+    select_car_python,
 )
 
 # 初始化 Console
@@ -1350,7 +1351,7 @@ class DriveCommand(DonkeyCommand):
         return cmd
 
     def get_car_command_line(self):
-        return [sys.executable, "manage.py", "drive"]
+        return [select_car_python(), "manage.py", "drive"]
 
     def choose_available_backend_port(self, preferred_port=8100):
         port = preferred_port

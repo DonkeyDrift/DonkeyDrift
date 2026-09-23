@@ -500,20 +500,65 @@ def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+_TF_AVAILABLE = None
+
+
+def _tf_available() -> bool:
+    """当前 python 是否装了 TensorFlow（结果缓存；ImportError 之外的异常也按无 TF 处理）。"""
+    global _TF_AVAILABLE
+    if _TF_AVAILABLE is None:
+        try:
+            import tensorflow  # noqa: F401
+            _TF_AVAILABLE = True
+        except Exception:
+            _TF_AVAILABLE = False
+    return _TF_AVAILABLE
+
+
 def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'FastAiPilot']:
     '''
     given the string model_type and the configuration settings in cfg
     create a Keras model and return it.
     '''
+    if model_type is None:
+        model_type = cfg.DEFAULT_MODEL_TYPE
+    logger.info(f'get_model_by_type: model type is: {model_type}')
+
+    if 'aidlite_' in model_type:
+        # NPU(AidLite/QNN) 路径不依赖 TensorFlow，必须在 import keras 之前返回，
+        # 让车端能跑在只装 aidlite 的 python 上（见 parts/npu_pilot.py）
+        from donkeycar.parts.npu_pilot import NpuLinearPilot
+        used_model_type = model_type.replace('aidlite_', '', 1)
+        if used_model_type != 'linear':
+            raise Exception(f'aidlite_ interpreter only supports linear, got: {model_type}')
+        return NpuLinearPilot(cfg)
+
+    if 'torch_' in model_type:
+        # PyTorch 训练产物(.ckpt)的 CPU 推理路径，同样不依赖 TensorFlow
+        from donkeycar.parts.torch_linear import TorchLinearPilot
+        used_model_type = model_type.replace('torch_', '', 1)
+        if used_model_type != 'linear':
+            raise Exception(f'torch_ interpreter only supports linear, got: {model_type}')
+        return TorchLinearPilot(cfg)
+
+    if 'tflite_' in model_type and not _tf_available():
+        # 无 TensorFlow 的运行时（py3.12 + aidlite 的车端环境）：.tflite 模型走
+        # aidlite 内建 TFLite/CPU 后端，避免 import keras 即崩。仅支持 linear。
+        from donkeycar.parts.npu_pilot import AidLiteTflite, NpuLinearPilot
+        used_model_type = model_type.replace('tflite_', '', 1)
+        if used_model_type != 'linear':
+            raise Exception(f'tflite fallback (no TF) only supports linear, got: {model_type}')
+        interpreter = AidLiteTflite(
+            in_shapes=[[1, cfg.IMAGE_H, cfg.IMAGE_W, cfg.IMAGE_DEPTH]],
+            out_shapes=[[1, 1], [1, 1]])
+        return NpuLinearPilot(cfg, interpreter=interpreter)
+
     from donkeycar.parts.keras import KerasCategorical, KerasLinear, \
         KerasInferred, KerasIMU, KerasMemory, KerasBehavioral, KerasLocalizer, \
         KerasLSTM, Keras3D_CNN
     from donkeycar.parts.interpreter import KerasInterpreter, TfLite, TensorRT, \
         FastAIInterpreter
 
-    if model_type is None:
-        model_type = cfg.DEFAULT_MODEL_TYPE
-    logger.info(f'get_model_by_type: model type is: {model_type}')
     input_shape = (cfg.IMAGE_H, cfg.IMAGE_W, cfg.IMAGE_DEPTH)
     if 'tflite_' in model_type:
         interpreter = TfLite()

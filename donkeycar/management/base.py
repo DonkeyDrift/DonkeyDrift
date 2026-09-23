@@ -25,6 +25,7 @@ from donkeycar.webui_instance import (
     read_drive_pids,
     write_drive_pids,
     remove_drive_pid_file,
+    select_car_python,
 )
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -811,6 +812,9 @@ class Train(BaseCommand):
         parser.add_argument('--comment', type=str,
                             help='comment added to model database - use '
                                  'double quotes for multiple words')
+        parser.add_argument('--convert-npu', action='store_true',
+                            help='训练后自动将导出的 onnx 经 AIMO 云转为 '
+                                 '.aidem 上 NPU（需 API Key 与网络）')
         parsed_args = parser.parse_args(args)
         return parsed_args
 
@@ -823,16 +827,51 @@ class Train(BaseCommand):
             else getattr(cfg, 'DEFAULT_AI_FRAMEWORK', 'tensorflow')
 
         if framework == 'tensorflow':
-            from donkeycar.pipeline.training import train
-            train(cfg, args.tub, args.model, args.type, args.transfer,
-                  args.comment)
+            from donkeycar.utils import _tf_available
+            if _tf_available():
+                from donkeycar.pipeline.training import train
+                train(cfg, args.tub, args.model, args.type, args.transfer,
+                      args.comment)
+            elif args.type in (None, 'linear'):
+                # 无 TF 运行时（py3.12 NPU 环境）：linear 训练自动回退 PyTorch，
+                # 产物 <stem>.ckpt/.onnx/.png/_meta.json（结构复刻 default_n_linear）
+                logger.warning('TensorFlow 不可用，linear 训练回退 PyTorch'
+                               '（donkeycar.parts.torch_linear）')
+                from donkeycar.parts.torch_linear import train_torch_linear
+                train_torch_linear(cfg, args.tub, args.model,
+                                   comment=args.comment)
+            else:
+                logger.error('TensorFlow 不可用，且模型类型 %s 无 PyTorch 实现',
+                             args.type)
         elif framework == 'pytorch':
-            from donkeycar.parts.pytorch.torch_train import train
-            train(cfg, args.tub, args.model, args.type,
-                  checkpoint_path=args.checkpoint)
+            if args.type in (None, 'linear'):
+                from donkeycar.parts.torch_linear import train_torch_linear
+                train_torch_linear(cfg, args.tub, args.model,
+                                   comment=args.comment)
+            else:
+                from donkeycar.parts.pytorch.torch_train import train
+                train(cfg, args.tub, args.model, args.type,
+                      checkpoint_path=args.checkpoint)
         else:
             logger.error(f"Unrecognized framework: {framework}. Please specify "
                          f"one of 'tensorflow' or 'pytorch'")
+            return
+
+        if args.convert_npu:
+            self._convert_npu_after_train(args)
+
+    def _convert_npu_after_train(self, args):
+        """训练产物 <stem>.onnx → AIMO 云转 .aidem（校准图取自 tub 前若干张）。"""
+        stem = os.path.splitext(os.path.expanduser(args.model))[0]
+        onnx_path = stem + '.onnx'
+        if not os.path.isfile(onnx_path):
+            logger.error('--convert-npu: 未找到 %s（仅 torch 训练产物支持自动转换）',
+                         onnx_path)
+            return
+        from donkeycar.tools.aimo_npu_convert import convert_onnx_to_aidem
+        convert_onnx_to_aidem(onnx_path,
+                              out_dir=os.path.dirname(onnx_path) or '.',
+                              calib_tub_paths=args.tub)
 
 
 class ModelDatabase(BaseCommand):
@@ -1397,9 +1436,13 @@ class Drive(Web):
             )
         return car_path
 
+    def _car_python(self) -> str:
+        """车进程解释器选择，逻辑见 webui_instance.select_car_python。"""
+        return select_car_python()
+
     def _build_car_command(self, args):
         """构造 manage.py drive 命令行，透传 --model/--type/--js。"""
-        cmd = [sys.executable, 'manage.py', 'drive']
+        cmd = [self._car_python(), 'manage.py', 'drive']
         if args.model:
             cmd.extend(['--model', args.model])
         if args.type:

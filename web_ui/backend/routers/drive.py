@@ -331,6 +331,12 @@ def _model_type_for_path(model_path: str) -> Optional[str]:
         return "tflite_linear"
     if suffix == ".trt":
         return "tensorrt_linear"
+    if suffix == ".aidem":
+        # AIMO 转出的 QNN context binary（NPU），行为克隆 linear 结构
+        return "aidlite_linear"
+    if suffix == ".ckpt":
+        # PyTorch 训练产物（CPU 推理，无 TF 依赖）
+        return "torch_linear"
     return None
 
 

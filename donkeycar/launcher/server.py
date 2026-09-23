@@ -36,6 +36,7 @@ from donkeycar.webui_instance import (
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
+    select_car_python,
 )
 
 
@@ -276,7 +277,7 @@ def _launch_drive():
                     frontend_port = backend_port
 
         # 构建 car 命令（DRIVE_API_SERVER_URL 用实际后端端口）
-        car_cmd = [sys.executable, "manage.py", "drive"]
+        car_cmd = [select_car_python(), "manage.py", "drive"]
 
         # issue #003：附加 web_ui 选定的自动驾驶模型（持久化于
         # ~/.donkeycar/drive_model.json）；记录指向的文件已不存在时
@@ -309,7 +310,7 @@ def _launch_drive():
         except FileNotFoundError:
             return {
                 "status": "error",
-                "error": f"未找到 {sys.executable}，无法启动车进程",
+                "error": f"未找到 {car_cmd[0]}，无法启动车进程",
             }
         except Exception as e:
             return {

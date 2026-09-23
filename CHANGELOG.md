@@ -1,5 +1,22 @@
 # 变更日志
 
+## 2026-09-22 (229)
+
+- feat(drive): 接入 Qualcomm QCS6490 NPU 推理（AidLite/QNN240）——`aidlite_linear` 模型类型，AIMO 云转换产物（`*.ctx.bin.aidem` + 同目录 `qnn_model_info.json`）可直接经 Web 端热加载上车，invoke 实测 ~0.8ms（CPU TFLite 3.8ms，5×+）
+  - 新增 `donkeycar/parts/npu_pilot.py`（不依赖 TensorFlow）：`AidLite` 解释器（TYPE_QNN240+TYPE_DSP，形状读 `qnn_model_info.json`，锁内 invoke/destroy 防热加载竞态，`_quiet_c` 吞插件 printf 噪声）+ `NpuLinearPilot`（run(uint8 RGB)→(angle,throttle)，`normalize_image` 与 KerasPilot 同源）；aidlite 在 `load()` 惰性导入，原 .venv（无 aidlite）仅构建不加载不报错。
+  - `utils.get_model_by_type` 新增 `aidlite_` 前缀分支，在 `import keras` 之前早退返回（车端 python 无 TF 也能跑 NPU 路径）；`aidlite_` 仅支持 linear。
+  - `complete.py`：`_full_model_exts` 加 `.aidem`；新增 `_model_type_for_model_file()`，`--model`/磁盘恢复（selected_model.json）且未显式 `--type` 时按扩展名推导解释器（`.tflite`→tflite_linear、`.trt`→tensorrt_linear、`.aidem`→aidlite_linear，与后端映射一致），TRAIN_LOCALIZER/BEHAVIORS 优先级不变；已同步 `~/projects/mycar/manage.py`。
+  - 后端 `routers/drive.py _model_type_for_path` 加 `.aidem`→`aidlite_linear`，Web 选 NPU 模型热加载时下发正确 model_type；`routers/trainer.py list_models` 扩展名过滤加 `.aidem`（该接口被 Drive 页用作模型列表，且只扫 models/ 顶层）。
+  - 运行环境：车端 NPU 模型必须跑在 `.venv-npu`（本仓库内，python3.12 + --system-site-packages：aidlite 来自系统 dist-packages，补装 prettytable/tornado/docopt/utm/paho-mqtt/simple_pid/pynmea2/gymnasium，`site-packages/donkeydrift-npu.pth` 指向仓库与 gym-donkeycar）。启动：`.venv-npu/bin/python manage.py drive`（cwd ~/projects/mycar）。aidlite 的 .so 是 cpython-312 专用，原 3.11 venv 无法支持。
+  - 模型部署：`~/projects/mycar/models/` 顶层（`Sim01_qcs6490_w8a8.qnn240.ctx.bin.aidem` + `qnn_model_info.json`；Drive 页模型列表来自 trainer `/models` 接口，只认 models/ 顶层且按扩展名过滤，故必须平铺）。产物源包在 `~/projects/mycar/Sim01_qcs6490_npu/`（含 `npu_infer.py` 单图/视频/摄像头推理脚本）。
+  - AidLux 官方监控固化：`sys-mon`（AidLux 桌面「资源监控」应用后端，Go 采集器含 NPU 占用，`/opt/aidlux/app/sys-mon/`）镜像自带但未注册 systemd。新增 `/etc/systemd/system/sys-mon.service`（修正 ExecStart 路径到 app 目录，Restart=always），`enable --now` 已跑通（127.0.0.1:59090，SPA 200、指标采集日志滚动中）；桌面入口 `http://<板子IP>:8000` → 资源监控。
+  - 验证：PilotHolder 热加载链路实跑（加载 0.56s，angle/throttle 与独立脚本逐位一致，二次 load 热切换 + shutdown 正常，run() 含归一化 ~1.06ms）；venv 3.11 回归（模块导入与 pilot 构建不依赖 aidlite）通过。
+- fix(drive): 车进程自动切换 NPU 环境 + 去 TF 运行时——修「热加载 aidlite 失败：No module named 'aidlite'」：`donkey drive` 拉起的车进程此前固定用 `sys.executable`（用户从 3.11 venv 启动 → 车进程无 aidlite）。三处联动：
+  - `management/base.py` 新增 `_car_python()`：车进程解释器优先用仓库 `.venv-npu/bin/python`（aidlite 唯一所在），`DONKEY_CAR_PYTHON` 环境变量可覆盖，找不到则回退 `sys.executable` 保持原行为；`_build_car_command` 改用它。TUI/Web 等一切经 `donkey drive` 的启动路径均覆盖。
+  - `parts/npu_pilot.py` 升级双后端：`AidLite` 基类按 mode 分派——`.aidem`→QNN240/DSP（NPU），新增 `AidLiteTflite`（`.tflite`→aidlite 内建 TFLite/CPU 后端，无需系统 TensorFlow，形状由构造方按 cfg.IMAGE_* 给定）；tflite 后端推理期也走 `_quiet_c` 吞插件噪声。
+  - `utils.get_model_by_type` 新增 `_tf_available()` 探测（缓存）：无 TF 运行时下 `tflite_linear` 回退 `NpuLinearPilot + AidLiteTflite`（仍支持 linear），有 TF 时保持原生 `KerasLinear + TfLite` 不变——车进程 3.12 下启动即载 `Sim01.tflite`（selected_model.json）与热加载 `.aidem` 均无 TF 依赖。
+  - 验证：venv-npu 下 `tflite_linear`→`AidLite[TFLite/CPU]`，加载 Sim01.tflite 推理正常（run() ~4.5ms，与 report.md CPU 口径一致），NPU 输出逐位不变；3.11 下 `tflite_linear`→`KerasLinear/TfLite` 原路径回归通过；`_car_python()` 默认选 `.venv-npu`、环境变量覆盖生效。
+
 ## 2026-09-21 (228)
 
 - feat(arena,drive): 移植 beta 分支独有功能——Pilot Arena 贴合摘要与推理缓存、遥测 numpy 序列化防护（beta 废弃前的选择性集成）
