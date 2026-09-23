@@ -26,6 +26,7 @@ from donkeycar.webui_instance import (
     write_drive_pids,
     remove_drive_pid_file,
     select_car_python,
+    select_backend_python,
 )
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -983,6 +984,26 @@ class Web(BaseCommand):
             # 仅当登记仍属于本进程时清除，避免误删他人后来的登记
             remove_instance(only_pid=my_pid)
 
+    def _backend_python(self) -> str:
+        """web 后端（uvicorn）解释器：优先 .venv-npu——Arena 的 pilot 加载推理
+        跑在 uvicorn 进程内，依赖 aidlite（只装在系统 python3.12）。但候选
+        解释器须能跑后端（fastapi/uvicorn/multipart/websockets 齐全），探测
+        不通过则退回 sys.executable 保持原行为（此时 Arena 的 .aidem 推理
+        不可用，其余功能不受影响）。"""
+        candidate = select_backend_python()
+        if candidate == sys.executable:
+            return sys.executable
+        probe = subprocess.run(
+            [candidate, '-c', 'import fastapi, uvicorn, multipart, websockets'],
+            capture_output=True, timeout=60,
+        )
+        if probe.returncode == 0:
+            return candidate
+        print(f'警告: {candidate} 缺 web 后端依赖，回退 {sys.executable}'
+              f'（该解释器下 Arena 无法加载 .aidem NPU 模型；'
+              f'可对其运行 pip install -r web_ui/backend/requirements.txt 补齐）')
+        return sys.executable
+
     def _launch_web_ui(self, args):
         """解析 web_ui 路径、检查依赖、选择端口，并拉起前端+后端子进程。
 
@@ -1046,7 +1067,7 @@ class Web(BaseCommand):
             # 只适合前端开发调试，不适合日常使用（#135）。
             frontend_cmd = [npm_exe, 'run', 'dev', '--', '--host', '--port', str(frontend_port)]
             backend_cmd = [
-                sys.executable, '-m', 'uvicorn', 'main:app',
+                self._backend_python(), '-m', 'uvicorn', 'main:app',
                 '--host', str(args.backend_host),
                 '--port', str(backend_port),
                 '--reload',
@@ -1088,7 +1109,7 @@ class Web(BaseCommand):
                 raise SystemExit('前端生产构建失败，无法启动生产模式 Web UI')
 
         backend_cmd = [
-            sys.executable, '-m', 'uvicorn', 'main:app',
+            self._backend_python(), '-m', 'uvicorn', 'main:app',
             '--host', str(args.backend_host),
             '--port', str(backend_port),
             '--log-level', 'debug' if args.debug else 'warning',

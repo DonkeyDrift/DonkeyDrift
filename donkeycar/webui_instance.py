@@ -289,22 +289,48 @@ def kill_previous_car_processes(pid_file=None):
     remove_drive_pid_file(pid_file)
 
 
-# ── 车进程解释器选择 ────────────────────────────────────────────────
+# ── NPU 相关进程解释器选择 ──────────────────────────────────────────
+
+def _venv_npu_python() -> str:
+    """仓库 .venv-npu/bin/python 路径（aidlite 唯一所在，见 parts/npu_pilot.py）。"""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(repo_root, '.venv-npu', 'bin', 'python')
+
+
+def _prefer_venv_npu() -> str:
+    candidate = _venv_npu_python()
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return sys.executable
+
 
 def select_car_python() -> str:
     """车进程解释器选择：NPU 环境 .venv-npu 优先，DONKEY_CAR_PYTHON 可覆盖。
 
     车端 NPU(.aidem)与无 TF 的 .tflite 推理都依赖 aidlite——只存在于系统
-    python3.12（.venv-npu 挂系统站点包）；web/训练环境可以是任意 python。
-    供 base.py（donkey web/drive）、tui.py、launcher 三条拉车链路共用，
+    python3.12（.venv-npu 挂系统站点包）。
+    供 base.py（donkey drive）、tui.py、launcher 三条拉车链路共用，
     本模块仅依赖标准库，各链路均可安全导入。
     找不到 .venv-npu 时退回 sys.executable，保持原有行为。
     """
     override = os.environ.get('DONKEY_CAR_PYTHON', '').strip()
     if override:
         return override
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    candidate = os.path.join(repo_root, '.venv-npu', 'bin', 'python')
-    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-        return candidate
-    return sys.executable
+    return _prefer_venv_npu()
+
+
+def select_backend_python() -> str:
+    """web 后端（uvicorn）进程解释器选择：.venv-npu 优先，可被
+    DONKEY_BACKEND_PYTHON / DONKEY_CAR_PYTHON 覆盖。
+
+    Pilot Arena 的 pilot 加载与推理（routers/arena.py →
+    get_model_by_type('aidlite_linear') → parts/npu_pilot.py）跑在 uvicorn
+    进程内，同样依赖 aidlite——后端"可以是任意 python"的原假设随 Arena 支持
+    .aidem 失效。候选解释器能否跑后端（fastapi/uvicorn/multipart/websockets
+    是否齐全）由调用方探测，本函数只做路径选择。
+    """
+    for var in ('DONKEY_BACKEND_PYTHON', 'DONKEY_CAR_PYTHON'):
+        override = os.environ.get(var, '').strip()
+        if override:
+            return override
+    return _prefer_venv_npu()

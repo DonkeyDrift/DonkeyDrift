@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-23 (232)
+
+- fix(web): web 后端（uvicorn）自动切换 NPU 环境——修「Arena 加载 .aidem 报 import aidlite 失败」。Arena 的 pilot 加载推理跑在 uvicorn 进程内（`routers/arena.py` → `get_model_by_type('aidlite_linear')` → `npu_pilot`），而 `_launch_web_ui` 固定用 `sys.executable` 拉后端：用户从 3.11 venv 启动 `donkey web`/`donkey drive` → 后端无 aidlite（车进程早已修过同类问题，后端漏了）。三处联动：
+  - `webui_instance.py`：`select_car_python` 的路径逻辑抽为 `_venv_npu_python`/`_prefer_venv_npu` 共用；新增 `select_backend_python()`（`DONKEY_BACKEND_PYTHON` → `DONKEY_CAR_PYTHON` → `.venv-npu` → `sys.executable`），修正「web 端可以是任意 python」的过时假设。
+  - `management/base.py`：`Web` 类新增 `_backend_python()`——候选非当前解释器时子进程探测四个后端依赖（fastapi/uvicorn/multipart/websockets），不齐全则打印告警并回退 `sys.executable`（此时仅 Arena 的 .aidem 推理不可用，其余功能不变）；`_launch_web_ui` 的 dev/生产两处 uvicorn 拉起均改用它。
+  - 前端兜底（承接上条 231）：`PilotArenaPage` 模型类型下拉硬编码初始值补入 `aidlite_linear`（`/arena/model-types` 拉取前/失败时也可选 NPU 类型）。
+  - 验证：`pytest tests/test_webui_instance.py + web_ui/backend/tests` 587 过/2 跳（新增 6 用例：backend env 覆盖/回落 CAR 覆盖/.venv-npu 优先/候选缺失回退/当前解释器跳探测/探测失败回退告警）；按生产路径端到端实跑——`_backend_python()` 选中 `.venv-npu`，uvicorn 起后 model-types 含 `aidlite_linear`、经 API 加载 Sim01 `.aidem` 成功、卸载释放解释器正常。
+
 ## 2026-09-23 (231)
 
 - feat(arena): Pilot Arena 支持 `.aidem` NPU 模型的扫描与推理（AidLite/QNN240）
