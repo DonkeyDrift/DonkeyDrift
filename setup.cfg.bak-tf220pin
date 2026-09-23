@@ -57,9 +57,7 @@ install_requires =
 
 [options.extras_require]
 pc =
-    # 上限锁在 2.20 以下: TF 2.20 的新 tflite 解释器不再支持 Flex(SELECT_TF_OPS) 算子,
-    # LSTM / 3D-CNN 模型转换后推理会 RuntimeError(FlexTensorListReserve). 见 MIGRATION-py312.md
-    tensorflow>=2.19,<2.20
+    tensorflow>=2.16,<2.22
     tf-keras
     matplotlib
     kivy
