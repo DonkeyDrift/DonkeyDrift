@@ -1,12 +1,32 @@
 # 变更日志
 
-## 2026-09-25 (238)
+## 2026-09-25 (240)
 
 - fix(drive): 修复车端 WebSocket 断开回调竞态——旧连接断开无条件清空 `car_ws`，新连接在线时页面无画面
   - 根因（线上复现）：车端重连后新连接接管 `car_ws` 注册，旧连接（已被服务端 close 或延迟感知断开）的 `except` 分支仍会无条件 `drive_state.car_ws = None`，把新连接的注册清掉。此后 `send_to_car` 全部失败：WebRTC offer 无法转发到车端、协商永远完不成（`/api/drive/webrtc/stats` 表现为 `last_answer_at: null`、`car_ws_connected: false` 但帧仍在流入），DD 驾驶页表现为「车端在线却始终无画面」。
   - `web_ui/backend/routers/drive.py`：车端连接断开分支改为仅当 `drive_state.car_ws is websocket`（断开的仍是当前注册连接）时才清除注册并广播 `car_connection offline`；新连接已接管时不再误清、不再误广播离线。
   - 测试：`web_ui/backend/tests/test_drive.py` 新增 `test_stale_car_disconnect_keeps_new_registration`（新连接接管后主动断开旧连接，断言 `car_ws` 注册仍在且 `send_to_car` 成功）——修复前该用例稳定失败、修复后通过；`test_drive.py` 32 项与 `test_drive_telemetry_forward.py` 2 项全绿。
   - 注：后端运行时改动，已部署本机 8000 在线实例；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (239)
+
+- fix(tests): 修复 `PilotArenaPage.test.tsx` 一处 TS 类型错误导致的 `npm run build` 红灯
+  - 根因：#437 一系合入 main 时带进的 `PilotArenaPage.test.tsx:314` 直接访问 `api.predictArenaPilot.mock.calls`——`api` 方法是真实类型签名（非 `vi.fn`），TS 报 `Property 'mock' does not exist`，`tsc -b` 阶段整体失败，阻塞前端构建/部署（vitest 运行不受影响，故测试全绿但 build 挂）。
+  - 修复：改为 `vi.mocked(api.predictArenaPilot).mock.calls.length`，与文件内其余 9 处 `vi.mocked` 用法一致。
+  - 测试：该文件 vitest 6 项全过；`npm run build`（tsc -b + vite build）恢复通过。
+  - 注：仅测试文件一处类型修正，无运行时影响；无需单独本机部署（随下次 8000 部署一并生效），Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (238)
+
+- feat(ui): 恢复 Drive 页标题悬停淡入灰色副标题机制，全站卡片标题统一接入
+  - 背景：Apple 风格改版（#437 一系）中 `SectionCardTitle` 的悬停副标题机制被整体移除，用户发现「进入驾驶页后把光标放到卡片标题上不再弹出灰色介绍」。本条目恢复该机制并把各卡片副标题重新接回。
+  - `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：恢复 0784d454^ 的悬停版本——容器 `group`，副标题 `max-w-0 opacity-0` + `group-hover` 淡入（`transition-all duration-300`，与 TubLibrary 基准实现一致）；新增 `subtitleMarquee` 变体，宽度受限处（虚拟摇杆）副标题以 `marquee-x` 跑马灯循环展示完整文案。
+  - `web_ui/frontend/src/index.css`：补 `marquee-x` keyframes。
+  - 接线：DrivePage 虚拟摇杆卡片 `drive.virtualJoystickSubtitle`（+跑马灯）、SimCollectCard `drive.simCollectHint`、DriftCard `drive.driftSubtitle`、TubLibrary `tubLibrary.subtitle`；`i18n/messages/drive.ts`、`i18n/messages/tublibrary.ts` 增补对应中英词条。
+  - 测试：`npm ci` 后 vitest 全量 48 文件 305 项全过；`npm run build` 通过。
+  - 注：影响本机可见效果，合入后按惯例部署 8000；Firmware 无改动、无需 OTA。
+
+>>>>>>> origin/Tony
 ## 2026-09-25 (237)
 
 - docs(readme): 对外材料刷新——README zsh 举例纠错、俯拍章节状态对齐交接文档
