@@ -16,8 +16,11 @@ def _isolate_process_registry(monkeypatch):
     """
     monkeypatch.setattr(tui, "find_live_instance", lambda: None)
     monkeypatch.setattr(tui, "kill_previous_car_processes", lambda: None)
+    monkeypatch.setattr(tui, "takeover_car_processes", lambda: None)
     monkeypatch.setattr(tui, "write_drive_pids", lambda pids: None)
     monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
+    # 局域网探测在测试环境不确定，默认固定 localhost；LAN 行为有专测
+    monkeypatch.setattr(tui, "_lan_host", lambda: "localhost")
 
 
 class FakeProcess:
@@ -324,3 +327,66 @@ def test_drive_command_respects_user_drive_web_console_url(monkeypatch, tmp_path
 
     _, car_kwargs = popen_calls[0]
     assert car_kwargs["env"]["DRIVE_WEB_CONSOLE_URL"] == "http://192.0.2.10:8000"
+
+
+def test_drive_command_uses_lan_ip_for_remote_terminal(monkeypatch, tmp_path):
+    """局域网探测有结果时：Drive 页面地址与车进程提示 URL 都用局域网 IP。"""
+    popen_calls = []
+    opened_urls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    inst = {"pid": 4242, "backend_port": 8000, "frontend_port": 8000}
+    monkeypatch.setattr(tui, "find_live_instance", lambda: dict(inst))
+    monkeypatch.setattr(tui, "_lan_host", lambda: "192.168.3.103")
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(tui.webbrowser, "open", opened_urls.append)
+    monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
+    monkeypatch.delenv("DRIVE_API_PUBLIC_HOST", raising=False)
+    monkeypatch.delenv("DRIVE_WEB_CONSOLE_URL", raising=False)
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(tui.DriveCommand, "monitor_processes", lambda self, w, c: None)
+
+    tui.DriveCommand().execute()
+
+    _, car_kwargs = popen_calls[0]
+    assert car_kwargs["env"]["DRIVE_WEB_CONSOLE_URL"] == "http://192.168.3.103:8000"
+    assert opened_urls == ["http://192.168.3.103:8000/#/drive"]
+
+
+def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path):
+    """执行前调用接管清理（takeover_car_processes），杀掉其它在跑车进程。"""
+    popen_calls = []
+    prompts = iter(["y", ""])
+    takeover_calls = []
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(
+        tui, "takeover_car_processes",
+        lambda: takeover_calls.append("called") or [171399])
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+
+    tui.DriveCommand().execute()
+
+    assert takeover_calls == ["called"]

@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-25 (250)
+
+- feat(tui): Drive 一键接管——启动前全量杀掉其它车进程 + Drive 页面地址改用局域网 IP
+  - 背景：用户在 DC（Drifter Console）远程终端里跑 `donkey` → 6（Drive）期望"杀掉其它 donkey 进程让自己正常运行、并自动打开 `http://<局域网IP>:8000/#/drive`"，但旧行为只按 PID 文件清理上一次车进程（其它链路启动的 drive 存活时会被单实例守护拒绝），且复用实例打开的 URL 是 `localhost`（远程浏览器打不开）。
+  - `donkeycar/webui_instance.py`：新增 `find_car_processes()`（扫 `/proc` 按 cmdline 找所有 `manage.py drive`，支持 `exclude_pids` 与 `proc_dir` 注入）与 `takeover_car_processes()`（对全部在跑车进程先 SIGTERM、等 1s 后兜底 SIGKILL，供新 drive 接管；web 前后端与 launcher 不在清理之列）。
+  - `donkeycar/management/tui.py`：DriveCommand 执行前在 `kill_previous_car_processes()` 之后追加 `takeover_car_processes()`；新增 `_lan_host()`（UDP connect 探测局域网 IP，失败回落 localhost）；复用实例的 Drive URL 与车进程 `DRIVE_WEB_CONSOLE_URL` 默认值均改用局域网 IP，新起实例时 TUI 也打印局域网 Drive 地址（新实例本机浏览器仍由 `donkey web --open` 打开）。
+  - 测试：`tests/test_webui_instance.py` 新增 4 项（扫描过滤/exclude、proc 目录缺失容错、TERM→KILL 顺序、无目标不发信号）；`donkeycar/tests/test_tui_drive.py` 新增 2 项（局域网 IP 地址与车进程环境变量、接管调用发生），autouse 隔离夹具同步补 `takeover_car_processes` 与 `_lan_host` 桩；`test_webui_instance.py`+`test_tui_drive.py`+`test_launcher_drive_launch.py`+`test_web_command.py` 共 73 项全绿。
+  - 注：纯 Python 侧改动，随 launcher/新 TUI 会话生效，合入后部署本机；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (249)
 
 - fix(tub): 统一 TM 页「录制视频库」与「Tub 编辑器」总帧数口径——以有效帧为准并显式标注物理/已删帧数

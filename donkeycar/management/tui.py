@@ -43,8 +43,29 @@ from donkeycar.webui_instance import (
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
+    takeover_car_processes,
     select_car_python,
 )
+
+
+def _lan_host():
+    """探测本机局域网 IP（UDP connect 无真实流量）；失败或仅回环时返回 localhost。
+
+    供 Drive 页面地址使用：在 DC/SSH 等远程终端里，localhost 打不开、
+    用户需要可点击的局域网地址。
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("192.0.0.8", 1027))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        if ip and not ip.startswith("127."):
+            return ip
+    except OSError:
+        pass
+    return "localhost"
 
 # 初始化 Console
 console = Console()
@@ -1272,6 +1293,9 @@ class DriveCommand(DonkeyCommand):
 
         # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
         kill_previous_car_processes()
+        # 接管模式：全量杀掉其它在跑的车进程（含别的链路启动的），确保本次
+        # drive 不被单实例守护拒绝、能正常运行
+        takeover_car_processes()
 
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")
@@ -1300,10 +1324,11 @@ class DriveCommand(DonkeyCommand):
             car_env = os.environ.copy()
             car_env["DRIVE_API_SERVER_URL"] = \
                 self.get_drive_api_server_url(backend_port=backend_port)
-            # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口
-            #（DriveApiBridge 未设置时硬编码回落 5188）；用户已显式设置时尊重其值
+            # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口；
+            # 用局域网 IP，远程终端（DC/SSH）用户可直接点击（用户已显式设置时尊重其值）
+            #（DriveApiBridge 未设置时硬编码回落 5188）
             car_env.setdefault(
-                "DRIVE_WEB_CONSOLE_URL", f"http://localhost:{frontend_port}"
+                "DRIVE_WEB_CONSOLE_URL", f"http://{_lan_host()}:{frontend_port}"
             )
             car_process = subprocess.Popen(
                 car_cmd,
@@ -1317,12 +1342,20 @@ class DriveCommand(DonkeyCommand):
             # 记录本次启动的进程 PID，供下次启动时清理
             write_drive_pids([p.pid for p in processes])
 
+            # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开
+            drive_url = f"http://{_lan_host()}:{frontend_port}/#/drive"
             if inst is not None:
                 # 复用实例不经过 `donkey web --open`，由 TUI 直接打开 Drive 页；
                 # 实例刚通过 find_live_instance() 探测，前端端口已在监听
-                drive_url = f"http://localhost:{frontend_port}/#/drive"
                 webbrowser.open(drive_url)
                 console.print(f"[dim]已在浏览器打开 {drive_url}[/dim]")
+            else:
+                # 新起实例由 `donkey web --open` 在本机打开；远程终端用户请在
+                # 自己的浏览器打开下面的局域网地址
+                console.print(
+                    f"\n[bold green]Drive 页面: {drive_url}[/bold green] "
+                    "[dim]（远程终端请在自己的浏览器打开此地址）[/dim]"
+                )
 
             self.monitor_processes(web_process, car_process)
             console.print(f"\n[bold green]✓ 执行结束[/bold green]")
