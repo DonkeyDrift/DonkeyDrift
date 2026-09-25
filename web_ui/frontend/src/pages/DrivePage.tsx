@@ -16,6 +16,7 @@ import { GamepadConfigPanel } from '../components/drive/GamepadConfigPanel';
 import { ModelSelector } from '../components/drive/ModelSelector';
 import { SimCollectCard } from '../components/drive/SimCollectCard';
 import { DriftCard } from '../components/drive/DriftCard';
+import { DriveTargetCard, type DriveTarget } from '../components/drive/DriveTargetCard';
 import { useDriveStore } from '../store/useDriveStore';
 import { useGamepadStore } from '../store/useGamepadStore';
 import { useStore } from '../store/useStore';
@@ -63,6 +64,14 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [rcMode, setRcMode] = useState<number | null>(null);
   const [rcPark, setRcPark] = useState<number | null>(null);
   const [simConnected, setSimConnected] = useState(true);
+  // 驾驶目标派生用的一次性标记：见过 sim_connected 遥测 → 模拟器；见过 rc_mode → 真车。
+  // 用 ref 守门、只在 false→true 时 setState，避免 100Hz 遥测引发高频重渲染。
+  const seenSimTelemetryRef = useRef(false);
+  const seenRcTelemetryRef = useRef(false);
+  const [seenSimTelemetry, setSeenSimTelemetry] = useState(false);
+  const [seenRcTelemetry, setSeenRcTelemetry] = useState(false);
+  // 手动选择的驾驶目标（DriveTargetCard 保存成功后设置，优先于遥测/配置派生）
+  const [manualTarget, setManualTarget] = useState<'car' | 'sim' | null>(null);
 
   const handleTelemetry = useCallback((t: Telemetry) => {
     useTelemetryStore.getState().push(t);
@@ -78,12 +87,22 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       lastRcModeRef.current = t.rc_mode;
       setRcMode(t.rc_mode);
     }
+    // 一次性标记：含 rc_mode 字段即真车遥测（仅首次落 state）
+    if (typeof t.rc_mode === 'number' && !seenRcTelemetryRef.current) {
+      seenRcTelemetryRef.current = true;
+      setSeenRcTelemetry(true);
+    }
     if (typeof t.rc_park === 'number' && t.rc_park !== lastRcParkRef.current) {
       lastRcParkRef.current = t.rc_park;
       setRcPark(t.rc_park);
     }
     if (typeof t.sim_connected === 'boolean') {
       setSimConnected(t.sim_connected);
+      // 一次性标记：含 sim_connected 字段即模拟器遥测（仅首次落 state）
+      if (!seenSimTelemetryRef.current) {
+        seenSimTelemetryRef.current = true;
+        setSeenSimTelemetry(true);
+      }
     }
   }, []);
 
@@ -208,7 +227,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   }, []);
 
   const { params, loadFromServer } = useDriveStore();
-  const { configPath } = useStore();
+  const { config, configPath } = useStore();
 
   // 页面加载时从服务端拉取参数
   useEffect(() => {
@@ -428,10 +447,28 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     return `${min}:${sec.toString().padStart(2, '0')}`;
   };
 
+  // 驾驶目标派生：手动选择优先；其次按已见遥测（sim_connected → 模拟器，
+  // rc_mode → 真车）；都没有则退回配置里的 DONKEY_GYM，配置未加载为 unknown。
+  const driveTarget: DriveTarget = manualTarget
+    ?? (seenSimTelemetry
+      ? 'sim'
+      : seenRcTelemetry
+        ? 'car'
+        : (typeof config?.DONKEY_GYM === 'boolean'
+          ? (config.DONKEY_GYM ? 'sim' : 'car')
+          : 'unknown'));
+
   return (
     <div className="space-y-4">
-      <DriftCard />
-      <SimCollectCard />
+      <DriveTargetCard
+        target={driveTarget}
+        carOnline={carState.online}
+        simConnected={simConnected}
+        onSelectTarget={setManualTarget}
+      />
+      {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
+      {driveTarget !== 'sim' && <DriftCard />}
+      {driveTarget !== 'car' && <SimCollectCard />}
       {/* 视频 + 遥测 | 右侧抽屉：任何屏宽保持左右并排，抽屉右缘常驻、随宽度连续缩放（008）；
           窄屏抽屉转悬浮半透明浮层，不再折叠到视频下方 */}
       <div ref={dockRowRef} className="relative flex flex-row items-start gap-3">

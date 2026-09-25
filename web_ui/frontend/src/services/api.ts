@@ -756,6 +756,27 @@ export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKim
   return response.data as LaunchKimiCodeWebResult;
 };
 
+export interface RestartDrivingResult {
+  // 与 launcher（:8090）_launch_drive 返回一致：成功 {status:'launched', url, ...}，
+  // 失败 {status:'error', error}；warning 为启动就绪探测超时等非致命提示
+  status: string;
+  url?: string;
+  warning?: string | null;
+  error?: string;
+}
+
+export const restartDriving = async (signal?: AbortSignal): Promise<RestartDrivingResult> => {
+  // 转发到 launcher 的 /api/launch/drive：先杀旧 manage.py drive 再按最新
+  // myconfig.py 重启（驾驶目标切换保存后调用）。validateStatus 全放行：
+  // launcher 的业务错误（非 200）同样带 JSON {status, error} 体，
+  // 交给调用方按 status 判断，不按 HTTP 状态码抛异常。
+  const response = await api.post('/launch/drive', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as RestartDrivingResult;
+};
+
 export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
   // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
   // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。
