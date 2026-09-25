@@ -111,6 +111,9 @@ var lastSid=null;
 var retries=0;
 var reconnectTimer=null;
 var exited=false;
+// 主动关闭标志：pagehide（标签页/iframe 关闭、整页刷新）时置位，抑制
+// 断线自动重连与重连 overlay——服务端已收到销毁通知，重连只会白开新会话
+var intentionallyClosed=false;
 
 // ?cmd=<...> 自动执行（launcher 菜单 8/9/10 新标签打开时带上的首行命令）：
 // 连上 WebSocket 发完 hello 后，把解码后的命令作为输入发送（含换行触发执行），
@@ -300,7 +303,7 @@ function connect(){
   // shell 已退出（exit 帧）时不再重连
   ws.onclose=function(){
     clearTimeout(connectTimer);
-    if(exited)return;
+    if(exited||intentionallyClosed)return;
     scheduleReconnect();
   };
   ws.onerror=function(){/* onclose 随后触发，统一在那里处理 */};
@@ -323,6 +326,20 @@ function retryNow(){
 }
 document.addEventListener('visibilitychange',function(){if(!document.hidden)retryNow();});
 window.addEventListener('online',retryNow);
+
+// 标签页/iframe 关闭、整页刷新（pagehide）：立即通知服务端销毁会话（杀 bash
+// 及其运行的进程），不再等 15 分钟宽限期——宽限期只面向网络闪断/锁屏这类
+// 异常断线（issue #173）。sendBeacon 在页面卸载过程中也能可靠发出；服务端
+// WS close 帧路径是浏览器未发 beacon 时的兜底。event.persisted=true（页面
+// 进入 bfcache 并未销毁）时跳过，避免浏览器前进/后退误杀会话。
+window.addEventListener('pagehide',function(event){
+  if(event.persisted)return;
+  intentionallyClosed=true;
+  if(reconnectTimer!==null){clearTimeout(reconnectTimer);reconnectTimer=null;}
+  if(lastSid){
+    try{navigator.sendBeacon('/terminal/kill?session='+encodeURIComponent(lastSid));}catch(e){}
+  }
+});
 
 // 尺寸变化：iframe 尺寸变化会触发 window resize；ResizeObserver 更稳
 var pendingResize=false;

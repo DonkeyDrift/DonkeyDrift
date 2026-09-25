@@ -97,6 +97,69 @@ def test_catalog_endpoint_returns_harnesses(hu):
     assert len(data["harnesses"]) == 4
 
 
+def test_catalog_merges_persisted_update_info(hu, monkeypatch):
+    """目录应合并最近一次检查的可更新信息（按 harness_id/component_id 匹配）。"""
+    monkeypatch.setattr(
+        hu,
+        "detect_component",
+        lambda component: {"installed": True, "version": "1.2.3", "path": "/usr/bin/x"},
+    )
+    hu.save_state(
+        {
+            "updates": [
+                {
+                    "kind": "harness",
+                    "harness_id": "codex",
+                    "component_id": "codex-cli",
+                    "installed_version": "1.2.3",
+                    "latest_version": "1.3.0",
+                    "updateable": True,
+                },
+                # 非 harness 项不参与组件匹配
+                {"kind": "project", "id": "donkeydrift", "updateable": True},
+            ]
+        }
+    )
+    cat = hu._catalog_status()
+    codex = next(h for h in cat if h["id"] == "codex")
+    cli = next(c for c in codex["components"] if c["id"] == "codex-cli")
+    assert cli["latest_version"] == "1.3.0"
+    assert cli["update_available"] is True
+    # 无检查记录的组件：null / false
+    desktop = next(c for c in codex["components"] if c["id"] == "chatgpt-desktop")
+    assert desktop["latest_version"] is None
+    assert desktop["update_available"] is False
+
+
+def test_catalog_update_info_defaults_without_state(hu, monkeypatch):
+    """从未检查过（无持久化状态）时按无更新处理：latest_version=None / update_available=False。"""
+    monkeypatch.setattr(
+        hu,
+        "detect_component",
+        lambda component: {"installed": True, "version": "1.2.3", "path": "/usr/bin/x"},
+    )
+    cat = hu._catalog_status()
+    for h in cat:
+        for c in h["components"]:
+            assert c["latest_version"] is None
+            assert c["update_available"] is False
+
+
+def test_catalog_update_info_tolerates_corrupt_state(hu, monkeypatch):
+    """状态文件损坏时目录构建容错降级为无更新信息，不抛异常。"""
+    monkeypatch.setattr(
+        hu,
+        "detect_component",
+        lambda component: {"installed": True, "version": "1.2.3", "path": "/usr/bin/x"},
+    )
+    hu.STATE_PATH.write_text("not-json", encoding="utf-8")
+    cat = hu._catalog_status()
+    for h in cat:
+        for c in h["components"]:
+            assert c["latest_version"] is None
+            assert c["update_available"] is False
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 下载 URL 解析（mock 网络）
 # ─────────────────────────────────────────────────────────────────────────

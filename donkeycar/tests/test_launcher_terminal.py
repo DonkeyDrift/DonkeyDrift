@@ -13,6 +13,9 @@
 - 会话保持与重连（issue #173）：连接断开后 PTY 会话进入宽限期不销毁，
   ?session=<sid> 重连接回原会话并补发断线期间的输出；宽限期耗尽后由
   清扫线程销毁
+- 主动关闭立即销毁：客户端 close 帧（标签页/iframe 关闭）立即销毁会话、
+  杀掉 bash，重连接不回；/terminal/kill HTTP 端点（终端页 pagehide 的
+  sendBeacon 通道）命中 200 销毁、未命中/重复 404，GET/POST 均支持
 """
 
 import json
@@ -93,6 +96,30 @@ def _wait_until(predicate, timeout=10.0, interval=0.05):
             return True
         time.sleep(interval)
     return False
+
+
+def _proc_sigmasks(pid):
+    """读 /proc/<pid>/status 的 SigIgn/SigCgt 掩码；进程不在返回 None。"""
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            ign = cgt = None
+            for line in f:
+                if line.startswith("SigIgn:"):
+                    ign = int(line.split()[1], 16)
+                elif line.startswith("SigCgt:"):
+                    cgt = int(line.split()[1], 16)
+            return ign, cgt
+    except OSError:
+        return None
+
+
+def _foreground_children(pid):
+    """经 /proc/<pid>/task/<pid>/children 列出直接子进程。"""
+    try:
+        with open(f"/proc/{pid}/task/{pid}/children") as f:
+            return [int(x) for x in f.read().split()]
+    except OSError:
+        return []
 
 
 @pytest.fixture
@@ -181,12 +208,36 @@ def test_session_echo(session):
 def test_session_ctrl_c_interrupts_foreground_process(session):
     """Ctrl-C（\\x03）必须能打断前台进程——验证控制终端设置正确。"""
     sess, writer = session
-    sess.on_input(b"sleep 30\n")
-    time.sleep(0.5)
+    # 让前台子进程自报启动再发 Ctrl-C：固定 sleep(0.5) 在高负载下可能赶在
+    # sleep 尚未成为前台进程时送达 \x03（SIGINT 落到 bash 头上被吞），
+    # 自报启动可消除这类时序误报。
+    sess.on_input(b"sh -c 'echo started-$((6*7)); exec sleep 30'\n")
+    assert _wait_until(lambda: b"started-42" in writer.output())
+    # 补发 Ctrl-C（每次间隔 1s，最多 12 次）：覆盖 SIGINT 落在 bash fork 子
+    # 进程与 tcsetpgrp 之间的微秒竞态窗口。echo 先入队（sleep 不读 stdin，
+    # 排队无害），sleep 一死立即执行。补发无副作用（SIGINT 只投给前台组，
+    # 前台已死即空操作）。
+    # 历史根因注记（已修复，见 terminal.py _become_tty_leader）：宿主进程以
+    # nohup/非交互 shell 后台方式启动时会带着 SIGINT=SIG_IGN，忽略位跨
+    # fork+exec 继承到 sleep，补发再多也无效；测试进程自身如此启动时，
+    # TerminalSession 子进程复位信号处置保证了本用例仍能通过。
     sess.on_input(b"\x03")
-    time.sleep(0.3)
     sess.on_input(b"echo alive-$((6*7))\n")
-    assert _wait_until(lambda: b"alive-42" in writer.output())
+    for _ in range(12):
+        if _wait_until(lambda: b"alive-42" in writer.output(), timeout=1.0):
+            break
+        sess.on_input(b"\x03")
+    ok = _wait_until(lambda: b"alive-42" in writer.output())
+    if not ok:
+        # 现场取证：打印 pytest 进程与 bash/前台子进程的信号处置，用于
+        # 判定 Ctrl-C 失效根因（SIGINT 是否被继承性忽略：SigIgn 位 0x2）
+        import signal as _signal
+        print(f"DIAG pytest SIGINT disposition: {_signal.getsignal(_signal.SIGINT)!r}")
+        shell_pid = sess._proc.pid
+        print(f"DIAG shell pid={shell_pid} masks={_proc_sigmasks(shell_pid)}")
+        for child in _foreground_children(shell_pid):
+            print(f"DIAG child pid={child} masks={_proc_sigmasks(child)}")
+    assert ok
 
 
 def test_session_resize(session):
@@ -383,6 +434,20 @@ def _read_json_control(sock_file, timeout=10.0):
     pytest.fail("超时未收到 text 控制帧")
 
 
+def _http_json(method, url, expected_code):
+    """发 HTTP 请求：校验状态码并返回解析后的 JSON 响应体。"""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == expected_code
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        assert e.code == expected_code
+        return json.loads(e.read().decode("utf-8"))
+
+
 def test_terminal_ws_idle_keeps_connection():
     """空闲（无任何客户端帧，含 PONG）不再判死断连（issue #173）。
 
@@ -546,6 +611,102 @@ def test_terminal_ws_grace_expiry_destroys_session(monkeypatch):
         time.sleep(0.3)
         terminal._sweep_once()
         assert terminal._sessions.get(sid) is None, "宽限期耗尽后会话未被销毁"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# ===========================================================================
+# 主动关闭立即销毁（标签页关闭即杀会话；宽限期只留给异常断线）
+# ===========================================================================
+def test_kill_session_destroys_session():
+    """kill_session 按 sid 立即销毁会话；幂等，空/不存在/已销毁返回 False。"""
+    sess = TerminalSession()
+    with terminal._sessions_lock:
+        terminal._sessions[sess.sid] = sess
+    assert terminal.kill_session(sess.sid) is True
+    assert sess._closed
+    assert terminal._sessions.get(sess.sid) is None
+    # 幂等：重复 kill、空 sid、不存在的 sid 均不命中
+    assert terminal.kill_session(sess.sid) is False
+    assert terminal.kill_session("") is False
+    assert terminal.kill_session("nonexistent") is False
+
+
+def test_terminal_ws_close_frame_destroys_session():
+    """客户端主动发 close 帧（标签页/iframe 关闭）：会话立即销毁，重连接不回。
+
+    与异常断线（裸断 TCP，走宽限期可接回，见 issue #173 用例）相对：主动
+    关闭不留宽限期，bash 及其运行的进程立即被杀。
+    """
+    server, sock, sock_file = _open_terminal_ws()
+    try:
+        sid = _read_json_control(sock_file)["id"]
+        # close → 服务端回应 close 帧，且会话被立即销毁（不进宽限期）
+        sock.sendall(_masked_client_frame(b"", OP_CLOSE))
+        while True:
+            opcode, _payload = _recv_server_frame(sock_file)
+            if opcode == OP_CLOSE:
+                break
+        assert _wait_until(lambda: terminal._sessions.get(sid) is None,
+                           timeout=5)
+        sock_file.close()
+        sock.close()
+        # 带旧 sid 重连：会话已销毁，应开全新会话（reattached=False、sid 不同）
+        server2, sock2, sock_file2 = None, None, None
+        try:
+            server2, sock2, sock_file2 = _open_terminal_ws(session_id=sid)
+            msg = _read_json_control(sock_file2)
+            assert msg["type"] == "session"
+            assert msg["reattached"] is False
+            assert msg["id"] != sid
+            # 显式销毁，避免宽限期里的会话泄漏到其他测试
+            with terminal._sessions_lock:
+                sess = terminal._sessions.get(msg["id"])
+            if sess:
+                sess.close()
+        finally:
+            if sock2:
+                sock2.close()
+            if server2:
+                server2.shutdown()
+                server2.server_close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_terminal_kill_endpoint():
+    """/terminal/kill?session=<sid>：命中 200 并销毁；未命中/重复 404。GET/POST 均支持。
+
+    POST 是终端页 pagehide 的 sendBeacon 通道；GET 留作 curl 手工验证。
+    """
+    from donkeycar.launcher.server import LauncherHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LauncherHandler)
+    server.daemon_threads = True
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        sess = TerminalSession()
+        with terminal._sessions_lock:
+            terminal._sessions[sess.sid] = sess
+        url = f"http://127.0.0.1:{port}/terminal/kill?session={sess.sid}"
+        # GET 命中：200，会话被立即销毁
+        body = _http_json("GET", url, 200)
+        assert body["status"] == "ok" and body["killed"] == sess.sid
+        assert sess._closed
+        assert terminal._sessions.get(sess.sid) is None
+        # 重复 kill：404（幂等）
+        assert _http_json("GET", url, 404)["status"] == "error"
+        # POST（sendBeacon 通道）对已销毁会话：404
+        assert _http_json("POST", url, 404)["status"] == "error"
+        # sid 缺失 / 不存在：404
+        _http_json("GET", f"http://127.0.0.1:{port}/terminal/kill", 404)
+        _http_json("POST",
+                   f"http://127.0.0.1:{port}/terminal/kill?session=nosuch",
+                   404)
     finally:
         server.shutdown()
         server.server_close()

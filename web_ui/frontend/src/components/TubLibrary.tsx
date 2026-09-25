@@ -635,6 +635,13 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
 
   const hasRecords = records.length > 0;
 
+  // 统一总帧数口径：列表头合计显示所有录制的有效帧之和（record_count 为迭代
+  // 跳过软删除后的有效帧数），与 Tub 编辑器的有效帧数对齐
+  const totalFrameCount = useMemo(
+    () => sessions.reduce((sum, s) => sum + s.record_count, 0),
+    [sessions],
+  );
+
   // Pinned clips float to the top; both groups keep the API's newest-first order
   const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
   const sortedSessions = useMemo(() => {
@@ -687,7 +694,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
             <div className="flex flex-col min-h-0 max-h-[520px]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-zinc-400">
-                  {t('tubLibrary.recordingsCount', { count: sessions.length })}
+                  {t('tubLibrary.recordingsSummary', {
+                    recordings: sessions.length,
+                    count: totalFrameCount,
+                  })}
                 </span>
               </div>
               {error && (

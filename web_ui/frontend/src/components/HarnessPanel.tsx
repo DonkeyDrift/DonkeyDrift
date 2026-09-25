@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ArrowUpCircle,
   Bot,
   CheckCircle2,
   Cloud,
@@ -38,7 +39,10 @@ const HARNESS_ICONS: Record<string, React.ReactNode> = {
   zcode: <Zap className="h-4 w-4" />,
 };
 
-type BusyKey = string | null;
+// 进行中的任务集合：下载/安装/更新按各自 key（组件 harness/component、更新项 kind/id）
+// 并发跟踪，互不打断；结果提示同样按 key 记录，避免新任务清空其它任务的提示。
+type BusySet = ReadonlySet<string>;
+type NoticeMap = Record<string, string>;
 
 /**
  * Harness 选择与下载 + 一键更新板块（Issue #404，与 #403 的 AiSettingsPanel 并列）。
@@ -51,8 +55,31 @@ export const HarnessPanel: React.FC = () => {
   const [catalog, setCatalog] = useState<HarnessCatalog | null>(null);
   const [status, setStatus] = useState<HarnessStatus | null>(null);
   const [checking, setChecking] = useState(false);
-  const [busy, setBusy] = useState<BusyKey>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<BusySet>(new Set());
+  const [notices, setNotices] = useState<NoticeMap>({});
+
+  // 任务开始：标记 busy 并清掉该任务上一次的结果提示（不影响其它任务）。
+  const startTask = useCallback((key: string) => {
+    setBusy((prev) => new Set(prev).add(key));
+    setNotices((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const stopTask = useCallback((key: string) => {
+    setBusy((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+
+  const setTaskNotice = useCallback((key: string, message: string) => {
+    setNotices((prev) => ({ ...prev, [key]: message }));
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -70,67 +97,68 @@ export const HarnessPanel: React.FC = () => {
 
   const runCheck = useCallback(async () => {
     setChecking(true);
-    setNotice(null);
+    startTask('check');
     try {
       await checkHarnessUpdates();
       await refresh();
     } catch {
-      setNotice(t('harness.checking') + ' ' + t('harness.manualInstallHint'));
+      setTaskNotice('check', t('harness.checking') + ' ' + t('harness.manualInstallHint'));
     } finally {
       setChecking(false);
+      stopTask('check');
     }
-  }, [refresh, t]);
+  }, [refresh, startTask, stopTask, setTaskNotice, t]);
 
   const download = useCallback(
     async (harnessId: string, componentId: string) => {
-      setBusy(harnessId + '/' + componentId);
-      setNotice(null);
+      const key = harnessId + '/' + componentId;
+      startTask(key);
       try {
         const result = await downloadHarness(harnessId, componentId);
         if (result.status === 'open_url' && result.url) {
           window.open(result.url, '_blank', 'noopener,noreferrer');
         }
-        setNotice(result.message);
+        setTaskNotice(key, result.message);
       } catch {
-        setNotice(t('harness.manualInstallHint'));
+        setTaskNotice(key, t('harness.manualInstallHint'));
       } finally {
-        setBusy(null);
+        stopTask(key);
       }
     },
-    [t],
+    [startTask, stopTask, setTaskNotice, t],
   );
 
   const install = useCallback(
     async (harnessId: string, componentId: string) => {
-      setBusy(harnessId + '/' + componentId);
-      setNotice(null);
+      const key = harnessId + '/' + componentId;
+      startTask(key);
       try {
         const result = await installHarness(harnessId, componentId);
         if (result.status === 'open_url' && result.url) {
           window.open(result.url, '_blank', 'noopener,noreferrer');
         }
-        setNotice(result.message);
+        setTaskNotice(key, result.message);
         await refresh();
       } catch {
-        setNotice(t('harness.manualInstallHint'));
+        setTaskNotice(key, t('harness.manualInstallHint'));
       } finally {
-        setBusy(null);
+        stopTask(key);
       }
     },
-    [refresh, t],
+    [refresh, startTask, stopTask, setTaskNotice, t],
   );
 
   const applyUpdate = useCallback(
     async (item: HarnessUpdateItem) => {
-      setBusy(item.kind + '/' + (item.id ?? item.component_id ?? ''));
-      setNotice(null);
+      const key = item.kind + '/' + (item.id ?? item.component_id ?? '');
+      startTask(key);
       try {
         if (item.kind === 'harness') {
           await installHarnessUpdate('harness', item.harness_id + '/' + item.component_id);
         } else if (item.kind === 'firmware') {
           const ip = item.vehicle_ip;
           if (!ip) {
-            setNotice(t('harness.firmware') + ': ' + t('harness.manualInstallHint'));
+            setTaskNotice(key, t('harness.firmware') + ': ' + t('harness.manualInstallHint'));
             return;
           }
           await flashFirmware(ip, item.asset ?? undefined);
@@ -139,12 +167,12 @@ export const HarnessPanel: React.FC = () => {
         }
         await refresh();
       } catch {
-        setNotice(t('harness.manualInstallHint'));
+        setTaskNotice(key, t('harness.manualInstallHint'));
       } finally {
-        setBusy(null);
+        stopTask(key);
       }
     },
-    [refresh, t],
+    [refresh, startTask, stopTask, setTaskNotice, t],
   );
 
   const lastCheckText = status?.last_check_at
@@ -206,10 +234,14 @@ export const HarnessPanel: React.FC = () => {
           )}
         </div>
 
-        {notice && (
-          <p className="text-xs text-cyan-200" data-testid="harness-notice">
-            {notice}
-          </p>
+        {Object.keys(notices).length > 0 && (
+          <div className="space-y-1" data-testid="harness-notice">
+            {Object.entries(notices).map(([key, message]) => (
+              <p key={key} className="text-xs text-cyan-200">
+                {message}
+              </p>
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -218,7 +250,7 @@ export const HarnessPanel: React.FC = () => {
 
 const HarnessGroup: React.FC<{
   harness: HarnessInfo;
-  busy: BusyKey;
+  busy: BusySet;
   onDownload: (harnessId: string, componentId: string) => void;
   onInstall: (harnessId: string, componentId: string) => void;
 }> = ({ harness, busy, onDownload, onInstall }) => {
@@ -254,14 +286,16 @@ const HarnessGroup: React.FC<{
 const ComponentRow: React.FC<{
   harnessId: string;
   component: HarnessComponent;
-  busy: BusyKey;
+  busy: BusySet;
   onDownload: (harnessId: string, componentId: string) => void;
   onInstall: (harnessId: string, componentId: string) => void;
 }> = ({ harnessId, component, busy, onDownload, onInstall }) => {
   const { t } = useTranslation();
   const key = harnessId + '/' + component.id;
-  const isBusy = busy === key;
+  const isBusy = busy.has(key);
   const kindLabel = component.kind === 'desktop' ? t('harness.desktop') : t('harness.cli');
+  // 仅当最近一次检查确认有新版本时才显示「更新」；从未检查过（无记录）按无更新处理。
+  const hasUpdate = component.installed && component.update_available === true;
   return (
     <div className="flex items-center justify-between gap-2 rounded-md bg-zinc-900 px-3 py-2">
       <div className="min-w-0">
@@ -278,26 +312,38 @@ const ComponentRow: React.FC<{
         </div>
         <p className="mt-0.5 text-xs text-zinc-500">
           {component.installed ? (
-            <span className="flex items-center gap-1 text-emerald-400">
-              <CheckCircle2 className="h-3 w-3" />
-              {t('harness.installed')}
-              {component.version ? ' ' + component.version : ''}
-            </span>
+            hasUpdate ? (
+              <span className="flex items-center gap-1 text-amber-400">
+                <ArrowUpCircle className="h-3 w-3" />
+                {t('harness.updateAvailable')}
+                {component.latest_version
+                  ? ' ' + (component.version ? component.version + ' → ' : '') + component.latest_version
+                  : ''}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-emerald-400">
+                <CheckCircle2 className="h-3 w-3" />
+                {t('harness.installed')}
+                {component.version ? ' ' + component.version : ''}
+              </span>
+            )
           ) : (
             <span className="text-zinc-400">{t('harness.notInstalled')}</span>
           )}
         </p>
       </div>
       {component.installed ? (
-        <Button
-          onClick={() => onInstall(harnessId, component.id)}
-          disabled={isBusy}
-          variant="secondary"
-          size="sm"
-        >
-          <Download className="h-3.5 w-3.5" />
-          {isBusy ? t('harness.installing') : t('harness.update')}
-        </Button>
+        hasUpdate && (
+          <Button
+            onClick={() => onInstall(harnessId, component.id)}
+            disabled={isBusy}
+            variant="secondary"
+            size="sm"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {isBusy ? t('harness.installing') : t('harness.update')}
+          </Button>
+        )
       ) : (
         <Button
           onClick={() => onDownload(harnessId, component.id)}
@@ -315,12 +361,12 @@ const ComponentRow: React.FC<{
 
 const UpdateRow: React.FC<{
   item: HarnessUpdateItem;
-  busy: BusyKey;
+  busy: BusySet;
   onApply: (item: HarnessUpdateItem) => void;
 }> = ({ item, busy, onApply }) => {
   const { t } = useTranslation();
   const key = item.kind + '/' + (item.id ?? item.component_id ?? '');
-  const isBusy = busy === key;
+  const isBusy = busy.has(key);
   const kindLabel =
     item.kind === 'harness'
       ? t('harness.harnessItem')

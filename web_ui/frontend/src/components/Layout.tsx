@@ -90,9 +90,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               {/* logo 与标题文字同包一个链接（Issue #179）：点击任意一处均可跳转官网，文字继承主题色无链接默认样式 */}
               <a href="https://www.donkeydrift.com" target="_blank" rel="noopener" className="flex items-center gap-3"><img src="/logo.png" alt="DonkeyDrift" className="w-8 h-8 border header-logo" />DonkeyDrift</a>
             </div>
-            {/* GitHub 图标 + 版本号紧跟标题右侧（全宽度显示，不占右侧控制区空间）；
-                与后续导航组之间由 nav 的 ml-4 隔开（版本号不贴着「≡ Donkey」链接组） */}
-            <div className="ml-2 flex items-center gap-2">
+            {/* 手机端：GitHub 图标 + 版本号紧跟标题右侧，菜单收起时也可见；
+                桌面端二者移至右侧控制簇（恢复 Apple 改版前 90413278 排列） */}
+            <div className="ml-2 flex items-center gap-2 lg:hidden">
               <GitHubLink />
               <VersionBadge />
             </div>
@@ -100,7 +100,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 流程页锚点（#178）；Car Connector 已改为右侧控制区图标按钮（Issue #406）；
                 高级入口（Donkey / Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
                 见 EnterButtons.tsx（Issue #175） */}
-            <nav className="hidden lg:flex items-center space-x-4 text-sm font-medium h-14 ml-4">
+            <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14 ml-4">
               {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单 */}
               <div className="hidden xl:contents">
                 <DonkeyEntryLink />
@@ -136,7 +136,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 )}
               </div>
             </nav>
-            <div className="ml-auto hidden lg:flex items-center gap-3">
+            <div className="ml-auto hidden lg:flex items-center gap-4">
+              <VersionBadge />
+              <GitHubLink />
               <CarConnectorButton />
               <ConsoleMuteButton />
               <ThemeSwitcher />

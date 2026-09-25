@@ -19,6 +19,10 @@ import { useResolvedTheme } from '@/lib/theme';
  * 「手柄校准」按钮在本工具行（重新扫描右侧）：点击 postMessage(dd-open-joystick-cal)
  * 到内嵌 iframe，由车端页面打开校准弹窗（沿用 DrifterConsolePage 静音同步同款通道），
  * 因此内嵌视图里的「车辆设置」标题与「调校」行已被车端整行隐藏。
+ * iframe 高度跟随车端页面内容（整页一滑到底，不再 iframe 内部单独滚动）：车端
+ * embedded+settings 视图通过 postMessage({type:'dd-embed-height',height}) 上报文档
+ * 完整高度（跨域无法直接读 contentDocument），本组件校验 origin 对应当前选中车辆、
+ * height 在 200~10000 合理区间后把 iframe 拉到该像素值；收到首条高度消息前 min-h 兜底。
  */
 export const CarSettingsPanel: React.FC = () => {
   const { t, lang } = useTranslation();
@@ -26,6 +30,8 @@ export const CarSettingsPanel: React.FC = () => {
   const [devices, setDevices] = useState<{ ip: string; port: number; reachable: boolean }[]>([]);
   const [scanning, setScanning] = useState(false);
   const [selectedIp, setSelectedIp] = useState('');
+  // 车端上报的内嵌页面文档高度（px）；null = 尚未收到首条高度消息，走 min-h 兜底
+  const [embedHeight, setEmbedHeight] = useState<number | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const discover = useCallback(async () => {
@@ -50,6 +56,33 @@ export const CarSettingsPanel: React.FC = () => {
   useEffect(() => {
     void discover();
   }, [discover]);
+
+  // 换车/换主题会触发 iframe 重载（见 key），旧高度作废，回到 min-h 兜底等待新页面上报
+  useEffect(() => {
+    setEmbedHeight(null);
+  }, [selectedIp, theme]);
+
+  // 监听车端 embedded+settings 视图的 dd-embed-height 上报，把 iframe 拉到与内容等高。
+  // origin 必须对应当前选中车辆（允许带端口），height 限定合理区间，防止异常消息撑爆布局。
+  useEffect(() => {
+    if (!selectedIp) return;
+    const onMessage = (event: MessageEvent) => {
+      let host = '';
+      try {
+        host = new URL(event.origin).hostname;
+      } catch {
+        return; // origin 非法（如 sandbox 的 "null"）：直接忽略
+      }
+      if (host !== selectedIp) return;
+      const data = event.data as { type?: unknown; height?: unknown } | null;
+      if (!data || data.type !== 'dd-embed-height') return;
+      const height = Number(data.height);
+      if (!Number.isFinite(height) || height < 200 || height > 10000) return;
+      setEmbedHeight(Math.round(height));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [selectedIp]);
 
   const openJoystickCal = useCallback(() => {
     if (!selectedIp) return;
@@ -97,14 +130,15 @@ export const CarSettingsPanel: React.FC = () => {
       </div>
 
       {selectedIp ? (
-        <div className="min-h-[70vh]">
+        <div className={embedHeight === null ? 'min-h-[70vh]' : undefined}>
           <iframe
             ref={iframeRef}
             key={`${selectedIp}-${theme}`}
             src={`http://${selectedIp}/?embedded=1&settings=1&lang=${lang}&theme=${theme}&ui=apple`}
             title={t('connector.carSettingsTitle')}
             allowFullScreen
-            className="h-[80vh] min-h-[560px] w-full rounded-md border-0 bg-zinc-950"
+            className={`w-full rounded-md border-0 bg-zinc-950${embedHeight === null ? ' min-h-[560px]' : ''}`}
+            style={embedHeight === null ? undefined : { height: `${embedHeight}px` }}
           />
         </div>
       ) : (

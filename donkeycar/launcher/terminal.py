@@ -21,9 +21,11 @@ donkey 等 TUI 程序）。之所以走局域网 WebSocket 而不是 Serial2 串
 
 会话保持与重连（issue #173）：PTY 会话与 WebSocket 连接解耦。连接 URL 可
 带 ?session=<sid>，命中存活会话则接回原 PTY（断线期间的输出从回放缓冲补
-发）；未命中则新开会话。连接断开（任何原因，含 TCP keepalive 判死）后
-会话保留 _SESSION_GRACE 秒的宽限期，期间重连均可找回现场，宽限期过后才
-销毁。
+发）；未命中则新开会话。异常断线（网络闪断/手机锁屏/TCP keepalive 判死）
+后会话保留 _SESSION_GRACE 秒的宽限期，期间重连均可找回现场，宽限期过后
+才销毁；客户端主动关闭（WebSocket close 帧，如标签页/iframe 被关、整页
+刷新）则立即销毁会话、杀掉 bash，不留宽限期——另有 /terminal/kill HTTP
+端点供终端页 pagehide 时 sendBeacon 调用，与 close 帧路径互为兜底。
 
 每个 WebSocket 连接同一时间只挂在一个会话上；shell 自然退出（用户输入
 exit）时会话立即销毁。浏览器对小输入帧不分片，binary 输入按帧直写 PTY
@@ -42,6 +44,7 @@ import logging
 import os
 import pty
 import socket
+import signal
 import struct
 import subprocess
 import termios
@@ -196,8 +199,10 @@ class TerminalSession:
         attach    — 挂上一个 WS 连接：补发断线期间的回放缓冲
         on_input  — 客户端输入字节直写 PTY master
         on_resize — TIOCSWINSZ 调整窗口大小
-        detach    — 连接断开（任何原因）时解除挂载，会话进入宽限期，
-                    期间 PTY 输出继续累积进回放缓冲，等待重连接回
+        detach    — 连接异常断开（网络闪断/锁屏/TCP 判死）时解除挂载，
+                    会话进入宽限期，期间 PTY 输出继续累积进回放缓冲，
+                    等待重连接回；主动关闭（WS close 帧 / /terminal/kill）
+                    不经宽限期，直接 close
         close     — 杀子进程、关 master、从 _sessions 注销，幂等
     子进程自然退出（用户输入 exit）时由 waiter 线程通知客户端并 close。
     宽限期耗尽仍无人重连的会话由 _sessions_sweeper 后台线程清扫。
@@ -235,6 +240,14 @@ class TerminalSession:
             # 控制终端（任务控制、Ctrl-C 信号投递都依赖它）
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            # 复位控制信号处置：若本进程（如被 nohup 后台启动、或经非交互
+            # shell 后台任务拉起）带着 SIGINT/SIGQUIT/SIGHUP=SIG_IGN，忽略位
+            # 会跨 fork+exec 一路继承到 shell 及其前台子进程，PTY 里按 Ctrl-C
+            # 将永远无法打断前台命令（bash 启动时记住忽略态并传播给子进程）。
+            # 终端会话是交互入口，必须显式恢复默认处置。
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+            signal.signal(signal.SIGHUP, signal.SIG_DFL)
 
         self._proc = subprocess.Popen(
             list(shell),
@@ -408,6 +421,26 @@ def _acquire_session(requested_sid: str):
     return sess, reattached
 
 
+def kill_session(sid: str) -> bool:
+    """按 sid 立即销毁存活会话（标签页关闭即杀 bash，不走宽限期）。
+
+    供 /terminal/kill HTTP 端点（终端页 pagehide 的 sendBeacon）调用；
+    WS close 帧路径直接在 handle_terminal_ws 里 close，不经过本函数。
+
+    Returns:
+        命中并销毁返回 True；sid 为空、会话不存在或已销毁返回 False。
+        幂等——重复 kill 同一会话返回 False。
+    """
+    if not sid:
+        return False
+    with _sessions_lock:
+        sess = _sessions.get(sid)
+    if sess is None or sess._closed:
+        return False
+    sess.close()  # close 幂等，并发重复调用安全
+    return True
+
+
 def _ensure_sweeper():
     """惰性启动会话清扫线程（首次建立会话时起，daemon，进程退出不阻拦）。"""
     global _sweeper_started
@@ -482,7 +515,9 @@ def handle_terminal_ws(handler):
 
     连接 URL 可带 ?session=<sid>：命中存活会话则接回原 PTY（补发断线期间
     的输出），否则新开会话；建连后向客户端发 {"type":"session",...} 告知
-    sid 与是否接回（issue #173）。连接断开只会话进入宽限期，不销毁。
+    sid 与是否接回（issue #173）。异常断线（网络闪断/锁屏/TCP 判死）会话
+    进入宽限期不销毁；收到客户端 close 帧（主动关闭，如标签页/iframe 被
+    关）则立即销毁会话、杀掉 bash。
 
     本函数直到 WebSocket 断开才返回（ThreadingHTTPServer 每连接一线程，
     阻塞是预期行为）。
@@ -520,6 +555,11 @@ def handle_terminal_ws(handler):
             _fin, opcode, payload = read_frame(handler.rfile)
             if opcode == OP_CLOSE:
                 writer.send(b"", OP_CLOSE)
+                # 客户端主动关闭（浏览器发 close 帧，多为标签页/iframe 被关、
+                # 整页刷新）：立即销毁会话、杀掉 bash，不留宽限期——宽限期只
+                # 面向网络闪断/锁屏这类异常断线（issue #173）。close 幂等，
+                # finally 的 detach 对已销毁会话无害。
+                session.close()
                 break
             if opcode == OP_PING:
                 writer.send(payload, OP_PONG)

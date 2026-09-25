@@ -46,6 +46,18 @@ const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
 const DRAG_SELECTION_THRESHOLD_PX = 5;
 const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
+/** 把全局播放位置写进下方的不受控进度条（value 直写 DOM，播放期零 re-render）。
+ *  值一律夹到当前量程（records.length - 1）：越界时浏览器会静默截断显示值，量程变化后
+ *  不重写 value 更会让下方进度条停在上一次的位置、与上方录制视频库的播放进度条脱节。 */
+const writeSliderValue = (slider: HTMLInputElement, index: number) => {
+  const max = Number(slider.max);
+  const upper = Number.isFinite(max) ? max : index;
+  const next = String(Math.max(0, Math.min(index, upper)));
+  if (slider.value !== next) {
+    slider.value = next;
+  }
+};
+
 /** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
  *  canvas 配色按语义角色（转向=--accent、油门=--warn、选区=--ok、删除标记=--bad）
  *  随主题（深/浅）切换自动重取色；fallback 为原深/浅硬编码值。 */
@@ -118,6 +130,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const sliderRef = useRef<HTMLInputElement>(null);
   const sliderRafRef = useRef<number | null>(null);
   const sliderPendingValueRef = useRef<number | null>(null);
+  // 用户是否正按着下方进度条拖动：拖动期间让位给用户（不写 DOM），抬起即恢复跟随
+  const sliderDraggingRef = useRef(false);
   const [tooltipData, setTooltipData] = useState<{ x: number; y: number; steering: number; throttle: number; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectionDraft, setSelectionDraft] = useState<{
@@ -711,9 +725,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       currentIndexRef.current = state.currentIndex;
       if (state.currentIndex === previousIndex) return;
       positionPlayhead();
+      // 仅在「用户正按着滑块拖动」时让位（否则会把手感拽回旧值）；不能按 focus 判断——
+      // 点过/拖过滑块后焦点会一直留在它身上，按 focus 跳过会让下方进度条此后永久停在
+      // 旧位置，与上方录制视频库的播放进度条脱节（用户报障：上下播放进度栏不同步）。
       const slider = sliderRef.current;
-      if (slider && document.activeElement !== slider) {
-        slider.value = String(state.currentIndex);
+      if (slider && !sliderDraggingRef.current) {
+        writeSliderValue(slider, state.currentIndex);
       }
       followPlayheadViewport();
     });
@@ -737,6 +754,54 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     },
     [setCurrentIndex]
   );
+
+  // 拖动开始标记：只认「指针按下」这一件事，抬起/取消（含拖到窗口外）一律解除，
+  // 解除时把挂起值立刻落库，再按全局播放位置校准一次，保证上下进度条随即对齐。
+  const handleSliderPointerDown = useCallback(() => {
+    sliderDraggingRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    const releaseSlider = () => {
+      if (!sliderDraggingRef.current) return;
+      sliderDraggingRef.current = false;
+      if (sliderRafRef.current != null) {
+        cancelAnimationFrame(sliderRafRef.current);
+        sliderRafRef.current = null;
+      }
+      const pending = sliderPendingValueRef.current;
+      if (pending != null) {
+        sliderPendingValueRef.current = null;
+        setCurrentIndex(pending);
+        return;
+      }
+      const slider = sliderRef.current;
+      if (slider) {
+        writeSliderValue(slider, currentIndexRef.current);
+      }
+    };
+
+    window.addEventListener('pointerup', releaseSlider);
+    window.addEventListener('pointercancel', releaseSlider);
+    window.addEventListener('blur', releaseSlider);
+    return () => {
+      window.removeEventListener('pointerup', releaseSlider);
+      window.removeEventListener('pointercancel', releaseSlider);
+      window.removeEventListener('blur', releaseSlider);
+    };
+  }, [setCurrentIndex]);
+
+  // 记录集/作用域变化（切换录制、重载 tub、删除或恢复帧）后重新校准滑块量程与位置：
+  // 非受控滑块的 max 变了不会自动重写 value，旧的越界值会被浏览器静默截断成 max，
+  // 出现「上方早在第 1 帧、下方还停在末尾」这类上下不一致。
+  useEffect(() => {
+    const slider = sliderRef.current;
+    if (!slider) return;
+    slider.max = String(Math.max(0, records.length - 1));
+    if (!sliderDraggingRef.current) {
+      writeSliderValue(slider, currentIndexRef.current);
+    }
+  }, [records.length]);
 
   // 卸载时取消挂起的 rAF
   useEffect(() => {
@@ -2037,9 +2102,21 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 {aiCleanBusy ? t('tubEditor.aiFilterScanning') : t('tubEditor.aiFilterEntry')}
               </span>
             </Button>
-            <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0">
+            <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0 select-none">
               <div className="h-4 box-content text-xs text-zinc-400 uppercase">{t('tubEditor.zoomLabel')}</div>
               <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
+            </div>
+            {/* 总帧数口径统一为有效帧：全局视图并列展示物理帧数与已删帧数，避免与录制视频库「N 帧」不一致的困惑 */}
+            <div className="flex h-[30px] box-content items-center rounded-md bg-zinc-800 px-3 text-left">
+              <span className="whitespace-nowrap text-xs font-mono text-cyan-400">
+                {isSessionScoped
+                  ? t('tubEditor.framesSessionScope', { count: records.length })
+                  : t('tubEditor.framesGlobalScope', {
+                      count: records.length,
+                      physical: totalPhysicalRecords,
+                      deleted: deletedIndexes.length,
+                    })}
+              </span>
             </div>
             <Button
               size="sm"
@@ -2081,7 +2158,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         <div
           ref={containerRef}
           data-testid="tub-editor-chart"
-          className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none`}
+          className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none select-none`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           onMouseDown={handleMouseDown}
@@ -2144,7 +2221,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             </div>
           )}
         </div>
-        <div ref={sliderContainerRef} className="relative mt-3 h-6 shrink-0">
+        <div ref={sliderContainerRef} className="relative mt-3 h-6 shrink-0 select-none">
           <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-lg bg-zinc-700" />
           {sliderSelectionStyle && (
             <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2">
@@ -2173,6 +2250,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             step="1"
             defaultValue={useStore.getState().currentIndex}
             onChange={handleSliderChange}
+            onPointerDown={handleSliderPointerDown}
             disabled={!records.length}
             aria-label={t('tubEditor.scrollAria')}
             className="tub-editor-scroll-slider relative z-20 h-6 w-full appearance-none cursor-pointer bg-transparent disabled:cursor-not-allowed disabled:opacity-40"

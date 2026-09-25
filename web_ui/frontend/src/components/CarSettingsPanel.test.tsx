@@ -144,4 +144,103 @@ describe('CarSettingsPanel', () => {
     });
     expect(container.querySelector('iframe')).toHaveAttribute('allowfullscreen');
   });
+
+  it('收到车端 dd-embed-height 消息后 iframe 高度跟随上报值（整页一滑到底）', async () => {
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+    } as never);
+    const { container } = render(<CarSettingsPanel />);
+    const iframe = await waitFor(() => {
+      const f = container.querySelector('iframe');
+      expect(f).not.toBeNull();
+      return f as HTMLIFrameElement;
+    });
+    // 首条高度消息前：无内联高度，min-h-[560px] 兜底
+    expect(iframe.style.height).toBe('');
+    expect(iframe.className).toContain('min-h-[560px]');
+
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'dd-embed-height', height: 1234 },
+      }),
+    );
+    expect(iframe.style.height).toBe('1234px');
+
+    // 持续上报（如车端懒加载子 iframe 撑高页面）时高度继续跟随
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'dd-embed-height', height: 2100 },
+      }),
+    );
+    expect(iframe.style.height).toBe('2100px');
+
+    // origin 带端口（同一台车）也认
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46:8080',
+        data: { type: 'dd-embed-height', height: 1800 },
+      }),
+    );
+    expect(iframe.style.height).toBe('1800px');
+  });
+
+  it('非法 origin / 非法 height / 非本类型消息一律忽略，iframe 高度不动', async () => {
+    mockDiscover.mockResolvedValue({
+      found: [{ ip: '192.168.3.46', port: 80, reachable: true }],
+    } as never);
+    const { container } = render(<CarSettingsPanel />);
+    const iframe = await waitFor(() => {
+      const f = container.querySelector('iframe');
+      expect(f).not.toBeNull();
+      return f as HTMLIFrameElement;
+    });
+
+    const ignored: MessageEvent[] = [
+      // 其他设备/站点的 origin
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.99',
+        data: { type: 'dd-embed-height', height: 1234 },
+      }),
+      new MessageEvent('message', {
+        origin: 'https://evil.example.com',
+        data: { type: 'dd-embed-height', height: 1234 },
+      }),
+      // height 超出合理区间（200~10000）
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'dd-embed-height', height: 50 },
+      }),
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'dd-embed-height', height: 99999 },
+      }),
+      // height 非数字
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'dd-embed-height', height: 'abc' },
+      }),
+      // type 不匹配
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'other-message', height: 800 },
+      }),
+    ];
+    ignored.forEach((e) => fireEvent(window, e));
+    expect(iframe.style.height).toBe('');
+
+    // 监听本身在工作：合法消息仍可生效
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        origin: 'http://192.168.3.46',
+        data: { type: 'dd-embed-height', height: 800 },
+      }),
+    );
+    expect(iframe.style.height).toBe('800px');
+  });
 });

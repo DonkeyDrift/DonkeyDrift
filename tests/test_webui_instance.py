@@ -15,6 +15,7 @@
 """
 
 import os
+import signal
 import sys
 from unittest import mock
 
@@ -24,8 +25,10 @@ from donkeycar import webui_instance
 from donkeycar.webui_instance import (
     DRIVE_PID_FILE,
     WEBUI_INSTANCE_FILE,
+    find_car_processes,
     find_live_instance,
     kill_previous_car_processes,
+    takeover_car_processes,
     read_drive_pids,
     read_instance,
     remove_drive_pid_file,
@@ -199,6 +202,71 @@ def test_kill_unreadable_cmdline_falls_back_to_kill_all(instance_file):
         kill_previous_car_processes(pid_file=pid_file)
 
     assert sorted(set(killed)) == [101, 202]
+
+
+# ===========================================================================
+# find_car_processes / takeover_car_processes：接管模式全量清理
+# ===========================================================================
+
+def _make_fake_proc(tmp_path, pids):
+    """构造假 /proc 目录：每个 pid 一个空目录。"""
+    proc_dir = tmp_path / "proc"
+    proc_dir.mkdir()
+    for pid in pids:
+        (proc_dir / str(pid)).mkdir()
+    return proc_dir
+
+
+def test_find_car_processes_scans_and_filters(tmp_path):
+    """按 cmdline 扫描车进程：web 进程排除、exclude_pids 生效。"""
+    proc_dir = _make_fake_proc(tmp_path, [101, 202, 303])
+    cmdlines = {
+        # 101 是 web 后端（保留），202/303 是车进程
+        101: ["python", "-m", "uvicorn", "main:app"],
+        202: ["python", "manage.py", "drive"],
+        303: ["python", "manage.py", "drive"],
+    }
+
+    with mock.patch.object(webui_instance, "_process_cmdline",
+                           side_effect=lambda pid: cmdlines.get(pid)):
+        assert find_car_processes(exclude_pids={303}, proc_dir=str(proc_dir)) == [202]
+        assert sorted(find_car_processes(proc_dir=str(proc_dir))) == [202, 303]
+
+
+def test_find_car_processes_missing_proc_dir(tmp_path):
+    """proc_dir 不存在（非 Linux）返回空列表，不抛异常。"""
+    assert find_car_processes(proc_dir=str(tmp_path / "nope")) == []
+
+
+def test_takeover_car_processes_term_then_kill():
+    """接管：对所有扫描到的车进程先 SIGTERM、再兜底 SIGKILL。"""
+    killed = []
+
+    with mock.patch.object(webui_instance, "find_car_processes",
+                           return_value=[202, 303]), \
+         mock.patch.object(os, "kill",
+                           side_effect=lambda pid, sig: killed.append((pid, sig))), \
+         mock.patch.object(webui_instance, "threading"):
+        result = takeover_car_processes()
+
+    assert result == [202, 303]
+    assert killed == [
+        (202, signal.SIGTERM), (303, signal.SIGTERM),
+        (202, signal.SIGKILL), (303, signal.SIGKILL),
+    ]
+
+
+def test_takeover_car_processes_no_targets_is_noop():
+    """没有在跑车进程时不发任何信号。"""
+    killed = []
+
+    with mock.patch.object(webui_instance, "find_car_processes",
+                           return_value=[]), \
+         mock.patch.object(os, "kill",
+                           side_effect=lambda pid, sig: killed.append((pid, sig))):
+        assert takeover_car_processes() == []
+
+    assert killed == []
 
 
 # ===========================================================================

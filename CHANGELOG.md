@@ -1,5 +1,113 @@
 # 变更日志
 
+## 2026-09-25 (257)
+
+- fix(tubeditor): 修复 TM 页面上下两根播放进度条不同步——下方滑块不再因「持有焦点」而永久停摆
+  - 现象（用户报障 + 8000 在线实例 Playwright 真机实测复现）：鼠标点一下 Tub 编辑器图表下方的滑块（焦点落到这个 range 上），再用空格起播——上方录制视频库的播放进度条一路前进（实测 5220→5340），下方滑块死死停在 5185；此后除非点到别处，下方进度条永久停摆，与上方彻底脱节。
+  - 根因：`web_ui/frontend/src/components/TubEditor.tsx` 的 store 订阅里用 `document.activeElement !== slider` 决定要不要把全局播放位置写回下方滑块的 DOM 值。range 输入的焦点在点击后会一直保留，「让位给正在拖动的用户」因此被放大成「永久不再跟随」——回放、上方进度条、首/末帧按钮、键盘方向键写来的新位置全被这一条判断吞掉。
+  - 修复（保持「零 re-render、直写 DOM」的既定 60fps 架构，不改组件树）：
+    1. **焦点判断改为拖动判断**：新增 `sliderDraggingRef`，只在 `onPointerDown` 到 `pointerup`/`pointercancel`/`blur` 之间让位；抬起时立刻把 rAF 挂起的拖动值落库并重新校准，拖动结束即恢复跟随。
+    2. **新增 `writeSliderValue()`**：写值前一律夹到当前量程（`records.length - 1`），避免越界值被浏览器静默截断、显示值与全局播放位置不一致。
+    3. **新增量程重校 effect**（依赖 `records.length`）：切换录制、重载 tub、删除/恢复帧导致量程变化后重写 `max` 与 `value`，杜绝「上方早在第 1 帧、下方还停在末尾」。
+  - 测试：`web_ui/frontend/src/components/TubEditor.playhead.test.tsx` 新增 3 项——滑块持有焦点时仍跟随全局播放位置、拖动期间不被外部播放位置拽走且抬起后立即重新对齐、记录集切换后重校量程与位置不残留越界旧值。`TubEditor`/`TubLibrary`/`App` 等 6 个相关测试文件 38 用例全绿，`tsc -b --noEmit` 与 `npm run build` 通过。
+  - 验证：修复前在 8000 实测复现不同步（上方 5220→5340 / 下方冻在 5185）；修复后用本次分支构建起 8027 临时实例（用后已关）实测——点过下方滑块后空格起播，上下八次采样逐次相等；拖上方、首/末帧按钮、切录制后量程重校（10371 帧 → 20 帧）、播放中拖下方，五种操作全部同步。
+  - 注：纯前端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (256)
+
+- feat(launcher): 终端标签页关闭立即杀掉 PTY 会话——pagehide sendBeacon + WS close 帧双通道，异常断线保留 15 分钟宽限期
+  - 背景：DC（Drifter Console）终端标签页（或整个浏览器标签页）一关，上位机 launcher 里对应的 bash PTY 会话及其正在运行的进程要立即被杀掉；此前连接断开一律只 detach 进 15 分钟宽限期（issue #173 为网络闪断/手机锁屏设计），关掉标签页后进程仍空跑到宽限期耗尽才被清扫。
+  - `donkeycar/launcher/terminal.py`：新增 `kill_session(sid)`（查 `_sessions` 命中即 `close()`，幂等，未命中/空 sid 返回 False）；`handle_terminal_ws` 收到 OP_CLOSE 回 close 帧后立即 `session.close()` 销毁会话、杀掉 bash（finally 的 detach 保留，对已销毁会话无害）；异常断线（协议错误/TCP keepalive 判死）路径不动，仍走宽限期可接回。模块与 TerminalSession 类 docstring 同步更新。
+  - `donkeycar/launcher/server.py`：新增 `/terminal/kill?session=<sid>` 端点（POST 供终端页 sendBeacon、GET 供 curl 手工验证；命中 200 JSON、未命中/重复 404 JSON，幂等）。
+  - `donkeycar/launcher/terminal_static/terminal.html`：新增 `pagehide` 监听——`event.persisted`（进 bfcache 未销毁）时跳过防浏览器前进/后退误杀；置 `intentionallyClosed` 标志抑制断线自动重连与重连 overlay；`navigator.sendBeacon('/terminal/kill?session='+encodeURIComponent(lastSid))` 通知服务端立即销毁（lastSid 为空不发）。iframe 被移除/整页关闭/刷新均触发 pagehide；WS close 帧路径是浏览器未发 beacon 时的兜底。
+  - 测试：`donkeycar/tests/test_launcher_terminal.py` 新增 3 项（kill_session 销毁与幂等、close 帧→会话立即销毁且带旧 sid 重连接不回、kill 端点 GET/POST 命中 200/未命中 404）；`tests/test_launcher_terminal.py` 新增 pagehide/sendBeacon 静态断言并同步 onclose 重连抑制断言。终端两文件 32 项 + launcher 其余 263 项 pytest 全绿。
+  - 注：launcher 后端改动，合入后需部署 deploy-8000 并重启 donkeydrifter-launcher 服务生效；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (255)
+
+- feat(ui): 顶栏恢复 Apple 改版前原始排列 + Drive 页选中态统一 Apple 蓝 + 输入框对比度修复
+  - 背景：用户反馈 DD 页面顶部标签（Drive / Tub Manager / Trainer / Pilot Arena）排列太紧凑，要求改回原始样式。查明 Apple 改版首个提交（0784d454）把桌面导航从 `space-x-6` 收紧为 `space-x-4`，并把 GitHub 图标+版本号从右侧控制簇移到标题左侧。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面 nav 恢复 `space-x-6`（24px 间距）；GitHubLink+VersionBadge 移回右侧控制簇（CarConnectorButton 之前，与 90413278 排列一致，簇 `gap-3`→`gap-4`）；标题旁的 GitHub+版本号容器改为 `lg:hidden`（手机端保持可见，桌面端不再挤占导航区）。Apple 色彩体系（dd-header/is-scrolled/dd-nav-link）、「⋯」溢出菜单与手机端三行结构零改动。
+  - `web_ui/frontend/src/components/drive/DriveModeSelector.tsx`：手动/半自动/全自动三段选中态删掉逐模式三色（emerald/amber/cyan），统一为 accent 浅底+accent 文字（`bg-cyan-600/20 text-cyan-400`）；`src/themes/theme-light.css` 与 `src/themes/theme-mus4.css` 三条 `button.mode-active[data-mode=…]` 绿/琥珀/蓝描边合并为一条统一 `--accent-a55` 描边。评审采到的「自动漂移灰蓝/停止灰红」实为全站统一禁用降饱和语言（apple-deep.css §6，属 Apple 体系规范），启用态本就是 `--accent-fill`/`--bad-fill`，未动。
+  - `web_ui/frontend/src/components/ui/Input.tsx`：输入框边框 `border-zinc-700`→`border-zinc-600`（映射发丝线强档 `--line-mid`，浅 rgba(60,60,67,.29)/深 rgba(255,255,255,.16)），解决 Drive 页表单输入框融进卡片底色、边框几乎看不见的问题；共享 Input 全站使用者同步生效，非法字段标红逻辑不受影响。
+  - 小字审查：DrivePage 及 DriftCard/SimCollectCard 可见文案逐条过，剩余均为状态值/警告/可操作信息，无「没有任何作用」的废话，未删文案。
+  - 测试：`DriveModeSelector/DriftCard/ModelSelector/SimCollectCard/appleTokens/App/VersionBadge/GitHubLink` 8 文件 59 用例全绿（`DriveModeSelector.test.tsx` 断言同步统一 accent 类）；`tsc -b --noEmit` 通过；`npm run build` 成功；Playwright 截图核验桌面顶栏间距与输入框边框。
+  - 注：纯前端改动，合入后部署本机；Firmware 侧配套状态卡底色统一见 Firmware v1.10.4。
+
+## 2026-09-25 (254)
+
+- feat(drive): Drive 页新增「驾驶目标」卡片——真车/模拟器目标可见可切，保存后一键重启驾驶生效
+  - 背景：落地页（FlowPage Drive section）首屏无条件并排渲染 DriftCard（真车专属）与 SimCollectCard（模拟器专属），页面没有任何真车/模拟器切换入口；旧路径（左缘 Connectors 抽屉 SimulatorConfig，`<lg` 断点隐藏、移动端不可达）保存 `DONKEY_GYM` 后必须重启 `manage.py drive` 才生效，但 UI 无任何提示，重启入口又藏在「≡ Donkey」内嵌 launcher 页里，完整切换链对用户不可见。
+  - `web_ui/frontend/src/components/drive/DriveTargetCard.tsx`（新增）：状态行（当前目标 真车/模拟器/未知 + 车端在线状态点 + 模拟器离线重连中徽标）；「真车 | 模拟器」分段切换——调 `saveSimulatorConfig` 翻转 `DONKEY_GYM`（保留原 `SIM_HOST`，为空且目标是模拟器时先自动发现最佳 IP，发现失败提示先启动 DonkeySim，不保存；未加载配置目录时提示先去 Loaders 抽屉）；保存成功后显示琥珀「已保存，需重启驾驶生效」提示条与「重启驾驶生效」主按钮——调 `restartDriving()` 经后端转发 launcher 重启 `manage.py drive`（重读 myconfig），成功提示等待车端上线，失败给出 `/donkey` 菜单手动启动的降级指引。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部挂载 DriveTargetCard；按遥测字段存在性派生驾驶目标（见过 `sim_connected` → 模拟器、见过 `rc_mode` → 真车，ref 守门一次性落 state 避免 100Hz 遥测引发重渲染；手动选择优先、静态配置 `DONKEY_GYM` 兜底、未加载为 unknown）；两张模式卡按目标条件渲染（真车只显示漂移卡、模拟器只显示采集卡、未知保持两张都显示）。
+  - `web_ui/backend/routers/launch.py`：新增 `POST /api/launch/drive` 转发端点（仿既有 launch 转发先例复用 `_forward_launch`，透传 launcher JSON 与状态码，沿用 125s 长超时）。
+  - `web_ui/frontend/src/services/api.ts`：新增 `restartDriving()` 包装与 `RestartDrivingResult` 类型。
+  - i18n：`i18n/messages/drive.ts` 新增 17 个 `drive.target*` 键，zh/en 同步。
+  - 测试：`DriveTargetCard.test.tsx` 新增 8 项（状态行渲染、保存参数正确且保留 SIM_HOST、重启按钮流转、配置目录未加载/模拟器未发现/重启失败降级路径）；`web_ui/backend/tests/test_launch.py` 新增 2 项 + 路由注册断言。前端 vitest 全量 360 用例全绿、`npm run build` 通过；后端 pytest 全量 577 项全绿。
+  - 注：前端 + 后端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+## 2026-09-25 (253)
+
+- feat(car-connector): 设置页改版——AI 配置 CC-Switch 化（已配置徽标 + 填 Key 自动带出 Base URL/模型）、Harness 并发更新与按需更新按钮、ESP32 内嵌页整页滚动
+  - AI 配置（整体参考 CC-Switch 的 UI 与做法）：
+    - 供应商列表折叠态直接显示配置状态徽标（已配置＝祖母绿对勾 / 未配置＝灰），不展开即可看出哪个 AI 已配好；后端 `routers/ai_config.py` 的 `_provider_view()` 新增 `configured` 字段（任一账号有 api_key 或 OAuth token 即 true），前端优先取之、缺省从 accounts 推导。
+    - 添加账号改为预设式：预设供应商默认只需粘贴 API Key（备注名可选），Base URL 与模型名称由预设自动带出展示（带「自动」徽章，不再是空输入框）；「高级设置」展开区内才可覆盖 base_url/models，未覆盖时不发送这两个字段（后端消费时回退预设默认值）；自定义供应商无预设仍手填。
+    - 「当前使用中」切换改为开关式 toggle（role=switch），未配置的供应商禁用并提示先填 API Key；测试连接、Codex OAuth 设备码登录、多账号管理与自定义供应商增删保留不变。
+  - Harness 下载 + 一键更新：
+    - 后端 `routers/harness_updater.py`：`_catalog_status()` 合并最近一次更新检查的持久化结果（新增 `_persisted_update_index()`），每个组件附带 `latest_version` 与 `update_available`；无记录或状态文件损坏时降级为 null/false。
+    - 前端 `HarnessPanel.tsx`：busy 从单字符串改为 Set——下载/安装/一键更新多个任务可并发进行，各自显示进行中，结果提示按任务 key 记录互不清空（此前点第二个更新会顶掉第一个的进度态，用户感知为「被停掉」）。
+    - 组件行「更新」按钮改为按需显示：仅当 `update_available` 时才出现；版本行无更新保持绿色「已安装 x.y.z」，有更新改琥珀色「有新更新 已装 → 可更新」；从未检查过时按无更新处理（顶部「立即检查」按钮不受影响）。
+  - ESP32 车辆设置（`CarSettingsPanel.tsx`）：板块移到页面最后（新顺序 AutoSync → Harness → AI 配置 → 车辆设置，AI 配置与 Harness 下载/一键更新相邻）；iframe 固定 80vh 改为跟随车端页面内容高度——监听 `dd-embed-height` postMessage（校验 origin 归属所选车辆 IP、height 限 200~10000），未收到消息前保持 min-h-[560px] 兜底；设置页一页滑到底，不再出现 iframe 内单独滚动条。高度上报需 Firmware v1.10.3 配套，旧固件不回发消息时自动落兜底高度、向后兼容。
+  - 文件：`web_ui/backend/routers/ai_config.py`、`web_ui/backend/routers/harness_updater.py`、`web_ui/frontend/src/components/{AiSettingsPanel,HarnessPanel,CarSettingsPanel}.tsx`、`web_ui/frontend/src/pages/CarConnectorPage.tsx`、`web_ui/frontend/src/services/api.ts`（`AiConfigProvider.configured` / `HarnessComponent.latest_version`+`update_available` 类型字段）、`web_ui/frontend/src/i18n/messages/{aiconfig,harness}.ts`（zh/en 同步）。
+  - 测试：后端 `test_ai_config.py` 13 项（新增 configured 标志与 OAuth 即配置断言）、`test_harness_updater.py` 22 项（新增目录合并持久化更新信息 3 项，含损坏状态容错）；前端 `AiSettingsPanel.test.tsx` 7 项（徽标/Key-only 保存/高级覆盖）、`HarnessPanel.test.tsx` 10 项（并发 busy 互不干扰、按需更新按钮、琥珀色新更新文案）、`CarSettingsPanel.test.tsx` 9 项（高度跟随、非法 origin/越界 height 忽略）；全量 vitest 53 文件 358 项、后端 pytest 579 项全绿，`tsc` + `vite build` 通过。
+
+## 2026-09-25 (252)
+
+- fix(tests,parts,launcher,utils): 根治三条同根因（nohup/后台启动继承 SIGINT=SIG_IGN）环境敏感故障——`test_drivesim` 与真实 8000 服务解耦 + `SquareBoxCamera` 帧 uint8 化（修 square 模板视频流真 Bug）；Web 终端 Ctrl-C 失效（产品 Bug，TerminalSession 子进程复位信号处置）；`run_shell_command` 超时杀进程升级 SIGKILL 兜底（否则后台启动下测试无限挂死）
+  - `test_scripts.py::test_drivesim` 抖动根因有两层：①环境耦合——square 模板的 DriveApiBridge 默认连 `ws://127.0.0.1:8000`，测试结果取决于当时本机 8000 有没有真实 DD 实例（连上还会向真实实例推遥测）；②真 Bug——连上后 WebRTC 视频轨道把 `SquareBoxCamera` 的 float64 帧送进 `av.VideoFrame.from_ndarray`，后者断言 uint8 抛 `ValueError`，`is_error` 扫到 'Error' 即判失败。修复：测试用 `monkeypatch.setenv("DRIVE_API_SERVER_URL", "ws://127.0.0.1:9/...")` 指向必然无人监听的端口（hermetic，subprocess 继承环境变量）；`donkeycar/parts/simulation.py` 的 `SquareBoxCamera.run` 帧改 `np.zeros(..., dtype=np.uint8)`（与真实相机一致，视频编码与所有图像消费方都要求 uint8）。
+  - `test_launcher_terminal.py::test_session_ctrl_c_interrupts_foreground_process` "全量套件才失败"根因（经 /proc 现场取证 + 逐用例 SIGINT 间谍插件定位）：pytest 进程以 `nohup … &`/非交互 shell 后台任务方式启动时，按 POSIX 规则 SIGINT/SIGQUIT 被设为 SIG_IGN，该忽略位跨 fork+exec 一路继承到 TerminalSession 的 bash 及其前台子进程（bash 启动时记住忽略态并传播给子进程，`exec sleep` 保留之），PTY 里补发再多 `\x03` 也无法打断 sleep——前台/交互式跑同一全量套件则一切正常。这是**产品级真 Bug**：`donkey web` 若被 nohup/systemd/非交互后台拉起（Web 服务常见姿势），所有 Web 终端会话的 Ctrl-C 全部失效。修复（`donkeycar/launcher/terminal.py` `_become_tty_leader`）：子进程 exec 前显式把 SIGINT/SIGQUIT/SIGHUP 复位为 SIG_DFL（终端会话是交互入口，不继承宿主的忽略处置）。测试侧加固：前台子进程自报启动（`sh -c 'echo started-42; exec sleep 30'`）消除固定 `sleep(0.5)` 的 tcsetpgrp 时序误报 + echo 先入队 + 每秒补发 `\x03` 最多 12 次覆盖 fork→tcsetpgrp 微秒竞态 + 失败时打印 `/proc` 信号掩码现场取证（本次定位即靠它）。
+  - 同根因第三处（`donkeycar/utils.py::kill`）：`run_shell_command` 超时后只发一次 SIGINT；宿主进程带 SIGINT=SIG_IGN 时子进程（如 `manage.py drive`）无视信号不死，调用方随后的管道 `readlines()` 无限阻塞——nohup 后台跑全量时 `test_scripts.py::test_drivesim` 即此挂死（测试进程卡在 35%）。修复：SIGINT 后 3 秒未退升级 SIGKILL 兜底。
+  - 新增回归测试 `donkeycar/tests/test_simulation.py`：断言 SquareBoxCamera 帧为 uint8（守护 av 编码契约）。
+  - 测试：`test_launcher_terminal.py` 单文件 5 连过（3 前台 + 2 `nohup … &` 后台——修复前后台方式必挂 1 例，修复后全绿）；`test_scripts.py` 单文件 `nohup … &` 后台 4 项全过 39.6s（修复前同方式无限挂死）；`test_launcher_terminal.py + test_simulation.py + test_scripts.py` 三文件 28 项全过（56s）；全量套件（`nohup … &` 后台启动，最难模式）：1005 过 0 失败 16 跳过（558.7s）——修复前同方式 Ctrl-C 用例必挂、test_drivesim 无限挂死。
+  - 注：`simulation.py` 为运行时代码改动，但仅 square 演示模板消费该相机（真实车用真实相机，本就 uint8）；`terminal.py`/`utils.py` 属防御性健壮性修复，不改变常规前台运行行为与 UI 可见效果；无需本机部署；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (251)
+
+- fix(tubeditor): TE 缩放/框选交互面补 `select-none`，手感对齐旧版（Harry）
+  - 根因：今天全局 `user-select: text` 改动（页面文本可复制）后，TE 图表容器（拖拽框选/Ctrl+滚轮缩放/点击定位）、底部滑条容器、缩放倍率指示簇不在按钮类豁免名单内，拖拽会拖出文本选区，缩放手感与旧版（全局 `user-select:none`）不一致。注：两分支 TE 缩放算法代码逐字节相同（最后改动同出共同祖先 dacd98ad），行为差异全部来自这条 CSS 全局开关。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：图表容器（`tub-editor-chart`）、滑条容器（`sliderContainerRef`）、缩放倍率指示簇三处补 `select-none`；选区手柄此前已有。帧计数胶囊等纯展示文本保持可选中（维持 #249 可复制能力）。
+  - 测试：`TubEditor.test.tsx` 新增 3 项（图表容器/滑条容器/缩放指示簇带 select-none）；该文件 10 项全绿，`tsc -b --noEmit` 通过，`npm run build` 通过。
+  - 注：纯前端样式改动；合入后 Tony 部署源（deploy-8000）快进+重建 dist 备用，本机 8000 按用户当前指令保持 Harry-Stable-1 旧版运行；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (250)
+
+- feat(tui): Drive 一键接管——启动前全量杀掉其它车进程 + Drive 页面地址改用局域网 IP
+  - 背景：用户在 DC（Drifter Console）远程终端里跑 `donkey` → 6（Drive）期望"杀掉其它 donkey 进程让自己正常运行、并自动打开 `http://<局域网IP>:8000/#/drive`"，但旧行为只按 PID 文件清理上一次车进程（其它链路启动的 drive 存活时会被单实例守护拒绝），且复用实例打开的 URL 是 `localhost`（远程浏览器打不开）。
+  - `donkeycar/webui_instance.py`：新增 `find_car_processes()`（扫 `/proc` 按 cmdline 找所有 `manage.py drive`，支持 `exclude_pids` 与 `proc_dir` 注入）与 `takeover_car_processes()`（对全部在跑车进程先 SIGTERM、等 1s 后兜底 SIGKILL，供新 drive 接管；web 前后端与 launcher 不在清理之列）。
+  - `donkeycar/management/tui.py`：DriveCommand 执行前在 `kill_previous_car_processes()` 之后追加 `takeover_car_processes()`；新增 `_lan_host()`（UDP connect 探测局域网 IP，失败回落 localhost）；复用实例的 Drive URL 与车进程 `DRIVE_WEB_CONSOLE_URL` 默认值均改用局域网 IP，新起实例时 TUI 也打印局域网 Drive 地址（新实例本机浏览器仍由 `donkey web --open` 打开）。
+  - 测试：`tests/test_webui_instance.py` 新增 4 项（扫描过滤/exclude、proc 目录缺失容错、TERM→KILL 顺序、无目标不发信号）；`donkeycar/tests/test_tui_drive.py` 新增 2 项（局域网 IP 地址与车进程环境变量、接管调用发生），autouse 隔离夹具同步补 `takeover_car_processes` 与 `_lan_host` 桩；`test_webui_instance.py`+`test_tui_drive.py`+`test_launcher_drive_launch.py`+`test_web_command.py` 共 73 项全绿。
+  - 注：纯 Python 侧改动，随 launcher/新 TUI 会话生效，合入后部署本机；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (249)
+
+- fix(tub): 统一 TM 页「录制视频库」与「Tub 编辑器」总帧数口径——以有效帧为准并显式标注物理/已删帧数
+  - 根因（实测 `mycar/data` manifest + 运行实例 API）：视频库每条录制「N 帧」为有效帧（迭代跳过软删除，当前合计 10391）；Tub 编辑器全局视图横轴/底部滑条为物理帧号空间（`total_physical_records=42386`，含 31995 个已软删帧），用户把最右物理帧号 42385 当成总帧数，与视频库合计对不上账。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：录制列表头由「共 N 条录制」改为「共 N 条录制 · M 帧」，M 为全部 `record_count` 合计（即有效帧总数，useMemo 计算）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：头部（缩放控件旁）新增帧计数胶囊——会话视图「本录制 M 帧」（与视频库选中条目同源同值）；全局视图「有效 M / 物理 P 帧 · 已删 D」。横轴保留物理 `_index` 坐标（删除空洞可视化与按物理帧号恢复依赖它），仅统一文字口径。
+  - i18n：`i18n/messages/tublibrary.ts`（`recordingsCount` 更名 `recordingsSummary`，全仓唯一引用点已同步）、`i18n/messages/tubeditor.ts`（新增 `framesSessionScope`/`framesGlobalScope`），zh/en 同步。
+  - 测试：`TubLibrary.test.tsx` 新增合计帧数渲染用例、`TubEditor.test.tsx` 新增全局/会话两种口径标签用例（t mock 升级为支持插值）；两文件 19 用例全绿，`tsc -b --noEmit` 通过。
+  - 注：纯前端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (248)
+
+- fix(drive): 修复多浏览器页签并存时键盘/摇杆输入被挂机页签覆盖——后端新增「驾驶客户端」仲裁
+  - 根因（本机 ws 探针实测 + 代码定位）：后端把所有客户端的控制消息原样转发车端，无任何仲裁。挂机的后台页签（输入源默认摇杆、无人操作）持续以 60Hz 发 `{angle:0, throttle:0}`，把正在驾驶页签的键盘输入几乎全部覆盖——实测 60Hz 连发 `angle=0.4` 共 1.5s，车端遥测 138 帧里 0.4 仅存活个位数帧，车端表现为「输入有显示但车辆不动」（模拟器与实车同链路同病）。另有叠加因素：上轮重部署后旧 8000 后端优雅排空被旧 WS 连接卡住不死，新旧双后端并存、浏览器页签被拆到两个进程，落在无车端进程上的控制被静默丢弃（已清理僵尸进程 128189）。
+  - `web_ui/backend/routers/drive.py`：新增驾驶客户端仲裁——同一时刻唯一 `driver_client_id` 的控制可下发车端；非 driver 须携带主动驾驶意图（非零角/油门或 drive_mode/recording 变化、buttons/car_mode 字段）才能抢占，纯空闲 0 流永远抢不走驾驶权；空闲流拒绝回执按 2s 限频回 `control_rejected(not_driver)`；driver 断开或停发超 2s（`DRIVER_RELEASE_TIMEOUT`）自动释放身份。
+  - `web_ui/frontend/src/hooks/useDriveControlLoop.ts`：页面隐藏（`document.hidden`，后台页签）时暂停 60Hz 控制发送——挂机页签不再当「幽灵客户端」。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：新增 `onControlRejected` 回调分发服务端仲裁拒绝。
+  - `web_ui/frontend/src/pages/DrivePage.tsx` + `i18n/messages/drive.ts`：被仲裁拒绝时工具栏显示「另一个页面正在驾驶，本页输入被忽略」徽章（4s 无新拒绝自动消失，中英文案 `drive.driverConflict`）。
+  - 测试：`web_ui/backend/tests/test_drive_client_arbitration.py` 新增 6 项（单客户端空闲流回归、幽灵页签不得覆盖、非零抢占、断开释放、超时释放、拒绝回执限频）；`useDriveControlLoop.test.tsx` 新增隐藏暂停 1 项；`useDriveWebsocket.test.tsx` 新增 control_rejected 分发 1 项。
+  - 注：后端 + 前端运行时改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (247)
 
 - feat(drive): 多车端进程双重防护——drive 启动单实例守护 + 车端槽位易主风暴页面告警
@@ -20,7 +128,6 @@
   - `donkeycar/templates/complete.py`：`V.add(TubRotator(tub_writer, cfg.DATA_PATH), inputs=['recording'], outputs=[])` 注册在 `TubWriter` 之前，保证同一循环 tick 内先轮换再写首帧；`recording` key 由 DriveApiBridge / 摇杆统一写入，Web 按钮、手柄等录制入口一致生效。web_ui 前后端无需改动（`tub/num_records` 经既有 ws 链路自动归零显示）。
   - 测试：`donkeycar/tests/test_tubwriter.py` 新增 `TestTubRotator` 3 项——`new_tub()` 切换后写入落新目录且计数归零、旧 tub 不受影响；上升沿轮换 / 持续 True 与下降沿不轮换；tub 为空不轮换。`test_tubwriter.py` 4 项 + `test_tub_v2.py` 4 项 + `test_kinematics.py`（引用 complete 模板）19 项全绿。
   - 注：车端 Python 改动，随 `manage.py drive` 重启生效；本地 `mycar/manage.py` 副本已同步接线；Firmware 无改动、无需 OTA。
-
 ## 2026-09-25 (245)
 
 - fix(drive): 修复 Mac 端 Drive 页录制"自动开始/闪烁/计时一直 0:00"——后端录制态 stale 缓存跨车端断连残留
@@ -112,6 +219,7 @@
     - 俯拍漂移章节：模块地图测试计数 254 → 559（本分支实测 `web_ui/backend` 559 passed + 1 skipped）；状态行由 2026-08-30 对齐 `docs/guide/overhead-drift-handoff.md` 的 2026-09-01 口径（全量夜间审计补齐看门狗三链路/线程安全/NaN 防线加固待实车核对、M4 前遗留项清零；M1 人工漂移录制、M2 点动机理验证待实操不变）。
   - 测试：纯文档改动，无运行时代码影响；全量 pytest（本分支基线）除两条已被 #444 修复的既有失败（build_drift_clip 反斜杠路径、setup metadata url 断言）外全部通过，合并 origin/Tony 后在合并树上复跑 `tests/test_build_drift_clip.py` + `donkeycar/tests/test_project_metadata.py` 29 passed + 1 skipped；`web_ui/backend` 559 passed + 1 skipped。
   - 注：PyPI 项目页（0.1.0）首页仍展示旧仓名链接（301 跳转可用）——`setup.cfg` 已是正确值，下次发版自然更新；无需本机部署（纯文档），Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (236)
 
 - fix(tests): `test_train` 收敛性测试固定随机种子，根治 `test_train[data9]` 偶发失败

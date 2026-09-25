@@ -87,6 +87,15 @@ async def launch_zcode_remote(request: Request):
     return await _forward_launch(request, "/api/launch/zcode-remote", timeout_s=10.0)
 
 
+@router.post("/drive")
+async def launch_drive(request: Request):
+    """转发 POST /api/launch/drive（启动/重启驾驶会话）到 launcher 并回传其 JSON 响应。
+
+    launcher 侧 _launch_drive() 先杀旧 manage.py drive 进程（重读 myconfig.py）
+    再复用/新起 Web UI 实例；新起实例时等就绪可能耗时较长，沿用默认长超时。"""
+    return await _forward_launch(request, "/api/launch/drive")
+
+
 async def _forward_launch(
     request: Request, launcher_path: str, timeout_s: float = FORWARD_TIMEOUT_S
 ) -> JSONResponse:

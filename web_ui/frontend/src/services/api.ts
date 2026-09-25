@@ -756,6 +756,27 @@ export const launchKimiCodeWeb = async (signal?: AbortSignal): Promise<LaunchKim
   return response.data as LaunchKimiCodeWebResult;
 };
 
+export interface RestartDrivingResult {
+  // 与 launcher（:8090）_launch_drive 返回一致：成功 {status:'launched', url, ...}，
+  // 失败 {status:'error', error}；warning 为启动就绪探测超时等非致命提示
+  status: string;
+  url?: string;
+  warning?: string | null;
+  error?: string;
+}
+
+export const restartDriving = async (signal?: AbortSignal): Promise<RestartDrivingResult> => {
+  // 转发到 launcher 的 /api/launch/drive：先杀旧 manage.py drive 再按最新
+  // myconfig.py 重启（驾驶目标切换保存后调用）。validateStatus 全放行：
+  // launcher 的业务错误（非 200）同样带 JSON {status, error} 体，
+  // 交给调用方按 status 判断，不按 HTTP 状态码抛异常。
+  const response = await api.post('/launch/drive', {}, {
+    signal,
+    validateStatus: () => true,
+  });
+  return response.data as RestartDrivingResult;
+};
+
 export const launchDsh = async (signal?: AbortSignal): Promise<LaunchKimiCodeWebResult> => {
   // 同 launchKimiCodeWeb：DeepSeek Harness（dsh web）经后端转发到 launcher
   // 的 /api/launch/dsh；dsh 冷启动数秒、launcher 端整体超时 60s。
@@ -828,6 +849,9 @@ export interface HarnessComponent {
   installed: boolean;
   version: string | null;
   path: string | null;
+  // 最近一次更新检查（后台周期/手动一键检查）得出的可更新信息；未检查过时缺省。
+  latest_version?: string | null;
+  update_available?: boolean;
   install: HarnessComponentInstall;
 }
 
@@ -1165,6 +1189,8 @@ export interface AiConfigProvider {
   api_format: 'openai' | 'anthropic' | string;
   custom: boolean;
   default_models: string[];
+  // 该供应商是否已有可用凭据（任一账号有 API Key 或已连 OAuth）；后端列表接口返回。
+  configured?: boolean;
   accounts: AiConfigAccount[];
 }
 
