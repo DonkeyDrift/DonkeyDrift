@@ -42,6 +42,7 @@ import logging
 import os
 import pty
 import socket
+import signal
 import struct
 import subprocess
 import termios
@@ -235,6 +236,14 @@ class TerminalSession:
             # 控制终端（任务控制、Ctrl-C 信号投递都依赖它）
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            # 复位控制信号处置：若本进程（如被 nohup 后台启动、或经非交互
+            # shell 后台任务拉起）带着 SIGINT/SIGQUIT/SIGHUP=SIG_IGN，忽略位
+            # 会跨 fork+exec 一路继承到 shell 及其前台子进程，PTY 里按 Ctrl-C
+            # 将永远无法打断前台命令（bash 启动时记住忽略态并传播给子进程）。
+            # 终端会话是交互入口，必须显式恢复默认处置。
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+            signal.signal(signal.SIGHUP, signal.SIG_DFL)
 
         self._proc = subprocess.Popen(
             list(shell),

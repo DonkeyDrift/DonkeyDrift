@@ -29,9 +29,16 @@ def test_createcar(cardir):
     assert is_error(err) is False
 
 
-def test_drivesim(cardir):
-    cmd = ['donkey', 'createcar', '--path', cardir ,'--template', 'square']
+def test_drivesim(cardir, monkeypatch):
+    cmd = ['donkey', 'createcar', '--path', cardir, '--template', 'square']
     out, err, proc_id = utils.run_shell_command(cmd, timeout=10)
+    # Point the DriveApiBridge at a port nothing listens on: the default
+    # ws://127.0.0.1:8000 races with whatever real service happens to run
+    # there — when it connects, the spawned drive pushes telemetry to the
+    # live instance and its video track feeds frames to the av encoder,
+    # making the result environment-dependent (intermittent failure).
+    monkeypatch.setenv("DRIVE_API_SERVER_URL",
+                       "ws://127.0.0.1:9/api/drive/ws?role=car")
     cmd = ['python', 'manage.py', 'drive']
     out, err, proc_id = utils.run_shell_command(cmd, cwd=cardir)
     print(err)
