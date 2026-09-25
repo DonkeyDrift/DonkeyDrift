@@ -384,13 +384,25 @@ def _split_reg_query(query: str) -> list[str]:
     return [part.strip('"') for part in query.split(" ") if part.strip()]
 
 
+def _persisted_update_index() -> dict:
+    """最近一次更新检查（持久化在 STATE_PATH）里 kind=='harness' 的项，
+    按 (harness_id, component_id) 建索引；读盘失败/无记录时容错为空 dict。"""
+    index = {}
+    for item in load_state().get("updates") or []:
+        if isinstance(item, dict) and item.get("kind") == "harness":
+            index[(item.get("harness_id"), item.get("component_id"))] = item
+    return index
+
+
 def _catalog_status() -> list[dict]:
-    """逐项检测，返回前端可直接渲染的目录状态。"""
+    """逐项检测，返回前端可直接渲染的目录状态（含最近一次检查得出的可更新信息）。"""
+    update_index = _persisted_update_index()
     result = []
     for harness in HARNESS_CATALOG:
         components = []
         for component in harness["components"]:
             det = detect_component(component)
+            upd = update_index.get((harness["id"], component["id"]), {})
             components.append(
                 {
                     "id": component["id"],
@@ -399,6 +411,9 @@ def _catalog_status() -> list[dict]:
                     "installed": det["installed"],
                     "version": det["version"],
                     "path": det["path"],
+                    # 最近一次检查的可更新信息；无记录（从未检查过）时为 None / False。
+                    "latest_version": upd.get("latest_version"),
+                    "update_available": bool(upd.get("updateable")),
                     "install": {
                         "type": component["install"]["type"],
                         "package": component["install"].get("package"),
