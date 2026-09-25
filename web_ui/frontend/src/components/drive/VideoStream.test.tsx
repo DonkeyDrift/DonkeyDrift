@@ -58,6 +58,17 @@ const degradedState = () => ({
 beforeEach(() => {
   vi.useRealTimers();
   mockWebRtc.mockReturnValue(connectedState());
+  // /drive/stats 常驻轮询的默认桩：保持单测封闭（不真实请求本机后端）
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    json: async () => ({
+      online: true,
+      fps: 0,
+      car_ws_connected: true,
+      last_seen_age_sec: 0,
+      car_takeovers_10s: 0,
+      multi_car_warning: false,
+    }),
+  })));
 });
 
 describe('VideoStream', () => {
@@ -179,6 +190,26 @@ describe('VideoStream', () => {
     expect(screen.getByText('正在连接摄像头...')).toBeInTheDocument();
 
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('多车端抢占告警：stats 返回 multi_car_warning 时渲染告警横幅', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      json: async () => ({
+        online: true,
+        fps: 1,
+        car_ws_connected: true,
+        last_seen_age_sec: 0,
+        car_takeovers_10s: 12,
+        multi_car_warning: true,
+      }),
+    })));
+
+    render(<VideoStream />);
+
+    await waitFor(() => {
+      expect(screen.getByText('检测到多个车端进程抢占连接：请关闭多余的 manage.py drive 进程后等待自动恢复')).toBeInTheDocument();
+    });
     vi.unstubAllGlobals();
   });
 

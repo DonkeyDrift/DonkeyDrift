@@ -116,6 +116,17 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     requesting the same named input.
     """
     logger.info(f'PID: {os.getpid()}')
+
+    # 单实例守护：多个 drive 进程会互相抢占后端唯一车端连接（连接风暴、
+    # 页面无画面），发现存活实例时拒绝启动并给出明确指引
+    from donkeycar.webui_instance import (
+        DriveAlreadyRunning, acquire_drive_instance_lock)
+    try:
+        acquire_drive_instance_lock()
+    except DriveAlreadyRunning as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
     if model_path is None:
         model_path = _selected_model_from_disk()
     if cfg.DONKEY_GYM:
