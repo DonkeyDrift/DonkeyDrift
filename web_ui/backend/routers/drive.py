@@ -78,6 +78,11 @@ class DriveState:
         self.car_ws: Optional[WebSocket] = None
         self.client_ws: Dict[str, WebSocket] = {}
 
+        # 最近一次向客户端广播的 car_state 三元组快照：
+        # 客户端 60Hz 控制循环会持续命中控制分支，回声广播仅在值变化时发出，
+        # 避免值未变的 car_state 以 60Hz 洪泛所有客户端。
+        self.last_car_state_echo: Optional[tuple] = None
+
         # 遥测进程内挂钩（第三视角漂移引擎等订阅方，广播前同步调用）
         self.telemetry_hooks: List[Callable[[dict], None]] = []
 
@@ -688,6 +693,9 @@ async def drive_ws(
 
                 # 车端状态变更广播给所有客户端
                 if state_changed:
+                    drive_state.last_car_state_echo = (
+                        drive_state.drive_mode, drive_state.recording, drive_state.num_records,
+                    )
                     await drive_state.broadcast_to_clients({
                         "type": "car_state",
                         "drive_mode": drive_state.drive_mode,
@@ -706,6 +714,21 @@ async def drive_ws(
                     "type": "car_connection",
                     "online": False,
                 })
+                # 车端断开即复位录制态：否则缓存的 recording=true 跨断连残留，
+                # 客户端每次重连都被当作初始 car_state 推回，页面表现为
+                # 「没点录制却自动开始录制、计时一直 0:00 的闪烁」——车端
+                # 重连后 1s 内上报真实 false 又把状态翻回去，如此往复。
+                if drive_state.recording:
+                    drive_state.recording = False
+                    drive_state.last_car_state_echo = (
+                        drive_state.drive_mode, False, drive_state.num_records,
+                    )
+                    await drive_state.broadcast_to_clients({
+                        "type": "car_state",
+                        "drive_mode": drive_state.drive_mode,
+                        "recording": False,
+                        "num_records": drive_state.num_records,
+                    })
 
     else:
         # 客户端连接（浏览器）
@@ -782,7 +805,10 @@ async def drive_ws(
                         drive_state.throttle = float(msg["throttle"])
                     if "drive_mode" in msg:
                         drive_state.drive_mode = msg["drive_mode"]
-                    if "recording" in msg:
+                    if "recording" in msg and drive_state.car_ws is not None:
+                        # 车端不在线时忽略录制指令：此时转发必然失败，若仍写缓存，
+                        # 脏值会残留到客户端重连时作为初始状态推回前端
+                        # （见车端断开分支的注释）。
                         drive_state.recording = bool(msg["recording"])
                     if "buttons" in msg:
                         drive_state.buttons.update(msg["buttons"])
@@ -790,8 +816,15 @@ async def drive_ws(
                     # 转发给车端
                     await drive_state.send_to_car(msg)
 
-                    # 同步给其他所有客户端（多端状态一致）
-                    await drive_state.broadcast_to_clients({
+                    # 同步给其他所有客户端（多端状态一致）。
+                    # 60Hz 控制循环会持续命中本分支，仅在三元组变化时广播，
+                    # 避免值未变的 car_state 以 60Hz 洪泛所有客户端。
+                    echo_state = (
+                        drive_state.drive_mode, drive_state.recording, drive_state.num_records,
+                    )
+                    if echo_state != drive_state.last_car_state_echo:
+                        drive_state.last_car_state_echo = echo_state
+                        await drive_state.broadcast_to_clients({
                         "type": "car_state",
                         "drive_mode": drive_state.drive_mode,
                         "recording": drive_state.recording,

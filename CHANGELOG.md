@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-25 (245)
+
+- fix(drive): 修复 Mac 端 Drive 页录制"自动开始/闪烁/计时一直 0:00"——后端录制态 stale 缓存跨车端断连残留
+  - 根因（本机 ws 探针实测 + 代码定位）：客户端发 `{recording:true}` 时无论车端是否在线都写入 `drive_state.recording`（车端闪断时转发悄悄失败，缓存卡在 true）；车端 ws 断开又不复位该缓存。浏览器每次重连，后端把残留的 `recording:true` 当初始 `car_state` 推给前端 → 页面"没点录制却自动开始录制"；车端重连后 1s 内上报真实 `recording:false` 又把状态翻回去，`recordStartTime` 反复置空 → 按钮闪烁、计时一直 0:00、tub 无数据。车端 ws 闪断（Wi-Fi 上的 Mac drive loop）让该循环反复出现。
+  - `web_ui/backend/routers/drive.py` 三处修复：
+    1. 车端断开即复位录制态并补播 `car_state(recording=false)`——脏缓存不再跨断连存活；
+    2. 车端不在线（`car_ws is None`）时忽略客户端录制指令，不再让缓存领先于车端真值；
+    3. 客户端控制消息触发的 `car_state` 回声广播改为仅三元组（drive_mode/recording/num_records）变化时发出——消除 60Hz 控制循环造成的 ~50Hz 洪泛（本机实测：120 条同值控制消息 0 次广播）。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：`car_connection online=false` 与 ws `onclose`/停用时一并复位 `recording:false`——车端不在线绝不显示"录制中"，双保险防闪烁。
+  - 测试：`web_ui/backend/tests/test_drive.py` 新增 3 项（车端断开复位广播、离线录制指令不写缓存、回声广播去重），并同步 `test_car_frame_message_updates_num_records_and_broadcasts_state` 断连复位断言——后端 568 项全绿；`useDriveWebsocket.test.tsx` 新增 2 项（car_connection 离线/onclose 复位录制态）——前端 341 项全绿；另起 8023 临时实例 ws 探针三场景实测通过。
+  - 注：后端 + 前端运行时改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
 ## 2026-09-25 (244)
 
 - fix(drive): 修复 macOS 浏览器手柄选项永远灰色不可选——手柄连接检测加「轮询 + 用户手势」兜底
@@ -16,7 +27,6 @@
   - `donkeycar/parts/drive_api_bridge.py`：退避 `asyncio.sleep(self.reconnect_interval)` 从 `except` 分支移到 `_connect_loop` 循环体末尾——异常断开与被服务端正常关闭（新车端接管）一律退避。
   - 测试：`donkeycar/tests/test_drive_api_bridge.py` 新增 `test_connect_loop_backs_off_after_clean_server_close`（第 3 次连接即置停的确定性终止设计，断言相邻重连间隔 ≥ 退避值；修复前无退避间隔趋近 0 稳定失败）——修复后通过；`test_drive_api_bridge.py` 51 项 + `test_drive_api_bridge_telemetry.py` 14 项全绿。
   - 注：车端 Part 改动，随下次 `manage.py drive` 重启生效；后端无需重启；Firmware 无改动、无需 OTA。
-
 ## 2026-09-25 (242)
 
 - fix(launcher): 修复 DC 页面终端（上位机 Web 终端）无法选择文字并复制
