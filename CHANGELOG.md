@@ -1,13 +1,33 @@
 # 变更日志
 
-## 2026-09-25 (241)
+## 2026-09-25 (243)
 
 - fix(bridge): `DriveApiBridge` 被服务端正常关闭后也按 `reconnect_interval` 退避重连，根治多车端实例互踢时的连接风暴
   - 根因（线上复现）：本机误开两个 `manage.py drive` 实例时，后端唯一 car 槽位互相接管——新车端连接会 close 旧连接，旧桥的 `_connect_loop` 在**正常关闭**路径（`async for` 正常结束，无异常）下无任何退避立即热重连，形成每秒上百次的连接风暴（journal 实测 ~80 条/秒「已连接到 Web Console Drive 服务端」），car 槽位毫秒级易主、谁都来不及推帧，页面表现为占位帧/无画面。
   - `donkeycar/parts/drive_api_bridge.py`：退避 `asyncio.sleep(self.reconnect_interval)` 从 `except` 分支移到 `_connect_loop` 循环体末尾——异常断开与被服务端正常关闭（新车端接管）一律退避。
-  - 测试：`donkeycar/tests/test_drive_api_bridge.py` 新增 `test_connect_loop_backs_off_after_clean_server_close`（0.3s 窗口、0.05s 退避断言至多 7 次连接；修复前无退避为数百次）——修复前稳定失败、修复后通过；`test_drive_api_bridge.py` 51 项 + `test_drive_api_bridge_telemetry.py` 14 项全绿。
+  - 测试：`donkeycar/tests/test_drive_api_bridge.py` 新增 `test_connect_loop_backs_off_after_clean_server_close`（第 3 次连接即置停的确定性终止设计，断言相邻重连间隔 ≥ 退避值；修复前无退避间隔趋近 0 稳定失败）——修复后通过；`test_drive_api_bridge.py` 51 项 + `test_drive_api_bridge_telemetry.py` 14 项全绿。
   - 注：车端 Part 改动，随下次 `manage.py drive` 重启生效；后端无需重启；Firmware 无改动、无需 OTA。
 
+## 2026-09-25 (242)
+
+- fix(launcher): 修复 DC 页面终端（上位机 Web 终端）无法选择文字并复制
+  - 根因：终端页 `terminal.html` 的 xterm 选区画在自有层里（`.xterm` 为 `user-select:none`，无原生 DOM 选区），浏览器原生手段全部复制不到内容——Ctrl+C 被 xterm 当输入发送 SIGINT、Ctrl+Shift+C 无任何绑定、右键菜单「复制」复制到空串；触屏设备上 xterm 更是完全没有拖选能力（桌面拖选高亮本身正常，实测验证过）。
+  - `donkeycar/launcher/terminal_static/terminal.html` 补齐三条复制通路：
+    1. 快捷键：Ctrl+Shift+C / Ctrl+Insert（macOS 为 Cmd+Shift+C）复制选区；Ctrl/Cmd+C 在有选区时复制、无选区时保持原行为发送 SIGINT——捕获阶段拦截并 `stopPropagation`，防止复制键被 xterm 当输入透传给 shell；
+    2. 右键：有选区时直接复制（与本地终端一致），无选区时保留浏览器默认菜单；
+    3. 触屏长按 550ms：选中按压处整行（`term.select` 高亮）并复制，禁用 iOS 长按系统放大镜/呼出（`-webkit-touch-callout:none`），长按后吞掉合成点击避免误触 shell。
+  - 剪贴板写入优先 `navigator.clipboard.writeText`，不可用时回退隐藏 textarea + `execCommand('copy')`——终端多经局域网 HTTP（非 secure context，`navigator.clipboard` 不存在）、且跨域 iframe 内 Clipboard API 受 Permissions Policy 默认封锁，execCommand 兜底两条场景都实测可用；复制结果以 toast 反馈（中英文案「已复制/Copied」「已复制整行/Line copied」）。
+  - 测试：`donkeycar/tests/test_launcher_terminal.py` 新增 `test_terminal_page_copy_and_touch_select`（断言三条复制通路、clipboard 兜底、toast 文案齐备）；Playwright 端到端实测——拖选+Ctrl+C、Ctrl+Shift+C、右键复制、触屏长按复制（CDP 真实 touch 序列）、无选区 Ctrl+C 透传 SIGINT、DC 同款 iframe 嵌入（带/不带 `allow` 授权）全部通过；`test_launcher_terminal.py` 两处 28 项全绿。
+  - 注：改动属 launcher 终端静态页，部署 8090 在线实例即生效；Firmware 无改动、无需 OTA。
+
+
+## 2026-09-25 (241)
+
+- fix(launcher): 修复 DC/DD 点击「DeepSeek Harness」后标签页停在 about:blank 长达 45 秒——并发启动竞态串行化
+  - 根因（线上复现 + 本机复现）：launcher 是 ThreadingHTTPServer，`launch_dsh_web` 冷启动有 ~14 秒窗口（dsh 插件树加载完才监听固定端口 58641）。窗口期内的第二次点击（用户以为没反应再点一次、或在 DC 和 DD 各点一次）快路径探测不到即将就绪的实例，会再冷启动一个重复的 dsh 子进程——dsh 0.1.5-rc.3 实测遇 EADDRINUSE 只打印错误不退出（进程僵住），`_spawn_and_capture` 只能等满 `SPAWN_TIMEOUT_S`（45s）才杀掉走兜底复用，用户标签页全程停在 about:blank（2026-09-25 13:41-13:42 日志实证：13:41:16 冷启动、13:41:26 第二次点击、13:42:10 才兜底返回）。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_LAUNCH_LOCK` 模块级互斥锁，「复用快路径 → 冷启动 → 固定端口兜底」全流程持锁串行化；后来的并发调用等前一个完成，醒来即命中快路径复用刚登记的实例，毫秒级返回。cwd 校验仍在锁外（快速失败不变）。
+  - 测试：`tests/test_launcher_dsh_web.py` 新增 `test_concurrent_launch_serialized_no_duplicate_spawn`（第二次调用被锁挡住不并发冷启动；前一个完成后直接复用带 token 入口、零子进程）；全文件 98 项 + `web_ui/backend/tests/test_launch.py`、`tests/test_launcher_menu_actions.py` 46 项全绿。
+  - 注：launcher 运行时改动，合入后重启 `donkeydrifter-launcher.service` 生效；前端无改动、无需重建 dist；Firmware 无改动、无需 OTA。
 ## 2026-09-25 (240)
 
 - fix(drive): 修复车端 WebSocket 断开回调竞态——旧连接断开无条件清空 `car_ws`，新连接在线时页面无画面

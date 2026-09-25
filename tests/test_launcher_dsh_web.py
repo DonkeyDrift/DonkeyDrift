@@ -16,7 +16,8 @@
   DSH_WEB_PORT；_FakeProc 脚本化管道输出）成功抓 banner URL 且改写为
   局域网入口（mDNS 主机名优先，其次局域网 IP）、cwd 透传、cwd 非法
   直接报错、未安装 dsh、banner 超时杀进程、进程提前退出报错、冷启动
-  失败后固定端口兜底复用
+  失败后固定端口兜底复用；并发调用被 _LAUNCH_LOCK 串行化——冷启动
+  窗口期内的第二次点击等第一个完成后直接复用，不起重复子进程
 - _SPAWNED 登记：死进程剔除、探测失败剔除后走冷启动；登记为空
   （模拟 launcher 重启）时经固定端口特征探测复用存活实例；带 token
   入口的登记条目复用前先经 _probe_token_entry 验证 token 仍有效
@@ -218,6 +219,42 @@ class TestLaunchDshWeb:
         assert result == {"status": "ok",
                          "url": "http://192.168.3.10:58641/?dsh_new_session=1"}
         assert spawned == []  # 复用路径不起子进程
+
+    def test_concurrent_launch_serialized_no_duplicate_spawn(self, monkeypatch):
+        """冷启动窗口期内的第二次点击被 _LAUNCH_LOCK 串行化（2026-09-25
+        DC/DD 点击后标签页停在 about:blank 45 秒的根因）：窗口期内第二次
+        调用若并发冷启动会撞 EADDRINUSE 且 dsh 僵住不退出，只能等满
+        SPAWN_TIMEOUT_S；串行化后它等第一个调用完成，醒来直接复用其登记
+        的实例，全程不起子进程。"""
+        monkeypatch.setattr(dsh_web, "_probe_root", lambda *a, **k: True)
+        monkeypatch.setattr(dsh_web, "_validate_entry_url",
+                            lambda *a, **k: True)
+        spawned_b = []
+        result_box = {}
+
+        def _second_click():
+            result_box["r"] = launch_dsh_web(
+                cwd=None, timeout_s=5.0, popen_fn=_make_popen(spawned_b))
+
+        # 主线程模拟"第一次冷启动正在进行"：占住启动锁
+        with dsh_web._LAUNCH_LOCK:
+            t = threading.Thread(target=_second_click)
+            t.start()
+            t.join(0.4)
+            # 第二次调用被锁挡住：既没返回也没并发冷启动
+            assert t.is_alive()
+            assert spawned_b == []
+            # 窗口期内第一次调用成功：登记带 token 的存活实例
+            dsh_web._SPAWNED.append({
+                "proc": _FakeProc(hold=True), "port": 58641,
+                "url": "http://192.168.3.10:58641/?token=tk"})
+        t.join(10)
+        assert not t.is_alive()
+        # 醒来即命中快路径复用（token 入口 + 新会话标记），零子进程
+        assert result_box["r"] == {
+            "status": "ok",
+            "url": "http://192.168.3.10:58641/?token=tk&dsh_new_session=1"}
+        assert spawned_b == []
 
     def test_spawn_success_captures_url_and_keeps_proc(self):
         proc = _FakeProc(payload=_DSH_BANNER, hold=True)

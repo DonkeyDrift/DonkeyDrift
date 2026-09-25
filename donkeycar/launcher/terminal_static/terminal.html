@@ -9,6 +9,10 @@
 html,body{margin:0;height:100%;background:var(--tbg,#101318);overflow:hidden}
 #term{height:100%;padding:4px;box-sizing:border-box}
 #term .xterm{height:100%}
+/* 触屏长按复制：禁用 iOS 长按系统放大镜/呼出菜单，长按手势由页面自己处理 */
+#term,.xterm{-webkit-touch-callout:none}
+#termToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);background:rgba(28,32,40,.92);color:#e8edf2;font:13px system-ui,sans-serif;padding:8px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:99}
+#termToast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tov,rgba(16,19,24,.85));color:var(--tovink,#8fa1b5);font-family:system-ui,sans-serif;font-size:14px;cursor:pointer;user-select:none;text-align:center;padding:0 16px}
 #overlay[hidden]{display:none}
 </style>
@@ -68,8 +72,8 @@ var termPalette=(function(){
 // 语言：与 Launcher 菜单页一致——显式存储优先，否则跟随浏览器语言
 var uiLang=(function(){try{var v=localStorage.getItem('donkeydrifter.ui.lang');if(v==='zh'||v==='en')return v;}catch(e){}try{return String(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}catch(e){return 'zh';}})();
 var T={
-  zh:{connecting:'正在连接上位机终端…',closed:'连接已断开',reconnecting:'正在重新连接会话…',newSession:'点击重连（将开启新会话）'},
-  en:{connecting:'Connecting to host terminal…',closed:'Disconnected',reconnecting:'Reconnecting session…',newSession:'Tap to reconnect (starts a new session)'}
+  zh:{connecting:'正在连接上位机终端…',closed:'连接已断开',reconnecting:'正在重新连接会话…',newSession:'点击重连（将开启新会话）',copied:'已复制',copyFailed:'复制失败，请重试',lineCopied:'已复制整行'},
+  en:{connecting:'Connecting to host terminal…',closed:'Disconnected',reconnecting:'Reconnecting session…',newSession:'Tap to reconnect (starts a new session)',copied:'Copied',copyFailed:'Copy failed, please retry',lineCopied:'Line copied'}
 };
 function t(k){return (T[uiLang]&&T[uiLang][k])||T.zh[k]||k;}
 document.documentElement.lang=uiLang==='zh'?'zh-CN':'en';
@@ -153,6 +157,99 @@ term.onData(function(d){
   if(ws&&ws.readyState===WebSocket.OPEN){ws.send(encoder.encode(d));}
   trackLine(d);
 });
+
+// ===== 选择与复制（issue：DC 终端无法选择文字并复制）=====
+// xterm 的选区画在自己的层里，浏览器原生复制（Ctrl+C/右键菜单）拿不到内容，
+// 且 Ctrl+C 默认发送 SIGINT；触屏设备上 xterm 完全没有拖选能力。
+// 这里补齐三条复制通路：
+//   1) Ctrl+Shift+C / Ctrl+Insert（macOS 为 Cmd+Shift+C）→ 复制选区
+//      Ctrl/Cmd+C 在有选区时复制，无选区时保持原行为发送 SIGINT
+//   2) 右键：有选区时直接复制（与本地终端一致）
+//   3) 触屏长按 550ms：选中按压处整行并复制
+var toastTimer=null;
+function toast(msg){
+  var el=document.getElementById('termToast');
+  if(!el){el=document.createElement('div');el.id='termToast';document.body.appendChild(el);}
+  el.textContent=msg;el.classList.add('show');
+  if(toastTimer)clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){el.classList.remove('show');},1600);
+}
+function copyText(text){
+  return new Promise(function(resolve){
+    function fallback(){
+      try{
+        var ta=document.createElement('textarea');
+        ta.value=text;
+        ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+        document.body.appendChild(ta);
+        ta.focus();ta.select();
+        var ok=document.execCommand('copy');
+        ta.remove();
+        resolve(ok);
+      }catch(e){resolve(false);}
+    }
+    // 终端多经局域网 HTTP 访问（非 secure context，navigator.clipboard 不存在），必须留 execCommand 兜底
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){resolve(true);},fallback);
+    }else fallback();
+  });
+}
+function copySelection(){
+  var s=term.getSelection();
+  if(!s)return false;
+  copyText(s).then(function(ok){toast(ok?t('copied'):t('copyFailed'));});
+  return true;
+}
+// 捕获阶段拦截，stopPropagation 防止 xterm 把复制键当输入发给 shell
+document.addEventListener('keydown',function(e){
+  var mod=e.ctrlKey||e.metaKey;
+  if(!mod)return;
+  var k=e.key,shiftC=e.shiftKey&&(k==='C'||k==='c');
+  if(shiftC||(e.ctrlKey&&k==='Insert')||((k==='c'||k==='C')&&term.hasSelection())){
+    if(copySelection()){e.preventDefault();e.stopPropagation();}
+  }
+},true);
+// 右键复制当前选区（无选区时保留浏览器默认菜单）
+document.getElementById('term').addEventListener('contextmenu',function(e){
+  if(term.hasSelection()){copySelection();e.preventDefault();}
+});
+// 触屏长按：选中按压处整行（高亮 + 复制）
+function copyLineAt(x,y){
+  try{
+    var el=document.elementFromPoint(x,y);
+    while(el&&!(el.parentElement&&el.parentElement.classList.contains('xterm-rows')))el=el.parentElement;
+    if(!el)return;
+    var rows=el.parentElement.children;
+    var idx=Array.prototype.indexOf.call(rows,el);
+    var buf=term._core.buffer;
+    var line=buf.lines.get(buf.ydisp+idx);
+    if(!line)return;
+    var text=line.translateToString(true);
+    if(!text)return;
+    var len=line.translateToString(false).replace(/\s+$/,'').length;
+    if(len>0)term.select(0,buf.ydisp+idx,len);
+    copyText(text).then(function(ok){toast(ok?t('lineCopied'):t('copyFailed'));});
+  }catch(e){/* 布局取行失败时静默，不打断触屏交互 */}
+}
+(function(){
+  var el=document.getElementById('term');
+  var timer=null,sx=0,sy=0,longFired=false;
+  el.addEventListener('touchstart',function(e){
+    if(e.touches.length!==1)return;
+    var p=e.touches[0];sx=p.clientX;sy=p.clientY;longFired=false;
+    timer=setTimeout(function(){timer=null;longFired=true;copyLineAt(sx,sy);},550);
+  },{passive:true});
+  el.addEventListener('touchmove',function(e){
+    if(timer===null)return;
+    var p=e.touches[0];
+    if(Math.abs(p.clientX-sx)>10||Math.abs(p.clientY-sy)>10){clearTimeout(timer);timer=null;}
+  },{passive:true});
+  el.addEventListener('touchend',function(e){
+    if(timer!==null){clearTimeout(timer);timer=null;}
+    // 长按已处理，吞掉后续合成点击，避免误触 shell
+    if(longFired){e.preventDefault();longFired=false;}
+  });
+})();
 
 function connect(){
   var url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/terminal/ws';
