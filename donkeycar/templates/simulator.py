@@ -131,8 +131,23 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
             preserve_source_resolution=True,
         )
+        # outputs 顺序必须与 DriveApiBridge.run_threaded 的 7 元组返回值严格一致
+        # (Vehicle/Memory 按位置配对)：少写或错序会导致重连标志被静默丢弃。
+        # inputs 顺序必须与 run_threaded 签名严格一致（Vehicle 按位置解包），
+        # 尾部 sim/connected 由上面的 SimConnectionState 提供；中间键在模拟器
+        # 模式下不存在时 Memory.get 返回 None，遥测自动省略对应字段。
+        # 首元素用 preview/image_array（渲染原始帧）作视频源，cam/image_array
+        # 保持 NN 输入分辨率——预览画质与 NN 处理分辨率解耦（f2f8a7d6）。
+        # 注意：donkeycar/tests/test_template_simulator_preview.py 以 AST 字面量
+        # 解析本 V.add 的 inputs，必须保持内联列表字面量、不可抽成变量。
         V.add(ctr,
-              inputs=['preview/image_array', 'tub/num_records', 'user/mode', 'recording', 'sim/connected'],
+              inputs=['preview/image_array', 'tub/num_records', 'user/mode', 'recording',
+                      'imu/gyr_z', 'imu/gyr_x', 'imu/gyr_y',
+                      'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+                      'steering', 'throttle', 'pilot/angle', 'pilot/throttle',
+                      'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park',
+                      'drift/yaw_error', 'drift/steering_correction', 'drift/throttle_mode',
+                      'sim/connected'],
               outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
               threaded=True)
 

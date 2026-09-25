@@ -37,7 +37,7 @@ def test_custom_templates():
         assert (mcfg is not None)
 
 
-# --- DonkeyDrifter template import checks ---
+# --- DonkeyDrift template import checks ---
 
 _MAIN_VEHICLE_TEMPLATES = [
     "arduino_drive.py",

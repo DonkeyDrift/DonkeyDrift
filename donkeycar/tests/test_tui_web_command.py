@@ -7,6 +7,7 @@ def test_web_command_uses_bundled_web_ui_path():
     cmd = WebUICommand().get_command_line({})
 
     assert cmd[:2] == ["donkey", "web"]
+    assert "--install-deps" in cmd
     assert "--path" in cmd
     assert "--open" in cmd
     assert cmd != ["donkey", "web"]
@@ -24,4 +25,4 @@ def test_web_command_opens_browser_even_without_bundled_web_ui(monkeypatch):
 
     cmd = WebUICommand().get_command_line({})
 
-    assert cmd == ["donkey", "web", "--open"]
+    assert cmd == ["donkey", "web", "--install-deps", "--open"]

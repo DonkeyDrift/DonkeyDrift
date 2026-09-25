@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         await harness_updater.stop_background_check()
 
 
-app = FastAPI(title="DonkeyDrifter", lifespan=lifespan)
+app = FastAPI(title="DonkeyDrift Web API", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -138,11 +138,11 @@ if os.path.isdir(FRONTEND_DIST):
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)
-        return {"message": "DonkeyDrifter is running"}
+        return {"message": "DonkeyDrift Web UI is running"}
 else:
     @app.get("/")
     async def root():
-        return {"message": "DonkeyDrifter is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
+        return {"message": "DonkeyDrift Web UI is running (frontend not built, run: cd web_ui/frontend && npm run build)"}
 
 
 if __name__ == "__main__":
