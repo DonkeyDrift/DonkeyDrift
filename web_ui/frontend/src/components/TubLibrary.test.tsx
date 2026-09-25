@@ -197,6 +197,48 @@ describe('TubLibrary download button', () => {
   });
 });
 
+// 回归测试（总帧数口径统一）：左侧录制列表头展示「共 N 条录制 · 合计有效帧数」，
+// 合计为所有 sessions 的 record_count 之和（有效帧，迭代跳过软删除），
+// 与 Tub 编辑器的有效帧数口径对齐。
+describe('TubLibrary recordings summary total frames', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(listTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      sessions: [
+        { ...sessions[0], record_count: 7 },
+        { ...sessions[1], record_count: 4 },
+      ],
+    });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: [
+        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+      ],
+    });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('renders the summed record_count of all recordings in the list header', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    // 两条录制各自的 record_count（7 + 4）合计为 11 帧
+    await waitFor(() => {
+      expect(screen.getByText('共 2 条录制 · 11 帧')).toBeInTheDocument();
+    });
+  });
+});
+
 // 墙钟播放调度回归（60fps）：某一帧图片未加载完时播放不停摆——跳过该帧
 // 继续按墙钟推进；长时间停顿（切后台/网络卡死）后从当前帧继续播放，不快进。
 describe('TubLibrary wall-clock playback scheduling', () => {

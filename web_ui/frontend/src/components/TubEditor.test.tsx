@@ -37,7 +37,12 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('@/i18n', () => ({
-  useTranslation: () => ({ t: (key: string) => key, lang: 'zh' }),
+  useTranslation: () => ({
+    // 插值 mock：携带参数时返回 key + JSON 参数，便于断言文案口径（与 useMyPcProbe.test.ts 手法一致）
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key} ${JSON.stringify(params)}` : key,
+    lang: 'zh',
+  }),
 }));
 
 vi.mock('@/lib/theme', () => ({
@@ -154,5 +159,36 @@ describe('TubEditor 拖拽框选', () => {
 
     expect(useStore.getState().selectionStartIndex).toBeNull();
     expect(useStore.getState().selectionEndIndex).toBeNull();
+  });
+});
+
+describe('TubEditor 帧计数口径标签', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
+  });
+
+  it('全局视图渲染「有效 N / 物理 P 帧 · 已删 D」', () => {
+    const records = makeRecords();
+    useStore.setState({
+      records,
+      activeSessionId: null,
+      activeSessionRecords: [],
+      totalPhysicalRecords: 12,
+      deletedIndexes: [2, 5],
+    });
+    mountEditor();
+
+    // 有效 10（物理 12 中有 2 帧已软删除，与录制视频库的「N 帧」口径对齐）
+    expect(
+      screen.getByText('tubEditor.framesGlobalScope {"count":10,"physical":12,"deleted":2}')
+    ).toBeInTheDocument();
+  });
+
+  it('会话作用域（activeSessionId 非空）渲染「本录制 M 帧」', () => {
+    const records = makeRecords();
+    useStore.getState().setActiveSession('s1', records);
+    mountEditor();
+
+    expect(screen.getByText('tubEditor.framesSessionScope {"count":10}')).toBeInTheDocument();
   });
 });

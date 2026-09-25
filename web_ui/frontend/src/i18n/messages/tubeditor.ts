@@ -4,6 +4,8 @@ export const tubeditor: { zh: Record<string, string>; en: Record<string, string>
   zh: {
     'tubEditor.title': 'Tub 编辑器',
     'tubEditor.liveUpdate': '实时更新',
+    'tubEditor.framesSessionScope': '本录制 {count} 帧',
+    'tubEditor.framesGlobalScope': '有效 {count} / 物理 {physical} 帧 · 已删 {deleted}',
     'tubEditor.emptyChartAria': '空图表占位',
     'tubEditor.emptyState': '选择文件以查看遥测数据',
     'tubEditor.startIndexAria': '开始索引',
@@ -67,6 +69,8 @@ export const tubeditor: { zh: Record<string, string>; en: Record<string, string>
   en: {
     'tubEditor.title': 'Tub Editor',
     'tubEditor.liveUpdate': 'Live Update',
+    'tubEditor.framesSessionScope': 'This recording: {count} frames',
+    'tubEditor.framesGlobalScope': 'Active {count} / physical {physical} · {deleted} deleted',
     'tubEditor.emptyChartAria': 'empty-chart placeholder',
     'tubEditor.emptyState': 'Select files to view telemetry data',
     'tubEditor.startIndexAria': 'Start index',

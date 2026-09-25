@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-25 (249)
+
+- fix(tub): 统一 TM 页「录制视频库」与「Tub 编辑器」总帧数口径——以有效帧为准并显式标注物理/已删帧数
+  - 根因（实测 `mycar/data` manifest + 运行实例 API）：视频库每条录制「N 帧」为有效帧（迭代跳过软删除，当前合计 10391）；Tub 编辑器全局视图横轴/底部滑条为物理帧号空间（`total_physical_records=42386`，含 31995 个已软删帧），用户把最右物理帧号 42385 当成总帧数，与视频库合计对不上账。
+  - `web_ui/frontend/src/components/TubLibrary.tsx`：录制列表头由「共 N 条录制」改为「共 N 条录制 · M 帧」，M 为全部 `record_count` 合计（即有效帧总数，useMemo 计算）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：头部（缩放控件旁）新增帧计数胶囊——会话视图「本录制 M 帧」（与视频库选中条目同源同值）；全局视图「有效 M / 物理 P 帧 · 已删 D」。横轴保留物理 `_index` 坐标（删除空洞可视化与按物理帧号恢复依赖它），仅统一文字口径。
+  - i18n：`i18n/messages/tublibrary.ts`（`recordingsCount` 更名 `recordingsSummary`，全仓唯一引用点已同步）、`i18n/messages/tubeditor.ts`（新增 `framesSessionScope`/`framesGlobalScope`），zh/en 同步。
+  - 测试：`TubLibrary.test.tsx` 新增合计帧数渲染用例、`TubEditor.test.tsx` 新增全局/会话两种口径标签用例（t mock 升级为支持插值）；两文件 19 用例全绿，`tsc -b --noEmit` 通过。
+  - 注：纯前端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (248)
 
 - fix(drive): 修复多浏览器页签并存时键盘/摇杆输入被挂机页签覆盖——后端新增「驾驶客户端」仲裁

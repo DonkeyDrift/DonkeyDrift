@@ -2041,6 +2041,18 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
               <div className="h-4 box-content text-xs text-zinc-400 uppercase">{t('tubEditor.zoomLabel')}</div>
               <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
             </div>
+            {/* 总帧数口径统一为有效帧：全局视图并列展示物理帧数与已删帧数，避免与录制视频库「N 帧」不一致的困惑 */}
+            <div className="flex h-[30px] box-content items-center rounded-md bg-zinc-800 px-3 text-left">
+              <span className="whitespace-nowrap text-xs font-mono text-cyan-400">
+                {isSessionScoped
+                  ? t('tubEditor.framesSessionScope', { count: records.length })
+                  : t('tubEditor.framesGlobalScope', {
+                      count: records.length,
+                      physical: totalPhysicalRecords,
+                      deleted: deletedIndexes.length,
+                    })}
+              </span>
+            </div>
             <Button
               size="sm"
               variant="secondary"
