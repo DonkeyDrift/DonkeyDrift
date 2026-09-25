@@ -661,6 +661,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
           <SectionCardTitle
             icon={<Clapperboard className="w-5 h-5" />}
             title={t('tubLibrary.title')}
+            subtitle={t('tubLibrary.subtitle')}
           />
           <Button
             size="sm"

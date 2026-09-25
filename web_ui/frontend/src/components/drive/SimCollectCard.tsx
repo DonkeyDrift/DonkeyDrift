@@ -75,6 +75,7 @@ export const SimCollectCard: React.FC = () => {
           <SectionCardTitle
             icon={<FlaskConical className="w-5 h-5" />}
             title={t('drive.simCollectTitle')}
+            subtitle={t('drive.simCollectHint')}
           />
           {running ? (
             <Button onClick={() => void stop()} variant="danger" size="sm">
