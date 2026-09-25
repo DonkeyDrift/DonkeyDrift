@@ -11,6 +11,20 @@
   - i18n：`i18n/messages/drive.ts` 新增 17 个 `drive.target*` 键，zh/en 同步。
   - 测试：`DriveTargetCard.test.tsx` 新增 8 项（状态行渲染、保存参数正确且保留 SIM_HOST、重启按钮流转、配置目录未加载/模拟器未发现/重启失败降级路径）；`web_ui/backend/tests/test_launch.py` 新增 2 项 + 路由注册断言。前端 vitest 全量 360 用例全绿、`npm run build` 通过；后端 pytest 全量 577 项全绿。
   - 注：前端 + 后端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+## 2026-09-25 (253)
+
+- feat(car-connector): 设置页改版——AI 配置 CC-Switch 化（已配置徽标 + 填 Key 自动带出 Base URL/模型）、Harness 并发更新与按需更新按钮、ESP32 内嵌页整页滚动
+  - AI 配置（整体参考 CC-Switch 的 UI 与做法）：
+    - 供应商列表折叠态直接显示配置状态徽标（已配置＝祖母绿对勾 / 未配置＝灰），不展开即可看出哪个 AI 已配好；后端 `routers/ai_config.py` 的 `_provider_view()` 新增 `configured` 字段（任一账号有 api_key 或 OAuth token 即 true），前端优先取之、缺省从 accounts 推导。
+    - 添加账号改为预设式：预设供应商默认只需粘贴 API Key（备注名可选），Base URL 与模型名称由预设自动带出展示（带「自动」徽章，不再是空输入框）；「高级设置」展开区内才可覆盖 base_url/models，未覆盖时不发送这两个字段（后端消费时回退预设默认值）；自定义供应商无预设仍手填。
+    - 「当前使用中」切换改为开关式 toggle（role=switch），未配置的供应商禁用并提示先填 API Key；测试连接、Codex OAuth 设备码登录、多账号管理与自定义供应商增删保留不变。
+  - Harness 下载 + 一键更新：
+    - 后端 `routers/harness_updater.py`：`_catalog_status()` 合并最近一次更新检查的持久化结果（新增 `_persisted_update_index()`），每个组件附带 `latest_version` 与 `update_available`；无记录或状态文件损坏时降级为 null/false。
+    - 前端 `HarnessPanel.tsx`：busy 从单字符串改为 Set——下载/安装/一键更新多个任务可并发进行，各自显示进行中，结果提示按任务 key 记录互不清空（此前点第二个更新会顶掉第一个的进度态，用户感知为「被停掉」）。
+    - 组件行「更新」按钮改为按需显示：仅当 `update_available` 时才出现；版本行无更新保持绿色「已安装 x.y.z」，有更新改琥珀色「有新更新 已装 → 可更新」；从未检查过时按无更新处理（顶部「立即检查」按钮不受影响）。
+  - ESP32 车辆设置（`CarSettingsPanel.tsx`）：板块移到页面最后（新顺序 AutoSync → Harness → AI 配置 → 车辆设置，AI 配置与 Harness 下载/一键更新相邻）；iframe 固定 80vh 改为跟随车端页面内容高度——监听 `dd-embed-height` postMessage（校验 origin 归属所选车辆 IP、height 限 200~10000），未收到消息前保持 min-h-[560px] 兜底；设置页一页滑到底，不再出现 iframe 内单独滚动条。高度上报需 Firmware v1.10.3 配套，旧固件不回发消息时自动落兜底高度、向后兼容。
+  - 文件：`web_ui/backend/routers/ai_config.py`、`web_ui/backend/routers/harness_updater.py`、`web_ui/frontend/src/components/{AiSettingsPanel,HarnessPanel,CarSettingsPanel}.tsx`、`web_ui/frontend/src/pages/CarConnectorPage.tsx`、`web_ui/frontend/src/services/api.ts`（`AiConfigProvider.configured` / `HarnessComponent.latest_version`+`update_available` 类型字段）、`web_ui/frontend/src/i18n/messages/{aiconfig,harness}.ts`（zh/en 同步）。
+  - 测试：后端 `test_ai_config.py` 13 项（新增 configured 标志与 OAuth 即配置断言）、`test_harness_updater.py` 22 项（新增目录合并持久化更新信息 3 项，含损坏状态容错）；前端 `AiSettingsPanel.test.tsx` 7 项（徽标/Key-only 保存/高级覆盖）、`HarnessPanel.test.tsx` 10 项（并发 busy 互不干扰、按需更新按钮、琥珀色新更新文案）、`CarSettingsPanel.test.tsx` 9 项（高度跟随、非法 origin/越界 height 忽略）；全量 vitest 53 文件 358 项、后端 pytest 579 项全绿，`tsc` + `vite build` 通过。
 
 ## 2026-09-25 (252)
 

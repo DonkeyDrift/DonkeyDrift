@@ -849,6 +849,9 @@ export interface HarnessComponent {
   installed: boolean;
   version: string | null;
   path: string | null;
+  // 最近一次更新检查（后台周期/手动一键检查）得出的可更新信息；未检查过时缺省。
+  latest_version?: string | null;
+  update_available?: boolean;
   install: HarnessComponentInstall;
 }
 
@@ -1186,6 +1189,8 @@ export interface AiConfigProvider {
   api_format: 'openai' | 'anthropic' | string;
   custom: boolean;
   default_models: string[];
+  // 该供应商是否已有可用凭据（任一账号有 API Key 或已连 OAuth）；后端列表接口返回。
+  configured?: boolean;
   accounts: AiConfigAccount[];
 }
 
