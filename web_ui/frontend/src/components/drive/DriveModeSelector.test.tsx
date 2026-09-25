@@ -26,17 +26,17 @@ describe('DriveModeSelector', () => {
     expect(onChange).toHaveBeenCalledWith('local');
   });
 
-  it('激活按钮按 ESP32 模式配色着色（手动绿/半自动琥珀/全自动蓝，语义类映射 --ok/--warn/--accent）', () => {
+  it('激活按钮统一 accent 配色（浅底 + accent 文字，语义类映射 --accent 变量体系）', () => {
     const { rerender } = render(<DriveModeSelector value="user" onChange={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: '手动' })).toHaveClass('mode-active');
     expect(screen.getByRole('button', { name: '手动' })).toHaveAttribute('data-mode', 'user');
-    expect(screen.getByRole('button', { name: '手动' })).toHaveClass('bg-emerald-500/25', 'text-emerald-400');
+    expect(screen.getByRole('button', { name: '手动' })).toHaveClass('bg-cyan-600/20', 'text-cyan-400');
     expect(screen.getByRole('button', { name: '半自动' })).not.toHaveClass('mode-active');
 
     rerender(<DriveModeSelector value="local_angle" onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: '半自动' })).toHaveClass('mode-active');
-    expect(screen.getByRole('button', { name: '半自动' })).toHaveClass('bg-amber-400/10', 'text-amber-400');
+    expect(screen.getByRole('button', { name: '半自动' })).toHaveClass('bg-cyan-600/20', 'text-cyan-400');
 
     rerender(<DriveModeSelector value="local" onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: '全自动' })).toHaveClass('mode-active');

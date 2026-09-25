@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-25 (255)
+
+- feat(ui): 顶栏恢复 Apple 改版前原始排列 + Drive 页选中态统一 Apple 蓝 + 输入框对比度修复
+  - 背景：用户反馈 DD 页面顶部标签（Drive / Tub Manager / Trainer / Pilot Arena）排列太紧凑，要求改回原始样式。查明 Apple 改版首个提交（0784d454）把桌面导航从 `space-x-6` 收紧为 `space-x-4`，并把 GitHub 图标+版本号从右侧控制簇移到标题左侧。
+  - `web_ui/frontend/src/components/Layout.tsx`：桌面 nav 恢复 `space-x-6`（24px 间距）；GitHubLink+VersionBadge 移回右侧控制簇（CarConnectorButton 之前，与 90413278 排列一致，簇 `gap-3`→`gap-4`）；标题旁的 GitHub+版本号容器改为 `lg:hidden`（手机端保持可见，桌面端不再挤占导航区）。Apple 色彩体系（dd-header/is-scrolled/dd-nav-link）、「⋯」溢出菜单与手机端三行结构零改动。
+  - `web_ui/frontend/src/components/drive/DriveModeSelector.tsx`：手动/半自动/全自动三段选中态删掉逐模式三色（emerald/amber/cyan），统一为 accent 浅底+accent 文字（`bg-cyan-600/20 text-cyan-400`）；`src/themes/theme-light.css` 与 `src/themes/theme-mus4.css` 三条 `button.mode-active[data-mode=…]` 绿/琥珀/蓝描边合并为一条统一 `--accent-a55` 描边。评审采到的「自动漂移灰蓝/停止灰红」实为全站统一禁用降饱和语言（apple-deep.css §6，属 Apple 体系规范），启用态本就是 `--accent-fill`/`--bad-fill`，未动。
+  - `web_ui/frontend/src/components/ui/Input.tsx`：输入框边框 `border-zinc-700`→`border-zinc-600`（映射发丝线强档 `--line-mid`，浅 rgba(60,60,67,.29)/深 rgba(255,255,255,.16)），解决 Drive 页表单输入框融进卡片底色、边框几乎看不见的问题；共享 Input 全站使用者同步生效，非法字段标红逻辑不受影响。
+  - 小字审查：DrivePage 及 DriftCard/SimCollectCard 可见文案逐条过，剩余均为状态值/警告/可操作信息，无「没有任何作用」的废话，未删文案。
+  - 测试：`DriveModeSelector/DriftCard/ModelSelector/SimCollectCard/appleTokens/App/VersionBadge/GitHubLink` 8 文件 59 用例全绿（`DriveModeSelector.test.tsx` 断言同步统一 accent 类）；`tsc -b --noEmit` 通过；`npm run build` 成功；Playwright 截图核验桌面顶栏间距与输入框边框。
+  - 注：纯前端改动，合入后部署本机；Firmware 侧配套状态卡底色统一见 Firmware v1.10.4。
+
 ## 2026-09-25 (254)
 
 - feat(drive): Drive 页新增「驾驶目标」卡片——真车/模拟器目标可见可切，保存后一键重启驾驶生效
