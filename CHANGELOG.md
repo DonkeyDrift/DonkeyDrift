@@ -26,7 +26,6 @@
   - 测试：`npm ci` 后 vitest 全量 48 文件 305 项全过；`npm run build` 通过。
   - 注：影响本机可见效果，合入后按惯例部署 8000；Firmware 无改动、无需 OTA。
 
->>>>>>> origin/Tony
 ## 2026-09-25 (237)
 
 - docs(readme): 对外材料刷新——README zsh 举例纠错、俯拍章节状态对齐交接文档
