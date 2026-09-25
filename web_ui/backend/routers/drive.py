@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 驾驶客户端停发超过该秒数即释放驾驶权（页面隐藏/关闭后不再独占）
+DRIVER_RELEASE_TIMEOUT = 2.0
+
 # ------------------------------------------------------------------
 # 全局状态
 # ------------------------------------------------------------------
@@ -81,6 +84,13 @@ class DriveState:
         # 连接管理
         self.car_ws: Optional[WebSocket] = None
         self.client_ws: Dict[str, WebSocket] = {}
+
+        # 多客户端驾驶仲裁：同一时刻唯一「驾驶客户端」（driver）。
+        # 挂机的后台页签会持续 60Hz 发 0，若无仲裁会把正在驾驶页签的
+        # 键盘/摇杆输入几乎全部覆盖——车端表现为「输入有显示但车不动」。
+        # driver 断开或停发超时（DRIVER_RELEASE_TIMEOUT）后释放身份。
+        self.driver_client_id: Optional[str] = None
+        self.driver_last_seen: float = 0.0
 
         # 最近一次向客户端广播的 car_state 三元组快照：
         # 客户端 60Hz 控制循环会持续命中控制分支，回声广播仅在值变化时发出，
@@ -775,6 +785,7 @@ async def drive_ws(
             return
 
         try:
+            last_reject_sent = float("-inf")
             while True:
                 raw = await websocket.receive_text()
                 try:
@@ -809,6 +820,48 @@ async def drive_ws(
                             "reason": "drift_auto_active",
                         }))
                         continue
+
+                    # 多客户端驾驶仲裁：同一时刻只允许一个「驾驶客户端」
+                    # （driver）的控制下发车端（见 DriveState.driver_client_id 注释）。
+                    now = time.monotonic()
+                    if (drive_state.driver_client_id is not None
+                            and (drive_state.driver_client_id not in drive_state.client_ws
+                                 or now - drive_state.driver_last_seen > DRIVER_RELEASE_TIMEOUT)):
+                        # driver 已断开或停发超时：释放驾驶权
+                        drive_state.driver_client_id = None
+                    if drive_state.driver_client_id not in (None, client_id):
+                        # 挑战者须携带主动驾驶意图（非零角/油门或状态变化）；
+                        # 后台页签的空闲 0 流永远抢不走驾驶权。
+                        try:
+                            angle_v = float(msg.get("angle") or 0.0)
+                        except (TypeError, ValueError):
+                            angle_v = 0.0
+                        try:
+                            throttle_v = float(msg.get("throttle") or 0.0)
+                        except (TypeError, ValueError):
+                            throttle_v = 0.0
+                        challenge = (
+                            abs(angle_v) > 1e-6
+                            or abs(throttle_v) > 1e-6
+                            or ("drive_mode" in msg and msg["drive_mode"] != drive_state.drive_mode)
+                            or ("recording" in msg and bool(msg["recording"]) != drive_state.recording)
+                            or "buttons" in msg
+                            or "car_mode" in msg
+                        )
+                        if not challenge:
+                            # 限频回执（2s 一次），避免 60Hz 空闲流被打回执洪泛
+                            if now - last_reject_sent >= 2.0:
+                                last_reject_sent = now
+                                await websocket.send_text(json.dumps({
+                                    "type": "control_rejected",
+                                    "reason": "not_driver",
+                                }))
+                            continue
+                        logger.info(f"客户端 {client_id} 抢占驾驶权（原驾驶端 {drive_state.driver_client_id}）")
+                    # 到这里：现任 driver 保持身份，或挑战者抢占成功
+                    drive_state.driver_client_id = client_id
+                    drive_state.driver_last_seen = now
+
                     if "angle" in msg:
                         drive_state.angle = float(msg["angle"])
                     if "throttle" in msg:
@@ -843,6 +896,9 @@ async def drive_ws(
         except (WebSocketDisconnect, RuntimeError):
             if drive_state.client_ws.get(client_id) is websocket:
                 drive_state.client_ws.pop(client_id, None)
+            # 驾驶客户端断开即释放驾驶权，其余页面可立即接管
+            if drive_state.driver_client_id == client_id:
+                drive_state.driver_client_id = None
             logger.info(f"客户端断开，当前在线: {len(drive_state.client_ws)}")
             # 没有前端在线时停止恢复任务
             if not drive_state.client_ws:

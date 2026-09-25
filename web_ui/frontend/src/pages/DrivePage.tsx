@@ -87,10 +87,25 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     }
   }, []);
 
+  // 另一页面正在驾驶（后端多客户端仲裁拒绝本页控制）时显示提示，
+  // 4s 无新拒绝自动消失；本页一旦发送非零控制抢占成功，拒绝即停。
+  const [driverConflict, setDriverConflict] = useState(false);
+  const driverConflictTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleControlRejected = useCallback((reason: string) => {
+    if (reason !== 'not_driver') return;
+    setDriverConflict(true);
+    if (driverConflictTimerRef.current) clearTimeout(driverConflictTimerRef.current);
+    driverConflictTimerRef.current = setTimeout(() => setDriverConflict(false), 4000);
+  }, []);
+  useEffect(() => () => {
+    if (driverConflictTimerRef.current) clearTimeout(driverConflictTimerRef.current);
+  }, []);
+
   const { connected, carState, send } = useDriveWebsocket({
     enabled: active,
     onWebRtcSignal: setWebRtcSignal,
     onTelemetry: handleTelemetry,
+    onControlRejected: handleControlRejected,
     clientId: clientIdRef.current,
   });
 
@@ -439,6 +454,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                   data-sim-connected={simConnected}
                 >
                   {t('drive.simOfflineReconnecting')}
+                </span>
+              )}
+              {driverConflict && (
+                <span
+                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  data-driver-conflict="true"
+                  role="status"
+                >
+                  {t('drive.driverConflict')}
                 </span>
               )}
               <DriveModeSelector value={mode} onChange={handleModeChange} disabled={!carState.online} />

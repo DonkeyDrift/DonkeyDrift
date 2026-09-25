@@ -49,13 +49,15 @@ interface UseDriveWebsocketOptions {
   reconnectInterval?: number;
   onWebRtcSignal?: (signal: WebRtcSignal) => void;
   onTelemetry?: (t: Telemetry) => void;
+  /** 控制指令被服务端仲裁拒绝（如 not_driver=另一页面正在驾驶） */
+  onControlRejected?: (reason: string) => void;
   clientId?: string;
   /** 是否启用连接（如 Drive section 滚出视口时传 false 断开，停止后台收发） */
   enabled?: boolean;
 }
 
 export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
-  const { autoReconnect = true, reconnectInterval = 3000, onWebRtcSignal, onTelemetry, clientId, enabled = true } = options;
+  const { autoReconnect = true, reconnectInterval = 3000, onWebRtcSignal, onTelemetry, onControlRejected, clientId, enabled = true } = options;
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -141,6 +143,9 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
           if (msg.type === 'telemetry') {
             onTelemetry?.(msg as Telemetry);
           }
+          if (msg.type === 'control_rejected') {
+            onControlRejected?.(typeof msg.reason === 'string' ? msg.reason : 'unknown');
+          }
         } catch {
           // 忽略格式错误的消息
         }
@@ -166,7 +171,7 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
         reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
       }
     }
-  }, [wsUrl, autoReconnect, reconnectInterval, onWebRtcSignal, onTelemetry]);
+  }, [wsUrl, autoReconnect, reconnectInterval, onWebRtcSignal, onTelemetry, onControlRejected]);
 
   const send = useCallback((data: Record<string, unknown>) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
