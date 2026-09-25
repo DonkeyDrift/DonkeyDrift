@@ -157,3 +157,80 @@ describe('TubEditor playhead overlay (60fps playback)', () => {
     expect(screen.getByTestId('playhead-overlay').style.transform).toBe('translateX(89px)');
   });
 });
+
+// 用户报障：TM 页面「上方录制视频库的播放进度条」与「下方 Tub 编辑器图表下的滑块」
+// 不同步。根因：下方滑块的 DOM 值只在「没有焦点」时才写——用户点过/拖过它一次，焦点
+// 就一直留在 range 上，此后全局播放位置（回放、上方进度条、首末帧按钮、键盘方向键）
+// 再怎么变都不会写回它的 DOM 值，下方进度条永久停在旧位置。改为只认「指针按下」的
+// 拖动态让位，并在记录集/量程变化后重新校准。
+describe('TubEditor 上下播放进度条同步', () => {
+  const getSlider = () =>
+    document.querySelector('input[type="range"]') as HTMLInputElement;
+
+  it('滑块持有焦点时仍跟随全局播放位置', () => {
+    renderEditor();
+    pump(1000);
+    const slider = getSlider();
+
+    act(() => {
+      slider.focus();
+    });
+    expect(document.activeElement).toBe(slider);
+
+    act(() => {
+      useStore.setState({ currentIndex: 4 });
+    });
+
+    expect(slider.value).toBe('4');
+  });
+
+  it('用户拖动期间不被外部播放位置拽走，抬起后立刻重新对齐', () => {
+    renderEditor();
+    pump(1000);
+    const slider = getSlider();
+
+    act(() => {
+      fireEvent.pointerDown(slider);
+    });
+    act(() => {
+      fireEvent.input(slider, { target: { value: '2' } });
+    });
+    // 拖动中：回放/上方进度条写来的新位置不得把用户拇指拽走
+    act(() => {
+      useStore.setState({ currentIndex: 7 });
+    });
+    expect(slider.value).toBe('2');
+
+    act(() => {
+      fireEvent.pointerUp(window);
+    });
+    pump(1016);
+
+    // 抬起：挂起的拖动值落库，滑块与全局播放位置重新一致
+    expect(useStore.getState().currentIndex).toBe(2);
+    expect(slider.value).toBe('2');
+  });
+
+  it('记录集切换后重校量程与位置，不残留越界旧值', () => {
+    renderEditor();
+    pump(1000);
+    const slider = getSlider();
+
+    act(() => {
+      useStore.setState({ currentIndex: 9 });
+    });
+    expect(slider.value).toBe('9');
+
+    // 切到只有 3 帧的录制：全局索引 9 越界，若不重写 value 浏览器只会静默截断显示，
+    // 出现「上方已在第 1 帧、下方还停在末尾」的上下不一致
+    act(() => {
+      useStore.setState({
+        activeSessionId: 's2',
+        activeSessionRecords: makeRecords().slice(0, 3) as never,
+      });
+    });
+
+    expect(slider.max).toBe('2');
+    expect(slider.value).toBe('2');
+  });
+});
