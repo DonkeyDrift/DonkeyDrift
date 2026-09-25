@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-25 (256)
+
+- feat(launcher): 终端标签页关闭立即杀掉 PTY 会话——pagehide sendBeacon + WS close 帧双通道，异常断线保留 15 分钟宽限期
+  - 背景：DC（Drifter Console）终端标签页（或整个浏览器标签页）一关，上位机 launcher 里对应的 bash PTY 会话及其正在运行的进程要立即被杀掉；此前连接断开一律只 detach 进 15 分钟宽限期（issue #173 为网络闪断/手机锁屏设计），关掉标签页后进程仍空跑到宽限期耗尽才被清扫。
+  - `donkeycar/launcher/terminal.py`：新增 `kill_session(sid)`（查 `_sessions` 命中即 `close()`，幂等，未命中/空 sid 返回 False）；`handle_terminal_ws` 收到 OP_CLOSE 回 close 帧后立即 `session.close()` 销毁会话、杀掉 bash（finally 的 detach 保留，对已销毁会话无害）；异常断线（协议错误/TCP keepalive 判死）路径不动，仍走宽限期可接回。模块与 TerminalSession 类 docstring 同步更新。
+  - `donkeycar/launcher/server.py`：新增 `/terminal/kill?session=<sid>` 端点（POST 供终端页 sendBeacon、GET 供 curl 手工验证；命中 200 JSON、未命中/重复 404 JSON，幂等）。
+  - `donkeycar/launcher/terminal_static/terminal.html`：新增 `pagehide` 监听——`event.persisted`（进 bfcache 未销毁）时跳过防浏览器前进/后退误杀；置 `intentionallyClosed` 标志抑制断线自动重连与重连 overlay；`navigator.sendBeacon('/terminal/kill?session='+encodeURIComponent(lastSid))` 通知服务端立即销毁（lastSid 为空不发）。iframe 被移除/整页关闭/刷新均触发 pagehide；WS close 帧路径是浏览器未发 beacon 时的兜底。
+  - 测试：`donkeycar/tests/test_launcher_terminal.py` 新增 3 项（kill_session 销毁与幂等、close 帧→会话立即销毁且带旧 sid 重连接不回、kill 端点 GET/POST 命中 200/未命中 404）；`tests/test_launcher_terminal.py` 新增 pagehide/sendBeacon 静态断言并同步 onclose 重连抑制断言。终端两文件 32 项 + launcher 其余 263 项 pytest 全绿。
+  - 注：launcher 后端改动，合入后需部署 deploy-8000 并重启 donkeydrifter-launcher 服务生效；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (255)
 
 - feat(ui): 顶栏恢复 Apple 改版前原始排列 + Drive 页选中态统一 Apple 蓝 + 输入框对比度修复

@@ -20,14 +20,14 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, parse_qs
 
 from donkeycar._version import __version__
 from donkeycar import findcar
 from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
 from donkeycar.launcher.dsh_web import _entry_url_for_client, launch_dsh_web
-from donkeycar.launcher.terminal import handle_terminal_ws
+from donkeycar.launcher.terminal import handle_terminal_ws, kill_session
 from donkeycar.webui_instance import (
     probe_http_ok,
     find_live_instance,
@@ -1078,6 +1078,9 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/terminal/ws":
             # WebSocket 升级：连接被终端桥接管，直到断开后才返回
             handle_terminal_ws(self)
+        elif path == "/terminal/kill":
+            # 终端页 pagehide 的 sendBeacon 走 POST；GET 留作 curl 验证通道
+            self._handle_terminal_kill(parsed)
         elif path == "/api/status":
             self._serve_json(_get_status())
         elif path == "/api/projects":
@@ -1102,7 +1105,10 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path == "/api/launch/drive":
+        if path == "/terminal/kill":
+            # 终端页标签页/iframe 关闭时 navigator.sendBeacon 发来（POST）
+            self._handle_terminal_kill(parsed)
+        elif path == "/api/launch/drive":
             # 读取并丢弃请求体（如有）
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 0:
@@ -1505,6 +1511,26 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_terminal_kill(self, parsed):
+        """/terminal/kill?session=<sid>：立即销毁指定终端会话（杀 bash PTY）。
+
+        终端页在 pagehide（标签页/iframe 关闭、整页刷新）时用
+        navigator.sendBeacon 调本端点（POST），让上位机立即杀掉对应会话，
+        不再等 15 分钟宽限期——宽限期只面向网络闪断/锁屏等异常断线
+        （issue #173）；WS close 帧路径是浏览器未发 beacon 时的兜底。
+        同时支持 GET，便于 curl 手工验证。命中返回 200；未命中（sid 为
+        空/不存在/已销毁）返回 404，幂等。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)  # 丢弃请求体，保持连接整洁
+        sid = (parse_qs(parsed.query).get("session") or [""])[0]
+        if kill_session(sid):
+            self._serve_json({"status": "ok", "killed": sid})
+        else:
+            self._serve_json(
+                {"status": "error", "error": "session not found"}, code=404)
 
     def _serve_json(self, data, code=200, extra_headers=None):
         """提供 JSON 响应。extra_headers 为额外的响应头名值对序列（如

@@ -13,6 +13,9 @@
 - 会话保持与重连（issue #173）：连接断开后 PTY 会话进入宽限期不销毁，
   ?session=<sid> 重连接回原会话并补发断线期间的输出；宽限期耗尽后由
   清扫线程销毁
+- 主动关闭立即销毁：客户端 close 帧（标签页/iframe 关闭）立即销毁会话、
+  杀掉 bash，重连接不回；/terminal/kill HTTP 端点（终端页 pagehide 的
+  sendBeacon 通道）命中 200 销毁、未命中/重复 404，GET/POST 均支持
 """
 
 import json
@@ -431,6 +434,20 @@ def _read_json_control(sock_file, timeout=10.0):
     pytest.fail("超时未收到 text 控制帧")
 
 
+def _http_json(method, url, expected_code):
+    """发 HTTP 请求：校验状态码并返回解析后的 JSON 响应体。"""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == expected_code
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        assert e.code == expected_code
+        return json.loads(e.read().decode("utf-8"))
+
+
 def test_terminal_ws_idle_keeps_connection():
     """空闲（无任何客户端帧，含 PONG）不再判死断连（issue #173）。
 
@@ -594,6 +611,102 @@ def test_terminal_ws_grace_expiry_destroys_session(monkeypatch):
         time.sleep(0.3)
         terminal._sweep_once()
         assert terminal._sessions.get(sid) is None, "宽限期耗尽后会话未被销毁"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# ===========================================================================
+# 主动关闭立即销毁（标签页关闭即杀会话；宽限期只留给异常断线）
+# ===========================================================================
+def test_kill_session_destroys_session():
+    """kill_session 按 sid 立即销毁会话；幂等，空/不存在/已销毁返回 False。"""
+    sess = TerminalSession()
+    with terminal._sessions_lock:
+        terminal._sessions[sess.sid] = sess
+    assert terminal.kill_session(sess.sid) is True
+    assert sess._closed
+    assert terminal._sessions.get(sess.sid) is None
+    # 幂等：重复 kill、空 sid、不存在的 sid 均不命中
+    assert terminal.kill_session(sess.sid) is False
+    assert terminal.kill_session("") is False
+    assert terminal.kill_session("nonexistent") is False
+
+
+def test_terminal_ws_close_frame_destroys_session():
+    """客户端主动发 close 帧（标签页/iframe 关闭）：会话立即销毁，重连接不回。
+
+    与异常断线（裸断 TCP，走宽限期可接回，见 issue #173 用例）相对：主动
+    关闭不留宽限期，bash 及其运行的进程立即被杀。
+    """
+    server, sock, sock_file = _open_terminal_ws()
+    try:
+        sid = _read_json_control(sock_file)["id"]
+        # close → 服务端回应 close 帧，且会话被立即销毁（不进宽限期）
+        sock.sendall(_masked_client_frame(b"", OP_CLOSE))
+        while True:
+            opcode, _payload = _recv_server_frame(sock_file)
+            if opcode == OP_CLOSE:
+                break
+        assert _wait_until(lambda: terminal._sessions.get(sid) is None,
+                           timeout=5)
+        sock_file.close()
+        sock.close()
+        # 带旧 sid 重连：会话已销毁，应开全新会话（reattached=False、sid 不同）
+        server2, sock2, sock_file2 = None, None, None
+        try:
+            server2, sock2, sock_file2 = _open_terminal_ws(session_id=sid)
+            msg = _read_json_control(sock_file2)
+            assert msg["type"] == "session"
+            assert msg["reattached"] is False
+            assert msg["id"] != sid
+            # 显式销毁，避免宽限期里的会话泄漏到其他测试
+            with terminal._sessions_lock:
+                sess = terminal._sessions.get(msg["id"])
+            if sess:
+                sess.close()
+        finally:
+            if sock2:
+                sock2.close()
+            if server2:
+                server2.shutdown()
+                server2.server_close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_terminal_kill_endpoint():
+    """/terminal/kill?session=<sid>：命中 200 并销毁；未命中/重复 404。GET/POST 均支持。
+
+    POST 是终端页 pagehide 的 sendBeacon 通道；GET 留作 curl 手工验证。
+    """
+    from donkeycar.launcher.server import LauncherHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LauncherHandler)
+    server.daemon_threads = True
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        sess = TerminalSession()
+        with terminal._sessions_lock:
+            terminal._sessions[sess.sid] = sess
+        url = f"http://127.0.0.1:{port}/terminal/kill?session={sess.sid}"
+        # GET 命中：200，会话被立即销毁
+        body = _http_json("GET", url, 200)
+        assert body["status"] == "ok" and body["killed"] == sess.sid
+        assert sess._closed
+        assert terminal._sessions.get(sess.sid) is None
+        # 重复 kill：404（幂等）
+        assert _http_json("GET", url, 404)["status"] == "error"
+        # POST（sendBeacon 通道）对已销毁会话：404
+        assert _http_json("POST", url, 404)["status"] == "error"
+        # sid 缺失 / 不存在：404
+        _http_json("GET", f"http://127.0.0.1:{port}/terminal/kill", 404)
+        _http_json("POST",
+                   f"http://127.0.0.1:{port}/terminal/kill?session=nosuch",
+                   404)
     finally:
         server.shutdown()
         server.server_close()

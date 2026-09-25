@@ -53,7 +53,8 @@ def test_terminal_page_auto_reconnects_and_preserves_session():
     source = _source()
 
     # onclose 先清连接超时定时器，再走 scheduleReconnect 自动退避重连
-    assert "ws.onclose=function(){\n    clearTimeout(connectTimer);\n    if(exited)return;\n    scheduleReconnect();" \
+    # （exited=shell 退出、intentionallyClosed=标签页主动关闭时不重连）
+    assert "ws.onclose=function(){\n    clearTimeout(connectTimer);\n    if(exited||intentionallyClosed)return;\n    scheduleReconnect();" \
         in source
     # 服务端 session 帧记录 sid，重连时带上 ?session=<sid> 接回原 PTY
     assert "lastSid=j.id;" in source
@@ -79,3 +80,24 @@ def test_terminal_page_has_connect_timeout():
     assert "try{ws.close();}catch(e){}" in source
     # onopen 落定后清掉超时定时器，正常连接不受影响
     assert "ws.onopen=function(){\n    clearTimeout(connectTimer);" in source
+
+
+def test_terminal_page_kills_session_on_pagehide():
+    """标签页/iframe 关闭（pagehide）时 sendBeacon 立即销毁会话，不等宽限期。
+
+    「关掉标签页马上杀掉进程」：页面卸载时 POST /terminal/kill?session=<sid>，
+    服务端立即销毁 bash PTY 会话；15 分钟宽限期只面向网络闪断/锁屏等异常
+    断线（issue #173）。bfcache（event.persisted）不算关闭，不得误杀。
+    """
+    source = _source()
+
+    # pagehide 监听（iframe 被移除/整页关闭/刷新都触发）；persisted=true
+    # （进入 bfcache，页面未销毁）时跳过，防前进/后退误杀会话
+    assert "window.addEventListener('pagehide',function(event){" in source
+    assert "if(event.persisted)return;" in source
+    # 主动关闭标志：抑制断线自动重连与重连 overlay（重连只会白开新会话）
+    assert "var intentionallyClosed=false;" in source
+    assert "intentionallyClosed=true;" in source
+    # sendBeacon 在页面卸载中也能可靠发出；带当前会话 sid，空 sid 不发
+    assert "navigator.sendBeacon('/terminal/kill?session='+encodeURIComponent(lastSid))" in source
+    assert "if(lastSid){" in source
