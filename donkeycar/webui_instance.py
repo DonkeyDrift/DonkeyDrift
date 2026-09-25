@@ -344,6 +344,54 @@ def _is_car_process(pid):
     return "manage.py" in cmdline and "drive" in cmdline
 
 
+def find_car_processes(exclude_pids=None, proc_dir="/proc"):
+    """扫描 /proc，返回所有在跑的车进程（manage.py drive）pid 列表。
+
+    排除当前进程与 exclude_pids；非 Linux（无 /proc）返回 []。
+    """
+    exclude = set(exclude_pids or ())
+    pids = []
+    try:
+        entries = os.listdir(proc_dir)
+    except OSError:
+        return pids
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == os.getpid() or pid in exclude:
+            continue
+        if _is_car_process(pid):
+            pids.append(pid)
+    return pids
+
+
+def takeover_car_processes(exclude_pids=None):
+    """接管模式：杀掉所有在跑的车进程（含非本链路启动的），供新 drive 启动。
+
+    与 kill_previous_car_processes 只按 PID 文件清理不同，本函数按 cmdline
+    全量扫描在跑的 manage.py drive 一并终止，确保新 drive 不会被单实例守护
+    （DriveAlreadyRunning）拒绝、抢占车端连接。web 前后端与 launcher 进程
+    不在清理之列。返回本次杀掉的 pid 列表。
+    """
+    pids = find_car_processes(exclude_pids=exclude_pids)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    if pids:
+        # 给被杀进程的父进程（TUI monitor 循环）留出回收时间，避免僵尸 pid
+        # 被 drive 实例登记误判为存活
+        threading.Event().wait(1.0)
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+    return pids
+
+
 def kill_previous_car_processes(pid_file=None):
     """杀掉上一次启动遗留的车进程（manage.py drive），释放摄像头等硬件。
 
