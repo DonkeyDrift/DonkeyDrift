@@ -493,7 +493,20 @@ def run_shell_command(cmd, cwd=None, timeout=15):
 
 
 def kill(proc_id):
+    """中断子进程：先 SIGINT 争取优雅退出，3 秒未退升级 SIGKILL。
+
+    宿主进程可能带着 SIGINT=SIG_IGN（如被 nohup 或非交互 shell 后台任务
+    启动），此时子进程跨 fork 继承忽略位，仅发 SIGINT 会永远杀不死它，
+    调用方随后的管道读取将无限阻塞——必须有 SIGKILL 兜底。
+    """
     os.kill(proc_id, signal.SIGINT)
+    for _ in range(30):
+        try:
+            os.kill(proc_id, 0)
+        except OSError:
+            return
+        time.sleep(0.1)
+    os.kill(proc_id, signal.SIGKILL)
 
 
 def eprint(*args, **kwargs):

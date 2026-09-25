@@ -67,7 +67,9 @@ class SquareBoxCamera:
         """
         radius = int((box_size or self.box_size)/2)
         color = color or self.color
-        frame = np.zeros(shape=self.resolution + (3,))
+        # uint8 like a real camera: av video streaming (WebRTC track) rejects
+        # float arrays, and every image consumer expects uint8 anyway.
+        frame = np.zeros(shape=self.resolution + (3,), dtype=np.uint8)
         frame[y - radius: y + radius,
               x - radius: x + radius, :] = color
         return frame

@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-25 (252)
+
+- fix(tests,parts,launcher,utils): 根治三条同根因（nohup/后台启动继承 SIGINT=SIG_IGN）环境敏感故障——`test_drivesim` 与真实 8000 服务解耦 + `SquareBoxCamera` 帧 uint8 化（修 square 模板视频流真 Bug）；Web 终端 Ctrl-C 失效（产品 Bug，TerminalSession 子进程复位信号处置）；`run_shell_command` 超时杀进程升级 SIGKILL 兜底（否则后台启动下测试无限挂死）
+  - `test_scripts.py::test_drivesim` 抖动根因有两层：①环境耦合——square 模板的 DriveApiBridge 默认连 `ws://127.0.0.1:8000`，测试结果取决于当时本机 8000 有没有真实 DD 实例（连上还会向真实实例推遥测）；②真 Bug——连上后 WebRTC 视频轨道把 `SquareBoxCamera` 的 float64 帧送进 `av.VideoFrame.from_ndarray`，后者断言 uint8 抛 `ValueError`，`is_error` 扫到 'Error' 即判失败。修复：测试用 `monkeypatch.setenv("DRIVE_API_SERVER_URL", "ws://127.0.0.1:9/...")` 指向必然无人监听的端口（hermetic，subprocess 继承环境变量）；`donkeycar/parts/simulation.py` 的 `SquareBoxCamera.run` 帧改 `np.zeros(..., dtype=np.uint8)`（与真实相机一致，视频编码与所有图像消费方都要求 uint8）。
+  - `test_launcher_terminal.py::test_session_ctrl_c_interrupts_foreground_process` "全量套件才失败"根因（经 /proc 现场取证 + 逐用例 SIGINT 间谍插件定位）：pytest 进程以 `nohup … &`/非交互 shell 后台任务方式启动时，按 POSIX 规则 SIGINT/SIGQUIT 被设为 SIG_IGN，该忽略位跨 fork+exec 一路继承到 TerminalSession 的 bash 及其前台子进程（bash 启动时记住忽略态并传播给子进程，`exec sleep` 保留之），PTY 里补发再多 `\x03` 也无法打断 sleep——前台/交互式跑同一全量套件则一切正常。这是**产品级真 Bug**：`donkey web` 若被 nohup/systemd/非交互后台拉起（Web 服务常见姿势），所有 Web 终端会话的 Ctrl-C 全部失效。修复（`donkeycar/launcher/terminal.py` `_become_tty_leader`）：子进程 exec 前显式把 SIGINT/SIGQUIT/SIGHUP 复位为 SIG_DFL（终端会话是交互入口，不继承宿主的忽略处置）。测试侧加固：前台子进程自报启动（`sh -c 'echo started-42; exec sleep 30'`）消除固定 `sleep(0.5)` 的 tcsetpgrp 时序误报 + echo 先入队 + 每秒补发 `\x03` 最多 12 次覆盖 fork→tcsetpgrp 微秒竞态 + 失败时打印 `/proc` 信号掩码现场取证（本次定位即靠它）。
+  - 同根因第三处（`donkeycar/utils.py::kill`）：`run_shell_command` 超时后只发一次 SIGINT；宿主进程带 SIGINT=SIG_IGN 时子进程（如 `manage.py drive`）无视信号不死，调用方随后的管道 `readlines()` 无限阻塞——nohup 后台跑全量时 `test_scripts.py::test_drivesim` 即此挂死（测试进程卡在 35%）。修复：SIGINT 后 3 秒未退升级 SIGKILL 兜底。
+  - 新增回归测试 `donkeycar/tests/test_simulation.py`：断言 SquareBoxCamera 帧为 uint8（守护 av 编码契约）。
+  - 测试：`test_launcher_terminal.py` 单文件 5 连过（3 前台 + 2 `nohup … &` 后台——修复前后台方式必挂 1 例，修复后全绿）；`test_scripts.py` 单文件 `nohup … &` 后台 4 项全过 39.6s（修复前同方式无限挂死）；`test_launcher_terminal.py + test_simulation.py + test_scripts.py` 三文件 28 项全过（56s）；全量套件（`nohup … &` 后台启动，最难模式）：1005 过 0 失败 16 跳过（558.7s）——修复前同方式 Ctrl-C 用例必挂、test_drivesim 无限挂死。
+  - 注：`simulation.py` 为运行时代码改动，但仅 square 演示模板消费该相机（真实车用真实相机，本就 uint8）；`terminal.py`/`utils.py` 属防御性健壮性修复，不改变常规前台运行行为与 UI 可见效果；无需本机部署；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (251)
 
 - fix(tubeditor): TE 缩放/框选交互面补 `select-none`，手感对齐旧版（Harry）
@@ -149,6 +159,7 @@
     - 俯拍漂移章节：模块地图测试计数 254 → 559（本分支实测 `web_ui/backend` 559 passed + 1 skipped）；状态行由 2026-08-30 对齐 `docs/guide/overhead-drift-handoff.md` 的 2026-09-01 口径（全量夜间审计补齐看门狗三链路/线程安全/NaN 防线加固待实车核对、M4 前遗留项清零；M1 人工漂移录制、M2 点动机理验证待实操不变）。
   - 测试：纯文档改动，无运行时代码影响；全量 pytest（本分支基线）除两条已被 #444 修复的既有失败（build_drift_clip 反斜杠路径、setup metadata url 断言）外全部通过，合并 origin/Tony 后在合并树上复跑 `tests/test_build_drift_clip.py` + `donkeycar/tests/test_project_metadata.py` 29 passed + 1 skipped；`web_ui/backend` 559 passed + 1 skipped。
   - 注：PyPI 项目页（0.1.0）首页仍展示旧仓名链接（301 跳转可用）——`setup.cfg` 已是正确值，下次发版自然更新；无需本机部署（纯文档），Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (236)
 
 - fix(tests): `test_train` 收敛性测试固定随机种子，根治 `test_train[data9]` 偶发失败
