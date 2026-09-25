@@ -676,7 +676,7 @@ html.theme-mus4 button.bg-cyan-600\/20.border-cyan-500\/50 > span {
   color: var(--on-accent);
 }
 
-/* ---------- Drive mode selector: ESP32 mode colors (手动=绿, 半自动=黄, 全自动=蓝) ---------- */
+/* ---------- Drive mode selector: 选中段统一 accent（2026-09-25 起不再按模式分色） ---------- */
 /* component: src/components/drive/DriveModeSelector.tsx (mode-active + data-mode) */
 html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden {
   border-radius: var(--r-pill);
@@ -688,16 +688,6 @@ html.theme-mus4 .inline-flex.rounded-lg.overflow-hidden > button {
 html.theme-mus4 button.mode-active {
   border-radius: var(--r-pill);
   font-weight: var(--w-fill);
-}
-html.theme-mus4 button.mode-active[data-mode="user"] {
-  outline: 1px solid var(--ok-a55);
-  outline-offset: -1px;
-}
-html.theme-mus4 button.mode-active[data-mode="local_angle"] {
-  outline: 1px solid var(--warn-mode);
-  outline-offset: -1px;
-}
-html.theme-mus4 button.mode-active[data-mode="local"] {
   outline: 1px solid var(--accent-a55);
   outline-offset: -1px;
 }
