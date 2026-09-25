@@ -11,6 +11,15 @@
   - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：`car_connection online=false` 与 ws `onclose`/停用时一并复位 `recording:false`——车端不在线绝不显示"录制中"，双保险防闪烁。
   - 测试：`web_ui/backend/tests/test_drive.py` 新增 3 项（车端断开复位广播、离线录制指令不写缓存、回声广播去重），并同步 `test_car_frame_message_updates_num_records_and_broadcasts_state` 断连复位断言——后端 568 项全绿；`useDriveWebsocket.test.tsx` 新增 2 项（car_connection 离线/onclose 复位录制态）——前端 341 项全绿；另起 8023 临时实例 ws 探针三场景实测通过。
   - 注：后端 + 前端运行时改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+- fix(web-ui): DD 页面全部文本可选中可复制——放开全局 `user-select:none`，仅交互控件保持不可选
+  - 背景：`index.css` 对 `html/body/#root` 全局 `user-select:none`（App 化手感），导致页面标题、标签、数据等所有文字都无法选择复制；主题层 `apple-deep.css` §5 只放开了输入框/代码/等宽字体等窄白名单，标题与常规文案仍选不了。
+  - `web_ui/frontend/src/index.css`：全局改为 `user-select:text`；`button/[role='button']/a/select/summary/[data-no-select]` 保持 `user-select:none`（+`-webkit-touch-callout:none`），防止点击/双击控件时误出选区；需要豁免的元素可用 `[data-no-select]`。
+  - `web_ui/frontend/src/themes/apple-deep.css`：§5 注释更新（原「chrome 不可选、数据可选中」模型已被全局放开取代，规则保留作主题层兜底）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：选区首尾三角手柄补 `select-none`，放开全局选择后拖手柄不会带出文字选区（虚拟摇杆本就自带 `select-none`，无需改）。
+  - 测试：vitest 53 文件 341 项全过；`npm run build`（tsc -b + vite build）通过；部署 8000 后 Playwright 实测标题拖选出现原生选区、复制可用。
+  - 注：影响本机可见效果，合入后部署 8000 在线实例；Firmware 无改动、无需 OTA。
+
+
 ## 2026-09-25 (244)
 
 - fix(drive): 修复 macOS 浏览器手柄选项永远灰色不可选——手柄连接检测加「轮询 + 用户手势」兜底
