@@ -586,3 +586,47 @@ def test_terminal_page_supports_theme_params():
     assert "'#5cc8ff'" in body
     # xterm 主题改由调色板驱动
     assert "theme:{background:termPalette.bg" in body
+
+
+def test_terminal_page_copy_and_touch_select():
+    """终端页应支持选区复制（快捷键/右键）与触屏长按复制整行。
+
+    xterm 的选区不走浏览器原生选择（user-select:none），原生 Ctrl+C/右键
+    菜单复制不到内容且 Ctrl+C 默认发 SIGINT；触屏设备上 xterm 也没有
+    拖选能力。页面必须自带复制通路。
+    """
+    import urllib.request
+
+    from donkeycar.launcher.server import LauncherHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LauncherHandler)
+    server.daemon_threads = True
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/terminal", timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    # 复制通路一：快捷键（Ctrl+Shift+C / Ctrl+Insert，有选区时 Ctrl+C）
+    assert "copySelection" in body
+    assert "term.hasSelection()" in body
+    # 局域网 HTTP（非 secure context）下 navigator.clipboard 不存在，必须留 execCommand 兜底
+    assert "navigator.clipboard" in body
+    assert "execCommand('copy')" in body
+    # 复制键要在捕获阶段拦住，不能透传给 shell 当输入
+    assert "e.stopPropagation()" in body
+    # 复制通路二：右键复制选区
+    assert "'contextmenu'" in body
+    # 复制通路三：触屏长按选中整行并复制
+    assert "'touchstart'" in body
+    assert "copyLineAt" in body
+    assert "term.select(" in body
+    # 复制结果 toast 反馈（含中英文案）
+    assert "termToast" in body
+    assert "已复制" in body
+    assert "Copied" in body

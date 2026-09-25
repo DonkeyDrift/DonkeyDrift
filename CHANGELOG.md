@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-09-25 (242)
+
+- fix(launcher): 修复 DC 页面终端（上位机 Web 终端）无法选择文字并复制
+  - 根因：终端页 `terminal.html` 的 xterm 选区画在自有层里（`.xterm` 为 `user-select:none`，无原生 DOM 选区），浏览器原生手段全部复制不到内容——Ctrl+C 被 xterm 当输入发送 SIGINT、Ctrl+Shift+C 无任何绑定、右键菜单「复制」复制到空串；触屏设备上 xterm 更是完全没有拖选能力（桌面拖选高亮本身正常，实测验证过）。
+  - `donkeycar/launcher/terminal_static/terminal.html` 补齐三条复制通路：
+    1. 快捷键：Ctrl+Shift+C / Ctrl+Insert（macOS 为 Cmd+Shift+C）复制选区；Ctrl/Cmd+C 在有选区时复制、无选区时保持原行为发送 SIGINT——捕获阶段拦截并 `stopPropagation`，防止复制键被 xterm 当输入透传给 shell；
+    2. 右键：有选区时直接复制（与本地终端一致），无选区时保留浏览器默认菜单；
+    3. 触屏长按 550ms：选中按压处整行（`term.select` 高亮）并复制，禁用 iOS 长按系统放大镜/呼出（`-webkit-touch-callout:none`），长按后吞掉合成点击避免误触 shell。
+  - 剪贴板写入优先 `navigator.clipboard.writeText`，不可用时回退隐藏 textarea + `execCommand('copy')`——终端多经局域网 HTTP（非 secure context，`navigator.clipboard` 不存在）、且跨域 iframe 内 Clipboard API 受 Permissions Policy 默认封锁，execCommand 兜底两条场景都实测可用；复制结果以 toast 反馈（中英文案「已复制/Copied」「已复制整行/Line copied」）。
+  - 测试：`donkeycar/tests/test_launcher_terminal.py` 新增 `test_terminal_page_copy_and_touch_select`（断言三条复制通路、clipboard 兜底、toast 文案齐备）；Playwright 端到端实测——拖选+Ctrl+C、Ctrl+Shift+C、右键复制、触屏长按复制（CDP 真实 touch 序列）、无选区 Ctrl+C 透传 SIGINT、DC 同款 iframe 嵌入（带/不带 `allow` 授权）全部通过；`test_launcher_terminal.py` 两处 28 项全绿。
+  - 注：改动属 launcher 终端静态页，部署 8090 在线实例即生效；Firmware 无改动、无需 OTA。
+
+
 ## 2026-09-25 (241)
 
 - fix(launcher): 修复 DC/DD 点击「DeepSeek Harness」后标签页停在 about:blank 长达 45 秒——并发启动竞态串行化
@@ -7,7 +20,6 @@
   - `donkeycar/launcher/dsh_web.py`：新增 `_LAUNCH_LOCK` 模块级互斥锁，「复用快路径 → 冷启动 → 固定端口兜底」全流程持锁串行化；后来的并发调用等前一个完成，醒来即命中快路径复用刚登记的实例，毫秒级返回。cwd 校验仍在锁外（快速失败不变）。
   - 测试：`tests/test_launcher_dsh_web.py` 新增 `test_concurrent_launch_serialized_no_duplicate_spawn`（第二次调用被锁挡住不并发冷启动；前一个完成后直接复用带 token 入口、零子进程）；全文件 98 项 + `web_ui/backend/tests/test_launch.py`、`tests/test_launcher_menu_actions.py` 46 项全绿。
   - 注：launcher 运行时改动，合入后重启 `donkeydrifter-launcher.service` 生效；前端无改动、无需重建 dist；Firmware 无改动、无需 OTA。
-
 ## 2026-09-25 (240)
 
 - fix(drive): 修复车端 WebSocket 断开回调竞态——旧连接断开无条件清空 `car_ws`，新连接在线时页面无画面
