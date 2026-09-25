@@ -927,3 +927,51 @@ def test_drive_api_bridge_handles_request_car_state(monkeypatch):
         "drive_mode": bridge.mode,
         "recording": bridge.recording,
     }]
+
+
+def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
+    """被服务端正常关闭（新车端接管）后必须退避重连，防连接风暴。"""
+    import donkeycar.parts.drive_api_bridge as bridge_mod
+
+    connects = []
+    bridge_holder = {}
+
+    class FakeWs:
+        async def __aenter__(self):
+            connects.append(time.monotonic())
+            # 第 3 次连接即置停，保证新旧实现下测试都能确定性终止
+            if len(connects) >= 3:
+                bridge_holder["bridge"].running = False
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            # 服务端立即正常关闭（async for 正常结束，不抛异常）
+            raise StopAsyncIteration
+
+    class FakeWebsockets:
+        @staticmethod
+        def connect(url):
+            # 真实 websockets.connect 是异步上下文管理器工厂（非协程）
+            return FakeWs()
+
+    monkeypatch.setattr(bridge_mod, "websockets", FakeWebsockets())
+
+    bridge = DriveApiBridge(auto_start=False, reconnect_interval=0.05)
+    bridge_holder["bridge"] = bridge
+    bridge.running = True
+
+    asyncio.run(bridge._connect_loop())
+
+    assert len(connects) == 3
+    gap2 = connects[1] - connects[0]
+    gap3 = connects[2] - connects[1]
+    # 被正常关闭后的重连间隔应不小于退避值（留少量调度余量）；
+    # 无退避的热重连两次间隔都趋近 0
+    assert gap2 >= 0.04, f"第 2 次重连间隔 {gap2:.4f}s，缺少退避"
+    assert gap3 >= 0.04, f"第 3 次重连间隔 {gap3:.4f}s，缺少退避"

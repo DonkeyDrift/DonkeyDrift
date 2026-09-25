@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-25 (243)
+
+- fix(bridge): `DriveApiBridge` 被服务端正常关闭后也按 `reconnect_interval` 退避重连，根治多车端实例互踢时的连接风暴
+  - 根因（线上复现）：本机误开两个 `manage.py drive` 实例时，后端唯一 car 槽位互相接管——新车端连接会 close 旧连接，旧桥的 `_connect_loop` 在**正常关闭**路径（`async for` 正常结束，无异常）下无任何退避立即热重连，形成每秒上百次的连接风暴（journal 实测 ~80 条/秒「已连接到 Web Console Drive 服务端」），car 槽位毫秒级易主、谁都来不及推帧，页面表现为占位帧/无画面。
+  - `donkeycar/parts/drive_api_bridge.py`：退避 `asyncio.sleep(self.reconnect_interval)` 从 `except` 分支移到 `_connect_loop` 循环体末尾——异常断开与被服务端正常关闭（新车端接管）一律退避。
+  - 测试：`donkeycar/tests/test_drive_api_bridge.py` 新增 `test_connect_loop_backs_off_after_clean_server_close`（第 3 次连接即置停的确定性终止设计，断言相邻重连间隔 ≥ 退避值；修复前无退避间隔趋近 0 稳定失败）——修复后通过；`test_drive_api_bridge.py` 51 项 + `test_drive_api_bridge_telemetry.py` 14 项全绿。
+  - 注：车端 Part 改动，随下次 `manage.py drive` 重启生效；后端无需重启；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (242)
 
 - fix(launcher): 修复 DC 页面终端（上位机 Web 终端）无法选择文字并复制

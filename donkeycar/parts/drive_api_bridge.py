@@ -451,7 +451,10 @@ class DriveApiBridge:
                     )
                 else:
                     logger.warning(f"连接失败，{self.reconnect_interval}s 后重连: {e}")
-                await asyncio.sleep(self.reconnect_interval)
+            # 无论连接异常还是被服务端正常关闭（新车端连接接管时旧连接被 close），
+            # 一律按 reconnect_interval 退避重连：多个车端实例并存时会互踢对方下线，
+            # 无退避的热重连会打成每秒上百次的连接风暴（线上实测复现）
+            await asyncio.sleep(self.reconnect_interval)
 
     def _handle_message(self, msg: dict):
         """处理服务端发来的控制消息。"""
