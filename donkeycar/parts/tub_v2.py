@@ -122,7 +122,21 @@ class TubWriter(object):
     """
     def __init__(self, base_path, inputs=[], types=[], metadata=[],
                  max_catalog_len=1000):
+        self.inputs = inputs
+        self.types = types
+        self.metadata = metadata
+        self.max_catalog_len = max_catalog_len
         self.tub = Tub(base_path, inputs, types, metadata, max_catalog_len)
+
+    def new_tub(self, base_path):
+        """
+        Close the current tub and switch to a fresh one with the same
+        schema. Recording continues in the new tub with the record count
+        (manifest.current_index) restarting from zero.
+        """
+        self.close()
+        self.tub = Tub(base_path, self.inputs, self.types, self.metadata,
+                       self.max_catalog_len)
 
     def run(self, *args):
         assert len(self.tub.inputs) == len(args), \
@@ -139,6 +153,33 @@ class TubWriter(object):
 
     def shutdown(self):
         self.close()
+
+
+class TubRotator:
+    """
+    Donkey part which starts a new tub on each rising edge of the
+    'recording' flag, so every recording session begins with a record
+    count of zero instead of appending to the previously filled tub.
+    The current tub is only rotated when it already holds records;
+    an empty tub (e.g. freshly created at drive start) is reused.
+    """
+    def __init__(self, tub_writer, data_path):
+        """
+        :param tub_writer: the TubWriter part whose tub gets rotated
+        :param data_path: data directory the new tub path is created in
+        """
+        self.tub_writer = tub_writer
+        self.data_path = data_path
+        self._was_recording = False
+
+    def run(self, recording):
+        if recording and not self._was_recording:
+            # 延迟 import 避免 datastore <-> tub_v2 循环依赖
+            from donkeycar.parts.datastore import TubHandler
+            if self.tub_writer.tub.manifest.current_index > 0:
+                tub_path = TubHandler(path=self.data_path).create_tub_path()
+                self.tub_writer.new_tub(tub_path)
+        self._was_recording = recording
 
 
 class TubWiper:

@@ -2186,7 +2186,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 aria-valuemin={0}
                 aria-valuemax={records.length}
                 aria-valuenow={sliderSelectionRange.startIndex}
-                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none select-none items-center justify-center"
                 style={{ left: `${sliderSelectionPercents.startPct}%` }}
                 onPointerDown={handleSelectionHandlePointerDown('start')}
                 onPointerMove={handleSelectionHandlePointerMove}
@@ -2205,7 +2205,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 aria-valuemin={0}
                 aria-valuemax={records.length}
                 aria-valuenow={sliderSelectionRange.endIndex}
-                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+                className="absolute top-1/2 z-30 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none select-none items-center justify-center"
                 style={{ left: `${sliderSelectionPercents.endPct}%` }}
                 onPointerDown={handleSelectionHandlePointerDown('end')}
                 onPointerMove={handleSelectionHandlePointerMove}

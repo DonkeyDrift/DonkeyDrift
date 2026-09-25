@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-25 (246)
+## 2026-09-25 (247)
 
 - feat(drive): 多车端进程双重防护——drive 启动单实例守护 + 车端槽位易主风暴页面告警
   - 背景：2026-09-25 排查「连接模拟器后 DD 页面无画面」时实测复现——本机误开两个 `manage.py drive` 互相抢占后端唯一 car 槽位，配合 bridge 无退避热重连形成每秒约 80 次的连接风暴（PR #454 已修退避），本条把"多开"本身拦住、并把风暴直接显示到页面上。
@@ -10,6 +10,16 @@
   - `web_ui/frontend/src/components/drive/VideoStream.tsx`：`/drive/stats` 轮询不再只在 MJPEG 降级时进行（WebRTC 正常时也需 carOnline/告警），`multi_car_warning` 为真时视频区底部渲染红色告警横幅（i18n 中英 `driveViz.multiCarWarning`）。
   - 测试：新增 `donkeycar/tests/test_webui_instance_drive_guard.py` 5 项（登记/幂等/存活拒绝/陈旧覆盖/只清自身）、`web_ui/backend/tests/test_drive.py` 新增风暴告警用例（4 连接 3 易主触发、单连接不误报）、`VideoStream.test.tsx` 新增告警横幅用例并为常驻轮询补默认 fetch 桩保持单测封闭；`test_drive.py`+`test_drive_telemetry_forward.py` 39 项、`test_webui_instance.py`+`test_template.py`+守护 40 项、`VideoStream.test.tsx` 9 项全绿，`npm run build` 通过。
   - 注：后端/前端改动随本机 8000 部署生效；drive 守护随下次 `manage.py drive` 重启生效；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (246)
+- feat(tub): 每次点击录制自动切换新 tub，样本计数从 0 开始，不再向旧 tub 追加
+  - 根因：`AUTO_CREATE_NEW_TUB = False` 时 drive 启动把 `DATA_PATH`（`mycar/data`）整个目录当作一个大 tub 一次性打开，点「录制」只切换 `recording` run_condition，新帧继续追加进旧 tub，`tub/num_records`（= `manifest.current_index`）从旧计数继续累加。
+  - `donkeycar/parts/tub_v2.py`：
+    1. `TubWriter` 保存 `inputs/types/metadata/max_catalog_len`，新增 `new_tub(base_path)`——close 旧 tub（落盘 manifest）后按相同 schema 新建 `Tub`，计数自然归零；
+    2. 新增 `TubRotator` part——检测 `recording` 上升沿（每次开始录制），当前 tub 已有记录（`current_index > 0`）时轮换到 `TubHandler(DATA_PATH).create_tub_path()` 新建的 `tub_N_YY-MM-DD/`；tub 为空（本次 drive 尚未录过）则复用，不留空目录。旧数据不迁移不删除。
+  - `donkeycar/templates/complete.py`：`V.add(TubRotator(tub_writer, cfg.DATA_PATH), inputs=['recording'], outputs=[])` 注册在 `TubWriter` 之前，保证同一循环 tick 内先轮换再写首帧；`recording` key 由 DriveApiBridge / 摇杆统一写入，Web 按钮、手柄等录制入口一致生效。web_ui 前后端无需改动（`tub/num_records` 经既有 ws 链路自动归零显示）。
+  - 测试：`donkeycar/tests/test_tubwriter.py` 新增 `TestTubRotator` 3 项——`new_tub()` 切换后写入落新目录且计数归零、旧 tub 不受影响；上升沿轮换 / 持续 True 与下降沿不轮换；tub 为空不轮换。`test_tubwriter.py` 4 项 + `test_tub_v2.py` 4 项 + `test_kinematics.py`（引用 complete 模板）19 项全绿。
+  - 注：车端 Python 改动，随 `manage.py drive` 重启生效；本地 `mycar/manage.py` 副本已同步接线；Firmware 无改动、无需 OTA。
 
 ## 2026-09-25 (245)
 
@@ -22,6 +32,15 @@
   - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：`car_connection online=false` 与 ws `onclose`/停用时一并复位 `recording:false`——车端不在线绝不显示"录制中"，双保险防闪烁。
   - 测试：`web_ui/backend/tests/test_drive.py` 新增 3 项（车端断开复位广播、离线录制指令不写缓存、回声广播去重），并同步 `test_car_frame_message_updates_num_records_and_broadcasts_state` 断连复位断言——后端 568 项全绿；`useDriveWebsocket.test.tsx` 新增 2 项（car_connection 离线/onclose 复位录制态）——前端 341 项全绿；另起 8023 临时实例 ws 探针三场景实测通过。
   - 注：后端 + 前端运行时改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+- fix(web-ui): DD 页面全部文本可选中可复制——放开全局 `user-select:none`，仅交互控件保持不可选
+  - 背景：`index.css` 对 `html/body/#root` 全局 `user-select:none`（App 化手感），导致页面标题、标签、数据等所有文字都无法选择复制；主题层 `apple-deep.css` §5 只放开了输入框/代码/等宽字体等窄白名单，标题与常规文案仍选不了。
+  - `web_ui/frontend/src/index.css`：全局改为 `user-select:text`；`button/[role='button']/a/select/summary/[data-no-select]` 保持 `user-select:none`（+`-webkit-touch-callout:none`），防止点击/双击控件时误出选区；需要豁免的元素可用 `[data-no-select]`。
+  - `web_ui/frontend/src/themes/apple-deep.css`：§5 注释更新（原「chrome 不可选、数据可选中」模型已被全局放开取代，规则保留作主题层兜底）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：选区首尾三角手柄补 `select-none`，放开全局选择后拖手柄不会带出文字选区（虚拟摇杆本就自带 `select-none`，无需改）。
+  - 测试：vitest 53 文件 341 项全过；`npm run build`（tsc -b + vite build）通过；部署 8000 后 Playwright 实测标题拖选出现原生选区、复制可用。
+  - 注：影响本机可见效果，合入后部署 8000 在线实例；Firmware 无改动、无需 OTA。
+
+
 ## 2026-09-25 (244)
 
 - fix(drive): 修复 macOS 浏览器手柄选项永远灰色不可选——手柄连接检测加「轮询 + 用户手势」兜底

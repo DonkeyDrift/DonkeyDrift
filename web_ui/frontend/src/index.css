@@ -50,9 +50,22 @@
   }
 }
 
+/* 文本全局可选中可复制（用户需求：标题等所有内容都要能选择复制）；
+   仅交互控件（按钮/链接/自定义可点元素/下拉/折叠头）保持不可选中，
+   防止点击/拖拽时误出选区。拖拽面板（虚拟摇杆等）自带 select-none。 */
 html,
 body,
 #root {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button,
+[role='button'],
+a,
+select,
+summary,
+[data-no-select] {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
