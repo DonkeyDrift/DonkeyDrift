@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-25 (240)
+
+- fix(drive): 修复车端 WebSocket 断开回调竞态——旧连接断开无条件清空 `car_ws`，新连接在线时页面无画面
+  - 根因（线上复现）：车端重连后新连接接管 `car_ws` 注册，旧连接（已被服务端 close 或延迟感知断开）的 `except` 分支仍会无条件 `drive_state.car_ws = None`，把新连接的注册清掉。此后 `send_to_car` 全部失败：WebRTC offer 无法转发到车端、协商永远完不成（`/api/drive/webrtc/stats` 表现为 `last_answer_at: null`、`car_ws_connected: false` 但帧仍在流入），DD 驾驶页表现为「车端在线却始终无画面」。
+  - `web_ui/backend/routers/drive.py`：车端连接断开分支改为仅当 `drive_state.car_ws is websocket`（断开的仍是当前注册连接）时才清除注册并广播 `car_connection offline`；新连接已接管时不再误清、不再误广播离线。
+  - 测试：`web_ui/backend/tests/test_drive.py` 新增 `test_stale_car_disconnect_keeps_new_registration`（新连接接管后主动断开旧连接，断言 `car_ws` 注册仍在且 `send_to_car` 成功）——修复前该用例稳定失败、修复后通过；`test_drive.py` 32 项与 `test_drive_telemetry_forward.py` 2 项全绿。
+  - 注：后端运行时改动，已部署本机 8000 在线实例；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (239)
 
 - fix(tests): 修复 `PilotArenaPage.test.tsx` 一处 TS 类型错误导致的 `npm run build` 红灯
@@ -18,6 +26,7 @@
   - 测试：`npm ci` 后 vitest 全量 48 文件 305 项全过；`npm run build` 通过。
   - 注：影响本机可见效果，合入后按惯例部署 8000；Firmware 无改动、无需 OTA。
 
+>>>>>>> origin/Tony
 ## 2026-09-25 (237)
 
 - docs(readme): 对外材料刷新——README zsh 举例纠错、俯拍章节状态对齐交接文档
