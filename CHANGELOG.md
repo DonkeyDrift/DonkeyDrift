@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-25 (229)
+
+- fix(tests): 修复 origin/Tony 两条既有测试失败，pytest 全量转绿——`build_drift_clip` 反斜杠路径默认命名 + setup metadata url 断言同步
+  - `scripts/build_drift_clip.py`：默认输出名取 `Path(tp).name`，POSIX 下 `\` 不是分隔符，传入 Windows 风格 tub 路径（如 `C:\data\tubs\tub_a\`）时整条路径被当成文件名，默认输出退化为 `data/clips/C:\data\tubs\tub_a\_clip.json`（`test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 长期红灯）。新增 `tub_dir_name()`（统一把 `\` 换 `/` 再分段取末级目录名，兼容两种分隔符与末尾分隔符），`main()` 的 sources 取名改用它；POSIX 路径行为不变。
+  - `donkeycar/tests/test_project_metadata.py`：`test_setup_metadata_uses_donkeydrifter_identity` 的 url 断言仍期望 `…/DonkeyDrifter`，而 #441 已把 setup.cfg `url` 死链修为真实仓库地址 `…/DonkeyDrift`（改配置未同步测试），断言更新并加注释。
+  - 测试：`test_build_drift_clip.py` 16 项 + `test_project_metadata.py` 13 项全过；pytest 全量两轮（969/970 项）覆盖验证——第二轮唯一失败 `test_train[data9]` 为随机收敛性用例（CI 本就 `GITHUB_ACTIONS` 禁用），单独复跑 90s 通过，首轮亦通过，与本次改动无关。
+  - 注：仅 CLI 脚本与测试改动，`build_drift_clip` 运行时无引用（web 后端/前端/`drift_replay` 均不 import），不影响本机可见效果、无需部署；Firmware 无改动、无需 OTA。
+
 ## 2026-09-21 (228)
 
 - feat(arena,drive): 移植 beta 分支独有功能——Pilot Arena 贴合摘要与推理缓存、遥测 numpy 序列化防护（beta 废弃前的选择性集成）

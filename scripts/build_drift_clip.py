@@ -41,6 +41,18 @@ from donkeycar.parts.tub_v2 import Tub
 CLIP_SCHEMA = "mus4.drift_replay_clip.v1"
 
 
+def tub_dir_name(tub_path: str | Path) -> str:
+    """取 tub 末级目录名，用于默认输出命名与来源标记。
+
+    同时兼容 POSIX 与 Windows 反斜杠路径（含末尾带分隔符）：在
+    Linux/macOS 上 Path.name 不把 '\\' 当分隔符，传入 Windows 风格
+    路径字符串（如从 Windows 机器拷贝来的 tub 路径）时会把整条路径
+    带进来，导致默认输出名退化为 "C:\\data\\tubs\\tub_a\\_clip.json"。
+    """
+    parts = [p for p in str(tub_path).replace("\\", "/").split("/") if p]
+    return parts[-1] if parts else ""
+
+
 def load_tub_records(tub_path: str | Path) -> list[dict]:
     """从 Tub v2 读取录制记录，抽取控制字段。
 
@@ -227,7 +239,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         seg = [r for r in recs if r["mode"] == "user"]
         if seg:
             segments.append(seg)
-            sources.append(Path(tp).name)
+            sources.append(tub_dir_name(tp))
     if not segments:
         print("未找到人工驾驶录制段（mode='user'）", flush=True)
         return 1
