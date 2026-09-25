@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-25 (251)
+
+- fix(tubeditor): TE 缩放/框选交互面补 `select-none`，手感对齐旧版（Harry）
+  - 根因：今天全局 `user-select: text` 改动（页面文本可复制）后，TE 图表容器（拖拽框选/Ctrl+滚轮缩放/点击定位）、底部滑条容器、缩放倍率指示簇不在按钮类豁免名单内，拖拽会拖出文本选区，缩放手感与旧版（全局 `user-select:none`）不一致。注：两分支 TE 缩放算法代码逐字节相同（最后改动同出共同祖先 dacd98ad），行为差异全部来自这条 CSS 全局开关。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：图表容器（`tub-editor-chart`）、滑条容器（`sliderContainerRef`）、缩放倍率指示簇三处补 `select-none`；选区手柄此前已有。帧计数胶囊等纯展示文本保持可选中（维持 #249 可复制能力）。
+  - 测试：`TubEditor.test.tsx` 新增 3 项（图表容器/滑条容器/缩放指示簇带 select-none）；该文件 10 项全绿，`tsc -b --noEmit` 通过，`npm run build` 通过。
+  - 注：纯前端样式改动；合入后 Tony 部署源（deploy-8000）快进+重建 dist 备用，本机 8000 按用户当前指令保持 Harry-Stable-1 旧版运行；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (250)
 
 - feat(tui): Drive 一键接管——启动前全量杀掉其它车进程 + Drive 页面地址改用局域网 IP

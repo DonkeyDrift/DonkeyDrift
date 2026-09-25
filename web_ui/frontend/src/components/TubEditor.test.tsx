@@ -192,3 +192,34 @@ describe('TubEditor 帧计数口径标签', () => {
     expect(screen.getByText('tubEditor.framesSessionScope {"count":10}')).toBeInTheDocument();
   });
 });
+
+describe('TubEditor 缩放区域不可选中（与旧版一致）', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
+  });
+
+  beforeEach(() => {
+    const records = makeRecords();
+    useStore.getState().setActiveSession('s1', records);
+    useStore.setState({ totalRecords: records.length });
+  });
+
+  // 全局 user-select:text（文本可复制）放开后，缩放/框选交互面必须显式 select-none，
+  // 否则拖拽框选、滚轮缩放会拖出文本选区，手感与旧版（全局 user-select:none）不一致
+  it('图表容器带 select-none，拖拽框选/滚轮缩放不产生文本选区', () => {
+    const chart = mountEditor();
+    expect(chart.className).toContain('select-none');
+  });
+
+  it('底部滑条容器带 select-none', () => {
+    const { container } = render(<TubEditor active />);
+    const slider = container.querySelector('.tub-editor-scroll-slider');
+    expect(slider?.parentElement?.className).toContain('select-none');
+  });
+
+  it('缩放倍率指示簇带 select-none', () => {
+    mountEditor();
+    const zoomLabel = screen.getByText('tubEditor.zoomLabel');
+    expect(zoomLabel.parentElement?.className).toContain('select-none');
+  });
+});

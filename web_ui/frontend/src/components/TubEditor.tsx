@@ -2037,7 +2037,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 {aiCleanBusy ? t('tubEditor.aiFilterScanning') : t('tubEditor.aiFilterEntry')}
               </span>
             </Button>
-            <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0">
+            <div className="flex h-[30px] box-content items-center gap-2 rounded-md bg-zinc-800 px-3 text-left rotate-0 select-none">
               <div className="h-4 box-content text-xs text-zinc-400 uppercase">{t('tubEditor.zoomLabel')}</div>
               <div className="h-4 box-content text-[15px] font-mono text-cyan-400 leading-none">{zoomMultiplier}x</div>
             </div>
@@ -2093,7 +2093,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         <div
           ref={containerRef}
           data-testid="tub-editor-chart"
-          className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none`}
+          className={`relative min-h-[12rem] w-full flex-1 ${containerCursorClass} touch-none select-none`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           onMouseDown={handleMouseDown}
@@ -2156,7 +2156,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             </div>
           )}
         </div>
-        <div ref={sliderContainerRef} className="relative mt-3 h-6 shrink-0">
+        <div ref={sliderContainerRef} className="relative mt-3 h-6 shrink-0 select-none">
           <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-lg bg-zinc-700" />
           {sliderSelectionStyle && (
             <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-2 -translate-y-1/2">
