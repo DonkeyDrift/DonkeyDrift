@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-09-25 (236)
+
+- fix(tests): `test_train` 收敛性测试固定随机种子，根治 `test_train[data9]` 偶发失败
+  - 根因：`donkeycar/tests/test_train.py` 的训练收敛断言（`loss[-1] < loss[0] * convergence`，6 epoch）依赖三类未播种随机源——`train_test_split` 的 `random.randint` 划分洗牌、Keras 权重初始化、albumentations 增强（data9 = linear+aug 对增强随机性最敏感），全量套件高负载下间歇性红灯（首轮过、次轮败、单跑过）。
+  - 修复：`tensorflow.keras.utils.set_random_seed(42)` 统一播种 python/numpy/tf 三路 RNG——`test_train` 每个用例开训前重播（权重初始化/划分/增强全部确定化），session 级 `car_dir` fixture 开头播种（合成 imu 数据逐运行一致，顺带消除 imu 用例隐患）。
+  - 验证：`test_train.py` 整文件 34 过 1 跳（486s，11 个训练参数播种后全部收敛、无确定化反转）；`data9` 单独连跑 3 次全过（修复前约半数失败）；全量套件 968 过 2 失败——`test_launcher_terminal` Ctrl-C PTY 时序与 `test_scripts::test_drivesim` 子进程连本机 8000 两条均为高负载环境敏感型既有抖动，空闲单独复跑 17.8s 全过，与本改动无关（前两次全量这两条亦通过；`data9` 本轮已通过）。
+  - 注：仅测试文件改动，无运行时代码影响；无需本机部署，Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (235)
+
+- fix(tests): 修复 origin/Tony 两条既有测试失败，pytest 全量转绿——`build_drift_clip` 反斜杠路径默认命名 + setup metadata url 断言同步
+  - `scripts/build_drift_clip.py`：默认输出名取 `Path(tp).name`，POSIX 下 `\` 不是分隔符，传入 Windows 风格 tub 路径（如 `C:\data\tubs\tub_a\`）时整条路径被当成文件名，默认输出退化为 `data/clips/C:\data\tubs\tub_a\_clip.json`（`test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 长期红灯）。新增 `tub_dir_name()`（统一把 `\` 换 `/` 再分段取末级目录名，兼容两种分隔符与末尾分隔符），`main()` 的 sources 取名改用它；POSIX 路径行为不变。
+  - `donkeycar/tests/test_project_metadata.py`：`test_setup_metadata_uses_donkeydrifter_identity` 的 url 断言仍期望 `…/DonkeyDrifter`，而 #441 已把 setup.cfg `url` 死链修为真实仓库地址 `…/DonkeyDrift`（改配置未同步测试），断言更新并加注释。
+  - 测试：`test_build_drift_clip.py` 16 项 + `test_project_metadata.py` 13 项全过；pytest 全量两轮（969/970 项）覆盖验证——第二轮唯一失败 `test_train[data9]` 为随机收敛性用例（CI 本就 `GITHUB_ACTIONS` 禁用），单独复跑 90s 通过，首轮亦通过，与本次改动无关。
+  - 注：仅 CLI 脚本与测试改动，`build_drift_clip` 运行时无引用（web 后端/前端/`drift_replay` 均不 import），不影响本机可见效果、无需部署；Firmware 无改动、无需 OTA。
+
 ## 2026-09-23 (234)
 
 - fix(arena): 修复 Pilot Arena 加载 `.aidem` NPU 模型后推理帧率过低（实测仅 30 余 FPS、NPU 占用率低）

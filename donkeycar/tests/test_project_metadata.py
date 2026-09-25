@@ -62,7 +62,7 @@ def test_setup_metadata_uses_donkeydrifter_identity():
     assert metadata["name"] == "donkeydrifter"
     assert metadata["author"] == "Haobot"
     assert metadata["author_email"] == "haobot2018@gmail.com"
-    # 仓库已更名为 DonkeyDrift；GitHub URL 同步更新。
+    # url 为真实仓库地址（#441 死链修复 DonkeyDrifter→DonkeyDrift，本断言同步）
     assert metadata["url"] == "https://github.com/DonkeyDrift/DonkeyDrift"
     assert metadata["license"] == "Apache-2.0"
     # description / keywords 中保留品牌名 DonkeyDrift 与 PyPI 包名 donkeydrifter。
