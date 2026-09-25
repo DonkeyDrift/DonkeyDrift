@@ -311,7 +311,7 @@ describe('PilotArenaPage 播放流畅度（卡顿修复回归）', () => {
     fireEvent.click(screen.getByRole('button', { name: 'arena.play' }));
 
     // 播放起来后 predict 会持续被调用；节流 flush（100ms）后数字读数必须出现
-    await waitFor(() => expect(api.predictArenaPilot.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    await waitFor(() => expect(vi.mocked(api.predictArenaPilot).mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
     expect(await screen.findByText('arena.angleLabel 0.250', undefined, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByText('arena.throttleLabel 0.500')).toBeInTheDocument();
   });

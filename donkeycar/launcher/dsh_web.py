@@ -68,6 +68,11 @@ dsh web 的局域网暴露（issue #164）有几处与 kimi web 不同的机制�
   或旧 launcher 孤儿子进程）时，``_kill_dsh_port_squatter`` 确认 cmdline
   是 dsh 后 SIGTERM 终止并等端口释放，重试一次冷启动拿全新 token——
   否则该状态下每次点击都只会得到 401/占用报错，无法自愈。
+- 启动全程持 ``_LAUNCH_LOCK`` 互斥（2026-09-25）：冷启动到固定端口开始
+  监听有秒级窗口，窗口期内的并发点击会各自冷启动出重复的 dsh 子进程，
+  撞 EADDRINUSE 后 dsh 僵住不退出（0.1.5-rc.3 实测），只能等满
+  ``SPAWN_TIMEOUT_S`` 才兜底复用，用户标签页停在 about:blank 长达 45 秒；
+  串行化后后来的调用等前一个完成，醒来即命中快路径复用。
 - 入口 URL 的 host 跟随客户端请求实际用的 Host（``_entry_url_for_client``，
   可达性优先）：入口默认用 mDNS 主机名（origin 稳定，见 ``_lan_url``），
   但客户端所在网络解析不了该 mDNS 名时浏览器根本到不了本机 dsh；更糟
@@ -265,6 +270,16 @@ _PATCH_LOCK = threading.Lock()
 # 固定端口特征探测；那样复用到的实例不是本进程拉起的，没有 proc 可
 # 登记（本 launcher 不掌握其生命周期）
 _SPAWNED = []
+
+# 启动互斥锁（2026-09-25，DC/DD 点击后标签页停在 about:blank 45 秒）：
+# launcher 是 ThreadingHTTPServer，冷启动有 ~14 秒窗口（dsh 插件树加载
+# 完才监听固定端口），窗口期内的第二次点击探测不到即将就绪的实例、
+# 会再冷启动一个重复的 dsh 子进程——dsh 0.1.5-rc.3 实测遇
+# EADDRINUSE 只打印错误不退出（进程僵住），_spawn_and_capture 只能等满
+# SPAWN_TIMEOUT_S（45s）才杀掉走兜底复用，用户标签页全程停在
+# about:blank。串行化后，后来的调用等前一个完成，醒来时快路径复用
+# 立即命中刚登记的实例，毫秒级返回。
+_LAUNCH_LOCK = threading.Lock()
 
 
 def _resolve_dsh_binary():
@@ -1008,7 +1023,9 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
     ``DSH_WEB_PORT``，失败后再探一次固定端口兜底（端口可能被登记滞后
     的存活实例占用，对齐 ``kimi_web`` 的兜底语义）；端口被 token 未知
     的存活 dsh 占用时经 ``_kill_dsh_port_squatter`` 终止占位实例并重试
-    一次冷启动（自愈，见模块 docstring 通道④）。
+    一次冷启动（自愈，见模块 docstring 通道④）。整个"复用→冷启动→
+    兜底"流程持 ``_LAUNCH_LOCK`` 互斥：并发点击串行化，杜绝冷启动窗口
+    期内的重复子进程与 45 秒 EADDRINUSE 僵局（见 ``_LAUNCH_LOCK`` 注释）。
 
     无论复用还是冷启动，返回的 URL 都带 ``?dsh_new_session=1``——DSH
     前端检测到该参数时清除 ``localStorage["dsh.sessions.current"]``，
@@ -1043,74 +1060,78 @@ def launch_dsh_web(cwd=None, timeout_s=DEFAULT_TIMEOUT_S, *,
             }
         cwd_str = str(cwd_path)
 
-    # 快路径：复用存活实例（_SPAWNED 内存登记 → 固定端口特征探测）
-    url = _live_spawned_url()
-    if url:
-        url = _mark_new_session(url)
-        logger.info("复用已运行的 dsh web 实例（新会话）: %s", url)
-        return {"status": "ok", "url": url}
+    # 启动互斥（_LAUNCH_LOCK，见定义处注释）：冷启动有秒级窗口，窗口期
+    # 内的并发点击若各自冷启动会撞 EADDRINUSE 且 dsh 僵住不退出，只能
+    # 等满 SPAWN_TIMEOUT_S——串行化后后来的调用醒来即命中快路径复用
+    with _LAUNCH_LOCK:
+        # 快路径：复用存活实例（_SPAWNED 内存登记 → 固定端口特征探测）
+        url = _live_spawned_url()
+        if url:
+            url = _mark_new_session(url)
+            logger.info("复用已运行的 dsh web 实例（新会话）: %s", url)
+            return {"status": "ok", "url": url}
 
-    binary = resolve_binary_fn()
-    if not binary:
-        return {
-            "status": "error",
-            "error": "未找到 dsh 可执行文件（PATH 与当前 Python 环境的 "
-                     "bin 目录均无），请确认 DeepSeek Harness 已安装",
-        }
+        binary = resolve_binary_fn()
+        if not binary:
+            return {
+                "status": "error",
+                "error": "未找到 dsh 可执行文件（PATH 与当前 Python 环境的 "
+                         "bin 目录均无），请确认 DeepSeek Harness 已安装",
+            }
 
-    # 冷启动前自愈补丁：放行特权方法的 trusted-host 访问（幂等，失败
-    # 只影响局域网设置页，不影响 dsh 启动）
-    _patch_privileged_methods(binary)
-    # client.js 注入 crypto.randomUUID 兜底 + ?dsh_new_session=1 清理逻辑
-    # （幂等，失败只影响局域网自动进入 Projects 和新会话清理，不影响 dsh 启动）
-    _patch_client_uuid_polyfill(binary)
-    # 设置镜像回环门补丁：局域网浏览器切 host 模式（幂等，失败只影响
-    # 局域网设置页/模型选择，不影响 dsh 启动）
-    _patch_settings_mirror_gate(binary)
-    # web-all remote-channel 补丁：remote-web-ui 卸载后防止聚合 client 自装
-    # fetch 劫持把 /api 改写到已不存在的 /remote 通道（局域网 405）
-    _patch_remote_channel_client()
+        # 冷启动前自愈补丁：放行特权方法的 trusted-host 访问（幂等，失败
+        # 只影响局域网设置页，不影响 dsh 启动）
+        _patch_privileged_methods(binary)
+        # client.js 注入 crypto.randomUUID 兜底 + ?dsh_new_session=1 清理逻辑
+        # （幂等，失败只影响局域网自动进入 Projects 和新会话清理，不影响 dsh 启动）
+        _patch_client_uuid_polyfill(binary)
+        # 设置镜像回环门补丁：局域网浏览器切 host 模式（幂等，失败只影响
+        # 局域网设置页/模型选择，不影响 dsh 启动）
+        _patch_settings_mirror_gate(binary)
+        # web-all remote-channel 补丁：remote-web-ui 卸载后防止聚合 client 自装
+        # fetch 劫持把 /api 改写到已不存在的 /remote 通道（局域网 405）
+        _patch_remote_channel_client()
 
-    lan_ip = lan_ip_fn()
-    mdns = mdns_fn()
-    trusted_hosts = []
-    if lan_ip:
-        trusted_hosts.append(lan_ip)
-    if mdns and mdns not in trusted_hosts:
-        trusted_hosts.append(mdns)
-    deadline = time.monotonic() + timeout_s
-    proc, url, error = _spawn_and_capture(
-        binary, cwd_str, trusted_hosts, deadline, popen_fn=popen_fn)
-    if url:
-        return {"status": "ok", "url": _register_spawn_success(
-            proc, url, "dsh web 已启动（新会话）")}
+        lan_ip = lan_ip_fn()
+        mdns = mdns_fn()
+        trusted_hosts = []
+        if lan_ip:
+            trusted_hosts.append(lan_ip)
+        if mdns and mdns not in trusted_hosts:
+            trusted_hosts.append(mdns)
+        deadline = time.monotonic() + timeout_s
+        proc, url, error = _spawn_and_capture(
+            binary, cwd_str, trusted_hosts, deadline, popen_fn=popen_fn)
+        if url:
+            return {"status": "ok", "url": _register_spawn_success(
+                proc, url, "dsh web 已启动（新会话）")}
 
-    # 冷启动失败兜底：固定端口可能被登记滞后的存活实例占用（如另一
-    # launcher 此前拉起、本进程 _SPAWNED 没有登记的实例），再探一次复用
-    url = _probe_dsh_fixed_port()
-    if url:
-        url = _mark_new_session(url)
-        logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例（新会话）: %s", url)
-        return {"status": "ok", "url": url}
-    # 端口被存活的 dsh 占用但复用不了（入口 token 未知/已失效，如 dsh
-    # 自动升级后自我重启）：冷启动永远 EADDRINUSE——自动终止占位实例并
-    # 重试一次冷启动拿全新 token；终止未果才退回手动提示
-    if _probe_root("127.0.0.1", DSH_WEB_PORT):
-        if _kill_dsh_port_squatter():
-            # 独立超时预算：杀占位 + 重启最多再花一个 timeout_s
-            proc, url, error = _spawn_and_capture(
-                binary, cwd_str, trusted_hosts,
-                time.monotonic() + timeout_s, popen_fn=popen_fn)
-            if url:
-                return {"status": "ok", "url": _register_spawn_success(
-                    proc, url, "占位 dsh 实例已终止，dsh web 已重新启动"
-                               "（新会话）")}
-        else:
-            error = (f"{error}；固定端口 {DSH_WEB_PORT} 已被一个存活的 dsh "
-                     "web 占用且其入口 token 未知（非 launcher 拉起或登记"
-                     "丢失），自动终止未果，请手动关闭该实例后重试")
-    logger.warning("启动 dsh web 失败: %s", error)
-    return {"status": "error", "error": error}
+        # 冷启动失败兜底：固定端口可能被登记滞后的存活实例占用（如另一
+        # launcher 此前拉起、本进程 _SPAWNED 没有登记的实例），再探一次复用
+        url = _probe_dsh_fixed_port()
+        if url:
+            url = _mark_new_session(url)
+            logger.info("冷启动未果，复用到固定端口上的存活 dsh 实例（新会话）: %s", url)
+            return {"status": "ok", "url": url}
+        # 端口被存活的 dsh 占用但复用不了（入口 token 未知/已失效，如 dsh
+        # 自动升级后自我重启）：冷启动永远 EADDRINUSE——自动终止占位实例并
+        # 重试一次冷启动拿全新 token；终止未果才退回手动提示
+        if _probe_root("127.0.0.1", DSH_WEB_PORT):
+            if _kill_dsh_port_squatter():
+                # 独立超时预算：杀占位 + 重启最多再花一个 timeout_s
+                proc, url, error = _spawn_and_capture(
+                    binary, cwd_str, trusted_hosts,
+                    time.monotonic() + timeout_s, popen_fn=popen_fn)
+                if url:
+                    return {"status": "ok", "url": _register_spawn_success(
+                        proc, url, "占位 dsh 实例已终止，dsh web 已重新启动"
+                                   "（新会话）")}
+            else:
+                error = (f"{error}；固定端口 {DSH_WEB_PORT} 已被一个存活的 dsh "
+                         "web 占用且其入口 token 未知（非 launcher 拉起或登记"
+                         "丢失），自动终止未果，请手动关闭该实例后重试")
+        logger.warning("启动 dsh web 失败: %s", error)
+        return {"status": "error", "error": error}
 
 
 def _url_port(url: str):

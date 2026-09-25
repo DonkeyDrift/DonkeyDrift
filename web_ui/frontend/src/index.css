@@ -50,9 +50,22 @@
   }
 }
 
+/* 文本全局可选中可复制（用户需求：标题等所有内容都要能选择复制）；
+   仅交互控件（按钮/链接/自定义可点元素/下拉/折叠头）保持不可选中，
+   防止点击/拖拽时误出选区。拖拽面板（虚拟摇杆等）自带 select-none。 */
 html,
 body,
 #root {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button,
+[role='button'],
+a,
+select,
+summary,
+[data-no-select] {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -126,4 +139,22 @@ body,
 
 .tub-editor-scroll-slider:disabled::-moz-range-thumb {
   background: rgb(255 255 255 / 0.3);
+}
+
+/* SectionCardTitle 副标题跑马灯：从左到右滚动展示完整文案，
+   播到最右（文本右端进入可视窗口）后短暂停顿，再回到起点重播。
+   窗口宽度与组件内 group-hover:max-w-40（10rem）保持一致。 */
+@keyframes marquee-x {
+  0% {
+    transform: translateX(0);
+  }
+  72% {
+    transform: translateX(calc(-100% + 10rem));
+  }
+  88% {
+    transform: translateX(calc(-100% + 10rem));
+  }
+  100% {
+    transform: translateX(0);
+  }
 }

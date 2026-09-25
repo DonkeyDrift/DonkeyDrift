@@ -354,13 +354,16 @@ def test_car_frame_message_updates_num_records_and_broadcasts_state(monkeypatch)
 
     assert drive.drive_state.num_records == 16460
     assert drive.drive_state.drive_mode == "local_angle"
-    assert drive.drive_state.recording is True
+    # 车端断开后录制态复位（stale 缓存修复），不再跨断连残留
+    assert drive.drive_state.recording is False
 
     car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
-    assert len(car_state_messages) == 1
+    # 帧携带状态变化一次 + 断开复位广播一次
+    assert len(car_state_messages) == 2
     assert car_state_messages[0]["num_records"] == 16460
     assert car_state_messages[0]["drive_mode"] == "local_angle"
     assert car_state_messages[0]["recording"] is True
+    assert car_state_messages[1]["recording"] is False
 
 
 def test_car_frame_message_with_none_state_does_not_crash(monkeypatch):
@@ -480,6 +483,56 @@ async def test_activate_sim_recovery_starts_worker(monkeypatch):
         time.sleep(0.1)
 
     assert len(started) == 1
+
+
+def test_stats_reports_multi_car_warning_on_takeover_storm():
+    """车端槽位短窗多次易主（多 drive 互踢）时 /stats 给出告警字段。"""
+    client, drive = make_online_client()
+
+    # 单连接：无易主、无告警
+    with client.websocket_connect("/api/drive/ws?role=car"):
+        resp = client.get("/api/drive/stats").json()
+        assert resp["car_takeovers_10s"] == 0
+        assert resp["multi_car_warning"] is False
+
+    # 连续开 4 个连接（均保持打开，后连者顶掉前者的注册）→ 3 次易主 → 风暴告警
+    sockets = []
+    for _ in range(4):
+        ws = client.websocket_connect("/api/drive/ws?role=car").__enter__()
+        ws.send_json({"type": "heartbeat"})
+        sockets.append(ws)
+
+    resp = client.get("/api/drive/stats").json()
+    assert resp["car_takeovers_10s"] == 3
+    assert resp["multi_car_warning"] is True
+
+    for ws in sockets:
+        ws.__exit__(None, None, None)
+
+
+def test_stale_car_disconnect_keeps_new_registration():
+    """旧车端连接的断开回调不得清空新连接的 car_ws 注册（竞态回归）。
+
+    新连接接管注册后，旧连接（可能已被服务端 close、延迟感知断开）的
+    except 分支若无条件置 car_ws=None，会让 send_to_car 持续失败，
+    WebRTC offer 无法转发到车端，页面表现为车端在线却始终无画面。
+    """
+    client, drive = make_online_client()
+
+    with client.websocket_connect("/api/drive/ws?role=car") as old_ws:
+        assert drive.drive_state.car_ws is not None
+        with client.websocket_connect("/api/drive/ws?role=car") as new_ws:
+            new_ws.send_json({"type": "heartbeat"})
+            # 新连接已接管注册；此时断开旧连接，等其断开回调执行完毕
+            old_ws.close()
+            time.sleep(0.5)
+            assert drive.drive_state.car_ws is not None, (
+                "旧车端连接的断开回调清空了新连接的 car_ws 注册"
+            )
+            ok = asyncio.run(
+                drive.drive_state.send_to_car({"type": "request_car_state"})
+            )
+            assert ok, "car_ws 注册丢失，send_to_car 失败"
 
 
 def test_client_connect_requests_car_state_when_online(monkeypatch):
@@ -685,3 +738,70 @@ def test_load_model_falls_back_when_car_never_acks(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json()["restart_required"] is True
+
+
+# ------------------------------------------------------------------
+# 录制态 stale 缓存修复：车端断开复位 + 离线忽略录制指令 + 回声广播去重
+# （Mac 端 Drive 页“自动开始录制/闪烁/计时 0:00”问题）
+# ------------------------------------------------------------------
+def test_car_disconnect_resets_recording_and_broadcasts(monkeypatch):
+    client, drive = make_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=car") as car_ws:
+        car_ws.send_json({"recording": True})
+
+    assert drive.drive_state.recording is False
+
+    car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
+    # 车端上报 recording=true 一次 + 断开复位广播一次
+    assert len(car_state_messages) == 2
+    assert car_state_messages[0]["recording"] is True
+    assert car_state_messages[1]["recording"] is False
+
+
+def test_client_recording_ignored_when_car_offline(monkeypatch):
+    client, drive = make_client()
+    # 车端从未连接（car_ws 为 None），录制指令不得写入缓存
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        ws.send_json({"recording": True})
+
+    assert drive.drive_state.recording is False
+
+
+def test_client_recording_updates_cache_when_car_online(monkeypatch):
+    client, drive = make_client()
+
+    with client.websocket_connect("/api/drive/ws?role=car"):
+        with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+            ws.send_json({"recording": True})
+
+        assert drive.drive_state.recording is True
+
+
+def test_client_control_echo_only_broadcasts_on_change(monkeypatch):
+    client, drive = make_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        # 60Hz 控制循环：car_state 只含 drive_mode/recording/num_records，
+        # angle/throttle 变化不触发广播；首条建立基线后值未变不再广播
+        ws.send_json({"angle": 0.1, "throttle": 0.2})
+        ws.send_json({"angle": 0.1, "throttle": 0.2})
+        ws.send_json({"angle": 0.3, "throttle": 0.2})
+        # 三元组变化（drive_mode）后再次广播
+        ws.send_json({"angle": 0.3, "throttle": 0.2, "drive_mode": "local"})
+
+    car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
+    assert len(car_state_messages) == 2
+    assert car_state_messages[1]["drive_mode"] == "local"

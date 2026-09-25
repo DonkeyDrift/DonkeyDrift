@@ -46,6 +46,10 @@ class DriveState:
         # 心跳
         self.car_last_seen: Optional[datetime] = None
 
+        # 车端槽位易主记录：新车端连接顶掉旧连接时打点，
+        # 短窗口内多次易主 = 多个 drive 进程互踢的连接风暴指纹
+        self.car_takeover_times = deque(maxlen=64)
+
         # WebRTC 信令状态
         self.webrtc_session: Optional[dict] = None
         self.webrtc_stats = {
@@ -77,6 +81,11 @@ class DriveState:
         # 连接管理
         self.car_ws: Optional[WebSocket] = None
         self.client_ws: Dict[str, WebSocket] = {}
+
+        # 最近一次向客户端广播的 car_state 三元组快照：
+        # 客户端 60Hz 控制循环会持续命中控制分支，回声广播仅在值变化时发出，
+        # 避免值未变的 car_state 以 60Hz 洪泛所有客户端。
+        self.last_car_state_echo: Optional[tuple] = None
 
         # 遥测进程内挂钩（第三视角漂移引擎等订阅方，广播前同步调用）
         self.telemetry_hooks: List[Callable[[dict], None]] = []
@@ -169,6 +178,11 @@ class DriveState:
         if self.car_last_seen is None:
             return False
         return datetime.now() - self.car_last_seen < timedelta(seconds=5)
+
+    def car_takeovers_in(self, window_sec: float = 10.0) -> int:
+        """最近 window_sec 秒内车端槽位易主次数。"""
+        now = time.time()
+        return sum(1 for ts in self.car_takeover_times if now - ts <= window_sec)
 
     def video_fps(self) -> int:
         """根据最近帧时间戳估算视频 FPS。"""
@@ -602,6 +616,7 @@ async def drive_ws(
     if role == "car":
         # 车端连接
         if drive_state.car_ws is not None:
+            drive_state.car_takeover_times.append(time.time())
             try:
                 await drive_state.car_ws.close()
             except Exception:
@@ -688,6 +703,9 @@ async def drive_ws(
 
                 # 车端状态变更广播给所有客户端
                 if state_changed:
+                    drive_state.last_car_state_echo = (
+                        drive_state.drive_mode, drive_state.recording, drive_state.num_records,
+                    )
                     await drive_state.broadcast_to_clients({
                         "type": "car_state",
                         "drive_mode": drive_state.drive_mode,
@@ -696,11 +714,31 @@ async def drive_ws(
                     })
         except (WebSocketDisconnect, RuntimeError):
             logger.info("车端连接断开")
-            drive_state.car_ws = None
-            await drive_state.broadcast_to_clients({
-                "type": "car_connection",
-                "online": False,
-            })
+            # 仅当断开的仍是当前注册的车端连接时才清除并广播离线：
+            # 新连接接管注册后，旧连接残留的断开回调若无条件清空 car_ws，
+            # 会导致 send_to_car 全部失败、WebRTC offer 无法转发到车端，
+            # 页面表现为「车端在线却始终无画面」（线上复现过）。
+            if drive_state.car_ws is websocket:
+                drive_state.car_ws = None
+                await drive_state.broadcast_to_clients({
+                    "type": "car_connection",
+                    "online": False,
+                })
+                # 车端断开即复位录制态：否则缓存的 recording=true 跨断连残留，
+                # 客户端每次重连都被当作初始 car_state 推回，页面表现为
+                # 「没点录制却自动开始录制、计时一直 0:00 的闪烁」——车端
+                # 重连后 1s 内上报真实 false 又把状态翻回去，如此往复。
+                if drive_state.recording:
+                    drive_state.recording = False
+                    drive_state.last_car_state_echo = (
+                        drive_state.drive_mode, False, drive_state.num_records,
+                    )
+                    await drive_state.broadcast_to_clients({
+                        "type": "car_state",
+                        "drive_mode": drive_state.drive_mode,
+                        "recording": False,
+                        "num_records": drive_state.num_records,
+                    })
 
     else:
         # 客户端连接（浏览器）
@@ -777,7 +815,10 @@ async def drive_ws(
                         drive_state.throttle = float(msg["throttle"])
                     if "drive_mode" in msg:
                         drive_state.drive_mode = msg["drive_mode"]
-                    if "recording" in msg:
+                    if "recording" in msg and drive_state.car_ws is not None:
+                        # 车端不在线时忽略录制指令：此时转发必然失败，若仍写缓存，
+                        # 脏值会残留到客户端重连时作为初始状态推回前端
+                        # （见车端断开分支的注释）。
                         drive_state.recording = bool(msg["recording"])
                     if "buttons" in msg:
                         drive_state.buttons.update(msg["buttons"])
@@ -785,8 +826,15 @@ async def drive_ws(
                     # 转发给车端
                     await drive_state.send_to_car(msg)
 
-                    # 同步给其他所有客户端（多端状态一致）
-                    await drive_state.broadcast_to_clients({
+                    # 同步给其他所有客户端（多端状态一致）。
+                    # 60Hz 控制循环会持续命中本分支，仅在三元组变化时广播，
+                    # 避免值未变的 car_state 以 60Hz 洪泛所有客户端。
+                    echo_state = (
+                        drive_state.drive_mode, drive_state.recording, drive_state.num_records,
+                    )
+                    if echo_state != drive_state.last_car_state_echo:
+                        drive_state.last_car_state_echo = echo_state
+                        await drive_state.broadcast_to_clients({
                         "type": "car_state",
                         "drive_mode": drive_state.drive_mode,
                         "recording": drive_state.recording,
@@ -893,11 +941,16 @@ async def drive_stats():
     last_seen_age = None
     if drive_state.car_last_seen is not None:
         last_seen_age = (datetime.now() - drive_state.car_last_seen).total_seconds()
+    takeovers_10s = drive_state.car_takeovers_in(10.0)
     return {
         "online": drive_state.car_online(),
         "fps": drive_state.video_fps(),
         "car_ws_connected": drive_state.car_ws is not None,
         "last_seen_age_sec": last_seen_age,
+        # 车端槽位 10 秒内易主次数；>=3 视为多个 drive 进程互踢的
+        # 连接风暴（单次重连只易主 1 次），前端据此展示告警
+        "car_takeovers_10s": takeovers_10s,
+        "multi_car_warning": takeovers_10s >= 3,
     }
 
 

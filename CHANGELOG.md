@@ -1,5 +1,117 @@
 # 变更日志
 
+## 2026-09-25 (247)
+
+- feat(drive): 多车端进程双重防护——drive 启动单实例守护 + 车端槽位易主风暴页面告警
+  - 背景：2026-09-25 排查「连接模拟器后 DD 页面无画面」时实测复现——本机误开两个 `manage.py drive` 互相抢占后端唯一 car 槽位，配合 bridge 无退避热重连形成每秒约 80 次的连接风暴（PR #454 已修退避），本条把"多开"本身拦住、并把风暴直接显示到页面上。
+  - `donkeycar/webui_instance.py`：新增 drive 单实例守护——登记文件 `~/.donkeycar/drive_instance.json`（pid + `/proc` 启动时钟，防 PID 复用误判），`acquire_drive_instance_lock()` 发现存活实例抛 `DriveAlreadyRunning`（错误信息含旧 pid、kill 指引与陈旧登记清理指引）；同进程幂等、atexit 自动清理、陈旧/损坏登记自动接管；非 Linux 无 /proc 退化为仅 pid 存活判定。
+  - `donkeycar/templates/complete.py`：`drive()` 开头接入守护，冲突时报错退出（终端直跑 / `donkey web` / launcher 全链路生效）。
+  - `web_ui/backend/routers/drive.py`：车端槽位易主打点（`car_takeover_times`），`/api/drive/stats` 新增 `car_takeovers_10s` 与 `multi_car_warning`（10 秒内 ≥3 次易主判定为多车端互踢；单次重连只易主 1 次不误报）。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：`/drive/stats` 轮询不再只在 MJPEG 降级时进行（WebRTC 正常时也需 carOnline/告警），`multi_car_warning` 为真时视频区底部渲染红色告警横幅（i18n 中英 `driveViz.multiCarWarning`）。
+  - 测试：新增 `donkeycar/tests/test_webui_instance_drive_guard.py` 5 项（登记/幂等/存活拒绝/陈旧覆盖/只清自身）、`web_ui/backend/tests/test_drive.py` 新增风暴告警用例（4 连接 3 易主触发、单连接不误报）、`VideoStream.test.tsx` 新增告警横幅用例并为常驻轮询补默认 fetch 桩保持单测封闭；`test_drive.py`+`test_drive_telemetry_forward.py` 39 项、`test_webui_instance.py`+`test_template.py`+守护 40 项、`VideoStream.test.tsx` 9 项全绿，`npm run build` 通过。
+  - 注：后端/前端改动随本机 8000 部署生效；drive 守护随下次 `manage.py drive` 重启生效；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (246)
+- feat(tub): 每次点击录制自动切换新 tub，样本计数从 0 开始，不再向旧 tub 追加
+  - 根因：`AUTO_CREATE_NEW_TUB = False` 时 drive 启动把 `DATA_PATH`（`mycar/data`）整个目录当作一个大 tub 一次性打开，点「录制」只切换 `recording` run_condition，新帧继续追加进旧 tub，`tub/num_records`（= `manifest.current_index`）从旧计数继续累加。
+  - `donkeycar/parts/tub_v2.py`：
+    1. `TubWriter` 保存 `inputs/types/metadata/max_catalog_len`，新增 `new_tub(base_path)`——close 旧 tub（落盘 manifest）后按相同 schema 新建 `Tub`，计数自然归零；
+    2. 新增 `TubRotator` part——检测 `recording` 上升沿（每次开始录制），当前 tub 已有记录（`current_index > 0`）时轮换到 `TubHandler(DATA_PATH).create_tub_path()` 新建的 `tub_N_YY-MM-DD/`；tub 为空（本次 drive 尚未录过）则复用，不留空目录。旧数据不迁移不删除。
+  - `donkeycar/templates/complete.py`：`V.add(TubRotator(tub_writer, cfg.DATA_PATH), inputs=['recording'], outputs=[])` 注册在 `TubWriter` 之前，保证同一循环 tick 内先轮换再写首帧；`recording` key 由 DriveApiBridge / 摇杆统一写入，Web 按钮、手柄等录制入口一致生效。web_ui 前后端无需改动（`tub/num_records` 经既有 ws 链路自动归零显示）。
+  - 测试：`donkeycar/tests/test_tubwriter.py` 新增 `TestTubRotator` 3 项——`new_tub()` 切换后写入落新目录且计数归零、旧 tub 不受影响；上升沿轮换 / 持续 True 与下降沿不轮换；tub 为空不轮换。`test_tubwriter.py` 4 项 + `test_tub_v2.py` 4 项 + `test_kinematics.py`（引用 complete 模板）19 项全绿。
+  - 注：车端 Python 改动，随 `manage.py drive` 重启生效；本地 `mycar/manage.py` 副本已同步接线；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (245)
+
+- fix(drive): 修复 Mac 端 Drive 页录制"自动开始/闪烁/计时一直 0:00"——后端录制态 stale 缓存跨车端断连残留
+  - 根因（本机 ws 探针实测 + 代码定位）：客户端发 `{recording:true}` 时无论车端是否在线都写入 `drive_state.recording`（车端闪断时转发悄悄失败，缓存卡在 true）；车端 ws 断开又不复位该缓存。浏览器每次重连，后端把残留的 `recording:true` 当初始 `car_state` 推给前端 → 页面"没点录制却自动开始录制"；车端重连后 1s 内上报真实 `recording:false` 又把状态翻回去，`recordStartTime` 反复置空 → 按钮闪烁、计时一直 0:00、tub 无数据。车端 ws 闪断（Wi-Fi 上的 Mac drive loop）让该循环反复出现。
+  - `web_ui/backend/routers/drive.py` 三处修复：
+    1. 车端断开即复位录制态并补播 `car_state(recording=false)`——脏缓存不再跨断连存活；
+    2. 车端不在线（`car_ws is None`）时忽略客户端录制指令，不再让缓存领先于车端真值；
+    3. 客户端控制消息触发的 `car_state` 回声广播改为仅三元组（drive_mode/recording/num_records）变化时发出——消除 60Hz 控制循环造成的 ~50Hz 洪泛（本机实测：120 条同值控制消息 0 次广播）。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：`car_connection online=false` 与 ws `onclose`/停用时一并复位 `recording:false`——车端不在线绝不显示"录制中"，双保险防闪烁。
+  - 测试：`web_ui/backend/tests/test_drive.py` 新增 3 项（车端断开复位广播、离线录制指令不写缓存、回声广播去重），并同步 `test_car_frame_message_updates_num_records_and_broadcasts_state` 断连复位断言——后端 568 项全绿；`useDriveWebsocket.test.tsx` 新增 2 项（car_connection 离线/onclose 复位录制态）——前端 341 项全绿；另起 8023 临时实例 ws 探针三场景实测通过。
+  - 注：后端 + 前端运行时改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+- fix(web-ui): DD 页面全部文本可选中可复制——放开全局 `user-select:none`，仅交互控件保持不可选
+  - 背景：`index.css` 对 `html/body/#root` 全局 `user-select:none`（App 化手感），导致页面标题、标签、数据等所有文字都无法选择复制；主题层 `apple-deep.css` §5 只放开了输入框/代码/等宽字体等窄白名单，标题与常规文案仍选不了。
+  - `web_ui/frontend/src/index.css`：全局改为 `user-select:text`；`button/[role='button']/a/select/summary/[data-no-select]` 保持 `user-select:none`（+`-webkit-touch-callout:none`），防止点击/双击控件时误出选区；需要豁免的元素可用 `[data-no-select]`。
+  - `web_ui/frontend/src/themes/apple-deep.css`：§5 注释更新（原「chrome 不可选、数据可选中」模型已被全局放开取代，规则保留作主题层兜底）。
+  - `web_ui/frontend/src/components/TubEditor.tsx`：选区首尾三角手柄补 `select-none`，放开全局选择后拖手柄不会带出文字选区（虚拟摇杆本就自带 `select-none`，无需改）。
+  - 测试：vitest 53 文件 341 项全过；`npm run build`（tsc -b + vite build）通过；部署 8000 后 Playwright 实测标题拖选出现原生选区、复制可用。
+  - 注：影响本机可见效果，合入后部署 8000 在线实例；Firmware 无改动、无需 OTA。
+
+
+## 2026-09-25 (244)
+
+- fix(drive): 修复 macOS 浏览器手柄选项永远灰色不可选——手柄连接检测加「轮询 + 用户手势」兜底
+  - 根因：`useGamepadDrive` 的连接检测只依赖 `gamepadconnected` 事件，从不主动轮询 `navigator.getGamepads()`。macOS Safari/Chrome 只有在**页面获得焦点时按过手柄任意按键**后才把手柄暴露给页面，且 Safari 的 `gamepadconnected` 事件触发不可靠（部分版本只在用户手势后触发、甚至不触发）；页面在手柄唤醒前加载或事件缺失时 `connected` 恒为 `false`，`InputSourceSelector` 手柄选项一直灰着（Windows Chrome 上按过按键事件正常触发，故可用）。
+  - `web_ui/frontend/src/hooks/useGamepadDrive.ts`：常驻检测 effect 改为「事件 + 轮询 + 手势」三通道——保留 `gamepadconnected`/`gamepaddisconnected` 监听；新增 1000ms `setInterval` 轮询 `getGamepads()`（过滤 `connected !== false`）；`focus`/`pointerdown`/`keydown` 时立即检测一次（Safari 需用户手势后才暴露手柄）；挂载时即检测一次，清理时全部移除。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：`drive.gamepadNotDetected` 中英文提示补「请按手柄任意按键」唤醒指引。
+  - 测试：`useGamepadDrive.test.tsx` 新增 2 项——不派发事件仅靠轮询/手势也能检测到手柄并在移除后 1 秒内复位（fake timers）、`pointerdown`/`keydown` 立即检测插拔；`GamepadConfigPanel.test.tsx` 未检测提示断言同步新文案。vitest 全量 53 文件 341 项全过，`npm run build` 通过。
+  - 注：前端可见效果改动，合入后部署本机 8000 在线实例；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (243)
+
+- fix(bridge): `DriveApiBridge` 被服务端正常关闭后也按 `reconnect_interval` 退避重连，根治多车端实例互踢时的连接风暴
+  - 根因（线上复现）：本机误开两个 `manage.py drive` 实例时，后端唯一 car 槽位互相接管——新车端连接会 close 旧连接，旧桥的 `_connect_loop` 在**正常关闭**路径（`async for` 正常结束，无异常）下无任何退避立即热重连，形成每秒上百次的连接风暴（journal 实测 ~80 条/秒「已连接到 Web Console Drive 服务端」），car 槽位毫秒级易主、谁都来不及推帧，页面表现为占位帧/无画面。
+  - `donkeycar/parts/drive_api_bridge.py`：退避 `asyncio.sleep(self.reconnect_interval)` 从 `except` 分支移到 `_connect_loop` 循环体末尾——异常断开与被服务端正常关闭（新车端接管）一律退避。
+  - 测试：`donkeycar/tests/test_drive_api_bridge.py` 新增 `test_connect_loop_backs_off_after_clean_server_close`（第 3 次连接即置停的确定性终止设计，断言相邻重连间隔 ≥ 退避值；修复前无退避间隔趋近 0 稳定失败）——修复后通过；`test_drive_api_bridge.py` 51 项 + `test_drive_api_bridge_telemetry.py` 14 项全绿。
+  - 注：车端 Part 改动，随下次 `manage.py drive` 重启生效；后端无需重启；Firmware 无改动、无需 OTA。
+## 2026-09-25 (242)
+
+- fix(launcher): 修复 DC 页面终端（上位机 Web 终端）无法选择文字并复制
+  - 根因：终端页 `terminal.html` 的 xterm 选区画在自有层里（`.xterm` 为 `user-select:none`，无原生 DOM 选区），浏览器原生手段全部复制不到内容——Ctrl+C 被 xterm 当输入发送 SIGINT、Ctrl+Shift+C 无任何绑定、右键菜单「复制」复制到空串；触屏设备上 xterm 更是完全没有拖选能力（桌面拖选高亮本身正常，实测验证过）。
+  - `donkeycar/launcher/terminal_static/terminal.html` 补齐三条复制通路：
+    1. 快捷键：Ctrl+Shift+C / Ctrl+Insert（macOS 为 Cmd+Shift+C）复制选区；Ctrl/Cmd+C 在有选区时复制、无选区时保持原行为发送 SIGINT——捕获阶段拦截并 `stopPropagation`，防止复制键被 xterm 当输入透传给 shell；
+    2. 右键：有选区时直接复制（与本地终端一致），无选区时保留浏览器默认菜单；
+    3. 触屏长按 550ms：选中按压处整行（`term.select` 高亮）并复制，禁用 iOS 长按系统放大镜/呼出（`-webkit-touch-callout:none`），长按后吞掉合成点击避免误触 shell。
+  - 剪贴板写入优先 `navigator.clipboard.writeText`，不可用时回退隐藏 textarea + `execCommand('copy')`——终端多经局域网 HTTP（非 secure context，`navigator.clipboard` 不存在）、且跨域 iframe 内 Clipboard API 受 Permissions Policy 默认封锁，execCommand 兜底两条场景都实测可用；复制结果以 toast 反馈（中英文案「已复制/Copied」「已复制整行/Line copied」）。
+  - 测试：`donkeycar/tests/test_launcher_terminal.py` 新增 `test_terminal_page_copy_and_touch_select`（断言三条复制通路、clipboard 兜底、toast 文案齐备）；Playwright 端到端实测——拖选+Ctrl+C、Ctrl+Shift+C、右键复制、触屏长按复制（CDP 真实 touch 序列）、无选区 Ctrl+C 透传 SIGINT、DC 同款 iframe 嵌入（带/不带 `allow` 授权）全部通过；`test_launcher_terminal.py` 两处 28 项全绿。
+  - 注：改动属 launcher 终端静态页，部署 8090 在线实例即生效；Firmware 无改动、无需 OTA。
+
+
+## 2026-09-25 (241)
+
+- fix(launcher): 修复 DC/DD 点击「DeepSeek Harness」后标签页停在 about:blank 长达 45 秒——并发启动竞态串行化
+  - 根因（线上复现 + 本机复现）：launcher 是 ThreadingHTTPServer，`launch_dsh_web` 冷启动有 ~14 秒窗口（dsh 插件树加载完才监听固定端口 58641）。窗口期内的第二次点击（用户以为没反应再点一次、或在 DC 和 DD 各点一次）快路径探测不到即将就绪的实例，会再冷启动一个重复的 dsh 子进程——dsh 0.1.5-rc.3 实测遇 EADDRINUSE 只打印错误不退出（进程僵住），`_spawn_and_capture` 只能等满 `SPAWN_TIMEOUT_S`（45s）才杀掉走兜底复用，用户标签页全程停在 about:blank（2026-09-25 13:41-13:42 日志实证：13:41:16 冷启动、13:41:26 第二次点击、13:42:10 才兜底返回）。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_LAUNCH_LOCK` 模块级互斥锁，「复用快路径 → 冷启动 → 固定端口兜底」全流程持锁串行化；后来的并发调用等前一个完成，醒来即命中快路径复用刚登记的实例，毫秒级返回。cwd 校验仍在锁外（快速失败不变）。
+  - 测试：`tests/test_launcher_dsh_web.py` 新增 `test_concurrent_launch_serialized_no_duplicate_spawn`（第二次调用被锁挡住不并发冷启动；前一个完成后直接复用带 token 入口、零子进程）；全文件 98 项 + `web_ui/backend/tests/test_launch.py`、`tests/test_launcher_menu_actions.py` 46 项全绿。
+  - 注：launcher 运行时改动，合入后重启 `donkeydrifter-launcher.service` 生效；前端无改动、无需重建 dist；Firmware 无改动、无需 OTA。
+## 2026-09-25 (240)
+
+- fix(drive): 修复车端 WebSocket 断开回调竞态——旧连接断开无条件清空 `car_ws`，新连接在线时页面无画面
+  - 根因（线上复现）：车端重连后新连接接管 `car_ws` 注册，旧连接（已被服务端 close 或延迟感知断开）的 `except` 分支仍会无条件 `drive_state.car_ws = None`，把新连接的注册清掉。此后 `send_to_car` 全部失败：WebRTC offer 无法转发到车端、协商永远完不成（`/api/drive/webrtc/stats` 表现为 `last_answer_at: null`、`car_ws_connected: false` 但帧仍在流入），DD 驾驶页表现为「车端在线却始终无画面」。
+  - `web_ui/backend/routers/drive.py`：车端连接断开分支改为仅当 `drive_state.car_ws is websocket`（断开的仍是当前注册连接）时才清除注册并广播 `car_connection offline`；新连接已接管时不再误清、不再误广播离线。
+  - 测试：`web_ui/backend/tests/test_drive.py` 新增 `test_stale_car_disconnect_keeps_new_registration`（新连接接管后主动断开旧连接，断言 `car_ws` 注册仍在且 `send_to_car` 成功）——修复前该用例稳定失败、修复后通过；`test_drive.py` 32 项与 `test_drive_telemetry_forward.py` 2 项全绿。
+  - 注：后端运行时改动，已部署本机 8000 在线实例；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (239)
+
+- fix(tests): 修复 `PilotArenaPage.test.tsx` 一处 TS 类型错误导致的 `npm run build` 红灯
+  - 根因：#437 一系合入 main 时带进的 `PilotArenaPage.test.tsx:314` 直接访问 `api.predictArenaPilot.mock.calls`——`api` 方法是真实类型签名（非 `vi.fn`），TS 报 `Property 'mock' does not exist`，`tsc -b` 阶段整体失败，阻塞前端构建/部署（vitest 运行不受影响，故测试全绿但 build 挂）。
+  - 修复：改为 `vi.mocked(api.predictArenaPilot).mock.calls.length`，与文件内其余 9 处 `vi.mocked` 用法一致。
+  - 测试：该文件 vitest 6 项全过；`npm run build`（tsc -b + vite build）恢复通过。
+  - 注：仅测试文件一处类型修正，无运行时影响；无需单独本机部署（随下次 8000 部署一并生效），Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (238)
+
+- feat(ui): 恢复 Drive 页标题悬停淡入灰色副标题机制，全站卡片标题统一接入
+  - 背景：Apple 风格改版（#437 一系）中 `SectionCardTitle` 的悬停副标题机制被整体移除，用户发现「进入驾驶页后把光标放到卡片标题上不再弹出灰色介绍」。本条目恢复该机制并把各卡片副标题重新接回。
+  - `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：恢复 0784d454^ 的悬停版本——容器 `group`，副标题 `max-w-0 opacity-0` + `group-hover` 淡入（`transition-all duration-300`，与 TubLibrary 基准实现一致）；新增 `subtitleMarquee` 变体，宽度受限处（虚拟摇杆）副标题以 `marquee-x` 跑马灯循环展示完整文案。
+  - `web_ui/frontend/src/index.css`：补 `marquee-x` keyframes。
+  - 接线：DrivePage 虚拟摇杆卡片 `drive.virtualJoystickSubtitle`（+跑马灯）、SimCollectCard `drive.simCollectHint`、DriftCard `drive.driftSubtitle`、TubLibrary `tubLibrary.subtitle`；`i18n/messages/drive.ts`、`i18n/messages/tublibrary.ts` 增补对应中英词条。
+  - 测试：`npm ci` 后 vitest 全量 48 文件 305 项全过；`npm run build` 通过。
+  - 注：影响本机可见效果，合入后按惯例部署 8000；Firmware 无改动、无需 OTA。
+
+## 2026-09-25 (237)
+
+- docs(readme): 对外材料刷新——README zsh 举例纠错、俯拍章节状态对齐交接文档
+  - 背景：对外材料过时审查（GitHub README / hackster 宣传稿 / PyPI 元数据）。`setup.cfg` url 死链与配套断言已由 #441 / #444 修复，本条目收敛 README 内两处过时表述。
+  - `README.md`：
+    - zsh 引号说明举例 `pip install donkeycar[pc]` → `pip install donkeydrifter[pc]`——原举例与紧上方加粗警告「install `donkeydrifter`, never `donkeycar`」自相矛盾；
+    - 俯拍漂移章节：模块地图测试计数 254 → 559（本分支实测 `web_ui/backend` 559 passed + 1 skipped）；状态行由 2026-08-30 对齐 `docs/guide/overhead-drift-handoff.md` 的 2026-09-01 口径（全量夜间审计补齐看门狗三链路/线程安全/NaN 防线加固待实车核对、M4 前遗留项清零；M1 人工漂移录制、M2 点动机理验证待实操不变）。
+  - 测试：纯文档改动，无运行时代码影响；全量 pytest（本分支基线）除两条已被 #444 修复的既有失败（build_drift_clip 反斜杠路径、setup metadata url 断言）外全部通过，合并 origin/Tony 后在合并树上复跑 `tests/test_build_drift_clip.py` + `donkeycar/tests/test_project_metadata.py` 29 passed + 1 skipped；`web_ui/backend` 559 passed + 1 skipped。
+  - 注：PyPI 项目页（0.1.0）首页仍展示旧仓名链接（301 跳转可用）——`setup.cfg` 已是正确值，下次发版自然更新；无需本机部署（纯文档），Firmware 无改动、无需 OTA。
 ## 2026-09-25 (236)
 
 - fix(tests): `test_train` 收敛性测试固定随机种子，根治 `test_train[data9]` 偶发失败

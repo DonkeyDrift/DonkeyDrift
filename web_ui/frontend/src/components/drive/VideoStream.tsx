@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { API_URL, getDriveVideoTransport, type DriveVideoTransport } from '../../services/api';
-import { Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, Wifi, WifiOff } from 'lucide-react';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 import type { WebRtcSignal } from '../../hooks/useDriveWebsocket';
 import { useTranslation } from '@/i18n';
@@ -25,6 +25,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const [mjpegFps, setMjpegFps] = useState(0);
   const [carOnline, setCarOnline] = useState<boolean | null>(null);
   const [mjpegFallbackAllowed, setMjpegFallbackAllowed] = useState(false);
+  const [multiCarWarning, setMultiCarWarning] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<string>('16/9');
   const imgRef = useRef<HTMLImageElement>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,10 +155,9 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
     };
   }, [webRtcVisible]);
 
+  // 车端在线状态与多车端抢占告警：不依赖降级状态常驻轮询
+  // （WebRTC 正常时也需要 carOnline 供其心跳判断、multi_car_warning 提示多开）
   useEffect(() => {
-    if (!degraded) {
-      return;
-    }
     let mounted = true;
     const loadStats = async () => {
       try {
@@ -166,6 +166,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         if (mounted) {
           setMjpegFps(Number(data.fps) || 0);
           setCarOnline(Boolean(data.online));
+          setMultiCarWarning(Boolean(data.multi_car_warning));
         }
       } catch {
         if (mounted) {
@@ -180,7 +181,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       mounted = false;
       clearInterval(timer);
     };
-  }, [degraded]);
+  }, []);
 
   useEffect(() => {
     onLatencyChange?.(latencyMs);
@@ -230,6 +231,13 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
         <div className="text-base font-mono leading-tight text-cyan-400">{webRtcConnected ? browserFps : mjpegFps}</div>
       </div>
+      {/* 多车端抢占告警：10 秒内车端槽位多次易主 = 多个 manage.py drive 互踢 */}
+      {multiCarWarning && (
+        <div className="dd-overlay absolute inset-x-2 bottom-2 z-40 flex items-center gap-2 rounded-md border border-red-400/30 bg-red-950/70 px-3 py-2 text-xs text-red-200 shadow-lg backdrop-blur-md">
+          <AlertTriangle className="h-4 w-4 shrink-0 animate-pulse" aria-hidden />
+          <span>{t('driveViz.multiCarWarning')}</span>
+        </div>
+      )}
       {/* MJPEG 层：始终预加载，WebRTC 完全显示后才淡出，避免中间 Gap 闪烁 */}
       <img
         key={retryCount}

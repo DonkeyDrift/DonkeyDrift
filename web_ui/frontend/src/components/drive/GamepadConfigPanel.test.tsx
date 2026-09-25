@@ -50,6 +50,6 @@ describe('GamepadConfigPanel', () => {
 
   it('未连接手柄时显示未检测提示', () => {
     render(<GamepadConfigPanel axes={[]} connected={false} defaultOpen />);
-    expect(screen.getByText('未检测到手柄')).toBeInTheDocument();
+    expect(screen.getByText('未检测到手柄（请按手柄任意按键）')).toBeInTheDocument();
   });
 });

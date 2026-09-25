@@ -48,7 +48,7 @@ Requires Python 3.11.
 
 On macOS the default shell is zsh, which treats bare `[...]` as a glob pattern and fails
 with `no matches found`. Quote the requirement instead of escaping the brackets
-(`pip install donkeycar\[pc\]` and `pip install donkeycar[pc]` install the same thing —
+(`pip install donkeydrifter\[pc\]` and `pip install "donkeydrifter[pc]"` install the same thing —
 the brackets must simply survive the shell):
 
 ```bash
@@ -119,7 +119,7 @@ ESP32（MUS4 固件，RC 遥控器本地控制）
 - **同步录制**：以相机帧时戳为基准对齐 ws 遥测流（rc 60 Hz / IMU 100 Hz）线性插值，tub v2 格式落盘，在线提取油门点动特征（频率/占空比/幅值）。
 - **控制与安全**：级联 PID + 油门脉冲发生器、看门狗（丢帧/断线时零油门）、AUTO 期间服务端多 client 仲裁（浏览器控制字段一律丢弃并回发 `control_rejected`）。
 
-模块地图（`web_ui/backend/`，254 例测试全绿）：
+模块地图（`web_ui/backend/`，559 例测试全绿）：
 
 | 模块                                       | 职责                                                |
 | ------------------------------------------ | --------------------------------------------------- |
@@ -133,7 +133,7 @@ ESP32（MUS4 固件，RC 遥控器本地控制）
 | `drift_webrtc.py`                          | aiortc 60 fps 推流（360p）                           |
 | `web_ui/frontend/.../DriftCard.tsx`        | 前端卡片（预览、参数面板、localStorage 回填）         |
 
-当前状态（2026-08-30）：**M0 相机链路已收官**——60 fps 稳定、运动丢检测排障闭环（曝光 1/400 s 根治拖影）；M1 人工漂移录制、M2 点动机理验证待实操。里程碑与验收标准见[实施计划](docs/plan/overhead-drift-control-implementation.md)与[状态交接文档](docs/guide/overhead-drift-handoff.md)。
+当前状态（2026-09-01）：**M0 相机链路已收官**——60 fps 稳定、运动丢检测排障闭环（曝光 1/400 s 根治拖影）；其后全量夜间审计补齐看门狗三链路、线程安全与 NaN 防线加固（待实车核对），M4 前遗留项清零；M1 人工漂移录制、M2 点动机理验证待实操。里程碑与验收标准见[实施计划](docs/plan/overhead-drift-control-implementation.md)与[状态交接文档](docs/guide/overhead-drift-handoff.md)。
 
 ## Repository Layout
 

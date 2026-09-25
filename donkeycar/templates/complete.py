@@ -54,7 +54,7 @@ from donkeydrifter.parts.launch import AiLaunch
 from donkeydrifter.parts.pipe import Pipe
 from donkeydrifter.parts.throttle_filter import ThrottleFilter
 from donkeydrifter.parts.transform import DelayedTrigger, Lambda, TriggeredCallback
-from donkeydrifter.parts.tub_v2 import TubWriter
+from donkeydrifter.parts.tub_v2 import TubWriter, TubRotator
 from donkeydrifter.utils import *
 
 logger = logging.getLogger(__name__)
@@ -116,6 +116,17 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     requesting the same named input.
     """
     logger.info(f'PID: {os.getpid()}')
+
+    # 单实例守护：多个 drive 进程会互相抢占后端唯一车端连接（连接风暴、
+    # 页面无画面），发现存活实例时拒绝启动并给出明确指引
+    from donkeycar.webui_instance import (
+        DriveAlreadyRunning, acquire_drive_instance_lock)
+    try:
+        acquire_drive_instance_lock()
+    except DriveAlreadyRunning as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
     if model_path is None:
         model_path = _selected_model_from_disk()
     if cfg.DONKEY_GYM:
@@ -651,6 +662,10 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
           outputs=['user/angle', 'user/throttle'])
 
     tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta)
+    # 每次开始录制（recording 上升沿）自动切换到新 tub，样本计数从 0 开始，
+    # 不再向旧 tub 追加；须注册在 TubWriter 之前，保证同一循环内先轮换再写首帧。
+    V.add(TubRotator(tub_writer, cfg.DATA_PATH),
+          inputs=['recording'], outputs=[])
     V.add(tub_writer, inputs=inputs, outputs=["tub/num_records"], run_condition='recording')
 
     # Telemetry (we add the same metrics added to the TubHandler

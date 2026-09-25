@@ -116,6 +116,9 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
             setCarState((prev) => {
               const online = !!msg.online;
               if (online === prev.online) return prev;
+              // 车端离线即复位录制态：不显示"录制中"，杜绝车端闪断期间
+              // 残留 recording=true 导致的按钮闪烁与 0:00 计时
+              if (!online) return { ...prev, online: false, recording: false };
               return { ...prev, online };
             });
           }
@@ -146,7 +149,7 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
       ws.onclose = () => {
         if (wsRef.current !== ws || !mountedRef.current) return;
         setConnected(false);
-        setCarState((prev) => ({ ...prev, online: false }));
+        setCarState((prev) => ({ ...prev, online: false, recording: false }));
         clearTimers();
         if (autoReconnect && !closingRef.current) {
           reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
@@ -197,7 +200,7 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
         }
       }
       setConnected(false);
-      setCarState((prev) => ({ ...prev, online: false }));
+      setCarState((prev) => ({ ...prev, online: false, recording: false }));
       return undefined;
     }
 
