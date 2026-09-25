@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-25 (246)
+
+- feat(tub): 每次点击录制自动切换新 tub，样本计数从 0 开始，不再向旧 tub 追加
+  - 根因：`AUTO_CREATE_NEW_TUB = False` 时 drive 启动把 `DATA_PATH`（`mycar/data`）整个目录当作一个大 tub 一次性打开，点「录制」只切换 `recording` run_condition，新帧继续追加进旧 tub，`tub/num_records`（= `manifest.current_index`）从旧计数继续累加。
+  - `donkeycar/parts/tub_v2.py`：
+    1. `TubWriter` 保存 `inputs/types/metadata/max_catalog_len`，新增 `new_tub(base_path)`——close 旧 tub（落盘 manifest）后按相同 schema 新建 `Tub`，计数自然归零；
+    2. 新增 `TubRotator` part——检测 `recording` 上升沿（每次开始录制），当前 tub 已有记录（`current_index > 0`）时轮换到 `TubHandler(DATA_PATH).create_tub_path()` 新建的 `tub_N_YY-MM-DD/`；tub 为空（本次 drive 尚未录过）则复用，不留空目录。旧数据不迁移不删除。
+  - `donkeycar/templates/complete.py`：`V.add(TubRotator(tub_writer, cfg.DATA_PATH), inputs=['recording'], outputs=[])` 注册在 `TubWriter` 之前，保证同一循环 tick 内先轮换再写首帧；`recording` key 由 DriveApiBridge / 摇杆统一写入，Web 按钮、手柄等录制入口一致生效。web_ui 前后端无需改动（`tub/num_records` 经既有 ws 链路自动归零显示）。
+  - 测试：`donkeycar/tests/test_tubwriter.py` 新增 `TestTubRotator` 3 项——`new_tub()` 切换后写入落新目录且计数归零、旧 tub 不受影响；上升沿轮换 / 持续 True 与下降沿不轮换；tub 为空不轮换。`test_tubwriter.py` 4 项 + `test_tub_v2.py` 4 项 + `test_kinematics.py`（引用 complete 模板）19 项全绿。
+  - 注：车端 Python 改动，随 `manage.py drive` 重启生效；本地 `mycar/manage.py` 副本已同步接线；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (245)
 
 - fix(drive): 修复 Mac 端 Drive 页录制"自动开始/闪烁/计时一直 0:00"——后端录制态 stale 缓存跨车端断连残留
