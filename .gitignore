@@ -65,8 +65,18 @@ secrets*
 .claude/
 .agents/
 
+# Playwright 运行产物
+web_ui/frontend/test-results/
+web_ui/frontend/playwright-report/
+
 # 俯拍漂移链路延迟测量报告（本机产物）
 latency_report.json
 
 # 本机科普 HTML 页面（保留本地、不入库）
 docs/architecture-guide.html
+
+# NPU 车端运行环境（python3.12 + system-site-packages，见 CHANGELOG 2026-09-22；本机构建，不入库）
+.venv-npu/
+
+# Web 后端运行时状态（车端选中模型/驾驶参数，运行期生成）
+web_ui/backend/data/

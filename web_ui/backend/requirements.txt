@@ -9,5 +9,6 @@ aiortc
 av
 httpx2
 zeroconf
+httpx
 packaging
 pupil-apriltags

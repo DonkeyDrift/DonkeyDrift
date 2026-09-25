@@ -81,6 +81,10 @@ class DriveState:
         # 遥测进程内挂钩（第三视角漂移引擎等订阅方，广播前同步调用）
         self.telemetry_hooks: List[Callable[[dict], None]] = []
 
+        # issue #003 热加载：request_id -> asyncio.Future（等待车端 model_loaded ACK）
+        self.pending_model_loads: Dict[str, asyncio.Future] = {}
+        self.current_model: Optional[str] = None
+
         # 模拟器自动恢复任务
         self.sim_recovery_task: Optional[asyncio.Task] = None
         self.sim_recovery_interval: float = float(
@@ -316,6 +320,26 @@ class LoadModelRequest(BaseModel):
     working_dir: Optional[str] = None
 
 
+# 车端热加载 ACK 等待上限（秒）：TFLite/TF 载入通常 <1s，留足余量。
+HOT_LOAD_TIMEOUT_S = float(os.environ.get("DRIVE_MODEL_HOT_LOAD_TIMEOUT", "30"))
+
+
+def _model_type_for_path(model_path: str) -> Optional[str]:
+    """按扩展名推导车端热加载用的 model_type；None 时交给车端 myconfig 默认。"""
+    suffix = Path(model_path).suffix.lower()
+    if suffix == ".tflite":
+        return "tflite_linear"
+    if suffix == ".trt":
+        return "tensorrt_linear"
+    if suffix == ".aidem":
+        # AIMO 转出的 QNN context binary（NPU），行为克隆 linear 结构
+        return "aidlite_linear"
+    if suffix == ".ckpt":
+        # PyTorch 训练产物（CPU 推理，无 TF 依赖）
+        return "torch_linear"
+    return None
+
+
 def _validate_model_path(model_path: str) -> str:
     """模型路径安全校验：必须是位于 models 目录内的相对路径，禁止目录穿越。"""
     if not model_path or not isinstance(model_path, str):
@@ -332,11 +356,11 @@ def _validate_model_path(model_path: str) -> str:
 
 @router.post("/load_model")
 async def load_model(request: LoadModelRequest):
-    """选择模型：持久化所选模型并要求带模型重启车端（不做运行时热切换）。
+    """选择模型：持久化选择，并请车端运行期热加载（无需重启）。
 
-    车端只在启动时按 --model 加载模型（complete.py 无 --model 时也会回退读取
-    selected_model.json），运行时无法换模型，因此这里改为：校验路径 → 写盘 →
-    尽力通知车端「带模型重启」→ 前端提示重启生效。
+    车端常驻 PilotHolder（complete.py）可在运行期原子替换推理模型；本端点
+    经 WebSocket 下发 load_model 并等待车端的 model_loaded ACK。车端离线或
+    版本过旧（迟迟无 ACK）时回退为「已记录，需重启车端后生效」提示。
     """
     model_path = _validate_model_path(request.model_path)
 
@@ -356,14 +380,59 @@ async def load_model(request: LoadModelRequest):
         logger.error(f"持久化所选模型失败: {e}")
         raise HTTPException(status_code=500, detail=f"持久化所选模型失败: {e}")
 
-    # 车端在线时下发「带模型重启」信号（best-effort，不在线则重启后按文件读取所选模型）
-    if drive_state.car_online():
-        await drive_state.send_to_car({"type": "restart_with_model", "model_path": model_path})
+    if not drive_state.car_online():
+        return {
+            "success": True,
+            "loading": False,
+            "restart_required": True,
+            "message": "车端未连接：模型已记录，车端下次启动生效",
+        }
 
+    request_id = uuid.uuid4().hex
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    drive_state.pending_model_loads[request_id] = future
+    sent = await drive_state.send_to_car({
+        "type": "load_model",
+        "request_id": request_id,
+        "model_path": model_path,
+        "model_type": _model_type_for_path(model_path),
+    })
+    if not sent:
+        drive_state.pending_model_loads.pop(request_id, None)
+        return {
+            "success": True,
+            "loading": False,
+            "restart_required": True,
+            "message": "指令下发失败：模型已记录，请重启车端后生效",
+        }
+
+    try:
+        result = await asyncio.wait_for(future, timeout=HOT_LOAD_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.warning(f"车端热加载模型超时（request_id={request_id}）")
+        return {
+            "success": True,
+            "loading": False,
+            "restart_required": True,
+            "message": "车端热加载超时（可能为旧版车端）：模型已记录，请重启车端后生效",
+        }
+    finally:
+        drive_state.pending_model_loads.pop(request_id, None)
+
+    if result.get("success"):
+        drive_state.current_model = model_path
+        return {
+            "success": True,
+            "loading": False,
+            "restart_required": False,
+            "model": model_path,
+            "message": "模型已热加载，切换到全自动即可推理",
+        }
     return {
-        "success": True,
-        "restart_required": True,
-        "message": "模型已记录，需重启车端后生效",
+        "success": False,
+        "loading": False,
+        "restart_required": False,
+        "message": result.get("error") or "车端热加载失败",
     }
 
 
@@ -563,6 +632,19 @@ async def drive_ws(
                 # 处理车端 WebRTC 视频统计
                 if msg.get("type") == "webrtc_stats":
                     drive_state.apply_car_webrtc_stats(msg)
+                    continue
+
+                # 车端热加载模型结果（issue #003）：唤醒等待中的 /load_model 请求
+                if msg.get("type") == "model_loaded":
+                    future = drive_state.pending_model_loads.get(msg.get("request_id"))
+                    if future is not None and not future.done():
+                        future.set_result(msg)
+                    await drive_state.broadcast_to_clients({
+                        "type": "model_loaded",
+                        "success": bool(msg.get("success")),
+                        "model": msg.get("model"),
+                        "error": msg.get("error"),
+                    })
                     continue
 
                 # 车端遥测曲线数据，原样广播给所有客户端（车端已按 100Hz 节流）

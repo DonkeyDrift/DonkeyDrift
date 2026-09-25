@@ -292,8 +292,11 @@ export const ModelsList: React.FC = () => {
                   onClick={async (e) => {
                     e.stopPropagation();
                     try {
-                      await loadModelToCar(m.path, configPath);
-                      alert(t('trainer.loadToCarSent'));
+                      // 后端 /drive/load_model 只接受 models/ 内的相对路径
+                      // （与 DrivePage 选择器一致）；列表项的 m.path 是绝对路径，
+                      // 直接传会被 400 拒绝。
+                      const res = await loadModelToCar(`./models/${m.name}`, configPath);
+                      alert(res?.message || t('trainer.loadToCarSent'));
                     } catch (error) {
                       alert(t('trainer.loadFailed', { message: getApiErrorMessage(error) }));
                     }

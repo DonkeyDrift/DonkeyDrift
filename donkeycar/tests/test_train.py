@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from itertools import product
 from typing import Callable, List
 
+from tensorflow.keras.utils import set_random_seed
+
 from donkeycar.parts.tub_v2 import Tub
 from donkeycar.pipeline.training import train, BatchSequence
 from donkeycar.config import Config
@@ -79,6 +81,9 @@ def imu_fields() -> List[str]:
 @pytest.fixture(scope='session')
 def car_dir(tmpdir_factory, base_config, imu_fields) -> str:
     """ Creating car dir with sub dirs and extracting tub """
+    # Seed before generating synthetic imu data so the session-scoped
+    # dataset is identical on every run (part of the flaky-convergence fix).
+    set_random_seed(42)
     car_dir = tmpdir_factory.mktemp('mycar')
     os.mkdir(os.path.join(car_dir, 'models'))
     # extract tub.tar.gz into car_dir/tub
@@ -145,6 +150,11 @@ def test_train(config: Config, data: Data) -> None:
     if data.type == 'fastai_linear':
         # fastai is an optional dependency (torch extra), skip if missing
         pytest.importorskip('fastai')
+
+    # Re-seed before each training run: weight init, train/val split shuffle
+    # and augmentation all draw from these RNGs — unseeded they made the
+    # convergence assertion below flaky (data9 failed intermittently).
+    set_random_seed(42)
 
     def pilot_path(name):
         pilot_name = f'pilot_{name}.savedmodel'

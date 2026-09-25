@@ -1,7 +1,8 @@
 import React from 'react';
-import { act, render } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useGamepadDrive } from './useGamepadDrive';
+import { DEFAULT_GAMEPAD_CONFIG } from '../lib/gamepadMapping';
 
 const HookProbe: React.FC<{
   enabled: boolean;
@@ -17,6 +18,9 @@ const fireGamepadEvent = (type: string) => {
     window.dispatchEvent(new Event(type));
   });
 };
+
+const makePad = (axes: number[]): Gamepad =>
+  ({ id: 'test-pad', mapping: 'standard', axes, buttons: [] }) as unknown as Gamepad;
 
 describe('useGamepadDrive', () => {
   it('未选中手柄（enabled=false）时连接检测仍运行', () => {
@@ -41,6 +45,52 @@ describe('useGamepadDrive', () => {
 
     fireGamepadEvent('gamepaddisconnected');
     expect(states.at(-1)).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('按配置读取 Z 轴转向，左拨输出负值', async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [makePad([0, 0, -0.8, 0])],
+    });
+
+    const Probe: React.FC = () => {
+      useGamepadDrive({ enabled: true, config: DEFAULT_GAMEPAD_CONFIG, onChange });
+      return null;
+    };
+    render(<Probe />);
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const [angle, throttle] = onChange.mock.calls.at(-1) as [number, number];
+    expect(angle).toBeCloseTo(-0.78, 2);
+    expect(throttle).toBe(0);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('反向配置会把左拨映射为正', async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [makePad([0, 0, -0.8, 0])],
+    });
+
+    const Probe: React.FC = () => {
+      useGamepadDrive({
+        enabled: true,
+        config: {
+          ...DEFAULT_GAMEPAD_CONFIG,
+          steering: { ...DEFAULT_GAMEPAD_CONFIG.steering, invert: true },
+        },
+        onChange,
+      });
+      return null;
+    };
+    render(<Probe />);
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const [angle] = onChange.mock.calls.at(-1) as [number, number];
+    expect(angle).toBeGreaterThan(0);
 
     vi.unstubAllGlobals();
   });

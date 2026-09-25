@@ -15,6 +15,7 @@
 """
 
 import os
+import sys
 from unittest import mock
 
 import pytest
@@ -354,3 +355,139 @@ def test_drive_run_env_points_to_reused_backend(instance_file, tmp_path):
         "ws://127.0.0.1:8000/api/drive/ws"
     # 复用时 PID 文件只记车进程（run 退出时 finally 会清文件，故捕获写入）
     assert pid_writes == [[777]]
+
+
+# ===========================================================================
+# 选定模型持久化（issue #003：选模型后带模型重启，选择需跨重启保持）
+# ===========================================================================
+
+@pytest.fixture
+def model_file(tmp_path):
+    """把选定模型记录文件指到临时目录。"""
+    path = tmp_path / "drive_model.json"
+    with mock.patch.object(webui_instance, "DRIVE_MODEL_FILE", path):
+        yield path
+
+
+def test_drive_model_roundtrip(model_file):
+    from donkeycar.webui_instance import read_drive_model, write_drive_model
+
+    payload = write_drive_model("/abs/models/DKG-1.tflite", "tflite_linear")
+
+    assert payload["model"] == "/abs/models/DKG-1.tflite"
+    assert payload["model_type"] == "tflite_linear"
+    assert payload["selected_at"] > 0
+    assert read_drive_model() == payload
+
+
+def test_drive_model_write_without_type(model_file):
+    from donkeycar.webui_instance import read_drive_model, write_drive_model
+
+    write_drive_model("/abs/models/m.h5")
+
+    assert read_drive_model()["model_type"] is None
+
+
+def test_read_drive_model_missing_file(model_file):
+    from donkeycar.webui_instance import read_drive_model
+
+    assert read_drive_model() is None
+
+
+def test_read_drive_model_corrupt_file(model_file):
+    from donkeycar.webui_instance import read_drive_model
+
+    model_file.write_text("not json{", encoding="utf-8")
+    assert read_drive_model() is None
+
+
+def test_read_drive_model_bad_fields(model_file):
+    from donkeycar.webui_instance import read_drive_model
+
+    model_file.write_text('{"model": ""}', encoding="utf-8")
+    assert read_drive_model() is None
+    model_file.write_text('{"model": 42}', encoding="utf-8")
+    assert read_drive_model() is None
+
+
+def test_remove_drive_model(model_file):
+    from donkeycar.webui_instance import (
+        read_drive_model,
+        remove_drive_model,
+        write_drive_model,
+    )
+
+    write_drive_model("/abs/models/DKG-1.tflite", "tflite_linear")
+    remove_drive_model()
+    assert read_drive_model() is None
+    # 重复删除不报错
+    remove_drive_model()
+
+
+# ===========================================================================
+# NPU 进程解释器选择（aidlite 只在 .venv-npu / 系统 python3.12 可用）
+# ===========================================================================
+
+def test_select_backend_python_env_override(monkeypatch):
+    from donkeycar.webui_instance import select_backend_python
+
+    monkeypatch.setenv("DONKEY_BACKEND_PYTHON", "/opt/py-backend/bin/python")
+    assert select_backend_python() == "/opt/py-backend/bin/python"
+
+
+def test_select_backend_python_falls_back_to_car_override(monkeypatch):
+    from donkeycar.webui_instance import select_backend_python
+
+    monkeypatch.delenv("DONKEY_BACKEND_PYTHON", raising=False)
+    monkeypatch.setenv("DONKEY_CAR_PYTHON", "/opt/py-car/bin/python")
+    assert select_backend_python() == "/opt/py-car/bin/python"
+
+
+def test_select_python_prefers_venv_npu(monkeypatch, tmp_path):
+    from donkeycar import webui_instance
+
+    monkeypatch.delenv("DONKEY_CAR_PYTHON", raising=False)
+    monkeypatch.delenv("DONKEY_BACKEND_PYTHON", raising=False)
+    venv = tmp_path / ".venv-npu" / "bin" / "python"
+    venv.parent.mkdir(parents=True)
+    venv.write_text("#!/bin/sh\n")
+    venv.chmod(0o755)  # _prefer_venv_npu 会做 os.access(X_OK) 检查
+    with mock.patch.object(webui_instance, "_venv_npu_python", return_value=str(venv)):
+        assert webui_instance.select_car_python() == str(venv)
+        assert webui_instance.select_backend_python() == str(venv)
+
+
+def test_select_backend_python_missing_candidate_falls_back(monkeypatch):
+    from donkeycar import webui_instance
+
+    monkeypatch.delenv("DONKEY_CAR_PYTHON", raising=False)
+    monkeypatch.delenv("DONKEY_BACKEND_PYTHON", raising=False)
+    with mock.patch.object(webui_instance, "_venv_npu_python",
+                           return_value="/nonexistent/python"):
+        assert webui_instance.select_backend_python() == sys.executable
+
+
+def test_web_backend_python_skips_probe_when_current(monkeypatch):
+    """候选就是当前解释器时直接返回，不起子进程探测。"""
+    from donkeycar.management.base import Web
+
+    monkeypatch.delenv("DONKEY_BACKEND_PYTHON", raising=False)
+    monkeypatch.delenv("DONKEY_CAR_PYTHON", raising=False)
+    with mock.patch.object(webui_instance, "_venv_npu_python",
+                           return_value="/nonexistent/python"), \
+         mock.patch("donkeycar.management.base.subprocess.run") as run_mock:
+        assert Web()._backend_python() == sys.executable
+    run_mock.assert_not_called()
+
+
+def test_web_backend_python_probe_failure_falls_back(monkeypatch, capsys):
+    """候选解释器缺后端依赖（探测非零退出）→ 回退当前解释器并告警。"""
+    from donkeycar.management.base import Web
+
+    monkeypatch.setenv("DONKEY_BACKEND_PYTHON", "/candidate/python")
+    failed = mock.Mock(returncode=1)
+    with mock.patch("donkeycar.management.base.subprocess.run",
+                    return_value=failed) as run_mock:
+        assert Web()._backend_python() == sys.executable
+    run_mock.assert_called_once()
+    assert "缺 web 后端依赖" in capsys.readouterr().out

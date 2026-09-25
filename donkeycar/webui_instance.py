@@ -21,6 +21,7 @@
 import json
 import os
 import signal
+import sys
 import threading
 import time
 import urllib.request
@@ -29,6 +30,9 @@ from pathlib import Path
 # 实例登记文件与车进程 PID 文件（与 base.py / tui.py / launcher 既有约定一致）
 WEBUI_INSTANCE_FILE = Path.home() / ".donkeycar" / "webui.json"
 DRIVE_PID_FILE = Path.home() / ".donkeycar" / "drive.pid"
+# 当前选定自动驾驶模型（issue #003）：web_ui 后端写入，launcher 每次
+# 起车进程时读取并附加 --model/--type，选择跨重启保持。
+DRIVE_MODEL_FILE = Path.home() / ".donkeycar" / "drive_model.json"
 
 # 探测超时（秒）：仅本机回环探测，快速失败
 PROBE_TIMEOUT_S = 2.0
@@ -183,6 +187,52 @@ def remove_drive_pid_file(pid_file=None):
         pass
 
 
+# ── 选定模型持久化（issue #003）─────────────────────────────────────
+
+def read_drive_model(model_file=None):
+    """读选定模型记录；文件缺失/损坏/字段非法返回 None。
+
+    记录格式：``{"model": 绝对路径, "model_type": str|None, "selected_at": ...}``
+    """
+    if model_file is None:
+        model_file = DRIVE_MODEL_FILE
+    try:
+        data = json.loads(Path(model_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("model"), str) \
+            and data["model"].strip():
+        return data
+    return None
+
+
+def write_drive_model(model_path, model_type=None, model_file=None):
+    """写入选定模型记录（原子替换）。"""
+    if model_file is None:
+        model_file = DRIVE_MODEL_FILE
+    payload = {
+        "model": str(model_path),
+        "model_type": model_type if model_type else None,
+        "selected_at": time.time(),
+    }
+    path = Path(model_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.replace(path)
+    return payload
+
+
+def remove_drive_model(model_file=None):
+    """删除选定模型记录（选「无模型」时调用）。"""
+    if model_file is None:
+        model_file = DRIVE_MODEL_FILE
+    try:
+        Path(model_file).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _process_cmdline(pid):
     """读进程 cmdline（NUL 分隔）；非 Linux 或进程不存在返回 None。"""
     try:
@@ -237,3 +287,50 @@ def kill_previous_car_processes(pid_file=None):
         except OSError:
             pass
     remove_drive_pid_file(pid_file)
+
+
+# ── NPU 相关进程解释器选择 ──────────────────────────────────────────
+
+def _venv_npu_python() -> str:
+    """仓库 .venv-npu/bin/python 路径（aidlite 唯一所在，见 parts/npu_pilot.py）。"""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(repo_root, '.venv-npu', 'bin', 'python')
+
+
+def _prefer_venv_npu() -> str:
+    candidate = _venv_npu_python()
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return sys.executable
+
+
+def select_car_python() -> str:
+    """车进程解释器选择：NPU 环境 .venv-npu 优先，DONKEY_CAR_PYTHON 可覆盖。
+
+    车端 NPU(.aidem)与无 TF 的 .tflite 推理都依赖 aidlite——只存在于系统
+    python3.12（.venv-npu 挂系统站点包）。
+    供 base.py（donkey drive）、tui.py、launcher 三条拉车链路共用，
+    本模块仅依赖标准库，各链路均可安全导入。
+    找不到 .venv-npu 时退回 sys.executable，保持原有行为。
+    """
+    override = os.environ.get('DONKEY_CAR_PYTHON', '').strip()
+    if override:
+        return override
+    return _prefer_venv_npu()
+
+
+def select_backend_python() -> str:
+    """web 后端（uvicorn）进程解释器选择：.venv-npu 优先，可被
+    DONKEY_BACKEND_PYTHON / DONKEY_CAR_PYTHON 覆盖。
+
+    Pilot Arena 的 pilot 加载与推理（routers/arena.py →
+    get_model_by_type('aidlite_linear') → parts/npu_pilot.py）跑在 uvicorn
+    进程内，同样依赖 aidlite——后端"可以是任意 python"的原假设随 Arena 支持
+    .aidem 失效。候选解释器能否跑后端（fastapi/uvicorn/multipart/websockets
+    是否齐全）由调用方探测，本函数只做路径选择。
+    """
+    for var in ('DONKEY_BACKEND_PYTHON', 'DONKEY_CAR_PYTHON'):
+        override = os.environ.get(var, '').strip()
+        if override:
+            return override
+    return _prefer_venv_npu()

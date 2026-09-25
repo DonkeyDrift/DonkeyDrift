@@ -245,3 +245,74 @@ describe('PilotArenaPage 帧区间切片', () => {
     );
   });
 });
+
+describe('PilotArenaPage 播放流畅度（卡顿修复回归）', () => {
+  // 记录 Image 的 src 加载请求；jsdom 不真正加载资源，complete 恒为 false
+  const requestedUrls: string[] = [];
+  class MockImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    complete = false;
+    naturalWidth = 0;
+    width = 0;
+    height = 0;
+    set src(value: string) {
+      requestedUrls.push(value);
+    }
+    get src() {
+      return requestedUrls[requestedUrls.length - 1] ?? '';
+    }
+  }
+
+  beforeEach(() => {
+    requestedUrls.length = 0;
+    vi.stubGlobal('Image', MockImage);
+    useStore.setState({
+      records: Array.from({ length: 30 }, (_, i) => ({
+        _index: i,
+        _timestamp_ms: i * 100,
+        'cam/image_array': `${i}_cam_image_array_.jpg`,
+        'user/angle': 0.1,
+        'user/throttle': 0.2,
+      })),
+      currentIndex: 0,
+      isPlaying: false,
+      isLooping: false,
+    });
+  });
+
+  it('跳帧后前瞻预取后续 12 帧图像（取图 RTT 不再卡住显示时刻）', async () => {
+    render(<PilotArenaPage />);
+    // 主播放进度条是 DOM 中第一个 slider（后两个是 plot 区间滑块）
+    const seekSlider = screen.getAllByRole('slider')[0];
+    fireEvent.change(seekSlider, { target: { value: '5' } });
+
+    const frameUrls = requestedUrls.filter((url) => url.includes('_cam_image_array_'));
+    const prefetched = new Set(
+      frameUrls
+        .map((url) => Number(new URL(url).searchParams.get('path')?.match(/^(\d+)_/)?.[1]))
+        .filter((index) => Number.isFinite(index)),
+    );
+    // 预取窗口 = 跳帧目标 5 之后的 12 帧（6..17），不含已播过的 0..5
+    for (let expected = 6; expected <= 17; expected += 1) {
+      expect(prefetched.has(expected), `应预取第 ${expected} 帧`).toBe(true);
+    }
+    expect(prefetched.has(5), '当前帧不算预取').toBe(false);
+    expect(prefetched.has(18), '预取窗口应为 12 帧').toBe(false);
+  });
+
+  it('播放中推理读数经节流合并后仍能到达界面（不丢数、不直接逐响应 setState）', async () => {
+    render(<PilotArenaPage />);
+    const loadButton = await screen.findByRole('button', { name: 'arena.loadAndPredict' });
+    await waitFor(() => expect(loadButton).toBeEnabled());
+    fireEvent.click(loadButton);
+    await waitFor(() => expect(api.loadArenaPilot).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'arena.play' }));
+
+    // 播放起来后 predict 会持续被调用；节流 flush（100ms）后数字读数必须出现
+    await waitFor(() => expect(api.predictArenaPilot.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    expect(await screen.findByText('arena.angleLabel 0.250', undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText('arena.throttleLabel 0.500')).toBeInTheDocument();
+  });
+});
