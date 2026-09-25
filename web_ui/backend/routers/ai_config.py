@@ -213,6 +213,12 @@ def _provider_view(provider_id: str, state: Dict[str, Any]) -> Optional[Dict[str
         "api_format": meta["api_format"],
         "custom": meta["custom"],
         "default_models": meta.get("default_models") or [],
+        # 该供应商是否已有可用凭据（任一账号有 API Key 或 OAuth token），
+        # 供前端在折叠态直接展示「已配置/未配置」徽标。
+        "configured": any(
+            bool(a.get("api_key") or a.get("refresh_token") or a.get("access_token"))
+            for a in accounts
+        ),
         "accounts": [_account_view(a) for a in accounts],
     }
 

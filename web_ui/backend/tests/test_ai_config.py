@@ -58,6 +58,25 @@ def test_list_providers_returns_presets(client):
     assert payload["active_provider"] is None
 
 
+def test_provider_configured_flag(client):
+    """列表接口的 configured 字段：任一账号有 api_key 即视为已配置，清空后回落。"""
+    listing = client.get("/api/ai-config/providers").json()
+    assert all(p["configured"] is False for p in listing["providers"])
+
+    client.post("/api/ai-config/providers/deepseek", json={"name": "d", "api_key": "sk-abcdefgh1234"})
+    listing = client.get("/api/ai-config/providers").json()
+    providers = {p["id"]: p for p in listing["providers"]}
+    assert providers["deepseek"]["configured"] is True
+    assert providers["codex"]["configured"] is False
+
+    # 清空唯一账号的 key 后回到未配置
+    account_id = providers["deepseek"]["accounts"][0]["id"]
+    client.post("/api/ai-config/providers/deepseek", json={"account_id": account_id, "api_key": ""})
+    listing = client.get("/api/ai-config/providers").json()
+    deepseek = next(p for p in listing["providers"] if p["id"] == "deepseek")
+    assert deepseek["configured"] is False
+
+
 def test_upsert_account_creates_and_masks_key(client, tmp_path):
     secret = "sk-abcdefghijklmnop1234567890"
     resp = client.post("/api/ai-config/providers/deepseek", json={"name": "我的 Key", "api_key": secret})
@@ -184,6 +203,11 @@ def test_oauth_device_code_flow(client, monkeypatch, tmp_path):
     assert codex_account["access_token"] == "at-secret"
     assert codex_account["id"] == "acc-123"
     assert raw["active_provider"] == "codex"
+
+    # OAuth token 也算已配置凭据（configured 走 refresh_token/access_token 判定）
+    listing = client.get("/api/ai-config/providers").json()
+    codex = next(p for p in listing["providers"] if p["id"] == "codex")
+    assert codex["configured"] is True
 
 
 def test_oauth_device_code_pending(client, monkeypatch):

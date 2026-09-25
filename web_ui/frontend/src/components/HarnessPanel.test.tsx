@@ -27,6 +27,7 @@ import {
   getHarnessCatalog,
   getHarnessStatus,
   downloadHarness,
+  installHarness,
   checkHarnessUpdates,
   installHarnessUpdate,
   flashFirmware,
@@ -35,6 +36,7 @@ import {
 const mockCatalog = vi.mocked(getHarnessCatalog);
 const mockStatus = vi.mocked(getHarnessStatus);
 const mockDownload = vi.mocked(downloadHarness);
+const mockInstall = vi.mocked(installHarness);
 const mockCheck = vi.mocked(checkHarnessUpdates);
 const mockInstallUpdate = vi.mocked(installHarnessUpdate);
 const mockFlash = vi.mocked(flashFirmware);
@@ -119,6 +121,26 @@ const statusFixture = {
     },
   ],
 };
+
+// 已安装且「有更新」的目录：codex-cli 1.2.3 → 1.3.0。
+const updateAvailableCatalogFixture = {
+  ...installedCatalogFixture,
+  harnesses: [
+    {
+      ...installedCatalogFixture.harnesses[0],
+      components: [
+        {
+          ...installedCatalogFixture.harnesses[0].components[0],
+          latest_version: '1.3.0',
+          update_available: true,
+        },
+        installedCatalogFixture.harnesses[0].components[1],
+      ],
+    },
+  ],
+};
+
+const emptyStatusFixture = { ...statusFixture, updateable_count: 0, updates: [] };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -215,6 +237,100 @@ describe('HarnessPanel', () => {
 
     await waitFor(() => {
       expect(mockFlash).toHaveBeenCalledWith('192.168.4.1', '/tmp/fw.bin');
+    });
+  });
+
+  it('并发更新：两个任务的进行中状态互不干扰', async () => {
+    const twoUpdatesStatus = {
+      ...statusFixture,
+      updateable_count: 2,
+      updates: [
+        {
+          kind: 'project',
+          id: 'donkeydrift',
+          name: 'DonkeyDrifter',
+          installed: true,
+          installed_version: '0.1.2',
+          latest_version: '0.2.0',
+          updateable: true,
+        },
+        {
+          kind: 'component',
+          id: 'donkeycar',
+          name: 'donkeycar',
+          installed: true,
+          installed_version: '5.1.0',
+          latest_version: '5.2.0',
+          updateable: true,
+        },
+      ],
+    };
+    mockStatus.mockResolvedValue(twoUpdatesStatus as never);
+    // 每个更新项一个可手动 resolve 的 Promise，模拟并发耗时任务
+    const resolvers: Record<string, () => void> = {};
+    mockInstallUpdate.mockImplementation(
+      ((kind: string, id: string) =>
+        new Promise((resolve) => {
+          resolvers[id] = () => resolve({ status: 'ok', message: 'ok' });
+        })) as never,
+    );
+    render(<HarnessPanel />);
+
+    await screen.findByText('Codex');
+    const buttons = screen.getAllByRole('button', { name: 'harness.update' });
+    expect(buttons).toHaveLength(2);
+
+    // 点第一个：只有它进入「安装中」，另一个保持可点的「更新」
+    fireEvent.click(buttons[0]);
+    expect((await screen.findAllByRole('button', { name: 'harness.installing' })).length).toBe(1);
+    expect(screen.getByRole('button', { name: 'harness.update' })).toBeInTheDocument();
+
+    // 再点第二个：两个「安装中」并存，前一个的进度态不丢
+    fireEvent.click(screen.getByRole('button', { name: 'harness.update' }));
+    expect((await screen.findAllByRole('button', { name: 'harness.installing' })).length).toBe(2);
+
+    // 先完成第一个：它恢复「更新」，第二个仍在「安装中」
+    resolvers['donkeydrift']();
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'harness.installing' })).toHaveLength(1);
+    });
+    expect(screen.getByRole('button', { name: 'harness.update' })).toBeInTheDocument();
+
+    // 完成第二个：两个都恢复
+    resolvers['donkeycar']();
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'harness.update' })).toHaveLength(2);
+    });
+  });
+
+  it('已安装组件无更新时不显示「更新」按钮，版本行保持绿色已安装', async () => {
+    mockCatalog.mockResolvedValue(installedCatalogFixture as never);
+    mockStatus.mockResolvedValue(emptyStatusFixture as never);
+    render(<HarnessPanel />);
+
+    await screen.findByText('Codex');
+    expect(screen.queryByRole('button', { name: 'harness.update' })).not.toBeInTheDocument();
+    const installedLine = screen.getByText(/harness\.installed/);
+    expect(installedLine.className).toContain('text-emerald-400');
+    expect(screen.queryByText(/harness\.updateAvailable/)).not.toBeInTheDocument();
+  });
+
+  it('已安装组件有更新时显示琥珀色「有新更新」文案与更新按钮', async () => {
+    mockCatalog.mockResolvedValue(updateAvailableCatalogFixture as never);
+    mockStatus.mockResolvedValue(emptyStatusFixture as never);
+    mockInstall.mockResolvedValue({ status: 'ok', message: 'ok' } as never);
+    render(<HarnessPanel />);
+
+    await screen.findByText('Codex');
+    const updateLine = screen.getByText(/harness\.updateAvailable/);
+    expect(updateLine.className).toContain('text-amber-400');
+    expect(updateLine.textContent).toContain('1.2.3');
+    expect(updateLine.textContent).toContain('1.3.0');
+
+    // 更新按钮点击后走组件安装（升级到最新）
+    fireEvent.click(screen.getByRole('button', { name: 'harness.update' }));
+    await waitFor(() => {
+      expect(mockInstall).toHaveBeenCalledWith('codex', 'codex-cli');
     });
   });
 });

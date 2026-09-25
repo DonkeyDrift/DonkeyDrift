@@ -13,6 +13,7 @@ import {
   Loader2,
   ChevronDown,
   ChevronRight,
+  Check,
   KeyRound,
   LogIn,
   type LucideIcon,
@@ -64,41 +65,64 @@ interface AccountFormState {
 
 const EMPTY_ACCOUNT_FORM: AccountFormState = { name: '', apiKey: '', baseUrl: '', models: '' };
 
-function AccountForm({ providerId, onSaved }: { providerId: string; onSaved: () => void }) {
+/**
+ * 添加账号表单（CC-Switch 预设式）：预设供应商默认只需粘贴 API Key（备注名可选），
+ * Base URL/模型由预设自动带出展示；展开「高级设置」才允许覆盖，未覆盖时不发送
+ * base_url/models 字段，由后端回退预设默认值。自定义供应商没有预设，仍允许手填。
+ */
+function AccountForm({ provider, onSaved }: { provider: AiConfigProvider; onSaved: () => void }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<AccountFormState>(EMPTY_ACCOUNT_FORM);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const submit = useCallback(async () => {
     setSaving(true);
     try {
-      await saveAiConfigAccount(providerId, {
+      const baseUrl = form.baseUrl.trim();
+      const models = form.models
+        .split(',')
+        .map((m) => m.trim())
+        .filter(Boolean);
+      const payload: { name?: string; api_key: string; base_url?: string; models?: string[] } = {
         name: form.name.trim() || undefined,
         api_key: form.apiKey,
-        base_url: form.baseUrl.trim() || undefined,
-        models: form.models
-          .split(',')
-          .map((m) => m.trim())
-          .filter(Boolean),
-      });
+      };
+      // 仅在用户显式覆盖时才带上 base_url/models，否则后端回退预设默认值
+      if (baseUrl) payload.base_url = baseUrl;
+      if (models.length) payload.models = models;
+      await saveAiConfigAccount(provider.id, payload);
       setForm(EMPTY_ACCOUNT_FORM);
+      setShowAdvanced(false);
       onSaved();
     } catch {
       // 保存失败时保留输入，静默跳过
     } finally {
       setSaving(false);
     }
-  }, [form, providerId, onSaved]);
+  }, [form, provider.id, onSaved]);
+
+  const overrideInputs = (
+    <>
+      <input
+        className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        placeholder={provider.base_url || t('aiConfig.baseUrlLabel')}
+        value={form.baseUrl}
+        onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
+        aria-label={t('aiConfig.baseUrlLabel')}
+      />
+      <input
+        className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        placeholder={provider.default_models.join(', ') || t('aiConfig.modelsLabel')}
+        value={form.models}
+        onChange={(e) => setForm((f) => ({ ...f, models: e.target.value }))}
+        aria-label={t('aiConfig.modelsLabel')}
+      />
+    </>
+  );
 
   return (
     <div className="mt-2 space-y-2 rounded-md border border-zinc-800 bg-zinc-900/60 p-3">
-      <input
-        className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-        placeholder={t('aiConfig.nameLabel')}
-        value={form.name}
-        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-        aria-label={t('aiConfig.nameLabel')}
-      />
       <input
         className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
         placeholder={t('aiConfig.apiKeyPlaceholder')}
@@ -108,19 +132,41 @@ function AccountForm({ providerId, onSaved }: { providerId: string; onSaved: () 
       />
       <input
         className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-        placeholder={t('aiConfig.baseUrlLabel')}
-        value={form.baseUrl}
-        onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-        aria-label={t('aiConfig.baseUrlLabel')}
+        placeholder={provider.custom ? t('aiConfig.nameLabel') : t('aiConfig.nameOptionalLabel')}
+        value={form.name}
+        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+        aria-label={t('aiConfig.nameLabel')}
       />
-      <input
-        className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-        placeholder={t('aiConfig.modelsLabel')}
-        value={form.models}
-        onChange={(e) => setForm((f) => ({ ...f, models: e.target.value }))}
-        aria-label={t('aiConfig.modelsLabel')}
-      />
-      <Button onClick={() => void submit()} disabled={saving} variant="secondary" size="sm" data-testid={`ai-add-account-${providerId}`}>
+      {provider.custom ? (
+        overrideInputs
+      ) : (
+        <>
+          <div className="space-y-1 rounded-md bg-zinc-800/50 px-2 py-1.5 text-xs" data-testid={`ai-autofill-${provider.id}`}>
+            <p className="flex flex-wrap items-center gap-1.5 text-zinc-400">
+              <span>{t('aiConfig.baseUrlLabel')}:</span>
+              <span className="font-mono text-zinc-300">{provider.base_url || '-'}</span>
+              <span className="rounded-full bg-emerald-600/20 px-1.5 py-0.5 text-emerald-300">{t('aiConfig.autoBadge')}</span>
+            </p>
+            <p className="flex flex-wrap items-center gap-1.5 text-zinc-400">
+              <span>{t('aiConfig.modelsAutoLabel')}:</span>
+              <span className="font-mono text-zinc-300">{provider.default_models.join(', ') || '-'}</span>
+              <span className="rounded-full bg-emerald-600/20 px-1.5 py-0.5 text-emerald-300">{t('aiConfig.autoBadge')}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+            data-testid={`ai-advanced-${provider.id}`}
+          >
+            {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {t('aiConfig.advancedToggle')}
+          </button>
+          {showAdvanced && overrideInputs}
+        </>
+      )}
+      <Button onClick={() => void submit()} disabled={saving} variant="secondary" size="sm" data-testid={`ai-add-account-${provider.id}`}>
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
         {saving ? t('aiConfig.saving') : t('aiConfig.addAccount')}
       </Button>
@@ -400,6 +446,8 @@ interface ProviderBlockProps {
 
 function ProviderBlock({ provider, active, expanded, onToggle, onSetActive, onDeleteAccount, onDeleteCustom, onSaved }: ProviderBlockProps) {
   const { t } = useTranslation();
+  // 优先用后端 configured 字段；缺省时从账号列表推导（任一账号有 key 或已连 OAuth）。
+  const configured = provider.configured ?? provider.accounts.some((a) => a.has_api_key || a.oauth_connected);
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-900/40" data-testid={`ai-provider-${provider.id}`}>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
@@ -416,12 +464,40 @@ function ProviderBlock({ provider, active, expanded, onToggle, onSetActive, onDe
           {active && (
             <span className="rounded-full bg-cyan-600/20 px-2 py-0.5 text-xs text-cyan-200" data-testid={`ai-active-${provider.id}`}>{t('aiConfig.currentBadge')}</span>
           )}
+          {configured ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-600/20 px-2 py-0.5 text-xs text-emerald-300" data-testid={`ai-configured-${provider.id}`}>
+              <Check className="h-3 w-3" />
+              {t('aiConfig.configured')}
+            </span>
+          ) : (
+            <span className="shrink-0 rounded-full bg-zinc-700/40 px-2 py-0.5 text-xs text-zinc-500" data-testid={`ai-unconfigured-${provider.id}`}>
+              {t('aiConfig.notConfigured')}
+            </span>
+          )}
         </button>
-        {!active && (
-          <Button onClick={onSetActive} variant="secondary" size="sm" data-testid={`ai-set-active-${provider.id}`}>
-            {t('aiConfig.setActive')}
-          </Button>
+        {!configured && !active && (
+          <span className="text-xs text-zinc-500" data-testid={`ai-needkey-${provider.id}`}>{t('aiConfig.needKeyHint')}</span>
         )}
+        {/* CC-Switch 风格开关：已配置才可切换为「当前使用中」，未配置禁用并提示先填 Key */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={active}
+          aria-label={t('aiConfig.setActive')}
+          title={!configured && !active ? t('aiConfig.needKeyHint') : t('aiConfig.setActive')}
+          disabled={active || !configured}
+          onClick={onSetActive}
+          data-testid={`ai-set-active-${provider.id}`}
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+            active ? 'bg-cyan-600' : 'bg-zinc-700'
+          } ${active || !configured ? 'cursor-not-allowed' : 'hover:bg-zinc-600'} ${!configured && !active ? 'opacity-50' : ''}`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-zinc-100 transition-transform ${
+              active ? 'translate-x-4' : 'translate-x-0.5'
+            }`}
+          />
+        </button>
       </div>
 
       {expanded && (
@@ -435,7 +511,7 @@ function ProviderBlock({ provider, active, expanded, onToggle, onSetActive, onDe
           {provider.accounts.map((account) => (
             <AccountRow key={account.id} account={account} onDelete={() => onDeleteAccount(account.id)} />
           ))}
-          <AccountForm providerId={provider.id} onSaved={onSaved} />
+          <AccountForm provider={provider} onSaved={onSaved} />
           {provider.oauth && <CodexOAuthFlow onDone={onSaved} />}
           {onDeleteCustom && (
             <Button onClick={onDeleteCustom} variant="danger" size="sm">
