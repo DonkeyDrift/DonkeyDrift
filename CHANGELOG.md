@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-25 (244)
+
+- fix(drive): 修复 macOS 浏览器手柄选项永远灰色不可选——手柄连接检测加「轮询 + 用户手势」兜底
+  - 根因：`useGamepadDrive` 的连接检测只依赖 `gamepadconnected` 事件，从不主动轮询 `navigator.getGamepads()`。macOS Safari/Chrome 只有在**页面获得焦点时按过手柄任意按键**后才把手柄暴露给页面，且 Safari 的 `gamepadconnected` 事件触发不可靠（部分版本只在用户手势后触发、甚至不触发）；页面在手柄唤醒前加载或事件缺失时 `connected` 恒为 `false`，`InputSourceSelector` 手柄选项一直灰着（Windows Chrome 上按过按键事件正常触发，故可用）。
+  - `web_ui/frontend/src/hooks/useGamepadDrive.ts`：常驻检测 effect 改为「事件 + 轮询 + 手势」三通道——保留 `gamepadconnected`/`gamepaddisconnected` 监听；新增 1000ms `setInterval` 轮询 `getGamepads()`（过滤 `connected !== false`）；`focus`/`pointerdown`/`keydown` 时立即检测一次（Safari 需用户手势后才暴露手柄）；挂载时即检测一次，清理时全部移除。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：`drive.gamepadNotDetected` 中英文提示补「请按手柄任意按键」唤醒指引。
+  - 测试：`useGamepadDrive.test.tsx` 新增 2 项——不派发事件仅靠轮询/手势也能检测到手柄并在移除后 1 秒内复位（fake timers）、`pointerdown`/`keydown` 立即检测插拔；`GamepadConfigPanel.test.tsx` 未检测提示断言同步新文案。vitest 全量 53 文件 341 项全过，`npm run build` 通过。
+  - 注：前端可见效果改动，合入后部署本机 8000 在线实例；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (243)
 
 - fix(bridge): `DriveApiBridge` 被服务端正常关闭后也按 `reconnect_interval` 退避重连，根治多车端实例互踢时的连接风暴
