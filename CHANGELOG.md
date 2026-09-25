@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-25 (241)
+
+- fix(launcher): 修复 DC/DD 点击「DeepSeek Harness」后标签页停在 about:blank 长达 45 秒——并发启动竞态串行化
+  - 根因（线上复现 + 本机复现）：launcher 是 ThreadingHTTPServer，`launch_dsh_web` 冷启动有 ~14 秒窗口（dsh 插件树加载完才监听固定端口 58641）。窗口期内的第二次点击（用户以为没反应再点一次、或在 DC 和 DD 各点一次）快路径探测不到即将就绪的实例，会再冷启动一个重复的 dsh 子进程——dsh 0.1.5-rc.3 实测遇 EADDRINUSE 只打印错误不退出（进程僵住），`_spawn_and_capture` 只能等满 `SPAWN_TIMEOUT_S`（45s）才杀掉走兜底复用，用户标签页全程停在 about:blank（2026-09-25 13:41-13:42 日志实证：13:41:16 冷启动、13:41:26 第二次点击、13:42:10 才兜底返回）。
+  - `donkeycar/launcher/dsh_web.py`：新增 `_LAUNCH_LOCK` 模块级互斥锁，「复用快路径 → 冷启动 → 固定端口兜底」全流程持锁串行化；后来的并发调用等前一个完成，醒来即命中快路径复用刚登记的实例，毫秒级返回。cwd 校验仍在锁外（快速失败不变）。
+  - 测试：`tests/test_launcher_dsh_web.py` 新增 `test_concurrent_launch_serialized_no_duplicate_spawn`（第二次调用被锁挡住不并发冷启动；前一个完成后直接复用带 token 入口、零子进程）；全文件 98 项 + `web_ui/backend/tests/test_launch.py`、`tests/test_launcher_menu_actions.py` 46 项全绿。
+  - 注：launcher 运行时改动，合入后重启 `donkeydrifter-launcher.service` 生效；前端无改动、无需重建 dist；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (240)
 
 - fix(drive): 修复车端 WebSocket 断开回调竞态——旧连接断开无条件清空 `car_ws`，新连接在线时页面无画面
