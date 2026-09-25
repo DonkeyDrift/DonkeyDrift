@@ -59,7 +59,8 @@ def test_setup_metadata_uses_donkeydrifter_identity():
     assert metadata["name"] == "donkeydrifter"
     assert metadata["author"] == "Haobot"
     assert metadata["author_email"] == "haobot2018@gmail.com"
-    assert metadata["url"] == "https://github.com/DonkeyDrift/DonkeyDrifter"
+    # url 为真实仓库地址（#441 死链修复 DonkeyDrifter→DonkeyDrift，本断言同步）
+    assert metadata["url"] == "https://github.com/DonkeyDrift/DonkeyDrift"
     assert metadata["license"] == "Apache-2.0"
     assert "DonkeyDrifter" in metadata["description"]
     assert "donkeydrifter" in metadata["keywords"]
