@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-25 (254)
+
+- feat(drive): Drive 页新增「驾驶目标」卡片——真车/模拟器目标可见可切，保存后一键重启驾驶生效
+  - 背景：落地页（FlowPage Drive section）首屏无条件并排渲染 DriftCard（真车专属）与 SimCollectCard（模拟器专属），页面没有任何真车/模拟器切换入口；旧路径（左缘 Connectors 抽屉 SimulatorConfig，`<lg` 断点隐藏、移动端不可达）保存 `DONKEY_GYM` 后必须重启 `manage.py drive` 才生效，但 UI 无任何提示，重启入口又藏在「≡ Donkey」内嵌 launcher 页里，完整切换链对用户不可见。
+  - `web_ui/frontend/src/components/drive/DriveTargetCard.tsx`（新增）：状态行（当前目标 真车/模拟器/未知 + 车端在线状态点 + 模拟器离线重连中徽标）；「真车 | 模拟器」分段切换——调 `saveSimulatorConfig` 翻转 `DONKEY_GYM`（保留原 `SIM_HOST`，为空且目标是模拟器时先自动发现最佳 IP，发现失败提示先启动 DonkeySim，不保存；未加载配置目录时提示先去 Loaders 抽屉）；保存成功后显示琥珀「已保存，需重启驾驶生效」提示条与「重启驾驶生效」主按钮——调 `restartDriving()` 经后端转发 launcher 重启 `manage.py drive`（重读 myconfig），成功提示等待车端上线，失败给出 `/donkey` 菜单手动启动的降级指引。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：顶部挂载 DriveTargetCard；按遥测字段存在性派生驾驶目标（见过 `sim_connected` → 模拟器、见过 `rc_mode` → 真车，ref 守门一次性落 state 避免 100Hz 遥测引发重渲染；手动选择优先、静态配置 `DONKEY_GYM` 兜底、未加载为 unknown）；两张模式卡按目标条件渲染（真车只显示漂移卡、模拟器只显示采集卡、未知保持两张都显示）。
+  - `web_ui/backend/routers/launch.py`：新增 `POST /api/launch/drive` 转发端点（仿既有 launch 转发先例复用 `_forward_launch`，透传 launcher JSON 与状态码，沿用 125s 长超时）。
+  - `web_ui/frontend/src/services/api.ts`：新增 `restartDriving()` 包装与 `RestartDrivingResult` 类型。
+  - i18n：`i18n/messages/drive.ts` 新增 17 个 `drive.target*` 键，zh/en 同步。
+  - 测试：`DriveTargetCard.test.tsx` 新增 8 项（状态行渲染、保存参数正确且保留 SIM_HOST、重启按钮流转、配置目录未加载/模拟器未发现/重启失败降级路径）；`web_ui/backend/tests/test_launch.py` 新增 2 项 + 路由注册断言。前端 vitest 全量 360 用例全绿、`npm run build` 通过；后端 pytest 全量 577 项全绿。
+  - 注：前端 + 后端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
 ## 2026-09-25 (253)
 
 - feat(car-connector): 设置页改版——AI 配置 CC-Switch 化（已配置徽标 + 填 Key 自动带出 Base URL/模型）、Harness 并发更新与按需更新按钮、ESP32 内嵌页整页滚动

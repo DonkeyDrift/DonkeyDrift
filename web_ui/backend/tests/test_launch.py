@@ -32,6 +32,7 @@ def test_main_registers_launch_router():
     assert "/api/launch/dsh" in routes
     assert "/api/launch/zcode" in routes
     assert "/api/launch/zcode-remote" in routes
+    assert "/api/launch/drive" in routes
 
 
 def test_post_to_launcher_posts_body_and_preserves_timeout(monkeypatch):
@@ -149,6 +150,61 @@ def test_forward_launch_zcode_remote_uses_short_timeout(monkeypatch):
     assert resp.status_code == 200
     assert json.loads(resp.body) == {
         "status": "ok", "running": True, "started": False}
+
+
+def test_forward_launch_drive_returns_launcher_json(monkeypatch):
+    # launcher _launch_drive() 成功响应：status=launched，带 url/端口/warning
+    launch = importlib.import_module("routers.launch")
+    captured = {}
+
+    def fake_post(path, body, timeout_s, forwarded_host=None):
+        captured["path"] = path
+        captured["body"] = body
+        captured["timeout_s"] = timeout_s
+        return 200, json.dumps(
+            {"status": "launched",
+             "url": "http://localhost:8000/#/drive",
+             "backend_port": 8000,
+             "frontend_port": 8000,
+             "project": "/home/user/mycar",
+             "warning": None}).encode()
+
+    monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
+
+    resp = asyncio.run(launch.launch_drive(_FakeRequest()))
+
+    assert captured["path"] == "/api/launch/drive"
+    assert captured["body"] == b"{}"
+    # 新起 Web UI 实例时等就绪耗时较长，沿用默认长超时
+    assert captured["timeout_s"] == launch.FORWARD_TIMEOUT_S
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {
+        "status": "launched",
+        "url": "http://localhost:8000/#/drive",
+        "backend_port": 8000,
+        "frontend_port": 8000,
+        "project": "/home/user/mycar",
+        "warning": None}
+
+
+def test_forward_launch_drive_passthrough_launcher_error(monkeypatch):
+    # launcher 业务错误（如未找到 mycar 项目，500）原样透传状态码与 JSON
+    launch = importlib.import_module("routers.launch")
+
+    def fake_post(path, body, timeout_s, forwarded_host=None):
+        return 500, json.dumps(
+            {"status": "error",
+             "error": "未找到有效的 mycar 项目（需包含 manage.py 和 myconfig.py）"}
+        ).encode()
+
+    monkeypatch.setattr(launch, "_post_to_launcher", fake_post)
+
+    resp = asyncio.run(launch.launch_drive(_FakeRequest()))
+
+    assert resp.status_code == 500
+    assert json.loads(resp.body) == {
+        "status": "error",
+        "error": "未找到有效的 mycar 项目（需包含 manage.py 和 myconfig.py）"}
 
 
 def test_forward_launch_launcher_unreachable_returns_502(monkeypatch):
