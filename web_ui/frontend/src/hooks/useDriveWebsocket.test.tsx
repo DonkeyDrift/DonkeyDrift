@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { act, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { useDriveWebsocket, type WebRtcSignal } from './useDriveWebsocket';
+import { useDriveWebsocket, type CarState, type WebRtcSignal } from './useDriveWebsocket';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -27,8 +27,11 @@ class FakeWebSocket {
   }
 }
 
-const HookProbe: React.FC<{ onSignal: (signal: WebRtcSignal) => void; enabled?: boolean }> = ({ onSignal, enabled = true }) => {
-  useDriveWebsocket({ autoReconnect: false, onWebRtcSignal: onSignal, enabled });
+const HookProbe: React.FC<{ onSignal: (signal: WebRtcSignal) => void; enabled?: boolean; onState?: (s: CarState) => void }> = ({ onSignal, enabled = true, onState }) => {
+  const { carState } = useDriveWebsocket({ autoReconnect: false, onWebRtcSignal: onSignal, enabled });
+  useEffect(() => {
+    onState?.(carState);
+  }, [carState, onState]);
   return null;
 };
 
@@ -78,6 +81,57 @@ describe('useDriveWebsocket', () => {
     render(<HookProbe onSignal={onSignal} enabled={false} />);
 
     expect(FakeWebSocket.instances).toHaveLength(0);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('车端离线（car_connection online=false）时复位录制态', () => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const onSignal = vi.fn();
+    const states: CarState[] = [];
+    const onState = (s: CarState) => states.push(s);
+
+    render(<HookProbe onSignal={onSignal} onState={onState} />);
+    const ws = FakeWebSocket.instances[0];
+
+    act(() => {
+      ws.onopen?.();
+      ws.onmessage?.({ data: JSON.stringify({ type: 'car_connection', online: true }) });
+      ws.onmessage?.({ data: JSON.stringify({ type: 'car_state', drive_mode: 'user', recording: true, num_records: 5 }) });
+      // 车端闪断：online=false 必须同时复位 recording，否则页面残留"录制中"
+      ws.onmessage?.({ data: JSON.stringify({ type: 'car_connection', online: false }) });
+    });
+
+    const last = states[states.length - 1];
+    expect(last.online).toBe(false);
+    expect(last.recording).toBe(false);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('WebSocket 断开（onclose）时复位录制态', () => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const onSignal = vi.fn();
+    const states: CarState[] = [];
+    const onState = (s: CarState) => states.push(s);
+
+    render(<HookProbe onSignal={onSignal} onState={onState} />);
+    const ws = FakeWebSocket.instances[0];
+
+    act(() => {
+      ws.onopen?.();
+      ws.onmessage?.({ data: JSON.stringify({ type: 'car_connection', online: true }) });
+      ws.onmessage?.({ data: JSON.stringify({ type: 'car_state', drive_mode: 'user', recording: true, num_records: 5 }) });
+      ws.onclose?.();
+    });
+
+    const last = states[states.length - 1];
+    expect(last.online).toBe(false);
+    expect(last.recording).toBe(false);
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });

@@ -354,13 +354,16 @@ def test_car_frame_message_updates_num_records_and_broadcasts_state(monkeypatch)
 
     assert drive.drive_state.num_records == 16460
     assert drive.drive_state.drive_mode == "local_angle"
-    assert drive.drive_state.recording is True
+    # 车端断开后录制态复位（stale 缓存修复），不再跨断连残留
+    assert drive.drive_state.recording is False
 
     car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
-    assert len(car_state_messages) == 1
+    # 帧携带状态变化一次 + 断开复位广播一次
+    assert len(car_state_messages) == 2
     assert car_state_messages[0]["num_records"] == 16460
     assert car_state_messages[0]["drive_mode"] == "local_angle"
     assert car_state_messages[0]["recording"] is True
+    assert car_state_messages[1]["recording"] is False
 
 
 def test_car_frame_message_with_none_state_does_not_crash(monkeypatch):
@@ -710,3 +713,70 @@ def test_load_model_falls_back_when_car_never_acks(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json()["restart_required"] is True
+
+
+# ------------------------------------------------------------------
+# 录制态 stale 缓存修复：车端断开复位 + 离线忽略录制指令 + 回声广播去重
+# （Mac 端 Drive 页“自动开始录制/闪烁/计时 0:00”问题）
+# ------------------------------------------------------------------
+def test_car_disconnect_resets_recording_and_broadcasts(monkeypatch):
+    client, drive = make_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=car") as car_ws:
+        car_ws.send_json({"recording": True})
+
+    assert drive.drive_state.recording is False
+
+    car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
+    # 车端上报 recording=true 一次 + 断开复位广播一次
+    assert len(car_state_messages) == 2
+    assert car_state_messages[0]["recording"] is True
+    assert car_state_messages[1]["recording"] is False
+
+
+def test_client_recording_ignored_when_car_offline(monkeypatch):
+    client, drive = make_client()
+    # 车端从未连接（car_ws 为 None），录制指令不得写入缓存
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        ws.send_json({"recording": True})
+
+    assert drive.drive_state.recording is False
+
+
+def test_client_recording_updates_cache_when_car_online(monkeypatch):
+    client, drive = make_client()
+
+    with client.websocket_connect("/api/drive/ws?role=car"):
+        with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+            ws.send_json({"recording": True})
+
+        assert drive.drive_state.recording is True
+
+
+def test_client_control_echo_only_broadcasts_on_change(monkeypatch):
+    client, drive = make_client()
+    broadcasted = []
+
+    async def fake_broadcast(payload):
+        broadcasted.append(payload)
+
+    monkeypatch.setattr(drive.drive_state, "broadcast_to_clients", fake_broadcast)
+
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=browser-1") as ws:
+        # 60Hz 控制循环：car_state 只含 drive_mode/recording/num_records，
+        # angle/throttle 变化不触发广播；首条建立基线后值未变不再广播
+        ws.send_json({"angle": 0.1, "throttle": 0.2})
+        ws.send_json({"angle": 0.1, "throttle": 0.2})
+        ws.send_json({"angle": 0.3, "throttle": 0.2})
+        # 三元组变化（drive_mode）后再次广播
+        ws.send_json({"angle": 0.3, "throttle": 0.2, "drive_mode": "local"})
+
+    car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
+    assert len(car_state_messages) == 2
+    assert car_state_messages[1]["drive_mode"] == "local"
