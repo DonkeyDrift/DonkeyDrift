@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-25 (239)
+
+- fix(tests): 修复 `PilotArenaPage.test.tsx` 一处 TS 类型错误导致的 `npm run build` 红灯
+  - 根因：#437 一系合入 main 时带进的 `PilotArenaPage.test.tsx:314` 直接访问 `api.predictArenaPilot.mock.calls`——`api` 方法是真实类型签名（非 `vi.fn`），TS 报 `Property 'mock' does not exist`，`tsc -b` 阶段整体失败，阻塞前端构建/部署（vitest 运行不受影响，故测试全绿但 build 挂）。
+  - 修复：改为 `vi.mocked(api.predictArenaPilot).mock.calls.length`，与文件内其余 9 处 `vi.mocked` 用法一致。
+  - 测试：该文件 vitest 6 项全过；`npm run build`（tsc -b + vite build）恢复通过。
+  - 注：仅测试文件一处类型修正，无运行时影响；无需单独本机部署（随下次 8000 部署一并生效），Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (238)
 
 - feat(ui): 恢复 Drive 页标题悬停淡入灰色副标题机制，全站卡片标题统一接入
