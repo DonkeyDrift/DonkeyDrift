@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-25 (231)
+
+- docs(readme): 对外材料刷新——README zsh 举例纠错、俯拍章节状态对齐交接文档
+  - 背景：对外材料过时审查（GitHub README / hackster 宣传稿 / PyPI 元数据）。`setup.cfg` url 死链与配套断言已由 #441 / #444 修复，本条目收敛 README 内两处过时表述。
+  - `README.md`：
+    - zsh 引号说明举例 `pip install donkeycar[pc]` → `pip install donkeydrifter[pc]`——原举例与紧上方加粗警告「install `donkeydrifter`, never `donkeycar`」自相矛盾；
+    - 俯拍漂移章节：模块地图测试计数 254 → 559（本分支实测 `web_ui/backend` 559 passed + 1 skipped）；状态行由 2026-08-30 对齐 `docs/guide/overhead-drift-handoff.md` 的 2026-09-01 口径（全量夜间审计补齐看门狗三链路/线程安全/NaN 防线加固待实车核对、M4 前遗留项清零；M1 人工漂移录制、M2 点动机理验证待实操不变）。
+  - 测试：纯文档改动，无运行时代码影响；合并 origin/Tony（#444/#445 已修两条既有失败）后全量 pytest <待填>；`donkeycar/tests/test_project_metadata.py` 13 例全过；`web_ui/backend` 559 passed + 1 skipped。
+  - 注：PyPI 项目页（0.1.0）首页仍展示旧仓名链接（301 跳转可用）——`setup.cfg` 已是正确值，下次发版自然更新；无需本机部署（纯文档），Firmware 无改动、无需 OTA。
+
 ## 2026-09-21 (228)
 
 - feat(arena,drive): 移植 beta 分支独有功能——Pilot Arena 贴合摘要与推理缓存、遥测 numpy 序列化防护（beta 废弃前的选择性集成）
