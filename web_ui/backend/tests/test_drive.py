@@ -485,6 +485,31 @@ async def test_activate_sim_recovery_starts_worker(monkeypatch):
     assert len(started) == 1
 
 
+def test_stats_reports_multi_car_warning_on_takeover_storm():
+    """车端槽位短窗多次易主（多 drive 互踢）时 /stats 给出告警字段。"""
+    client, drive = make_online_client()
+
+    # 单连接：无易主、无告警
+    with client.websocket_connect("/api/drive/ws?role=car"):
+        resp = client.get("/api/drive/stats").json()
+        assert resp["car_takeovers_10s"] == 0
+        assert resp["multi_car_warning"] is False
+
+    # 连续开 4 个连接（均保持打开，后连者顶掉前者的注册）→ 3 次易主 → 风暴告警
+    sockets = []
+    for _ in range(4):
+        ws = client.websocket_connect("/api/drive/ws?role=car").__enter__()
+        ws.send_json({"type": "heartbeat"})
+        sockets.append(ws)
+
+    resp = client.get("/api/drive/stats").json()
+    assert resp["car_takeovers_10s"] == 3
+    assert resp["multi_car_warning"] is True
+
+    for ws in sockets:
+        ws.__exit__(None, None, None)
+
+
 def test_stale_car_disconnect_keeps_new_registration():
     """旧车端连接的断开回调不得清空新连接的 car_ws 注册（竞态回归）。
 

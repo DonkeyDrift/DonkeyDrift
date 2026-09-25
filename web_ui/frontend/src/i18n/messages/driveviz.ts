@@ -14,6 +14,7 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.carOfflineWaiting': '车端离线：等待 DriveApiBridge 连接到 /api/drive/ws?role=car',
     'driveViz.connectingCamera': '正在连接摄像头...',
     'driveViz.cameraNotConnected': '摄像头未连接',
+    'driveViz.multiCarWarning': '检测到多个车端进程抢占连接：请关闭多余的 manage.py drive 进程后等待自动恢复',
     // TelemetryChart
     'driveViz.chartTitle': '遥测曲线',
     'driveViz.chartTitleSteering': '转向 / 姿态',
@@ -68,6 +69,7 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.carOfflineWaiting': 'Car offline: waiting for DriveApiBridge to connect to /api/drive/ws?role=car',
     'driveViz.connectingCamera': 'Connecting to camera...',
     'driveViz.cameraNotConnected': 'Camera not connected',
+    'driveViz.multiCarWarning': 'Multiple drive processes are fighting for the car connection: stop the extra manage.py drive process and wait for auto recovery',
     // TelemetryChart
     'driveViz.chartTitle': 'Telemetry Chart',
     'driveViz.chartTitleSteering': 'Steering / Attitude',

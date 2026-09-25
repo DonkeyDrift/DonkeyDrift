@@ -46,6 +46,10 @@ class DriveState:
         # 心跳
         self.car_last_seen: Optional[datetime] = None
 
+        # 车端槽位易主记录：新车端连接顶掉旧连接时打点，
+        # 短窗口内多次易主 = 多个 drive 进程互踢的连接风暴指纹
+        self.car_takeover_times = deque(maxlen=64)
+
         # WebRTC 信令状态
         self.webrtc_session: Optional[dict] = None
         self.webrtc_stats = {
@@ -174,6 +178,11 @@ class DriveState:
         if self.car_last_seen is None:
             return False
         return datetime.now() - self.car_last_seen < timedelta(seconds=5)
+
+    def car_takeovers_in(self, window_sec: float = 10.0) -> int:
+        """最近 window_sec 秒内车端槽位易主次数。"""
+        now = time.time()
+        return sum(1 for ts in self.car_takeover_times if now - ts <= window_sec)
 
     def video_fps(self) -> int:
         """根据最近帧时间戳估算视频 FPS。"""
@@ -607,6 +616,7 @@ async def drive_ws(
     if role == "car":
         # 车端连接
         if drive_state.car_ws is not None:
+            drive_state.car_takeover_times.append(time.time())
             try:
                 await drive_state.car_ws.close()
             except Exception:
@@ -931,11 +941,16 @@ async def drive_stats():
     last_seen_age = None
     if drive_state.car_last_seen is not None:
         last_seen_age = (datetime.now() - drive_state.car_last_seen).total_seconds()
+    takeovers_10s = drive_state.car_takeovers_in(10.0)
     return {
         "online": drive_state.car_online(),
         "fps": drive_state.video_fps(),
         "car_ws_connected": drive_state.car_ws is not None,
         "last_seen_age_sec": last_seen_age,
+        # 车端槽位 10 秒内易主次数；>=3 视为多个 drive 进程互踢的
+        # 连接风暴（单次重连只易主 1 次），前端据此展示告警
+        "car_takeovers_10s": takeovers_10s,
+        "multi_car_warning": takeovers_10s >= 3,
     }
 
 

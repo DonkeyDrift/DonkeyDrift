@@ -18,6 +18,7 @@
 设计参考 ``donkeycar/launcher/kimi_web.py`` 的实例登记 + 探测复用模式。
 """
 
+import atexit
 import json
 import os
 import signal
@@ -185,6 +186,93 @@ def remove_drive_pid_file(pid_file=None):
         Path(pid_file).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+# ── drive 单实例守护（防多车端进程互踢，2026-09-25）──────────────────
+
+# drive 实例登记：所有启动链路（终端直跑 / donkey web / launcher）统一
+# 在 drive() 开头登记自己、退出时清除；后来者发现存活实例即拒绝启动，
+# 避免多个 manage.py drive 互相抢占后端唯一 car 槽位（连接风暴、无画面）。
+DRIVE_INSTANCE_FILE = Path.home() / ".donkeycar" / "drive_instance.json"
+
+
+class DriveAlreadyRunning(RuntimeError):
+    """已有存活的 drive 进程，本次启动被拒绝。"""
+
+
+def _proc_start_time(pid):
+    """读 /proc/<pid>/stat 的进程启动时钟（第 22 字段）；失败返回 None。"""
+    try:
+        with open(f"/proc/{int(pid)}/stat", "rb") as f:
+            stat = f.read().decode("utf-8", "replace")
+        # comm 可能含空格/括号，从最右 ")" 之后切分再取第 20 个字段
+        #（切掉 pid/comm 后，原第 22 字段成为第 20 个）
+        return stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _drive_instance_alive(entry):
+    """登记的 drive 实例是否仍存活（pid 存活 + 启动时钟一致防 PID 复用）。"""
+    if not isinstance(entry, dict) or not isinstance(entry.get("pid"), int):
+        return False
+    if not _pid_alive(entry["pid"]):
+        return False
+    started_at = entry.get("started_at")
+    current = _proc_start_time(entry["pid"])
+    if current is None or started_at is None:
+        # 非 Linux 无 /proc：退化为仅 pid 存活判定
+        return True
+    return str(started_at) == str(current)
+
+
+def acquire_drive_instance_lock(instance_file=None):
+    """drive 启动前调用：已有存活实例则抛 ``DriveAlreadyRunning``。
+
+    无冲突时登记自己（pid + /proc 启动时钟，防 PID 复用误判）并注册
+    atexit 清理；异常退出留下的陈旧登记会在下次启动时因 pid 已死被覆盖。
+    同进程重复调用幂等。返回本次登记 dict。
+    """
+    if instance_file is None:
+        instance_file = DRIVE_INSTANCE_FILE
+    path = Path(instance_file)
+    pid = os.getpid()
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        entry = None
+    if isinstance(entry, dict) and entry.get("pid") == pid:
+        return entry
+    if _drive_instance_alive(entry):
+        raise DriveAlreadyRunning(
+            f"检测到已运行的 drive 进程（pid={entry['pid']}）。"
+            "多个 manage.py drive 会互相抢占车端连接，导致连接风暴、"
+            f"页面无画面；请先停止旧进程（kill {entry['pid']}）再启动。"
+            f"若确认是陈旧登记，删除 {path} 后重试。"
+        )
+    record = {"pid": pid, "started_at": _proc_start_time(pid)}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(record), encoding="utf-8")
+    os.replace(tmp, path)
+    atexit.register(release_drive_instance_lock, instance_file)
+    return record
+
+
+def release_drive_instance_lock(instance_file=None):
+    """清除本进程的 drive 实例登记（仅当登记仍属于本进程）。"""
+    if instance_file is None:
+        instance_file = DRIVE_INSTANCE_FILE
+    path = Path(instance_file)
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(entry, dict) and entry.get("pid") == os.getpid():
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ── 选定模型持久化（issue #003）─────────────────────────────────────

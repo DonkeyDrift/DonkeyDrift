@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-25 (246)
+
+- feat(drive): 多车端进程双重防护——drive 启动单实例守护 + 车端槽位易主风暴页面告警
+  - 背景：2026-09-25 排查「连接模拟器后 DD 页面无画面」时实测复现——本机误开两个 `manage.py drive` 互相抢占后端唯一 car 槽位，配合 bridge 无退避热重连形成每秒约 80 次的连接风暴（PR #454 已修退避），本条把"多开"本身拦住、并把风暴直接显示到页面上。
+  - `donkeycar/webui_instance.py`：新增 drive 单实例守护——登记文件 `~/.donkeycar/drive_instance.json`（pid + `/proc` 启动时钟，防 PID 复用误判），`acquire_drive_instance_lock()` 发现存活实例抛 `DriveAlreadyRunning`（错误信息含旧 pid、kill 指引与陈旧登记清理指引）；同进程幂等、atexit 自动清理、陈旧/损坏登记自动接管；非 Linux 无 /proc 退化为仅 pid 存活判定。
+  - `donkeycar/templates/complete.py`：`drive()` 开头接入守护，冲突时报错退出（终端直跑 / `donkey web` / launcher 全链路生效）。
+  - `web_ui/backend/routers/drive.py`：车端槽位易主打点（`car_takeover_times`），`/api/drive/stats` 新增 `car_takeovers_10s` 与 `multi_car_warning`（10 秒内 ≥3 次易主判定为多车端互踢；单次重连只易主 1 次不误报）。
+  - `web_ui/frontend/src/components/drive/VideoStream.tsx`：`/drive/stats` 轮询不再只在 MJPEG 降级时进行（WebRTC 正常时也需 carOnline/告警），`multi_car_warning` 为真时视频区底部渲染红色告警横幅（i18n 中英 `driveViz.multiCarWarning`）。
+  - 测试：新增 `donkeycar/tests/test_webui_instance_drive_guard.py` 5 项（登记/幂等/存活拒绝/陈旧覆盖/只清自身）、`web_ui/backend/tests/test_drive.py` 新增风暴告警用例（4 连接 3 易主触发、单连接不误报）、`VideoStream.test.tsx` 新增告警横幅用例并为常驻轮询补默认 fetch 桩保持单测封闭；`test_drive.py`+`test_drive_telemetry_forward.py` 39 项、`test_webui_instance.py`+`test_template.py`+守护 40 项、`VideoStream.test.tsx` 9 项全绿，`npm run build` 通过。
+  - 注：后端/前端改动随本机 8000 部署生效；drive 守护随下次 `manage.py drive` 重启生效；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (245)
 
 - fix(drive): 修复 Mac 端 Drive 页录制"自动开始/闪烁/计时一直 0:00"——后端录制态 stale 缓存跨车端断连残留
