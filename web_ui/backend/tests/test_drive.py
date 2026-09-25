@@ -482,6 +482,31 @@ async def test_activate_sim_recovery_starts_worker(monkeypatch):
     assert len(started) == 1
 
 
+def test_stale_car_disconnect_keeps_new_registration():
+    """旧车端连接的断开回调不得清空新连接的 car_ws 注册（竞态回归）。
+
+    新连接接管注册后，旧连接（可能已被服务端 close、延迟感知断开）的
+    except 分支若无条件置 car_ws=None，会让 send_to_car 持续失败，
+    WebRTC offer 无法转发到车端，页面表现为车端在线却始终无画面。
+    """
+    client, drive = make_online_client()
+
+    with client.websocket_connect("/api/drive/ws?role=car") as old_ws:
+        assert drive.drive_state.car_ws is not None
+        with client.websocket_connect("/api/drive/ws?role=car") as new_ws:
+            new_ws.send_json({"type": "heartbeat"})
+            # 新连接已接管注册；此时断开旧连接，等其断开回调执行完毕
+            old_ws.close()
+            time.sleep(0.5)
+            assert drive.drive_state.car_ws is not None, (
+                "旧车端连接的断开回调清空了新连接的 car_ws 注册"
+            )
+            ok = asyncio.run(
+                drive.drive_state.send_to_car({"type": "request_car_state"})
+            )
+            assert ok, "car_ws 注册丢失，send_to_car 失败"
+
+
 def test_client_connect_requests_car_state_when_online(monkeypatch):
     client, drive = make_online_client()
     sent_to_car = []

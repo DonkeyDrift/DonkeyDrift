@@ -696,11 +696,16 @@ async def drive_ws(
                     })
         except (WebSocketDisconnect, RuntimeError):
             logger.info("车端连接断开")
-            drive_state.car_ws = None
-            await drive_state.broadcast_to_clients({
-                "type": "car_connection",
-                "online": False,
-            })
+            # 仅当断开的仍是当前注册的车端连接时才清除并广播离线：
+            # 新连接接管注册后，旧连接残留的断开回调若无条件清空 car_ws，
+            # 会导致 send_to_car 全部失败、WebRTC offer 无法转发到车端，
+            # 页面表现为「车端在线却始终无画面」（线上复现过）。
+            if drive_state.car_ws is websocket:
+                drive_state.car_ws = None
+                await drive_state.broadcast_to_clients({
+                    "type": "car_connection",
+                    "online": False,
+                })
 
     else:
         # 客户端连接（浏览器）
