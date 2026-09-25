@@ -27,8 +27,13 @@ class FakeWebSocket {
   }
 }
 
-const HookProbe: React.FC<{ onSignal: (signal: WebRtcSignal) => void; enabled?: boolean; onState?: (s: CarState) => void }> = ({ onSignal, enabled = true, onState }) => {
-  const { carState } = useDriveWebsocket({ autoReconnect: false, onWebRtcSignal: onSignal, enabled });
+const HookProbe: React.FC<{
+  onSignal: (signal: WebRtcSignal) => void;
+  enabled?: boolean;
+  onState?: (s: CarState) => void;
+  onControlRejected?: (reason: string) => void;
+}> = ({ onSignal, enabled = true, onState, onControlRejected }) => {
+  const { carState } = useDriveWebsocket({ autoReconnect: false, onWebRtcSignal: onSignal, enabled, onControlRejected });
   useEffect(() => {
     onState?.(carState);
   }, [carState, onState]);
@@ -132,6 +137,29 @@ describe('useDriveWebsocket', () => {
     const last = states[states.length - 1];
     expect(last.online).toBe(false);
     expect(last.recording).toBe(false);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('收到 control_rejected 时把 reason 传给 onControlRejected', () => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const onSignal = vi.fn();
+    const onControlRejected = vi.fn();
+
+    render(<HookProbe onSignal={onSignal} onControlRejected={onControlRejected} />);
+    const ws = FakeWebSocket.instances[0];
+
+    act(() => {
+      ws.onopen?.();
+      ws.onmessage?.({ data: JSON.stringify({ type: 'control_rejected', reason: 'not_driver' }) });
+      ws.onmessage?.({ data: JSON.stringify({ type: 'control_rejected' }) });
+    });
+
+    expect(onControlRejected).toHaveBeenCalledTimes(2);
+    expect(onControlRejected).toHaveBeenNthCalledWith(1, 'not_driver');
+    expect(onControlRejected).toHaveBeenNthCalledWith(2, 'unknown');
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });

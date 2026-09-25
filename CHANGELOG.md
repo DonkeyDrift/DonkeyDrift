@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-25 (248)
+
+- fix(drive): 修复多浏览器页签并存时键盘/摇杆输入被挂机页签覆盖——后端新增「驾驶客户端」仲裁
+  - 根因（本机 ws 探针实测 + 代码定位）：后端把所有客户端的控制消息原样转发车端，无任何仲裁。挂机的后台页签（输入源默认摇杆、无人操作）持续以 60Hz 发 `{angle:0, throttle:0}`，把正在驾驶页签的键盘输入几乎全部覆盖——实测 60Hz 连发 `angle=0.4` 共 1.5s，车端遥测 138 帧里 0.4 仅存活个位数帧，车端表现为「输入有显示但车辆不动」（模拟器与实车同链路同病）。另有叠加因素：上轮重部署后旧 8000 后端优雅排空被旧 WS 连接卡住不死，新旧双后端并存、浏览器页签被拆到两个进程，落在无车端进程上的控制被静默丢弃（已清理僵尸进程 128189）。
+  - `web_ui/backend/routers/drive.py`：新增驾驶客户端仲裁——同一时刻唯一 `driver_client_id` 的控制可下发车端；非 driver 须携带主动驾驶意图（非零角/油门或 drive_mode/recording 变化、buttons/car_mode 字段）才能抢占，纯空闲 0 流永远抢不走驾驶权；空闲流拒绝回执按 2s 限频回 `control_rejected(not_driver)`；driver 断开或停发超 2s（`DRIVER_RELEASE_TIMEOUT`）自动释放身份。
+  - `web_ui/frontend/src/hooks/useDriveControlLoop.ts`：页面隐藏（`document.hidden`，后台页签）时暂停 60Hz 控制发送——挂机页签不再当「幽灵客户端」。
+  - `web_ui/frontend/src/hooks/useDriveWebsocket.ts`：新增 `onControlRejected` 回调分发服务端仲裁拒绝。
+  - `web_ui/frontend/src/pages/DrivePage.tsx` + `i18n/messages/drive.ts`：被仲裁拒绝时工具栏显示「另一个页面正在驾驶，本页输入被忽略」徽章（4s 无新拒绝自动消失，中英文案 `drive.driverConflict`）。
+  - 测试：`web_ui/backend/tests/test_drive_client_arbitration.py` 新增 6 项（单客户端空闲流回归、幽灵页签不得覆盖、非零抢占、断开释放、超时释放、拒绝回执限频）；`useDriveControlLoop.test.tsx` 新增隐藏暂停 1 项；`useDriveWebsocket.test.tsx` 新增 control_rejected 分发 1 项。
+  - 注：后端 + 前端运行时改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (247)
 
 - feat(drive): 多车端进程双重防护——drive 启动单实例守护 + 车端槽位易主风暴页面告警
@@ -20,7 +31,6 @@
   - `donkeycar/templates/complete.py`：`V.add(TubRotator(tub_writer, cfg.DATA_PATH), inputs=['recording'], outputs=[])` 注册在 `TubWriter` 之前，保证同一循环 tick 内先轮换再写首帧；`recording` key 由 DriveApiBridge / 摇杆统一写入，Web 按钮、手柄等录制入口一致生效。web_ui 前后端无需改动（`tub/num_records` 经既有 ws 链路自动归零显示）。
   - 测试：`donkeycar/tests/test_tubwriter.py` 新增 `TestTubRotator` 3 项——`new_tub()` 切换后写入落新目录且计数归零、旧 tub 不受影响；上升沿轮换 / 持续 True 与下降沿不轮换；tub 为空不轮换。`test_tubwriter.py` 4 项 + `test_tub_v2.py` 4 项 + `test_kinematics.py`（引用 complete 模板）19 项全绿。
   - 注：车端 Python 改动，随 `manage.py drive` 重启生效；本地 `mycar/manage.py` 副本已同步接线；Firmware 无改动、无需 OTA。
-
 ## 2026-09-25 (245)
 
 - fix(drive): 修复 Mac 端 Drive 页录制"自动开始/闪烁/计时一直 0:00"——后端录制态 stale 缓存跨车端断连残留

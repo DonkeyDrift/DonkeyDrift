@@ -34,6 +34,9 @@ export const useDriveControlLoop = ({
     }
 
     const timer = window.setInterval(() => {
+      // 后台页签暂停发送：挂着不动的页签不再以 60Hz 发 0 抢占驾驶权
+      // （后端多客户端仲裁的配合措施）
+      if (document.hidden) return;
       send(getControlRef.current());
     }, intervalMs);
 

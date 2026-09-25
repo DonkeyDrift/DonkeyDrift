@@ -47,4 +47,22 @@ describe('useDriveControlLoop', () => {
     expect(send).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
+
+  it('页面隐藏（后台页签）时暂停发送，回到前台恢复', () => {
+    vi.useFakeTimers();
+    const send = vi.fn(() => true);
+    render(<Probe connected={true} send={send} />);
+    vi.advanceTimersByTime(1000);
+    expect(send.mock.calls.length).toBeGreaterThanOrEqual(58);
+
+    send.mockClear();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    vi.advanceTimersByTime(1000);
+    expect(send).not.toHaveBeenCalled();
+
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    vi.advanceTimersByTime(1000);
+    expect(send.mock.calls.length).toBeGreaterThanOrEqual(58);
+    vi.useRealTimers();
+  });
 });
