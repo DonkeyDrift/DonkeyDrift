@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-09-25 (238)
+
+- feat(ui): 恢复 Drive 页标题悬停淡入灰色副标题机制，全站卡片标题统一接入
+  - 背景：Apple 风格改版（#437 一系）中 `SectionCardTitle` 的悬停副标题机制被整体移除，用户发现「进入驾驶页后把光标放到卡片标题上不再弹出灰色介绍」。本条目恢复该机制并把各卡片副标题重新接回。
+  - `web_ui/frontend/src/components/ui/SectionCardTitle.tsx`：恢复 0784d454^ 的悬停版本——容器 `group`，副标题 `max-w-0 opacity-0` + `group-hover` 淡入（`transition-all duration-300`，与 TubLibrary 基准实现一致）；新增 `subtitleMarquee` 变体，宽度受限处（虚拟摇杆）副标题以 `marquee-x` 跑马灯循环展示完整文案。
+  - `web_ui/frontend/src/index.css`：补 `marquee-x` keyframes。
+  - 接线：DrivePage 虚拟摇杆卡片 `drive.virtualJoystickSubtitle`（+跑马灯）、SimCollectCard `drive.simCollectHint`、DriftCard `drive.driftSubtitle`、TubLibrary `tubLibrary.subtitle`；`i18n/messages/drive.ts`、`i18n/messages/tublibrary.ts` 增补对应中英词条。
+  - 测试：`npm ci` 后 vitest 全量 48 文件 305 项全过；`npm run build` 通过。
+  - 注：影响本机可见效果，合入后按惯例部署 8000；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (237)
 
 - docs(readme): 对外材料刷新——README zsh 举例纠错、俯拍章节状态对齐交接文档

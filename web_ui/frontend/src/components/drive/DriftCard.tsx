@@ -308,7 +308,7 @@ export const DriftCard: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <SectionCardTitle icon={<CircleDot className="h-4 w-4" />} title={t('drive.driftTitle')} />
+        <SectionCardTitle icon={<CircleDot className="h-4 w-4" />} title={t('drive.driftTitle')} subtitle={t('drive.driftSubtitle')} />
       </CardHeader>
       <CardContent className="space-y-3">
         {/* 相机接入：移动端单列堆叠（390px 下 5 列会压爆），sm 起恢复 6 列网格 */}
