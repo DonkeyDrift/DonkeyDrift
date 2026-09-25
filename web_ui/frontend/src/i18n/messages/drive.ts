@@ -29,7 +29,7 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.sourceGyro': '陀螺仪',
     'drive.sourceEsp32': 'ESP32 手柄',
     'drive.gamepadConnected': '已连接手柄',
-    'drive.gamepadNotDetected': '未检测到手柄',
+    'drive.gamepadNotDetected': '未检测到手柄（请按手柄任意按键）',
     'drive.gyroSupported': '设备支持陀螺仪',
     'drive.gyroNotSupported': '设备不支持陀螺仪',
     // GamepadConfigPanel / GamepadCalibrationWizard
@@ -200,7 +200,7 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.sourceGyro': 'Gyroscope',
     'drive.sourceEsp32': 'ESP32 Gamepad',
     'drive.gamepadConnected': 'Gamepad connected',
-    'drive.gamepadNotDetected': 'No gamepad detected',
+    'drive.gamepadNotDetected': 'No gamepad detected (press any button on the gamepad)',
     'drive.gyroSupported': 'Device supports gyroscope',
     'drive.gyroNotSupported': 'Device does not support gyroscope',
     // GamepadConfigPanel / GamepadCalibrationWizard

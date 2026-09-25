@@ -43,18 +43,36 @@ export const useGamepadDrive = ({
   configRef.current = config;
   const lastValueRef = useRef({ angle: 0, throttle: 0 });
 
-  // 连接检测常驻运行（不受 enabled/monitor 门控），否则切换菜单里手柄选项永远灰着
+  // 连接检测常驻运行（不受 enabled/monitor 门控），否则切换菜单里手柄选项永远灰着。
+  // 除 gamepadconnected/gamepaddisconnected 事件外，再以「轮询 + 用户手势」兜底：
+  // macOS Safari/Chrome 只有在页面获得焦点时按过手柄按键后才把手柄暴露给页面，
+  // 且 Safari 的 gamepadconnected 事件触发不可靠，必须轮询 getGamepads() 才稳定。
   useEffect(() => {
-    const handleConnect = () => setConnected(true);
-    const handleDisconnect = () => {
+    const detect = () => {
       const pads = navigator.getGamepads?.() ?? [];
-      if (pads.filter(Boolean).length === 0) setConnected(false);
+      setConnected(pads.filter((p) => p !== null && p.connected !== false).length > 0);
     };
+
+    const handleConnect = () => setConnected(true);
+    const handleDisconnect = () => detect();
+
     window.addEventListener('gamepadconnected', handleConnect);
     window.addEventListener('gamepaddisconnected', handleDisconnect);
+    // Safari 需要用户手势后才暴露手柄：页面交互/获得焦点时立即检测一次
+    window.addEventListener('focus', detect);
+    window.addEventListener('pointerdown', detect);
+    window.addEventListener('keydown', detect);
+    // 轮询兜底：事件缺失时也能在 1 秒内跟上手柄插拔
+    const timer = window.setInterval(detect, 1000);
+    detect();
+
     return () => {
       window.removeEventListener('gamepadconnected', handleConnect);
       window.removeEventListener('gamepaddisconnected', handleDisconnect);
+      window.removeEventListener('focus', detect);
+      window.removeEventListener('pointerdown', detect);
+      window.removeEventListener('keydown', detect);
+      window.clearInterval(timer);
     };
   }, []);
 

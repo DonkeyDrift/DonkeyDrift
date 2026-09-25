@@ -49,6 +49,58 @@ describe('useGamepadDrive', () => {
     vi.unstubAllGlobals();
   });
 
+  it('不触发 gamepadconnected 事件时，轮询 getGamepads 也能检测到手柄', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [makePad([0, 0, 0, 0])],
+    });
+    const states: boolean[] = [];
+    render(<HookProbe enabled={false} onState={(c) => states.push(c)} />);
+
+    // getGamepads 已返回手柄但从未派发 gamepadconnected（macOS Safari 场景）
+    expect(states.at(-1)).toBe(true);
+
+    // 轮询兜底：手柄被移除后 1 秒内 connected 复位
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [null],
+    });
+    act(() => {
+      vi.advanceTimersByTime(1100);
+    });
+    expect(states.at(-1)).toBe(false);
+
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('用户手势（pointerdown/keydown/focus）时立即检测手柄', () => {
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [makePad([0, 0, 0, 0])],
+    });
+    const states: boolean[] = [];
+    render(<HookProbe enabled={false} onState={(c) => states.push(c)} />);
+
+    expect(states.at(-1)).toBe(true);
+
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [null],
+    });
+    act(() => {
+      window.dispatchEvent(new Event('pointerdown'));
+    });
+    expect(states.at(-1)).toBe(false);
+
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [makePad([0, 0, 0, 0])],
+    });
+    act(() => {
+      window.dispatchEvent(new Event('keydown'));
+    });
+    expect(states.at(-1)).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
+
   it('按配置读取 Z 轴转向，左拨输出负值', async () => {
     const onChange = vi.fn();
     vi.stubGlobal('navigator', {
