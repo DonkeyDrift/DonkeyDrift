@@ -4,6 +4,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ModelsList } from './ModelsList';
 
+// 回归测试（issue 001）：loss 曲线浮窗遮挡相邻行操作按钮。
+// 修复后：悬停不再弹出；点击 loss 徽章打开真正的 modal（遮罩 + 居中 +
+// 点击遮罩 / X / Esc 关闭），不再覆盖列表按钮。
+
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -12,11 +16,12 @@ vi.mock('@/i18n', () => ({
 }));
 
 const mockListModels = vi.fn();
+const mockLoadModelToCar = vi.fn((..._args: unknown[]) => Promise.resolve({ message: 'ok' }));
 vi.mock('../../services/api', () => ({
   listModels: (...args: unknown[]) => mockListModels(...args),
   deleteModel: vi.fn(() => Promise.resolve()),
   downloadModelUrl: vi.fn(() => '/download'),
-  loadModelToCar: vi.fn(() => Promise.resolve()),
+  loadModelToCar: (...args: unknown[]) => mockLoadModelToCar(...args),
   importModel: vi.fn(() => Promise.resolve()),
   uploadModelLoss: vi.fn(() => Promise.resolve()),
   API_URL: 'http://localhost',
@@ -83,8 +88,14 @@ describe('ModelsList', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'trainer.viewLossChart' }));
 
-    expect(screen.getByTestId('loss-chart-overlay')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'trainer.lossChartAlt' })).toBeInTheDocument();
+    const overlay = screen.getByTestId('loss-chart-overlay');
+    expect(overlay).toBeInTheDocument();
+    // 全屏遮罩而非跟随行的 fixed popover
+    expect(overlay.className).toContain('fixed inset-0');
+    const img = screen.getByRole('img', { name: 'trainer.lossChartAlt' });
+    expect(img).toBeInTheDocument();
+    expect(img.getAttribute('src')).toContain('/trainer/models/preview?path=');
+    expect(img.getAttribute('src')).toContain(encodeURIComponent(models[0].previewPath));
   });
 
   it('点击遮罩关闭 modal', async () => {
@@ -127,6 +138,18 @@ describe('ModelsList', () => {
     expect(screen.getByText('trainer.deleteConfirm')).toBeInTheDocument();
   });
 
+  it('点击操作按钮（复制路径）不会误触打开 loss modal', async () => {
+    Object.assign(window.navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    render(<ModelsList />);
+    await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'trainer.copyPath' })[0]);
+
+    expect(screen.queryByTestId('loss-chart-overlay')).toBeNull();
+  });
+
   it('无 loss 数据的模型显示补传入口与无数据提示', async () => {
     render(<ModelsList />);
     await waitFor(() => expect(screen.getByText('m3.tflite')).toBeInTheDocument());
@@ -143,5 +166,18 @@ describe('ModelsList', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'trainer.uploadLoss' })[1]);
 
     expect(screen.getByTestId('upload-loss-dialog')).toBeInTheDocument();
+  });
+
+  it('加载到车端传相对路径 ./models/<name>（后端拒绝绝对路径）', async () => {
+    // 回归：列表项 m.path 是绝对路径，而 /drive/load_model 只接受 models/
+    // 内的相对路径；直接传 m.path 会 400「model_path 必须是相对路径」。
+    render(<ModelsList />);
+    await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'trainer.loadToCar' })[0]);
+
+    await waitFor(() =>
+      expect(mockLoadModelToCar).toHaveBeenCalledWith('./models/m1.tflite', '/models'),
+    );
   });
 });

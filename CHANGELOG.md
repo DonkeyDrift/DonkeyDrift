@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-09-25 (230)
+## 2026-09-25 (236)
 
 - fix(tests): `test_train` 收敛性测试固定随机种子，根治 `test_train[data9]` 偶发失败
   - 根因：`donkeycar/tests/test_train.py` 的训练收敛断言（`loss[-1] < loss[0] * convergence`，6 epoch）依赖三类未播种随机源——`train_test_split` 的 `random.randint` 划分洗牌、Keras 权重初始化、albumentations 增强（data9 = linear+aug 对增强随机性最敏感），全量套件高负载下间歇性红灯（首轮过、次轮败、单跑过）。
@@ -8,13 +8,83 @@
   - 验证：`test_train.py` 整文件 34 过 1 跳（486s，11 个训练参数播种后全部收敛、无确定化反转）；`data9` 单独连跑 3 次全过（修复前约半数失败）；全量套件 968 过 2 失败——`test_launcher_terminal` Ctrl-C PTY 时序与 `test_scripts::test_drivesim` 子进程连本机 8000 两条均为高负载环境敏感型既有抖动，空闲单独复跑 17.8s 全过，与本改动无关（前两次全量这两条亦通过；`data9` 本轮已通过）。
   - 注：仅测试文件改动，无运行时代码影响；无需本机部署，Firmware 无改动、无需 OTA。
 
-## 2026-09-25 (229)
+## 2026-09-25 (235)
 
 - fix(tests): 修复 origin/Tony 两条既有测试失败，pytest 全量转绿——`build_drift_clip` 反斜杠路径默认命名 + setup metadata url 断言同步
   - `scripts/build_drift_clip.py`：默认输出名取 `Path(tp).name`，POSIX 下 `\` 不是分隔符，传入 Windows 风格 tub 路径（如 `C:\data\tubs\tub_a\`）时整条路径被当成文件名，默认输出退化为 `data/clips/C:\data\tubs\tub_a\_clip.json`（`test_build_drift_clip.py::test_backslash_tub_path_default_out_name` 长期红灯）。新增 `tub_dir_name()`（统一把 `\` 换 `/` 再分段取末级目录名，兼容两种分隔符与末尾分隔符），`main()` 的 sources 取名改用它；POSIX 路径行为不变。
   - `donkeycar/tests/test_project_metadata.py`：`test_setup_metadata_uses_donkeydrifter_identity` 的 url 断言仍期望 `…/DonkeyDrifter`，而 #441 已把 setup.cfg `url` 死链修为真实仓库地址 `…/DonkeyDrift`（改配置未同步测试），断言更新并加注释。
   - 测试：`test_build_drift_clip.py` 16 项 + `test_project_metadata.py` 13 项全过；pytest 全量两轮（969/970 项）覆盖验证——第二轮唯一失败 `test_train[data9]` 为随机收敛性用例（CI 本就 `GITHUB_ACTIONS` 禁用），单独复跑 90s 通过，首轮亦通过，与本次改动无关。
   - 注：仅 CLI 脚本与测试改动，`build_drift_clip` 运行时无引用（web 后端/前端/`drift_replay` 均不 import），不影响本机可见效果、无需部署；Firmware 无改动、无需 OTA。
+
+## 2026-09-23 (234)
+
+- fix(arena): 修复 Pilot Arena 加载 `.aidem` NPU 模型后推理帧率过低（实测仅 30 余 FPS、NPU 占用率低）
+  - 根因（真机 QCS6490 实测拆解）：NPU invoke 本身 ~0.8-1.8ms（`run()` 全程 ~1.4ms，非瓶颈），单帧全链路本机回环 RTT ~8ms 中框架/HTTP 占 ~5ms；浏览器经网络访问 RTT 升至 20-30ms，而前端每 viewer 推理并发默认为 1——并发 1 时推理帧率被 `1/RTT` 硬封顶（RTT 30ms → 上限 33FPS），NPU 每 33ms 只忙 0.8ms，故占用率看起来很低
+  - `routers/arena.py`：`load`/`predict`/`preview`/`predictions`/`unload` 五个端点 `async def` → 同步 `def`（Starlette 线程池执行，沿用 `routers/tub.py` 取图端点既定做法）。原先阻塞调用（NPU 解释器初始化、PIL 解码、cv 预处理、NPU invoke、PNG 编码、批量循环、解释器 destroy）全部压在 uvicorn 事件循环上，并发预测无法重叠（帧 N 的 Python 侧准备只能串行等帧 N-1 的 invoke），批量切片（数千帧、秒级）会冻结整个后端；同步 def 后 invoke 期间释放 GIL，多帧 CPU 准备与 NPU 执行真正流水线化
+  - `routers/arena.py`：预测缓存（OrderedDict）读写加锁。同步端点引入线程池并发后，原单线程事件循环下不可能发生的 move_to_end/迭代竞态需显式防护（锁外执行 invoke，不损并行度）
+  - `PilotArenaPage.tsx`：每 viewer 推理并发默认值 1 → 2（`ARENA_INFERENCE_CONCURRENCY_DEFAULT`，config 旋钮覆盖不变、上限 4），第 N+1 帧请求在第 N 帧 invoke 期间即可发出
+  - 实测（本机 QCS6490，`.aidem` 模型 100 帧真实 HTTP 压测，多轮取区间）：并发 2 吞吐 187~311 req/s、RTT 均值 6.3~10.3ms（改造前 async 端点并发 2 仅 210 req/s 且无法真正并行；并发 1 各轮 80~123 req/s，经浏览器网络访问 RTT 增至 20-30ms 后即掉到 30-50FPS）；并发 2/4 下 ~200-300 req/s 的服务端容量已覆盖前端 60Hz 评估循环，浏览器侧重新成为上限
+  - 验证：`pytest web_ui/backend/tests` 全绿；vitest `PilotArenaPage.test.tsx` 4/4 过
+
+
+
+- feat(gamepad): 实现Web端手柄输入轴可配置化功能——自 A1-v1.0 分支提交 `adba4b5c` 移植合并到 main，解决「不同手柄轴向不一致（如某手柄转向在 axes[2]）导致切到手柄输入源后转向不生效或方向相反」
+  - `lib/gamepadMapping.ts`（新）：标准化轴映射（去死区 → 中位校准 → 反向 → 限幅），内置 Xbox 标准 / Z 轴转向 / 方向盘三套预设
+  - `store/useGamepadStore.ts`（新）：localStorage 持久化（键 `donkey-gamepad-config`），按手柄 id 记忆，避免跨设备配置串用
+  - `components/drive/GamepadConfigPanel.tsx`（新）：虚拟摇杆抽屉内嵌「手柄设置」折叠卡（设计文档方案 A）——预设切换、转向/油门轴选择、反向勾选、死区与上限滑块、迷你轴监视；选中手柄输入源时自动展开
+  - `components/drive/GamepadCalibrationWizard.tsx`（新）：4 步一键校准向导（方案 B 并入 A 的「一键校准」入口）——自动识别转向/油门轴并计算最优死区
+  - `hooks/useGamepadDrive.ts` 重构：硬编码 `axes[0]/axes[1]` → 可配置映射 + 轴监视快照；连接检测常驻（不受 enabled 门控）
+  - 设计文档：`docs/plan/gamepad-config-design.md` + 可交互原型 `docs/design/gamepad-config-mockup.html`
+  - 行为变化：默认预设由左摇杆（axes[0]/[1]、死区 0.1）改为 Z 轴预设（转向 axes[2]、死区 0.08）——原设计即针对 Z 轴手柄，Xbox 标准手柄用户在面板一键切回或跑校准向导
+  - 验证：`npm run check` 零错误、vitest 53 文件 / 337 全绿（含新增手柄相关 23 例）、`npm run build` 通过；cherry-pick 与原提交逐行一致（+2278/−46），无文本冲突
+
+## 2026-09-23 (232)
+
+- fix(web): web 后端（uvicorn）自动切换 NPU 环境——修「Arena 加载 .aidem 报 import aidlite 失败」。Arena 的 pilot 加载推理跑在 uvicorn 进程内（`routers/arena.py` → `get_model_by_type('aidlite_linear')` → `npu_pilot`），而 `_launch_web_ui` 固定用 `sys.executable` 拉后端：用户从 3.11 venv 启动 `donkey web`/`donkey drive` → 后端无 aidlite（车进程早已修过同类问题，后端漏了）。三处联动：
+  - `webui_instance.py`：`select_car_python` 的路径逻辑抽为 `_venv_npu_python`/`_prefer_venv_npu` 共用；新增 `select_backend_python()`（`DONKEY_BACKEND_PYTHON` → `DONKEY_CAR_PYTHON` → `.venv-npu` → `sys.executable`），修正「web 端可以是任意 python」的过时假设。
+  - `management/base.py`：`Web` 类新增 `_backend_python()`——候选非当前解释器时子进程探测四个后端依赖（fastapi/uvicorn/multipart/websockets），不齐全则打印告警并回退 `sys.executable`（此时仅 Arena 的 .aidem 推理不可用，其余功能不变）；`_launch_web_ui` 的 dev/生产两处 uvicorn 拉起均改用它。
+  - 前端兜底（承接上条 231）：`PilotArenaPage` 模型类型下拉硬编码初始值补入 `aidlite_linear`（`/arena/model-types` 拉取前/失败时也可选 NPU 类型）。
+  - 验证：`pytest tests/test_webui_instance.py + web_ui/backend/tests` 587 过/2 跳（新增 6 用例：backend env 覆盖/回落 CAR 覆盖/.venv-npu 优先/候选缺失回退/当前解释器跳探测/探测失败回退告警）；按生产路径端到端实跑——`_backend_python()` 选中 `.venv-npu`，uvicorn 起后 model-types 含 `aidlite_linear`、经 API 加载 Sim01 `.aidem` 成功、卸载释放解释器正常。
+
+## 2026-09-23 (231)
+
+- feat(arena): Pilot Arena 支持 `.aidem` NPU 模型的扫描与推理（AidLite/QNN240）
+  - `routers/arena.py`：MODEL_TYPES 加 `aidlite_linear`——复用 `utils.get_model_by_type` 的 `aidlite_` 分支（`NpuLinearPilot`，`run(uint8 RGB)→(angle,throttle)` 与 Arena 的 `pilot.run(image)` 接口天然对齐，`cfg=None` 时用默认 IMAGE_* 且以模型 json 为准）；`_model_extensions` 加 aidlite→`{.aidem}`、默认集合补 `.aidem`，`/models` 扫描与按类型过滤即生效。前端零改动：模型类型下拉本就动态拉取 `/arena/model-types`，模型列表由后端按类型过滤。
+  - `unload_pilot` 补解释器释放：此前只删字典，NPU 解释器持有 Hexagon 硬件上下文会泄漏；卸载时调用 `pilot.shutdown()`（有该方法才调，Keras 等类型不受影响），失败仅告警不阻断卸载。
+  - 边界：Arena「导入模型」暂不收 `.aidem`——裸 `.aidem` 缺同目录 `qnn_model_info.json` 无法加载，单文件导入会产生坏模型；scp 把 `.aidem` + `qnn_model_info.json` 一起放到 `models/` 顶层即可被扫描到。
+  - 运行前提：web 后端进程需能 `import aidlite`（本机以 `.venv-npu` 启动后端）；无 aidlite 的解释器下加载报 `npu_pilot` 的明确 RuntimeError（不再是无从下手的 500 堆栈）。
+  - 验证：`pytest web_ui/backend/tests` 557 过/2 跳（3.11 venv，含新增 model-types 含 aidlite_linear、按类型过滤只返 `.aidem`、aidlite_linear 加载、卸载触发 shutdown 四个用例）；`.venv-npu` 实机冒烟——扫描到 Sim01 `.aidem`（format=aidem）、`load_pilot(cfg=None)` 真实加载 NPU、`run()` 输出与 `npu_pilot` 直连逐位一致（+0.265195/+0.347023）、卸载后二次加载推理正常。
+  - 前端兜底：`PilotArenaPage` 模型类型下拉的硬编码初始值 `['tflite_linear','linear']` 补入 `aidlite_linear`（该数组是 `/arena/model-types` 拉取前/失败时的兜底）；vitest 4 过、`tsc -b` 零错误。
+
+## 2026-09-22 (230)
+
+- feat(drive): 虚拟摇杆抽屉右缘常驻 + 连续缩放——窄屏（<1024px）不再整体折叠到视频下方（docs/issues/008，交互原型经 demo 页 A/B 评估确认）
+  - `DrivePage.tsx` 视频行容器去掉 `flex-col` 断点（任何屏宽左右并排 + `relative`）；抽屉 aside 以 `scale(clamp(0.62, (行宽−360)/422, 1))`、`transform-origin: top right` 连续缩放，贴地时负 margin-left 把缩放省出的占位还给视频列（负右边距不会使抽屉左移，实测踩坑），桌面 sticky 行为不变。
+  - 视频列保不住 320px 底线时自动切「悬浮模式」：aside 绝对定位吸附右缘、面板整体 40% 半透明（评估确认值）+ 2px 背景模糊浮于视频之上，顶部实测工具栏高度让过（不遮录制按钮）；收起/展开按「展开态等效宽」判定阈值，模式不随收起跳变。
+  - 新增 `hooks/useElementWidth.ts`（`useElementWidth`/`useElementHeight`，ResizeObserver）：行宽/抽屉自然宽（随语言横竖排把手 30↔60px 变化）/工具栏高全实测，替代常量；缩放分母保留设计常量稳定手感。
+  - `VirtualJoystick.tsx` 新增 `scale` prop：指针位移按 1/scale 换算回元素坐标（s=0.62 拖 40px→摇杆头 64.5px，实测精确），任意缩放下行程映射一致；scale 变化重算中心。
+  - 验证：tsc + vitest 316/316；Playwright 11 档宽度几何断言（≥1024 桌面原样、768–1023 贴地 0.891/视频 321px、≤767 悬浮视频全宽）+ 截图目检；评估原型存 `web_ui/joystick-scaling-demo.html`（可 A/B 对比旧版行为）。
+- fix(trainer): 修复 Trainer「导入模型」422 与「加载到车端」400（docs/issues/007）
+  - `services/api.ts`：axios 实例默认 `Content-Type: application/json` 对 FormData 请求会原样发出（经真实 axios + XHR 全链路复现；此前单测整体 mock 了 api 层故零覆盖）→ 后端按 JSON 解析 multipart 体报 422。FormData 请求统一显式 `Content-Type: null`——axios 序列化阶段丢弃该头，由浏览器生成带 boundary 的 multipart（不能手动设 multipart 值，会丢 boundary）。
+  - `ModelsList.tsx`「加载到车端」改传相对路径 `` `./models/${m.name}` ``：`/drive/load_model` 的 `_validate_model_path`（#003 安全设计）只收 models/ 内相对路径，列表项 `m.path` 是绝对路径会 400。
+  - 回归测试：新增 `services/apiFormData.test.ts`（2 项，断言 FormData 请求置空 Content-Type）与 `ModelsList.test.tsx` 用例（1 项，断言传 `./models/<name>`）；真实链路端到端复现修复前 422 → 修复后 200 入列表。全量 vitest 316 过、`tsc -b` 零错误、`npm run build` 通过，后端 45 过。
+
+## 2026-09-22 (229)
+
+- feat(drive): 接入 Qualcomm QCS6490 NPU 推理（AidLite/QNN240）——`aidlite_linear` 模型类型，AIMO 云转换产物（`*.ctx.bin.aidem` + 同目录 `qnn_model_info.json`）可直接经 Web 端热加载上车，invoke 实测 ~0.8ms（CPU TFLite 3.8ms，5×+）
+  - 新增 `donkeycar/parts/npu_pilot.py`（不依赖 TensorFlow）：`AidLite` 解释器（TYPE_QNN240+TYPE_DSP，形状读 `qnn_model_info.json`，锁内 invoke/destroy 防热加载竞态，`_quiet_c` 吞插件 printf 噪声）+ `NpuLinearPilot`（run(uint8 RGB)→(angle,throttle)，`normalize_image` 与 KerasPilot 同源）；aidlite 在 `load()` 惰性导入，原 .venv（无 aidlite）仅构建不加载不报错。
+  - `utils.get_model_by_type` 新增 `aidlite_` 前缀分支，在 `import keras` 之前早退返回（车端 python 无 TF 也能跑 NPU 路径）；`aidlite_` 仅支持 linear。
+  - `complete.py`：`_full_model_exts` 加 `.aidem`；新增 `_model_type_for_model_file()`，`--model`/磁盘恢复（selected_model.json）且未显式 `--type` 时按扩展名推导解释器（`.tflite`→tflite_linear、`.trt`→tensorrt_linear、`.aidem`→aidlite_linear，与后端映射一致），TRAIN_LOCALIZER/BEHAVIORS 优先级不变；已同步 `~/projects/mycar/manage.py`。
+  - 后端 `routers/drive.py _model_type_for_path` 加 `.aidem`→`aidlite_linear`，Web 选 NPU 模型热加载时下发正确 model_type；`routers/trainer.py list_models` 扩展名过滤加 `.aidem`（该接口被 Drive 页用作模型列表，且只扫 models/ 顶层）。
+  - 运行环境：车端 NPU 模型必须跑在 `.venv-npu`（本仓库内，python3.12 + --system-site-packages：aidlite 来自系统 dist-packages，补装 prettytable/tornado/docopt/utm/paho-mqtt/simple_pid/pynmea2/gymnasium，`site-packages/donkeydrift-npu.pth` 指向仓库与 gym-donkeycar）。启动：`.venv-npu/bin/python manage.py drive`（cwd ~/projects/mycar）。aidlite 的 .so 是 cpython-312 专用，原 3.11 venv 无法支持。
+  - 模型部署：`~/projects/mycar/models/` 顶层（`Sim01_qcs6490_w8a8.qnn240.ctx.bin.aidem` + `qnn_model_info.json`；Drive 页模型列表来自 trainer `/models` 接口，只认 models/ 顶层且按扩展名过滤，故必须平铺）。产物源包在 `~/projects/mycar/Sim01_qcs6490_npu/`（含 `npu_infer.py` 单图/视频/摄像头推理脚本）。
+  - AidLux 官方监控固化：`sys-mon`（AidLux 桌面「资源监控」应用后端，Go 采集器含 NPU 占用，`/opt/aidlux/app/sys-mon/`）镜像自带但未注册 systemd。新增 `/etc/systemd/system/sys-mon.service`（修正 ExecStart 路径到 app 目录，Restart=always），`enable --now` 已跑通（127.0.0.1:59090，SPA 200、指标采集日志滚动中）；桌面入口 `http://<板子IP>:8000` → 资源监控。
+  - 验证：PilotHolder 热加载链路实跑（加载 0.56s，angle/throttle 与独立脚本逐位一致，二次 load 热切换 + shutdown 正常，run() 含归一化 ~1.06ms）；venv 3.11 回归（模块导入与 pilot 构建不依赖 aidlite）通过。
+- fix(drive): 车进程自动切换 NPU 环境 + 去 TF 运行时——修「热加载 aidlite 失败：No module named 'aidlite'」：`donkey drive` 拉起的车进程此前固定用 `sys.executable`（用户从 3.11 venv 启动 → 车进程无 aidlite）。三处联动：
+  - `management/base.py` 新增 `_car_python()`：车进程解释器优先用仓库 `.venv-npu/bin/python`（aidlite 唯一所在），`DONKEY_CAR_PYTHON` 环境变量可覆盖，找不到则回退 `sys.executable` 保持原行为；`_build_car_command` 改用它。TUI/Web 等一切经 `donkey drive` 的启动路径均覆盖。
+  - `parts/npu_pilot.py` 升级双后端：`AidLite` 基类按 mode 分派——`.aidem`→QNN240/DSP（NPU），新增 `AidLiteTflite`（`.tflite`→aidlite 内建 TFLite/CPU 后端，无需系统 TensorFlow，形状由构造方按 cfg.IMAGE_* 给定）；tflite 后端推理期也走 `_quiet_c` 吞插件噪声。
+  - `utils.get_model_by_type` 新增 `_tf_available()` 探测（缓存）：无 TF 运行时下 `tflite_linear` 回退 `NpuLinearPilot + AidLiteTflite`（仍支持 linear），有 TF 时保持原生 `KerasLinear + TfLite` 不变——车进程 3.12 下启动即载 `Sim01.tflite`（selected_model.json）与热加载 `.aidem` 均无 TF 依赖。
+  - 验证：venv-npu 下 `tflite_linear`→`AidLite[TFLite/CPU]`，加载 Sim01.tflite 推理正常（run() ~4.5ms，与 report.md CPU 口径一致），NPU 输出逐位不变；3.11 下 `tflite_linear`→`KerasLinear/TfLite` 原路径回归通过；`_car_python()` 默认选 `.venv-npu`、环境变量覆盖生效。
 
 ## 2026-09-21 (228)
 
@@ -26,6 +96,9 @@
   - 文档：`docs/issues/001-006` + README、`docs/guide/pilot-arena-handoff.md`、pilot-arena-testing 计划（拷入前逐文件脱敏）；`web-drive-console-user-guide.md`「加载到车」行为描述与代码对齐（持久化 + 带模型重启）；`setup.cfg` url 死链修复（DonkeyDrifter→DonkeyDrift）。
   - 测试：vitest **48 文件 / 305 全绿**（净 +5）、tsc 零错误、build 通过；pytest 后端 **559 + 1 skip**、`tests/` 397（1 条 origin/Tony 既有失败）、telemetry 12 全过；真实模型集成测试本机实跑 1 passed。
   - 注：仅 DD 改动，Firmware 无改动、无需 OTA；合并后 ff deploy-8000 并重建前端部署。
+- feat(drive): 选模型改为车端运行期**热加载**，无需重启车端进程（issues/003）——车端常驻 `PilotHolder`（新增 `donkeycar/parts/pilot_holder.py`）在运行期原子替换 KerasPilot；`DriveApiBridge` 消费 `load_model` 消息并回 `model_loaded` ACK；后端 `/drive/load_model` 经 WebSocket 下发并等待 ACK（`DRIVE_MODEL_HOT_LOAD_TIMEOUT` 默认 30s），车端离线/旧版超时回退为「模型已记录，需重启车端后生效」；前端选模型显示「正在加载模型…」→「模型已热加载，可直接推理」，不再走重启状态机。
+  - 车端：`complete.py` 无 `--model` 时也注册空的 `PilotHolder` 并接线 `DriveApiBridge(model_loader=...)`；有 `--model` 时启动即载入并保留文件变更自动重载；legacy `.json`（结构+权重分离）与漂移回放仍走原静态路径、不支持热切换。
+  - 测试：`donkeycar/tests/test_pilot_holder_hot_load.py` 9 例（原子替换/空容器/失败保留旧模型/ACK/兼容别名）；后端 `test_drive.py` load_model 改为离线回退 + ACK 热加载 + 超时回退三例；前端 `test_drive_page_layout.py` 改为热加载断言。后端 31 例、车端 9 例、前端 334 例全绿。
 
 ## 2026-09-20 (227)
 
@@ -602,6 +675,38 @@
   - 测试同步：后端 `web_ui/backend/tests/test_launch.py` 新增 zcode 注册断言与转发用例；launcher 侧新建 `tests/test_launcher_zcode.py` 4 用例（happy path URL 形态含 shlex.quote 防注入 + CORS、cwd 不存在 400、缺省 cwd 动态 Path.home() 回归栅栏、非 JSON 400），IP 一律 RFC 5737 TEST-NET-1（192.0.2.x）占位；前端 `EnterButtons.test.tsx` 新增 `ZCodeEntryLink` 2 用例（成功开新标签/失败关标签告警），`App.test.tsx` 的 api mock 补 `launchZcode`（缺导出导致 App 渲染抛错 4 例失败，补齐后全绿）。
   - 实测：后端 `pytest tests/` 179 passed、仓库根 `pytest tests/` 272 passed、前端 `vitest run` 30 文件 159 passed、`tsc -b` 无错、`npm run build` 通过。仅 DD 改动，Firmware 无改动、无需 OTA。
 
+## 2026-09-04 (176)
+
+- fix(trainer): Trainer 三档训练目标命名第四次定稿——「本机」→「局域网主机」（Lan Host）、「车载电脑」→「本机」（Local Host），视角约定写死为「以车上操作视角为准」（docs/issues/006）
+  - 背景：「本机 / 车载电脑」命名与实际含义颠倒——「本机」档实际要求填写 SSH 连接信息、指远程开发电脑，「车载电脑」档实际指运行 Web UI 的本机/车端。该命名此前已翻转三次（2026-08-18 (19)、(28) 等），本次为第四次并定稿：**以车上操作视角为准，「本机」= 手边这台跑 Web UI 的车端电脑**，约定已写入用户手册与 `trainer.ts` 文件头注释，避免再次翻转。
+  - 改动范围（只动显示字符串，内部枚举 `mypc` / `local` / `online`、i18n key 名、API 路径 `/train/mypc` 等一律不变）：
+    - `web_ui/frontend/src/i18n/messages/trainer.ts`：`tabMyPc` 本机→局域网主机、`tabLocal` 车载电脑→本机、`startMyPcTraining`→「在局域网主机上训练」、`startLocalTraining`→「在本机上训练」、`myPcTraining`→「局域网主机训练」、`myPcFirstUseHint` / `myPcProbeReady` / `myPcTrainingSubtitle` 等派生文案同步；en 同步 `Lan Host / Local Host / Train on Lan Host / Train on Local Host / Lan Host Training`。文件头新增命名约定注释（key 名与显示语方向相反属可接受的内部债务）。
+    - `web_ui/backend/mypc_probe.py`：直出文案「环境就绪，可以开始本机训练。」→「…局域网主机训练。」、Windows WSL 建议文案同步；`routers/trainer.py` mypc 探测路由 docstring 术语同步。
+    - 测试同步：`ModeTabs.test.tsx` 三档渲染与点击断言、`test_trainer_mypc.py` 探测建议断言。
+    - 文档：`docs/guide/web-drive-console-user-guide.md`「本机训练（This Computer）」章节改为「局域网主机训练（Lan Host）」并在章首写入视角约定。
+  - 注：语义独立的「本机」（`network_utils.py`、`routers/connector.py`、`drive.ts`、手册快速开始章节的「本机场景」）未动。Firmware 无改动，无需 OTA。
+
+## 2026-09-04 (175)
+
+- perf(frontend, backend) + feat(web-ui): Pilot Arena 推理链路优化（config 按 mtime 缓存 + 评估节流 250ms→逐帧）+ 批量预测新增「模型贴合摘要」
+  - **背景（实测分解）**：DKG-1.tflite(120×160 float32) 裸 TFLite 推理 1.24ms(≈807FPS)、`pilot.run` 1.33ms(≈750FPS)，模型本身非瓶颈；真瓶颈是 ① `web_ui/backend/routers/arena.py` 每次 predict 重新 `load_config()` 编译执行 config.py+myconfig.py ≈**75~80ms/帧**（占 97%，且每帧刷两行 `INFO:donkeycar.config` 日志）② 前端 `PilotArenaPage.tsx` 评估节流硬下限 250ms → 观察到的"4~5FPS"。
+  - **后端**：`arena.load_car_config` 按 (config.py, myconfig.py) mtime 缓存（线程锁 + 变化即重载；`arena.py` 模块级 `_car_config_cache`）。效果：单帧预测（缓存 config+磁盘读图+解码+TFLite）**79ms → 1.72ms（≈580FPS）**；config INFO 日志仅在首次/配置保存后出现一次。全部调用点（predict/preview/批量/load）共享缓存，无行为回归（mtime 变化即失效）。
+  - **前端**：推理评估节流下限 250→**16ms**（与图像加载一致，评估节奏=逐帧播放 `DRIVE_LOOP_HZ`，60Hz 时每播放帧一次推理）；新增 config 旋钮 `ARENA_PREDICTION_INTERVAL_MS`（可调大限流）；`ARENA_INFERENCE_CONCURRENCY` 上限 2→4。inference 徽标预期从 ~4 提升到接近播放帧率（受 DRIVE_LOOP_HZ=60 约束 ≈60）。
+  - **新功能（规划 §3.3「模型性能指标摘要」）**：`POST /api/arena/pilots/{id}/predictions` 响应新增 `summary`——角度/油门两序列各自的 MAE/RMSE/平均偏差(bias=pilot−user)/max|err|/count，非有限值所在帧自动剔除；纯函数 `compute_prediction_metrics`（arena.py）+ 前端 Tub Plot 图下「贴合摘要」展示区（i18n zh/en 各 10 词条）。批量 200 帧含摘要 330ms（≈606FPS 当量）；摘要计算 ~0.27µs/点（20 万点 53ms），开销可忽略；全缓存命中重跑 1.1ms。
+  - **测试（本会话补齐分层体系，全部已提交分支 `test/pilot-arena-testing`）**：
+    - 后端：修复 `test_drift_vision.py::TestAdaptiveDetection` 4 例（测试基建 bug——替身注入改 `raising=False` 并置位可用性守卫，本不需真库；根因是缺库时模块无 `_PupilDetector` 属性）；本机补装 `pupil-apriltags` 1.0.4 后全量 **351 passed + 1 skipped**（仅剩 opt-in 集成测试需 `ARENA_INTEGRATION=1`）。
+    - 回归护栏：`test_arena.py` +4 例（config mtime 缓存语义 1 + 摘要 3，TDD 先红后绿）+ 预测逐帧不重编译 config 的 API 级护栏（计数断言 `load_config` 全程仅 1 次）。
+    - 集成测试（opt-in）：`tests/integration/test_arena_real_model.py`——真实 DKG-1.tflite + mycar，`ARENA_INTEGRATION=1` 实测热缓存单帧 predict **4.23ms（≈236FPS 当量）**，预算 <30ms；caplog 断言 predict 期间 0 条 config 日志。
+    - 前端：vitest **160 passed**（28 文件，新增 `PilotArenaPage.test.tsx` 摘要面板组件测试 2 例）；Playwright E2E **1 passed**（route-mocked 全流程：加载配置→加载 Tub→选模型→加载并预测→生成曲线→摘要面板；`playwright.config.ts` + `e2e/pilot-arena.spec.ts`，vitest 已 exclude `e2e/**`、`.gitignore` 增补 Playwright 产物）。
+  - 注：仅 DD 改动，已全部提交于分支 `test/pilot-arena-testing`（自 345f6f7d 起，含用户 Nowhere_X 并行提交 5698f176，未推送）；浏览器端 FPS 徽标提升与真机多 viewer 并发负载仍待用户 Windows 机器人工确认。
+
+## 2026-09-03 (174)
+
+- chore(security): 隐私防漏加固与泄露清理——`.gitignore` 补全密钥/证书/agent 目录屏蔽规则；移除被旧分支合并复活的 `AGENTS.md`/`CLAUDE.md` 跟踪
+  - 背景：两仓库安全审计（GitHub 均为公开）确认本仓库文件内容（含全历史）无密钥/邮箱实质泄露；但发现 main 尖端被旧分支（eed2e4d4 "init"/27dbd9e1 "Rename to DonkeyDrift" 经今日合并）复活了 `AGENTS.md`/`CLAUDE.md` 的跟踪——内容为旧版开发指南、无凭据，但按约定 agent 说明文件不入库，本次重新解除跟踪（本地文件保留，`.gitignore` 的 `/AGENTS.md`、`/CLAUDE.md` 规则本已存在、此前被跟踪导致无效）。**注意：旧基点分支合并进 main 会复活早已移除的文件，合并前务必检查 diff。**
+  - `.gitignore` 新增：`.env`/`.env.*`、`*.pem`/`*.key`/`id_rsa*`/`known_hosts`/`*.ovpn`/`*.p12`/`*.keystore`/`credentials*`/`secrets*`、`*.log`、`.claude/`/`.agents/`。经 `git ls-files` 确认无被这些规则命中的其余已跟踪文件。
+  - 无代码行为变化、无需本机部署（纯仓库卫生）；Tony 分支同等改动见 2026-09-03 (165)；Firmware 侧配套清理见 `Firmware/MUS4_FW/CHANGELOG.md` v1.8.66。
+
 ## 2026-09-03 (169)
 
 - fix(trainer): mypc 环境发现稳健性重写 + 训练静默期进度/时长 UX 改进（2026-08-23 开发于 dd-deploy，本次由主会话移植收尾合入）
@@ -720,7 +825,7 @@
     - `web_ui/frontend/src/services/api.ts`：新增 `SimCollectStartParams`/`SimCollectJobState`/`SimCollectResult`/`SimCollectStatus` 类型与 `startSimCollect`/`getSimCollectStatus`/`stopSimCollect`/`createSimCollectEventStream` 四函数。
     - `web_ui/frontend/src/hooks/useSimCollectJob.ts`（新增）：自包含 local state，SSE 优先推送 progress/log/status，SSE 断开且未到终态自动降级 2s 轮询 status 兜底；409 → 已有任务在跑提示。
     - `web_ui/frontend/src/components/drive/SimCollectCard.tsx`（新增）：卡片 UI——标题/说明、步数输入、可折叠高级参数（KP/KD/油门/最低油门）、开始/停止按钮、运行中进度条+实时 cte/速度、完成结果摘要（步数/mean|cte|/max|cte|/是否冲出/输出目录）、出错信息+可展开日志；全文案走 i18n。
-    - `web_ui/frontend/src/pages/DrivePage.tsx`：`<SimCollectCard />` 放在页面最顶部（视频区上方），进入 Drive 页即可见；初始版本放在视频区下方，因桌面端视频占 `calc(100vh-9rem)` 导致卡片在视口外不可见，后修正移至顶部。
+    - `web_ui/frontend/src/pages/DrivePage.tsx`：根容器主 flex 行后插入 `<SimCollectCard />` 全宽卡片（最小侵入，未重排其它结构）。
     - `web_ui/frontend/src/i18n/messages/drive.ts`：新增 `drive.simCollect*` 词条 25 条（zh/en 双份）。
   - 测试同步：`web_ui/backend/tests/test_simcollect.py` 12 项（行解析纯函数 + start/status/stop/conflict 404/错误退出，子进程级 FakeProcess mock）；后端 `pytest tests/` 118 项全绿。前端 `SimCollectCard.test.tsx` 5 项（mock `useSimCollectJob` 控制 idle/running/done/error 状态断言文案与参数）；前端 `vitest run` 25 文件 138 项、`tsc -b`、`npm run build` 全绿。端到端实测：worktree 后端（8123）跑 `POST /simcollect/start {steps:20}` → SSH 启 Mac sim → 采 20 步 → status=done、result 正确解析、数据落 `mycar/sim_collect_20260823_141731`。
   - 注：仅 DD 改动，Firmware 无改动、无需 OTA。采集编排脚本与采集脚本（`mycar/collect_sim_mac.sh`、`mycar/collect_sim_data.py`）为本机工作目录文件、非 git 仓库，不在本次 commit 范围（已在前序 mycar 工作中就绪）。全程纯本地，未碰 GitHub。
@@ -3414,4 +3519,3 @@
 - ESP32 串口协议与 Arduino 控制器
 - CLI 工具链（createcar、calibrate、web、train 等）
 - 模拟器集成（DonkeyGym）
-

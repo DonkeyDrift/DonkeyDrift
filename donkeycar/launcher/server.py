@@ -32,9 +32,11 @@ from donkeycar.webui_instance import (
     probe_http_ok,
     find_live_instance,
     read_instance,
+    read_drive_model,
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
+    select_car_python,
 )
 
 
@@ -217,7 +219,9 @@ def _launch_drive():
             backend_port = _choose_available_backend_port(8000)
             frontend_port = _choose_available_backend_port(5188)
             web_ui_path = _get_bundled_web_ui_path()
-            web_cmd = ["donkey", "web"]
+            # 首次启动常见前后端依赖未完整安装；交给 donkey web 自恢复，
+            # 避免 launcher 只给出提示却仍直接进入构建失败。
+            web_cmd = ["donkey", "web", "--install-deps"]
             if web_ui_path is not None:
                 web_cmd.extend(["--path", str(web_ui_path)])
             web_cmd.extend(["--backend-port", str(backend_port)])
@@ -273,7 +277,21 @@ def _launch_drive():
                     frontend_port = backend_port
 
         # 构建 car 命令（DRIVE_API_SERVER_URL 用实际后端端口）
-        car_cmd = [sys.executable, "manage.py", "drive"]
+        car_cmd = [select_car_python(), "manage.py", "drive"]
+
+        # issue #003：附加 web_ui 选定的自动驾驶模型（持久化于
+        # ~/.donkeycar/drive_model.json）；记录指向的文件已不存在时
+        # 回退为无模型启动，避免 manage.py 加载失败反复退出。
+        selected = read_drive_model()
+        if selected is not None:
+            selected_path = selected["model"]
+            if os.path.exists(selected_path):
+                car_cmd.extend(["--model", selected_path])
+                if selected.get("model_type"):
+                    car_cmd.extend(["--type", selected["model_type"]])
+            else:
+                print(f"[launcher] 选定模型文件不存在，按无模型启动: "
+                      f"{selected_path}")
 
         # 设置环境变量
         car_env = os.environ.copy()
@@ -292,7 +310,7 @@ def _launch_drive():
         except FileNotFoundError:
             return {
                 "status": "error",
-                "error": f"未找到 {sys.executable}，无法启动车进程",
+                "error": f"未找到 {car_cmd[0]}，无法启动车进程",
             }
         except Exception as e:
             return {

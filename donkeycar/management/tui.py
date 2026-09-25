@@ -43,6 +43,7 @@ from donkeycar.webui_instance import (
     write_drive_pids,
     remove_drive_pid_file,
     kill_previous_car_processes,
+    select_car_python,
 )
 
 # 初始化 Console
@@ -1239,7 +1240,7 @@ class DriveCommand(DonkeyCommand):
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
         cmd_str = self.get_preview_command(web_cmd, car_cmd, drive_api_server_url)
 
-        console.print("[dim]将启动 DonkeyDrifter 的 Drive 标签页，并连接当前车辆项目。[/dim]")
+        console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
         console.print("\n[bold yellow]命令预览:[/bold yellow]")
         console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
 
@@ -1339,7 +1340,9 @@ class DriveCommand(DonkeyCommand):
 
     def get_command_line(self, params, backend_port=None):
         web_ui_path = _get_bundled_web_ui_path()
-        cmd = ["donkey", "web"]
+        # 首次启动常见前端依赖未装齐；这里显式带上 --install-deps，
+        # 让 TUI 的“一键打开”真正具备自恢复能力。
+        cmd = ["donkey", "web", "--install-deps"]
         if web_ui_path is not None:
             cmd.extend(["--path", str(web_ui_path)])
         if backend_port is not None:
@@ -1348,7 +1351,7 @@ class DriveCommand(DonkeyCommand):
         return cmd
 
     def get_car_command_line(self):
-        return [sys.executable, "manage.py", "drive"]
+        return [select_car_python(), "manage.py", "drive"]
 
     def choose_available_backend_port(self, preferred_port=8100):
         port = preferred_port
@@ -1513,8 +1516,8 @@ class WebUICommand(DonkeyCommand):
     def get_command_line(self, params):
         web_ui_path = _get_bundled_web_ui_path()
         if web_ui_path is None:
-            return ["donkey", "web", "--open"]
-        return ["donkey", "web", "--path", str(web_ui_path), "--open"]
+            return ["donkey", "web", "--install-deps", "--open"]
+        return ["donkey", "web", "--install-deps", "--path", str(web_ui_path), "--open"]
 
 # -----------------------------------------------------------------------------
 # 菜单系统

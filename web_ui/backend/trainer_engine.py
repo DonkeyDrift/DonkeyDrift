@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import re
+import sys
 import threading
 import time
 import uuid
@@ -133,7 +134,10 @@ class TrainingJobManager:
                         working_dir: Optional[str] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
-        cmd = ["donkey", "train", "--tub", tub, "--model", model, "--type", model_type]
+        # 用后端自身解释器经模块入口拉起训练（不依赖 PATH 里的 donkey 指向哪个
+        # venv）：3.12 NPU 环境下无 TF 时 Train 命令自动回退 torch 训练
+        cmd = [sys.executable, "-m", "donkeycar.management",
+               "train", "--tub", tub, "--model", model, "--type", model_type]
         if transfer:
             cmd.extend(["--transfer", transfer])
 

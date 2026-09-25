@@ -3,6 +3,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 interface VirtualJoystickProps {
   onChange?: (angle: number, throttle: number) => void;
   size?: number;
+  /** 父级 transform 缩放系数（右缘常驻抽屉会整体缩放）：指针位移按 1/scale 换算回元素坐标，保证任意缩放下行程映射一致 */
+  scale?: number;
   className?: string;
 }
 
@@ -14,6 +16,7 @@ interface VirtualJoystickProps {
 export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
   onChange,
   size = 220,
+  scale = 1,
   className = '',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,8 +59,8 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     updateCenter();
     setDragging(true);
 
-    const dx = e.clientX - centerRef.current.x;
-    const dy = e.clientY - centerRef.current.y;
+    const dx = (e.clientX - centerRef.current.x) / scale;
+    const dy = (e.clientY - centerRef.current.y) / scale;
     const clamped = clampToRadius(dx, dy);
     setOffset(clamped);
     emitChange(clamped.x, clamped.y);
@@ -65,8 +68,8 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (activePointerId.current !== e.pointerId) return;
-    const dx = e.clientX - centerRef.current.x;
-    const dy = e.clientY - centerRef.current.y;
+    const dx = (e.clientX - centerRef.current.x) / scale;
+    const dy = (e.clientY - centerRef.current.y) / scale;
     const clamped = clampToRadius(dx, dy);
     setOffset(clamped);
     emitChange(clamped.x, clamped.y);
@@ -85,7 +88,7 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     updateCenter();
     window.addEventListener('resize', updateCenter);
     return () => window.removeEventListener('resize', updateCenter);
-  }, [updateCenter]);
+  }, [updateCenter, scale]); // scale 变化时元素视觉尺寸改变（origin 在右上角），中心需重算
 
   const knobSize = 56;
 

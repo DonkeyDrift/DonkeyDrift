@@ -408,6 +408,15 @@ export const deleteModel = async (path: string) => {
   return response.data;
 };
 
+// FormData 上传统一配置：显式置空 Content-Type。axios 实例默认带
+// application/json，若随请求发出，后端按 JSON 解析 multipart 体会直接 422
+// （「导入失败: Request failed with status code 422」）。置 null 后 axios 在
+// toJSON 阶段丢弃该头，交给浏览器/XHR 按 FormData 自动生成带 boundary 的
+// multipart/form-data；不能手动设成 multipart/form-data——那样会丢 boundary。
+const formDataRequestConfig = {
+  headers: { 'Content-Type': null },
+} as const;
+
 export const importModel = async (
   file: File,
   workingDir?: string,
@@ -425,9 +434,7 @@ export const importModel = async (
   if (workingDir) {
     form.append('working_dir', workingDir);
   }
-  // 不手动设置 Content-Type：axios 对 FormData 会在浏览器侧自动设置
-  // multipart/form-data 边界，手动设置反而会丢失 boundary。
-  const response = await api.post('/trainer/models/import', form);
+  const response = await api.post('/trainer/models/import', form, formDataRequestConfig);
   return response.data;
 };
 
@@ -450,6 +457,7 @@ export const uploadModelLoss = async (
   const response = await api.post(
     `/trainer/models/${encodeURIComponent(name)}/loss`,
     form,
+    formDataRequestConfig,
   );
   return response.data;
 };

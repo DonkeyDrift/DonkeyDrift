@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>虚拟摇杆 · 右侧常驻缩放优化演示 — DonkeyDrift</title>
+<style>
+  :root{
+    --bg:#09090b; --panel:#18181b; --panel2:#1f1f23; --line:#27272a;
+    --txt:#e4e4e7; --muted:#a1a1aa; --dim:#71717a;
+    --accent:#06b6d4; --accent-dim:#0e7490; --red:#ef4444; --green:#22c55e;
+    --overlay-alpha:.4;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--bg); color:var(--txt);
+    font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px;}
+  button{font-family:inherit; cursor:pointer;}
+
+  /* ===== 顶部控制区 ===== */
+  .controls{position:sticky; top:0; z-index:50; padding:14px 20px 12px;
+    background:rgba(9,9,11,.94); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);}
+  .controls-row1{display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  .title{font-size:16px; font-weight:700;}
+  .title small{display:block; font-size:11px; font-weight:400; color:var(--muted); margin-top:2px;}
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden;}
+  .seg button{padding:8px 16px; background:transparent; border:none; color:var(--muted); font-size:13px; font-weight:600;}
+  .seg button.on{background:var(--accent); color:#04252b;}
+  .seg button:not(.on):hover{color:var(--txt); background:var(--panel2);}
+
+  .controls-row2{display:flex; align-items:center; gap:14px; margin-top:12px; flex-wrap:wrap;}
+  .slider-wrap{position:relative; flex:1 1 320px; max-width:560px; padding-top:14px;}
+  .slider-wrap input[type=range]{width:100%; accent-color:var(--accent); cursor:ew-resize;}
+  .bp-mark{position:absolute; top:0; transform:translateX(-50%); font-size:10px; color:var(--dim);
+    white-space:nowrap; pointer-events:none;}
+  .bp-mark::after{content:""; display:block; width:1px; height:8px; background:var(--dim); margin:2px auto 0;}
+  .presets{display:flex; gap:6px; flex-wrap:wrap;}
+  .presets button{padding:5px 10px; font-size:12px; border-radius:8px;
+    border:1px solid var(--line); background:var(--panel); color:var(--muted);}
+  .presets button:hover{border-color:var(--accent-dim); color:var(--txt);}
+  #widthOut{font-variant-numeric:tabular-nums; font-weight:700; color:var(--accent); min-width:64px; text-align:right;}
+
+  .ov-row{display:flex; align-items:center; gap:10px; margin-top:10px;
+    font-size:12px; color:var(--muted); flex-wrap:wrap;}
+  .ov-row input[type=range]{width:180px; accent-color:var(--accent); vertical-align:middle;}
+  .ov-row.disabled{opacity:.35; pointer-events:none;}
+  #ovOut{font-weight:700; color:var(--accent); min-width:40px; font-variant-numeric:tabular-nums;}
+  .ov-hint{font-size:11px; color:var(--dim);}
+
+  #status{margin-top:10px; font-size:12.5px; color:var(--muted); line-height:1.6;}
+  #status b{color:var(--txt);}
+  #status .mode-tag{display:inline-block; padding:1px 8px; border-radius:6px; font-size:11px; font-weight:600; margin-right:6px;}
+  .mode-tag.side{background:rgba(6,182,212,.15); color:var(--accent); border:1px solid rgba(6,182,212,.35);}
+  .mode-tag.over{background:rgba(234,179,8,.13); color:#eab308; border:1px solid rgba(234,179,8,.35);}
+  .mode-tag.fold{background:rgba(239,68,68,.13); color:var(--red); border:1px solid rgba(239,68,68,.35);}
+
+  /* ===== 演示舞台 ===== */
+  .stage{padding:28px 20px 10px; display:flex; justify-content:center; overflow-x:hidden;}
+  .device{position:relative; background:#0c0c0e; border:1px solid #3f3f46; border-radius:14px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5); flex-shrink:0;}
+  .grip{position:absolute; left:-16px; top:50%; transform:translateY(-50%); width:12px; height:72px;
+    border-radius:8px; background:var(--panel2); border:1px solid var(--line); cursor:ew-resize;
+    display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:10px;
+    letter-spacing:1px; user-select:none; touch-action:none;}
+  .grip:hover{border-color:var(--accent-dim); color:var(--accent);}
+
+  /* 设备内：顶栏 */
+  .topbar{display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:9px 12px; border-bottom:1px solid var(--line); overflow:hidden;}
+  .chips{display:flex; gap:6px; align-items:center; overflow:hidden;}
+  .chip{font-size:11px; color:var(--muted); border:1px solid var(--line); background:var(--panel);
+    border-radius:7px; padding:3px 9px; white-space:nowrap;}
+  .chip.rec{color:#fca5a5; border-color:rgba(239,68,68,.35);}
+  .chip.rec::before{content:"●"; color:var(--red); margin-right:5px; font-size:9px;}
+
+  /* 设备内：页面主体 */
+  .page{position:relative; padding:10px;}
+  .video{position:relative; height:330px; border-radius:10px; overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 10%, #1b2430 0%, #0d1117 55%, #07090c 100%);
+    border:1px solid #1f2937;}
+  .cam-label{position:absolute; top:10px; left:12px; font-size:11px; color:#94a3b8;
+    background:rgba(2,6,12,.55); border:1px solid rgba(148,163,184,.2); padding:3px 9px; border-radius:7px;}
+  .cam-dot{position:absolute; width:10px; height:10px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 14px 3px rgba(6,182,212,.55); animation:cruise 7s ease-in-out infinite alternate;}
+  @keyframes cruise{
+    0%{left:12%; top:62%;} 30%{left:34%; top:38%;} 60%{left:58%; top:58%;}
+    85%{left:78%; top:34%;} 100%{left:88%; top:52%;}}
+  .track-line{position:absolute; left:0; right:0; top:52%; height:0;
+    border-top:1px dashed rgba(148,163,184,.18);}
+  .fs-btn{position:absolute; right:10px; bottom:10px; width:30px; height:30px; border-radius:8px;
+    background:rgba(2,6,12,.55); border:1px solid rgba(148,163,184,.25); color:#cbd5e1; font-size:13px;}
+  .legend{display:flex; gap:16px; margin-top:8px; padding:7px 56px 7px 10px; border:1px solid var(--line);
+    border-radius:9px; background:var(--panel); overflow:hidden; white-space:nowrap;}
+  .legend span{font-size:11px; color:var(--muted); display:inline-flex; align-items:center; gap:5px;}
+  .dot{width:7px; height:7px; border-radius:50%; display:inline-block;}
+
+  /* ===== 右侧摇杆簇（面板 + 把手）：优化模式由 JS 绝对定位 + 缩放 ===== */
+  .dock{display:flex; align-items:flex-start; gap:6px;}
+  .page.dockmode .dock{position:absolute; top:0; right:10px; z-index:30; transform-origin:top right;
+    transition:transform .16s ease-out;}
+  .page.dockmode .video-col{transition:margin-right .22s ease;}
+
+  .panel{width:384px; max-width:none; background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; overflow:hidden; box-shadow:0 12px 32px rgba(0,0,0,.45);
+    transition:width .28s ease, opacity .28s ease, background .25s ease;}
+  .dock:not(.open) .panel{width:0 !important; opacity:0; border-color:transparent; box-shadow:none;}
+  .panel-inner{width:352px; padding:14px; display:flex; flex-direction:column; gap:12px;}
+  .dock.overlay .panel{background:rgba(24,24,27,.78); backdrop-filter:blur(2px);
+    border-color:rgba(6,182,212,.28); opacity:var(--overlay-alpha);}
+
+  .panel-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .panel-title{display:flex; align-items:center; gap:7px; font-size:13px; font-weight:700;}
+  .panel-title svg{color:var(--accent);}
+  .src-chip{font-size:11px; color:var(--accent); border:1px solid rgba(6,182,212,.4);
+    background:rgba(6,182,212,.1); padding:2px 8px; border-radius:7px; white-space:nowrap;}
+
+  .joy-row{display:flex; gap:20px; align-items:center; justify-content:center;}
+  /* 竖直油门条 */
+  .thr{position:relative; width:34px; height:220px; border-radius:17px; background:#0a0a0c;
+    border:2px solid var(--line); overflow:hidden;}
+  .thr-mid{position:absolute; left:0; right:0; top:50%; height:1px; background:var(--line);}
+  .thr-fill{position:absolute; left:3px; right:3px; background:var(--accent); border-radius:6px; top:50%; height:0;}
+  .thr-fill.neg{background:var(--red);}
+  /* 摇杆本体 */
+  .joy{position:relative; width:220px; height:220px; border-radius:50%; background:#09090b;
+    border:2px solid var(--line); touch-action:none; user-select:none; flex-shrink:0;}
+  .joy.drag{border-color:rgba(6,182,212,.6); box-shadow:0 0 24px rgba(6,182,212,.12);}
+  .ring{position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); border-radius:50%;
+    border:1px solid #1c1c1f; pointer-events:none;}
+  .ring.dash{border-style:dashed; border-color:rgba(39,39,42,.6);}
+  .vline{position:absolute; left:50%; top:0; width:1px; height:100%; background:#1c1c1f; transform:translateX(-50%);}
+  .hline{position:absolute; top:50%; left:0; height:1px; width:100%; background:#1c1c1f; transform:translateY(-50%);}
+  .knob{position:absolute; top:50%; left:50%; width:56px; height:56px; border-radius:50%;
+    background:#71717a; box-shadow:0 6px 14px rgba(0,0,0,.5); pointer-events:none;
+    transform:translate(-50%,-50%); transition:transform .18s ease;}
+  .joy.drag .knob{transition:none; background:rgba(6,182,212,.55);}
+
+  /* 转向条 */
+  .ang{position:relative; height:10px; border-radius:5px; background:#0a0a0c; border:1px solid var(--line); overflow:hidden;}
+  .ang-mid{position:absolute; left:50%; top:0; bottom:0; width:1px; background:var(--line);}
+  .ang-fill{position:absolute; top:2px; bottom:2px; left:50%; background:var(--accent); border-radius:4px; width:0;}
+
+  .prog-row{display:flex; gap:8px; justify-content:center;}
+  .prog-row button{padding:7px 0; flex:1; max-width:118px; font-size:12px; border-radius:8px;
+    border:1px dashed var(--line); background:transparent; color:var(--muted);}
+  .prog-row button:hover{border-color:var(--accent-dim); color:var(--txt);}
+  .hotkeys{font-size:10px; color:var(--dim); text-align:center; line-height:1.7;}
+
+  /* 把手（悬浮触发按钮） */
+  .handle{display:flex; flex-direction:column; align-items:center; gap:6px; padding:9px 6px;
+    border-radius:10px; background:var(--panel); border:1px solid var(--line); color:var(--muted);
+    box-shadow:0 8px 20px rgba(0,0,0,.4); flex-shrink:0;}
+  .handle:hover{background:var(--panel2); color:#fff;}
+  .handle svg{flex-shrink:0;}
+  .handle .vt{writing-mode:vertical-rl; font-size:11px; font-weight:600; letter-spacing:3px; line-height:1;}
+
+  /* 帮助 FAB：始终右下 */
+  .helpfab{position:absolute; right:12px; bottom:12px; z-index:40; width:42px; height:42px;
+    border-radius:50%; border:1px solid rgba(6,182,212,.6); background:var(--accent); color:#04252b;
+    font-size:21px; font-weight:900; line-height:1; box-shadow:0 8px 18px rgba(0,0,0,.45);}
+
+  /* ===== 旧版行为复刻 ===== */
+  .device.mode-old .page{display:flex; flex-direction:row; align-items:flex-start; gap:10px;}
+  .device.mode-old.narrow-old .page{flex-direction:column; align-items:stretch;}
+  .device.mode-old .video-col{flex:1; min-width:0; margin-right:0 !important;}
+  .device.mode-old .dock{position:static !important; transform:none !important;}
+  .device.mode-old .dock.open .panel{width:384px;}
+  .device.mode-old.narrow-old .dock.open .panel{width:min(384px, calc(100% - 56px));}
+  .device.mode-old .dock.overlay .panel{background:var(--panel); backdrop-filter:none; border-color:var(--line);}
+
+  /* ===== 底部说明 ===== */
+  .notes{max-width:960px; margin:26px auto 40px; padding:0 24px;}
+  .notes h2{font-size:14px; color:var(--txt); margin-bottom:10px;}
+  .notes li{font-size:12.5px; color:var(--muted); line-height:1.9; margin-left:18px;}
+  .notes code{background:var(--panel2); border:1px solid var(--line); border-radius:5px;
+    padding:1px 6px; font-size:11.5px; color:#67e8f9;}
+</style>
+</head>
+<body>
+
+<!-- 控制区 -->
+<section class="controls">
+  <div class="controls-row1">
+    <div class="title">虚拟摇杆 · 右侧常驻缩放优化演示
+      <small>对比旧版「窄屏折叠到视频下方」与优化版「右缘吸附 + 连续缩放」——拖动滑块或模拟屏左缘把手即可评估</small>
+    </div>
+    <div class="seg" id="modeSeg">
+      <button data-mode="new" class="on">优化缩放（新）</button>
+      <button data-mode="old">旧版行为（当前线上）</button>
+    </div>
+  </div>
+  <div class="controls-row2">
+    <div class="slider-wrap">
+      <div class="bp-mark" id="bpMark" style="left:65.2%">旧版折叠断点 1024px</div>
+      <input type="range" id="widthSlider" min="320" max="1440" step="2" value="700">
+    </div>
+    <div class="presets" id="presets"></div>
+    <output id="widthOut">700px</output>
+  </div>
+  <div class="ov-row" id="ovRow">
+    <span>悬浮模式摇杆透明度</span>
+    <input type="range" id="ovSlider" min="25" max="100" step="5" value="40">
+    <output id="ovOut">40%</output>
+    <span class="ov-hint">数值越低画面越透出来（仅优化模式的悬浮状态生效）</span>
+  </div>
+  <div id="status"></div>
+</section>
+
+<!-- 模拟屏幕 -->
+<main class="stage">
+  <div class="device" id="device" style="width:700px">
+    <div class="grip" id="grip" title="拖拽改变模拟屏宽（双击复位 700px）">⟨⟩</div>
+
+    <div class="topbar">
+      <div class="chips">
+        <span class="chip">▶ 普通模式</span>
+        <span class="chip">drift_v3.onnx</span>
+        <span class="chip rec">REC 0128</span>
+      </div>
+      <div class="chips"><span class="chip">⇄ 已连接</span></div>
+    </div>
+
+    <div class="page dockmode" id="page">
+      <!-- 左：视频 + 图例 -->
+      <div class="video-col" id="videoCol">
+        <div class="video">
+          <span class="cam-label">DRIFT CAM · 30FPS</span>
+          <div class="track-line"></div>
+          <div class="cam-dot"></div>
+          <button class="fs-btn" title="全屏">⛶</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot" style="background:#06b6d4"></i>转向 · 期望</span>
+          <span><i class="dot" style="background:#a78bfa"></i>转向 · 实际</span>
+          <span><i class="dot" style="background:#22c55e"></i>油门 · 期望</span>
+          <span><i class="dot" style="background:#facc15"></i>油门 · 实际</span>
+        </div>
+      </div>
+
+      <!-- 右：摇杆抽屉（面板 + 把手） -->
+      <aside class="dock open" id="dock">
+        <div class="panel" id="panel">
+          <div class="panel-inner" id="panelInner">
+            <div class="panel-head">
+              <span class="panel-title">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>
+                虚拟摇杆
+              </span>
+              <span class="src-chip">输入源 · 触屏</span>
+            </div>
+            <div class="joy-row">
+              <div class="thr" id="thr"><div class="thr-mid"></div><div class="thr-fill" id="thrFill"></div></div>
+              <div class="joy" id="joy">
+                <div class="ring" style="width:164px;height:164px"></div>
+                <div class="ring dash" style="width:82px;height:82px"></div>
+                <div class="vline"></div><div class="hline"></div>
+                <div class="knob" id="knob"></div>
+              </div>
+            </div>
+            <div class="ang"><div class="ang-mid"></div><div class="ang-fill" id="angFill"></div></div>
+            <div class="prog-row"><button>● 开始录制</button><button>★ 标记片段</button></div>
+            <div class="hotkeys">W/A/S/D 转向与油门 · Space 急停<br>J 虚拟摇杆 · G 陀螺仪 · 手柄自动接入</div>
+          </div>
+        </div>
+        <button class="handle" id="handle" title="收起 / 展开虚拟摇杆">
+          <svg id="handleIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          <span class="vt">虚拟摇杆</span>
+        </button>
+      </aside>
+    </div>
+
+    <button class="helpfab" title="快捷键帮助（常驻右下）">?</button>
+  </div>
+</main>
+
+<!-- 优化要点 -->
+<section class="notes">
+  <h2>优化机制（对应 DrivePage.tsx 右侧抽屉）</h2>
+  <ul>
+    <li><b>右缘常驻：</b>摇杆簇（面板 + 把手）改为绝对定位吸附视频右上缘（<code>position:absolute; right; transform-origin:top right</code>），任何屏宽下都不再进入文档流、不再折叠到视频下方。</li>
+    <li><b>连续缩放：</b>缩放比随屏宽连续变化 <code>s = clamp(0.62, (vw − 366) / 420, 1)</code>，取代 1024px 断点的位置跳变；把手与面板整体等比缩放，触控热区同步。</li>
+    <li><b>视频连续让位：</b>并排时视频右侧让位 = 面板簇宽 × s，拖动滑块可见画面宽度平滑变化、无跳变；屏宽不足 626px 时自动切入<b>悬浮模式</b>——面板降为半透明浮层（已确认 40%，可用上方滑块微调，背景模糊仅 2px）浮于视频右侧之上，视频恢复全宽、画面可辨。</li>
+    <li><b>收起/展开：</b>把手点击收起时面板宽度动画归零，只剩把手常驻右缘；帮助 FAB 始终右下角，两种模式下位置不变。</li>
+  </ul>
+</section>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const device=$('device'), page=$('page'), videoCol=$('videoCol'), dock=$('dock'),
+        panel=$('panel'), joy=$('joy'), knob=$('knob'), thrFill=$('thrFill'),
+        angFill=$('angFill'), handle=$('handle'), handleIcon=$('handleIcon'),
+        slider=$('widthSlider'), widthOut=$('widthOut'), statusEl=$('status');
+
+  const PANEL_W=384, GAP=6, HANDLE_W=30, MIN_VIDEO=320;
+  const state={ vw:700, mode:'new', open:true, overlayAlpha:.4 };
+  let scaleNow=1;
+
+  /* ---------- 布局核心 ---------- */
+  function layout(){
+    const vw=state.vw;
+    device.style.width=vw+'px';
+    widthOut.textContent=vw+'px';
+    slider.value=vw;
+
+    if(state.mode==='new'){
+      device.classList.remove('mode-old','narrow-old');
+      page.classList.add('dockmode');
+      ovRow.classList.remove('disabled');
+      const s=Math.max(0.62, Math.min(1,(vw-366)/420));
+      scaleNow=s;
+      const clusterW=(state.open? PANEL_W+GAP+HANDLE_W : HANDLE_W);
+      const need=clusterW*s+20;                    // 右缘 inset 10 + 呼吸 10
+      const overlay=state.open && (vw-need)<MIN_VIDEO;
+      dock.style.transform=`scale(${s})`;
+      dock.classList.toggle('overlay',overlay);
+      videoCol.style.marginRight=overlay?'0px':Math.round(clusterW*s+10)+'px';
+      handleIcon.innerHTML='<path d="M15 18l-6-6 6-6"/>';
+      const modeTag=overlay
+        ?'<span class="mode-tag over">悬浮模式</span>'
+        :'<span class="mode-tag side">并排模式</span>';
+      statusEl.innerHTML=state.open
+        ?`${modeTag}屏宽 <b>${vw}px</b> → 缩放 <b>${s.toFixed(2)}</b>（面板视觉宽 ${Math.round(PANEL_W*s)}px）`
+          +(overlay
+            ?` · 屏宽不足以并排，摇杆<b>半透明悬浮于视频右侧之上</b>（透明度 ${Math.round(state.overlayAlpha*100)}%），视频保持全宽`
+            :` · 视频右侧连续让位 <b>${Math.round(clusterW*s+10)}px</b>，无断点跳变`)
+        :`${modeTag}摇杆已收起，把手常驻右缘（缩放 ${s.toFixed(2)}）`;
+    }else{
+      device.classList.add('mode-old');
+      device.classList.toggle('narrow-old', vw<1024);
+      page.classList.remove('dockmode');
+      ovRow.classList.add('disabled');
+      dock.style.transform=''; dock.classList.remove('overlay');
+      videoCol.style.marginRight='';
+      statusEl.innerHTML=vw<1024
+        ?'<span class="mode-tag fold">折叠到下方</span>屏宽 <b>'+vw+'px</b> 低于断点 <b>1024px</b> → 摇杆窗口与把手整体<b>掉到视频下方</b>，位置跳变、无缩放'
+        :'<span class="mode-tag side">并排模式</span>屏宽 <b>'+vw+'px</b> ≥ 1024px → 右侧并排（原样）';
+    }
+  }
+
+  /* ---------- 控件 ---------- */
+  slider.addEventListener('input',()=>{ state.vw=+slider.value; layout(); });
+
+  /* 悬浮模式透明度 */
+  const ovRow=$('ovRow'), ovSlider=$('ovSlider'), ovOut=$('ovOut');
+  ovSlider.addEventListener('input',()=>{
+    state.overlayAlpha=+ovSlider.value/100;
+    ovOut.textContent=ovSlider.value+'%';
+    document.documentElement.style.setProperty('--overlay-alpha', state.overlayAlpha);
+    layout();
+  });
+
+  const presets=[['手机 375',375],['窄平板 560',560],['平板 700',700],['窄桌面 900',900],['断点 1024',1024],['桌面 1280',1280]];
+  const presetsEl=$('presets');
+  presets.forEach(([label,w])=>{
+    const b=document.createElement('button');
+    b.textContent=label;
+    b.onclick=()=>{ state.vw=w; layout(); };
+    presetsEl.appendChild(b);
+  });
+
+  $('modeSeg').addEventListener('click',e=>{
+    const btn=e.target.closest('button'); if(!btn) return;
+    [...$('modeSeg').children].forEach(b=>b.classList.toggle('on',b===btn));
+    state.mode=btn.dataset.mode; layout();
+  });
+
+  handle.addEventListener('click',()=>{
+    state.open=!state.open;
+    dock.classList.toggle('open',state.open);
+    handleIcon.innerHTML=state.open
+      ?'<path d="M15 18l-6-6 6-6"/>'
+      :'<path d="M9 18l6-6-6-6"/>';
+    layout();
+  });
+
+  /* 拖拽左缘把手调宽 */
+  const grip=$('grip');
+  let dragX=null, dragVw=0;
+  grip.addEventListener('pointerdown',e=>{
+    dragX=e.clientX; dragVw=state.vw;
+    grip.setPointerCapture(e.pointerId);
+  });
+  grip.addEventListener('pointermove',e=>{
+    if(dragX===null) return;
+    state.vw=Math.round(Math.min(1440,Math.max(320,dragVw+(e.clientX-dragX)*2)));
+    layout();
+  });
+  grip.addEventListener('pointerup',()=>{ dragX=null; });
+  grip.addEventListener('dblclick',()=>{ state.vw=700; layout(); });
+
+  /* ---------- 摇杆交互（缩放补偿） ---------- */
+  const MAX_R=82;
+  function setBars(dx,dy){
+    const thr=Math.max(-1,Math.min(1,-dy/MAX_R)), ang=Math.max(-1,Math.min(1,dx/MAX_R));
+    if(thr>=0){ thrFill.style.top=(50-thr*50)+'%'; thrFill.style.height=(thr*50)+'%'; thrFill.classList.remove('neg'); }
+    else{ thrFill.style.top='50%'; thrFill.style.height=(-thr*50)+'%'; thrFill.classList.add('neg'); }
+    angFill.style.width=Math.abs(ang)*50+'%';
+    angFill.style.left=ang>=0?'50%':(50-Math.abs(ang)*50)+'%';
+    if(ang<0) angFill.style.background='var(--red)'; else angFill.style.background='var(--accent)';
+  }
+  function joyMove(e){
+    const r=joy.getBoundingClientRect();
+    let dx=(e.clientX-(r.left+r.width/2))/scaleNow;
+    let dy=(e.clientY-(r.top+r.height/2))/scaleNow;
+    const d=Math.hypot(dx,dy);
+    if(d>MAX_R){ dx*=MAX_R/d; dy*=MAX_R/d; }
+    knob.style.transform=`translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    setBars(dx,dy);
+  }
+  joy.addEventListener('pointerdown',e=>{
+    joy.setPointerCapture(e.pointerId);
+    joy.classList.add('drag');
+    joyMove(e);
+  });
+  joy.addEventListener('pointermove',e=>{ if(joy.classList.contains('drag')) joyMove(e); });
+  const joyEnd=()=>{
+    joy.classList.remove('drag');
+    knob.style.transform='translate(-50%,-50%)';
+    setBars(0,0);
+  };
+  joy.addEventListener('pointerup',joyEnd);
+  joy.addEventListener('pointercancel',joyEnd);
+
+  layout();
+})();
+</script>
+</body>
+</html>

@@ -20,6 +20,7 @@ if str(BACKEND_DIR) not in sys.path:
 class FakePilot:
     last_image = None
     run_count = 0
+    shutdown_count = 0
 
     def __init__(self):
         self.loaded_path = None
@@ -32,12 +33,16 @@ class FakePilot:
         FakePilot.run_count += 1
         return 0.25, 0.5
 
+    def shutdown(self):
+        FakePilot.shutdown_count += 1
+
 
 def make_client(monkeypatch):
     arena = importlib.import_module("routers.arena")
     arena = importlib.reload(arena)
     FakePilot.last_image = None
     FakePilot.run_count = 0
+    FakePilot.shutdown_count = 0
 
     monkeypatch.setattr(arena, "get_model_by_type", lambda model_type, cfg: FakePilot())
     monkeypatch.setattr(arena, "load_car_config", lambda config_path=None: SimpleNamespace())
@@ -78,7 +83,8 @@ def test_processing_config_provides_noop_crop_defaults():
 def test_list_models_includes_all_arena_model_formats(tmp_path):
     models_dir = tmp_path / "models"
     models_dir.mkdir()
-    for name in ["pilot.h5", "pilot.tflite", "pilot.savedmodel", "pilot.trt", "loss.png"]:
+    for name in ["pilot.h5", "pilot.tflite", "pilot.savedmodel", "pilot.trt",
+                 "pilot.aidem", "loss.png"]:
         (models_dir / name).write_text("model")
 
     from routers import arena
@@ -90,7 +96,42 @@ def test_list_models_includes_all_arena_model_formats(tmp_path):
 
     assert response.status_code == 200
     names = {item["name"] for item in response.json()["models"]}
-    assert names == {"pilot.h5", "pilot.tflite", "pilot.savedmodel", "pilot.trt"}
+    assert names == {"pilot.h5", "pilot.tflite", "pilot.savedmodel", "pilot.trt",
+                     "pilot.aidem"}
+
+
+def test_model_types_include_aidlite_linear():
+    from routers import arena
+
+    client = TestClient(FastAPI())
+    client.app.include_router(arena.router, prefix="/api/arena")
+
+    response = client.get("/api/arena/model-types")
+
+    assert response.status_code == 200
+    assert "aidlite_linear" in response.json()["model_types"]
+
+
+def test_list_models_with_aidlite_type_returns_only_aidem(tmp_path):
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    for name in ["pilot.aidem", "pilot.tflite", "pilot.h5"]:
+        (models_dir / name).write_text("model")
+
+    from routers import arena
+
+    client = TestClient(FastAPI())
+    client.app.include_router(arena.router, prefix="/api/arena")
+
+    response = client.get(
+        "/api/arena/models",
+        params={"working_dir": str(tmp_path), "model_type": "aidlite_linear"},
+    )
+
+    assert response.status_code == 200
+    models = response.json()["models"]
+    assert [item["name"] for item in models] == ["pilot.aidem"]
+    assert models[0]["format"] == "aidem"
 
 
 def test_list_models_includes_savedmodel_directory(tmp_path):
@@ -203,6 +244,28 @@ def test_load_and_unload_pilot(monkeypatch, tmp_path):
     delete_response = client.delete(f"/api/arena/pilots/{pilot['id']}")
     assert delete_response.status_code == 200
     assert client.get("/api/arena/pilots").json()["pilots"] == []
+    # 卸载必须释放解释器（NPU 模型持有硬件上下文）
+    assert FakePilot.shutdown_count == 1
+
+
+def test_load_pilot_aidlite_linear(monkeypatch, tmp_path):
+    client, _ = make_client(monkeypatch)
+    model_path = tmp_path / "pilot.aidem"
+    model_path.write_text("model")
+
+    load_response = client.post(
+        "/api/arena/pilots/load",
+        json={
+            "model_path": str(model_path),
+            "model_type": "aidlite_linear",
+            "config_path": str(tmp_path),
+        },
+    )
+
+    assert load_response.status_code == 200
+    pilot = load_response.json()["pilot"]
+    assert pilot["name"] == "pilot.aidem"
+    assert pilot["model_type"] == "aidlite_linear"
 
 
 def test_predict_returns_user_and_pilot_values(monkeypatch, tmp_path):
