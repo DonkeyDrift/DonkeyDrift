@@ -212,7 +212,8 @@ html.theme-light .bg-black\/50 {
 }
 
 /* ======================================================================
- * 5. 可选取性（规格 §0/审计 #3）：chrome 保持不可选，数据与输入可选中。
+ * 5. 可选取性：index.css 已改为全局文本可选中（仅交互控件不可选），本规则
+ *    作为主题层的显式兜底保留（历史版本全局禁选时曾是唯一通路）。
  * ==================================================================== */
 html.theme-mus4 :is(input, textarea, [contenteditable='true'], code, pre, kbd, samp, .font-mono, [class*='font-mono'], [class*='select-text'], [data-selectable], .dd-selectable),
 html.theme-light :is(input, textarea, [contenteditable='true'], code, pre, kbd, samp, .font-mono, [class*='font-mono'], [class*='select-text'], [data-selectable], .dd-selectable) {
