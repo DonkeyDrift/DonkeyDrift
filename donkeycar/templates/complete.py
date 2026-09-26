@@ -861,13 +861,17 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array',
     )
     # inputs 顺序必须与 DriveApiBridge.run_threaded 签名严格一致（Vehicle 按位置解包）：
     # (img_arr, num_records, mode, recording, imu_gz, imu_gx, imu_gy,
-    #  imu_ax, imu_ay, imu_az, steering, throttle, pilot_angle, pilot_throttle)
+    #  imu_ax, imu_ay, imu_az, steering, throttle, pilot_angle, pilot_throttle,
+    #  rc_steering, rc_throttle, rc_mode, rc_park)
     # 非 HAVE_IMU 或 ARDUINO_CONTROLLER 模式下 imu/* key 可能不存在，Memory.get 返回 None，
     # run_threaded 收到 None 后不写入遥测消息（见 RFC 降级说明），无需条件分支。
+    # rc/* 来自 ArdRc（固件 T..S.. / M:P 帧上行）：接通 Drive 页 rc 油门/转向曲线、
+    # 驾驶模式跟随与 Park 锁定徽标；非 ARDUINO 模式下键不存在，同样走 None 跳过。
     ctr_inputs = [input_image, 'tub/num_records', 'user/mode', 'recording',
                   'imu/gyr_z', 'imu/gyr_x', 'imu/gyr_y',
                   'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
-                  'steering', 'throttle', 'pilot/angle', 'pilot/throttle']
+                  'steering', 'throttle', 'pilot/angle', 'pilot/throttle',
+                  'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park']
     V.add(ctr,
           inputs=ctr_inputs,
           outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],

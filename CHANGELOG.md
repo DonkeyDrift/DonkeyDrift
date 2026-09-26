@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-26 (258)
+
+- fix(telemetry): 修复 Drive 页 RC 油门/转向曲线无数据——complete 模板 `ctr_inputs` 漏接 `rc/*` 四键
+  - 现象（真机排障）：串口遥测链路（probe 实测 ~127 行/秒 T..S../$IMU）与 Web 后端广播均正常，但 Drive 页默认开启的 RC 油门/转向曲线整组空白，无法通过曲线确认底盘数据被读取；后端 WS 抓包显示 telemetry 消息只有 `steering/throttle` 两个命令值字段，`rc_*`/`gz` 等全部缺失。
+  - 根因：`donkeycar/templates/complete.py` 的 `ctr_inputs` 只有 14 个输入（到 `pilot/throttle` 为止），而 `DriveApiBridge.run_threaded` 签名在 `pilot_*` 之后还有 `rc_steering/rc_throttle/rc_mode/rc_park`——Vehicle 按位置解包，这四个参数恒为 None；`_maybe_send_telemetry` 对 None 字段整段跳过，`ArdRc` 写进 Memory 的 `rc/*` 永远上不了浏览器。接线随桥接签名扩展发生了漂移。
+  - 修复：`ctr_inputs` 追加 `'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'`（位置与签名严格对齐）；新增回归测试 `test_complete_template_wires_rc_telemetry_into_bridge`（AST/正则断言 `pilot/throttle` 之后必须依次是这四键，且模板注册了 `ArdRc` 生产者），防止未来签名再扩展时再次漂移。
+  - 附带确认：`HAVE_IMU=False` 时 gz/acc 五条曲线同样无数据（ArdImu 未挂载），属已知取舍——ARDUINO_CONTROLLER 车上启用 `HAVE_IMU=True` 会给新 tub 增加 6 列 IMU，与既有 tub 的 datastore_v2 schema 断言冲突，需先归档旧 tub，见 myconfig 注释。
+  - 真机验证：重启 `manage.py drive` 后 WS 客户端 8 秒收到 472 条 telemetry，消息体含 `rc_steering=-0.01`（固件 T 帧实时抖动）、`rc_mode=0`、`rc_park=1`；Drive 页曲线恢复绘制，Park 锁定徽标正常。
+
 ## 2026-09-25 (257)
 
 - fix(tubeditor): 修复 TM 页面上下两根播放进度条不同步——下方滑块不再因「持有焦点」而永久停摆
