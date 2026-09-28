@@ -10,6 +10,7 @@ import {
   getImageUrl,
   getSessionRecords,
   listTubSessions,
+  loadTub,
   type TubSession,
   type TubRecord,
 } from '../services/api';
@@ -54,6 +55,12 @@ const MAX_CATCHUP_FRAMES = 10;
 // 落后墙钟超过这么多帧（~1s）视为长停顿（切后台/网络卡死）：
 // 从当前帧重新对表继续 1x 播放，不追帧、不快进。
 const MAX_RESUME_LAG_FRAMES = 60;
+
+// 自动刷新规则（录制库缓存治理）：TM section 常驻挂载（#178），录制列表与
+// 选中录制的帧只在 tubPath 变化/删除/AI 清理后拉取，Drive 页新录制的场次
+// 不会自动出现，新老数据混在一起。除手动「刷新」外，激活期间每 30s 静默
+// 检查一次新录制；播放中与浏览器后台标签页暂停；激活时数据已过期立即补一次。
+const AUTO_REFRESH_INTERVAL_MS = 30_000;
 
 /** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
  *  canvas 占位底色按 --surface 随主题（深/浅）切换自动重取色。 */
@@ -168,6 +175,12 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   const [pinned, setPinned] = useState<string[]>([]);
   const [actualFps, setActualFps] = useState(0);
   const [aiCleanOpen, setAiCleanOpen] = useState(false);
+  // 手动刷新进行中（按钮转圈/禁用）；refreshEpoch 递增使帧图片 URL 变化，
+  // 绕过浏览器对 /tub/image 的 HTTP 缓存（max-age=86400）
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshEpoch, setRefreshEpoch] = useState(0);
+  const refreshingRef = useRef(false);
+  const lastRefreshRef = useRef<number>(Date.now());
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -238,11 +251,12 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     pump();
   }, [touchImageCache]);
 
-  const refreshSessions = useCallback(async (path: string) => {
+  const refreshSessions = useCallback(async (path: string): Promise<TubSession[]> => {
     setError(null);
     try {
       const data = await listTubSessions(path);
       const items = data.sessions || [];
+      lastRefreshRef.current = Date.now();
       setSessions(items);
       // Auto-select the newest recording when nothing (valid) is selected
       setSelected((prev) =>
@@ -250,9 +264,11 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
           ? prev
           : items[0] ?? null,
       );
+      return items;
     } catch (err) {
       setSessions([]);
       setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
+      return [];
     }
   }, [t]);
 
@@ -260,13 +276,24 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     recordsRef.current = records;
   }, [records]);
 
+  // 手动刷新纪元：刷新后帧图片 URL 追加 &r=<epoch>。后端 /tub/image 带
+  // max-age=86400，同一 tub 路径重建后同名帧文件会命中浏览器旧图——
+  // 换 URL 强制绕过 HTTP 缓存，保证「刷新后看到新数据」。
+  const imageUrlWithEpoch = useCallback(
+    (path: string) => {
+      const url = getImageUrl(path, tubPath);
+      return refreshEpoch > 0 ? `${url}&r=${refreshEpoch}` : url;
+    },
+    [tubPath, refreshEpoch],
+  );
+
   // 预计算所有帧的图片 URL，避免播放循环每帧重复调用 getImageUrl()
   useEffect(() => {
     imageUrlsRef.current = records.map((r) => {
       const path = findImagePath(r);
-      return path ? getImageUrl(path, tubPath) : '';
+      return path ? imageUrlWithEpoch(path) : '';
     });
-  }, [records, tubPath]);
+  }, [records, imageUrlWithEpoch]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -383,7 +410,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
       return;
     }
 
-    const url = getImageUrl(currentImagePath, tubPath);
+    const url = imageUrlWithEpoch(currentImagePath);
     let img = imageCacheRef.current.get(url);
     if (!img) {
       img = new Image();
@@ -414,7 +441,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
         img?.removeEventListener('error', onError);
       };
     }
-  }, [currentImagePath, tubPath, theme, touchImageCache]);
+  }, [currentImagePath, imageUrlWithEpoch, theme, touchImageCache]);
 
   // Playback loop: wall-clock scheduled — position derives from elapsed time
   // (start frame + elapsed/frameInterval), each rAF tick draws the newest
@@ -633,6 +660,106 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     }
   }, [tubPath, selected, refreshSessions, setTub, setActiveSession]);
 
+  // 手动「刷新」（用户报障：常驻挂载下录制列表与选中帧长期停留在旧快照，
+  // 新老数据混在一起）：清空浏览器内暂存的数据后全量重拉——录制列表、当前
+  // 选中录制的帧、全局 tub（编辑器等面板同步），并递增图片 URL 纪元绕过
+  // 浏览器 HTTP 缓存（/tub/image 带 max-age=86400）。
+  const hardRefresh = useCallback(async () => {
+    if (!tubPath || refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    // 停止播放并清空内存帧缓存，避免旧图继续贴在画面上
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    imageCacheRef.current.clear();
+    setRefreshEpoch((e) => e + 1);
+    setError(null);
+    try {
+      const items = await refreshSessions(tubPath);
+      const nextSelected =
+        selected && items.some((s) => s.session_id === selected.session_id)
+          ? selected
+          : items[0] ?? null;
+      setSelected(nextSelected);
+
+      let nextRecords: TubRecord[] = [];
+      if (nextSelected) {
+        try {
+          const data = await getSessionRecords(tubPath, nextSelected.session_id);
+          nextRecords = data.records || [];
+        } catch {
+          // 会话级刷新尽力而为：列表已更新，下方全局 tub 仍会刷新
+        }
+      }
+      // 全局 tub 同步（与整条删除后的逻辑一致）；setTub 会清空 activeSession，
+      // 因此必须在 setTub 之后重新写入 activeSession
+      try {
+        const data = await loadTub(tubPath);
+        setTub(
+          data.path,
+          data.records || [],
+          data.fields || [],
+          data.total_physical_records,
+          data.deleted_indexes,
+        );
+      } catch {
+        // Refreshing the global tub is best-effort; the library list is already updated
+      }
+      setRecords(nextRecords);
+      setActiveSession(nextSelected?.session_id ?? null, nextRecords as StoreTubRecord[]);
+      setFrame(0);
+      frameRef.current = 0;
+      setImageError(false);
+    } catch (err) {
+      setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
+    }
+  }, [tubPath, selected, refreshSessions, setTub, setActiveSession, t]);
+
+  // 自动刷新（静默）：只重拉录制列表；当前选中录制有新增帧且未在播放时，
+  // 一并静默重拉其帧并保持当前帧位置。不动图片缓存、不递增纪元，
+  // 避免周期性全量重载拖慢页面。
+  const softRefresh = useCallback(async () => {
+    if (!tubPath || refreshingRef.current || isPlayingRef.current) return;
+    try {
+      const items = await refreshSessions(tubPath);
+      if (
+        selected &&
+        !isPlayingRef.current &&
+        items.some((s) => s.session_id === selected.session_id)
+      ) {
+        const current = items.find((s) => s.session_id === selected.session_id);
+        if (current && current.record_count !== selected.record_count) {
+          const data = await getSessionRecords(tubPath, selected.session_id);
+          const next = data.records || [];
+          setRecords(next);
+          setActiveSession(selected.session_id, next as StoreTubRecord[]);
+          frameRef.current = Math.min(frameRef.current, Math.max(0, next.length - 1));
+          setFrame(frameRef.current);
+        }
+      }
+    } catch {
+      // refreshSessions 内部已 setError；轮询失败不打断用户操作
+    }
+  }, [tubPath, selected, refreshSessions, setActiveSession]);
+
+  // 自动刷新调度：TM section 激活期间每 30s 检查一次；播放中与浏览器后台
+  // 标签页暂停；激活（滚回视口/切回标签页）时数据已过期则立即补一次。
+  useEffect(() => {
+    if (!isTubManagerActive || !tubPath) return;
+    const tick = () => {
+      if (document.hidden) return;
+      if (isPlayingRef.current) return;
+      if (Date.now() - lastRefreshRef.current < AUTO_REFRESH_INTERVAL_MS) return;
+      void softRefresh();
+    };
+    tick();
+    const timer = window.setInterval(tick, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [isTubManagerActive, tubPath, softRefresh]);
+
   const hasRecords = records.length > 0;
 
   // 统一总帧数口径：列表头合计显示所有录制的有效帧之和（record_count 为迭代
@@ -670,17 +797,32 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
             title={t('tubLibrary.title')}
             subtitle={t('tubLibrary.subtitle')}
           />
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!tubPath}
-            aria-label={t('aiClean.entryAria')}
-            title={t('aiClean.entryAria')}
-            onClick={() => setAiCleanOpen(true)}
-          >
-            <Sparkles className="w-4 h-4" />
-            <span className="text-xs">{t('aiClean.entry')}</span>
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!tubPath || refreshing}
+              aria-label={t('tubLibrary.refreshAria')}
+              title={t('tubLibrary.refreshTitle')}
+              onClick={() => void hardRefresh()}
+            >
+              <RotateCcw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+              <span className="text-xs">
+                {refreshing ? t('tubLibrary.refreshing') : t('tubLibrary.refresh')}
+              </span>
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!tubPath}
+              aria-label={t('aiClean.entryAria')}
+              title={t('aiClean.entryAria')}
+              onClick={() => setAiCleanOpen(true)}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="text-xs">{t('aiClean.entry')}</span>
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
