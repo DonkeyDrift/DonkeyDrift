@@ -154,12 +154,12 @@ html.theme-light {
   --warn-mode: rgba(255, 149, 0, 0.6);
   --warn-a60: rgba(255, 149, 0, 0.6);
 
-  /* radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊；logo 图标 8px) */
+  /* radii (Apple Pro: 20px 卡片 / 24px 浮层与媒体井 / 12px 控件 / 9999px 胶囊；logo 图标 8px) */
   --r-sm: 10px;
   --r: 10px;
-  --r-md: 10px;
-  --r-lg: 18px;
-  --r-xl: 18px;
+  --r-md: 12px;
+  --r-lg: 20px;
+  --r-xl: 24px;
   --r-pill: 9999px;
   --r-logo: 8px;
 
@@ -173,9 +173,10 @@ html.theme-light {
   --w-badge: 600;
   --tracking-title: -0.02em;
 
-  /* shadows —— 卡片保持 hairline-only（--shadow-sm: none），浮层单独给 elevation：
-     浅色下浮层只靠 1.12:1 的描边分界会读起来是“贴上去的方块”。 */
-  --shadow-sm: none;
+  /* shadows —— Apple Pro 卡片材质：hairline 描边（见 .bg-zinc-900 规则）叠加
+     双层柔和投影（近身接触影 + 大半径环境影），卡片从“贴上去的方块”变成
+     浮于画布的表面；浮层沿用更大的 elevation。 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.07);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   --shadow-2xl: 0 20px 56px rgba(0, 0, 0, 0.18), 0 4px 10px rgba(0, 0, 0, 0.1);
@@ -564,7 +565,7 @@ html.theme-light .accent-cyan-400 {
   accent-color: var(--accent);
 }
 
-/* ---------- Radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊，经 --r-* 变量) ---------- */
+/* ---------- Radii (Apple Pro: 20px 卡片 / 24px 浮层 / 12px 控件 / 9999px 胶囊，经 --r-* 变量) ---------- */
 html.theme-light .rounded-sm {
   border-radius: var(--r-sm);
 }
@@ -642,6 +643,13 @@ html.theme-light .shadow-2xl {
 html.theme-light button.bg-cyan-600,
 html.theme-light button.bg-cyan-500 {
   font-weight: var(--w-fill);
+  /* Apple Pro 材质：全页唯一实心蓝给同色柔和投影，明确“主行动”的浮起层级；
+     红/绿填充保持中性 shadow-sm，避免多色投影互相打架。 */
+  box-shadow: 0 1px 2px rgba(0, 113, 227, 0.35), 0 6px 16px rgba(0, 113, 227, 0.25);
+}
+html.theme-light button.bg-cyan-600:hover,
+html.theme-light button.bg-cyan-500:hover {
+  box-shadow: 0 1px 2px rgba(0, 113, 227, 0.35), 0 8px 20px rgba(0, 113, 227, 0.3);
 }
 html.theme-light button.bg-red-600.text-white,
 html.theme-light button.bg-red-500.text-white,
@@ -850,7 +858,7 @@ html.theme-light .car-connector-btn[aria-current="page"] {
   color: var(--accent-ui);
 }
 /* 标题左侧 logo：32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px）、圆角 8px、边框 --line-soft
-   （圆角显式锁定 8px，原因同深色侧：.rounded-lg 被主题改写为 18px；
+   （圆角显式锁定 8px，原因同深色侧：.rounded-lg 被主题改写为 20px；
      box-sizing 显式 content-box：避免 Tailwind border-box 使边框占进 32px、图标小一圈；
      --r-logo 保持 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
 html.theme-light .header-logo {

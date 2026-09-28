@@ -92,10 +92,11 @@ describe('拍平后的调色板 = Apple token（规格 §1/§2/§5/§6）', () =
     expect(lightPal['--line-mid']).toBe(lightPal['--separator']);
   });
 
-  it('圆角/字重/标题字距 = Apple 刻度（18/10/9999、600、-0.02em）', () => {
+  it('圆角/字重/标题字距 = Apple Pro 刻度（20/24/12/9999、600、-0.02em）', () => {
     for (const tokens of [dark, lightPal]) {
-      expect(tokens['--r-lg']).toBe('18px');
-      expect(tokens['--r-md']).toBe('10px');
+      expect(tokens['--r-lg']).toBe('20px');
+      expect(tokens['--r-xl']).toBe('24px');
+      expect(tokens['--r-md']).toBe('12px');
       expect(tokens['--r-pill']).toBe('9999px');
       expect(tokens['--w-bold']).toBe('600');
       expect(tokens['--w-extrabold']).toBe('600');
@@ -103,9 +104,12 @@ describe('拍平后的调色板 = Apple token（规格 §1/§2/§5/§6）', () =
     }
   });
 
-  it('浮层恢复 elevation，卡片仍是 hairline-only', () => {
+  it('浅色卡片 hairline + 双层柔和投影（Apple Pro 材质），深色卡片仍 hairline-only', () => {
+    expect(lightPal['--shadow-sm']).toBe(
+      '0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.07)',
+    );
+    expect(dark['--shadow-sm']).toBe('none');
     for (const tokens of [dark, lightPal]) {
-      expect(tokens['--shadow-sm']).toBe('none');
       expect(tokens['--shadow-lg']).toMatch(/^0 8px 30px rgba\(0, 0, 0, /);
       expect(tokens['--shadow-xl']).toMatch(/^0 12px 40px rgba\(0, 0, 0, /);
     }

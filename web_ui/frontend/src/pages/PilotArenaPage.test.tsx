@@ -143,6 +143,54 @@ async function loadPilotAndGeneratePlot() {
   await waitFor(() => expect(api.getArenaPredictions).toHaveBeenCalled());
 }
 
+describe('PilotArenaPage 未加载空态引导', () => {
+  beforeEach(() => {
+    // 返回 2 个模型：页面只对「唯一模型」自动加载（autoLoad 需 models.length === 1），
+    // 这样空态不会在后台被自动加载悄悄消掉，测试可确定性断言
+    vi.mocked(api.listArenaModels).mockResolvedValue({
+      models: [
+        { path: '/tmp/DKG-1.tflite', name: 'DKG-1.tflite' },
+        { path: '/tmp/DKG-2.tflite', name: 'DKG-2.tflite' },
+      ],
+    } as unknown as Awaited<ReturnType<typeof api.listArenaModels>>);
+  });
+
+  it('pilot 未加载时显示空态说明与次级提示，加载后消失', async () => {
+    render(<PilotArenaPage />);
+
+    // 初始未加载：空态出现，卡片标题仍是 noPilotLoaded
+    expect(await screen.findByText('arena.pilotEmptyDesc')).toBeInTheDocument();
+    expect(screen.getByText('arena.pilotEmptyHint')).toBeInTheDocument();
+    expect(screen.getByText('arena.noPilotLoaded')).toBeInTheDocument();
+
+    const loadButton = await screen.findByRole('button', { name: 'arena.loadAndPredict' });
+    await waitFor(() => expect(loadButton).toBeEnabled());
+    fireEvent.click(loadButton);
+    await waitFor(() => expect(api.loadArenaPilot).toHaveBeenCalled());
+
+    // 已加载：空态与「未加载」标题都不再出现，渲染路径恢复原样
+    await waitFor(() => expect(screen.queryByText('arena.pilotEmptyDesc')).not.toBeInTheDocument());
+    expect(screen.queryByText('arena.pilotEmptyHint')).not.toBeInTheDocument();
+    expect(screen.queryByText('arena.noPilotLoaded')).not.toBeInTheDocument();
+  });
+
+  it('多列对比时空态对每一列独立生效', async () => {
+    render(<PilotArenaPage />);
+    await screen.findByText('arena.pilotEmptyDesc');
+
+    // 添加第二列：两列都未加载，各有一份空态
+    fireEvent.click(screen.getByRole('button', { name: 'arena.addPilot' }));
+    await waitFor(() => expect(screen.getAllByText('arena.pilotEmptyDesc')).toHaveLength(2));
+
+    // 只加载第一列：该列空态消失，第二列保留
+    const loadButtons = screen.getAllByRole('button', { name: 'arena.loadAndPredict' });
+    await waitFor(() => expect(loadButtons[0]).toBeEnabled());
+    fireEvent.click(loadButtons[0]);
+    await waitFor(() => expect(api.loadArenaPilot).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByText('arena.pilotEmptyDesc')).toHaveLength(1));
+  });
+});
+
 describe('PilotArenaPage 模型贴合摘要', () => {
   it('生成曲线后渲染 angle/throttle 两侧误差指标', async () => {
     vi.mocked(api.getArenaPredictions).mockResolvedValue({

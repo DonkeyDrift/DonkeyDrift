@@ -153,12 +153,13 @@ html.theme-mus4 {
   --warn-mode: rgba(255, 159, 10, 0.55);
   --warn-a60: rgba(255, 159, 10, 0.6);
 
-  /* radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊；logo 图标 8px) */
+  /* radii (Apple Pro: 20px 卡片 / 24px 浮层与媒体井 / 12px 控件 / 9999px 胶囊；logo 图标 8px；
+     与 theme-light.css 几何刻度保持一致，两主题只换色不换形) */
   --r-sm: 10px;
   --r: 10px;
-  --r-md: 10px;
-  --r-lg: 18px;
-  --r-xl: 18px;
+  --r-md: 12px;
+  --r-lg: 20px;
+  --r-xl: 24px;
   --r-pill: 9999px;
   --r-logo: 8px;
 
@@ -563,7 +564,7 @@ html.theme-mus4 .accent-cyan-400 {
   accent-color: var(--accent);
 }
 
-/* ---------- Radii (Apple: 18px 卡片 / 10px 控件 / 9999px 胶囊，经 --r-* 变量) ---------- */
+/* ---------- Radii (Apple Pro: 20px 卡片 / 24px 浮层 / 12px 控件 / 9999px 胶囊，经 --r-* 变量) ---------- */
 html.theme-mus4 .rounded-sm {
   border-radius: var(--r-sm);
 }
@@ -793,11 +794,21 @@ html.theme-mus4 .console-mute-btn[aria-pressed="true"] {
   color: var(--accent-ui);
 }
 /* 标题左侧 logo：32px 内容 + 1px 边框外凸（box-sizing:content-box，总 34px）、圆角 8px、边框 --line-soft
-   （圆角显式锁定 8px：上方 html.theme-mus4 .rounded-lg 会把 rounded-lg 改成 18px；
+   （圆角显式锁定 8px：上方 html.theme-mus4 .rounded-lg 会把 rounded-lg 改成 20px；
      box-sizing 显式 content-box：Tailwind preflight 默认 border-box 会让 border
      占进 32px 内使图标小一圈；--r-logo 保持 8px——32px 图标的 8px 圆角即 iOS 图标比例） */
 html.theme-mus4 .header-logo {
   box-sizing: content-box;
   border-radius: var(--r-logo);
   border-color: var(--line-soft);
+}
+
+/* ---------- 顶栏分段控件激活“拇指”（Layout.tsx .dd-nav-thumb，方案 B 药丸导航） ----------
+   深色下 bg-zinc-900 → --surface（#1c1c1e）比轨道（bg-zinc-800 → --surface2）还暗，
+   选中态会“陷进”轨道；Apple 深色分段控件的拇指是更亮的灰：换 --raised-2、
+   去掉卡片描边、改给深色投影（本主题 --shadow-sm = none，此处单独定义）。 */
+html.theme-mus4 .dd-nav-thumb {
+  background-color: var(--raised-2);
+  outline: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
