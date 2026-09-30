@@ -55,13 +55,15 @@ describe('DriveTargetCard', () => {
     });
   });
 
-  it('渲染状态行：当前目标、车端在线状态点与模拟器离线徽标', () => {
+  it('渲染状态行：当前目标、车端在线状态胶囊与模拟器离线徽标', () => {
     renderCard({ target: 'car', carOnline: true, simConnected: false });
     expect(screen.getByText('驾驶目标')).toBeInTheDocument();
     expect(screen.getByText('当前目标')).toBeInTheDocument();
     // 状态行值 + 分段按钮各一处「真车」
     expect(screen.getAllByText('真车').length).toBe(2);
-    expect(screen.getByText('车端在线')).toBeInTheDocument();
+    // 在线状态为绿色药丸胶囊
+    const pill = screen.getByText('车端在线');
+    expect(pill).toHaveClass('rounded-full', 'border-emerald-500/30', 'bg-emerald-500/20');
     expect(screen.getByText('模拟器离线，重连中…')).toBeInTheDocument();
   });
 

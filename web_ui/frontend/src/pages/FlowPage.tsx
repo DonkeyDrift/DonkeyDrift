@@ -49,10 +49,11 @@ function FlowSectionHeader({ step, meta }: { step: number; meta: SectionMeta }) 
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-500/40 bg-cyan-500/10 text-sm font-bold text-cyan-400">
+      {/* 步骤徽章：中性灰井 + 等宽数字（方案 B 的克制语言，不再用 cyan 描边抢视觉） */}
+      <span className="tnum flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-400">
         {step}
       </span>
-      <h2 className="text-xl font-bold leading-none text-zinc-100">{t(meta.titleKey)}</h2>
+      <h2 className="text-2xl font-semibold leading-none text-zinc-100">{t(meta.titleKey)}</h2>
     </div>
   );
 }

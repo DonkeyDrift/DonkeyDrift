@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { ModelsList } from './ModelsList';
 
 // 回归测试（issue 001）：loss 曲线浮窗遮挡相邻行操作按钮。
@@ -58,13 +59,21 @@ const models = [
 ];
 
 describe('ModelsList', () => {
+  // 组件内空态含 react-router <Link>，渲染需包一层 MemoryRouter
+  const renderList = () =>
+    render(
+      <MemoryRouter>
+        <ModelsList />
+      </MemoryRouter>,
+    );
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockListModels.mockResolvedValue({ models });
   });
 
   it('悬停有 loss 图的模型行延迟后显示 loss 曲线浮窗，移出消失', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
 
     const row = screen.getByText('m1.tflite').closest('div.bg-zinc-950');
@@ -83,7 +92,7 @@ describe('ModelsList', () => {
   });
 
   it('点击 loss 徽章打开 modal', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'trainer.viewLossChart' }));
@@ -99,7 +108,7 @@ describe('ModelsList', () => {
   });
 
   it('点击遮罩关闭 modal', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'trainer.viewLossChart' }));
 
@@ -109,7 +118,7 @@ describe('ModelsList', () => {
   });
 
   it('按 Esc 关闭 modal', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'trainer.viewLossChart' }));
 
@@ -119,7 +128,7 @@ describe('ModelsList', () => {
   });
 
   it('点击 X 按钮关闭 modal', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'trainer.viewLossChart' }));
 
@@ -129,7 +138,7 @@ describe('ModelsList', () => {
   });
 
   it('点击操作按钮（删除）不会误触打开 loss modal', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole('button', { name: 'trainer.deleteModel' })[0]);
@@ -142,7 +151,7 @@ describe('ModelsList', () => {
     Object.assign(window.navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
     });
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole('button', { name: 'trainer.copyPath' })[0]);
@@ -151,7 +160,7 @@ describe('ModelsList', () => {
   });
 
   it('无 loss 数据的模型显示补传入口与无数据提示', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m3.tflite')).toBeInTheDocument());
 
     expect(screen.getByText('trainer.noLossData')).toBeInTheDocument();
@@ -160,7 +169,7 @@ describe('ModelsList', () => {
   });
 
   it('点击补传按钮打开补传对话框', async () => {
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m3.tflite')).toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole('button', { name: 'trainer.uploadLoss' })[1]);
@@ -171,7 +180,7 @@ describe('ModelsList', () => {
   it('加载到车端传相对路径 ./models/<name>（后端拒绝绝对路径）', async () => {
     // 回归：列表项 m.path 是绝对路径，而 /drive/load_model 只接受 models/
     // 内的相对路径；直接传 m.path 会 400「model_path 必须是相对路径」。
-    render(<ModelsList />);
+    renderList();
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole('button', { name: 'trainer.loadToCar' })[0]);
@@ -179,5 +188,40 @@ describe('ModelsList', () => {
     await waitFor(() =>
       expect(mockLoadModelToCar).toHaveBeenCalledWith('./models/m1.tflite', '/models'),
     );
+  });
+
+  it('无模型时渲染空态引导（图标 + 标题 + 描述 + 行动区）', async () => {
+    mockListModels.mockResolvedValue({ models: [] });
+    renderList();
+
+    await waitFor(() => expect(screen.getByTestId('models-empty-state')).toBeInTheDocument());
+    expect(screen.getByText('trainer.noModelsTitle')).toBeInTheDocument();
+    expect(screen.getByText('trainer.noModelsDesc')).toBeInTheDocument();
+    // 行动区：导入模型主按钮 + 去 Drive 录数据入口
+    expect(screen.getAllByRole('button', { name: 'trainer.importModel' }).length).toBeGreaterThan(0);
+    const driveLink = screen.getByRole('link', { name: 'trainer.noModelsCtaDrive' });
+    expect(driveLink).toHaveAttribute('href', '/drive');
+  });
+
+  it('空态点击导入模型按钮打开导入对话框（复用头部同一 handler）', async () => {
+    mockListModels.mockResolvedValue({ models: [] });
+    renderList();
+
+    await waitFor(() => expect(screen.getByTestId('models-empty-state')).toBeInTheDocument());
+    const emptyState = screen.getByTestId('models-empty-state');
+    fireEvent.click(
+      Array.from(emptyState.querySelectorAll('button')).find(
+        (b) => b.textContent === 'trainer.importModel',
+      )!,
+    );
+
+    expect(screen.getByTestId('import-model-dialog')).toBeInTheDocument();
+  });
+
+  it('有模型时不渲染空态', async () => {
+    renderList();
+
+    await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
+    expect(screen.queryByTestId('models-empty-state')).toBeNull();
   });
 });

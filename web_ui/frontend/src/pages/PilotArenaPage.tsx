@@ -13,7 +13,8 @@ import { Line } from 'react-chartjs-2';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 import { Button } from '../components/ui/Button';
-import { ArrowLeftRight, ArrowRightLeft, Cpu, Database, LineChart, SlidersHorizontal } from 'lucide-react';
+import Empty from '../components/Empty';
+import { ArrowLeftRight, ArrowRightLeft, Bot, Cpu, Database, LineChart, SlidersHorizontal } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import {
   ArenaMetricSummary,
@@ -1101,6 +1102,14 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {!viewer.pilot && (
+                <Empty
+                  className="rounded-md border border-dashed border-zinc-700 py-6"
+                  icon={<Bot className="h-8 w-8" strokeWidth={1.5} />}
+                  title={t('arena.pilotEmptyDesc')}
+                  hint={t('arena.pilotEmptyHint')}
+                />
+              )}
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <label className="space-y-1 text-sm">
                   <span className="text-zinc-400">{t('arena.modelType')}</span>

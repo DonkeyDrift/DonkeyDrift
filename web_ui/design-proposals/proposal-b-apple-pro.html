@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DonkeyDrift — Drive</title>
+<style>
+  :root {
+    /* ── Color tokens ─────────────────────────────── */
+    --canvas:        #f5f5f7;
+    --surface:       #ffffff;
+    --surface-soft:  #fafafc;
+    --fill:          rgba(120,120,128,.10);
+    --fill-strong:   rgba(120,120,128,.16);
+    --stroke:        rgba(0,0,0,.055);
+    --stroke-strong: rgba(0,0,0,.10);
+    --ink:           #1d1d1f;
+    --ink-2:         #6e6e73;
+    --ink-3:         #86868b;
+    --blue:          #0071e3;
+    --blue-bright:   #0a84ff;
+    --blue-soft:     rgba(0,113,227,.09);
+    --green:         #30d158;
+    --green-deep:    #248a3d;
+    --orange:        #ff9f0a;
+    --red:           #ff453a;
+    --red-soft:      rgba(255,69,58,.10);
+
+    /* ── Radius scale ─────────────────────────────── */
+    --r-xl:   28px;   /* hero / media well */
+    --r-lg:   24px;   /* cards */
+    --r-md:   16px;   /* inner wells */
+    --r-sm:   12px;   /* inputs, chips */
+    --r-pill: 980px;
+
+    /* ── Shadow scale ─────────────────────────────── */
+    --sh-card: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05);
+    --sh-lift: 0 2px 4px rgba(0,0,0,.05), 0 16px 40px rgba(0,0,0,.09);
+    --sh-chip: 0 1px 3px rgba(0,0,0,.18), 0 8px 24px rgba(0,0,0,.22);
+
+    --ease: cubic-bezier(.32,.72,0,1);
+
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+            "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    font-family: var(--font);
+    background: var(--canvas);
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.47;
+    letter-spacing: -.01em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: rgba(0,113,227,.18); }
+
+  /* ══ Header ═══════════════════════════════════════ */
+  .hdr {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(245,245,247,.72);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--stroke);
+  }
+  .hdr-in {
+    max-width: 1160px; margin: 0 auto;
+    height: 58px; padding: 0 24px;
+    display: flex; align-items: center; gap: 20px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(145deg, #2c2c2e, #0b0b0c);
+    display: grid; place-items: center;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 2px 6px rgba(0,0,0,.22);
+  }
+  .brand-name { font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+  .brand-name em { font-style: normal; color: var(--blue); }
+
+  .nav {
+    display: flex; gap: 2px; margin: 0 auto;
+    background: var(--fill); border-radius: var(--r-pill); padding: 3px;
+  }
+  .nav a {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 500; color: var(--ink-2);
+    text-decoration: none; padding: 5px 14px;
+    border-radius: var(--r-pill); white-space: nowrap;
+    transition: all .35s var(--ease);
+  }
+  .nav a:hover { color: var(--ink); }
+  .nav a.on {
+    background: var(--surface); color: var(--ink); font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,.10), 0 0 0 .5px rgba(0,0,0,.03);
+  }
+
+  .hdr-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .ver { font-size: 12px; font-weight: 500; color: var(--ink-3); font-family: var(--mono); letter-spacing: 0; }
+
+  .conn {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12.5px; font-weight: 500; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--stroke);
+    border-radius: var(--r-pill); padding: 5px 12px 5px 9px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    transition: all .35s var(--ease); cursor: default;
+  }
+  .conn:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); transform: translateY(-1px); }
+  .conn svg { color: var(--ink-2); }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 0 3px rgba(48,209,88,.18);
+    animation: pulse 2.4s var(--ease) infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 3px rgba(48,209,88,.18); }
+    50%      { box-shadow: 0 0 0 5px rgba(48,209,88,.08); }
+  }
+
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--stroke);
+    background: var(--surface); color: var(--ink-2); cursor: pointer;
+    display: grid; place-items: center;
+    transition: all .35s var(--ease);
+  }
+  .icon-btn:hover { color: var(--ink); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .icon-btn:active { transform: scale(.94); }
+
+  .lang {
+    font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+    background: none; border: none; cursor: pointer; font-family: var(--font);
+    padding: 4px 2px; transition: color .3s var(--ease);
+  }
+  .lang:hover { color: var(--ink); }
+
+  .pill {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    padding: 3.5px 9px; border-radius: var(--r-pill);
+  }
+  .pill-ota { background: var(--blue-soft); color: var(--blue); }
+  .pill-dev { background: rgba(255,159,10,.14); color: #b25000; }
+
+  /* ══ Layout ═══════════════════════════════════════ */
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 36px 24px 72px; }
+
+  .page-head { margin-bottom: 28px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .page-head h1 { font-size: 34px; font-weight: 700; letter-spacing: -.025em; line-height: 1.1; }
+  .page-head p  { font-size: 15px; color: var(--ink-2); margin-top: 6px; max-width: 560px; }
+  .session-chip {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--stroke);
+    border-radius: var(--r-pill); padding: 8px 16px;
+    font-size: 13px; color: var(--ink-2); font-weight: 500;
+    box-shadow: var(--sh-card);
+  }
+  .session-chip b { color: var(--ink); font-weight: 600; font-family: var(--mono); letter-spacing: 0; }
+
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+  .span4 { grid-column: span 4; }
+  .span8 { grid-column: span 8; }
+  .span12 { grid-column: span 12; }
+
+  /* ══ Cards ════════════════════════════════════════ */
+  .card {
+    background: var(--surface);
+    border-radius: var(--r-lg);
+    border: 1px solid var(--stroke);
+    box-shadow: var(--sh-card);
+    padding: 22px 24px;
+    transition: box-shadow .45s var(--ease), transform .45s var(--ease);
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .card-title { font-size: 17px; font-weight: 600; letter-spacing: -.015em; display: flex; align-items: center; gap: 9px; }
+  .card-title svg { color: var(--blue); }
+  .card-sub { font-size: 12.5px; color: var(--ink-3); }
+
+  /* ── Segmented control ── */
+  .seg {
+    display: flex; background: var(--fill); border-radius: 11px; padding: 2px; gap: 2px;
+  }
+  .seg button {
+    flex: 1; border: none; background: none; cursor: pointer;
+    font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--ink-2);
+    padding: 6px 14px; border-radius: 9px; white-space: nowrap;
+    transition: all .35s var(--ease);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .seg button:hover { color: var(--ink); }
+  .seg button.on {
+    background: var(--surface); color: var(--ink); font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,.10), 0 0 0 .5px rgba(0,0,0,.02);
+  }
+  .seg button:active { transform: scale(.97); }
+
+  /* ── Status row (Drive Target) ── */
+  .status-line {
+    display: flex; align-items: center; gap: 10px; margin-top: 18px;
+    background: var(--surface-soft); border: 1px solid var(--stroke);
+    border-radius: var(--r-md); padding: 13px 16px;
+  }
+  .status-line .dot { flex-shrink: 0; }
+  .status-line .s-label { font-size: 14px; font-weight: 600; }
+  .status-line .s-meta { font-size: 12.5px; color: var(--ink-3); margin-left: auto; font-family: var(--mono); letter-spacing: 0; }
+
+  .kv-mini { display: flex; flex-direction: column; gap: 9px; margin-top: 16px; }
+  .kv-mini .row { display: flex; justify-content: space-between; font-size: 13px; }
+  .kv-mini .row .k { color: var(--ink-2); }
+  .kv-mini .row .v { font-weight: 500; font-family: var(--mono); letter-spacing: 0; }
+  .kv-mini .row .v.good { color: var(--green-deep); font-weight: 600; }
+
+  /* ── Buttons ── */
+  .btn {
+    font-family: var(--font); font-size: 13.5px; font-weight: 600;
+    border: none; cursor: pointer; border-radius: var(--r-pill);
+    padding: 9px 18px; display: inline-flex; align-items: center; gap: 7px;
+    transition: all .35s var(--ease); letter-spacing: -.01em;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-primary {
+    background: var(--blue); color: #fff;
+    box-shadow: 0 1px 2px rgba(0,113,227,.35), 0 6px 16px rgba(0,113,227,.24);
+  }
+  .btn-primary:hover { background: #0077ed; transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,113,227,.35), 0 10px 24px rgba(0,113,227,.30); }
+  .btn-soft { background: var(--fill); color: var(--ink); }
+  .btn-soft:hover { background: var(--fill-strong); transform: translateY(-1px); }
+  .btn-danger { background: var(--red-soft); color: var(--red); }
+  .btn-danger:hover { background: rgba(255,69,58,.16); transform: translateY(-1px); }
+  .btn-rec {
+    background: var(--red); color: #fff;
+    box-shadow: 0 1px 2px rgba(255,69,58,.35), 0 6px 16px rgba(255,69,58,.24);
+  }
+  .btn-rec:hover { background: #ff5147; transform: translateY(-1px); }
+
+  /* ── Overhead Drift: fields ── */
+  .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .field label {
+    display: block; font-size: 12px; font-weight: 500; color: var(--ink-2);
+    margin-bottom: 6px; letter-spacing: -.005em;
+  }
+  .field input {
+    width: 100%; font-family: var(--mono); font-size: 13.5px; color: var(--ink);
+    background: var(--surface-soft); border: 1px solid var(--stroke);
+    border-radius: var(--r-sm); padding: 9px 12px; outline: none;
+    transition: all .3s var(--ease);
+  }
+  .field input::placeholder { color: var(--ink-3); font-family: var(--font); }
+  .field input:focus {
+    border-color: var(--blue); background: #fff;
+    box-shadow: 0 0 0 3.5px rgba(0,113,227,.16);
+  }
+
+  details.adv { margin-top: 14px; }
+  details.adv summary {
+    list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 500; color: var(--blue);
+    padding: 4px 0; user-select: none; transition: opacity .3s;
+  }
+  details.adv summary::-webkit-details-marker { display: none; }
+  details.adv summary:hover { opacity: .75; }
+  details.adv summary .chev { transition: transform .4s var(--ease); }
+  details.adv[open] summary .chev { transform: rotate(90deg); }
+  details.adv .adv-body { margin-top: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+
+  /* ── Telemetry readouts ── */
+  .tele {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+    margin-top: 18px;
+  }
+  .tele .t {
+    background: var(--surface-soft); border: 1px solid var(--stroke);
+    border-radius: var(--r-sm); padding: 10px 11px; min-width: 0;
+  }
+  .tele .t .tk { font-size: 9.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .045em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tele .t .tv { font-size: 13px; font-weight: 600; font-family: var(--mono); letter-spacing: -.02em; margin-top: 4px; white-space: nowrap; }
+  .tele .t .tv.ok { color: var(--green-deep); }
+  .tele .t .tv.neg { color: var(--blue); }
+
+  .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+  .actions .spacer { flex: 1; }
+
+  /* ── Drive controls toolbar ── */
+  .drive-bar {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--stroke);
+    border-radius: var(--r-lg); box-shadow: var(--sh-card);
+    padding: 14px 18px; margin-bottom: 20px;
+  }
+  .drive-bar .seg { min-width: 320px; }
+  .model-sel {
+    display: flex; align-items: center; gap: 9px;
+    background: var(--surface-soft); border: 1px solid var(--stroke);
+    border-radius: var(--r-pill); padding: 8px 14px; cursor: pointer;
+    font-size: 13px; font-weight: 500;
+    transition: all .35s var(--ease);
+  }
+  .model-sel:hover { box-shadow: 0 2px 8px rgba(0,0,0,.07); transform: translateY(-1px); }
+  .model-sel .fname { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .model-sel svg { color: var(--ink-3); }
+  .recorded { font-size: 13px; color: var(--ink-2); }
+  .recorded b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+  .drive-bar .grow { flex: 1; }
+
+  /* ══ Media well ═══════════════════════════════════ */
+  .well {
+    position: relative; border-radius: var(--r-xl); overflow: hidden;
+    background: #000; aspect-ratio: 16/9;
+    box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 24px 64px rgba(0,0,0,.18);
+    border: 1px solid rgba(0,0,0,.9);
+  }
+  .well svg.feed { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .well .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.52) 100%);
+  }
+  .chip {
+    position: absolute; display: flex; align-items: center; gap: 7px;
+    font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,.92);
+    font-family: var(--mono); letter-spacing: .01em;
+    background: rgba(28,28,30,.55);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: var(--r-pill); padding: 6px 12px;
+    box-shadow: var(--sh-chip);
+  }
+  .chip.tl { top: 16px; left: 16px; font-family: var(--font); letter-spacing: -.005em; }
+  .chip.tr { top: 16px; right: 16px; }
+  .chip .rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: blink 1.6s ease infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+  .tele-strip {
+    position: absolute; left: 16px; right: 16px; bottom: 16px;
+    display: flex; align-items: center; gap: 22px;
+    background: rgba(28,28,30,.55);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: var(--r-md); padding: 10px 18px;
+    box-shadow: var(--sh-chip);
+  }
+  .tele-strip .item { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+  .tele-strip .ik { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.55); text-transform: uppercase; letter-spacing: .06em; }
+  .tele-strip .iv { font-size: 14px; font-weight: 600; color: #fff; font-family: var(--mono); }
+  .tele-strip .iv.neg { color: #64d2ff; }
+  .tele-strip .iv.pos { color: #30d158; }
+  .tele-strip .sep { width: 1px; height: 18px; background: rgba(255,255,255,.14); }
+  .tele-strip .lat { margin-left: auto; }
+  .tele-strip .bar { display: inline-block; width: 44px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.16); overflow: hidden; vertical-align: middle; }
+  .tele-strip .bar i { display: block; height: 100%; border-radius: 2px; }
+
+  /* ══ Controls cluster ═════════════════════════════ */
+  .controls { display: grid; grid-template-columns: 300px 96px 1fr; gap: 24px; align-items: stretch; }
+  .ctl-block { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .ctl-label { font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .07em; }
+
+  .joy {
+    width: 168px; height: 168px; border-radius: 50%; position: relative;
+    background:
+      radial-gradient(circle at 50% 38%, #ffffff, #ececf0 70%, #e2e2e8);
+    border: 1px solid var(--stroke-strong);
+    box-shadow: inset 0 2px 8px rgba(0,0,0,.05), 0 8px 20px rgba(0,0,0,.06);
+    cursor: grab; transition: box-shadow .4s var(--ease);
+  }
+  .joy:hover { box-shadow: inset 0 2px 8px rgba(0,0,0,.05), 0 12px 28px rgba(0,0,0,.10); }
+  .joy:active { cursor: grabbing; }
+  .joy .ring { position: absolute; inset: 18px; border-radius: 50%; border: 1.5px dashed rgba(0,0,0,.09); }
+  .joy .cross-h, .joy .cross-v { position: absolute; background: rgba(0,0,0,.07); border-radius: 1px; }
+  .joy .cross-h { left: 14%; right: 14%; top: 50%; height: 1.5px; margin-top: -.75px; }
+  .joy .cross-v { top: 14%; bottom: 14%; left: 50%; width: 1.5px; margin-left: -.75px; }
+  .knob {
+    position: absolute; width: 62px; height: 62px; border-radius: 50%;
+    left: calc(50% - 31px - 2px); top: calc(50% - 31px - 3px);
+    background: radial-gradient(circle at 36% 30%, #ffffff, #e8e8ee 62%, #d5d5de);
+    border: 1px solid rgba(0,0,0,.10);
+    box-shadow: 0 3px 10px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.9);
+    display: grid; place-items: center;
+    transition: transform .18s var(--ease);
+  }
+  .joy:hover .knob { transform: scale(1.04); }
+  .joy:active .knob { transform: scale(.97); }
+  .knob::after { content: ""; width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, var(--blue-bright), var(--blue)); box-shadow: 0 1px 4px rgba(0,113,227,.5); }
+  .joy-val { font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-weight: 500; }
+  .joy-val b { color: var(--ink); }
+
+  .thr-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .thr {
+    position: relative; width: 44px; height: 168px; border-radius: var(--r-pill);
+    background: var(--fill); border: 1px solid var(--stroke);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.05);
+    overflow: hidden; cursor: pointer;
+  }
+  .thr .fillv {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 42%;
+    background: linear-gradient(180deg, var(--blue-bright), var(--blue));
+    border-radius: 0 0 var(--r-pill) var(--r-pill);
+    transition: height .5s var(--ease);
+  }
+  .thr .thumb {
+    position: absolute; left: 4px; right: 4px; bottom: calc(42% - 9px); height: 18px;
+    background: #fff; border-radius: var(--r-pill);
+    box-shadow: 0 1px 4px rgba(0,0,0,.22), 0 0 0 .5px rgba(0,0,0,.05);
+    transition: bottom .5s var(--ease);
+  }
+  .thr .tick { position: absolute; left: 8px; right: 8px; height: 1px; background: rgba(0,0,0,.10); }
+
+  /* ── Sparkline panel ── */
+  .spark {
+    background: var(--surface-soft); border: 1px solid var(--stroke);
+    border-radius: var(--r-md); padding: 16px 18px 12px;
+    display: flex; flex-direction: column; min-width: 0;
+  }
+  .spark-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
+  .spark-head .st { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+  .legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .legend .sw { width: 14px; height: 3px; border-radius: 2px; }
+  .legend .lv { font-family: var(--mono); font-weight: 600; color: var(--ink); margin-left: 2px; }
+  .spark-body { flex: 1; min-height: 130px; }
+  .spark svg { width: 100%; height: 100%; display: block; }
+
+  /* ══ Footer hint ══════════════════════════════════ */
+  .foot {
+    margin-top: 26px; display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: var(--ink-3); flex-wrap: wrap; gap: 8px;
+  }
+  .foot kbd {
+    font-family: var(--mono); font-size: 11px; background: var(--surface);
+    border: 1px solid var(--stroke-strong); border-bottom-width: 2px;
+    border-radius: 6px; padding: 2px 6px; color: var(--ink-2);
+  }
+
+  /* ══ Responsive ═══════════════════════════════════ */
+  @media (max-width: 980px) {
+    .span4, .span8 { grid-column: span 12; }
+    .controls { grid-template-columns: 1fr 96px; }
+    .spark-cell { grid-column: 1 / -1; }
+    .tele { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 720px) {
+    .hdr-in { padding: 0 14px; gap: 12px; height: auto; min-height: 58px; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+    .nav { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .nav::-webkit-scrollbar { display: none; }
+    .ver, .lang, .pill-ota { display: none; }
+    .wrap { padding: 24px 14px 56px; }
+    .page-head h1 { font-size: 28px; }
+    .fields { grid-template-columns: 1fr 1fr; }
+    details.adv .adv-body { grid-template-columns: 1fr; }
+    .tele { grid-template-columns: repeat(2, 1fr); }
+    .drive-bar .seg { min-width: 0; width: 100%; }
+    .controls { grid-template-columns: 1fr; }
+    .thr-wrap { flex-direction: row; justify-content: center; }
+    .thr { width: 168px; height: 44px; }
+    .thr .fillv { height: 100%; width: 42%; border-radius: var(--r-pill) 0 0 var(--r-pill); }
+    .thr .thumb { bottom: 4px; top: 4px; height: auto; left: calc(42% - 9px); right: auto; width: 18px; }
+    .tele-strip { gap: 10px; padding: 8px 12px; left: 10px; right: 10px; bottom: 10px; }
+    .tele-strip .sep { display: none; }
+    .tele-strip .item.opt { display: none; }
+    .tele-strip .bar { display: none; }
+    .tele-strip .iv { font-size: 12.5px; }
+    .card-head { flex-wrap: wrap; gap: 4px 14px; }
+    .card { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════ Header ══════════ -->
+<header class="hdr">
+  <div class="hdr-in">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.6" fill="#fff" stroke="none"/>
+          <path d="M12 3.5v5.2M4.4 16.4l4.7-2.4M19.6 16.4l-4.7-2.4"/>
+        </svg>
+      </div>
+      <span class="brand-name">Donkey<em>Drift</em></span>
+    </div>
+
+    <nav class="nav">
+      <a href="#" class="on">Drive</a>
+      <a href="#">Tub Manager</a>
+      <a href="#">Trainer</a>
+      <a href="#">Pilot Arena</a>
+    </nav>
+
+    <div class="hdr-right">
+      <span class="ver">V0.1.2</span>
+      <div class="conn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 2v6M15 2v6M7 8h10v4a5 5 0 0 1-10 0V8zM12 17v5"/>
+        </svg>
+        Real Car · online <span class="dot"></span>
+      </div>
+      <button class="icon-btn" aria-label="Toggle theme">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.5 1.5M17.2 17.2l1.5 1.5M18.7 5.3l-1.5 1.5M6.8 17.2l-1.5 1.5"/>
+        </svg>
+      </button>
+      <button class="lang">EN</button>
+      <span class="pill pill-ota">OTA</span>
+      <span class="pill pill-dev">DEV</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ══════════ Page heading ══════════ -->
+  <div class="page-head">
+    <div>
+      <h1>Drive</h1>
+      <p>Remote-drive the car, record training data, and watch telemetry in real time.</p>
+    </div>
+    <div class="session-chip">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0071e3" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>
+      </svg>
+      Session <b>00:14:36</b> &nbsp;·&nbsp; Tub <b>tub_2026_09_28_14</b>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- ══════════ Drive Target ══════════ -->
+    <section class="card span4">
+      <div class="card-head">
+        <div class="card-title">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 16l1.4-4.2A2 2 0 0 1 8.3 10h7.4a2 2 0 0 1 1.9 1.8L19 16"/><path d="M4 16h16v3a1 1 0 0 1-1 1h-1.5a1 1 0 0 1-1-1v-1h-9v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3z"/><circle cx="7.5" cy="16.8" r=".6" fill="currentColor"/><circle cx="16.5" cy="16.8" r=".6" fill="currentColor"/>
+          </svg>
+          Drive Target
+        </div>
+        <span class="card-sub">Vehicle link</span>
+      </div>
+
+      <div class="seg">
+        <button class="on">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 2v6M15 2v6M7 8h10v4a5 5 0 0 1-10 0V8zM12 17v5"/></svg>
+          Real Car
+        </button>
+        <button>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6M12 17v4"/></svg>
+          Simulator
+        </button>
+      </div>
+
+      <div class="status-line">
+        <span class="dot"></span>
+        <span class="s-label">Car online</span>
+        <span class="s-meta">192.168.1.42:8887</span>
+      </div>
+
+      <div class="kv-mini">
+        <div class="row"><span class="k">Link latency</span><span class="v good">23 ms</span></div>
+        <div class="row"><span class="k">Battery</span><span class="v">11.8 V · 74%</span></div>
+        <div class="row"><span class="k">Camera stream</span><span class="v">MJPEG · 160×120</span></div>
+        <div class="row"><span class="k">Firmware</span><span class="v">mono_encoder v3</span></div>
+      </div>
+    </section>
+
+    <!-- ══════════ Overhead Drift ══════════ -->
+    <section class="card span8">
+      <div class="card-head">
+        <div class="card-title">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2.5"/>
+          </svg>
+          Overhead Drift
+        </div>
+        <button class="btn btn-primary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2.5"/></svg>
+          Start camera
+        </button>
+      </div>
+
+      <div class="fields">
+        <div class="field"><label>Camera index</label><input value="0"></div>
+        <div class="field"><label>AprilTag ID</label><input value="0"></div>
+        <div class="field"><label>Heading offset (°)</label><input value="0"></div>
+      </div>
+
+      <details class="adv">
+        <summary>
+          <svg class="chev" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+          Advanced parameters
+        </summary>
+        <div class="adv-body">
+          <div class="field"><label>Exposure (log2 s, blank = auto)</label><input placeholder="e.g. -7"></div>
+          <div class="field"><label>Homography calibration file</label><input value="field_homography.npz"></div>
+        </div>
+      </details>
+
+      <div class="tele">
+        <div class="t"><div class="tk">State</div><div class="tv ok">Tracking</div></div>
+        <div class="t"><div class="tk">β slip</div><div class="tv neg">−4.2°</div></div>
+        <div class="t"><div class="tk">Pose (x, y)</div><div class="tv">1.24, 0.86</div></div>
+        <div class="t"><div class="tk">Heading</div><div class="tv">173.5°</div></div>
+        <div class="t"><div class="tk">Cam fps</div><div class="tv">30</div></div>
+        <div class="t"><div class="tk">Telem / fr</div><div class="tv">1287/1290</div></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-soft">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8" fill="currentColor"/></svg>
+          Calibrate
+        </button>
+        <button class="btn btn-soft">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+          Record <span style="font-weight:400;opacity:.65">· human RC drift</span>
+        </button>
+        <button class="btn btn-soft">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
+          Auto drift
+        </button>
+        <span class="spacer"></span>
+        <button class="btn btn-danger">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop / hand back
+        </button>
+      </div>
+    </section>
+
+    <!-- ══════════ Drive controls + Video ══════════ -->
+    <section class="span12">
+
+      <div class="drive-bar">
+        <div class="seg">
+          <button class="on">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>
+            Manual
+          </button>
+          <button>Semi-Auto</button>
+          <button>Full Auto</button>
+        </div>
+
+        <div class="model-sel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0071e3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z"/><path d="M12 11l8-4.5M12 11v9M12 11L4 6.5"/></svg>
+          <span class="fname">DKG-1.tflite</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+
+        <span class="recorded">Recorded: <b>787</b> frames</span>
+
+        <span class="grow"></span>
+
+        <button class="btn btn-rec">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+          Record
+        </button>
+      </div>
+
+      <div class="well">
+        <!-- Simulated top-down drift-track camera feed -->
+        <svg class="feed" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <radialGradient id="floor" cx="50%" cy="46%" r="72%">
+              <stop offset="0%" stop-color="#3a3d42"/>
+              <stop offset="55%" stop-color="#26282c"/>
+              <stop offset="100%" stop-color="#101114"/>
+            </radialGradient>
+            <linearGradient id="asphalt" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#3b3f45"/>
+              <stop offset="100%" stop-color="#2a2d32"/>
+            </linearGradient>
+            <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="6"/>
+            </filter>
+          </defs>
+
+          <!-- floor -->
+          <rect width="1280" height="720" fill="url(#floor)"/>
+
+          <!-- floor tile seams -->
+          <g stroke="#ffffff" stroke-opacity=".035" stroke-width="2">
+            <path d="M0 180 H1280 M0 360 H1280 M0 540 H1280"/>
+            <path d="M320 0 V720 M640 0 V720 M960 0 V720"/>
+          </g>
+
+          <!-- track edge halo (painted first, peeking out on both sides) -->
+          <path d="M 300 360 C 300 180, 560 140, 700 170 C 880 208, 1060 190, 1060 360 C 1060 530, 830 560, 660 545 C 460 527, 300 540, 300 360 Z"
+                fill="none" stroke="#d7dade" stroke-opacity=".38" stroke-width="160" stroke-linecap="round"/>
+          <!-- track body -->
+          <path id="track" d="M 300 360 C 300 180, 560 140, 700 170 C 880 208, 1060 190, 1060 360 C 1060 530, 830 560, 660 545 C 460 527, 300 540, 300 360 Z"
+                fill="none" stroke="url(#asphalt)" stroke-width="150" stroke-linecap="round"/>
+          <!-- center dashed line -->
+          <path d="M 300 360 C 300 180, 560 140, 700 170 C 880 208, 1060 190, 1060 360 C 1060 530, 830 560, 660 545 C 460 527, 300 540, 300 360 Z"
+                fill="none" stroke="#c8cad0" stroke-opacity=".55" stroke-width="4" stroke-dasharray="26 22"/>
+
+          <!-- AprilTag marker on field -->
+          <g transform="translate(640,352) rotate(-8)">
+            <rect x="-26" y="-26" width="52" height="52" fill="#f2f3f5" rx="3"/>
+            <rect x="-18" y="-18" width="36" height="36" fill="#0d0d0f"/>
+            <rect x="-10" y="-10" width="9" height="9" fill="#f2f3f5"/>
+            <rect x="1" y="1" width="9" height="9" fill="#f2f3f5"/>
+          </g>
+
+          <!-- drift smoke trail -->
+          <g filter="url(#soft)" opacity=".5">
+            <circle cx="742" cy="282" r="26" fill="#9ea3ab"/>
+            <circle cx="782" cy="262" r="20" fill="#8b9098"/>
+            <circle cx="818" cy="246" r="15" fill="#787d85"/>
+          </g>
+
+          <!-- car (top-down, drifting attitude) -->
+          <g transform="translate(706,296) rotate(63)">
+            <ellipse cx="0" cy="6" rx="30" ry="52" fill="#000" opacity=".45" filter="url(#soft)"/>
+            <rect x="-24" y="-46" width="48" height="92" rx="14" fill="#0a84ff"/>
+            <rect x="-24" y="-46" width="48" height="92" rx="14" fill="none" stroke="#fff" stroke-opacity=".25" stroke-width="1.5"/>
+            <rect x="-17" y="-30" width="34" height="26" rx="7" fill="#0b1526" opacity=".85"/>
+            <rect x="-19" y="22" width="38" height="16" rx="6" fill="#0653b6"/>
+            <!-- wheels -->
+            <rect x="-31" y="-38" width="9" height="20" rx="4" fill="#151517"/>
+            <rect x="22"  y="-38" width="9" height="20" rx="4" fill="#151517"/>
+            <rect x="-31" y="18"  width="9" height="20" rx="4" fill="#151517"/>
+            <rect x="22"  y="18"  width="9" height="20" rx="4" fill="#151517"/>
+            <!-- heading tick -->
+            <path d="M0 -58 L0 -72" stroke="#30d158" stroke-width="4" stroke-linecap="round"/>
+          </g>
+
+          <!-- steering vector -->
+          <path d="M 706 296 L 645 240" stroke="#30d158" stroke-width="3" stroke-dasharray="7 7" stroke-linecap="round" opacity=".9"/>
+          <circle cx="645" cy="240" r="5" fill="#30d158"/>
+        </svg>
+        <div class="vignette"></div>
+
+        <div class="chip tl">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
+          MJPEG fallback
+        </div>
+        <div class="chip tr"><span class="rec-dot"></span> FPS 30</div>
+
+        <div class="tele-strip">
+          <div class="item"><span class="ik">Steering</span><span class="iv neg">−0.01</span></div>
+          <span class="sep"></span>
+          <div class="item">
+            <span class="ik">Throttle</span><span class="iv pos">0.42</span>
+            <span class="bar"><i style="width:42%;background:#30d158"></i></span>
+          </div>
+          <span class="sep"></span>
+          <div class="item opt"><span class="ik">Mode</span><span class="iv">Manual</span></div>
+          <span class="sep"></span>
+          <div class="item opt"><span class="ik">Recording</span><span class="iv" style="color:#ff6961">787 f</span></div>
+          <div class="item lat"><span class="ik">Latency</span><span class="iv">23 ms</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ Controls cluster ══════════ -->
+    <section class="card span12">
+      <div class="card-head" style="margin-bottom:8px">
+        <div class="card-title">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h4l2-5 3 10 2-5h4"/></svg>
+          Controls &amp; Telemetry
+        </div>
+        <span class="card-sub">WASD / arrow keys also drive · Space = e-stop</span>
+      </div>
+
+      <div class="controls">
+        <div class="ctl-block">
+          <div class="joy">
+            <div class="ring"></div>
+            <div class="cross-h"></div><div class="cross-v"></div>
+            <div class="knob"></div>
+          </div>
+          <div class="joy-val">steering <b>−0.01</b></div>
+          <div class="ctl-label">Steering</div>
+        </div>
+
+        <div class="thr-wrap">
+          <div class="thr">
+            <div class="fillv"></div>
+            <div class="thumb"></div>
+            <div class="tick" style="top:25%"></div>
+            <div class="tick" style="top:50%"></div>
+            <div class="tick" style="top:75%"></div>
+          </div>
+          <div class="joy-val">throttle <b>0.42</b></div>
+          <div class="ctl-label">Throttle</div>
+        </div>
+
+        <div class="spark spark-cell">
+          <div class="spark-head">
+            <span class="st">Recent inputs</span>
+            <span class="legend"><span class="sw" style="background:#0a84ff"></span>Throttle <span class="lv">0.42</span></span>
+            <span class="legend"><span class="sw" style="background:#ff9f0a"></span>Steering <span class="lv">−0.01</span></span>
+            <span class="legend" style="margin-left:auto">last 8 s · 240 samples</span>
+          </div>
+          <div class="spark-body">
+            <svg viewBox="0 0 640 160" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="gThr" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#0a84ff" stop-opacity=".22"/>
+                  <stop offset="100%" stop-color="#0a84ff" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <!-- gridlines -->
+              <g stroke="#000" stroke-opacity=".055" stroke-width="1">
+                <path d="M0 40 H640 M0 80 H640 M0 120 H640"/>
+              </g>
+              <path d="M0 80 H640" stroke="#000" stroke-opacity=".12" stroke-width="1" stroke-dasharray="3 5"/>
+              <!-- throttle area + line -->
+              <path d="M0 96 C 30 92, 50 70, 80 64 S 130 58, 160 66 S 220 88, 250 84 S 310 52, 340 50 S 400 62, 430 58 S 490 40, 520 44 S 580 62, 610 58 L 640 56 L 640 160 L 0 160 Z" fill="url(#gThr)"/>
+              <path d="M0 96 C 30 92, 50 70, 80 64 S 130 58, 160 66 S 220 88, 250 84 S 310 52, 340 50 S 400 62, 430 58 S 490 40, 520 44 S 580 62, 610 58 L 640 56" fill="none" stroke="#0a84ff" stroke-width="2.2" stroke-linecap="round"/>
+              <!-- steering line -->
+              <path d="M0 82 C 25 80, 45 96, 75 98 S 125 78, 155 74 S 215 92, 245 96 S 305 76, 335 72 S 395 88, 425 92 S 485 74, 515 70 S 575 86, 605 84 L 640 81" fill="none" stroke="#ff9f0a" stroke-width="2.2" stroke-linecap="round"/>
+              <!-- live head markers -->
+              <circle cx="640" cy="56" r="4" fill="#0a84ff" stroke="#fff" stroke-width="2"/>
+              <circle cx="640" cy="81" r="4" fill="#ff9f0a" stroke="#fff" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot">
+    <span>Drive console · DonkeyDrift V0.1.2 · field_homography.npz loaded</span>
+    <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive &nbsp; <kbd>Space</kbd> e-stop &nbsp; <kbd>R</kbd> record</span>
+  </div>
+</main>
+
+<script>
+  // Subtle live-feel: breathing latency value in the telemetry strip.
+  (function () {
+    const lat = document.querySelector('.tele-strip .lat .iv');
+    const vals = [21, 23, 24, 22, 25, 23];
+    let i = 0;
+    setInterval(() => { lat.textContent = vals[i = (i + 1) % vals.length] + ' ms'; }, 1600);
+  })();
+</script>
+</body>
+</html>

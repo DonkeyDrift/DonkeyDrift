@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DonkeyDrift UI 设计稿对比</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0e0e11; color: #f4f4f5; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; padding: 64px 24px;
+  }
+  h1 { font-size: 28px; letter-spacing: -.02em; }
+  p.sub { color: #a1a1aa; margin: 12px 0 48px; font-size: 14px; }
+  .grid { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); max-width: 1100px; width: 100%; }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    background: #18181c; border: 1px solid #2a2a30; border-radius: 16px;
+    padding: 28px; transition: transform .2s cubic-bezier(.32,.72,0,1), border-color .2s;
+  }
+  a.card:hover { transform: translateY(-3px); border-color: #6366f1; }
+  .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: #8b8b94; }
+  h2 { font-size: 20px; margin: 8px 0 6px; }
+  .desc { font-size: 13px; color: #a1a1aa; line-height: 1.6; }
+  .sw { display: flex; gap: 6px; margin-top: 16px; }
+  .sw i { width: 22px; height: 22px; border-radius: 6px; display: block; border: 1px solid rgba(255,255,255,.08); }
+</style>
+</head>
+<body>
+  <h1>DonkeyDrift 网页改版 · 三稿对比</h1>
+  <p class="sub">点击任意卡片打开对应设计稿（静态 HTML，1440×900 桌面布局为主，兼容移动端）</p>
+  <div class="grid">
+    <a class="card" href="./proposal-a-cockpit-hud.html">
+      <span class="tag">方案 A</span>
+      <h2>赛车座舱 HUD</h2>
+      <p class="desc">深色技术风，荧光青 + 琥珀色，等宽数字遥测，切角面板，视频为绝对主角。强调驾驶时的 glanceability，密度最高，适合「操控优先」。</p>
+      <div class="sw"><i style="background:#0b0e13"></i><i style="background:#22d3ee"></i><i style="background:#f59e0b"></i><i style="background:#ef4444"></i></div>
+    </a>
+    <a class="card" href="./proposal-b-apple-pro.html">
+      <span class="tag">方案 B</span>
+      <h2>Apple Pro 消费级</h2>
+      <p class="desc">现有 Apple 浅色风的精致化升级：毛玻璃、大圆角、分层柔和阴影、渐进披露。最克制优雅，学习成本最低，适合「面向更广用户」。</p>
+      <div class="sw"><i style="background:#f5f5f7"></i><i style="background:#0071e3"></i><i style="background:#30d158"></i><i style="background:#ff453a"></i></div>
+    </a>
+    <a class="card" href="./proposal-c-devtool-linear.html">
+      <span class="tag">方案 C</span>
+      <h2>开发者工具 · Linear 风</h2>
+      <p class="desc">中性深色 + 左侧边栏 + ⌘K 命令面板，13px 紧凑密度，键盘优先，工业级高效。适合「高频专业用户 / 工程师日常」。</p>
+      <div class="sw"><i style="background:#0a0a0b"></i><i style="background:#6366f1"></i><i style="background:#34d399"></i><i style="background:#f87171"></i></div>
+    </a>
+    <a class="card" href="./proposal-d-hud-apple.html">
+      <span class="tag">方案 D · 推荐组合</span>
+      <h2>HUD 布局 × Apple 材质</h2>
+      <p class="desc">A 的三栏座舱布局（视频主角 + 双侧仪器 + 事件日志），换上 B 的浅色 Apple 材质：白色卡片、大圆角、柔和阴影、蓝色主行动。密度与优雅兼得。</p>
+      <div class="sw"><i style="background:#f5f5f7"></i><i style="background:#0071e3"></i><i style="background:#1d1d1f"></i><i style="background:#ff453a"></i></div>
+    </a>
+  </div>
+</body>
+</html>

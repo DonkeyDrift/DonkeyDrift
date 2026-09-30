@@ -73,11 +73,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     };
   }, [moreMenuOpen]);
 
-  const flowClass = (section: FlowSectionId) =>
+  const isFlowActive = (section: FlowSectionId) =>
+    !isConnector && !isFullBleed && activeSection === section;
+  // 桌面端：Apple 分段控件——轨道（bg-zinc-800 → surface2 + 发丝线）上四个药丸，
+  // 激活段为浮起“拇指”（表面色 + 柔和投影，深色下由 .dd-nav-thumb 换 --raised-2）
+  const flowPillClass = (section: FlowSectionId) =>
+    `whitespace-nowrap rounded-full px-3.5 py-1.5 transition-colors ${
+      isFlowActive(section)
+        ? 'dd-nav-thumb bg-zinc-900 text-zinc-100 shadow-sm'
+        : 'dd-nav-link text-zinc-400 hover:text-zinc-100'
+    }`;
+  // 手机菜单：抽屉里保持纯文字列表（药丸底在竖排列表中反而割裂）
+  const flowMenuClass = (section: FlowSectionId) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
-      !isConnector && !isFullBleed && activeSection === section
-        ? 'text-cyan-500'
-        : 'text-zinc-400 dd-nav-link'
+      isFlowActive(section) ? 'text-cyan-500' : 'text-zinc-400 dd-nav-link'
     }`;
 
   return (
@@ -100,17 +109,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 流程页锚点（#178）；Car Connector 已改为右侧控制区图标按钮（Issue #406）；
                 高级入口（Donkey / Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
                 见 EnterButtons.tsx（Issue #175） */}
-            <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14 ml-4">
+            <nav className="hidden lg:flex items-center space-x-5 text-sm font-medium h-14 ml-4">
               {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单 */}
               <div className="hidden xl:contents">
                 <DonkeyEntryLink />
                 <DrifterConsoleEntryLink />
               </div>
-              {FLOW_NAV_ITEMS.map((item) => (
-                <Link key={item.path} to={item.path} className={flowClass(item.section)}>
-                  {t(item.labelKey)}
-                </Link>
-              ))}
+              {/* Apple 分段控件：流程四锚点收进药丸轨道，激活段浮起为“拇指”（方案 B） */}
+              <div className="flex items-center gap-1 rounded-full bg-zinc-800 p-1">
+                {FLOW_NAV_ITEMS.map((item) => (
+                  <Link key={item.path} to={item.path} className={flowPillClass(item.section)}>
+                    {t(item.labelKey)}
+                  </Link>
+                ))}
+              </div>
               {/* 高级工具入口收进「⋯」溢出菜单（顶栏空间让给主导航） */}
               <div className="relative" ref={moreMenuRef}>
                 <button
@@ -180,7 +192,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   key={item.path}
                   to={item.path}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`py-2.5 ${flowClass(item.section)}`}
+                  className={`py-2.5 ${flowMenuClass(item.section)}`}
                 >
                   {t(item.labelKey)}
                 </Link>
