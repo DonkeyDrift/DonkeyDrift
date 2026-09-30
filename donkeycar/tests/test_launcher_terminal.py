@@ -42,6 +42,11 @@ from donkeycar.launcher.terminal import (
     ws_accept_key,
 )
 
+# PTY 终端桥（pty/fcntl/termios/bash）仅在上位机（Linux/macOS）可用；
+# Windows 上模块可导入但会话功能被平台守卫拦截，相关测试跳过。
+posix_only = pytest.mark.skipif(os.name != "posix",
+                                reason="PTY terminal bridge is POSIX-only")
+
 
 # ===========================================================================
 # 工具
@@ -125,6 +130,8 @@ def _foreground_children(pid):
 @pytest.fixture
 def session():
     """起一个真实 bash PTY 会话，测试后确保关闭。"""
+    if os.name != "posix":
+        pytest.skip("PTY terminal bridge is POSIX-only")
     sess = TerminalSession()
     with terminal._sessions_lock:
         terminal._sessions[sess.sid] = sess
@@ -270,6 +277,8 @@ def test_session_exit_notifies_and_closes(session):
 def test_default_cwd_prefers_projects(tmp_path, monkeypatch):
     """~/projects 存在时，默认工作目录指向它。"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Windows 上 expanduser 读 USERPROFILE 而非 HOME，两个都改保证跨平台
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     (tmp_path / "projects").mkdir()
     assert terminal._default_cwd() == str(tmp_path / "projects")
 
@@ -277,9 +286,11 @@ def test_default_cwd_prefers_projects(tmp_path, monkeypatch):
 def test_default_cwd_falls_back_to_home(tmp_path, monkeypatch):
     """~/projects 不存在时，回退到用户主目录 ~。"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert terminal._default_cwd() == str(tmp_path)
 
 
+@posix_only
 def test_session_starts_in_default_cwd(tmp_path, monkeypatch):
     """真实 PTY 会话的初始工作目录为 ~/projects（issue #102 端到端验证）。"""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -313,6 +324,7 @@ def _recv_server_frame(sock_file):
     return opcode, payload
 
 
+@posix_only
 def test_terminal_ws_end_to_end():
     from donkeycar.launcher.server import LauncherHandler
 
@@ -448,6 +460,7 @@ def _http_json(method, url, expected_code):
         return json.loads(e.read().decode("utf-8"))
 
 
+@posix_only
 def test_terminal_ws_idle_keeps_connection():
     """空闲（无任何客户端帧，含 PONG）不再判死断连（issue #173）。
 
@@ -514,6 +527,7 @@ def test_terminal_ws_rejects_bad_handshake():
 # ===========================================================================
 # 会话保持与重连（issue #173）
 # ===========================================================================
+@posix_only
 def test_terminal_ws_sends_session_frame():
     """新连接下发 session 控制帧：含 sid 且 reattached=False。"""
     server, sock, sock_file = _open_terminal_ws()
@@ -528,6 +542,7 @@ def test_terminal_ws_sends_session_frame():
         server.server_close()
 
 
+@posix_only
 def test_terminal_ws_reattach_preserves_session_and_replays_output():
     """断线后 ?session=<sid> 重连接回原 PTY：会话现场保留 + 断线期间输出补发。"""
     server, sock, sock_file = _open_terminal_ws()
@@ -585,6 +600,7 @@ def test_terminal_ws_reattach_preserves_session_and_replays_output():
             server2.server_close()
 
 
+@posix_only
 def test_terminal_ws_grace_expiry_destroys_session(monkeypatch):
     """宽限期耗尽仍无人重连的会话被清扫销毁（issue #173）。
 
@@ -619,6 +635,7 @@ def test_terminal_ws_grace_expiry_destroys_session(monkeypatch):
 # ===========================================================================
 # 主动关闭立即销毁（标签页关闭即杀会话；宽限期只留给异常断线）
 # ===========================================================================
+@posix_only
 def test_kill_session_destroys_session():
     """kill_session 按 sid 立即销毁会话；幂等，空/不存在/已销毁返回 False。"""
     sess = TerminalSession()
@@ -633,6 +650,7 @@ def test_kill_session_destroys_session():
     assert terminal.kill_session("nonexistent") is False
 
 
+@posix_only
 def test_terminal_ws_close_frame_destroys_session():
     """客户端主动发 close 帧（标签页/iframe 关闭）：会话立即销毁，重连接不回。
 
@@ -676,6 +694,7 @@ def test_terminal_ws_close_frame_destroys_session():
         server.server_close()
 
 
+@posix_only
 def test_terminal_kill_endpoint():
     """/terminal/kill?session=<sid>：命中 200 并销毁；未命中/重复 404。GET/POST 均支持。
 
