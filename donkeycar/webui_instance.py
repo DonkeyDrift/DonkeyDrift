@@ -101,7 +101,13 @@ def remove_instance(only_pid=None, instance_file=None):
 # ── 存活探测与复用 ──────────────────────────────────────────────────
 
 def _pid_alive(pid):
-    """pid 是否有存活进程（无权限视为存活，交给端口探测裁决）。"""
+    """pid 是否有存活进程（无权限视为存活，交给端口探测裁决）。
+
+    Windows 上 os.kill(pid, 0) 不是 POSIX 语义——对无效/已回收的 pid
+    会抛 OSError(WinError 87 参数错误)，故 Windows 走 OpenProcess 探测。
+    """
+    if os.name == "nt":
+        return _pid_alive_win(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -109,6 +115,21 @@ def _pid_alive(pid):
     except PermissionError:
         return True
     return True
+
+
+def _pid_alive_win(pid):
+    """Windows 版存活探测：OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)。"""
+    import ctypes
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = ctypes.c_void_p
+    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if handle:
+        k32.CloseHandle(handle)
+        return True
+    # 打开被拒说明进程存在但无权查询，按存活处理（交给端口探测裁决）
+    return ctypes.get_last_error() == ERROR_ACCESS_DENIED
 
 
 def _probe_http_ok(port, path="/", host="127.0.0.1",
