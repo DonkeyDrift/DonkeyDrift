@@ -21,12 +21,13 @@ Laya 是文本决策模型（ModernBERT 主干），它【看不了图像】。
   export    导出一个清洗 + 平衡过的新 tub，原数据不动（推荐）
   eval      不需要 tub：用合成标注窗口做引擎 A/B（准确率 + ECE 校准对比）；
             也可用 --labels 指向人工标注过的 report jsonl 做真实数据校准评估
-
 两个引擎
 --------
-  heuristic  纯阈值规则（约 20 行），零依赖、零训练，【建议先跑它做对照基线】
-  laya       文本决策模型，校准概率（注意：官方承认出厂 checkpoint 偏过度自信，
-             严肃使用前应先用标注数据拟合温度，见 README"校准"一节）
+  heuristic  纯阈值规则（约 20 行），零依赖、零训练，【默认引擎】
+             合成基准实测 99% 准确率 / ECE 0.084，缺陷归因 99%
+  laya       文本决策模型。零样本实测仅为多数类基线（见 README"实测记录"），
+             且官方承认出厂 checkpoint 过度自信——严肃使用前应先用标注数据
+             拟合温度（laya.fit_temperatures），再用 --labels 复评
 
 依赖
 ----
@@ -338,6 +339,13 @@ QUESTIONS = {
 
 def laya_score_all(states, model_name, batch_size=32):
     """跑 Laya 引擎。有 predict_batch 就批量（GPU 上快数倍），没有就逐条。"""
+    # scripts/ 目录里的历史脚本名（如 profile.py）会遮蔽标准库同名模块；
+    # `python scripts/laya_tub_gate.py` 会把 scripts/ 放进 sys.path 首位，
+    # 让 transformers 的懒加载链 import 到仓库脚本而非 stdlib，报出
+    # "No module named 'donkeycar'" 这种完全不相干的错。
+    # laya 引擎不依赖 scripts/ 里的任何东西，导入前把它摘掉。
+    _here = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != _here]
     try:
         import laya
     except ImportError:
@@ -348,9 +356,19 @@ def laya_score_all(states, model_name, batch_size=32):
 
     def _parse(res):
         a = res["answers"]
+        # score 原语返回期望等级（浮点）+ legend 映射；两个都留：
+        # 数值可排序求均值，标签可读。拿不到时降级为 "?" 不中断批处理。
+        q = a.get("quality", {})
+        legend = q.get("legend") or {}
+        try:
+            qval = float(q.get("score"))
+            qlabel = legend.get(str(int(round(qval))), "?")
+        except (TypeError, ValueError):
+            qval, qlabel = None, str(q.get("score", "?"))
         return {
             "is_clean": float(a["is_clean"]["noul"]),
-            "quality":  a.get("quality", {}).get("score", "?"),
+            "quality": qlabel,
+            "quality_level": qval,
             "defect":   a.get("defect", {}).get("choice", "?"),
             "maneuver": a.get("maneuver", {}).get("choice", "?"),
         }
@@ -719,7 +737,10 @@ def main(argv=None):
         description="Donkeycar tub 离线数据质量阀门（Laya / 规则双引擎）")
     ap.add_argument("--tub", help="tub 目录（如 ~/mycar/data/tub_001）；eval+合成基准下可省略")
     ap.add_argument("--mode", default="report", choices=["report", "delete", "export", "eval"])
-    ap.add_argument("--engine", default="laya", choices=["laya", "heuristic"])
+    ap.add_argument("--engine", default="heuristic", choices=["laya", "heuristic"],
+                    help="默认 heuristic：合成基准实测 Laya 零样本仅为多数类基线"
+                         "（准确率60%=干净占比，缺陷归因8%），见 README 实测记录；"
+                         "标注数据拟合温度后可再用 --engine laya 复评")
     ap.add_argument("--model", default="convaiinnovations/laya",
                     help="convaiinnovations/laya | laya-multilingual | laya-typed-decisions")
     ap.add_argument("--window", type=int, default=10, help="窗口帧数，10 帧 ≈ 0.5s @20Hz")

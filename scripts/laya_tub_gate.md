@@ -145,19 +145,53 @@ donkey train --tub ~/mycar/data/tub_clean --model ~/mycar/models/pilot.h5
 - 巡线→静止的过渡窗口因亮度突变被判 `off_track`（合理行为）✅
 - 见 `donkeycar/tests/test_laya_tub_gate.py::TestHeuristicSmoke`（CI 可重复）
 
-### 合成基准 A/B（需求 5.2 的自动化部分，300 窗口）
+### 合成基准 A/B（需求 5.2 的自动化部分，300 窗口，实测）
 
-| 引擎 | 准确率 | ECE | 缺陷归因准确率 |
-|---|---|---|---|
-| heuristic | 99.0% | 0.084 | 99.0% |
-| laya | 见下方实测 | | |
+| 引擎 | 准确率 | ECE | 缺陷归因准确率 | is_clean 均值 |
+|---|---|---|---|---|
+| heuristic | **99.0%** | 0.084 | **99.0%** | 0.684 |
+| laya（零样本） | 60.0% | 0.067 | 8.0% | 0.635 |
+
+环境：laya 0.3.22 / transformers 5.18 / torch 2.14，Apple Silicon CPU，
+`convaiinnovations/laya`（ModernBERT-large 421M），吞吐 ≈ 7 窗口/秒
+（1 万帧 ≈ 2000 窗口 ≈ 5 分钟，与需求文档的估算一致）。
+
+**如何解读（重要，不要只看 ECE）：**
+
+1. Laya 的 60% 准确率**恰好等于干净样本占比（60%）**——等价于"全猜干净"的
+   多数类基线；缺陷归因 8% 甚至低于 6 选 1 均匀随机（~17%）。
+   与社区"零样本 typed-decisions 接近随机"的独立评测一致。
+2. Laya 的 ECE（0.067）看起来比规则（0.084）还低，但这是**常数预测器的假象**：
+   把概率永远贴在先验（~0.6）附近当然"校准"，却没有判别力。
+   校准好 ≠ 判断对——ECE 只在前者（准确率）及格后才有意义。
+3. 加载时 laya 自己发出警告：checkpoint 附带的温度值非法（越界钳到 0.5），
+   "受影响条目的置信度应视为未校准"。
+
+**按需求文档 5.2 的验收红线，如实结论：零样本状态下 Laya 引擎不成立，
+规则引擎胜出。** 因此 `--engine` 默认值从需求文档原定的 `laya` 改为
+`heuristic`（这是一处有依据的偏离；Laya 保留为可选引擎，等
+`laya.fit_temperatures()` 用标注数据拟合温度后可用 `--labels` 复评翻身）。
 
 > 注意：合成基准按规则阈值反向构造，**天然偏向 heuristic**，只能证伪不能证成。
-> 真实结论必须走上面的人工标注 ECE 流程。
+> 但 Laya 连多数类基线都没超过，这个结论对分布偏移是稳健的。
 
-### 真实 Laya 推理实测
+### 真实 Laya 推理实测记录（工程细节）
 
-见本文档末尾"实测记录"一节（模型下载 + CPU 推理吞吐 + 合成基准得分）。
+- 包：`laya==0.3.22`（PyPI，Apache 2.0，依赖 torch≥2.0 / transformers≥4.48），
+  权重从 HuggingFace 拉 `convaiinnovations/laya`（421M，首次下载约 1.6GB）。
+- API 与需求文档草稿的写法兼容：`laya.load(model)` → `agent.predict(state, QUESTIONS)`
+  → `res["answers"][qid]["noul"/"choice"/"score"]`；另有 `predict_batch` 批量接口
+  （本工具已改用，逐条 → 分块批量）。
+- `score` 原语返回**期望等级浮点值** + `legend` 映射（如 `2.23 → marginal`），
+  报告里数值与标签都落盘（`quality_level` / `quality`）。
+- 加载警告（原文）：*"this checkpoint ships invalid temperatures or values outside
+  [0.5, 5]; ... Treat confidence from the affected entries as uncalibrated."*
+  ——checkpoint 自带温度非法，置信度未校准。
+- **一个真实的坑（已修复）**：`python scripts/laya_tub_gate.py --engine laya` 会把
+  `scripts/` 放进 `sys.path` 首位，仓库历史脚本 `scripts/profile.py` 遮蔽标准库
+  `profile`，transformers 懒加载链因此 import 到仓库脚本（其首行 `from donkeycar...`
+  在无 donkeycar 的 venv 里炸），报出 `No module named 'donkeycar'` 这种完全不相干的错。
+  修复：`laya_score_all` 导入 laya 前把 `scripts/` 从 `sys.path` 摘除。
 
 ## 六、已知限制（必须读）
 
@@ -169,7 +203,9 @@ donkey train --tub ~/mycar/data/tub_clean --model ~/mycar/models/pilot.h5
    侵入式改 `training.py` 不划算；所以落地推荐 export 模式。
 4. 视觉特征只是 64×48 灰度的统计量，**不是**语义理解；`off_track` 归因依赖亮度突变，
    阴影/逆光会误报。
-5. `--engine laya` 是 CLI 默认值（遵循需求文档），但**建议总先跑 heuristic** 做对照。
+5. `--engine` 默认值为 `heuristic`（**有意偏离需求文档原定的 laya 默认**），
+   依据是上面合成基准的实测：零样本 Laya 未超过多数类基线。标注数据拟合温度后
+   可用 `--engine laya` 复评。
 
 ## 七、关键设计决策（为什么这么做）
 
