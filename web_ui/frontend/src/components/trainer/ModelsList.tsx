@@ -283,7 +283,7 @@ export const ModelsList: React.FC = () => {
                   onClick={(e) => e.stopPropagation()}
                   title={t('trainer.downloadModel')}
                   aria-label={t('trainer.downloadModel')}
-                  className="dd-hit-v p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
+                  className="p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
                   download
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -303,7 +303,7 @@ export const ModelsList: React.FC = () => {
                   }}
                   title={t('trainer.loadToCar')}
                   aria-label={t('trainer.loadToCar')}
-                  className="dd-hit-v p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
+                  className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -314,7 +314,7 @@ export const ModelsList: React.FC = () => {
                   }}
                   title={t('trainer.copyPath')}
                   aria-label={t('trainer.copyPath')}
-                  className="dd-hit-v p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </button>
@@ -325,7 +325,7 @@ export const ModelsList: React.FC = () => {
                   }}
                   title={t('trainer.deleteModel')}
                   aria-label={t('trainer.deleteModel')}
-                  className="dd-hit-v p-1 text-red-400 hover:text-red-300 transition-colors"
+                  className="p-1 text-red-400 hover:text-red-300 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>

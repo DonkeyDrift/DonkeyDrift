@@ -22,10 +22,10 @@
  *
  * 浅色化原则(Apple 浅色):
  * - 中性面用高明度近中性灰:页面 #f5f5f7,面板 #fff(平板卡片、无渐变),
- *   发丝线两档(卡片黑 .08 / 分隔线 Apple light separator)。
+ *   发丝线以卡片黑 .08 为基,细分层级走派生 alpha。
  * - 标志性颜色集中在该出现的位置并保持饱和:FILL 实色填充
  *   (蓝 #0071e3 / 绿 #34c759 / 红 #ff3b30 + 白文字)、状态细框、图表线;
- *   状态文字走 *-text 变体(绿 #1a7f37、琥珀 #c93400、红 #d70015)。
+ *   状态文字同功能色(绿 #34c759、琥珀 #ff9500、红 #ff3b30)。
  * - FRAME 语言不变:绿=正常/开、琥珀=过渡/警告、红=锁定/危险、
  *   灰 #8e8e93 = 关/断开;驾驶模式 手动=绿、半自动=琥珀、全自动=蓝。
  * - 状态薄底只给极低透明度的同色相晕染,主要靠细框+彩色文字表意,
@@ -64,26 +64,22 @@ html.theme-light {
   --off: #8e8e93;
   --on-scrim: #ffffff;
 
-  /* hairlines / lines —— 只保留 2 档（Apple separator 体系）：
-     弱档 = 卡片描边/页头 hairline（黑 .08），强档 = 列表分隔线（Apple light separator）。
-     其余语义名一律解析到这两档之一。 */
-  --separator: rgba(60, 60, 67, 0.29); /* Apple light separator */
+  /* hairlines / lines */
   --hairline: rgba(0, 0, 0, 0.08);
-  --hairline-a85: rgba(0, 0, 0, 0.08);
-  --hairline-a55: rgba(0, 0, 0, 0.08);
-  --line-white10: rgba(0, 0, 0, 0.08);
-  --line-soft: rgba(0, 0, 0, 0.08);
-  --line-soft-a50: rgba(0, 0, 0, 0.08);
-  --line-soft-a60: rgba(0, 0, 0, 0.08);
-  --line-soft-a90: rgba(0, 0, 0, 0.08);
-  --line-mid: rgba(60, 60, 67, 0.29);
+  --hairline-a85: rgba(0, 0, 0, 0.12); /* 派生 */
+  --hairline-a55: rgba(0, 0, 0, 0.1); /* 派生 */
+  --line-white10: rgba(0, 0, 0, 0.1); /* 派生 */
+  --line-soft: rgba(0, 0, 0, 0.05); /* 派生 */
+  --line-soft-a50: rgba(0, 0, 0, 0.04); /* 派生 */
+  --line-soft-a60: rgba(0, 0, 0, 0.05); /* 派生 */
+  --line-soft-a90: rgba(0, 0, 0, 0.07); /* 派生 */
+  --line-mid: rgba(0, 0, 0, 0.14); /* 派生 */
 
-  /* text —— label 层级（对比度对 #f5f5f7 实算）：ink2 6.51 / ink3 4.53(AA) / ink4 3.62。
-     ink3 起为“结构性文字”下限，ink4 只给纯 meta（时间戳、版本号、单位）。 */
+  /* text */
   --ink: #1d1d1f;
-  --ink2: rgba(60, 60, 67, 0.85);
-  --ink3: rgba(60, 60, 67, 0.72);
-  --ink4: rgba(60, 60, 67, 0.62);
+  --ink2: rgba(60, 60, 67, 0.62);
+  --ink3: rgba(60, 60, 67, 0.48); /* 派生:tertiary label */
+  --ink4: rgba(60, 60, 67, 0.36); /* 派生:quaternary label */
   --ink5: #8e8e93;
   --ink-strong: #1d1d1f;
   --ink-strong-hover: #000000;
@@ -112,7 +108,6 @@ html.theme-light {
   --bad-fill: #ff3b30;
   --bad-fill-hover: #d92c22; /* 派生 */
   --bad: #ff3b30;
-  --bad-text: #d70015; /* 文字变体（4.94:1） */
   --bad-soft1: #c2261d; /* 派生 */
   --bad-soft2: #a01d18; /* 派生 */
   --bad-soft3: #7a1612; /* 派生 */
@@ -131,9 +126,6 @@ html.theme-light {
   --bad-a60: rgba(255, 59, 48, 0.5);
   --ok-fill: #34c759;
   --ok: #34c759;
-  /* 文字变体：填充继续用 --ok/--warn/--bad，文字一律走 *-text（浅色填充色
-     当文字不够 AA，故文字变体是更深一档的独立取值） */
-  --ok-text: #1a7f37;
   --ok-hover: #28a34c; /* 派生 */
   --ok-wash-25: rgba(52, 199, 89, 0.2);
   --ok-wash-10: rgba(52, 199, 89, 0.1);
@@ -144,7 +136,7 @@ html.theme-light {
   --ok-a70: rgba(52, 199, 89, 0.6);
   --ok-a40: rgba(52, 199, 89, 0.38);
   --warn: #ff9500;
-  --warn-text: #c93400; /* 文字变体（4.85:1）；--warn 仍是填充色 */
+  --warn-text: #ff9500;
   --warn-soft1: #b06a00; /* 派生 */
   --warn-soft2: #8a5300; /* 派生 */
   --warn-wash-40: rgba(255, 149, 0, 0.12);
@@ -173,12 +165,11 @@ html.theme-light {
   --w-badge: 600;
   --tracking-title: -0.02em;
 
-  /* shadows —— 卡片保持 hairline-only（--shadow-sm: none），浮层单独给 elevation：
-     浅色下浮层只靠 1.12:1 的描边分界会读起来是“贴上去的方块”。 */
+  /* shadows */
   --shadow-sm: none;
-  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
-  --shadow-2xl: 0 20px 56px rgba(0, 0, 0, 0.18), 0 4px 10px rgba(0, 0, 0, 0.1);
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
 }
 
 /* ---------- Surfaces ---------- */
@@ -194,10 +185,6 @@ html.theme-light .bg-zinc-900 {
   background-color: var(--surface);
 }
 html.theme-light .bg-zinc-900\/35 {
-  background-color: var(--surface-a35);
-}
-/* 分组底（HarnessPanel/AiSettingsPanel 的分组块）：与 /35 同档语义，组件自带 border */
-html.theme-light .bg-zinc-900\/40 {
   background-color: var(--surface-a35);
 }
 html.theme-light .bg-zinc-900\/50,
@@ -416,8 +403,6 @@ html.theme-light .text-zinc-600,
 html.theme-light .disabled\:text-zinc-600:disabled {
   color: var(--ink5);
 }
-/* 灰阶层级重映射（zinc-500→ink3、zinc-600→ink4）不在这份共享规则体里，
-   由 themes/apple-deep.css 第 0 节后置覆盖（同特异度、加载顺序在后胜出）。 */
 html.theme-light .text-white {
   color: var(--ink-strong);
 }
@@ -479,10 +464,6 @@ html.theme-light .text-amber-100 {
 
 /* ---------- Borders ---------- */
 html.theme-light .border-zinc-800 {
-  border-color: var(--line-soft);
-}
-/* divide-y 的分隔线走同一次级描边（Tailwind divide 色作用在子元素 border 上） */
-html.theme-light .divide-zinc-800 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--line-soft);
 }
 html.theme-light .border-zinc-700 {
@@ -804,8 +785,8 @@ html.theme-light .console-dev-toggle {
   border-color: var(--hairline);
   box-shadow: inset 0 0 0 1px var(--line-soft);
   color: var(--ink2);
-  /* 字体栈在此显式锁定一份完整栈；apple-deep.css §8 会把这组按钮的字体
-     统一回 system-ui 栈（同特异度、加载顺序在后胜出），此行为兜底基值 */
+  /* 字体栈在此显式锁定一份完整栈；深化层 apple-deep.css 已按用户要求撤下，
+     恢复 2026-09-11 第一轮 Apple 外观，此栈即唯一生效来源 */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   font-synthesis: none;
   text-rendering: optimizeLegibility;

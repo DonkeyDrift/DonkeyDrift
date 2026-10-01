@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-10-01 (258)
+
+- feat(ui): DD 全站视觉恢复 2026-09-11 第一轮 Apple 改版外观——按用户要求撤下后续两轮自行「深化」（e52eeec5 视觉审查 16 项、b979cc10 Apple 象限深化），覆盖全部页面
+  - 背景：第一轮 Apple 改版（0784d454，09-11）后，AI 又连续做了多轮深化（灰阶分层 ink2/3/4 提亮、语义色双轨、3px focus 环、44pt 命中区、elevation 恢复、发丝线 6 档收敛为 2 档、ApiStatusBar 加载骨架/错误条等）；用户明确表示更喜欢第一轮修改之后的样子，要求全页面恢复。
+  - 主题调色板（`web_ui/frontend/src/themes/theme-mus4.css` / `theme-light.css`）：`html.theme-*` 基块变量值逐项恢复为 0784d454 `ui-apple` 覆写块的值——深色 ink2/3/4 透明度回到 0.62/0.45/0.32（浅色 0.62/0.48/0.36）、发丝线恢复多档派生体系（hairline-a85 0.16 等）、`--shadow-lg/xl/2xl` 恢复 `none`（卡片回归 hairline-only 平直质感）、浅色 `--warn-text` 恢复 `#ff9500`；删除深化新增变量 `--separator`/`--ok-text`/`--bad-text`；删除 e52eeec5 新增的 `.bg-zinc-900\/40` 与 `.divide-zinc-800` 映射规则（这两个工具类在第一轮本就回落 Tailwind 默认色）。保留 b34ef4b4 的 Apple 唯一风格结构（不恢复座舱/切换器）与 8b6d00e3 用户点名的 mode-active 统一描边。
+  - 深化层整体删除：`themes/apple-deep.css`（479 行规则体层）、`themes/appleTokens.test.ts`、`components/ApiStatusBar.tsx` 及其测试、`lib/apiHealth.ts`；`main.tsx` 移除 apple-deep.css 导入；`services/api.ts` 移除 `registerApiClient` 旁路观测接线（e52eeec5 的 discoverConnectorConsoles 9s 超时属功能修复，保留）。
+  - `components/Layout.tsx`：移除 ApiStatusBar 接线与 b979cc10 的吸顶页头滚动 hairline（scrollY 监听/`is-scrolled`/`dd-header`），页头恢复第一轮写法；8b6d00e3 用户点名的顶栏原始排列（space-x-6、GitHub+版本号右簇）保留不动。
+  - 组件视觉逐项回退（保留全部功能改动）：`TelemetryChart` 曲线/图例配色恢复第一轮固定色板（删 textVar 双轨与 lightColor 拆分）；`VideoStream`/`DrivePage`/`TubLibrary`/`PilotArenaPage` 摘除 dd-overlay/dd-media 钩子类；`ProgrammableButtons`/`ModelsList` 摘除 dd-hit-v 44pt 命中区类；`EnterButtons` 摘除 dd-nav-link；`SidePanel` 恢复移动端可见并摘除 dd-hit-h；`FabActions` 恢复 backdrop-blur（单击直达行为为用户 9-15 点名要求，保留）；`CarConnectorButton` 图标恢复 Settings 齿轮；`HarnessPanel` 六处文字色恢复 text-zinc-400（7c420596 CC-Switch 化结构保留）；`SimCollectCard`/`DriftCard` 网格布局恢复 e52eeec5 前写法；`ThemeSwitcher`/`LanguageSwitcher` 恢复第一轮硬编码中文标签。
+  - 清理：`i18n/messages/common.ts` 删除恢复后不再被引用的 6 个键（dataState×2、themeSwitcher×2、languageSwitcher×2，zh/en 同步）；`services/apiFormData.test.ts` 删除对已删 apiHealth 模块的 vi.mock；`Input.tsx` 注释改实。
+  - 用户点名的后续调整全部保留：8b6d00e3 顶栏排列/选中态统一/输入框边框、c2ec0561 悬停副标题、57a0d8b7 全文可选中、2864bb2c TE select-none，以及全部功能性 feature/fix。
+  - 测试：vitest 52 文件 350 用例全绿；`tsc -b --noEmit` 零错误；`npm run build` 通过；Playwright 双主题截图核验 Drive/TM/Trainer/CC 页面，计算样式探针命中第一轮值（深色卡片 #1c1c1e 平直无投影、ink3 rgba(235,235,245,0.45)；浅色卡片 #fff、ink3 rgba(60,60,67,0.48)）。
+  - 注：纯前端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
 ## 2026-09-25 (257)
 
 - fix(tubeditor): 修复 TM 页面上下两根播放进度条不同步——下方滑块不再因「持有焦点」而永久停摆

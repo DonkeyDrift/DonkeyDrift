@@ -1069,6 +1069,9 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
             </Button>
             <Button variant="secondary" size="sm" onClick={() => jumpToRecord(currentIndex + 1)} disabled={!hasRecords}>{t('arena.nextFrame')}</Button>
             <Button variant="secondary" size="sm" onClick={() => jumpToRecord(maxIndex)} disabled={!hasRecords}>{t('arena.lastFrame')}</Button>
+            <span className="text-xs text-zinc-500">
+              {t('arena.playbackStats', { playback: Math.round(playbackSpeed), inference: Math.round(evaluationIntervalMs), concurrency: maxInferenceConcurrency })}
+            </span>
           </div>
           <div className="flex flex-wrap gap-3 text-sm text-zinc-400">
             <span>{t('arena.currentSeq', { index: displayRecordIndex })}</span>
@@ -1120,7 +1123,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                   </Button>
                   <Button
                     variant="secondary"
-                    className="w-full whitespace-nowrap"
+                    className="w-full"
                     onClick={() => importInputRefs.current[viewer.localId]?.click()}
                     disabled={viewer.loading || importingViewerId === viewer.localId}
                   >
@@ -1169,8 +1172,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 </div>
               )}
 
-              <div className="dd-media aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
-                <div className="dd-overlay absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md shadow-lg">
+              <div className="aspect-video overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 flex items-center justify-center relative">
+                <div className="absolute right-2 top-2 z-10 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center backdrop-blur-md shadow-lg">
                   <div>
                     <div className="text-[10px] uppercase leading-none text-zinc-400">{t('arena.playbackLabel')}</div>
                     <div className="font-mono text-sm leading-tight text-cyan-400">{viewer.playbackFps}</div>
@@ -1332,9 +1335,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
                 {plotLoading ? t('arena.generating') : t('arena.generatePlot')}
               </Button>
             </div>
-            {/* 区间滑杆：容器走主题 remap 的 bg-zinc-900/50（原 bg-zinc-950/60 未被浅色
-                主题映射，浅色下深底压深字不可读），起始/结束帧标签随之恢复可读 */}
-            <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-900/50 p-3">
+            <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                 <span data-testid="plot-start-label">{t('arena.plotStartFrame', { value: plotStart })}</span>
                 <span data-testid="plot-end-label">{t('arena.plotEndFrame', { value: plotEnd })}</span>
