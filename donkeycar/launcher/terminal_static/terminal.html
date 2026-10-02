@@ -11,9 +11,9 @@ html,body{margin:0;height:100%;background:var(--tbg,#101318);overflow:hidden}
 #term .xterm{height:100%}
 /* 触屏长按复制：禁用 iOS 长按系统放大镜/呼出菜单，长按手势由页面自己处理 */
 #term,.xterm{-webkit-touch-callout:none}
-#termToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);background:rgba(28,32,40,.92);color:#e8edf2;font:13px system-ui,sans-serif;padding:8px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:99}
+#termToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);background:rgba(28,32,40,.92);color:#e8edf2;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";padding:8px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:99}
 #termToast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tov,rgba(16,19,24,.85));color:var(--tovink,#8fa1b5);font-family:system-ui,sans-serif;font-size:14px;cursor:pointer;user-select:none;text-align:center;padding:0 16px}
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tov,rgba(16,19,24,.85));color:var(--tovink,#8fa1b5);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:14px;cursor:pointer;user-select:none;text-align:center;padding:0 16px}
 #overlay[hidden]{display:none}
 </style>
 </head>

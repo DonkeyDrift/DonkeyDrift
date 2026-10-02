@@ -1,6 +1,7 @@
 import React from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { Loader2 } from 'lucide-react';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -9,12 +10,17 @@ function cn(...inputs: ClassValue[]) {
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
   size?: 'sm' | 'md' | 'lg';
+  /** Shows a spinner before the children and forces disabled while set. */
+  loading?: boolean;
 }
 
 export const Button: React.FC<ButtonProps> = ({
   className,
   variant = 'primary',
   size = 'md',
+  loading = false,
+  disabled,
+  children,
   ...props
 }) => {
   // 全部走标准 Tailwind 工具类，由 themes/*.css 皮肤按语义变量重映射
@@ -40,7 +46,11 @@ export const Button: React.FC<ButtonProps> = ({
         sizes[size],
         className
       )}
+      disabled={disabled || loading}
       {...props}
-    />
+    >
+      {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+      {children}
+    </button>
   );
 };

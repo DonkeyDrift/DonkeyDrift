@@ -211,7 +211,7 @@ describe('ConsoleDevToggle', () => {
     mockGetJson.mockResolvedValue({ enabled: false });
     render(<ConsoleDevToggle />);
 
-    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    const toggle = await screen.findByRole('button', { name: 'console.devModeTitle' });
     fireEvent.click(toggle);
 
     expect(await screen.findByText('console.devTitle')).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe('ConsoleDevToggle', () => {
     mockGetJson.mockResolvedValue({ enabled: true });
     render(<ConsoleDevToggle />);
 
-    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    const toggle = await screen.findByRole('button', { name: 'console.devModeTitle' });
     fireEvent.click(toggle);
 
     await waitFor(() => {
@@ -251,8 +251,8 @@ describe('ConsoleDevToggle', () => {
     mockGetJson.mockResolvedValue({ enabled: false });
     render(<ConsoleDevToggle />);
 
-    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    const toggle = await screen.findByRole('button', { name: 'console.devModeTitle' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
     expect(toggle.className).toContain('h-8');
     expect(toggle.className).toContain('bg-zinc-800');
     expect(screen.getByText('console.devHint')).toBeInTheDocument();
@@ -262,8 +262,8 @@ describe('ConsoleDevToggle', () => {
     mockGetJson.mockResolvedValue({ enabled: true });
     render(<ConsoleDevToggle />);
 
-    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    const toggle = await screen.findByRole('button', { name: 'console.devModeTitle' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
     expect(toggle.className).toContain('bg-cyan-500/20');
     expect(toggle.className).toContain('border-cyan-500');
     expect(toggle.className).toContain('text-cyan-400');
@@ -272,7 +272,7 @@ describe('ConsoleDevToggle', () => {
   it('is disabled when the console is unreachable', () => {
     mockUseConsoleDevice.mockReturnValue({ ip: null, resolving: false, refresh: mockRefresh });
     render(<ConsoleDevToggle />);
-    const toggle = screen.getByRole('switch');
+    const toggle = screen.getByRole('button', { name: 'console.devModeTitle' });
     expect(toggle).toBeDisabled();
   });
 
@@ -285,9 +285,9 @@ describe('ConsoleDevToggle', () => {
   it('shows a disabled unreachable state instead of "off" while the devmode state is unknown', async () => {
     mockGetJson.mockRejectedValue(new Error('boom'));
     render(<ConsoleDevToggle />);
-    const toggle = await screen.findByRole('switch', { name: 'console.devModeTitle' });
+    const toggle = await screen.findByRole('button', { name: 'console.devModeTitle' });
     await waitFor(() => expect(toggle).toBeDisabled());
     expect(toggle).toHaveAttribute('title', 'console.unreachable');
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
   });
 });

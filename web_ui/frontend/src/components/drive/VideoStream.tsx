@@ -215,8 +215,8 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
 
       <div className="absolute top-2 left-2 z-30 flex items-start gap-2">
         <div className="rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-lg backdrop-blur-md min-w-[4.5rem]">
-          <div className={`text-[10px] leading-none flex items-center justify-center gap-1 ${statusMeta.color}`}>
-            <StatusIcon className={`w-3 h-3 ${statusMeta.pulse ? 'animate-pulse' : ''}`} />
+          <div className={`text-xs leading-none flex items-center justify-center gap-1 ${statusMeta.color}`}>
+            <StatusIcon className={`w-3 h-3 ${statusMeta.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
             {statusMeta.text}
           </div>
           <div className="text-base font-mono leading-tight text-cyan-400">{latencyMs > 0 ? `${latencyMs}ms` : '-'}</div>
@@ -228,13 +228,13 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         )}
       </div>
       <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-lg backdrop-blur-md">
-        <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
+        <div className="text-xs text-zinc-400 uppercase leading-none">FPS</div>
         <div className="text-base font-mono leading-tight text-cyan-400">{webRtcConnected ? browserFps : mjpegFps}</div>
       </div>
       {/* 多车端抢占告警：10 秒内车端槽位多次易主 = 多个 manage.py drive 互踢 */}
       {multiCarWarning && (
         <div className="absolute inset-x-2 bottom-2 z-40 flex items-center gap-2 rounded-md border border-red-400/30 bg-red-950/70 px-3 py-2 text-xs text-red-200 shadow-lg backdrop-blur-md">
-          <AlertTriangle className="h-4 w-4 shrink-0 animate-pulse" aria-hidden />
+          <AlertTriangle className="h-4 w-4 shrink-0 animate-pulse motion-reduce:animate-none" aria-hidden />
           <span>{t('driveViz.multiCarWarning')}</span>
         </div>
       )}

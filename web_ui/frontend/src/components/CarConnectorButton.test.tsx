@@ -36,16 +36,16 @@ describe('CarConnectorButton（Issue #406 顶栏图标入口）', () => {
   it('highlights the whole frame (bg + border + icon) in cyan when on /connector', () => {
     renderAt('/connector');
     const link = screen.getByRole('link', { name: 'common.nav.carConnector' });
-    expect(link.className).toContain('bg-[#5cc8ff]/10');
-    expect(link.className).toContain('border-[#5cc8ff]/60');
-    expect(link.className).toContain('text-[#5cc8ff]');
+    expect(link.className).toContain('bg-cyan-500/20');
+    expect(link.className).toContain('border-cyan-500/60');
+    expect(link.className).toContain('text-cyan-400');
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
   it('uses the neutral zinc frame (same as mute/theme/language) on other routes', () => {
     renderAt('/drive');
     const link = screen.getByRole('link', { name: 'common.nav.carConnector' });
-    expect(link.className).not.toContain('border-[#5cc8ff]/60');
+    expect(link.className).not.toContain('border-cyan-500/60');
     expect(link.className).toContain('bg-zinc-800');
     expect(link.className).toContain('border-zinc-700');
     expect(link).not.toHaveAttribute('aria-current');

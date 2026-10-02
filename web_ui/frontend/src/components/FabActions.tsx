@@ -38,7 +38,7 @@ export const FabActions: React.FC = () => {
         type="button"
         onClick={() => setHelpOpen(true)}
         aria-label={t('fab.help')}
-        className={`fixed bottom-[18px] right-[18px] z-50 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 text-[24px] font-black leading-none shadow-lg backdrop-blur-[4px] transition-colors ${helpFabColors}`}
+        className={`fixed bottom-[max(18px,env(safe-area-inset-bottom))] right-[18px] z-50 flex h-[46px] w-[46px] min-w-0 items-center justify-center rounded-full border p-0 text-[24px] font-semibold leading-none shadow-lg backdrop-blur-[4px] transition-colors ${helpFabColors}`}
       >
         ?
       </button>
@@ -51,8 +51,9 @@ export const FabActions: React.FC = () => {
             className="fixed inset-0 z-[100] bg-black/60"
             onClick={() => setHelpOpen(false)}
           />
-          {/* .helpModal: anchored bottom-right above the FAB cluster */}
-          <div className={`fixed bottom-[74px] right-[18px] z-[101] max-h-[calc(100vh-100px)] w-[min(340px,calc(100vw-36px))] overflow-y-auto rounded-xl border ${helpModalColors} p-[14px]`}>
+          {/* .helpModal: anchored bottom-right above the FAB cluster; keeps the same
+              10px gap above the safe-area-aware FAB (18 + 46 + 10 = 74). */}
+          <div className={`fixed bottom-[max(74px,calc(env(safe-area-inset-bottom)+56px))] right-[18px] z-[101] max-h-[calc(100vh-100px)] w-[min(340px,calc(100vw-36px))] overflow-y-auto rounded-xl border ${helpModalColors} p-[14px]`}>
             {/* .helpHead */}
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 className="m-0 text-base font-bold text-zinc-100">{t('fab.helpTitle')}</h2>

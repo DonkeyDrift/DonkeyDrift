@@ -4,6 +4,7 @@ import { useTranslation } from '@/i18n';
 import { useConsoleDevice } from '../hooks/useConsoleDevice';
 import { consoleGetJson, consolePostForm, consolePostText } from '../services/console';
 import { Button } from './ui/Button';
+import { Modal } from './Modal';
 
 // Drifter Console（ESP32）顶栏快捷控件：静音 / OTA / DEV。
 // 复用 Issue #234 已有的 /api/console/proxy 同源代理与 services/console，
@@ -83,7 +84,7 @@ export const ConsoleMuteButton: React.FC = () => {
       aria-label={label}
       aria-pressed={muted === true}
       title={resolving ? t('console.connecting') : unreachable || unknown ? t('console.unreachable') : label}
-      className={`console-mute-btn flex items-center justify-center w-8 h-8 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+      className={`console-mute-btn hit-44 flex items-center justify-center w-8 h-8 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
         muted
           ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400'
           : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-zinc-100'
@@ -118,15 +119,8 @@ export const ConsoleOtaButton: React.FC = () => {
     setStatus({ kind: 'idle', text: '' });
   }, [uploading]);
 
-  // Esc 关闭上传弹窗（上传进行中由 close() 自身拦截，不打断传输）
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, close]);
+  // Esc / focus trap / scrim come from the Modal primitive; close() still vetoes
+  // dismissal while an upload is in flight so the transfer is never interrupted.
 
   const upload = async () => {
     if (!ip || !file) {
@@ -170,56 +164,57 @@ export const ConsoleOtaButton: React.FC = () => {
 
       {/* 上传期间不依赖 ip：OTA 中车端 503，DD 重扫可能暂时把 ip 置 null，
           弹窗须在整个上传期间稳定存在（上传本身基于已发出的请求，不受影响）。 */}
-      {open && (ip || uploading) && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
-              <h2 className="text-base font-semibold text-zinc-100">{t('console.otaTitle')}</h2>
-              <button
-                type="button"
-                onClick={close}
-                disabled={uploading}
-                aria-label={t('common.close')}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 space-y-4">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".bin"
-                aria-label={t('console.otaChooseFile')}
-                onChange={(e) => {
-                  setFile(e.target.files?.[0] ?? null);
-                  setStatus({ kind: 'idle', text: '' });
-                }}
-                className="block w-full text-sm text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:text-zinc-200 hover:file:bg-zinc-700"
-              />
-              {status.kind !== 'idle' && (
-                <p
-                  className={`text-sm ${
-                    status.kind === 'success' ? 'text-emerald-400' : 'text-red-400'
-                  }`}
-                >
-                  {status.text}
-                </p>
-              )}
-            </div>
-            <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3">
-              <Button variant="secondary" onClick={close} disabled={uploading}>
-                {t('console.cancel')}
-              </Button>
-              {/* 离线（ip 丢失）时禁用刷写：入口按钮虽已在不可达时禁用，但弹窗打开后
-                  车端可能掉线，此时不允许把固件发给一个已不可达的设备 */}
-              <Button onClick={upload} disabled={uploading || !file || !ip}>
-                {uploading ? t('console.otaUploading') : t('console.otaUpload')}
-              </Button>
-            </div>
-          </div>
+      <Modal
+        open={open && (!!ip || uploading)}
+        onClose={close}
+        label={t('console.otaTitle')}
+        className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden"
+      >
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+          <h2 className="text-base font-semibold text-zinc-100">{t('console.otaTitle')}</h2>
+          <button
+            type="button"
+            onClick={close}
+            disabled={uploading}
+            aria-label={t('common.close')}
+            className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-100 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      )}
+        <div className="p-4 space-y-4">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".bin"
+            aria-label={t('console.otaChooseFile')}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setStatus({ kind: 'idle', text: '' });
+            }}
+            className="block w-full text-sm text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:text-zinc-200 hover:file:bg-zinc-700"
+          />
+          {status.kind !== 'idle' && (
+            <p
+              className={`text-sm ${
+                status.kind === 'success' ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {status.text}
+            </p>
+          )}
+        </div>
+        <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3">
+          <Button variant="secondary" onClick={close} disabled={uploading}>
+            {t('console.cancel')}
+          </Button>
+          {/* 离线（ip 丢失）时禁用刷写：入口按钮虽已在不可达时禁用，但弹窗打开后
+              车端可能掉线，此时不允许把固件发给一个已不可达的设备 */}
+          <Button onClick={upload} disabled={uploading || !file || !ip}>
+            {uploading ? t('console.otaUploading') : t('console.otaUpload')}
+          </Button>
+        </div>
+      </Modal>
     </>
   );
 };
@@ -296,8 +291,7 @@ export const ConsoleDevToggle: React.FC = () => {
       <span className="relative group inline-flex">
         <button
           type="button"
-          role="switch"
-          aria-checked={!!enabled}
+          aria-pressed={!!enabled}
           aria-label={t('console.devModeTitle')}
           disabled={unreachable || unknown || busy}
           onClick={toggle}
@@ -317,22 +311,23 @@ export const ConsoleDevToggle: React.FC = () => {
         )}
       </span>
 
-      {confirmOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-zinc-800 bg-zinc-900/50">
-              <h2 className="text-base font-semibold text-zinc-100">{t('console.devTitle')}</h2>
-            </div>
-            <div className="p-4 text-sm text-zinc-300 leading-relaxed">{t('console.devBody')}</div>
-            <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
-                {t('console.cancel')}
-              </Button>
-              <Button onClick={confirm}>{t('console.devConfirm')}</Button>
-            </div>
-          </div>
+      <Modal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        label={t('console.devTitle')}
+        className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden"
+      >
+        <div className="p-4 border-b border-zinc-800 bg-zinc-900/50">
+          <h2 className="text-base font-semibold text-zinc-100">{t('console.devTitle')}</h2>
         </div>
-      )}
+        <div className="p-4 text-sm text-zinc-300 leading-relaxed">{t('console.devBody')}</div>
+        <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3">
+          <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
+            {t('console.cancel')}
+          </Button>
+          <Button onClick={confirm}>{t('console.devConfirm')}</Button>
+        </div>
+      </Modal>
     </>
   );
 };

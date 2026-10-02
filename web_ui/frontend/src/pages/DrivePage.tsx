@@ -17,6 +17,7 @@ import { ModelSelector } from '../components/drive/ModelSelector';
 import { SimCollectCard } from '../components/drive/SimCollectCard';
 import { DriftCard } from '../components/drive/DriftCard';
 import { DriveTargetCard, type DriveTarget } from '../components/drive/DriveTargetCard';
+import { GamepadBridgeCard } from '../components/drive/GamepadBridgeCard';
 import { useDriveStore } from '../store/useDriveStore';
 import { useGamepadStore } from '../store/useGamepadStore';
 import { useStore } from '../store/useStore';
@@ -27,7 +28,7 @@ import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useElementWidth, useElementHeight } from '../hooks/useElementWidth';
 import { useTranslation } from '@/i18n';
 import { cn } from '../lib/utils';
-import { Circle, ChevronLeft, ChevronRight, Joystick, Maximize2, Minimize2 } from 'lucide-react';
+import { AlertTriangle, Circle, ChevronLeft, ChevronRight, Info, Joystick, Loader2, Lock, Maximize2, Minimize2, WifiOff } from 'lucide-react';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
 type DrivePageProps = {
@@ -466,6 +467,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         simConnected={simConnected}
         onSelectTarget={setManualTarget}
       />
+      {/* 手柄桥模式：仅真车目标下显示（ESP32 双槽位 车固件 ↔ RC_BLE_Bridge 切换） */}
+      {driveTarget === 'car' && <GamepadBridgeCard />}
       {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
       {driveTarget !== 'sim' && <DriftCard />}
       {driveTarget !== 'car' && <SimCollectCard />}
@@ -479,26 +482,29 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
               {rcPark === 1 && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/20 text-red-400 text-xs font-medium whitespace-nowrap"
+                  className="inline-flex items-center gap-1 text-red-400 text-xs font-medium whitespace-nowrap"
                   data-rc-park={rcPark}
                 >
+                  <Lock className="w-3.5 h-3.5" aria-hidden />
                   {t('drive.parkLocked')}
                 </span>
               )}
               {simConnected === false && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  className="inline-flex items-center gap-1 text-amber-400 text-xs font-medium whitespace-nowrap"
                   data-sim-connected={simConnected}
                 >
+                  <WifiOff className="w-3.5 h-3.5" aria-hidden />
                   {t('drive.simOfflineReconnecting')}
                 </span>
               )}
               {driverConflict && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  className="inline-flex items-center gap-1 text-amber-400 text-xs font-medium whitespace-nowrap"
                   data-driver-conflict="true"
                   role="status"
                 >
+                  <AlertTriangle className="w-3.5 h-3.5" aria-hidden />
                   {t('drive.driverConflict')}
                 </span>
               )}
@@ -511,18 +517,20 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               />
               {modelLoading && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/20 text-cyan-400 text-xs font-medium whitespace-nowrap animate-pulse"
+                  className="inline-flex items-center gap-1 text-cyan-400 text-xs font-medium whitespace-nowrap"
                   data-model-loading="true"
                 >
+                  <Loader2 className="w-3.5 h-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
                   {t('drive.modelLoading')}
                 </span>
               )}
               {!modelLoading && modelNotice && (
                 <span
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+                  className="inline-flex items-center gap-1 text-amber-400 text-xs font-medium whitespace-nowrap"
                   data-model-notice="true"
                   role="status"
                 >
+                  <Info className="w-3.5 h-3.5" aria-hidden />
                   {modelNotice}
                 </span>
               )}
@@ -535,7 +543,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               <button
                 onClick={toggleRecording}
                 disabled={!carState.online || recordingLock}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 max-lg:min-h-[40px] rounded-lg text-xs font-medium transition-colors tnum
                   ${recording
                     ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                     : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
@@ -544,7 +552,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                 `}
               >
                 {recording ? (
-                  <Circle className="w-3.5 h-3.5 fill-current animate-pulse text-red-400" />
+                  <Circle className="w-3.5 h-3.5 fill-current animate-pulse motion-reduce:animate-none text-red-400" />
                 ) : (
                   <Circle className="w-3.5 h-3.5" />
                 )}
@@ -623,7 +631,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           <div className="flex items-start gap-2">
             {/* 面板内容：夹在视频画面与把手（展开开关）之间；宽度固定自然宽，缩放交给 transform */}
             <div
-              className={`${joystickOpen ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-2xl overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
+              className={`${joystickOpen ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-float overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
                 joystickOpen && dockOverlay ? 'border-cyan-500/30 backdrop-blur-[2px]' : ''
               }`}
               style={joystickOpen && dockOverlay ? { opacity: DOCK_OVERLAY_OPACITY } : undefined}
@@ -668,7 +676,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                     className="max-w-[360px]"
                   />
                   <ParameterPanel className="w-full max-w-[360px]" />
-                  <div className="text-[10px] text-zinc-500 text-center">
+                  <div className="text-xs text-zinc-500 text-center">
                     {t('drive.hotkeysLine1')}<br />
                     {t('drive.hotkeysLine2')}
                   </div>
@@ -676,11 +684,12 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               </div>
             </div>
 
-            {/* 浮动触发把手：抽屉收起/展开开关；中文竖排、英文横排两行 */}
+            {/* 浮动触发把手：抽屉收起/展开开关；中文竖排、英文横排两行。
+                hit-44 把触控热区扩到 44px（视觉尺寸不变，抽屉布局常量 DOCK_CLUSTER_W 不受影响） */}
             <button
               onClick={() => setJoystickOpen(!joystickOpen)}
               title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
-              className="shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
+              className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
             >
               {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
               {lang === 'en' ? (

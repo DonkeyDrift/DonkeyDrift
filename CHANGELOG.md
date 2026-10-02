@@ -1,5 +1,72 @@
 # 变更日志
 
+## 2026-10-02 (266)
+
+- feat(drive): 驾驶页新增「手柄桥模式」卡片——车固件 ↔ RC_BLE_Bridge 蓝牙手柄桥一键切换（配套 Firmware v1.10.12 双启动槽位）
+  - 背景：HOT RC CT-8B 手柄要经 ESP32 BLE 桥接器（Firmware `examples/RC_BLE_Bridge`）连 Mac 操控 DD 页面里的模拟器；每次刷整固件太麻烦，方案二让车固件与桥固件分居 ESP32 两个 OTA 槽位（app0/app1），网页一键 10 秒互切。
+  - 新增 `web_ui/frontend/src/components/drive/GamepadBridgeCard.tsx`：无 props，经 `useConsoleDevice()` 取车 IP，所有请求走 DD 后端 `/api/console/proxy` 同源代理（`consoleGetJson`/`consolePostText`，与顶栏 DEV 控件同款链路），**后端零改动**。状态机：`GET api/slot-info` 读槽位 → 车模式+`other_kind=bridge` 显示「手柄桥已就绪」+确认 Modal 后 `POST api/switch-slot`；桥运行中显示绿点状态+「切回真车」（切回成功后 `invalidateConsoleDeviceCache()`）；未装桥（`other_kind=empty/unknown`）按钮禁用并附补种指引（指向 Firmware RC_BLE_Bridge/README）；切换中琥珀徽章、2s 轮询至 `app` 翻转、40s 超时提示；读取失败按 ConsoleDevToggle 同款自愈 `refresh()` 重扫。样式复用 `Card/SectionCardTitle/Button/Modal` 与 DriveTargetCard 同款 zinc/cyan/emerald/amber 体系。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`DriveTargetCard` 之后挂载，仅 `driveTarget === 'car'` 时显示（模拟器目标下不出现）。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：zh/en 各新增 20 条 `drive.bridge*` 文案。
+  - 固件契约：`GET /api/slot-info` 返回 `{"app":"car"|"bridge","running":"app0|app1","other":..., "other_kind":"car|bridge|unknown|empty"}`，`POST /api/switch-slot` 成功回 `ACK:SWITCHING` 后重启、对面空槽回 `400 NACK:NO_IMAGE`；车固件与桥固件接口对称，桥根页面含 "Drifter Console" 字样保证局域网发现在两种模式下均可用。
+  - 测试同步：新增 `GamepadBridgeCard.test.tsx` 8 用例（mock 方式照 ConsoleControls.test.tsx）——桥就绪/确认弹窗与 POST 参数断言/未安装禁用/桥模式切回/车→桥轮询翻转全流程/桥→车 invalidate 调用/读取失败兜底+重扫/POST 失败不进入切换中。
+  - 验证：worktree 内 `npx tsc --noEmit` 零错误、`npx vitest run` **53 文件 365 用例全绿**、`npm run build` 通过；Firmware 侧全链路已在实车实测（v1.10.12 切桥→BLE 广播「Gamepad MU02」→切回，见 Firmware CHANGELOG v1.10.12）。
+
+## 2026-10-02 (265)
+
+- fix(ui): 全站字体栈回最初版（更宽的首版栈）+ 品牌名去空格统一为「DonkeyDrifter」+ 找小车入口改名「Find-DKC」
+  - 起因（用户报障）：用户确认 DD 与 DC 页面现字体都不是想要的「最开始那种」——最初版更宽、类似苹果自带/Safari 字体；并要求把「Donkey Drifter」中间的空格去掉、「找小车」入口改成「Find-DKC」。
+  - 字体（回 fe144ad5 首版栈）：`web_ui/frontend/src/index.css` :root、`themes/theme-mus4.css` / `themes/theme-light.css` 的 .font-sans 重映射换回 `-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"`（0784d454 的 system-ui 优先统一撤回；顶栏 DC 风格按钮本就锁该栈）；launcher 侧内嵌页同步——`donkeycar/launcher/server.py` 启动中转页与 D 菜单页 body、`terminal_static/terminal.html` toast/overlay。实测本机 Chrome + Playwright：system-ui 栈解析 Noto Sans CJK SC（标题 148.3px@20px/700），首版栈解析 Noto Sans（151.0px，更宽）；Apple 设备即 SF Pro。
+  - 改名「DonkeyDrifter」（去空格，14 处）：前端 `index.html` 标题、`Layout.tsx` 品牌文字 + logo alt、`i18n/messages/common.ts` GitHub 链接中英两条、`launcher/server.py` 启动页标题、后端 `main.py` FastAPI title 与两条运行消息；测试同步 `GitHubLink.test.tsx`（3 处）、`test_branding.py`（2 处）、`test_launcher_menu_actions.py` 注释。
+  - 找小车入口改名「Find-DKC」：`i18n/messages/common.ts` 按钮标签 `common.enterButtons.findCar` 与弹窗标题 `common.findCar.title` 中英四处（找小车/Find Car → Find-DKC）；`FindCarModal.tsx` 注释同步；测试断言走 i18n key 无需改。
+  - 验证：vitest 52 文件 357 全绿、tsc -b --noEmit 通过、vite build 通过（dist 实测 `<title>DonkeyDrifter</title>`、5 处首版栈、无「Donkey Drifter」残留）；pytest 分两次跑（`tests/` 与 `web_ui/backend/tests/`，避开 test_findcar.py 同名收集冲突）全绿 + testpaths 全量绿。
+  - Find Car（cloudflare/find-car，本地非 git）检查后本就是该首版栈，无需改动。
+
+## 2026-10-02 (264)
+
+- fix(drive): 模拟器预览全高清兜底——Drive 页面视频恒为 1920×1080，与 NN 处理分辨率彻底解耦
+  - 背景（用户报障）：2026-09-07 (207) 已做「预览与 NN 输入解耦」（Issue #401/#405），但用户实测模拟器模式下 Drive 页视频仍是低清。根因：渲染分辨率完全取决于配置里的 `render_img_w/h` 键——用户实际跑模拟器的 `mycar/myconfig.py` 的 `GYM_CONF` 缺这两个键（连 `img_w/img_h` 也缺），dgym 回退按 NN 输入 160×120 渲染，预览帧=低清帧；且模板 `cfg_simulator.py` 默认渲染仅 640×480，即使生效也不是全高清。
+  - `donkeycar/parts/dgym.py`：`render_img_w/render_img_h` 缺省回退由「NN 输入分辨率」改为 **1920×1080 全高清**——任何配置（含缺 render 键的旧配置）下 Drive 页预览都是最高画质；显式设置 render 键仍可覆盖；NN 输入（cam/image_array）始终为 img_w×img_h（dgym 内下采样），训练/推理不受影响。
+  - `donkeycar/templates/cfg_simulator.py`：默认渲染分辨率 640×480 → 1920×1080（全高清），注释同步。
+  - 用户本机配置（非仓库文件）：`mycar/myconfig.py` 的 `GYM_CONF` 显式补 `img_w/img_h`（160×120，与训练一致）与 `render_img_w/render_img_h`（1920×1080）。
+  - 测试同步：`test_dgym_preview.py` 缺省用例重写为「无 render 键 → 请求 1920×1080 + cam_resolution=(1080,1920,3) + NN 帧下采样 120×160 + 预览帧 1080×1920」（新增 FakeFullHdEnv），模块 docstring 同步；`test_template_simulator_preview.py` 增补模板默认值 1920/1080 断言。实测 `pytest test_dgym_preview + test_template_simulator_preview + test_drive_api_bridge` **62 全过**。
+  - 注：视频源在车端 `manage.py drive` 进程，需重启模拟器驾驶进程后生效；DD Web 后端/前端零改动，无需本机部署；Firmware 无改动、无需 OTA。
+
+## 2026-10-02 (263)
+
+- fix(ui): 驾驶目标选择栏浅色模式下不再是深色——theme-light 补 `bg-zinc-800/60` 映射
+  - 现象（用户报障）：Drive 页「驾驶目标」分段选择栏（真车|模拟器）在浅色模式下轨道仍是深灰色，与白卡片格格不入。
+  - 根因：`components/drive/DriveTargetCard.tsx` 选择栏容器用 `bg-zinc-800/60`，而 `themes/theme-light.css` 的浅色映射只覆盖 `bg-zinc-800`、`/50`、`/80` 三档，`/60` 漏映射——实测浅色下计算样式仍 `rgba(39,39,42,0.6)` 深底（边框 `border-zinc-700`→`--hairline` 早已正确映射）。
+  - 修复（`themes/theme-light.css`）：新增 `html.theme-light .bg-zinc-800/60 { background-color: var(--surface2-a50) }`（`rgba(245,245,247,0.6)`，与 `/50` 同档浅灰底）；容器自带 hairline 边框已够描形，不再叠加 outline（避免边框+outline 双框）。全应用仅此一处使用非 hover 的 `bg-zinc-800/60`，其余 4 处均为 `hover:bg-zinc-800/60`（类名不同，不受影响）。
+  - 验证：vitest 52 文件 **357 用例全绿**、`tsc --noEmit` 零错误、`npm run build` 通过；Playwright A/B 实测——修复前 `rgba(39,39,42,0.6)` 深底截图 vs 修复后 `rgba(245,245,247,0.6)` 浅灰截图（临时预览端口 8023，用后已回收）。
+  - 注：合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
+## 2026-10-02 (262)
+
+- feat(ui): Web UI 用户可见名称统一为「Donkey Drifter」
+  - 背景：用户要求把 Donkey Drift Web UI 的名字改成「Donkey Drifter」。
+  - `web_ui/frontend/index.html`：标签页标题 `DonkeyDrift Web UI` → `Donkey Drifter`；`components/Layout.tsx` 顶栏 logo 链接 `alt` 与可见文本 `DonkeyDrift` → `Donkey Drifter`（href `https://www.donkeydrift.com` 不动）；`i18n/messages/common.ts` `common.githubLink.label` 中英两条 → `Donkey Drifter GitHub 仓库` / `Donkey Drifter on GitHub`（i18n key 不动）。
+  - `web_ui/backend/main.py`：`FastAPI(title)` → `Donkey Drifter Web API`（`/docs` Swagger 页标题）；根路径 JSON 提示 → `Donkey Drifter Web UI is running...`（前端未构建时浏览器可见）。
+  - 不动：GitHub URL（github.com/DonkeyDrift/...）、donkeydrift.com 域名、i18n key、CSS 类名、data-testid、仓库/包名、已是 DonkeyDrifter 的位置（`common.findCar.ddLabel`、harness_updater 等）；`web_ui/design-proposals/*.html` 与 `joystick-scaling-demo.html` 属不进 dist、后端不托管的内部设计稿/演示页，不在本次范围。
+  - 测试同步：`GitHubLink.test.tsx` 两处链接名断言；`web_ui/backend/tests/test_branding.py` 两用例（原名即 `*_uses_donkeydrifter_brand`，断言与命名意图对齐）。
+  - 验证：vitest 52 文件 **357 用例全绿**、`tsc --noEmit` 零错误、`npm run build` 通过（dist `<title>` 已核实为 Donkey Drifter）、`pytest tests/test_branding.py` 2 过。
+  - 注：合入后部署本机 8000；Firmware 无改动、无需 OTA（同批 Firmware 侧为 Tony-font-restore v1.10.8 字体恢复）。
+
+## 2026-10-02 (261)
+
+- feat(ui): DD 全站经典 Apple 风格彻底打磨——顶栏磨砂/按压回弹/对比度/触控目标/焦点环 + Menu/Modal 原语落地
+  - 背景：v1.10.5 恢复第一轮 Apple 外观后，用户完整审查 DD/DC/Find Car 三页面，点名要求按**经典 Apple 风格（传统磨砂感，明确非 2025 Liquid Glass）**做彻底打磨。本轮为用户批准的完整打磨（P0–P2 共 40+ 处），聚焦执行层细节：材质、对比度、触控目标、可访问性、动效手感。
+  - 顶栏传统磨砂（`components/Layout.tsx`）：实底 `bg-zinc-950` → `bg-zinc-950/80 backdrop-blur-xl backdrop-saturate-150 border-b border-zinc-800`（主题 `--canvas-a80` 映射早已预留，浅色自动适配）；移动端汉堡面板同款磨砂；顶栏 `px-3→px-4` 与正文左缘对齐；补 `pt-[env(safe-area-inset-top)]`；`--header-h` 改由 ResizeObserver 实测写入 `:root`（jsdom 有 guard）。
+  - 新原语 `components/Menu.tsx`：click 触发（告别 hover 开菜单）、150ms `var(--ease-apple)` opacity+scale(.96→1) 入场、transform-origin 随弹出方向、Esc/外部 pointerdown 关闭、motion-reduce 退化纯淡入；`ModelSelector`/`InputSourceSelector`/Layout「⋯」三处菜单全部接管，浮动投影统一 `shadow-float`。
+  - 新原语 `components/Modal.tsx`：遮罩 `bg-black/40 backdrop-blur-sm` 传统磨砂、Esc 关闭（stopPropagation 防多层串扰）、Tab 焦点圈定、打开初始焦点入内、关闭还原焦点、`role="dialog" aria-modal`；接管 `FindCarModal` 与 `ConsoleControls` 的 OTA 弹窗/DEV 确认框（上传途中仍 veto 关闭，语义不丢）。
+  - 按压反馈修复（`index.css`）：弃 `transform:scale()` 改用独立 CSS `scale` 属性，基础规则常驻 `transition: scale 100ms var(--ease-apple), background-color/color/border-color/box-shadow 150ms ease-out`——按下与松手回弹都走 Apple 曲线（此前 transition 只写 `:active` 里，松手瞬间跳回，且 shorthand 顶掉 hover 颜色缓动的问题一并解决）；reduced-motion 降级保留。
+  - 对比度（`theme-light.css`）：新增 `--ok-text:#248a3d`、`--warn-text:#c03400`（Apple accessibility variant，原填充色直当文字仅 ≈2.2:1），文字语义映射全部指向 text 变体、填充/wash 保持原值；`--ink3` alpha .48→.60、深色 `--ink3` →.55；`--ink4` 限定 placeholder/disabled 专用（`text-zinc-500` 正文映射改指 ink3，zinc/slate 同档不变量保持）。
+  - 触控目标：新增 `.hit-44` 工具类（`::after inset:-8px` 扩热区至 ≥44px、视觉尺寸不变），顶栏 ThemeSwitcher/LanguageSwitcher/静音钮/CarConnectorButton/⋯/汉堡钮全部应用；Drive 工具栏分段与录制按钮 `max-lg:min-h-[40px]`；抽屉把手 `hit-44` + focus-visible 环。
+  - Drive 页（`pages/DrivePage.tsx`）：parkLocked/simOffline/driverConflict/modelLoading/modelNotice 五枚状态徽标去按钮化（删 px-3 py-1.5 rounded-lg border 底，改「语义色文字+lucide 小图标」，与真按钮一眼分清）；录制时长/遥测读数全量 `tnum`（tabular-nums，`.tnum` 挪出 @layer 防 tree-shake）；`DriveTargetCard` simOffline 徽章对齐同款。
+  - 原生对话框清零：`ParameterPanel` 导入成功/失败 `alert()` → 行内 notice（对齐 DriveTargetCard Notice 模式）；`EnterButtons` ZCode `window.prompt` → 自足行内表单（label 复用 `common.enterButtons.zcodePrompt`、受控 input + Enter/Escape、占位标签生命周期与原 prompt 路径完全对齐，并修掉重复打开遗留占位标签、卸载未清理两个边界）。
+  - 细节打磨：新增 `--shadow-float` token（深 `0 8px 28px rgba(0,0,0,.55)` / 浅 `0 8px 24px rgba(0,0,0,.12)`）只给浮动层；`--w-black:600` 收口字重体系（FabActions `font-black`→`font-semibold`）；CarConnectorButton 激活态 `#5cc8ff` 硬编码→cyan 语义类（顶栏两种蓝合一）；safe-area 全链路（FAB `bottom-[max(18px,env(safe-area-inset-bottom))]`、帮助弹窗锚点同步）；全站 `:focus-visible` 焦点环；animate-pulse/跑马灯全部补 `motion-reduce:animate-none`；10/11px 微字 32 处提 `text-xs`；8px 半透明滚动条；主题切换 320ms 交叉淡化（`body.theme-switching` 临时 class，reduced-motion 跳过）；`Button` 新增可选 `loading` 属性；DEV 开关 `role="switch"`→普通 button+`aria-pressed`（主题选择器同步改）；`SimulatorConfig` UISwitch 补 `role="switch"`+`aria-checked`；`TubLibrary` 下载中 `animate-bounce`→Loader2 spin、内嵌列表圆角 18→10px；`-webkit-tap-highlight-color`/`touch-action:manipulation`；`SidePanel`/`EntryErrorBanner` 的 `lg:top-16` 魔法数→`var(--header-h)`；themes 死映射清理。
+  - 测试同步：`ConsoleControls.test.tsx`（switch→button+aria-pressed 9 处）、`ModelSelector.test.tsx`/`InputSourceSelector.test.tsx`（mouseEnter→click，悬浮语义用例改写为 Esc/外部关闭）、`CarConnectorButton.test.tsx`（cyan 类断言）、`EnterButtons.test.tsx`（ZCode 块 10 用例改写为行内表单驱动）；**vitest 52 文件 357 用例全绿**，`tsc --noEmit` 零错误，`npm run build` 通过。
+  - 注：纯前端改动，合入后部署本机 8000；Find Donkey Car 页面同款打磨在工作区 `cloudflare/find-car`（非本仓库）。
+
 ## 2026-10-01 (260)
 
 - feat(ui): DD 全站视觉恢复 2026-09-11 第一轮 Apple 改版外观——按用户要求撤下后续两轮自行「深化」（e52eeec5 视觉审查 16 项、b979cc10 Apple 象限深化），覆盖全部页面

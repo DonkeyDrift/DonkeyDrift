@@ -42,7 +42,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.sidePanel.loaders': '加载器',
     'common.sidePanel.connectors': '连接器',
     // GitHubLink
-    'common.githubLink.label': 'DonkeyDrift GitHub 仓库',
+    'common.githubLink.label': 'DonkeyDrifter GitHub 仓库',
     // EnterButtons
     'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': '启动 kimi 并在新标签页打开 Kimi Code Web',
@@ -66,9 +66,9 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.enterButtons.drifterConsoleTitle': '打开 ESP32 Drifter Console',
     'common.enterButtons.scanning': '扫描中…',
     'common.enterButtons.consoleNotFound': '未在局域网中发现 Drifter Console 设备',
-    'common.enterButtons.findCar': '找小车',
+    'common.enterButtons.findCar': 'Find-DKC',
     'common.enterButtons.findCarTitle': '一键搜索局域网内的小车',
-    'common.findCar.title': '找小车',
+    'common.findCar.title': 'Find-DKC',
     'common.findCar.scanning': '正在扫描局域网…',
     'common.findCar.ddLabel': '本机 DonkeyDrifter',
     'common.findCar.esp32Label': '小车 ESP32',
@@ -121,7 +121,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.sidePanel.loaders': 'Loaders',
     'common.sidePanel.connectors': 'Connectors',
     // GitHubLink
-    'common.githubLink.label': 'DonkeyDrift on GitHub',
+    'common.githubLink.label': 'DonkeyDrifter on GitHub',
     // EnterButtons
     'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': 'Start kimi and open Kimi Code Web in a new tab',
@@ -146,9 +146,9 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.enterButtons.drifterConsoleTitle': 'Open ESP32 Drifter Console',
     'common.enterButtons.scanning': 'Scanning…',
     'common.enterButtons.consoleNotFound': 'No Drifter Console device found on the LAN',
-    'common.enterButtons.findCar': 'Find Car',
+    'common.enterButtons.findCar': 'Find-DKC',
     'common.enterButtons.findCarTitle': 'Find the car on the LAN',
-    'common.findCar.title': 'Find Car',
+    'common.findCar.title': 'Find-DKC',
     'common.findCar.scanning': 'Scanning the LAN…',
     'common.findCar.ddLabel': 'This DonkeyDrifter (DD)',
     'common.findCar.esp32Label': 'Car ESP32',

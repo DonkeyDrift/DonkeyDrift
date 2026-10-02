@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Crosshair, Loader2, RotateCcw } from 'lucide-react';
+import { Crosshair, Loader2, RotateCcw, WifiOff } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { Button } from '../ui/Button';
@@ -161,7 +161,8 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
             {carOnline ? t('drive.targetCarOnline') : t('drive.targetCarOffline')}
           </span>
           {simConnected === false && (
-            <span className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap">
+            <span className="inline-flex items-center gap-1 text-amber-400 text-xs font-medium whitespace-nowrap">
+              <WifiOff className="w-3.5 h-3.5" aria-hidden />
               {t('drive.simOfflineReconnecting')}
             </span>
           )}
