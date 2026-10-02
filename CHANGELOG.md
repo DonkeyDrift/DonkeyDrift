@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-10-02 (262)
+
+- feat(ui): Web UI 用户可见名称统一为「Donkey Drifter」
+  - 背景：用户要求把 Donkey Drift Web UI 的名字改成「Donkey Drifter」。
+  - `web_ui/frontend/index.html`：标签页标题 `DonkeyDrift Web UI` → `Donkey Drifter`；`components/Layout.tsx` 顶栏 logo 链接 `alt` 与可见文本 `DonkeyDrift` → `Donkey Drifter`（href `https://www.donkeydrift.com` 不动）；`i18n/messages/common.ts` `common.githubLink.label` 中英两条 → `Donkey Drifter GitHub 仓库` / `Donkey Drifter on GitHub`（i18n key 不动）。
+  - `web_ui/backend/main.py`：`FastAPI(title)` → `Donkey Drifter Web API`（`/docs` Swagger 页标题）；根路径 JSON 提示 → `Donkey Drifter Web UI is running...`（前端未构建时浏览器可见）。
+  - 不动：GitHub URL（github.com/DonkeyDrift/...）、donkeydrift.com 域名、i18n key、CSS 类名、data-testid、仓库/包名、已是 DonkeyDrifter 的位置（`common.findCar.ddLabel`、harness_updater 等）；`web_ui/design-proposals/*.html` 与 `joystick-scaling-demo.html` 属不进 dist、后端不托管的内部设计稿/演示页，不在本次范围。
+  - 测试同步：`GitHubLink.test.tsx` 两处链接名断言；`web_ui/backend/tests/test_branding.py` 两用例（原名即 `*_uses_donkeydrifter_brand`，断言与命名意图对齐）。
+  - 验证：vitest 52 文件 **357 用例全绿**、`tsc --noEmit` 零错误、`npm run build` 通过（dist `<title>` 已核实为 Donkey Drifter）、`pytest tests/test_branding.py` 2 过。
+  - 注：合入后部署本机 8000；Firmware 无改动、无需 OTA（同批 Firmware 侧为 Tony-font-restore v1.10.8 字体恢复）。
+
 ## 2026-10-02 (261)
 
 - feat(ui): DD 全站经典 Apple 风格彻底打磨——顶栏磨砂/按压回弹/对比度/触控目标/焦点环 + Menu/Modal 原语落地
