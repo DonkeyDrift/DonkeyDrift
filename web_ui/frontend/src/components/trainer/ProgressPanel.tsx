@@ -86,18 +86,18 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({ job }) => {
           <div className="space-y-1">
             {isInitializing ? (
               <div className="flex justify-between text-xs text-zinc-400">
-                <span className="animate-pulse">{t('trainer.initializing')}</span>
+                <span className="animate-pulse motion-reduce:animate-none">{t('trainer.initializing')}</span>
               </div>
             ) : (
               <div className="flex justify-between text-xs text-zinc-500">
                 <span>{t('trainer.progress')}</span>
-                <span>{percentLabel}%</span>
+                <span className="tnum">{percentLabel}%</span>
               </div>
             )}
             <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
               {isInitializing ? (
                 <div
-                  className="h-full bg-cyan-600 animate-pulse"
+                  className="h-full bg-cyan-600 animate-pulse motion-reduce:animate-none"
                   style={{ width: '8%' }}
                 />
               ) : (
@@ -113,27 +113,27 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({ job }) => {
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div className="bg-zinc-950 rounded px-3 py-2">
               <div className="text-xs text-zinc-500">{t('trainer.epoch')}</div>
-              <div className="text-zinc-200">
+              <div className="text-zinc-200 tnum">
                 {progress!.currentEpoch}
                 {progress!.totalEpochs > 0 ? ` / ${progress!.totalEpochs}` : ''}
               </div>
             </div>
             <div className="bg-zinc-950 rounded px-3 py-2">
               <div className="text-xs text-zinc-500">{t('trainer.step')}</div>
-              <div className="text-zinc-200">
+              <div className="text-zinc-200 tnum">
                 {progress!.currentStep}
                 {progress!.totalSteps > 0 ? ` / ${progress!.totalSteps}` : ''}
               </div>
             </div>
             <div className="bg-zinc-950 rounded px-3 py-2">
               <div className="text-xs text-zinc-500">{t('trainer.loss')}</div>
-              <div className="text-zinc-200">
+              <div className="text-zinc-200 tnum">
                 {progress!.loss !== null ? progress!.loss.toFixed(4) : '--'}
               </div>
             </div>
             <div className="bg-zinc-950 rounded px-3 py-2">
               <div className="text-xs text-zinc-500">{t('trainer.duration')}</div>
-              <div className="text-zinc-200">
+              <div className="text-zinc-200 tnum">
                 {mins}m {secs}s
               </div>
             </div>

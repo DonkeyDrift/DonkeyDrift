@@ -18,7 +18,7 @@ export const VerticalThrottleBar: React.FC<VerticalThrottleBarProps> = ({ thrott
   return (
     <div className={`relative flex items-center justify-center ${className}`}>
       {/* 左侧数值 */}
-      <span className="absolute right-full mr-2 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 text-right">
+      <span className="absolute right-full mr-2 top-1/2 -translate-y-1/2 text-xs text-zinc-500 text-right tnum">
         {throttle.toFixed(2)}
       </span>
 
@@ -38,7 +38,7 @@ export const VerticalThrottleBar: React.FC<VerticalThrottleBarProps> = ({ thrott
       </div>
 
       {/* 右侧标签：前进 / 油门 / 倒车 */}
-      <div className="absolute left-full ml-2 flex flex-col justify-between h-full py-1 text-[10px] text-zinc-500 items-start">
+      <div className="absolute left-full ml-2 flex flex-col justify-between h-full py-1 text-xs text-zinc-500 items-start">
         <span>{t('driveViz.forward')}</span>
         <span className="[writing-mode:vertical-rl] -translate-x-1">{t('driveViz.throttleLabel')}</span>
         <span>{t('driveViz.reverse')}</span>

@@ -24,6 +24,7 @@ import {
   ChevronsRight,
   Clapperboard,
   Download,
+  Loader2,
   Pause,
   Pin,
   Play,
@@ -848,7 +849,9 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                   <span className="break-all">{error}</span>
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800">
+              {/* 卡片内嵌列表用 10px 控件圆角（外层卡片 18px，rounded-lg 被主题映射为 18px，
+                  故用 arbitrary 值锁定，不随主题圆角映射放大） */}
+              <div className="flex-1 overflow-y-auto rounded-[10px] border border-zinc-800 divide-y divide-zinc-800">
                 {sessions.length === 0 && !error && (
                   <div className="p-4 text-sm text-zinc-500 text-center">
                     {t('tubLibrary.noRecordings')}
@@ -927,7 +930,11 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                               : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800/60'
                           }`}
                         >
-                          <Download className={`w-4 h-4 ${downloadingId === session.session_id ? 'animate-bounce' : ''}`} />
+                          {downloadingId === session.session_id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
                         </span>
                         <span
                           role="button"
@@ -963,7 +970,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                 style={{ aspectRatio: frameAspect != null ? String(frameAspect) : '16 / 9' }}
               >
                 <div className="absolute right-2 top-2 z-10 rounded-md border border-white/10 bg-zinc-900/80 px-2 py-1 text-center shadow-lg">
-                  <div className="text-[10px] text-zinc-400 uppercase leading-none">FPS</div>
+                  <div className="text-xs text-zinc-400 uppercase leading-none">FPS</div>
                   <div className="text-base font-mono leading-tight text-cyan-400">{actualFps}</div>
                 </div>
                 {imageError ? (
@@ -1094,7 +1101,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
         {/* Delete confirmation */}
         {pendingDelete && (
           <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
-            <div className="bg-zinc-900 border border-zinc-700 rounded-xl max-w-md w-full p-5 shadow-2xl">
+            <div className="bg-zinc-900 border border-zinc-700 rounded-xl max-w-md w-full p-5 shadow-float">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-full bg-red-500/15 shrink-0">
                   <Trash2 className="w-5 h-5 text-red-400" />

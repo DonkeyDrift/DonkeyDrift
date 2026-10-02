@@ -17,27 +17,56 @@
 
   /* 标准过渡曲线（Apple 风），供各组件 transition/animation 引用 */
   --ease-apple: cubic-bezier(.32, .72, 0, 1);
+
+  /* App header height at the lg breakpoint; drawers/panels anchor to it and
+     Layout keeps the actual rendered value in sync with this token */
+  --header-h: 64px;
 }
+
+/* Plain (unlayered) utilities: kept outside @layer so Tailwind's tree-shaking
+   of unused layer entries can never drop them before consumers adopt them. */
 
 /* 数字等宽工具类（ Tailwind 原生 tabular-nums 亦可用，这里提供语义化别名 ） */
-@layer utilities {
-  .tnum {
-    font-variant-numeric: tabular-nums;
-  }
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
-/* 按压反馈：可点元素 :active 缩放 .97 / 100ms（Apple 触感）。
+/* Floating-panel drop shadow; the token lives in each theme palette */
+.shadow-float {
+  box-shadow: var(--shadow-float);
+}
+
+/* >=44px pointer hit area (Apple HIG) without changing the visual size:
+   an invisible ::after bleeds 8px past every edge */
+.hit-44 {
+  position: relative;
+}
+.hit-44::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+/* 按压反馈：:active 缩放 .97 / 100ms（Apple 触感）。
+   Uses the independent `scale` property instead of transform:scale() so it can
+   never clobber Tailwind translate/rotate values on the same element. The
+   transition lives in the base rule so the release animates too — declared
+   only inside :active it snapped back instantly on release. The transition
+   shorthand also lists the common color properties so Tailwind hover color
+   changes on pressable elements stay eased instead of snapping.
    只覆盖 button / 链接 / role=button；虚拟摇杆（div 指针拖拽）、canvas、
    input[type=range] 滑杆等拖拽控件本就不匹配这些选择器，天然排除；
-   个别需要豁免的可点元素加 data-no-press 即可。
-   注意：transition 只写在 :active 规则里——若写在基础规则会用 shorthand
-   顶掉 Tailwind transition-colors 的 property 列表，杀掉 hover 颜色过渡。 */
+   个别需要豁免的可点元素加 data-no-press 即可。 */
 @media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled):not([data-no-press]),
+  a[href],
+  [role='button'] {
+    transition: scale 100ms var(--ease-apple), background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+  }
   button:not(:disabled):not([data-no-press]):active,
   a[href]:active,
   [role='button']:active {
-    transform: scale(.97);
-    transition: transform 100ms var(--ease-apple);
+    scale: .97;
   }
 }
 
@@ -45,9 +74,19 @@
   button:active,
   a[href]:active,
   [role='button']:active {
-    transform: none;
+    scale: none;
     transition: none;
   }
+}
+
+/* 全局键盘焦点环（两主题各提供 --accent，深浅自动适配）。
+   Components with their own focus treatment keep it: Tailwind's
+   focus:outline-none / focus:ring-* utilities (Input.tsx and the form fields)
+   outrank this rule on specificity, so the ring only appears where nothing
+   else provides one. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* 文本全局可选中可复制（用户需求：标题等所有内容都要能选择复制）；
@@ -69,6 +108,40 @@ summary,
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* 移动端细节：去掉点击灰闪；链接/按钮跳过双击缩放延迟
+   （虚拟摇杆、canvas、range 滑杆等拖拽控件不受影响）。 */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+a,
+button {
+  touch-action: manipulation;
+}
+
+/* Apple 叠加式细滚动条：thumb 半透明、色值取自主题调色板
+   （--scrollbar-thumb），track 透明。 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+}
+
+/* 主题切换交叉淡化：lib/theme.ts 在换肤前后给 <body> 加 ~320ms 的
+   .theme-switching，让带主题色的表面用 .3s 缓出背景/文字色而不是瞬切。
+   仅切换窗口内、仅这两个属性生效，不给全站常驻 transition 负担。 */
+@media (prefers-reduced-motion: no-preference) {
+  body.theme-switching,
+  body.theme-switching * {
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
 }
 
 .tub-editor-scroll-slider {

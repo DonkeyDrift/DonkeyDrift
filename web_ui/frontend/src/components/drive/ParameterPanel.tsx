@@ -49,6 +49,8 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
   const { params, setParam, setPidParam, resetToDefault, importParams } = useDriveStore();
   const [open, setOpen] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  // 导入结果行内提示（替代原生 alert）：成功绿、失败红
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const handleExport = () => {
     const blob = new Blob([JSON.stringify({ params }, null, 2)], { type: 'application/json' });
@@ -68,9 +70,9 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
       try {
         const data = JSON.parse(ev.target?.result as string) as DriveParams;
         importParams(data);
-        alert(t('driveViz.importSuccess'));
+        setNotice({ type: 'success', message: t('driveViz.importSuccess') });
       } catch {
-        alert(t('driveViz.importFormatError'));
+        setNotice({ type: 'error', message: t('driveViz.importFormatError') });
       }
     };
     reader.readAsText(file);
@@ -89,7 +91,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
       {open && (
         <div className="px-3 pb-3 space-y-3 border-t border-zinc-800 pt-3">
           <div className="space-y-3">
-            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{t('driveViz.pidParams')}</p>
+            <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{t('driveViz.pidParams')}</p>
             <ParamSlider
               label={t('driveViz.kp')}
               value={params.pid.kp}
@@ -117,7 +119,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
           </div>
 
           <div className="space-y-3">
-            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{t('driveViz.responseRates')}</p>
+            <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{t('driveViz.responseRates')}</p>
             <ParamSlider
               label={t('driveViz.recenterRate')}
               value={params.recenterRate}
@@ -159,14 +161,14 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
           <div className="flex gap-2 pt-2 border-t border-zinc-800">
             <button
               onClick={resetToDefault}
-              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
             >
               <RotateCcw size={12} className="shrink-0" />
               <span className="whitespace-nowrap">{t('driveViz.resetDefault')}</span>
             </button>
             <button
               onClick={handleExport}
-              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
             >
               <Download size={12} className="shrink-0" />
               <span className="whitespace-nowrap">{t('driveViz.export')}</span>
@@ -181,13 +183,23 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({ className = '' }
               />
               <button
                 onClick={() => importRef.current?.click()}
-                className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
+                className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-xs whitespace-nowrap text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded transition-colors"
               >
                 <Upload size={12} className="shrink-0" />
                 <span className="whitespace-nowrap">{t('driveViz.import')}</span>
               </button>
             </label>
           </div>
+
+          {/* 导入结果行内提示（替代原生 alert），样式对齐 DriveTargetCard 的 Notice */}
+          {notice && (
+            <div
+              className={`text-xs leading-relaxed ${notice.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}
+              role="status"
+            >
+              {notice.message}
+            </div>
+          )}
         </div>
       )}
     </div>

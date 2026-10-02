@@ -62,13 +62,29 @@ const ensureSystemThemeListener = (): void => {
   }
 };
 
+/** body class toggled around a skin flip; index.css turns it into a background/color cross-fade. */
+const THEME_SWITCH_CLASS = 'theme-switching';
+/** Slightly longer than the .3s cross-fade in index.css so the class outlives the transition. */
+const THEME_SWITCH_FADE_MS = 320;
+let themeSwitchTimer: ReturnType<typeof setTimeout> | undefined;
+
 /** 切换 <html> 的皮肤 class 并广播主题变化(供 canvas/图表等 JS 配色订阅)。 */
 export const applyTheme = (mode: ThemeMode): ResolvedTheme => {
   ensureSystemThemeListener();
   const resolved = resolveTheme(mode);
   const root = document.documentElement;
+  const next = THEME_CLASS[resolved];
+  if (!root.classList.contains(next)) {
+    // actual skin flip: let themed surfaces cross-fade their colors (index.css)
+    document.body.classList.add(THEME_SWITCH_CLASS);
+    if (themeSwitchTimer !== undefined) clearTimeout(themeSwitchTimer);
+    themeSwitchTimer = setTimeout(() => {
+      document.body.classList.remove(THEME_SWITCH_CLASS);
+      themeSwitchTimer = undefined;
+    }, THEME_SWITCH_FADE_MS);
+  }
   root.classList.remove(THEME_CLASS.dark, THEME_CLASS.light);
-  root.classList.add(THEME_CLASS[resolved]);
+  root.classList.add(next);
   window.dispatchEvent(new CustomEvent<ResolvedTheme>(THEME_CHANGE_EVENT, { detail: resolved }));
   return resolved;
 };

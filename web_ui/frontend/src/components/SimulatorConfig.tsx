@@ -185,6 +185,8 @@ export const SimulatorConfig: React.FC = () => {
                 setDonkeyGym((v) => !v);
                 setSaveSuccess(false);
               }}
+              role="switch"
+              aria-checked={donkeyGym}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 donkeyGym ? 'bg-cyan-600' : 'bg-zinc-700'
               }`}
@@ -274,7 +276,7 @@ export const SimulatorConfig: React.FC = () => {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm text-sm text-zinc-100 max-w-sm animate-in fade-in slide-in-from-right-4 duration-300 ${toastBg(toast.type)}`}
+            className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 shadow-float backdrop-blur-sm text-sm text-zinc-100 max-w-sm animate-in fade-in slide-in-from-right-4 duration-300 ${toastBg(toast.type)}`}
           >
             {toastIcon(toast.type)}
             <span className="flex-1 leading-relaxed">{toast.message}</span>
