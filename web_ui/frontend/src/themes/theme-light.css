@@ -582,7 +582,7 @@ html.theme-light button.rounded-lg {
 
 /* ---------- Typography ---------- */
 html.theme-light .font-sans {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 /* 字重工具映射:经变量收窄到 Apple 的 400/600 体系(--w-semibold 保持 600)。
    Rule order stays medium→semibold→bold→extrabold→black, matching Tailwind's

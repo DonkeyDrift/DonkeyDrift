@@ -3,10 +3,11 @@
 @tailwind utilities;
 
 :root {
-  /* 字体栈统一为 system-ui 系（与 theme-*.css 的 .font-sans 重映射同栈）；
-     顶栏 DC 风格按钮（.theme-switcher-btn 等）为对齐 Drifter Console 仍在
-     主题文件里显式锁定旧栈，属有意例外。 */
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* 字体栈为首版（fe144ad5）原栈——-apple-system 优先：Apple 设备得 SF Pro，
+     其它平台落到 Noto Sans/Helvetica/Arial（实测比 system-ui 优先的栈更宽，
+     用户偏好此版）；theme-*.css 的 .font-sans 重映射与顶栏 DC 风格按钮
+     （.theme-switcher-btn 等）均与此同栈。 */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   line-height: 1.5;
   font-weight: 400;
 

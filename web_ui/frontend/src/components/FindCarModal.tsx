@@ -5,7 +5,7 @@ import { discoverConnectorConsoles, getConnectorLocalIps } from '@/services/api'
 import { Modal } from './Modal';
 
 /**
- * 「找小车」弹窗（局域网直连发现，无 token、无云端）：
+ * 「Find-DKC」弹窗（局域网直连发现，无 token、无云端）：
  * 打开时并行调用后端两个既有端点——`/connector/local_ips`（本机 DD 的局域网 IPv4）
  * 与 `/connector/discover_console`（扫描 80 端口识别 ESP32 Drifter Console），
  * 把本机 DD 地址与小车 ESP32 地址以可点击链接列出，实现"点一下找到车"。

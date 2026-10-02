@@ -5,9 +5,9 @@ import { render, screen } from '@testing-library/react';
 import { GitHubLink } from './GitHubLink';
 
 describe('GitHubLink', () => {
-  it('links to the Donkey Drifter GitHub repo in a new tab', () => {
+  it('links to the DonkeyDrifter GitHub repo in a new tab', () => {
     render(<GitHubLink />);
-    const link = screen.getByRole('link', { name: 'Donkey Drifter GitHub 仓库' });
+    const link = screen.getByRole('link', { name: 'DonkeyDrifter GitHub 仓库' });
     expect(link).toHaveAttribute('href', 'https://github.com/DonkeyDrift/DonkeyDrift');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link.getAttribute('rel')).toContain('noopener');
@@ -15,7 +15,7 @@ describe('GitHubLink', () => {
 
   it('renders the GitHub mark icon', () => {
     render(<GitHubLink />);
-    const link = screen.getByRole('link', { name: 'Donkey Drifter GitHub 仓库' });
+    const link = screen.getByRole('link', { name: 'DonkeyDrifter GitHub 仓库' });
     const svg = link.querySelector('svg');
     expect(svg).not.toBeNull();
     expect(svg).toHaveAttribute('viewBox', '0 0 16 16');
