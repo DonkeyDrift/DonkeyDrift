@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-10-02 (266)
+
+- feat(drive): 驾驶页新增「手柄桥模式」卡片——车固件 ↔ RC_BLE_Bridge 蓝牙手柄桥一键切换（配套 Firmware v1.10.12 双启动槽位）
+  - 背景：HOT RC CT-8B 手柄要经 ESP32 BLE 桥接器（Firmware `examples/RC_BLE_Bridge`）连 Mac 操控 DD 页面里的模拟器；每次刷整固件太麻烦，方案二让车固件与桥固件分居 ESP32 两个 OTA 槽位（app0/app1），网页一键 10 秒互切。
+  - 新增 `web_ui/frontend/src/components/drive/GamepadBridgeCard.tsx`：无 props，经 `useConsoleDevice()` 取车 IP，所有请求走 DD 后端 `/api/console/proxy` 同源代理（`consoleGetJson`/`consolePostText`，与顶栏 DEV 控件同款链路），**后端零改动**。状态机：`GET api/slot-info` 读槽位 → 车模式+`other_kind=bridge` 显示「手柄桥已就绪」+确认 Modal 后 `POST api/switch-slot`；桥运行中显示绿点状态+「切回真车」（切回成功后 `invalidateConsoleDeviceCache()`）；未装桥（`other_kind=empty/unknown`）按钮禁用并附补种指引（指向 Firmware RC_BLE_Bridge/README）；切换中琥珀徽章、2s 轮询至 `app` 翻转、40s 超时提示；读取失败按 ConsoleDevToggle 同款自愈 `refresh()` 重扫。样式复用 `Card/SectionCardTitle/Button/Modal` 与 DriveTargetCard 同款 zinc/cyan/emerald/amber 体系。
+  - `web_ui/frontend/src/pages/DrivePage.tsx`：`DriveTargetCard` 之后挂载，仅 `driveTarget === 'car'` 时显示（模拟器目标下不出现）。
+  - `web_ui/frontend/src/i18n/messages/drive.ts`：zh/en 各新增 20 条 `drive.bridge*` 文案。
+  - 固件契约：`GET /api/slot-info` 返回 `{"app":"car"|"bridge","running":"app0|app1","other":..., "other_kind":"car|bridge|unknown|empty"}`，`POST /api/switch-slot` 成功回 `ACK:SWITCHING` 后重启、对面空槽回 `400 NACK:NO_IMAGE`；车固件与桥固件接口对称，桥根页面含 "Drifter Console" 字样保证局域网发现在两种模式下均可用。
+  - 测试同步：新增 `GamepadBridgeCard.test.tsx` 8 用例（mock 方式照 ConsoleControls.test.tsx）——桥就绪/确认弹窗与 POST 参数断言/未安装禁用/桥模式切回/车→桥轮询翻转全流程/桥→车 invalidate 调用/读取失败兜底+重扫/POST 失败不进入切换中。
+  - 验证：worktree 内 `npx tsc --noEmit` 零错误、`npx vitest run` **53 文件 365 用例全绿**、`npm run build` 通过；Firmware 侧全链路已在实车实测（v1.10.12 切桥→BLE 广播「Gamepad MU02」→切回，见 Firmware CHANGELOG v1.10.12）。
+
 ## 2026-10-02 (265)
 
 - fix(ui): 全站字体栈回最初版（更宽的首版栈）+ 品牌名去空格统一为「DonkeyDrifter」+ 找小车入口改名「Find-DKC」
