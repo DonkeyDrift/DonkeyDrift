@@ -37,21 +37,29 @@ shell。仅供家庭/实验室可信网络使用。
 """
 
 import base64
-import fcntl
 import hashlib
 import json
 import logging
 import os
-import pty
 import socket
 import signal
 import struct
 import subprocess
-import termios
 import threading
 import time
 import uuid
 from urllib.parse import urlparse, parse_qs
+
+# pty/fcntl/termios 是 POSIX 专属模块。PTY 桥本身只在上位机（Linux）运行，
+# 但 launcher 包在 Windows 上也必须可导入（donkey TUI 的导入链会经过本
+# 模块），因此按平台守卫导入；Windows 上实际使用终端功能时再明确报错。
+_IS_POSIX = os.name == "posix"
+if _IS_POSIX:
+    import fcntl
+    import pty
+    import termios
+else:
+    fcntl = pty = termios = None
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +192,8 @@ class _WsWriter:
 
 def _default_cwd() -> str:
     """新会话的默认工作目录：~/projects（工作区主文件夹），不存在时回退 ~。"""
-    projects = os.path.expanduser("~/projects")
+    # normpath 消除 expanduser 在 Windows 上留下的混合分隔符（~/projects）
+    projects = os.path.normpath(os.path.expanduser("~/projects"))
     if os.path.isdir(projects):
         return projects
     return os.path.expanduser("~")
@@ -209,6 +218,9 @@ class TerminalSession:
     """
 
     def __init__(self, shell=("/bin/bash", "-l"), cwd=None, env=None):
+        if not _IS_POSIX:
+            raise RuntimeError(
+                "Web 终端依赖 POSIX PTY（pty/fcntl/termios），仅支持 Linux/macOS")
         self.sid = uuid.uuid4().hex[:12]
         self._writer = None
         self._detached_at = None
@@ -527,6 +539,9 @@ def handle_terminal_ws(handler):
     version = handler.headers.get("Sec-WebSocket-Version", "")
     if not key or upgrade != "websocket" or version != "13":
         handler.send_error(400, "Bad WebSocket Request")
+        return
+    if not _IS_POSIX:
+        handler.send_error(501, "terminal bridge requires a POSIX host")
         return
 
     handler.log_request(101)

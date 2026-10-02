@@ -1,6 +1,6 @@
 # 变更日志
 
-## 2026-10-01 (258)
+## 2026-10-01 (260)
 
 - feat(ui): DD 全站视觉恢复 2026-09-11 第一轮 Apple 改版外观——按用户要求撤下后续两轮自行「深化」（e52eeec5 视觉审查 16 项、b979cc10 Apple 象限深化），覆盖全部页面
   - 背景：第一轮 Apple 改版（0784d454，09-11）后，AI 又连续做了多轮深化（灰阶分层 ink2/3/4 提亮、语义色双轨、3px focus 环、44pt 命中区、elevation 恢复、发丝线 6 档收敛为 2 档、ApiStatusBar 加载骨架/错误条等）；用户明确表示更喜欢第一轮修改之后的样子，要求全页面恢复。
@@ -12,6 +12,25 @@
   - 用户点名的后续调整全部保留：8b6d00e3 顶栏排列/选中态统一/输入框边框、c2ec0561 悬停副标题、57a0d8b7 全文可选中、2864bb2c TE select-none，以及全部功能性 feature/fix。
   - 测试：vitest 52 文件 350 用例全绿；`tsc -b --noEmit` 零错误；`npm run build` 通过；Playwright 双主题截图核验 Drive/TM/Trainer/CC 页面，计算样式探针命中第一轮值（深色卡片 #1c1c1e 平直无投影、ink3 rgba(235,235,245,0.45)；浅色卡片 #fff、ink3 rgba(60,60,67,0.48)）。
   - 注：纯前端改动，合入后部署本机 8000；Firmware 无改动、无需 OTA。
+## 2026-09-28 (259)
+
+- feat(tublibrary): 录制视频库新增「刷新」按钮 + 30s 自动刷新——修复常驻挂载下新老录制数据混合
+  - 现象（用户报障）：录制视频库里的录制内容残留旧缓存、不及时清理，新老数据混在一起；录了新场次后库里不出现或与旧数据混杂。
+  - 根因：TM 并入统一流程大页面后四个 section 常驻挂载（#178），`TubLibrary` 的录制列表与选中录制的帧只在 `tubPath` 变化/整条删除/AI 清理后拉取——Drive 页录了新场次后 `tubPath` 不变，库里永远停留在旧快照；底部原有「刷新 Tub 记录」按钮走 `requestTubRefresh` 只重载全局 tub（编辑器视图），并不触发录制库的 session 列表与选中帧重拉，两个面板因此各拿一份新旧不一致的数据。次要路径：后端 `/tub/image` 带 `Cache-Control: max-age=86400`，同一 tub 路径重建后同名帧文件会命中浏览器 HTTP 旧图。
+  - 修复（`web_ui/frontend/src/components/TubLibrary.tsx`）：
+    1. **手动「刷新」按钮**（卡片头部，AI 清理按钮左侧）：停止回放 → 清空内存帧图片缓存 → 图片 URL 纪元 +1（追加 `&r=<epoch>` 绕过浏览器 HTTP 缓存）→ 重拉录制列表与当前选中录制的帧 → 重载全局 tub（`setTub` 后恢复 `activeSession`，编辑器联动不丢），与整条删除后的同步逻辑一致。
+    2. **自动刷新**：TM section 激活期间每 30s 静默轮询录制列表；激活（滚回视口/切回标签页）时数据已过期（>30s 未刷新）立即补一次；选中录制 `record_count` 有新增且未在播放时一并静默重拉其帧并保持当前帧位置；播放中与浏览器后台标签页（`document.hidden`）暂停轮询。轮询只拉列表不换图片纪元，避免周期性全量重载。
+  - 测试：`TubLibrary.test.tsx` 新增 5 项——点刷新后列表/选中帧/全局 tub 全部重拉且 activeSession 恢复、选中录制被删后刷新自动选中新的最新一条、激活期 30s 轮询拾取新录制（合计帧数更新且不重拉未变化的帧）、非激活不轮询、播放中暂停轮询且播放结束后的轮询静默重拉已增长的录制。`TubLibrary` 等前端 54 个测试文件 377 用例全绿，`tsc -b --noEmit` 与 `npm run build` 通过。
+  - 注：纯前端改动；后端 `/tub/image` 对多余查询参数不感知，`&r=` 无需后端配合。
+
+## 2026-09-26 (258)
+
+- fix(telemetry): 修复 Drive 页 RC 油门/转向曲线无数据——complete 模板 `ctr_inputs` 漏接 `rc/*` 四键
+  - 现象（真机排障）：串口遥测链路（probe 实测 ~127 行/秒 T..S../$IMU）与 Web 后端广播均正常，但 Drive 页默认开启的 RC 油门/转向曲线整组空白，无法通过曲线确认底盘数据被读取；后端 WS 抓包显示 telemetry 消息只有 `steering/throttle` 两个命令值字段，`rc_*`/`gz` 等全部缺失。
+  - 根因：`donkeycar/templates/complete.py` 的 `ctr_inputs` 只有 14 个输入（到 `pilot/throttle` 为止），而 `DriveApiBridge.run_threaded` 签名在 `pilot_*` 之后还有 `rc_steering/rc_throttle/rc_mode/rc_park`——Vehicle 按位置解包，这四个参数恒为 None；`_maybe_send_telemetry` 对 None 字段整段跳过，`ArdRc` 写进 Memory 的 `rc/*` 永远上不了浏览器。接线随桥接签名扩展发生了漂移。
+  - 修复：`ctr_inputs` 追加 `'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'`（位置与签名严格对齐）；新增回归测试 `test_complete_template_wires_rc_telemetry_into_bridge`（AST/正则断言 `pilot/throttle` 之后必须依次是这四键，且模板注册了 `ArdRc` 生产者），防止未来签名再扩展时再次漂移。
+  - 附带确认：`HAVE_IMU=False` 时 gz/acc 五条曲线同样无数据（ArdImu 未挂载），属已知取舍——ARDUINO_CONTROLLER 车上启用 `HAVE_IMU=True` 会给新 tub 增加 6 列 IMU，与既有 tub 的 datastore_v2 schema 断言冲突，需先归档旧 tub，见 myconfig 注释。
+  - 真机验证：重启 `manage.py drive` 后 WS 客户端 8 秒收到 472 条 telemetry，消息体含 `rc_steering=-0.01`（固件 T 帧实时抖动）、`rc_mode=0`、`rc_park=1`；Drive 页曲线恢复绘制，Park 锁定徽标正常。
 
 ## 2026-09-25 (257)
 
