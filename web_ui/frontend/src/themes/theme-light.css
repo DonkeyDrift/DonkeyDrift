@@ -213,6 +213,10 @@ html.theme-light .disabled\:bg-zinc-800:disabled {
 html.theme-light .bg-zinc-800\/50 {
   background-color: var(--surface2-a50);
 }
+/* 分段选择栏轨道（DriveTargetCard 驾驶目标切换）同款浅灰底 */
+html.theme-light .bg-zinc-800\/60 {
+  background-color: var(--surface2-a50);
+}
 html.theme-light .bg-zinc-800\/80 {
   background-color: var(--surface2-a80);
 }
