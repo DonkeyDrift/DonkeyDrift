@@ -17,6 +17,7 @@ import { ModelSelector } from '../components/drive/ModelSelector';
 import { SimCollectCard } from '../components/drive/SimCollectCard';
 import { DriftCard } from '../components/drive/DriftCard';
 import { DriveTargetCard, type DriveTarget } from '../components/drive/DriveTargetCard';
+import { GamepadBridgeCard } from '../components/drive/GamepadBridgeCard';
 import { useDriveStore } from '../store/useDriveStore';
 import { useGamepadStore } from '../store/useGamepadStore';
 import { useStore } from '../store/useStore';
@@ -466,6 +467,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         simConnected={simConnected}
         onSelectTarget={setManualTarget}
       />
+      {/* 手柄桥模式：仅真车目标下显示（ESP32 双槽位 车固件 ↔ RC_BLE_Bridge 切换） */}
+      {driveTarget === 'car' && <GamepadBridgeCard />}
       {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
       {driveTarget !== 'sim' && <DriftCard />}
       {driveTarget !== 'car' && <SimCollectCard />}
