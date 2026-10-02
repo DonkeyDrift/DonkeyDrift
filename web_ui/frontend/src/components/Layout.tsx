@@ -74,7 +74,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             {/* 标题左侧 logo：与 Drifter Console 独立页 headerLogo 完全一致 —— 32px 内容 + 1px 边框外凸（box-sizing content-box，总 34px）、圆角 8px、边框随主题（深色 #2b3441 / 浅色 #d5dce4，见 theme-*.css 的 .header-logo）、与标题 gap 12px */}
             <div className="font-bold text-xl lg:mr-4">
               {/* logo 与标题文字同包一个链接（Issue #179）：点击任意一处均可跳转官网，文字继承主题色无链接默认样式 */}
-              <a href="https://www.donkeydrift.com" target="_blank" rel="noopener" className="flex items-center gap-3"><img src="/logo.png" alt="Donkey Drifter" className="w-8 h-8 border header-logo" />Donkey Drifter</a>
+              <a href="https://www.donkeydrift.com" target="_blank" rel="noopener" className="flex items-center gap-3"><img src="/logo.png" alt="DonkeyDrifter" className="w-8 h-8 border header-logo" />DonkeyDrifter</a>
             </div>
             {/* 手机端：GitHub 图标 + 版本号紧跟标题右侧，菜单收起时也可见；
                 桌面端二者移至右侧控制簇（恢复 Apple 改版前 90413278 排列） */}

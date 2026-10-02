@@ -333,7 +333,7 @@ class TestEndpoints:
         assert data["model"] == "./models/pilot_1"
 
     def test_post_launch_web_removed(self, http_server):
-        # issue #181：原 7 号 Web 菜单并入 6 号「Donkey Drifter」，
+        # issue #181：原 7 号 Web 菜单并入 6 号「DonkeyDrifter」，
         # /api/launch/web 端点随之下线，应返回 404
         code, _ = _post(http_server + "/api/launch/web", {})
         assert code == 404

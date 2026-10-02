@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-10-02 (264)
+
+- fix(ui): 全站字体栈回最初版（更宽的首版栈）+ 品牌名去空格统一为「DonkeyDrifter」
+  - 起因（用户报障）：用户确认 DD 与 DC 页面现字体都不是想要的「最开始那种」——最初版更宽、类似苹果自带/Safari 字体；并要求把「Donkey Drifter」中间的空格去掉。
+  - 字体（回 fe144ad5 首版栈）：`web_ui/frontend/src/index.css` :root、`themes/theme-mus4.css` / `themes/theme-light.css` 的 .font-sans 重映射换回 `-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"`（0784d454 的 system-ui 优先统一撤回；顶栏 DC 风格按钮本就锁该栈）；launcher 侧内嵌页同步——`donkeycar/launcher/server.py` 启动中转页与 D 菜单页 body、`terminal_static/terminal.html` toast/overlay。实测本机 Chrome + Playwright：system-ui 栈解析 Noto Sans CJK SC（标题 148.3px@20px/700），首版栈解析 Noto Sans（151.0px，更宽）；Apple 设备即 SF Pro。
+  - 改名「DonkeyDrifter」（去空格，14 处）：前端 `index.html` 标题、`Layout.tsx` 品牌文字 + logo alt、`i18n/messages/common.ts` GitHub 链接中英两条、`launcher/server.py` 启动页标题、后端 `main.py` FastAPI title 与两条运行消息；测试同步 `GitHubLink.test.tsx`（3 处）、`test_branding.py`（2 处）、`test_launcher_menu_actions.py` 注释。
+  - 验证：vitest 52 文件 357 全绿、tsc -b --noEmit 通过、vite build 通过（dist 实测 `<title>DonkeyDrifter</title>`、5 处首版栈、无「Donkey Drifter」残留）；pytest 分两次跑（`tests/` 与 `web_ui/backend/tests/`，避开 test_findcar.py 同名收集冲突）全绿。
+  - Find Car（cloudflare/find-car，本地非 git）检查后本就是该首版栈，无需改动。
+
 ## 2026-10-02 (263)
 
 - fix(ui): 驾驶目标选择栏浅色模式下不再是深色——theme-light 补 `bg-zinc-800/60` 映射

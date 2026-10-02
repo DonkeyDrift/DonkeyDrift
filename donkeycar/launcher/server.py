@@ -1587,9 +1587,9 @@ LAUNCH_DRIVE_HTML = r"""<!DOCTYPE html>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="mask-icon" href="/favicon.svg" color="#5cc8ff">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<title>Donkey Drifter</title>
+<title>DonkeyDrifter</title>
 <style>
-body{font-family:system-ui,sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
 .box{text-align:center}
 .spinner{width:40px;height:40px;border:3px solid #2b3441;border-top-color:#5cc8ff;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -1673,7 +1673,7 @@ MENU_HTML = r"""<!DOCTYPE html>
         html{color-scheme:dark}
         body{
             background:#101318;color:#e8edf2;
-            font-family:system-ui,sans-serif;
+            font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";
             margin:12px;min-height:100vh;
         }
         .container{width:100%;margin:0}

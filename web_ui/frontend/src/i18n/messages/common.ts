@@ -42,7 +42,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.sidePanel.loaders': '加载器',
     'common.sidePanel.connectors': '连接器',
     // GitHubLink
-    'common.githubLink.label': 'Donkey Drifter GitHub 仓库',
+    'common.githubLink.label': 'DonkeyDrifter GitHub 仓库',
     // EnterButtons
     'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': '启动 kimi 并在新标签页打开 Kimi Code Web',
@@ -121,7 +121,7 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.sidePanel.loaders': 'Loaders',
     'common.sidePanel.connectors': 'Connectors',
     // GitHubLink
-    'common.githubLink.label': 'Donkey Drifter on GitHub',
+    'common.githubLink.label': 'DonkeyDrifter on GitHub',
     // EnterButtons
     'common.enterButtons.kimiCodeWeb': 'Kimi Code Web',
     'common.enterButtons.kimiCodeWebTitle': 'Start kimi and open Kimi Code Web in a new tab',
