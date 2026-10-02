@@ -18,7 +18,7 @@ export const Button: React.FC<ButtonProps> = ({
   ...props
 }) => {
   // 全部走标准 Tailwind 工具类，由 themes/*.css 皮肤按语义变量重映射
-  // （浅色 Apple Pro：--shadow-sm = 双层柔和投影；深色：--shadow-sm = none 无投影）。
+  // （Apple 象限 --shadow-sm = none，自动无投影）。
   const variants = {
     primary: 'bg-cyan-600 text-white hover:bg-cyan-700 shadow-sm active:shadow-inner border border-cyan-500/50',
     secondary: 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700 shadow-sm active:bg-zinc-900',

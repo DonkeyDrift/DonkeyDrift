@@ -97,8 +97,6 @@ export const DriftCard: React.FC = () => {
   const [exposure, setExposure] = useState(() => readSavedCameraConfig().exposure ?? '');
   const [invalidFields, setInvalidFields] = useState<CameraField[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
-  // 相机开启后输入表单默认折叠为一行摘要（渐进披露），点「修改参数」展开
-  const [cameraFormOpen, setCameraFormOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
   const [webrtcFailed, setWebrtcFailed] = useState(false);
@@ -313,67 +311,38 @@ export const DriftCard: React.FC = () => {
         <SectionCardTitle icon={<CircleDot className="h-4 w-4" />} title={t('drive.driftTitle')} subtitle={t('drive.driftSubtitle')} />
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* 相机接入：移动端单列堆叠（390px 下 5 列会压爆），sm 起恢复 6 列网格；
-            相机开启后默认折叠为一行紧凑摘要（渐进披露），「关相机」始终直接可见 */}
-        {cameraOn && !cameraFormOpen ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-zinc-800 px-3 py-2">
-            <Camera className="h-4 w-4 shrink-0 text-zinc-400" />
-            <span className="tnum font-mono text-xs text-zinc-400 truncate">
-              {t('drive.driftCameraSummary', { file: calibFile })}
-            </span>
-            <button
-              type="button"
-              className="text-xs text-zinc-400 underline whitespace-nowrap"
-              onClick={() => setCameraFormOpen(true)}
-            >
-              {t('drive.driftCameraFormExpand')}
-            </button>
-            <Button variant="secondary" className="ml-auto" onClick={stopCamera} disabled={busy}>
+        {/* 相机接入 */}
+        <div className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr_auto] gap-2 items-end">
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCameraIndex')}</label>
+            <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} className={fieldClass('cameraIndex')} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftTagId')}</label>
+            <Input value={tagId} onChange={(e) => setTagId(e.target.value)} disabled={cameraOn} className={fieldClass('tagId')} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftHeadingOffset')}</label>
+            <Input value={headingOffset} onChange={(e) => setHeadingOffset(e.target.value)} disabled={cameraOn} className={fieldClass('headingOffset')} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftExposure')}</label>
+            <Input value={exposure} placeholder={t('drive.driftExposurePlaceholder')} onChange={(e) => setExposure(e.target.value)} disabled={cameraOn} className={fieldClass('exposure')} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCalibFile')}</label>
+            <Input value={calibFile} onChange={(e) => setCalibFile(e.target.value)} disabled={cameraOn} />
+          </div>
+          {cameraOn ? (
+            <Button variant="secondary" onClick={stopCamera} disabled={busy}>
               <Octagon className="h-4 w-4" /> {t('drive.driftStopCamera')}
             </Button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-2 items-end sm:grid-cols-[1fr_1fr_1fr_1fr_2fr_auto]">
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCameraIndex')}</label>
-              <Input value={cameraIndex} onChange={(e) => setCameraIndex(e.target.value)} disabled={cameraOn} className={fieldClass('cameraIndex')} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftTagId')}</label>
-              <Input value={tagId} onChange={(e) => setTagId(e.target.value)} disabled={cameraOn} className={fieldClass('tagId')} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftHeadingOffset')}</label>
-              <Input value={headingOffset} onChange={(e) => setHeadingOffset(e.target.value)} disabled={cameraOn} className={fieldClass('headingOffset')} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftExposure')}</label>
-              <Input value={exposure} placeholder={t('drive.driftExposurePlaceholder')} onChange={(e) => setExposure(e.target.value)} disabled={cameraOn} className={fieldClass('exposure')} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('drive.driftCalibFile')}</label>
-              <Input value={calibFile} onChange={(e) => setCalibFile(e.target.value)} disabled={cameraOn} />
-            </div>
-            {cameraOn ? (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="text-xs text-zinc-400 underline whitespace-nowrap"
-                  onClick={() => setCameraFormOpen(false)}
-                >
-                  {t('drive.driftCameraFormCollapse')}
-                </button>
-                <Button variant="secondary" onClick={stopCamera} disabled={busy}>
-                  <Octagon className="h-4 w-4" /> {t('drive.driftStopCamera')}
-                </Button>
-              </div>
-            ) : (
-              <Button onClick={startCamera} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} {t('drive.driftStartCamera')}
-              </Button>
-            )}
-          </div>
-        )}
+          ) : (
+            <Button onClick={startCamera} disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} {t('drive.driftStartCamera')}
+            </Button>
+          )}
+        </div>
         {formError && <div className="text-xs text-red-400">{formError}</div>}
 
         {/* 俯拍预览：WebRTC 60fps 优先，失败回退 MJPEG */}
@@ -394,40 +363,40 @@ export const DriftCard: React.FC = () => {
           />
         )}
 
-        {/* 实时状态：瓦片化遥测（bg-zinc-800 浅主题为 surface2 灰井）；移动端 3 列、sm 起 6 列，数值等宽不换行 */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          <div className="rounded-lg bg-zinc-800 px-2 py-1.5 text-center">
-            <div className="text-[10px] text-zinc-400">{t('drive.driftStateLabel')}</div>
-            <div className="tnum font-mono text-sm font-medium text-zinc-100 whitespace-nowrap">{t(`drive.driftState.${s}`)}</div>
+        {/* 实时状态 */}
+        <div className="grid grid-cols-6 gap-2 text-center text-sm">
+          <div>
+            <div className="text-xs text-zinc-400">{t('drive.driftStateLabel')}</div>
+            <div className="font-medium">{t(`drive.driftState.${s}`)}</div>
           </div>
-          <div className="rounded-lg bg-zinc-800 px-2 py-1.5 text-center">
-            <div className="text-[10px] text-zinc-400">β (°)</div>
-            <div className="tnum font-mono text-sm font-medium text-zinc-100 whitespace-nowrap">{state?.beta_deg?.toFixed(1) ?? '—'}</div>
+          <div>
+            <div className="text-xs text-zinc-400">β (°)</div>
+            <div className="font-medium">{state?.beta_deg?.toFixed(1) ?? '—'}</div>
           </div>
-          <div className="rounded-lg bg-zinc-800 px-2 py-1.5 text-center">
-            <div className="text-[10px] text-zinc-400">{t('drive.driftPose')}</div>
-            <div className="tnum font-mono text-sm font-medium text-zinc-100 whitespace-nowrap">
+          <div>
+            <div className="text-xs text-zinc-400">{t('drive.driftPose')}</div>
+            <div className="font-medium">
               {state?.pose ? `${state.pose.x.toFixed(2)},${state.pose.y.toFixed(2)}` : '—'}
             </div>
           </div>
-          <div className="rounded-lg bg-zinc-800 px-2 py-1.5 text-center">
-            <div className="text-[10px] text-zinc-400">{t('drive.driftHeading')}</div>
-            <div className="tnum font-mono text-sm font-medium text-zinc-100 whitespace-nowrap">
+          <div>
+            <div className="text-xs text-zinc-400">{t('drive.driftHeading')}</div>
+            <div className="font-medium">
               {state?.pose ? ((((state.pose.heading_deg % 360) + 360) % 360).toFixed(1)) : '—'}
             </div>
           </div>
-          <div className="rounded-lg bg-zinc-800 px-2 py-1.5 text-center">
-            <div className="text-[10px] text-zinc-400">{t('drive.driftCameraFps')}</div>
-            <div className="tnum font-mono text-sm font-medium text-zinc-100 whitespace-nowrap">{cameraOn ? (state?.camera_fps ?? 0).toFixed(0) : '—'}</div>
+          <div>
+            <div className="text-xs text-zinc-400">{t('drive.driftCameraFps')}</div>
+            <div className="font-medium">{cameraOn ? (state?.camera_fps ?? 0).toFixed(0) : '—'}</div>
           </div>
-          <div className="rounded-lg bg-zinc-800 px-2 py-1.5 text-center">
-            <div className="text-[10px] text-zinc-400">{t('drive.driftTelemetryFrames')}</div>
-            <div className="tnum font-mono text-sm font-medium text-zinc-100 whitespace-nowrap">{state?.telemetry_count ?? 0} / {state?.frames_written ?? 0}</div>
+          <div>
+            <div className="text-xs text-zinc-400">{t('drive.driftTelemetryFrames')}</div>
+            <div className="font-medium">{state?.telemetry_count ?? 0} / {state?.frames_written ?? 0}</div>
           </div>
         </div>
 
-        {/* 模式控制：录制/自动要求标定就绪（否则后端必 409）；窄屏允许换行 */}
-        <div className="flex flex-wrap gap-2">
+        {/* 模式控制：录制/自动要求标定就绪（否则后端必 409） */}
+        <div className="flex gap-2">
           <Button variant="secondary" onClick={() => startSession('calibrate')} disabled={busy || active || !cameraOn}>
             <CircleDot className="h-4 w-4" /> {t('drive.driftCalibrate')}
           </Button>

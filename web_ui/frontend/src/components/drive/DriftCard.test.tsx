@@ -299,43 +299,6 @@ describe('DriftCard 输入与参数', () => {
   });
 });
 
-describe('DriftCard 相机配置渐进披露', () => {
-  it('相机关闭时输入表单默认可见，不出现「修改参数」', async () => {
-    mockState();
-    renderCard();
-    await screen.findByText('启动相机');
-    expect(screen.getByDisplayValue('field_homography.npz')).toBeInTheDocument();
-    expect(screen.queryByText('修改参数')).not.toBeInTheDocument();
-  });
-
-  it('相机开启时表单折叠为摘要行，「关相机」直接可见，点「修改参数」展开', async () => {
-    mockState({ camera_running: true });
-    renderCard();
-    await screen.findByText('关相机');
-    // 折叠态：摘要含当前标定文件，输入表单不在 DOM
-    expect(screen.getByText(/标定文件：field_homography\.npz/)).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('field_homography.npz')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('修改参数'));
-    // 展开后表单回归（输入框因相机运行保持禁用），「关相机」仍直接可见
-    expect(screen.getByDisplayValue('field_homography.npz')).toBeInTheDocument();
-    expect(screen.getByText('关相机')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('收起参数'));
-    expect(screen.queryByDisplayValue('field_homography.npz')).not.toBeInTheDocument();
-    expect(screen.getByText('关相机')).toBeInTheDocument();
-  });
-});
-
-describe('DriftCard 遥测瓦片', () => {
-  it('实时状态渲染为灰井瓦片，长数值等宽且不换行', async () => {
-    mockState({ telemetry_count: 1287, frames_written: 1290 });
-    renderCard();
-    const value = await screen.findByText('1287 / 1290');
-    expect(value.className).toContain('tnum');
-    expect(value.className).toContain('whitespace-nowrap');
-    expect(value.parentElement?.className).toContain('rounded-lg bg-zinc-800');
-  });
-});
-
 describe('DriftCard i18n', () => {
   it('英文界面渲染无任何中文字符串', async () => {
     setBrowserLanguage('en-US');

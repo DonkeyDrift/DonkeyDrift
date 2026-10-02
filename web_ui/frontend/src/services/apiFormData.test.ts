@@ -21,8 +21,6 @@ vi.mock('axios', () => ({
   },
 }));
 
-vi.mock('@/lib/apiHealth', () => ({ registerApiClient: vi.fn() }));
-
 import { importModel, uploadModelLoss } from './api';
 
 describe('FormData 上传统一的 Content-Type 处理', () => {

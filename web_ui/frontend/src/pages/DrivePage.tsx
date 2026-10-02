@@ -466,6 +466,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
         simConnected={simConnected}
         onSelectTarget={setManualTarget}
       />
+      {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
+      {driveTarget !== 'sim' && <DriftCard />}
+      {driveTarget !== 'car' && <SimCollectCard />}
       {/* 视频 + 遥测 | 右侧抽屉：任何屏宽保持左右并排，抽屉右缘常驻、随宽度连续缩放（008）；
           窄屏抽屉转悬浮半透明浮层，不再折叠到视频下方 */}
       <div ref={dockRowRef} className="relative flex flex-row items-start gap-3">
@@ -589,7 +592,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               onClick={toggleFullscreen}
               title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
               aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              className="dd-overlay absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+              className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
             >
               {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
@@ -695,9 +698,6 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           </div>
         </aside>
       </div>
-      {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
-      {driveTarget !== 'sim' && <DriftCard />}
-      {driveTarget !== 'car' && <SimCollectCard />}
     </div>
   );
 });

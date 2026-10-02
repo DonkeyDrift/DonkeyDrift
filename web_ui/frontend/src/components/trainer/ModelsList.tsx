@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { listModels, deleteModel, downloadModelUrl, loadModelToCar, importModel, uploadModelLoss, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload, ImagePlus, Package } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload, ImagePlus } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { useTranslation } from '@/i18n';
 
@@ -230,27 +229,7 @@ export const ModelsList: React.FC = () => {
       </div>
 
       {models.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-8 text-center" data-testid="models-empty-state">
-          <Package className="w-12 h-12 text-zinc-500" />
-          <p className="mt-3 text-sm font-medium text-zinc-300">{t('trainer.noModelsTitle')}</p>
-          <p className="mt-1 text-xs text-zinc-500 max-w-xs">{t('trainer.noModelsDesc')}</p>
-          <div className="mt-4 flex items-center gap-2">
-            <button
-              onClick={() => setShowImport(true)}
-              disabled={importing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-cyan-600 hover:bg-cyan-700 text-white rounded-md transition-colors disabled:opacity-50"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              {t('trainer.importModel')}
-            </button>
-            <Link
-              to="/drive"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-cyan-500 hover:text-cyan-400 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
-            >
-              {t('trainer.noModelsCtaDrive')}
-            </Link>
-          </div>
-        </div>
+        <div className="text-sm text-zinc-600">{t('trainer.noModels')}</div>
       )}
 
       <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -304,7 +283,7 @@ export const ModelsList: React.FC = () => {
                   onClick={(e) => e.stopPropagation()}
                   title={t('trainer.downloadModel')}
                   aria-label={t('trainer.downloadModel')}
-                  className="dd-hit-v p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
+                  className="p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
                   download
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -324,7 +303,7 @@ export const ModelsList: React.FC = () => {
                   }}
                   title={t('trainer.loadToCar')}
                   aria-label={t('trainer.loadToCar')}
-                  className="dd-hit-v p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
+                  className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -335,7 +314,7 @@ export const ModelsList: React.FC = () => {
                   }}
                   title={t('trainer.copyPath')}
                   aria-label={t('trainer.copyPath')}
-                  className="dd-hit-v p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </button>
@@ -346,7 +325,7 @@ export const ModelsList: React.FC = () => {
                   }}
                   title={t('trainer.deleteModel')}
                   aria-label={t('trainer.deleteModel')}
-                  className="dd-hit-v p-1 text-red-400 hover:text-red-300 transition-colors"
+                  className="p-1 text-red-400 hover:text-red-300 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>

@@ -150,27 +150,18 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
         />
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* 状态行：当前目标 + 车端在线状态胶囊 + 模拟器离线重连徽标 */}
+        {/* 状态行：当前目标 + 车端在线状态点 + 模拟器离线重连徽标 */}
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-zinc-400">{t('drive.targetCurrent')}</span>
           <span className="text-zinc-100 font-medium">{targetLabel}</span>
-          {/* 车端在线状态胶囊：在线绿（圆点呼吸）、离线灰 */}
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
-              carOnline
-                ? 'border-emerald-500/30 bg-emerald-500/20 text-emerald-400'
-                : 'border-zinc-700 bg-zinc-800 text-zinc-400'
-            }`}
-          >
+          <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
             <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                carOnline ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
-              }`}
+              className={`w-2 h-2 rounded-full ${carOnline ? 'bg-emerald-400' : 'bg-zinc-600'}`}
             />
             {carOnline ? t('drive.targetCarOnline') : t('drive.targetCarOffline')}
           </span>
           {simConnected === false && (
-            <span className="inline-flex items-center px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap">
+            <span className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap">
               {t('drive.simOfflineReconnecting')}
             </span>
           )}
