@@ -66,6 +66,9 @@ def test_simulator_config_defines_render_and_jpeg_quality():
     assert "render_img_w" in cfg
     assert "render_img_h" in cfg
     assert "DRIVE_VIDEO_JPEG_QUALITY" in cfg
+    # 模拟器预览必须是全高清：默认渲染分辨率 1920×1080
+    assert 'GYM_CONF["render_img_w"] = 1920' in cfg
+    assert 'GYM_CONF["render_img_h"] = 1080' in cfg
 
 
 def test_complete_config_defines_jpeg_quality():

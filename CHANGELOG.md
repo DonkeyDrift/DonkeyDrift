@@ -1,13 +1,24 @@
 # 变更日志
 
-## 2026-10-02 (264)
+## 2026-10-02 (265)
 
-- fix(ui): 全站字体栈回最初版（更宽的首版栈）+ 品牌名去空格统一为「DonkeyDrifter」
-  - 起因（用户报障）：用户确认 DD 与 DC 页面现字体都不是想要的「最开始那种」——最初版更宽、类似苹果自带/Safari 字体；并要求把「Donkey Drifter」中间的空格去掉。
+- fix(ui): 全站字体栈回最初版（更宽的首版栈）+ 品牌名去空格统一为「DonkeyDrifter」+ 找小车入口改名「Find-DKC」
+  - 起因（用户报障）：用户确认 DD 与 DC 页面现字体都不是想要的「最开始那种」——最初版更宽、类似苹果自带/Safari 字体；并要求把「Donkey Drifter」中间的空格去掉、「找小车」入口改成「Find-DKC」。
   - 字体（回 fe144ad5 首版栈）：`web_ui/frontend/src/index.css` :root、`themes/theme-mus4.css` / `themes/theme-light.css` 的 .font-sans 重映射换回 `-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"`（0784d454 的 system-ui 优先统一撤回；顶栏 DC 风格按钮本就锁该栈）；launcher 侧内嵌页同步——`donkeycar/launcher/server.py` 启动中转页与 D 菜单页 body、`terminal_static/terminal.html` toast/overlay。实测本机 Chrome + Playwright：system-ui 栈解析 Noto Sans CJK SC（标题 148.3px@20px/700），首版栈解析 Noto Sans（151.0px，更宽）；Apple 设备即 SF Pro。
   - 改名「DonkeyDrifter」（去空格，14 处）：前端 `index.html` 标题、`Layout.tsx` 品牌文字 + logo alt、`i18n/messages/common.ts` GitHub 链接中英两条、`launcher/server.py` 启动页标题、后端 `main.py` FastAPI title 与两条运行消息；测试同步 `GitHubLink.test.tsx`（3 处）、`test_branding.py`（2 处）、`test_launcher_menu_actions.py` 注释。
-  - 验证：vitest 52 文件 357 全绿、tsc -b --noEmit 通过、vite build 通过（dist 实测 `<title>DonkeyDrifter</title>`、5 处首版栈、无「Donkey Drifter」残留）；pytest 分两次跑（`tests/` 与 `web_ui/backend/tests/`，避开 test_findcar.py 同名收集冲突）全绿。
+  - 找小车入口改名「Find-DKC」：`i18n/messages/common.ts` 按钮标签 `common.enterButtons.findCar` 与弹窗标题 `common.findCar.title` 中英四处（找小车/Find Car → Find-DKC）；`FindCarModal.tsx` 注释同步；测试断言走 i18n key 无需改。
+  - 验证：vitest 52 文件 357 全绿、tsc -b --noEmit 通过、vite build 通过（dist 实测 `<title>DonkeyDrifter</title>`、5 处首版栈、无「Donkey Drifter」残留）；pytest 分两次跑（`tests/` 与 `web_ui/backend/tests/`，避开 test_findcar.py 同名收集冲突）全绿 + testpaths 全量绿。
   - Find Car（cloudflare/find-car，本地非 git）检查后本就是该首版栈，无需改动。
+
+## 2026-10-02 (264)
+
+- fix(drive): 模拟器预览全高清兜底——Drive 页面视频恒为 1920×1080，与 NN 处理分辨率彻底解耦
+  - 背景（用户报障）：2026-09-07 (207) 已做「预览与 NN 输入解耦」（Issue #401/#405），但用户实测模拟器模式下 Drive 页视频仍是低清。根因：渲染分辨率完全取决于配置里的 `render_img_w/h` 键——用户实际跑模拟器的 `mycar/myconfig.py` 的 `GYM_CONF` 缺这两个键（连 `img_w/img_h` 也缺），dgym 回退按 NN 输入 160×120 渲染，预览帧=低清帧；且模板 `cfg_simulator.py` 默认渲染仅 640×480，即使生效也不是全高清。
+  - `donkeycar/parts/dgym.py`：`render_img_w/render_img_h` 缺省回退由「NN 输入分辨率」改为 **1920×1080 全高清**——任何配置（含缺 render 键的旧配置）下 Drive 页预览都是最高画质；显式设置 render 键仍可覆盖；NN 输入（cam/image_array）始终为 img_w×img_h（dgym 内下采样），训练/推理不受影响。
+  - `donkeycar/templates/cfg_simulator.py`：默认渲染分辨率 640×480 → 1920×1080（全高清），注释同步。
+  - 用户本机配置（非仓库文件）：`mycar/myconfig.py` 的 `GYM_CONF` 显式补 `img_w/img_h`（160×120，与训练一致）与 `render_img_w/render_img_h`（1920×1080）。
+  - 测试同步：`test_dgym_preview.py` 缺省用例重写为「无 render 键 → 请求 1920×1080 + cam_resolution=(1080,1920,3) + NN 帧下采样 120×160 + 预览帧 1080×1920」（新增 FakeFullHdEnv），模块 docstring 同步；`test_template_simulator_preview.py` 增补模板默认值 1920/1080 断言。实测 `pytest test_dgym_preview + test_template_simulator_preview + test_drive_api_bridge` **62 全过**。
+  - 注：视频源在车端 `manage.py drive` 进程，需重启模拟器驾驶进程后生效；DD Web 后端/前端零改动，无需本机部署；Firmware 无改动、无需 OTA。
 
 ## 2026-10-02 (263)
 
