@@ -43,11 +43,13 @@ class DonkeyGymEnv(object):
         # 空帧占位
         self._img_h = int(self._conf.get("img_h", 120))
         self._img_w = int(self._conf.get("img_w", 160))
-        # 模拟器渲染分辨率与 NN 输入分辨率解耦：默认渲染分辨率 == NN 输入分辨率（向后兼容）。
-        # 设置 render_img_w/render_img_h 后，向模拟器请求更高渲染分辨率用于预览，
-        # 而 NN 输入（cam/image_array）仍为 img_w×img_h（在 dgym 内下采样）。
-        self._render_img_h = int(self._conf.get("render_img_h") or self._img_h)
-        self._render_img_w = int(self._conf.get("render_img_w") or self._img_w)
+        # 模拟器渲染分辨率与 NN 输入分辨率解耦：未显式设置 render_img_w/render_img_h 时
+        # 默认按 1920×1080 全高清渲染——Drive 页面用户看到的画面必须是最高画质，
+        # 与处理（NN 输入）分辨率无关；旧配置缺少 render 键时不再回退到低清。
+        # 显式设置 render_img_w/render_img_h 可覆盖该默认值；
+        # NN 输入（cam/image_array）始终为 img_w×img_h（在 dgym 内下采样）。
+        self._render_img_h = int(self._conf.get("render_img_h") or 1080)
+        self._render_img_w = int(self._conf.get("render_img_w") or 1920)
         self._output_preview = bool(output_preview)
         self._empty_frame = np.zeros((self._img_h, self._img_w, 3), dtype=np.uint8)
         self._empty_preview_frame = np.zeros((self._render_img_h, self._render_img_w, 3), dtype=np.uint8)
@@ -106,8 +108,9 @@ class DonkeyGymEnv(object):
         conf["port"] = self._port
         conf["guid"] = 0
         conf["frame_skip"] = 1
-        # 渲染分辨率与 NN 输入解耦：仅当设置了更高的渲染分辨率时才覆盖 img_w/img_h
-        # 与 cam_resolution，未设置时 conf 与旧行为逐字段一致（向后兼容）。
+        # 渲染分辨率与 NN 输入解耦：渲染分辨率（缺省 1920×1080 全高清）与 NN 输入
+        # 不一致时，覆盖发给模拟器的 img_w/img_h 与 cam_resolution，
+        # 让模拟器按渲染分辨率出图（NN 输入帧在 _set_frame 内下采样回 img_w×img_h）。
         if (self._render_img_w, self._render_img_h) != (self._img_w, self._img_h):
             conf["img_w"] = self._render_img_w
             conf["img_h"] = self._render_img_h
