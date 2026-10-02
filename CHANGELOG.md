@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-10-02 (263)
+
+- fix(ui): 驾驶目标选择栏浅色模式下不再是深色——theme-light 补 `bg-zinc-800/60` 映射
+  - 现象（用户报障）：Drive 页「驾驶目标」分段选择栏（真车|模拟器）在浅色模式下轨道仍是深灰色，与白卡片格格不入。
+  - 根因：`components/drive/DriveTargetCard.tsx` 选择栏容器用 `bg-zinc-800/60`，而 `themes/theme-light.css` 的浅色映射只覆盖 `bg-zinc-800`、`/50`、`/80` 三档，`/60` 漏映射——实测浅色下计算样式仍 `rgba(39,39,42,0.6)` 深底（边框 `border-zinc-700`→`--hairline` 早已正确映射）。
+  - 修复（`themes/theme-light.css`）：新增 `html.theme-light .bg-zinc-800/60 { background-color: var(--surface2-a50) }`（`rgba(245,245,247,0.6)`，与 `/50` 同档浅灰底）；容器自带 hairline 边框已够描形，不再叠加 outline（避免边框+outline 双框）。全应用仅此一处使用非 hover 的 `bg-zinc-800/60`，其余 4 处均为 `hover:bg-zinc-800/60`（类名不同，不受影响）。
+  - 验证：vitest 52 文件 **357 用例全绿**、`tsc --noEmit` 零错误、`npm run build` 通过；Playwright A/B 实测——修复前 `rgba(39,39,42,0.6)` 深底截图 vs 修复后 `rgba(245,245,247,0.6)` 浅灰截图（临时预览端口 8023，用后已回收）。
+  - 注：合入后部署本机 8000；Firmware 无改动、无需 OTA。
+
 ## 2026-10-02 (262)
 
 - feat(ui): Web UI 用户可见名称统一为「Donkey Drifter」
