@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-02 (264)
+
+- fix(drive): 模拟器预览全高清兜底——Drive 页面视频恒为 1920×1080，与 NN 处理分辨率彻底解耦
+  - 背景（用户报障）：2026-09-07 (207) 已做「预览与 NN 输入解耦」（Issue #401/#405），但用户实测模拟器模式下 Drive 页视频仍是低清。根因：渲染分辨率完全取决于配置里的 `render_img_w/h` 键——用户实际跑模拟器的 `mycar/myconfig.py` 的 `GYM_CONF` 缺这两个键（连 `img_w/img_h` 也缺），dgym 回退按 NN 输入 160×120 渲染，预览帧=低清帧；且模板 `cfg_simulator.py` 默认渲染仅 640×480，即使生效也不是全高清。
+  - `donkeycar/parts/dgym.py`：`render_img_w/render_img_h` 缺省回退由「NN 输入分辨率」改为 **1920×1080 全高清**——任何配置（含缺 render 键的旧配置）下 Drive 页预览都是最高画质；显式设置 render 键仍可覆盖；NN 输入（cam/image_array）始终为 img_w×img_h（dgym 内下采样），训练/推理不受影响。
+  - `donkeycar/templates/cfg_simulator.py`：默认渲染分辨率 640×480 → 1920×1080（全高清），注释同步。
+  - 用户本机配置（非仓库文件）：`mycar/myconfig.py` 的 `GYM_CONF` 显式补 `img_w/img_h`（160×120，与训练一致）与 `render_img_w/render_img_h`（1920×1080）。
+  - 测试同步：`test_dgym_preview.py` 缺省用例重写为「无 render 键 → 请求 1920×1080 + cam_resolution=(1080,1920,3) + NN 帧下采样 120×160 + 预览帧 1080×1920」（新增 FakeFullHdEnv），模块 docstring 同步；`test_template_simulator_preview.py` 增补模板默认值 1920/1080 断言。实测 `pytest test_dgym_preview + test_template_simulator_preview + test_drive_api_bridge` **62 全过**。
+  - 注：视频源在车端 `manage.py drive` 进程，需重启模拟器驾驶进程后生效；DD Web 后端/前端零改动，无需本机部署；Firmware 无改动、无需 OTA。
+
 ## 2026-10-02 (263)
 
 - fix(ui): 驾驶目标选择栏浅色模式下不再是深色——theme-light 补 `bg-zinc-800/60` 映射

@@ -245,11 +245,11 @@ GYM_CONF["bio"] = "I race robots."
 
 # 模拟器相机渲染分辨率（预览用），与 NN 输入 IMAGE_W×IMAGE_H 解耦：
 # - img_w/img_h 仍为 NN 输入分辨率（160×120），训练/推理不受影响；
-# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 640×480 高画质），
+# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 1920×1080 全高清），
 #   dgym 内部会把渲染帧下采样回 img_w×img_h 作为 cam/image_array，
 #   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示最高画质。
-GYM_CONF["render_img_w"] = 640
-GYM_CONF["render_img_h"] = 480
+GYM_CONF["render_img_w"] = 1920
+GYM_CONF["render_img_h"] = 1080
 
 def get_wsl_host_ip():
     # 尝试 1: 使用 ipconfig.exe (最准确，能获取 Windows 局域网 IP)
