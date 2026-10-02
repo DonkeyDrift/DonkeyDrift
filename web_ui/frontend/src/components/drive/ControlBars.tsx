@@ -17,7 +17,7 @@ export const ControlBars: React.FC<ControlBarsProps> = ({ angle, className = '' 
   return (
     <div className={`space-y-3 ${className}`}>
       <div>
-        <div className="flex items-center justify-between text-[10px] text-zinc-500 mb-1">
+        <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
           <span>{t('drive.turnLeft')}</span>
           <span className="text-zinc-400 font-medium">{t('drive.steering')}</span>
           <span>{t('drive.turnRight')}</span>
@@ -36,7 +36,7 @@ export const ControlBars: React.FC<ControlBarsProps> = ({ angle, className = '' 
             />
           )}
         </div>
-        <div className="text-[10px] text-zinc-500 text-center mt-1">
+        <div className="text-xs text-zinc-500 text-center mt-1 tnum">
           {angle.toFixed(2)}
         </div>
       </div>

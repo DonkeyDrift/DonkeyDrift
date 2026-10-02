@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { InputSourceSelector } from './InputSourceSelector';
 
 describe('InputSourceSelector', () => {
@@ -14,10 +14,10 @@ describe('InputSourceSelector', () => {
     expect(screen.queryByText('陀螺仪')).not.toBeInTheDocument();
   });
 
-  it('鼠标悬浮时自动展开并显示其余选项', () => {
+  it('点击按钮时展开并显示其余选项', () => {
     render(<InputSourceSelector value="joystick" onChange={vi.fn()} />);
 
-    fireEvent.mouseEnter(screen.getByText('摇杆'));
+    fireEvent.click(screen.getByText('摇杆'));
 
     expect(screen.getByText('键盘')).toBeInTheDocument();
     expect(screen.getByText('手柄')).toBeInTheDocument();
@@ -29,17 +29,17 @@ describe('InputSourceSelector', () => {
     const onChange = vi.fn();
     render(<InputSourceSelector value="joystick" onChange={onChange} />);
 
-    fireEvent.mouseEnter(screen.getByText('摇杆'));
+    fireEvent.click(screen.getByText('摇杆'));
     fireEvent.click(screen.getByText('ESP32 手柄'));
 
     expect(onChange).toHaveBeenCalledWith('esp32');
   });
 
-  it('选择新输入源后触发 onChange 并收起抽屉', () => {
+  it('选择新输入源后触发 onChange 并收起菜单', () => {
     const onChange = vi.fn();
     const { rerender } = render(<InputSourceSelector value="joystick" onChange={onChange} />);
 
-    fireEvent.mouseEnter(screen.getByText('摇杆'));
+    fireEvent.click(screen.getByText('摇杆'));
     fireEvent.click(screen.getByText('键盘'));
 
     expect(onChange).toHaveBeenCalledWith('keyboard');
@@ -54,7 +54,7 @@ describe('InputSourceSelector', () => {
     const onChange = vi.fn();
     render(<InputSourceSelector value="joystick" onChange={onChange} gamepadConnected={false} />);
 
-    fireEvent.mouseEnter(screen.getByText('摇杆'));
+    fireEvent.click(screen.getByText('摇杆'));
 
     const gamepadButton = screen.getByRole('button', { name: '手柄' });
     expect(gamepadButton).toBeDisabled();
@@ -70,30 +70,37 @@ describe('InputSourceSelector', () => {
     expect(indicator).toBeInTheDocument();
   });
 
-  it('鼠标悬浮在抽屉选项上时保持展开', () => {
+  it('在菜单选项上按下指针（菜单内部）时保持展开', () => {
     render(<InputSourceSelector value="joystick" onChange={vi.fn()} />);
 
-    const container = screen.getByTestId('input-source-selector');
-    fireEvent.mouseEnter(container);
+    fireEvent.click(screen.getByText('摇杆'));
 
     const keyboardButton = screen.getByRole('button', { name: '键盘' });
-    fireEvent.mouseEnter(keyboardButton);
+    fireEvent.pointerDown(keyboardButton);
 
     expect(keyboardButton).toBeInTheDocument();
     expect(screen.getByText('手柄')).toBeInTheDocument();
   });
 
-  it('鼠标移出后收起抽屉', async () => {
+  it('按 Escape 后收起菜单', () => {
     render(<InputSourceSelector value="joystick" onChange={vi.fn()} />);
 
-    const container = screen.getByTestId('input-source-selector');
-    fireEvent.mouseEnter(container);
+    fireEvent.click(screen.getByText('摇杆'));
     expect(screen.getByText('键盘')).toBeInTheDocument();
 
-    fireEvent.mouseLeave(container);
+    fireEvent.keyDown(document, { key: 'Escape' });
 
-    await waitFor(() => {
-      expect(screen.queryByText('键盘')).not.toBeInTheDocument();
-    });
+    expect(screen.queryByText('键盘')).not.toBeInTheDocument();
+  });
+
+  it('点击菜单外部后收起菜单', () => {
+    render(<InputSourceSelector value="joystick" onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('摇杆'));
+    expect(screen.getByText('键盘')).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByText('键盘')).not.toBeInTheDocument();
   });
 });

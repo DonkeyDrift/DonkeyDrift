@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, MoreHorizontal, X } from 'lucide-react';
+import { Menu as MenuIcon, MoreHorizontal, X } from 'lucide-react';
+import { Menu } from './Menu';
 import { FabActions } from './FabActions';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { GitHubLink } from './GitHubLink';
@@ -35,7 +36,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   // 桌面端「更多入口」溢出菜单（KCW / ZCode / DSH / FindCar）——顶栏拥挤时收起
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
 
   // 切换路由后收起手机菜单与溢出菜单
   useEffect(() => {
@@ -43,24 +44,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setMoreMenuOpen(false);
   }, [location.pathname]);
 
-  // 点击溢出菜单外部或按 Esc 时收起
+  // Publish the real rendered header height as --header-h so pages can offset
+  // sticky/scroll anchors; tracks breakpoint and mobile-menu height changes.
   useEffect(() => {
-    if (!moreMenuOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
-        setMoreMenuOpen(false);
-      }
+    const el = headerRef.current;
+    if (!el) return;
+    const sync = () => {
+      document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`);
     };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMoreMenuOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [moreMenuOpen]);
+    sync();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const flowClass = (section: FlowSectionId) =>
     `transition-colors hover:text-cyan-400 whitespace-nowrap ${
@@ -69,8 +66,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
-      <header className="bg-zinc-950 sticky top-0 z-50">
-        <div className="px-3">
+      {/* Traditional iOS frosted bar: translucent canvas + backdrop blur/saturate + hairline
+          (no Liquid Glass lensing); top padding absorbs the iOS status-bar safe area. */}
+      <header ref={headerRef} className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="px-4">
           <div className="h-14 flex items-center">
             {/* 标题左侧 logo：与 Drifter Console 独立页 headerLogo 完全一致 —— 32px 内容 + 1px 边框外凸（box-sizing content-box，总 34px）、圆角 8px、边框随主题（深色 #2b3441 / 浅色 #d5dce4，见 theme-*.css 的 .header-logo）、与标题 gap 12px */}
             <div className="font-bold text-xl lg:mr-4">
@@ -99,29 +98,33 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 </Link>
               ))}
               {/* 高级工具入口收进「⋯」溢出菜单（顶栏空间让给主导航） */}
-              <div className="relative" ref={moreMenuRef}>
-                <button
-                  type="button"
-                  aria-label={t('common.nav.more')}
-                  aria-expanded={moreMenuOpen}
-                  onClick={() => setMoreMenuOpen((open) => !open)}
-                  className="flex items-center justify-center w-8 h-8 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors"
-                >
-                  <MoreHorizontal className="w-5 h-5" />
-                </button>
-                {moreMenuOpen && (
-                  <div className="absolute right-0 top-10 z-50 flex min-w-[180px] flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-xl">
-                    <div className="flex flex-col gap-1 xl:hidden">
-                      <DonkeyEntryLink />
-                      <DrifterConsoleEntryLink />
-                    </div>
-                    <KimiCodeWebEntryLink />
-                    <ZCodeEntryLink />
-                    <DshEntryLink />
-                    <FindCarEntryLink />
+              <Menu
+                open={moreMenuOpen}
+                onOpenChange={setMoreMenuOpen}
+                className="relative"
+                panelClassName="right-0 top-10"
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={t('common.nav.more')}
+                    onClick={() => setMoreMenuOpen((open) => !open)}
+                    className="hit-44 flex items-center justify-center w-8 h-8 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors"
+                  >
+                    <MoreHorizontal className="w-5 h-5" />
+                  </button>
+                }
+              >
+                <div className="flex min-w-[180px] flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-float">
+                  <div className="flex flex-col gap-1 xl:hidden">
+                    <DonkeyEntryLink />
+                    <DrifterConsoleEntryLink />
                   </div>
-                )}
-              </div>
+                  <KimiCodeWebEntryLink />
+                  <ZCodeEntryLink />
+                  <DshEntryLink />
+                  <FindCarEntryLink />
+                </div>
+              </Menu>
             </nav>
             <div className="ml-auto hidden lg:flex items-center gap-4">
               <VersionBadge />
@@ -140,9 +143,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 aria-label={t('common.nav.menu')}
                 aria-expanded={mobileMenuOpen}
                 onClick={() => setMobileMenuOpen((open) => !open)}
-                className="p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="hit-44 p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
               >
-                {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                {mobileMenuOpen ? <X className="w-6 h-6" /> : <MenuIcon className="w-6 h-6" />}
               </button>
             </div>
           </div>
@@ -158,9 +161,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </div>
         {/* 手机菜单面板：导航项 + 高级入口（Donkey / Drifter Console / Kimi Code Web /
             DeepSeek Harness，弱化样式与桌面一致）；
-            主题/语言/版本号与 Car Connector 已移至标题区 */}
+            主题/语言/版本号与 Car Connector 已移至标题区。
+            Panel stays transparent so the header's frosted backdrop continues through it. */}
         {mobileMenuOpen && (
-          <div className="lg:hidden border-t border-zinc-800 bg-zinc-900">
+          <div className="lg:hidden border-t border-zinc-800">
             <nav className="container mx-auto px-4 py-2 flex flex-col text-sm font-medium">
               {FLOW_NAV_ITEMS.map((item) => (
                 <Link

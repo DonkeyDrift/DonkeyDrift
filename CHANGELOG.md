@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-10-02 (261)
+
+- feat(ui): DD 全站经典 Apple 风格彻底打磨——顶栏磨砂/按压回弹/对比度/触控目标/焦点环 + Menu/Modal 原语落地
+  - 背景：v1.10.5 恢复第一轮 Apple 外观后，用户完整审查 DD/DC/Find Car 三页面，点名要求按**经典 Apple 风格（传统磨砂感，明确非 2025 Liquid Glass）**做彻底打磨。本轮为用户批准的完整打磨（P0–P2 共 40+ 处），聚焦执行层细节：材质、对比度、触控目标、可访问性、动效手感。
+  - 顶栏传统磨砂（`components/Layout.tsx`）：实底 `bg-zinc-950` → `bg-zinc-950/80 backdrop-blur-xl backdrop-saturate-150 border-b border-zinc-800`（主题 `--canvas-a80` 映射早已预留，浅色自动适配）；移动端汉堡面板同款磨砂；顶栏 `px-3→px-4` 与正文左缘对齐；补 `pt-[env(safe-area-inset-top)]`；`--header-h` 改由 ResizeObserver 实测写入 `:root`（jsdom 有 guard）。
+  - 新原语 `components/Menu.tsx`：click 触发（告别 hover 开菜单）、150ms `var(--ease-apple)` opacity+scale(.96→1) 入场、transform-origin 随弹出方向、Esc/外部 pointerdown 关闭、motion-reduce 退化纯淡入；`ModelSelector`/`InputSourceSelector`/Layout「⋯」三处菜单全部接管，浮动投影统一 `shadow-float`。
+  - 新原语 `components/Modal.tsx`：遮罩 `bg-black/40 backdrop-blur-sm` 传统磨砂、Esc 关闭（stopPropagation 防多层串扰）、Tab 焦点圈定、打开初始焦点入内、关闭还原焦点、`role="dialog" aria-modal`；接管 `FindCarModal` 与 `ConsoleControls` 的 OTA 弹窗/DEV 确认框（上传途中仍 veto 关闭，语义不丢）。
+  - 按压反馈修复（`index.css`）：弃 `transform:scale()` 改用独立 CSS `scale` 属性，基础规则常驻 `transition: scale 100ms var(--ease-apple), background-color/color/border-color/box-shadow 150ms ease-out`——按下与松手回弹都走 Apple 曲线（此前 transition 只写 `:active` 里，松手瞬间跳回，且 shorthand 顶掉 hover 颜色缓动的问题一并解决）；reduced-motion 降级保留。
+  - 对比度（`theme-light.css`）：新增 `--ok-text:#248a3d`、`--warn-text:#c03400`（Apple accessibility variant，原填充色直当文字仅 ≈2.2:1），文字语义映射全部指向 text 变体、填充/wash 保持原值；`--ink3` alpha .48→.60、深色 `--ink3` →.55；`--ink4` 限定 placeholder/disabled 专用（`text-zinc-500` 正文映射改指 ink3，zinc/slate 同档不变量保持）。
+  - 触控目标：新增 `.hit-44` 工具类（`::after inset:-8px` 扩热区至 ≥44px、视觉尺寸不变），顶栏 ThemeSwitcher/LanguageSwitcher/静音钮/CarConnectorButton/⋯/汉堡钮全部应用；Drive 工具栏分段与录制按钮 `max-lg:min-h-[40px]`；抽屉把手 `hit-44` + focus-visible 环。
+  - Drive 页（`pages/DrivePage.tsx`）：parkLocked/simOffline/driverConflict/modelLoading/modelNotice 五枚状态徽标去按钮化（删 px-3 py-1.5 rounded-lg border 底，改「语义色文字+lucide 小图标」，与真按钮一眼分清）；录制时长/遥测读数全量 `tnum`（tabular-nums，`.tnum` 挪出 @layer 防 tree-shake）；`DriveTargetCard` simOffline 徽章对齐同款。
+  - 原生对话框清零：`ParameterPanel` 导入成功/失败 `alert()` → 行内 notice（对齐 DriveTargetCard Notice 模式）；`EnterButtons` ZCode `window.prompt` → 自足行内表单（label 复用 `common.enterButtons.zcodePrompt`、受控 input + Enter/Escape、占位标签生命周期与原 prompt 路径完全对齐，并修掉重复打开遗留占位标签、卸载未清理两个边界）。
+  - 细节打磨：新增 `--shadow-float` token（深 `0 8px 28px rgba(0,0,0,.55)` / 浅 `0 8px 24px rgba(0,0,0,.12)`）只给浮动层；`--w-black:600` 收口字重体系（FabActions `font-black`→`font-semibold`）；CarConnectorButton 激活态 `#5cc8ff` 硬编码→cyan 语义类（顶栏两种蓝合一）；safe-area 全链路（FAB `bottom-[max(18px,env(safe-area-inset-bottom))]`、帮助弹窗锚点同步）；全站 `:focus-visible` 焦点环；animate-pulse/跑马灯全部补 `motion-reduce:animate-none`；10/11px 微字 32 处提 `text-xs`；8px 半透明滚动条；主题切换 320ms 交叉淡化（`body.theme-switching` 临时 class，reduced-motion 跳过）；`Button` 新增可选 `loading` 属性；DEV 开关 `role="switch"`→普通 button+`aria-pressed`（主题选择器同步改）；`SimulatorConfig` UISwitch 补 `role="switch"`+`aria-checked`；`TubLibrary` 下载中 `animate-bounce`→Loader2 spin、内嵌列表圆角 18→10px；`-webkit-tap-highlight-color`/`touch-action:manipulation`；`SidePanel`/`EntryErrorBanner` 的 `lg:top-16` 魔法数→`var(--header-h)`；themes 死映射清理。
+  - 测试同步：`ConsoleControls.test.tsx`（switch→button+aria-pressed 9 处）、`ModelSelector.test.tsx`/`InputSourceSelector.test.tsx`（mouseEnter→click，悬浮语义用例改写为 Esc/外部关闭）、`CarConnectorButton.test.tsx`（cyan 类断言）、`EnterButtons.test.tsx`（ZCode 块 10 用例改写为行内表单驱动）；**vitest 52 文件 357 用例全绿**，`tsc --noEmit` 零错误，`npm run build` 通过。
+  - 注：纯前端改动，合入后部署本机 8000；Find Donkey Car 页面同款打磨在工作区 `cloudflare/find-car`（非本仓库）。
+
 ## 2026-10-01 (260)
 
 - feat(ui): DD 全站视觉恢复 2026-09-11 第一轮 Apple 改版外观——按用户要求撤下后续两轮自行「深化」（e52eeec5 视觉审查 16 项、b979cc10 Apple 象限深化），覆盖全部页面

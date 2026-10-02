@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ModelSelector } from './ModelSelector';
 
 describe('ModelSelector', () => {
@@ -17,20 +17,20 @@ describe('ModelSelector', () => {
     expect(screen.getByText('pilot_123.h5')).toBeInTheDocument();
   });
 
-  it('鼠标悬浮时展开并显示模型选项', () => {
+  it('点击按钮时展开并显示模型选项', () => {
     render(<ModelSelector value="" options={['a.h5', 'b.h5']} onChange={vi.fn()} />);
 
-    fireEvent.mouseEnter(screen.getByText('无模型'));
+    fireEvent.click(screen.getByText('无模型'));
 
     expect(screen.getByText('a.h5')).toBeInTheDocument();
     expect(screen.getByText('b.h5')).toBeInTheDocument();
   });
 
-  it('选择模型后触发 onChange 并收起抽屉', () => {
+  it('选择模型后触发 onChange 并收起菜单', () => {
     const onChange = vi.fn();
     const { rerender } = render(<ModelSelector value="" options={['a.h5', 'b.h5']} onChange={onChange} />);
 
-    fireEvent.mouseEnter(screen.getByText('无模型'));
+    fireEvent.click(screen.getByText('无模型'));
     fireEvent.click(screen.getByText('a.h5'));
 
     expect(onChange).toHaveBeenCalledWith('a.h5');
@@ -44,22 +44,30 @@ describe('ModelSelector', () => {
   it('禁用时不展开', () => {
     render(<ModelSelector value="" options={['a.h5']} onChange={vi.fn()} disabled />);
 
-    fireEvent.mouseEnter(screen.getByText('无模型'));
+    fireEvent.click(screen.getByText('无模型'));
 
     expect(screen.queryByText('a.h5')).not.toBeInTheDocument();
   });
 
-  it('鼠标移出后收起抽屉', async () => {
+  it('按 Escape 后收起菜单', () => {
     render(<ModelSelector value="" options={['a.h5']} onChange={vi.fn()} />);
 
-    const container = screen.getByTestId('model-selector');
-    fireEvent.mouseEnter(container);
+    fireEvent.click(screen.getByText('无模型'));
     expect(screen.getByText('a.h5')).toBeInTheDocument();
 
-    fireEvent.mouseLeave(container);
+    fireEvent.keyDown(document, { key: 'Escape' });
 
-    await waitFor(() => {
-      expect(screen.queryByText('a.h5')).not.toBeInTheDocument();
-    });
+    expect(screen.queryByText('a.h5')).not.toBeInTheDocument();
+  });
+
+  it('点击菜单外部后收起菜单', () => {
+    render(<ModelSelector value="" options={['a.h5']} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('无模型'));
+    expect(screen.getByText('a.h5')).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByText('a.h5')).not.toBeInTheDocument();
   });
 });

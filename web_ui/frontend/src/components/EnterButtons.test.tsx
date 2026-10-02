@@ -257,11 +257,13 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
 
   it('prompts, saves, then navigates the same placeholder when neither backend nor store works', async () => {
     mockOpenWindows();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     await clickAndFlush(renderButton());
-    // 无活链无存档：保留占位标签并弹出录入框
+    // 无活链无存档：保留占位标签并展开行内录入表单（label 为 zcodePrompt 文案）
     expect(fakeWins[0].close).not.toHaveBeenCalled();
-    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
+    const input = screen.getByLabelText('common.enterButtons.zcodePrompt');
+    expect(input).toHaveValue('');
+    fireEvent.change(input, { target: { value: STORED_URL } });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expectStored('placeholder-sid', 'placeholder-hash', '1');
     // 录入保存后直接导航同一个占位标签（已脱离点击手势，不再新开窗口），
     // 打开的是现拼的新鲜链接：sid/hash 保留、t 已刷新（不再是存入时的 t=1）
@@ -291,10 +293,9 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
     expect(navigatedParams().get('sid')).toBe('placeholder-sid');
   });
 
-  it('re-prompts and updates the stored link on double click (single click suppressed)', async () => {
+  it('re-opens the entry form and updates the stored link on double click (single click suppressed)', async () => {
     localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, STORED_URL);
     mockOpenWindows();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(UPDATED_URL);
     const btn = renderButton();
     // 浏览器双击事件序列：click → click → dblclick
     fireEvent.click(btn);
@@ -304,7 +305,11 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
       vi.advanceTimersByTime(400);
     });
     for (let i = 0; i < 5; i += 1) await act(async () => {});
-    expect(promptSpy).toHaveBeenCalledTimes(1);
+    // 双击展开行内表单：预填归一化后的存档，改值保存后落盘并打开
+    const input = screen.getByLabelText('common.enterButtons.zcodePrompt');
+    expect((input as HTMLInputElement).value).toContain('sid=placeholder-sid');
+    fireEvent.change(input, { target: { value: UPDATED_URL } });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expectStored('placeholder-sid2', 'placeholder-hash2', '2');
     // 单击被去抖抑制，只开一次窗口并导航到新链接
     expect(openSpy).toHaveBeenCalledTimes(1);
@@ -313,8 +318,11 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
 
   it('shows an inline error banner and neither saves nor navigates a non-https link', async () => {
     mockOpenWindows();
-    vi.spyOn(window, 'prompt').mockReturnValue('http://zcode.z.ai/remote/v4?sid=placeholder-sid&hash=placeholder-hash');
     await clickAndFlush(renderButton());
+    fireEvent.change(screen.getByLabelText('common.enterButtons.zcodePrompt'), {
+      target: { value: 'http://zcode.z.ai/remote/v4?sid=placeholder-sid&hash=placeholder-hash' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expect(screen.getByRole('alert')).toHaveTextContent('common.enterButtons.zcodeInvalid');
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(lastNavigated()).toBeUndefined();
@@ -324,30 +332,37 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
 
   it('shows an inline error banner and rejects a bare link without sid/hash params', async () => {
     mockOpenWindows();
-    vi.spyOn(window, 'prompt').mockReturnValue(BARE_URL);
     await clickAndFlush(renderButton());
+    fireEvent.change(screen.getByLabelText('common.enterButtons.zcodePrompt'), {
+      target: { value: BARE_URL },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expect(screen.getByRole('alert')).toHaveTextContent('common.enterButtons.zcodeInvalid');
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(lastNavigated()).toBeUndefined();
     expect(fakeWins[0].close).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the prompt when the stored link lacks sid/hash', async () => {
+  it('falls back to the entry form when the stored link lacks sid/hash', async () => {
     localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, BARE_URL);
     mockOpenWindows();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     await clickAndFlush(renderButton());
-    expect(promptSpy).toHaveBeenCalledTimes(1);
+    // 存档无效：表单预填空串，避免无效裸链接被直接提交
+    const input = screen.getByLabelText('common.enterButtons.zcodePrompt');
+    expect(input).toHaveValue('');
+    fireEvent.change(input, { target: { value: STORED_URL } });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expectStored('placeholder-sid', 'placeholder-hash', '1');
     expect(navigatedParams().get('sid')).toBe('placeholder-sid');
   });
 
   it('accepts a desktop-copied link whose params live in the # fragment', async () => {
     mockOpenWindows();
-    vi.spyOn(window, 'prompt').mockReturnValue(
-      'https://zcode.z.ai/remote/v4#sid=frag-sid&hash=frag-hash&t=9',
-    );
     await clickAndFlush(renderButton());
+    fireEvent.change(screen.getByLabelText('common.enterButtons.zcodePrompt'), {
+      target: { value: 'https://zcode.z.ai/remote/v4#sid=frag-sid&hash=frag-hash&t=9' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     // fragment 参数归并进 query、hash 清空、t 刷新后保存
     const stored = new URL(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY) ?? '');
     expect(stored.searchParams.get('sid')).toBe('frag-sid');
@@ -367,18 +382,18 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
     expect(lastNavigated()).toBe(TOKEN_URL);
   });
 
-  it('prefills the prompt with an empty string when the stored link is invalid', async () => {
+  it('prefills the entry form with an empty string when the stored link is invalid', async () => {
     localStorage.setItem(ZCODE_REMOTE_STORAGE_KEY, BARE_URL);
     mockOpenWindows();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     await clickAndFlush(renderButton());
-    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
+    expect(screen.getByLabelText('common.enterButtons.zcodePrompt')).toHaveValue('');
   });
 
-  it('does nothing when the prompt is cancelled', async () => {
+  it('does nothing when the entry form is cancelled', async () => {
     mockOpenWindows();
-    vi.spyOn(window, 'prompt').mockReturnValue(null);
     await clickAndFlush(renderButton());
+    fireEvent.click(screen.getByRole('button', { name: 'common.fileBrowser.cancel' }));
+    expect(screen.queryByLabelText('common.enterButtons.zcodePrompt')).not.toBeInTheDocument();
     expect(localStorage.getItem(ZCODE_REMOTE_STORAGE_KEY)).toBeNull();
     expect(lastNavigated()).toBeUndefined();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -394,22 +409,27 @@ describe('ZCodeEntryLink（点击实时取活链，localStorage 兜底）', () =
       throw new DOMException('QuotaExceededError');
     });
     mockOpenWindows();
-    vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     await clickAndFlush(renderButton());
+    fireEvent.change(screen.getByLabelText('common.enterButtons.zcodePrompt'), {
+      target: { value: STORED_URL },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expect(navigatedParams().get('sid')).toBe('placeholder-sid');
     expect(mockLaunchZcodeRemote).toHaveBeenCalledTimes(1);
   });
 
-  it('treats a throwing storage read as no saved link and falls back to the prompt', async () => {
-    // getItem 抛 SecurityError（存储禁用）时按无存档处理：prompt 预填空串、
+  it('treats a throwing storage read as no saved link and falls back to the entry form', async () => {
+    // getItem 抛 SecurityError（存储禁用）时按无存档处理：表单预填空串、
     // 录入后正常打开，点击不失效
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('SecurityError');
     });
     mockOpenWindows();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(STORED_URL);
     await clickAndFlush(renderButton());
-    expect(promptSpy).toHaveBeenCalledWith('common.enterButtons.zcodePrompt', '');
+    const input = screen.getByLabelText('common.enterButtons.zcodePrompt');
+    expect(input).toHaveValue('');
+    fireEvent.change(input, { target: { value: STORED_URL } });
+    fireEvent.click(screen.getByRole('button', { name: 'drive.gpWizSave' }));
     expect(navigatedParams().get('sid')).toBe('placeholder-sid');
     expect(mockLaunchZcodeRemote).toHaveBeenCalledTimes(1);
   });

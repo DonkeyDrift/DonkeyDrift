@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AlertCircle, Code2, FlaskConical, Menu, Search, Sparkles, SquareTerminal, X } from 'lucide-react';
 import { useTranslation } from '@/i18n';
@@ -6,13 +6,14 @@ import { fetchZcodeRemoteLink, launchDsh, launchKimiCodeWeb, launchZcodeRemote }
 import { FindCarModal } from './FindCarModal';
 
 /** 页面内 inline 错误横幅（替代 alert）：--bad 系洗色底 + hairline，可关闭。
- *  定位在顶栏下方（移动端标题区 135px / 桌面 57px，与 SidePanel 同款偏移）。 */
+ *  定位在顶栏下方：桌面端跟随顶栏高度变量 --header-h（默认 64px），移动端固定
+ *  143px = 三行标题区实测 135px + 约 8px 间距（与 SidePanel 同款偏移）。 */
 const EntryErrorBanner: React.FC<{ message: string; onClose: () => void }> = ({ message, onClose }) => {
   const { t } = useTranslation();
   return (
     <div
       role="alert"
-      className="fixed left-1/2 top-[143px] lg:top-16 z-[90] flex w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 rounded-md border border-red-500/50 bg-red-500/20 px-3 py-2 text-xs text-red-400"
+      className="fixed left-1/2 top-[143px] lg:top-[var(--header-h)] z-[90] flex w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 rounded-md border border-red-500/50 bg-red-500/20 px-3 py-2 text-xs text-red-400"
     >
       <AlertCircle className="h-4 w-4 shrink-0" />
       <span className="flex-1 break-words">{message}</span>
@@ -148,7 +149,7 @@ export const KimiCodeWebEntryLink: React.FC = () => {
 // 后端 /api/zcode-remote/link 取活链——桌面端未开启会代开启、不在线会拉起，
 // 拿到的链接 t 永远是新鲜的（z.ai 远控页拒绝旧 t——"手机连接已失效"），
 // 正常点击零弹框；后端取不到才回落 localStorage 存档（归一化刷新 t），
-// 无存档或存档缺 sid/hash 才 prompt 录入，双击重新录入。
+// 无存档或存档缺 sid/hash 才展开行内表单录入（替代 window.prompt），双击重新录入。
 // 远程链接由 ZCode 桌面端生成、本身是凭证，只存浏览器 localStorage，绝不入库；
 export const ZCODE_REMOTE_STORAGE_KEY = 'zcodeRemoteUrl';
 
@@ -224,11 +225,20 @@ export const ZCodeEntryLink: React.FC = () => {
   const { t } = useTranslation();
   const clickTimer = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 链接录入用页面内行内表单（替代 window.prompt）：promptOpen 控制显隐、promptValue
+  // 为输入值；promptWinRef 暂存单击主流程预开的占位标签，表单确认时导航它、取消/无效
+  // 时关闭（与旧 prompt 路径的占位标签生命周期一致）
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptValue, setPromptValue] = useState('');
+  const promptWinRef = useRef<Window | null>(null);
+  const promptInputId = useId();
 
-  // 卸载时清掉未触发的单击定时器
+  // 卸载时清掉未触发的单击定时器；录入表单未了结时一并关掉暂存的占位标签
   useEffect(
     () => () => {
       if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
+      promptWinRef.current?.close();
+      promptWinRef.current = null;
     },
     [],
   );
@@ -243,7 +253,7 @@ export const ZCodeEntryLink: React.FC = () => {
 
   // 单击 = 先同步开一个占位标签（防浏览器拦截异步 window.open），再实时向
   // 后端取活链（桌面端未开启会代开启/不在线会拉起，t 永远新鲜）；取不到
-  // 才回落 localStorage 存档现拼，都无才 prompt 录入。只有点击才向 Z Code
+  // 才回落 localStorage 存档现拼，都无才展开行内表单录入。只有点击才向 Z Code
   // 发请求
   const openRemote = () => {
     const win = window.open('about:blank', '_blank');
@@ -257,7 +267,7 @@ export const ZCodeEntryLink: React.FC = () => {
       const saved = readStoredRemoteUrl();
       const fresh = saved ? normalizeRemoteUrl(saved) : null;
       if (!fresh) {
-        promptForUrl(win);
+        openLinkForm(win);
         return;
       }
       navigate(fresh);
@@ -275,27 +285,39 @@ export const ZCodeEntryLink: React.FC = () => {
       .catch(() => fallbackToStore());
   };
 
-  // prompt 录入/更新链接：预填归一化后的存档（存档无效时预填空串，
-  // 避免早期存的无效裸链接诱导直接回车）；输入经归一化，失败在页面内
-  // 弹 inline 错误横幅且不保存；保存归一化后的值并立即按新链接打开一次。
-  // 存储写入失败（隐私模式/禁用）不阻塞本次打开——下次点击会再 prompt。
-  // 单击主流程传入占位标签 win 时导航它（此刻已脱离点击手势，直接
-  // window.open 会被拦截），取消/无效输入则关掉占位；双击等同步手势路径
-  // 无 win，直接 openFresh
-  const promptForUrl = (win?: Window | null) => {
+  // 行内表单录入/更新链接（window.prompt 的自足替代，不依赖外部组件）：预填归一化
+  // 后的存档（存档无效时预填空串，避免早期存的无效裸链接诱导直接提交）；输入经
+  // 归一化，失败关表单并弹 inline 错误横幅且不保存；保存归一化后的值并立即按新链接
+  // 打开一次。存储写入失败（隐私模式/禁用）不阻塞本次打开——下次点击会再出表单。
+  // 单击主流程传入占位标签 win 时由表单确认导航它（此刻已脱离点击手势，直接
+  // window.open 会被拦截），取消/无效输入则关掉占位；双击等同步手势路径无 win，
+  // 确认时直接 openFresh
+  const openLinkForm = (win?: Window | null) => {
+    // 上一次表单遗留的占位标签（未确认未取消）先关掉，避免泄漏空白页；
+    // 重新录入同时清掉上一条错误横幅，避免与表单同位置叠放
+    promptWinRef.current?.close();
+    setError(null);
     const saved = readStoredRemoteUrl();
-    const input = window.prompt(
-      t('common.enterButtons.zcodePrompt'),
-      saved ? (normalizeRemoteUrl(saved) ?? '') : '',
-    );
-    if (input === null) {
-      if (win) win.close();
-      return; // 用户取消
-    }
-    const url = normalizeRemoteUrl(input);
+    setPromptValue(saved ? (normalizeRemoteUrl(saved) ?? '') : '');
+    promptWinRef.current = win ?? null;
+    setPromptOpen(true);
+  };
+
+  const handlePromptCancel = () => {
+    setPromptOpen(false);
+    promptWinRef.current?.close();
+    promptWinRef.current = null;
+  };
+
+  const handlePromptSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const win = promptWinRef.current;
+    promptWinRef.current = null;
+    setPromptOpen(false);
+    const url = normalizeRemoteUrl(promptValue);
     if (!url) {
       setError(t('common.enterButtons.zcodeInvalid'));
-      if (win) win.close();
+      win?.close();
       return;
     }
     try {
@@ -325,7 +347,7 @@ export const ZCodeEntryLink: React.FC = () => {
       window.clearTimeout(clickTimer.current);
       clickTimer.current = null;
     }
-    promptForUrl();
+    openLinkForm();
   };
 
   return (
@@ -340,6 +362,43 @@ export const ZCodeEntryLink: React.FC = () => {
         <Code2 className="w-3.5 h-3.5 shrink-0" />
         {t('common.enterButtons.zcode')}
       </button>
+      {promptOpen && (
+        <form
+          onSubmit={handlePromptSubmit}
+          className="fixed left-1/2 top-[143px] lg:top-[var(--header-h)] z-[95] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-float"
+        >
+          <label htmlFor={promptInputId} className="mb-2 block text-xs leading-relaxed text-zinc-400">
+            {t('common.enterButtons.zcodePrompt')}
+          </label>
+          <input
+            id={promptInputId}
+            type="text"
+            value={promptValue}
+            onChange={(e) => setPromptValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') handlePromptCancel();
+            }}
+            autoFocus
+            spellCheck={false}
+            className="mb-3 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={handlePromptCancel}
+              className="rounded px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              {t('common.fileBrowser.cancel')}
+            </button>
+            <button
+              type="submit"
+              className="rounded bg-cyan-500/15 px-2.5 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/25 transition-colors"
+            >
+              {t('drive.gpWizSave')}
+            </button>
+          </div>
+        </form>
+      )}
       {error && <EntryErrorBanner message={error} onClose={() => setError(null)} />}
     </>
   );

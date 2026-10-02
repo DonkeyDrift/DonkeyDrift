@@ -67,7 +67,7 @@ export const DriveModeSelector: React.FC<DriveModeSelectorProps> = ({
             data-mode={mode.value}
             onClick={() => onChange(mode.value)}
             disabled={disabled}
-            className={`px-3 py-1.5 text-xs font-medium transition-colors
+            className={`inline-flex items-center justify-center px-3 py-1.5 max-lg:min-h-[40px] text-xs font-medium transition-colors
               ${active
                 ? `mode-active ${ACTIVE_CLASS}`
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'

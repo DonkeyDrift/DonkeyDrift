@@ -38,7 +38,7 @@ const MiniSlider: React.FC<{
   onChange: (value: number) => void;
 }> = ({ label, value, min, max, step, onChange }) => (
   <div>
-    <div className="mb-1 flex items-center justify-between text-[11px] text-zinc-500">
+    <div className="mb-1 flex items-center justify-between text-xs text-zinc-500">
       <span>{label}</span>
       <span className="font-mono text-zinc-400">{value.toFixed(2)}</span>
     </div>
@@ -108,13 +108,13 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
 
       {open && (
         <div className="space-y-3 border-t border-zinc-800 px-3 pb-3 pt-3">
-          <div className="flex items-center justify-between text-[10px] text-zinc-500">
+          <div className="flex items-center justify-between text-xs text-zinc-500">
             <span className="uppercase tracking-wider">{t('drive.gamepadPadLabel')}</span>
             <span className="max-w-[190px] truncate">{connected ? padId || '-' : t('drive.gamepadNotDetected')}</span>
           </div>
 
           <div>
-            <p className="mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">{t('drive.gamepadPreset')}</p>
+            <p className="mb-1.5 text-xs uppercase tracking-wider text-zinc-500">{t('drive.gamepadPreset')}</p>
             <div className="flex flex-wrap gap-1.5">
               {GAMEPAD_PRESET_ORDER.map((preset) => (
                 <button
@@ -123,7 +123,7 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
                   data-preset={preset.id}
                   onClick={() => setPreset(preset.id)}
                   className={
-                    'rounded-lg border px-2 py-1 text-[11px] transition-colors ' +
+                    'rounded-lg border px-2 py-1 text-xs transition-colors ' +
                     (config.preset === preset.id
                       ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300'
                       : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200')
@@ -137,12 +137,12 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">{t('drive.gamepadSteeringAxis')}</p>
+              <p className="mb-1 text-xs uppercase tracking-wider text-zinc-500">{t('drive.gamepadSteeringAxis')}</p>
               <select
                 aria-label={t('drive.gamepadSteeringAxis')}
                 value={config.steering.axis}
                 onChange={(e) => patchAxis('steering', { axis: Number(e.target.value) })}
-                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-200"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200"
               >
                 {axisOptions.map((i) => (
                   <option key={i} value={i}>
@@ -151,7 +151,7 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
                   </option>
                 ))}
               </select>
-              <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+              <label className="mt-1.5 flex items-center gap-1.5 text-xs text-zinc-400">
                 <input
                   type="checkbox"
                   checked={config.steering.invert}
@@ -162,12 +162,12 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
               </label>
             </div>
             <div>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">{t('drive.gamepadThrottleAxis')}</p>
+              <p className="mb-1 text-xs uppercase tracking-wider text-zinc-500">{t('drive.gamepadThrottleAxis')}</p>
               <select
                 aria-label={t('drive.gamepadThrottleAxis')}
                 value={config.throttle.axis}
                 onChange={(e) => patchAxis('throttle', { axis: Number(e.target.value) })}
-                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-200"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200"
               >
                 {axisOptions.map((i) => (
                   <option key={i} value={i}>
@@ -176,7 +176,7 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
                   </option>
                 ))}
               </select>
-              <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+              <label className="mt-1.5 flex items-center gap-1.5 text-xs text-zinc-400">
                 <input
                   type="checkbox"
                   checked={config.throttle.invert}
@@ -217,18 +217,18 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-wider text-zinc-500">{t('drive.gamepadAxisMonitor')}</p>
-              <p className="text-[10px] text-zinc-600">{t('drive.gamepadOutputPreview')}</p>
+              <p className="text-xs uppercase tracking-wider text-zinc-500">{t('drive.gamepadAxisMonitor')}</p>
+              <p className="text-xs text-zinc-600">{t('drive.gamepadOutputPreview')}</p>
             </div>
             {axes.length === 0 ? (
-              <p className="text-[11px] text-zinc-600">{t('drive.gamepadAxisEmpty')}</p>
+              <p className="text-xs text-zinc-600">{t('drive.gamepadAxisEmpty')}</p>
             ) : (
               <div className="space-y-1.5">
                 {axes.map((value, i) => {
                   const isSteer = i === config.steering.axis;
                   const isThrottle = i === config.throttle.axis;
                   return (
-                    <div key={i} className="flex items-center gap-2 text-[10px] text-zinc-500">
+                    <div key={i} className="flex items-center gap-2 text-xs text-zinc-500">
                       <span className={'w-10 shrink-0 ' + (isSteer ? 'text-cyan-400' : isThrottle ? 'text-emerald-400' : '')}>
                         {t('drive.gamepadAxisIndex', { index: i })}
                       </span>
@@ -238,14 +238,14 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
                         <button
                           type="button"
                           onClick={() => patchAxis('steering', { axis: i })}
-                          className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-cyan-300"
+                          className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400 hover:text-cyan-300"
                         >
                           {t('drive.gamepadSetAsSteering')}
                         </button>
                         <button
                           type="button"
                           onClick={() => patchAxis('throttle', { axis: i })}
-                          className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-emerald-300"
+                          className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400 hover:text-emerald-300"
                         >
                           {t('drive.gamepadSetAsThrottle')}
                         </button>
@@ -255,7 +255,7 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
                 })}
               </div>
             )}
-            <div className="mt-2 space-y-1.5 text-[11px] text-zinc-500">
+            <div className="mt-2 space-y-1.5 text-xs text-zinc-500">
               <div className="flex items-center gap-2">
                 <span className="w-10 shrink-0">{t('drive.gamepadAngle')}</span>
                 <AxisBar value={steerOut} color="#22d3ee" />
@@ -273,7 +273,7 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
             <button
               type="button"
               onClick={() => setWizardOpen(true)}
-              className="flex flex-1 items-center justify-center gap-1 rounded bg-cyan-500/15 px-2 py-1.5 text-[11px] text-cyan-300 hover:bg-cyan-500/25"
+              className="flex flex-1 items-center justify-center gap-1 rounded bg-cyan-500/15 px-2 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/25"
             >
               <Wand2 className="h-3.5 w-3.5 shrink-0" />
               <span className="whitespace-nowrap">{t('drive.gamepadCalibrate')}</span>
@@ -281,7 +281,7 @@ export const GamepadConfigPanel: React.FC<GamepadConfigPanelProps> = ({
             <button
               type="button"
               onClick={reset}
-              className="flex items-center justify-center gap-1 rounded bg-zinc-800 px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200"
+              className="flex items-center justify-center gap-1 rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
             >
               <RotateCcw className="h-3.5 w-3.5 shrink-0" />
               <span className="whitespace-nowrap">{t('drive.gamepadReset')}</span>
