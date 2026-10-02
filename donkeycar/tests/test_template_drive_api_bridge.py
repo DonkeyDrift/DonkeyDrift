@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -29,6 +30,29 @@ def test_complete_template_drive_api_bridge_outputs_include_car_mode_cmd():
         "'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd']"
     )
     assert expected in source
+
+
+def test_complete_template_wires_rc_telemetry_into_bridge():
+    """complete 模板必须把 ArdRc 产出的 rc/* 键接进 DriveApiBridge 遥测输入末尾。
+
+    Drive 页默认开启的 RC 油门/转向曲线、驾驶模式跟随与 Park 锁定徽标都依赖
+    telemetry 消息里的 rc_* 字段；ctr_inputs 若漏接（2026-09-26 前的实际状态），
+    ArdRc 写入 Memory 的 rc/* 永远到不了浏览器，曲线整组空白。键序必须与
+    run_threaded 签名位置对齐：pilot/throttle 之后依次是
+    rc/steering、rc/throttle、rc/mode、rc/park。
+    """
+    source = (_TEMPLATES_DIR / "complete.py").read_text(encoding="utf-8")
+    m = re.search(r"ctr_inputs\s*=\s*\[(.*?)\]", source, re.DOTALL)
+    assert m, "complete.py 未找到 ctr_inputs 列表"
+    keys = re.findall(r"'([^']+)'", m.group(1))
+    assert "pilot/throttle" in keys, "ctr_inputs 缺少 pilot/throttle 基准位"
+    tail = keys[keys.index("pilot/throttle") + 1:]
+    assert tail == ["rc/steering", "rc/throttle", "rc/mode", "rc/park"], (
+        f"rc/* 接线缺失或顺序错误: {tail}"
+    )
+    # rc/* 的生产者必须在模板中注册（ArdRc 从固件 T..S../M:P 帧解析）。
+    assert "ArdRc(controller=arduino_controller)" in source
+    assert "outputs=['rc/steering', 'rc/throttle', 'rc/mode', 'rc/park']" in source
 
 
 def test_basic_template_uses_drive_api_bridge_when_server_url_is_set():

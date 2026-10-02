@@ -1,11 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TubLibrary } from './TubLibrary';
 import { useStore } from '../store/useStore';
-import { getSessionRecords, listTubSessions, downloadTubSession } from '../services/api';
+import { getSessionRecords, listTubSessions, downloadTubSession, loadTub } from '../services/api';
 
 // 回归测试：进入录制视频库后自动选中最新一条录制（sessions[0]，API 已按
 // 最新在前排序），无需手动点击列表。
@@ -441,5 +441,253 @@ describe('TubLibrary spacebar playback control', () => {
     fireEvent.keyDown(window, { code: 'Space' });
     // Still showing the start label — space did not toggle playback
     expect(screen.getByRole('button', { name: '开始播放' })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 刷新（缓存治理）：录制库 section 常驻挂载，录制列表与选中帧只在 tubPath
+// 变化/删除/AI 清理后拉取，Drive 页新录制的场次不会自动出现，新老数据混在
+// 一起。手动「刷新」按钮清空浏览器暂存数据后全量重拉（列表 + 选中帧 + 全局
+// tub + 图片 URL 换纪元绕过 HTTP 缓存）；自动刷新在激活期间每 30s 静默轮询，
+// 播放中与后台标签页暂停。
+// ---------------------------------------------------------------------------
+const extraSession = {
+  session_id: '26-08-16_2',
+  record_count: 5,
+  first_index: 5,
+  last_index: 9,
+  start_time_ms: Date.parse('2026-08-16T12:00:00Z'),
+  end_time_ms: Date.parse('2026-08-16T12:00:05Z'),
+};
+
+describe('TubLibrary manual refresh', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // 墙钟播放 describe 泄漏的 Image/rAF stub 会改变本组用例的绘制行为，先恢复
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: [
+        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+      ],
+    });
+    vi.mocked(loadTub).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      record_count: 0,
+      total_physical_records: 0,
+      records: [],
+      fields: [],
+      deleted_indexes: [],
+    } as never);
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('reloads the list, the selected clip and the global tub when clicked', async () => {
+    render(
+      <MemoryRouter>
+        <TubLibrary />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    });
+    expect(listTubSessions).toHaveBeenCalledTimes(1);
+    expect(getSessionRecords).toHaveBeenCalledTimes(1);
+
+    // 新录制出现后点「刷新」：列表、选中帧与全局 tub 全部重拉
+    vi.mocked(listTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      sessions: [...sessions, extraSession],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '刷新录制库（清空浏览器暂存的数据）' }));
+
+    await waitFor(() => {
+      expect(listTubSessions).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledTimes(2);
+    });
+    // 选中录制未变，帧按同一 session 重拉
+    expect(getSessionRecords).toHaveBeenLastCalledWith('/tmp/tub', '26-08-16_1');
+    // 全局 tub 同步重载（编辑器等面板拿到新数据）
+    expect(loadTub).toHaveBeenCalledWith('/tmp/tub');
+    // 列表头合计出现新录制：2+3+5 = 10 帧
+    await waitFor(() => {
+      expect(screen.getByText('共 3 条录制 · 10 帧')).toBeInTheDocument();
+    });
+    // setTub 清空 activeSession 后由刷新流程恢复，编辑器联动不丢
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionId).toBe('26-08-16_1');
+    });
+  });
+
+  it('auto-selects the new newest recording when the selection disappeared', async () => {
+    render(
+      <MemoryRouter>
+        <TubLibrary />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
+    });
+
+    // 原选中录制被删，只剩新录制 → 刷新后自动选中新的最新一条
+    vi.mocked(listTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      sessions: [extraSession],
+    });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: [
+        { _index: 5, _timestamp_ms: 3, _session_id: '26-08-16_2', 'cam/image_array': 'cam_5.jpg' },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '刷新录制库（清空浏览器暂存的数据）' }));
+
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_2');
+    });
+  });
+});
+
+describe('TubLibrary auto refresh', () => {
+  const freshRecords = [
+    { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+    { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // 墙钟播放 describe 泄漏的 Image/rAF stub 会改变本组用例的绘制行为，先恢复
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      records: freshRecords,
+    });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('polls the session list every 30s while active and picks up a new recording', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <TubLibrary active />
+        </MemoryRouter>,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(listTubSessions).toHaveBeenCalledTimes(1);
+
+      vi.mocked(listTubSessions).mockResolvedValue({
+        status: true,
+        path: '/tmp/tub',
+        sessions: [...sessions, extraSession],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(listTubSessions).toHaveBeenCalledTimes(2);
+      // 新录制出现在列表头合计里（2+3+5 = 10 帧）；选中录制帧数未变，不重拉帧
+      expect(screen.getByText('共 3 条录制 · 10 帧')).toBeInTheDocument();
+      expect(getSessionRecords).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not poll while the section is inactive', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <TubLibrary />
+        </MemoryRouter>,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(listTubSessions).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+      expect(listTubSessions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pauses polling during playback and reloads a grown clip after it', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <TubLibrary active />
+        </MemoryRouter>,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(listTubSessions).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: '开始播放' }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(90_000);
+      });
+      // 播放中不轮询，避免打断回放
+      expect(listTubSessions).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: '停止播放' }));
+      // 选中录制新增了帧 → 播放结束后 30s 内的轮询静默重拉其帧
+      vi.mocked(listTubSessions).mockResolvedValue({
+        status: true,
+        path: '/tmp/tub',
+        sessions: [{ ...sessions[0], record_count: 4 }, sessions[1]],
+      });
+      vi.mocked(getSessionRecords).mockResolvedValue({
+        status: true,
+        path: '/tmp/tub',
+        records: [
+          ...freshRecords,
+          { _index: 5, _timestamp_ms: 3, _session_id: '26-08-16_1', 'cam/image_array': 'cam_5.jpg' },
+          { _index: 6, _timestamp_ms: 4, _session_id: '26-08-16_1', 'cam/image_array': 'cam_6.jpg' },
+        ],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(listTubSessions).toHaveBeenCalledTimes(2);
+      // 帧重拉后帧计数与量程更新（1 / 4）
+      expect(screen.getByText(/1 \/ 4/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

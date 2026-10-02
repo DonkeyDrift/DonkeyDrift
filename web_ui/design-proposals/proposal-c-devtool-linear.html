@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DonkeyDrift — Drive · Proposal C</title>
+<style>
+  :root{
+    --bg:            #0a0a0b;
+    --surface:       #141416;
+    --surface-2:     #1a1a1d;
+    --surface-3:     #202024;
+    --border:        #232326;
+    --border-strong: #2e2e33;
+    --text-1:        #f4f4f5;
+    --text-2:        #a1a1aa;
+    --text-3:        #63636b;
+    --accent:        #6366f1;
+    --accent-soft:   rgba(99,102,241,.14);
+    --accent-border: rgba(99,102,241,.38);
+    --green:         #34d399;
+    --red:           #f87171;
+    --red-soft:      rgba(248,113,113,.12);
+    --red-border:    rgba(248,113,113,.35);
+    --amber:         #fbbf24;
+    --radius:        8px;
+    --radius-sm:     6px;
+    --mono:          ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans:          -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    font-family:var(--sans);
+    font-size:13px;
+    line-height:1.45;
+    color:var(--text-1);
+    background:var(--bg);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  ::selection{ background:var(--accent-soft); }
+
+  /* ---------- App shell ---------- */
+  .app{ display:flex; height:100vh; }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    width:216px; flex:0 0 216px;
+    background:var(--surface);
+    border-right:1px solid var(--border);
+    display:flex; flex-direction:column;
+    z-index:5;
+  }
+  .ws-header{
+    display:flex; align-items:center; gap:10px;
+    padding:14px 14px 12px;
+    border-bottom:1px solid var(--border);
+  }
+  .ws-logo{
+    width:28px; height:28px; border-radius:7px; flex:0 0 28px;
+    background:linear-gradient(135deg,#6366f1 0%,#4338ca 100%);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 0 1px rgba(99,102,241,.4), 0 2px 8px rgba(67,56,202,.45), inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  .ws-name{ font-weight:600; font-size:13px; letter-spacing:.01em; }
+  .ws-sub{ font-size:11px; color:var(--text-3); font-family:var(--mono); margin-top:1px; }
+  .ws-chev{ margin-left:auto; color:var(--text-3); }
+
+  .nav{ padding:10px 8px; flex:1; overflow-y:auto; }
+  .nav-label{
+    font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--text-3); padding:8px 8px 5px;
+  }
+  .nav-item{
+    display:flex; align-items:center; gap:9px;
+    padding:6px 8px; margin-bottom:1px;
+    border-radius:var(--radius-sm);
+    color:var(--text-2); font-size:13px; font-weight:450;
+    cursor:pointer; text-decoration:none;
+    transition:background .12s ease, color .12s ease;
+    position:relative;
+  }
+  .nav-item:hover{ background:var(--surface-2); color:var(--text-1); }
+  .nav-item.active{
+    background:var(--accent-soft); color:var(--text-1); font-weight:500;
+    box-shadow:inset 0 0 0 1px var(--accent-border);
+  }
+  .nav-item.active svg{ color:var(--accent); }
+  .nav-item svg{ width:15px; height:15px; flex:0 0 15px; color:var(--text-3); }
+  .nav-item.active::before{
+    content:""; position:absolute; left:-8px; top:7px; bottom:7px; width:2px;
+    background:var(--accent); border-radius:2px;
+  }
+  .nav-badge{
+    margin-left:auto; font-family:var(--mono); font-size:10px;
+    background:var(--surface-3); border:1px solid var(--border);
+    color:var(--text-2); border-radius:4px; padding:0 5px; line-height:16px;
+  }
+  .nav-item kbd{ margin-left:auto; }
+
+  kbd{
+    font-family:var(--mono); font-size:10px; color:var(--text-2);
+    background:var(--surface-3); border:1px solid var(--border-strong);
+    border-bottom-width:2px; border-radius:4px; padding:0 4px;
+    line-height:16px; display:inline-block; min-width:16px; text-align:center;
+  }
+
+  .side-footer{
+    border-top:1px solid var(--border); padding:10px 12px;
+    display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-3);
+  }
+  .dot{ width:6px; height:6px; border-radius:50%; flex:0 0 6px; }
+  .dot.green{ background:var(--green); box-shadow:0 0 6px rgba(52,211,153,.7); animation:pulse 2.4s ease infinite; }
+  .dot.gray{ background:#3f3f46; }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.45} }
+
+  /* ---------- Main column ---------- */
+  .main{ flex:1; display:flex; flex-direction:column; min-width:0; }
+
+  .topbar{
+    height:44px; flex:0 0 44px;
+    display:flex; align-items:center; gap:10px;
+    padding:0 16px;
+    border-bottom:1px solid var(--border);
+    background:var(--surface);
+  }
+  .crumbs{ display:flex; align-items:center; gap:7px; font-size:12.5px; }
+  .crumbs .c-root{ color:var(--text-3); }
+  .crumbs .c-sep{ color:var(--text-3); }
+  .crumbs .c-cur{ color:var(--text-1); font-weight:550; }
+
+  .pill{
+    display:inline-flex; align-items:center; gap:6px;
+    height:24px; padding:0 9px;
+    border:1px solid var(--border); border-radius:999px;
+    background:var(--surface-2);
+    font-size:11.5px; color:var(--text-2); font-weight:500;
+    white-space:nowrap;
+  }
+  .pill .mono{ font-family:var(--mono); }
+  .pill.online{ border-color:rgba(52,211,153,.3); }
+  .pill.ota{ color:var(--amber); border-color:rgba(251,191,36,.28); }
+  .pill.dev{ color:var(--text-2); font-family:var(--mono); font-size:10.5px; letter-spacing:.04em; }
+  .topbar-right{ margin-left:auto; display:flex; align-items:center; gap:8px; }
+
+  .cmdk-chip{
+    display:inline-flex; align-items:center; gap:7px;
+    height:26px; padding:0 9px 0 10px;
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    color:var(--text-3); font-size:11.5px; cursor:pointer;
+    transition:border-color .12s ease, color .12s ease;
+  }
+  .cmdk-chip:hover{ border-color:var(--border-strong); color:var(--text-2); }
+
+  .icon-btn{
+    width:26px; height:26px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:var(--surface-2);
+    color:var(--text-3); display:inline-flex; align-items:center; justify-content:center;
+    cursor:pointer; transition:color .12s ease, border-color .12s ease;
+  }
+  .icon-btn:hover{ color:var(--text-1); border-color:var(--border-strong); }
+
+  /* ---------- Content ---------- */
+  .content{
+    flex:1; overflow-y:auto; padding:14px 16px 16px;
+    display:flex; flex-direction:column; gap:12px;
+  }
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:0 1px 2px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.025);
+  }
+  .card-head{
+    display:flex; align-items:center; gap:8px;
+    padding:9px 12px; border-bottom:1px solid var(--border);
+  }
+  .card-title{ font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text-2); }
+  .card-head .spacer{ margin-left:auto; }
+  .card-body{ padding:12px; }
+
+  /* segmented control */
+  .seg{
+    display:inline-flex; background:var(--surface-2);
+    border:1px solid var(--border); border-radius:7px; padding:2px; gap:2px;
+  }
+  .seg button{
+    appearance:none; border:0; background:transparent; cursor:pointer;
+    font-family:var(--sans); font-size:12px; font-weight:500;
+    color:var(--text-3); padding:4px 12px; border-radius:5px;
+    transition:all .12s ease; white-space:nowrap;
+  }
+  .seg button:hover{ color:var(--text-2); }
+  .seg button.on{
+    background:var(--surface-3); color:var(--text-1);
+    box-shadow:0 1px 2px rgba(0,0,0,.4), inset 0 0 0 1px var(--border-strong);
+  }
+
+  .btn{
+    appearance:none; cursor:pointer; font-family:var(--sans);
+    display:inline-flex; align-items:center; gap:7px;
+    font-size:12px; font-weight:550; height:28px; padding:0 11px;
+    border-radius:var(--radius-sm); border:1px solid var(--border-strong);
+    background:var(--surface-3); color:var(--text-1);
+    box-shadow:0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.05);
+    transition:all .12s ease; white-space:nowrap;
+  }
+  .btn:hover{ border-color:#3a3a41; background:#26262b; }
+  .btn.primary{
+    background:var(--accent); border-color:transparent; color:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.4), 0 0 12px rgba(99,102,241,.35), inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .btn.primary:hover{ background:#7474f3; }
+  .btn.danger{
+    background:var(--red-soft); border-color:var(--red-border); color:var(--red);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  .btn.danger:hover{ background:rgba(248,113,113,.2); }
+  .btn.rec{
+    background:#dc2626; border-color:transparent; color:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.4), 0 0 10px rgba(220,38,38,.35), inset 0 1px 0 rgba(255,255,255,.2);
+  }
+  .btn.rec:hover{ background:#e33a3a; }
+  .btn svg{ width:13px; height:13px; }
+  .btn kbd{ background:rgba(0,0,0,.25); border-color:rgba(255,255,255,.18); color:rgba(255,255,255,.85); }
+  .btn.ghost kbd, .btn:not(.primary):not(.rec) kbd{ background:var(--surface-2); border-color:var(--border-strong); color:var(--text-3); }
+
+  /* ---------- Row 1 : target + controls strip ---------- */
+  .row-top{ display:grid; grid-template-columns:minmax(300px,380px) 1fr; gap:12px; }
+
+  .target-body{ display:flex; flex-direction:column; gap:10px; }
+  .target-status{
+    display:flex; align-items:center; gap:8px;
+    font-size:12px; color:var(--text-2);
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:7px 10px;
+  }
+  .target-status .mono{ font-family:var(--mono); color:var(--text-3); font-size:11px; margin-left:auto; }
+
+  .controls-strip .card-body{
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 12px;
+  }
+  .model-select{
+    display:inline-flex; align-items:center; gap:8px;
+    height:28px; padding:0 10px;
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:var(--radius-sm); cursor:pointer;
+    font-size:12px; color:var(--text-1);
+    transition:border-color .12s ease;
+  }
+  .model-select:hover{ border-color:var(--border-strong); }
+  .model-select .mono{ font-family:var(--mono); font-size:11.5px; }
+  .model-select svg{ color:var(--text-3); }
+  .stat-chip{
+    display:inline-flex; align-items:baseline; gap:5px;
+    font-size:11.5px; color:var(--text-3);
+  }
+  .stat-chip b{ font-family:var(--mono); font-weight:500; color:var(--text-1); font-size:12px; }
+
+  /* ---------- Row 2 : viewport + right rail ---------- */
+  .row-main{ display:grid; grid-template-columns:1fr 340px; gap:12px; flex:1; min-height:0; }
+  .left-col{ display:flex; flex-direction:column; gap:12px; min-width:0; }
+
+  /* viewport */
+  .viewport{ position:relative; aspect-ratio:16/9; border-radius:var(--radius); overflow:hidden;
+    border:1px solid var(--border); background:#0d0d10; box-shadow:0 1px 2px rgba(0,0,0,.35); }
+  .viewport svg.feed{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .vp-badge{
+    position:absolute; display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.02em;
+    background:rgba(10,10,11,.72); border:1px solid var(--border-strong);
+    color:var(--text-2); border-radius:5px; padding:3px 7px;
+    backdrop-filter:blur(6px);
+  }
+  .vp-badge.tl{ top:10px; left:10px; }
+  .vp-badge.tr{ top:10px; right:10px; color:var(--green); border-color:rgba(52,211,153,.3); }
+  .vp-telemetry{
+    position:absolute; left:10px; right:10px; bottom:10px;
+    display:flex; align-items:center; gap:14px;
+    background:rgba(10,10,11,.78); border:1px solid var(--border-strong);
+    border-radius:7px; padding:6px 10px; backdrop-filter:blur(8px);
+    font-family:var(--mono); font-size:11px; color:var(--text-2);
+  }
+  .vp-telemetry .t-item{ display:inline-flex; gap:6px; align-items:baseline; white-space:nowrap; }
+  .vp-telemetry .t-item .lbl{ color:var(--text-3); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .vp-telemetry .t-item .val{ color:var(--text-1); }
+  .vp-telemetry .t-item .val.pos{ color:var(--green); }
+  .vp-telemetry .grow{ flex:1; }
+
+  /* controls cluster */
+  .cluster .card-body{
+    display:grid; grid-template-columns:150px 64px 1fr; gap:16px; align-items:center; padding:12px 16px;
+  }
+  .joy-wrap{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .joystick{
+    width:118px; height:118px; border-radius:50%; position:relative;
+    background:radial-gradient(circle at 50% 42%, #1e1e22 0%, #151517 70%);
+    border:1px solid var(--border-strong);
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.02);
+  }
+  .joystick::before, .joystick::after{
+    content:""; position:absolute; inset:18px; border-radius:50%;
+    border:1px dashed #2b2b31;
+  }
+  .joystick::after{ inset:38px; }
+  .joy-cross-h{ position:absolute; left:8px; right:8px; top:50%; height:1px; background:#26262b; }
+  .joy-cross-v{ position:absolute; top:8px; bottom:8px; left:50%; width:1px; background:#26262b; }
+  .joy-knob{
+    position:absolute; width:38px; height:38px; border-radius:50%;
+    left:calc(50% - 19px - 2px); top:calc(50% - 19px - 12px);
+    background:linear-gradient(160deg,#34343a,#222226);
+    border:1px solid #3d3d44;
+    box-shadow:0 3px 8px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  .cluster-label{ font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-3); font-weight:600; }
+  .cluster-val{ font-family:var(--mono); font-size:11px; color:var(--text-2); }
+
+  .throttle-wrap{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .throttle{
+    width:26px; height:118px; border-radius:6px; position:relative; overflow:hidden;
+    background:#151517; border:1px solid var(--border-strong);
+    box-shadow:inset 0 2px 6px rgba(0,0,0,.6);
+  }
+  .throttle-fill{
+    position:absolute; left:0; right:0; bottom:0; height:42%;
+    background:linear-gradient(180deg,#818cf8,#4f46e5);
+    box-shadow:0 0 10px rgba(99,102,241,.5);
+  }
+  .throttle-fill::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:2px; background:#c7d2fe;
+  }
+  .throttle-ticks{ position:absolute; inset:0; }
+  .throttle-ticks i{ position:absolute; left:3px; right:3px; height:1px; background:rgba(255,255,255,.08); }
+
+  .spark-wrap{ min-width:0; display:flex; flex-direction:column; gap:6px; }
+  .spark-head{ display:flex; align-items:center; gap:12px; }
+  .legend{ display:inline-flex; align-items:center; gap:5px; font-size:10.5px; color:var(--text-3); font-family:var(--mono); }
+  .legend i{ width:8px; height:2px; border-radius:1px; display:inline-block; }
+  .spark{ width:100%; height:118px; display:block;
+    background:#101013; border:1px solid var(--border); border-radius:var(--radius-sm); }
+
+  /* ---------- Right rail : overhead drift ---------- */
+  .od-card{ display:flex; flex-direction:column; min-height:0; }
+  .od-card .card-body{ flex:1; display:flex; flex-direction:column; }
+  .od-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .field{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .field.full{ grid-column:1 / -1; }
+  .field label{ font-size:10.5px; color:var(--text-3); font-weight:550; letter-spacing:.02em; }
+  .field .input{
+    display:flex; align-items:center; gap:6px;
+    height:27px; padding:0 8px;
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:var(--radius-sm); font-family:var(--mono); font-size:11.5px; color:var(--text-1);
+    transition:border-color .12s ease;
+  }
+  .field .input:hover{ border-color:var(--border-strong); }
+  .field .input .ph{ color:var(--text-3); font-style:normal; }
+  .field .input .unit{ margin-left:auto; color:var(--text-3); font-size:10px; font-family:var(--sans); }
+  .field .input svg{ width:11px; height:11px; color:var(--text-3); flex:0 0 11px; }
+
+  .telemetry-block{
+    margin-top:10px; border:1px solid var(--border); border-radius:var(--radius-sm);
+    background:var(--surface-2); overflow:hidden;
+  }
+  .t-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:5.5px 10px; font-size:11.5px;
+    border-bottom:1px solid var(--border);
+  }
+  .t-row:last-child{ border-bottom:0; }
+  .t-row .k{ color:var(--text-3); display:inline-flex; align-items:center; gap:7px; }
+  .t-row .v{ font-family:var(--mono); color:var(--text-1); font-size:11.5px; }
+  .t-row .v.accent{ color:#a5b4fc; }
+
+  .od-actions{ display:flex; gap:7px; margin-top:10px; flex-wrap:wrap; }
+  .od-actions .btn{ flex:1; justify-content:center; }
+  .od-actions .btn.wide{ flex-basis:100%; }
+
+  .log-block{
+    margin-top:10px; flex:1; min-height:96px;
+    border:1px solid var(--border); border-radius:var(--radius-sm);
+    background:#101013; padding:8px 10px;
+    font-family:var(--mono); font-size:10px; line-height:1.9;
+    color:var(--text-3); overflow:hidden;
+    box-shadow:inset 0 2px 6px rgba(0,0,0,.4);
+  }
+  .log-block .l-row{ display:flex; gap:8px; white-space:nowrap; }
+  .log-block .l-ts{ color:#4b4b53; flex:0 0 auto; }
+  .log-block .l-msg{ color:var(--text-2); }
+  .log-block .l-msg .hl{ color:#a5b4fc; }
+  .log-block .l-msg .ok{ color:var(--green); }
+
+  /* ---------- Command palette overlay ---------- */
+  .overlay{
+    position:fixed; inset:0; z-index:50;
+    background:rgba(6,6,8,.55); backdrop-filter:blur(3px);
+    display:flex; align-items:flex-start; justify-content:center;
+    padding-top:15vh;
+    opacity:0; visibility:hidden;
+    transition:opacity .16s ease, visibility .16s;
+  }
+  .overlay.open{ opacity:1; visibility:visible; }
+  .overlay .palette{ transform:translateY(-6px) scale(.99); transition:transform .16s cubic-bezier(.32,.72,0,1); }
+  .overlay.open .palette{ transform:none; }
+  .palette{
+    width:560px; max-width:calc(100vw - 32px);
+    background:#17171a; border:1px solid #2c2c31; border-radius:12px;
+    box-shadow:0 24px 64px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03), inset 0 1px 0 rgba(255,255,255,.05);
+    overflow:hidden;
+  }
+  .pal-input{
+    display:flex; align-items:center; gap:10px;
+    padding:13px 16px; border-bottom:1px solid var(--border);
+  }
+  .pal-input svg{ width:15px; height:15px; color:var(--text-3); flex:0 0 15px; }
+  .pal-input .q{ font-size:14px; color:var(--text-1); }
+  .pal-input .caret{ width:1.5px; height:17px; background:var(--accent); animation:blink 1.1s steps(1) infinite; }
+  @keyframes blink{ 50%{opacity:0} }
+  .pal-input .esc{ margin-left:auto; }
+  .pal-list{ padding:6px; max-height:320px; overflow-y:auto; }
+  .pal-group{ font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--text-3); padding:8px 10px 4px; }
+  .pal-item{
+    display:flex; align-items:center; gap:10px;
+    padding:7px 10px; border-radius:7px; cursor:pointer;
+    font-size:13px; color:var(--text-2);
+  }
+  .pal-item svg{ width:14px; height:14px; color:var(--text-3); flex:0 0 14px; }
+  .pal-item .hint{ margin-left:auto; display:inline-flex; gap:4px; align-items:center; font-size:11px; color:var(--text-3); }
+  .pal-item.sel{ background:var(--accent-soft); color:var(--text-1); box-shadow:inset 0 0 0 1px var(--accent-border); }
+  .pal-item.sel svg{ color:var(--accent); }
+  .pal-foot{
+    display:flex; align-items:center; gap:14px;
+    border-top:1px solid var(--border); padding:8px 14px;
+    font-size:10.5px; color:var(--text-3);
+  }
+  .pal-foot span{ display:inline-flex; align-items:center; gap:5px; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-thumb{ background:#2a2a2f; border-radius:5px; border:2px solid var(--bg); }
+  ::-webkit-scrollbar-track{ background:transparent; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:1100px){
+    .row-main{ grid-template-columns:1fr; }
+    .row-top{ grid-template-columns:1fr; }
+  }
+  @media (max-width:720px){
+    body{ overflow:auto; }
+    .app{ height:auto; min-height:100vh; }
+    .sidebar{ width:56px; flex-basis:56px; }
+    .ws-name,.ws-sub,.ws-chev,.nav-label,.nav-item span,.nav-badge,.nav-item kbd,.side-footer span{ display:none; }
+    .nav-item{ justify-content:center; padding:8px; }
+    .ws-header{ justify-content:center; padding:12px 6px; }
+    .topbar .pill.dev,.topbar .pill.ota,.cmdk-chip .txt{ display:none; }
+    .cluster .card-body{ grid-template-columns:130px 56px 1fr; gap:10px; }
+    .vp-telemetry{ gap:10px; }
+    .vp-telemetry .t-item:last-child,
+    .vp-telemetry .t-item:nth-last-child(2){ display:none; }
+    .spark-head .legend{ display:none; }
+    .log-block{ min-height:72px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="ws-header">
+      <div class="ws-logo">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 17a3 3 0 1 0 0 .01M19 17a3 3 0 1 0 0 .01"/>
+          <circle cx="5" cy="17" r="2.4"/><circle cx="19" cy="17" r="2.4"/>
+          <path d="M7.5 17h9M12 17l3.5-6.5H19M9 7h4l2 3.5"/>
+        </svg>
+      </div>
+      <div>
+        <div class="ws-name">DonkeyDrift</div>
+        <div class="ws-sub">V0.1.2</div>
+      </div>
+      <svg class="ws-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-label">Workflow</div>
+      <a class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21"/></svg>
+        <span>Drive</span><kbd>D</kbd>
+      </a>
+      <a class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+        <span>Tub Manager</span><span class="nav-badge">787</span>
+      </a>
+      <a class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+        <span>Trainer</span><kbd>T</kbd>
+      </a>
+      <a class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4a2 2 0 0 0 2 4h1M17 6h3a2 2 0 0 1-2 4h-1"/></svg>
+        <span>Pilot Arena</span><kbd>P</kbd>
+      </a>
+
+      <div class="nav-label" style="margin-top:10px">System</div>
+      <a class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7a5 5 0 0 1 0-10h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>
+        <span>Car Connector</span>
+      </a>
+      <a class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6M12 19h8"/></svg>
+        <span>Drifter Console</span>
+        <span class="nav-badge" style="color:var(--amber)">3</span>
+      </a>
+    </nav>
+
+    <div class="side-footer">
+      <span class="dot green"></span>
+      <span>All systems nominal</span>
+      <span style="margin-left:auto" class="mono">· 23ms</span>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <div class="main">
+
+    <!-- top bar -->
+    <header class="topbar">
+      <div class="crumbs">
+        <span class="c-root">donkeydrift</span>
+        <span class="c-sep">/</span>
+        <span class="c-cur">Drive</span>
+      </div>
+
+      <div class="topbar-right">
+        <span class="pill online">
+          <span class="dot green"></span>
+          Real Car · <b style="color:var(--green);font-weight:600">online</b>
+        </span>
+        <span class="pill"><span class="mono">EN</span></span>
+        <span class="pill ota">OTA</span>
+        <span class="pill dev">DEV</span>
+        <button class="icon-btn" title="Toggle theme">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+        <div class="cmdk-chip" id="cmdkChip" role="button" tabindex="0" title="Open command palette">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <span class="txt">Search or command</span>
+          <kbd>⌘K</kbd>
+        </div>
+      </div>
+    </header>
+
+    <!-- content -->
+    <div class="content">
+
+      <!-- Row 1 -->
+      <div class="row-top">
+
+        <!-- Drive Target -->
+        <section class="card">
+          <div class="card-head">
+            <span class="card-title">Drive Target</span>
+            <span class="spacer"></span>
+            <span class="dot green"></span>
+          </div>
+          <div class="card-body target-body">
+            <div class="seg">
+              <button class="on">Real Car</button>
+              <button>Simulator</button>
+            </div>
+            <div class="target-status">
+              <span class="dot green"></span>
+              Car online
+              <span class="mono">192.168.1.42:8887</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Drive controls strip -->
+        <section class="card controls-strip">
+          <div class="card-head">
+            <span class="card-title">Controls</span>
+            <span class="spacer"></span>
+            <span class="stat-chip">Session <b>tub_2026_09_28</b></span>
+          </div>
+          <div class="card-body">
+            <div class="seg">
+              <button class="on">Manual</button>
+              <button>Semi-Auto</button>
+              <button>Full Auto</button>
+            </div>
+            <div class="model-select">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+              <span class="mono">DKG-1.tflite</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+            <span class="stat-chip">Recorded <b>787</b> frames</span>
+            <span style="flex:1"></span>
+            <button class="btn rec">
+              <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+              Record <kbd>R</kbd>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- Row 2 -->
+      <div class="row-main">
+
+        <div class="left-col">
+          <!-- Video viewport -->
+          <div class="viewport">
+            <!-- Simulated overhead camera feed: top-down drift track -->
+            <svg class="feed" viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice">
+              <defs>
+                <radialGradient id="vig" cx="50%" cy="50%" r="72%">
+                  <stop offset="55%" stop-color="#000" stop-opacity="0"/>
+                  <stop offset="100%" stop-color="#000" stop-opacity=".55"/>
+                </radialGradient>
+                <linearGradient id="floor" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#17171b"/>
+                  <stop offset=".5" stop-color="#121215"/>
+                  <stop offset="1" stop-color="#0e0e11"/>
+                </linearGradient>
+                <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                  <path d="M40 0H0v40" fill="none" stroke="#1e1e24" stroke-width="1"/>
+                </pattern>
+                <pattern id="check" width="16" height="16" patternUnits="userSpaceOnUse">
+                  <rect width="8" height="8" fill="#d4d4d8"/>
+                  <rect x="8" y="8" width="8" height="8" fill="#d4d4d8"/>
+                  <rect x="8" width="8" height="8" fill="#141416"/>
+                  <rect y="8" width="8" height="8" fill="#141416"/>
+                </pattern>
+              </defs>
+
+              <rect width="800" height="450" fill="url(#floor)"/>
+              <rect width="800" height="450" fill="url(#grid)" opacity=".55"/>
+
+              <!-- track asphalt -->
+              <path d="M120 320 C 60 260, 70 130, 190 110 C 300 92, 330 150, 420 130 C 540 104, 700 120, 710 220 C 718 300, 620 340, 500 330 C 400 322, 380 380, 280 372 C 190 365, 160 350, 120 320 Z"
+                    fill="none" stroke="#242429" stroke-width="74" stroke-linejoin="round"/>
+              <!-- track edge lines -->
+              <path d="M120 320 C 60 260, 70 130, 190 110 C 300 92, 330 150, 420 130 C 540 104, 700 120, 710 220 C 718 300, 620 340, 500 330 C 400 322, 380 380, 280 372 C 190 365, 160 350, 120 320 Z"
+                    fill="none" stroke="#3d3d46" stroke-width="76" stroke-linejoin="round" opacity=".0"/>
+              <path d="M120 320 C 60 260, 70 130, 190 110 C 300 92, 330 150, 420 130 C 540 104, 700 120, 710 220 C 718 300, 620 340, 500 330 C 400 322, 380 380, 280 372 C 190 365, 160 350, 120 320 Z"
+                    fill="none" stroke="#454550" stroke-width="1.4" transform="translate(0 0)" stroke-dasharray="none" opacity=".8" stroke-linejoin="round" style="mix-blend-mode:screen"/>
+              <!-- center dashed line -->
+              <path d="M120 320 C 60 260, 70 130, 190 110 C 300 92, 330 150, 420 130 C 540 104, 700 120, 710 220 C 718 300, 620 340, 500 330 C 400 322, 380 380, 280 372 C 190 365, 160 350, 120 320 Z"
+                    fill="none" stroke="#55555f" stroke-width="1.6" stroke-dasharray="14 12" opacity=".8"/>
+
+              <!-- start / finish -->
+              <g transform="translate(500 330) rotate(8)">
+                <rect x="-8" y="-37" width="16" height="74" fill="url(#check)" opacity=".9"/>
+              </g>
+
+              <!-- AprilTag markers -->
+              <g transform="translate(96 84)">
+                <rect width="26" height="26" fill="#e4e4e7" rx="2"/>
+                <rect x="4" y="4" width="18" height="18" fill="#0a0a0b"/>
+                <rect x="9" y="9" width="8" height="8" fill="#e4e4e7"/>
+                <text x="13" y="38" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#71717a">tag 0</text>
+              </g>
+              <g transform="translate(676 366)">
+                <rect width="26" height="26" fill="#e4e4e7" rx="2"/>
+                <rect x="4" y="4" width="18" height="18" fill="#0a0a0b"/>
+                <rect x="9" y="9" width="8" height="8" fill="#e4e4e7"/>
+                <text x="13" y="38" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#71717a">tag 1</text>
+              </g>
+
+              <!-- pose trail -->
+              <path d="M470 322 C 450 316, 428 306, 408 292 C 388 278, 372 258, 362 236"
+                    fill="none" stroke="#6366f1" stroke-width="2" stroke-dasharray="3 5" opacity=".7"/>
+
+              <!-- the car -->
+              <g transform="translate(478 326) rotate(173.5)">
+                <circle r="17" fill="rgba(99,102,241,.16)"/>
+                <circle r="17" fill="none" stroke="#6366f1" stroke-width="1" opacity=".55"/>
+                <rect x="-11" y="-6" width="22" height="12" rx="3" fill="#6366f1" stroke="#a5b4fc" stroke-width="1"/>
+                <path d="M13 0 L24 0" stroke="#a5b4fc" stroke-width="2" stroke-linecap="round"/>
+                <path d="M22 -4 L28 0 L22 4" fill="none" stroke="#a5b4fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </g>
+              <text x="478" y="362" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9.5" fill="#a5b4fc">x 1.24 · y 0.86 · β −4.2°</text>
+
+              <rect width="800" height="450" fill="url(#vig)"/>
+            </svg>
+
+            <span class="vp-badge tl">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              MJPEG fallback
+            </span>
+            <span class="vp-badge tr"><span class="dot green" style="width:5px;height:5px"></span>FPS 30</span>
+
+            <div class="vp-telemetry">
+              <span class="t-item"><span class="lbl">steering</span><span class="val">-0.01</span></span>
+              <span class="t-item"><span class="lbl">throttle</span><span class="val pos">0.42</span></span>
+              <span class="grow"></span>
+              <span class="t-item"><span class="lbl">mode</span><span class="val">MANUAL</span></span>
+              <span class="t-item"><span class="lbl">latency</span><span class="val">23ms</span></span>
+            </div>
+          </div>
+
+          <!-- Controls cluster -->
+          <section class="card cluster">
+            <div class="card-body">
+              <div class="joy-wrap">
+                <div class="joystick">
+                  <div class="joy-cross-h"></div><div class="joy-cross-v"></div>
+                  <div class="joy-knob"></div>
+                </div>
+                <div class="cluster-label">Steering</div>
+                <div class="cluster-val">-0.01</div>
+              </div>
+
+              <div class="throttle-wrap">
+                <div class="throttle">
+                  <div class="throttle-ticks">
+                    <i style="top:20%"></i><i style="top:40%"></i><i style="top:60%"></i><i style="top:80%"></i>
+                  </div>
+                  <div class="throttle-fill"></div>
+                </div>
+                <div class="cluster-label">Throttle</div>
+                <div class="cluster-val">0.42</div>
+              </div>
+
+              <div class="spark-wrap">
+                <div class="spark-head">
+                  <span class="cluster-label">Input trace · last 8s</span>
+                  <span style="flex:1"></span>
+                  <span class="legend"><i style="background:#818cf8"></i>throttle</span>
+                  <span class="legend"><i style="background:#71717a"></i>steering</span>
+                </div>
+                <svg class="spark" viewBox="0 0 520 118" preserveAspectRatio="none">
+                  <line x1="0" y1="59" x2="520" y2="59" stroke="#232326" stroke-width="1"/>
+                  <line x1="0" y1="20" x2="520" y2="20" stroke="#1b1b1f" stroke-width="1"/>
+                  <line x1="0" y1="98" x2="520" y2="98" stroke="#1b1b1f" stroke-width="1"/>
+                  <!-- steering trace -->
+                  <polyline fill="none" stroke="#71717a" stroke-width="1.4" stroke-linejoin="round"
+                    points="0,59 30,55 60,63 90,52 120,58 150,66 180,50 210,57 240,61 270,54 300,59 330,48 360,60 390,56 420,62 450,58 480,60 520,59"/>
+                  <!-- throttle trace -->
+                  <polyline fill="none" stroke="#818cf8" stroke-width="1.6" stroke-linejoin="round"
+                    points="0,98 30,90 60,76 90,80 120,62 150,55 180,64 210,48 240,58 270,44 300,52 330,40 360,50 390,42 420,52 450,48 480,56 520,50"/>
+                  <circle cx="520" cy="50" r="3" fill="#818cf8"/>
+                  <circle cx="520" cy="59" r="3" fill="#71717a"/>
+                </svg>
+                <div style="display:flex;gap:10px">
+                  <button class="btn" style="height:26px;font-size:11.5px">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+                    E-Stop <kbd>Space</kbd>
+                  </button>
+                  <button class="btn" style="height:26px;font-size:11.5px">
+                    Max throttle <span style="font-family:var(--mono);color:var(--text-2)">0.55</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Overhead Drift -->
+        <section class="card od-card">
+          <div class="card-head">
+            <span class="card-title">Overhead Drift</span>
+            <span class="spacer"></span>
+            <span class="pill" style="height:20px;font-size:10.5px;color:var(--green);border-color:rgba(52,211,153,.3)">
+              <span class="dot green" style="width:5px;height:5px"></span>Tracking
+            </span>
+          </div>
+          <div class="card-body" style="overflow-y:auto">
+            <div class="od-grid">
+              <div class="field">
+                <label>Camera index</label>
+                <div class="input">0</div>
+              </div>
+              <div class="field">
+                <label>AprilTag ID</label>
+                <div class="input">0</div>
+              </div>
+              <div class="field">
+                <label>Heading offset</label>
+                <div class="input">0 <span class="unit">°</span></div>
+              </div>
+              <div class="field">
+                <label>Exposure <span style="opacity:.7">(log2 s)</span></label>
+                <div class="input"><span class="ph">e.g. -7</span><span class="unit">auto</span></div>
+              </div>
+              <div class="field full">
+                <label>Homography calibration file</label>
+                <div class="input">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                  field_homography.npz
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:10px">
+              <button class="btn primary" style="width:100%;justify-content:center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                Start camera <kbd>C</kbd>
+              </button>
+            </div>
+
+            <div class="telemetry-block">
+              <div class="t-row"><span class="k"><span class="dot green"></span>State</span><span class="v" style="color:var(--green)">Tracking</span></div>
+              <div class="t-row"><span class="k">β slip angle</span><span class="v accent">−4.2°</span></div>
+              <div class="t-row"><span class="k">Pose (x, y)</span><span class="v">(1.24, 0.86)</span></div>
+              <div class="t-row"><span class="k">Heading</span><span class="v">173.5°</span></div>
+              <div class="t-row"><span class="k">Camera fps</span><span class="v">30</span></div>
+              <div class="t-row"><span class="k">Telemetry / frames</span><span class="v">1287 / 1290</span></div>
+            </div>
+
+            <div class="od-actions">
+              <button class="btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                Calibrate
+              </button>
+              <button class="btn">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>
+                Record
+              </button>
+              <button class="btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 3.8 4.2.6-3 3 .7 4.2-3.8-2-3.8 2 .7-4.2-3-3 4.2-.6z"/></svg>
+                Auto drift
+              </button>
+              <button class="btn danger wide">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.4 6.6a9 9 0 1 1-12.8 0M12 2v9"/></svg>
+                Stop / hand back <kbd>Space</kbd>
+              </button>
+            </div>
+
+            <div class="cluster-label" style="margin:12px 0 0">Event log</div>
+            <div class="log-block">
+              <div class="l-row"><span class="l-ts">12:04:31</span><span class="l-msg">camera <span class="hl">/dev/video0</span> opened · 720p@30</span></div>
+              <div class="l-row"><span class="l-ts">12:04:33</span><span class="l-msg">homography loaded · <span class="hl">field_homography.npz</span></span></div>
+              <div class="l-row"><span class="l-ts">12:04:35</span><span class="l-msg">apriltag <span class="hl">id=0</span> locked · <span class="ok">tracking</span></span></div>
+              <div class="l-row"><span class="l-ts">12:05:02</span><span class="l-msg">recording → <span class="hl">tub_2026_09_28</span></span></div>
+              <div class="l-row"><span class="l-ts">12:05:41</span><span class="l-msg">β drift event · max |β| 14.8°</span></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= COMMAND PALETTE OVERLAY ================= -->
+<div class="overlay" id="paletteOverlay">
+  <div class="palette">
+    <div class="pal-input">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span class="q">start</span>
+      <span class="caret"></span>
+      <kbd class="esc">esc</kbd>
+    </div>
+    <div class="pal-list">
+      <div class="pal-group">Drive</div>
+      <div class="pal-item sel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        Start camera
+        <span class="hint"><kbd>C</kbd></span>
+      </div>
+      <div class="pal-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        Stop camera
+        <span class="hint"><kbd>⇧C</kbd></span>
+      </div>
+      <div class="pal-item">
+        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+        Toggle record
+        <span class="hint"><kbd>R</kbd></span>
+      </div>
+      <div class="pal-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.4 6.6a9 9 0 1 1-12.8 0M12 2v9"/></svg>
+        Stop / hand back control
+        <span class="hint"><kbd>Space</kbd></span>
+      </div>
+      <div class="pal-group">Navigate</div>
+      <div class="pal-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+        Go to Trainer
+        <span class="hint"><kbd>G</kbd><kbd>T</kbd></span>
+      </div>
+      <div class="pal-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+        Go to Tub Manager
+        <span class="hint"><kbd>G</kbd><kbd>M</kbd></span>
+      </div>
+    </div>
+    <div class="pal-foot">
+      <span><kbd>↑↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> run</span>
+      <span><kbd>esc</kbd> close</span>
+      <span style="margin-left:auto">6 results</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var overlay = document.getElementById('paletteOverlay');
+  var chip = document.getElementById('cmdkChip');
+  function toggle(open) {
+    overlay.classList.toggle('open', open === undefined ? !overlay.classList.contains('open') : open);
+  }
+  chip.addEventListener('click', function () { toggle(true); });
+  chip.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(true); } });
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) toggle(false); });
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); toggle(); }
+    else if (e.key === 'Escape') { toggle(false); }
+  });
+})();
+</script>
+
+</body>
+</html>

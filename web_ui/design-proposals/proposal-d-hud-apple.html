@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DonkeyDrift — Drive · Cockpit HUD (Apple Pro)</title>
+<style>
+  /* ============ TOKENS (Proposal B language) ============ */
+  :root{
+    --canvas:#f5f5f7;
+    --surface:#ffffff;
+    --soft:#fafafc;
+    --well:#f5f5f7;
+    --fill:rgba(120,120,128,.10);
+    --fill-strong:rgba(120,120,128,.16);
+    --stroke:rgba(0,0,0,.055);
+    --stroke-strong:rgba(0,0,0,.10);
+    --ink:#1d1d1f;
+    --ink-2:#6e6e73;
+    --ink-3:#86868b;
+    --blue:#0071e3;
+    --blue-bright:#0a84ff;
+    --blue-soft:rgba(0,113,227,.09);
+    --green:#30d158;
+    --green-ink:#248a3d;
+    --orange:#ff9f0a;
+    --orange-ink:#b25000;
+    --red:#ff453a;
+    --red-ink:#d70015;
+    --red-soft:rgba(255,69,58,.10);
+
+    --r-card:20px;
+    --r-well:14px;
+    --r-input:10px;
+    --r-media:22px;
+    --r-pill:980px;
+
+    --sh-card:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.05);
+    --sh-lift:0 2px 4px rgba(0,0,0,.05),0 14px 36px rgba(0,0,0,.09);
+    --sh-chip:0 1px 3px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.22);
+    --sh-media:0 1px 2px rgba(0,0,0,.14),0 20px 56px rgba(0,0,0,.18);
+
+    --ease:cubic-bezier(.32,.72,0,1);
+    --f-ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",Arial,sans-serif;
+    --f-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    font-family:var(--f-ui);
+    background:var(--canvas);
+    color:var(--ink);
+    font-size:13px;
+    line-height:1.45;
+    letter-spacing:-.01em;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    min-height:100vh;display:flex;flex-direction:column;
+    animation:boot .45s var(--ease);
+  }
+  @keyframes boot{from{opacity:0}to{opacity:1}}
+  ::selection{background:rgba(0,113,227,.18)}
+  .mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums;letter-spacing:0}
+
+  /* ============ HEADER (frosted, slim — A's density, B's material) ============ */
+  header{
+    position:sticky;top:0;z-index:50;
+    background:rgba(245,245,247,.78);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--stroke);
+  }
+  .hdr-in{
+    max-width:1600px;margin:0 auto;height:48px;padding:0 16px;
+    display:flex;align-items:center;gap:18px;
+  }
+  .brand{display:flex;align-items:center;gap:9px;flex:none}
+  .brand-mark{
+    width:26px;height:26px;border-radius:8px;flex:none;
+    background:linear-gradient(145deg,#2c2c2e,#0b0b0c);
+    display:grid;place-items:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 6px rgba(0,0,0,.22);
+  }
+  .brand-name{font-size:15px;font-weight:600;letter-spacing:-.02em;white-space:nowrap}
+  .brand-name em{font-style:normal;color:var(--blue)}
+  .brand-tag{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-top:-1px}
+
+  nav{
+    display:flex;gap:2px;margin:0 auto;
+    background:var(--fill);border-radius:var(--r-pill);padding:3px;
+  }
+  nav a{
+    display:flex;align-items:center;
+    font-size:12px;font-weight:500;color:var(--ink-2);
+    text-decoration:none;padding:4.5px 13px;border-radius:var(--r-pill);
+    white-space:nowrap;transition:all .35s var(--ease);
+  }
+  nav a:hover{color:var(--ink)}
+  nav a.on{
+    background:var(--surface);color:var(--ink);font-weight:600;
+    box-shadow:0 1px 3px rgba(0,0,0,.10),0 0 0 .5px rgba(0,0,0,.03);
+  }
+
+  .hdr-right{display:flex;align-items:center;gap:9px;flex:none}
+  .ver{font-family:var(--f-mono);font-size:11px;color:var(--ink-3)}
+  .conn{
+    display:flex;align-items:center;gap:7px;
+    font-size:11.5px;font-weight:500;color:var(--ink);
+    background:var(--surface);border:1px solid var(--stroke);
+    border-radius:var(--r-pill);padding:4.5px 11px 4.5px 9px;
+    box-shadow:0 1px 2px rgba(0,0,0,.04);cursor:default;white-space:nowrap;
+    transition:all .35s var(--ease);
+  }
+  .conn:hover{box-shadow:0 2px 8px rgba(0,0,0,.08);transform:translateY(-1px)}
+  .conn svg{color:var(--ink-2)}
+  .conn .sub{color:var(--ink-3);font-weight:400}
+  .dot{
+    width:7px;height:7px;border-radius:50%;background:var(--green);flex:none;
+    box-shadow:0 0 0 3px rgba(48,209,88,.18);
+    animation:pulse 2.4s var(--ease) infinite;
+  }
+  @keyframes pulse{
+    0%,100%{box-shadow:0 0 0 3px rgba(48,209,88,.18)}
+    50%{box-shadow:0 0 0 5px rgba(48,209,88,.07)}
+  }
+  .lang{
+    font-size:11.5px;font-weight:600;color:var(--ink-2);background:none;border:none;
+    cursor:pointer;font-family:var(--f-ui);padding:4px 2px;transition:color .3s var(--ease);
+  }
+  .lang:hover{color:var(--ink)}
+  .pill{font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:var(--r-pill)}
+  .pill-ota{background:var(--blue-soft);color:var(--blue)}
+  .pill-dev{background:rgba(255,159,10,.14);color:var(--orange-ink)}
+
+  /* ============ LAYOUT (Proposal A grid) ============ */
+  main{
+    flex:1;position:relative;z-index:1;
+    display:grid;grid-template-columns:318px minmax(0,1fr) 296px;gap:12px;
+    padding:12px 16px 14px;max-width:1600px;margin:0 auto;width:100%;
+  }
+  .col{display:flex;flex-direction:column;gap:12px;min-width:0}
+
+  /* ============ CARDS ============ */
+  .card{
+    background:var(--surface);border:1px solid var(--stroke);
+    border-radius:var(--r-card);box-shadow:var(--sh-card);
+    padding:14px 16px 15px;
+    transition:box-shadow .45s var(--ease);
+  }
+  .card:hover{box-shadow:var(--sh-lift)}
+  .p-head{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+  .p-title{
+    font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  .p-head .right{
+    margin-left:auto;display:flex;align-items:center;gap:6px;
+    font-family:var(--f-mono);font-size:9.5px;color:var(--ink-3);letter-spacing:.02em;
+  }
+  .p-head .right .st{font-family:var(--f-ui);font-weight:600;font-size:10px;letter-spacing:.06em}
+  .p-head .right .st.g{color:var(--green-ink)}
+  .dot.sm{width:6px;height:6px}
+
+  /* ============ CONTROLS ============ */
+  .seg{display:flex;background:var(--fill);border-radius:11px;padding:2px;gap:2px}
+  .seg button{
+    flex:1;border:none;background:none;cursor:pointer;
+    font-family:var(--f-ui);font-size:11.5px;font-weight:500;color:var(--ink-2);
+    padding:5.5px 8px;border-radius:9px;white-space:nowrap;
+    transition:all .35s var(--ease);
+  }
+  .seg button:hover{color:var(--ink)}
+  .seg button.on{
+    background:var(--surface);color:var(--ink);font-weight:600;
+    box-shadow:0 1px 3px rgba(0,0,0,.10),0 0 0 .5px rgba(0,0,0,.02);
+  }
+  .seg button:active{transform:scale(.97)}
+  .seg.sm button{font-size:10.5px;padding:5px 6px}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    font-family:var(--f-ui);font-size:11.5px;font-weight:600;letter-spacing:-.005em;
+    border:none;cursor:pointer;border-radius:var(--r-pill);padding:8px 13px;
+    transition:all .35s var(--ease);white-space:nowrap;
+  }
+  .btn:active{transform:scale(.97)}
+  .btn-primary{
+    background:var(--blue);color:#fff;
+    box-shadow:0 1px 2px rgba(0,113,227,.35),0 6px 16px rgba(0,113,227,.22);
+  }
+  .btn-primary:hover{background:#0077ed;transform:translateY(-1px);
+    box-shadow:0 2px 4px rgba(0,113,227,.35),0 10px 24px rgba(0,113,227,.28)}
+  .btn-soft{background:var(--fill);color:var(--ink)}
+  .btn-soft:hover{background:var(--fill-strong);transform:translateY(-1px)}
+  .btn-warm{background:rgba(255,159,10,.13);color:var(--orange-ink)}
+  .btn-warm:hover{background:rgba(255,159,10,.20);transform:translateY(-1px)}
+  .btn-danger{background:var(--red-soft);color:var(--red-ink)}
+  .btn-danger:hover{background:rgba(255,69,58,.16);transform:translateY(-1px)}
+  .btn-rec{
+    background:var(--red);color:#fff;
+    box-shadow:0 1px 2px rgba(255,69,58,.35),0 6px 16px rgba(255,69,58,.24);
+  }
+  .btn-rec:hover{background:#ff5147;transform:translateY(-1px)}
+  .rec-blink{width:7px;height:7px;border-radius:50%;background:#fff;flex:none;
+    animation:blink 1.4s ease infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+  .field{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .field label{
+    font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  .field input,.field .sel{
+    height:30px;width:100%;background:var(--soft);border:1px solid var(--stroke);
+    border-radius:var(--r-input);color:var(--ink);
+    font-family:var(--f-mono);font-size:12px;padding:0 9px;outline:none;
+    transition:all .3s var(--ease);
+  }
+  .field input:focus,.field .sel:focus{
+    border-color:var(--blue);background:#fff;
+    box-shadow:0 0 0 3.5px rgba(0,113,227,.15);
+  }
+  .field input::placeholder{color:var(--ink-3);font-family:var(--f-ui)}
+  select.sel{appearance:none;-webkit-appearance:none;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%2386868b'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 9px center;padding-right:22px}
+
+  .icon-btn{
+    width:30px;height:30px;border-radius:9px;border:1px solid var(--stroke);flex:none;
+    background:var(--surface);color:var(--ink-2);cursor:pointer;
+    display:grid;place-items:center;transition:all .35s var(--ease);
+  }
+  .icon-btn:hover{color:var(--ink);transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+  .icon-btn:active{transform:scale(.94)}
+
+  /* telemetry mini-grid — A's density, B's wells */
+  .tele-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .tele{
+    background:var(--well);border:1px solid var(--stroke);
+    border-radius:12px;padding:7px 9px 6px;min-width:0;
+  }
+  .tele .k{
+    font-size:8.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;
+  }
+  .tele .v{
+    font-family:var(--f-mono);font-variant-numeric:tabular-nums;
+    font-size:12.5px;font-weight:600;color:var(--ink);
+    line-height:1.15;white-space:nowrap;letter-spacing:-.02em;
+  }
+  .tele .v small{font-size:9px;font-weight:500;color:var(--ink-3)}
+  .tele .v.g{color:var(--green-ink)}
+  .tele .v.b{color:var(--blue)}
+  .tele .v.a{color:var(--orange-ink)}
+  .tele .v.r{color:var(--red-ink)}
+
+  /* ============ VIDEO MEDIA WELL (B's black well + A's HUD strip) ============ */
+  .viewport{
+    position:relative;width:100%;aspect-ratio:16/9;flex:none;
+    background:#000;border-radius:var(--r-media);overflow:hidden;
+    border:1px solid rgba(0,0,0,.9);
+    box-shadow:var(--sh-media);
+  }
+  .viewport canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse 105% 100% at 50% 45%,transparent 55%,rgba(0,0,0,.55) 100%)}
+  .chip{
+    position:absolute;display:flex;align-items:center;gap:6px;
+    font-size:10.5px;font-weight:600;color:rgba(255,255,255,.92);
+    background:rgba(28,28,30,.55);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    backdrop-filter:blur(14px) saturate(160%);
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:var(--r-pill);padding:5px 11px;
+    box-shadow:var(--sh-chip);white-space:nowrap;
+  }
+  .chip.mjpeg{top:12px;left:12px}
+  .chip.mjpeg svg{color:#ffd60a}
+  .chip.rec{top:12px;left:146px;font-family:var(--f-mono);letter-spacing:.01em}
+  .chip.rec .rec-blink{background:var(--red)}
+  .chip.fps{top:12px;right:12px;font-family:var(--f-mono);letter-spacing:.01em}
+  .v-strip{
+    position:absolute;left:12px;right:12px;bottom:12px;
+    display:flex;align-items:center;gap:20px;
+    background:rgba(28,28,30,.55);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    backdrop-filter:blur(14px) saturate(160%);
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:var(--r-well);padding:9px 16px;
+    box-shadow:var(--sh-chip);
+  }
+  .v-cell{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .v-cell .k{font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+    color:rgba(255,255,255,.55)}
+  .v-cell .v{font-family:var(--f-mono);font-variant-numeric:tabular-nums;
+    font-size:14px;font-weight:600;color:#fff;line-height:1.1;white-space:nowrap}
+  .v-cell .v small{font-size:9px;font-weight:500;color:rgba(255,255,255,.5)}
+  .v-cell .v.c{color:#64d2ff}
+  .v-cell .v.g{color:#30d158}
+  .v-cell .v.a{color:#ffd60a}
+  .v-bar{width:58px;height:3.5px;border-radius:2px;background:rgba(255,255,255,.16);
+    margin-top:4px;position:relative;overflow:hidden}
+  .v-bar i{position:absolute;top:0;bottom:0;left:0;border-radius:2px;background:#0a84ff}
+  .v-bar.g i{background:#30d158}
+  .v-bar.amb i{background:#ffd60a}
+  .v-mode{margin-left:auto;text-align:right}
+  .v-mode .v{font-size:11px;letter-spacing:.06em;padding-top:2px}
+
+  /* drive controls row */
+  .drive-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .drive-row .seg{width:228px;flex:none}
+  .model-wrap{flex:1;min-width:150px}
+  .rec-chip{
+    display:flex;align-items:center;gap:6px;flex:none;
+    font-size:11.5px;color:var(--ink-2);
+    background:var(--well);border:1px solid var(--stroke);
+    border-radius:var(--r-pill);padding:6px 12px;white-space:nowrap;
+  }
+  .rec-chip b{font-family:var(--f-mono);font-weight:600;color:var(--ink)}
+
+  /* session strip */
+  .sess{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+
+  /* event log — SF Mono on a light well */
+  .log{
+    background:var(--well);border:1px solid var(--stroke);border-radius:var(--r-well);
+    padding:8px 12px;display:flex;flex-direction:column;
+    font-family:var(--f-mono);font-size:10.5px;line-height:1.5;
+  }
+  .log-line{display:flex;gap:9px;align-items:baseline;padding:3.5px 0;
+    border-bottom:1px solid rgba(0,0,0,.045)}
+  .log-line:last-child{border-bottom:0}
+  .log-line .t{color:var(--ink-3);flex:none}
+  .log-line .m{flex:none;width:30px;font-weight:700;letter-spacing:.04em}
+  .log-line .m.r{color:var(--red-ink)}.log-line .m.b{color:var(--blue)}
+  .log-line .m.g{color:var(--green-ink)}.log-line .m.a{color:var(--orange-ink)}
+  .log-line .x{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ============ JOYSTICK + THROTTLE (B's light hardware) ============ */
+  .ctrl-wrap{display:flex;align-items:center;justify-content:space-around;gap:8px;padding:2px 0 0}
+  .joy-zone{display:flex;flex-direction:column;align-items:center;gap:7px}
+  .joy{
+    position:relative;width:148px;height:148px;border-radius:50%;cursor:grab;touch-action:none;
+    background:radial-gradient(circle at 50% 38%,#ffffff,#ececf0 70%,#e2e2e8);
+    border:1px solid var(--stroke-strong);
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.05),0 8px 20px rgba(0,0,0,.06);
+    transition:box-shadow .4s var(--ease);
+  }
+  .joy:hover{box-shadow:inset 0 2px 8px rgba(0,0,0,.05),0 12px 28px rgba(0,0,0,.10)}
+  .joy:active{cursor:grabbing}
+  .joy .ring{position:absolute;inset:15px;border-radius:50%;border:1.5px dashed rgba(0,0,0,.09)}
+  .joy .cross-h,.joy .cross-v{position:absolute;background:rgba(0,0,0,.07);border-radius:1px}
+  .joy .cross-h{left:13%;right:13%;top:50%;height:1.5px;margin-top:-.75px}
+  .joy .cross-v{top:13%;bottom:13%;left:50%;width:1.5px;margin-left:-.75px}
+  .knob{
+    position:absolute;width:46px;height:46px;left:calc(50% - 23px);top:calc(50% - 23px);
+    border-radius:50%;
+    background:radial-gradient(circle at 36% 30%,#ffffff,#e8e8ee 62%,#d5d5de);
+    border:1px solid rgba(0,0,0,.10);
+    box-shadow:0 3px 10px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.9);
+    display:grid;place-items:center;
+    transition:transform .18s var(--ease);
+  }
+  .joy:hover .knob{transform:scale(1.04)}
+  .joy:active .knob{transform:scale(.97)}
+  .knob::after{content:"";width:15px;height:15px;border-radius:50%;
+    background:radial-gradient(circle at 40% 35%,var(--blue-bright),var(--blue));
+    box-shadow:0 1px 4px rgba(0,113,227,.5)}
+  .joy-label{font-size:9px;font-weight:600;letter-spacing:.09em;color:var(--ink-3);text-transform:uppercase}
+  .joy-label .mono{color:var(--blue);font-size:10.5px;font-weight:600}
+  .thr-zone{display:flex;flex-direction:column;align-items:center;gap:7px}
+  .thr{
+    position:relative;width:32px;height:148px;border-radius:var(--r-pill);
+    background:var(--fill);border:1px solid var(--stroke);
+    box-shadow:inset 0 2px 6px rgba(0,0,0,.05);
+    overflow:hidden;cursor:pointer;touch-action:none;
+  }
+  .thr .fillv{
+    position:absolute;left:0;right:0;bottom:0;height:42%;
+    background:linear-gradient(180deg,var(--blue-bright),var(--blue));
+    border-radius:0 0 var(--r-pill) var(--r-pill);
+  }
+  .thr .thumb{
+    position:absolute;left:3px;right:3px;bottom:calc(42% - 8px);height:16px;
+    background:#fff;border-radius:var(--r-pill);
+    box-shadow:0 1px 4px rgba(0,0,0,.22),0 0 0 .5px rgba(0,0,0,.05);
+  }
+  .thr .tick{position:absolute;left:7px;right:7px;height:1px;background:rgba(0,0,0,.10)}
+  .pedal-row{display:flex;justify-content:space-between;gap:6px;margin-top:10px}
+  .pedal{
+    flex:1;display:flex;flex-direction:column;gap:2px;align-items:center;
+    background:var(--well);border:1px solid var(--stroke);border-radius:12px;padding:6px 4px 5px;
+  }
+  .pedal .k{font-size:8.5px;font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
+  .pedal .v{font-family:var(--f-mono);font-variant-numeric:tabular-nums;
+    font-size:12.5px;font-weight:600;color:var(--ink)}
+
+  /* trace */
+  .trace-box{
+    position:relative;border:1px solid var(--stroke);border-radius:var(--r-well);
+    background:var(--soft);overflow:hidden;
+  }
+  .trace-box canvas{display:block;width:100%;height:110px}
+  .legend{display:flex;gap:13px;margin-top:9px;align-items:center}
+  .legend span{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:500;
+    color:var(--ink-2)}
+  .legend i{width:12px;height:3px;border-radius:2px}
+  .legend .b i{background:var(--blue-bright)}
+  .legend .o i{background:var(--orange)}
+  .legend .lv{font-family:var(--f-mono);font-weight:600;color:var(--ink)}
+  .legend .now{margin-left:auto;font-family:var(--f-mono);font-size:9.5px;color:var(--ink-3)}
+
+  /* track map */
+  .map-box{
+    position:relative;border:1px solid var(--stroke);border-radius:var(--r-well);
+    background:var(--soft);
+    background-image:linear-gradient(rgba(0,0,0,.028) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(0,0,0,.028) 1px,transparent 1px);
+    background-size:20px 20px;overflow:hidden;
+  }
+  .map-box svg{display:block;width:100%;height:auto}
+  .map-meta{display:flex;justify-content:space-between;margin-top:9px;
+    font-size:9.5px;font-weight:600;letter-spacing:.06em;color:var(--ink-3);text-transform:uppercase}
+  .map-meta b{font-family:var(--f-mono);font-weight:600;color:var(--blue);letter-spacing:-.02em}
+  @keyframes dotpulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .car-dot{animation:dotpulse 1.6s ease-in-out infinite}
+
+  /* footer ticker */
+  footer{
+    display:flex;align-items:center;gap:14px;
+    padding:7px 18px;border-top:1px solid var(--stroke);
+    font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--ink-3);
+    background:rgba(250,250,252,.85);
+    -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    text-transform:uppercase;white-space:nowrap;overflow:hidden;
+  }
+  footer .sep{color:rgba(0,0,0,.14)}
+  footer .ok{color:var(--green-ink);font-weight:600}
+  footer .right{margin-left:auto;display:flex;gap:14px}
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width:1180px){
+    main{grid-template-columns:290px minmax(0,1fr)}
+    .col-r{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));align-items:start}
+  }
+  @media (max-width:820px){
+    main{grid-template-columns:1fr;padding:12px}
+    .hdr-in{flex-wrap:wrap;height:auto;min-height:48px;padding:8px 12px;gap:10px}
+    nav{order:3;width:100%;overflow-x:auto;margin:0;scrollbar-width:none}
+    nav::-webkit-scrollbar{display:none}
+    .brand-tag,.ver,.lang,.pill-ota{display:none}
+    .drive-row .seg{width:100%}
+    .v-strip{gap:12px;padding:8px 12px;left:8px;right:8px;bottom:8px}
+    .v-bar{display:none}
+    .chip.rec{left:auto;right:88px}
+    footer{flex-wrap:wrap;row-gap:4px;white-space:normal}
+    footer .right{margin-left:0}
+  }
+  @media (max-width:480px){
+    .tele-grid{grid-template-columns:repeat(2,1fr)}
+    .sess{grid-template-columns:repeat(2,1fr)}
+    .v-mode{display:none}
+    .v-cell .v{font-size:12.5px}
+    .ctrl-wrap{gap:14px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= HEADER ================= -->
+<header>
+  <div class="hdr-in">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.6" fill="#fff" stroke="none"/>
+          <path d="M12 3.5v5.2M4.4 16.4l4.7-2.4M19.6 16.4l-4.7-2.4"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">Donkey<em>Drift</em></div>
+        <div class="brand-tag">RC Drift Ops Console</div>
+      </div>
+    </div>
+
+    <nav>
+      <a href="#" class="on">Drive</a>
+      <a href="#">Tub Manager</a>
+      <a href="#">Trainer</a>
+      <a href="#">Pilot Arena</a>
+    </nav>
+
+    <div class="hdr-right">
+      <span class="ver">V0.1.2</span>
+      <div class="conn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 2v6M15 2v6M7 8h10v4a5 5 0 0 1-10 0V8zM12 17v5"/>
+        </svg>
+        <span class="dot"></span>
+        Real Car <span class="sub">· online</span>
+      </div>
+      <button class="lang">EN</button>
+      <span class="pill pill-ota">OTA</span>
+      <span class="pill pill-dev">DEV</span>
+    </div>
+  </div>
+</header>
+
+<!-- ================= MAIN ================= -->
+<main>
+  <!-- ===== LEFT COLUMN ===== -->
+  <div class="col col-l">
+    <!-- Drive target -->
+    <section class="card">
+      <div class="p-head"><span class="p-title">Drive Target</span>
+        <span class="right">CH-01</span></div>
+      <div class="seg" style="margin-bottom:10px">
+        <button class="on">Real Car</button>
+        <button>Simulator</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;background:var(--soft);border:1px solid var(--stroke);border-radius:var(--r-well);padding:9px 12px">
+        <span class="dot"></span>
+        <span style="font-size:12px;color:var(--green-ink);font-weight:600">Car online</span>
+        <span class="mono" style="margin-left:auto;font-size:9.5px;color:var(--ink-3)">ws://192.168.1.42:8887</span>
+      </div>
+    </section>
+
+    <!-- Overhead drift -->
+    <section class="card">
+      <div class="p-head"><span class="p-title">Overhead Drift</span>
+        <span class="right"><span class="dot sm"></span><span class="st g">TRACKING</span></span></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div class="field"><label>Camera index</label><input value="0"></div>
+        <div class="field"><label>AprilTag ID</label><input value="0"></div>
+        <div class="field"><label>Heading offset (°)</label><input value="0"></div>
+        <div class="field"><label>Exposure (log2 s)</label><input placeholder="e.g. -7"></div>
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label>Homography calibration file</label>
+        <div style="display:flex;gap:6px">
+          <input value="field_homography.npz" style="flex:1">
+          <button class="icon-btn" title="Browse" aria-label="Browse calibration file">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-bottom:11px;padding:9px 13px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2.5"/>
+        </svg>
+        Start camera
+      </button>
+
+      <div class="tele-grid" style="margin-bottom:11px">
+        <div class="tele"><div class="k">State</div><div class="v g">TRACKING</div></div>
+        <div class="tele"><div class="k">β slip</div><div class="v b">−4.2<small>°</small></div></div>
+        <div class="tele"><div class="k">Pose (x,y)</div><div class="v">1.24, 0.86</div></div>
+        <div class="tele"><div class="k">Heading</div><div class="v">173.5<small>°</small></div></div>
+        <div class="tele"><div class="k">Cam fps</div><div class="v">30</div></div>
+        <div class="tele"><div class="k">Telemetry</div><div class="v">1287<small>/1290</small></div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        <button class="btn btn-soft">Calibrate</button>
+        <button class="btn btn-warm">Record drift</button>
+        <button class="btn btn-soft" style="color:var(--blue)">Auto drift</button>
+        <button class="btn btn-danger">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop / hand back
+        </button>
+      </div>
+    </section>
+
+    <!-- Vehicle link -->
+    <section class="card">
+      <div class="p-head"><span class="p-title">Vehicle Link</span>
+        <span class="right"><span class="dot sm"></span><span class="st g">100 HZ</span></span></div>
+      <div class="tele-grid">
+        <div class="tele"><div class="k">Battery</div><div class="v g">11.8<small> V · 74%</small></div></div>
+        <div class="tele"><div class="k">Link</div><div class="v b">23<small> ms</small></div></div>
+        <div class="tele"><div class="k">RTT</div><div class="v">11<small> ms</small></div></div>
+        <div class="tele"><div class="k">Signal</div><div class="v">−58<small> dBm</small></div></div>
+        <div class="tele"><div class="k">ESC temp</div><div class="v a">47<small> °C</small></div></div>
+        <div class="tele"><div class="k">Failsafe</div><div class="v g">ARMED</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;padding:0 2px;font-size:11px">
+        <span style="color:var(--ink-2)">Firmware</span>
+        <span class="mono" style="color:var(--ink);font-weight:500">mono_encoder v3</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;padding:0 2px;font-size:11px">
+        <span style="color:var(--ink-2)">Dropped frames</span>
+        <span class="mono" style="color:var(--ink);font-weight:500">0.2%</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===== CENTER COLUMN ===== -->
+  <div class="col col-c">
+    <div class="viewport">
+      <canvas id="feed"></canvas>
+      <div class="vignette"></div>
+      <div class="chip mjpeg">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 9v4M12 17h.01M10.3 3.6L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z"/>
+        </svg>
+        MJPEG fallback
+      </div>
+      <div class="chip rec"><span class="rec-blink"></span>REC 00:12:44</div>
+      <div class="chip fps">FPS <span id="fpsVal">30</span></div>
+      <div class="v-strip">
+        <div class="v-cell">
+          <div class="k">Steering</div>
+          <div class="v c" id="strVal">−0.01</div>
+          <div class="v-bar"><i id="strBar" style="left:49%;width:2%"></i></div>
+        </div>
+        <div class="v-cell">
+          <div class="k">Throttle</div>
+          <div class="v g" id="thrVal">0.42</div>
+          <div class="v-bar g"><i id="thrBar" style="width:42%"></i></div>
+        </div>
+        <div class="v-cell">
+          <div class="k">Latency</div>
+          <div class="v a"><span id="latVal">23</span><small> ms</small></div>
+          <div class="v-bar amb"><i id="latBar" style="width:23%"></i></div>
+        </div>
+        <div class="v-cell v-mode">
+          <div class="k">Mode / Pilot</div>
+          <div class="v">MANUAL · HUMAN</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- drive controls row -->
+    <section class="card" style="padding:10px 14px">
+      <div class="drive-row">
+        <div class="seg sm">
+          <button class="on">Manual</button>
+          <button>Semi-Auto</button>
+          <button>Full Auto</button>
+        </div>
+        <div class="model-wrap">
+          <div class="field">
+            <select class="sel">
+              <option selected>DKG-1.tflite</option>
+              <option>DKG-0-baseline.tflite</option>
+              <option>driftnet_v3.tflite</option>
+            </select>
+          </div>
+        </div>
+        <span class="rec-chip">Recorded: <b>787</b></span>
+        <button class="btn btn-rec"><span class="rec-blink"></span>Record</button>
+      </div>
+    </section>
+
+    <!-- session strip -->
+    <div class="sess">
+      <div class="tele"><div class="k">Session</div><div class="v">00:12:44</div></div>
+      <div class="tele"><div class="k">Tub writer</div><div class="v r">● REC ACTIVE</div></div>
+      <div class="tele"><div class="k">Max |β| slip</div><div class="v b">20.1<small>°</small></div></div>
+      <div class="tele"><div class="k">Drift time</div><div class="v">3.2<small> s</small></div></div>
+    </div>
+
+    <!-- event log -->
+    <section class="card" style="flex:1;display:flex;flex-direction:column">
+      <div class="p-head"><span class="p-title">Event Log</span>
+        <span class="right">tail −f</span></div>
+      <div class="log" style="flex:1">
+        <div class="log-line"><span class="t">12:44:03.212</span><span class="m r">REC</span><span class="x">Recording started → data/tub_46_26-09-28</span></div>
+        <div class="log-line"><span class="t">12:41:58.047</span><span class="m b">MDL</span><span class="x">Pilot loaded: DKG-1.tflite (tflite · cpu)</span></div>
+        <div class="log-line"><span class="t">12:40:11.390</span><span class="m g">TRK</span><span class="x">Overhead tracking lock — AprilTag ID 0 @ 30 fps</span></div>
+        <div class="log-line"><span class="t">12:38:02.115</span><span class="m g">CAL</span><span class="x">Homography verified — field_homography.npz</span></div>
+        <div class="log-line"><span class="t">12:35:47.880</span><span class="m a">LNK</span><span class="x">Car connected — ws://192.168.1.42:8887 (11 ms RTT)</span></div>
+        <div class="log-line"><span class="t">12:35:46.104</span><span class="m b">CAM</span><span class="x">Camera 0 opened — 640×480 @ 30 fps (MJPEG)</span></div>
+        <div class="log-line"><span class="t">12:35:44.590</span><span class="m g">SYS</span><span class="x">Tub writer ready — ~/mycar/data (3.2 GB free)</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===== RIGHT COLUMN ===== -->
+  <div class="col col-r">
+    <!-- controls -->
+    <section class="card">
+      <div class="p-head"><span class="p-title">Control</span>
+        <span class="right">DIRECT · 100 HZ</span></div>
+      <div class="ctrl-wrap">
+        <div class="joy-zone">
+          <div class="joy" id="joy">
+            <div class="ring"></div>
+            <div class="cross-h"></div><div class="cross-v"></div>
+            <div class="knob" id="knob"></div>
+          </div>
+          <span class="joy-label">Steering</span>
+        </div>
+        <div class="thr-zone">
+          <div class="thr" id="thrTrack">
+            <div class="fillv" id="thrFill"></div>
+            <div class="thumb" id="thrHandle"></div>
+            <div class="tick" style="top:25%"></div>
+            <div class="tick" style="top:50%"></div>
+            <div class="tick" style="top:75%"></div>
+          </div>
+          <span class="joy-label">Throttle <span class="mono" id="thrRead">0.42</span></span>
+        </div>
+      </div>
+      <div class="pedal-row">
+        <div class="pedal"><span class="k">STR</span><span class="v" id="strPedal">−0.01</span></div>
+        <div class="pedal"><span class="k">THR</span><span class="v" id="thrPedal">0.42</span></div>
+        <div class="pedal"><span class="k">BRK</span><span class="v">0.00</span></div>
+      </div>
+    </section>
+
+    <!-- traces -->
+    <section class="card">
+      <div class="p-head"><span class="p-title">Telemetry Trace</span>
+        <span class="right">−10 s window</span></div>
+      <div class="trace-box"><canvas id="trace"></canvas></div>
+      <div class="legend">
+        <span class="b"><i></i>Throttle <span class="lv" id="lgThr">0.42</span></span>
+        <span class="o"><i></i>Steering <span class="lv" id="lgStr">−0.01</span></span>
+        <span class="now">t = live</span>
+      </div>
+    </section>
+
+    <!-- track map -->
+    <section class="card">
+      <div class="p-head"><span class="p-title">Track Map · Field</span>
+        <span class="right">APRILTAG-0</span></div>
+      <div class="map-box">
+        <svg viewBox="0 0 260 132">
+          <path d="M38 96 C20 96 14 74 28 60 C44 44 62 52 78 38 C94 24 116 20 138 28 C160 36 168 52 192 50 C220 48 240 62 236 82 C232 104 204 108 178 104 C150 100 132 112 104 108 C80 104 56 96 38 96 Z"
+                fill="none" stroke="#d2d2d7" stroke-width="7" stroke-linecap="round"/>
+          <path d="M38 96 C20 96 14 74 28 60 C44 44 62 52 78 38 C94 24 116 20 138 28 C160 36 168 52 192 50 C220 48 240 62 236 82 C232 104 204 108 178 104 C150 100 132 112 104 108 C80 104 56 96 38 96 Z"
+                fill="none" stroke="#aeaeb2" stroke-width="1" stroke-dasharray="4 5" opacity=".7"/>
+          <path d="M138 28 C160 36 168 52 192 50 C220 48 240 62 236 82"
+                fill="none" stroke="#0a84ff" stroke-width="2" opacity=".9" stroke-linecap="round"/>
+          <line x1="104" y1="100" x2="104" y2="116" stroke="#1d1d1f" stroke-width="2"/>
+          <text x="110" y="113" fill="#86868b" font-family="ui-monospace,monospace" font-size="7" letter-spacing="1">S/F</text>
+          <circle class="car-dot" cx="236" cy="82" r="4" fill="#0a84ff"/>
+          <circle cx="236" cy="82" r="8" fill="none" stroke="#0a84ff" stroke-width="1" opacity=".4"/>
+          <path d="M236 82 l9 -4" stroke="#0a84ff" stroke-width="1.5"/>
+          <text x="12" y="16" fill="#86868b" font-family="ui-monospace,monospace" font-size="7" letter-spacing="1.5">FIELD 6×4 m</text>
+          <text x="12" y="126" fill="#0a84ff" font-family="ui-monospace,monospace" font-size="7" letter-spacing="1">X 1.24 · Y 0.86</text>
+        </svg>
+      </div>
+      <div class="map-meta">
+        <span>Drift zone <b>SECTOR 2</b></span>
+        <span>β <b>−4.2°</b></span>
+        <span>HDG <b>173.5°</b></span>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <span class="ok">● SYSTEM NOMINAL</span><span class="sep">|</span>
+  <span>CAM0 · 640×480 @30</span><span class="sep">|</span>
+  <span>TUB: data/tub_46_26-09-28</span><span class="sep">|</span>
+  <span>CPU 37% · MEM 41%</span>
+  <div class="right">
+    <span>DONKEYDRIFT V0.1.2 · DEV BUILD</span>
+    <span class="ok">UPTIME 01:47:12</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+
+  /* ---------- simulated camera feed: fisheye floor / overhead drift view ---------- */
+  const fc = $('feed'), fx = fc.getContext('2d');
+  function drawFeed(){
+    const w = fc.width = fc.clientWidth * 2, h = fc.height = fc.clientHeight * 2;
+    const cx = w/2, cy = h*0.52, R = Math.max(w,h)*0.72;
+    // floor
+    const g = fx.createRadialGradient(cx,cy,0,cx,cy,R);
+    g.addColorStop(0,'#1c1e22'); g.addColorStop(.55,'#131518'); g.addColorStop(1,'#060708');
+    fx.fillStyle = g; fx.fillRect(0,0,w,h);
+    // polar grid (fisheye floor)
+    fx.strokeStyle = 'rgba(150,180,215,.13)'; fx.lineWidth = 1;
+    for(let r=60;r<R;r+=64){ fx.beginPath(); fx.arc(cx,cy,r,0,Math.PI*2); fx.stroke(); }
+    for(let a=0;a<24;a++){
+      const t = a/24*Math.PI*2;
+      fx.beginPath(); fx.moveTo(cx+Math.cos(t)*60, cy+Math.sin(t)*60);
+      fx.lineTo(cx+Math.cos(t)*R, cy+Math.sin(t)*R); fx.stroke();
+    }
+    // drift track ring (scaled ellipse, fits viewport)
+    const SX = 1.02, SY = 0.60, RO = R*0.58, RI = R*0.36;
+    fx.save(); fx.translate(cx,cy); fx.scale(SX,SY);
+    fx.strokeStyle='rgba(232,236,242,.32)'; fx.lineWidth=4;
+    fx.shadowColor='rgba(180,205,235,.22)'; fx.shadowBlur=8;
+    fx.beginPath(); fx.arc(0,0,RO,0,Math.PI*2); fx.stroke();
+    fx.beginPath(); fx.arc(0,0,RI,0,Math.PI*2); fx.stroke();
+    fx.shadowBlur=0;
+    fx.setLineDash([12,16]); fx.strokeStyle='rgba(160,168,178,.45)'; fx.lineWidth=2;
+    fx.beginPath(); fx.arc(0,0,(RO+RI)/2,0,Math.PI*2); fx.stroke();
+    fx.setLineDash([]);
+    // skid marks
+    fx.strokeStyle='rgba(0,0,0,.5)'; fx.lineWidth=9;
+    [-0.32,-0.16,0.00].forEach((o,i)=>{
+      fx.beginPath(); fx.arc(0,0,RI+14+i*16, o, o+0.55); fx.stroke();
+    });
+    // cones on the drift sector
+    for(let i=0;i<7;i++){
+      const a = Math.PI*(-0.10) + i*0.085;
+      const rr = (i%2? RI-12 : RO+12);
+      fx.fillStyle = i%2 ? 'rgba(255,159,10,.9)' : 'rgba(255,159,10,.5)';
+      fx.fillRect(Math.cos(a)*rr-4, Math.sin(a)*rr-4, 8, 8);
+    }
+    // drift trail (slip arc) — Apple blue inside the dark well
+    const RM = (RO+RI)/2;
+    const tg = fx.createLinearGradient(RM,-RM*0.4,-RM*0.4,RM*0.8);
+    tg.addColorStop(0,'rgba(10,132,255,0)');
+    tg.addColorStop(.6,'rgba(10,132,255,.5)');
+    tg.addColorStop(1,'rgba(100,210,255,1)');
+    fx.strokeStyle=tg; fx.lineWidth=7; fx.lineCap='round';
+    fx.shadowColor='rgba(10,132,255,.9)'; fx.shadowBlur=18;
+    fx.beginPath(); fx.arc(0,0,RM, Math.PI*(-0.14), Math.PI*0.26); fx.stroke();
+    fx.shadowBlur=0;
+    fx.restore();
+    // car marker at trail head
+    const a = Math.PI*0.26;
+    const px = cx + Math.cos(a)*RM*SX, py = cy + Math.sin(a)*RM*SY;
+    fx.save(); fx.translate(px,py); fx.rotate(Math.atan2(Math.cos(a)*SY,-Math.sin(a)*SX) - 0.30);
+    fx.shadowColor='rgba(10,132,255,1)'; fx.shadowBlur=20;
+    fx.fillStyle='#0a84ff';
+    fx.beginPath(); fx.moveTo(0,-18); fx.lineTo(11,13); fx.lineTo(0,7); fx.lineTo(-11,13); fx.closePath(); fx.fill();
+    fx.fillStyle='#041c33';
+    fx.beginPath(); fx.arc(0,1,3.4,0,Math.PI*2); fx.fill();
+    fx.shadowBlur=0; fx.restore();
+    // apriltag anchor marker
+    fx.strokeStyle='rgba(48,209,88,.7)'; fx.lineWidth=2;
+    fx.strokeRect(cx-R*0.5, cy-R*0.28, 26, 26);
+    fx.fillStyle='rgba(48,209,88,.7)'; fx.font='600 14px ui-monospace,monospace';
+    fx.fillText('TAG-0', cx-R*0.5+34, cy-R*0.28+18);
+    // grain
+    fx.fillStyle='rgba(255,255,255,.02)';
+    for(let i=0;i<350;i++){ fx.fillRect(Math.random()*w, Math.random()*h, 2, 2); }
+  }
+  drawFeed();
+  addEventListener('resize', drawFeed);
+
+  /* ---------- telemetry trace chart (light well) ---------- */
+  const tc = $('trace'), tx = tc.getContext('2d');
+  const N = 120, thr = [], str = [];
+  for(let i=0;i<N;i++){ thr.push(0.42); str.push(-0.01); }
+  const fmtS = v => (v<0?'−':'') + Math.abs(v).toFixed(2);
+  function step(){
+    thr.push(Math.min(.95,Math.max(.05, thr[thr.length-1] + (Math.random()-.48)*.09 ))); thr.shift();
+    str.push(Math.min(1,Math.max(-1, str[str.length-1] + (Math.random()-.5)*.16 ))); str.shift();
+    const w = tc.width = tc.clientWidth*2, h = tc.height = 220;
+    tx.clearRect(0,0,w,h);
+    tx.strokeStyle='rgba(0,0,0,.055)'; tx.lineWidth=1;
+    for(let y=0;y<=4;y++){ tx.beginPath(); tx.moveTo(0,h*y/4); tx.lineTo(w,h*y/4); tx.stroke(); }
+    // zero-steering reference
+    tx.strokeStyle='rgba(0,0,0,.14)'; tx.setLineDash([4,6]);
+    tx.beginPath(); tx.moveTo(0,h*0.55); tx.lineTo(w,h*0.55); tx.stroke(); tx.setLineDash([]);
+    // throttle area fill
+    const grad = tx.createLinearGradient(0,0,0,h);
+    grad.addColorStop(0,'rgba(10,132,255,.16)'); grad.addColorStop(1,'rgba(10,132,255,0)');
+    tx.beginPath();
+    thr.forEach((v,i)=>{ const x=i/(N-1)*w, y=h*0.90 - v*h*0.72; i?tx.lineTo(x,y):tx.moveTo(x,y); });
+    tx.lineTo(w,h); tx.lineTo(0,h); tx.closePath();
+    tx.fillStyle=grad; tx.fill();
+    function line(data, color, map){
+      tx.strokeStyle=color; tx.lineWidth=2.5; tx.lineJoin='round'; tx.lineCap='round';
+      tx.beginPath();
+      data.forEach((v,i)=>{ const x=i/(N-1)*w, y=map(v); i?tx.lineTo(x,y):tx.moveTo(x,y); });
+      tx.stroke();
+    }
+    line(str,'rgba(255,159,10,.95)', v => h*0.55 - v*h*0.32);
+    line(thr,'rgba(10,132,255,.95)', v => h*0.90 - v*h*0.72);
+    // live head dots
+    [[w-2,h*0.90-thr[N-1]*h*0.72,'#0a84ff'],[w-2,h*0.55-str[N-1]*h*0.32,'#ff9f0a']].forEach(([x,y,c])=>{
+      tx.fillStyle=c; tx.beginPath(); tx.arc(x,y,4,0,Math.PI*2); tx.fill();
+      tx.strokeStyle='#fff'; tx.lineWidth=2; tx.stroke();
+    });
+    $('lgThr').textContent = thr[N-1].toFixed(2);
+    $('lgStr').textContent = fmtS(str[N-1]);
+  }
+  step(); setInterval(step, 120);
+
+  /* ---------- joystick + throttle wiring ---------- */
+  function setStr(v){
+    $('strVal').textContent = fmtS(v);
+    $('strPedal').textContent = fmtS(v);
+    const b = $('strBar');
+    if(v>=0){ b.style.left='50%'; b.style.width=(v*50)+'%'; }
+    else { b.style.left=(50+v*50)+'%'; b.style.width=(-v*50)+'%'; }
+  }
+  function setThr(v){
+    const s = v.toFixed(2);
+    $('thrVal').textContent = s; $('thrPedal').textContent = s; $('thrRead').textContent = s;
+    $('thrBar').style.width = (v*100)+'%';
+    $('thrFill').style.height = (v*100)+'%';
+    $('thrHandle').style.bottom = 'calc(' + (v*100) + '% - 8px)';
+  }
+  const joy=$('joy'), knob=$('knob');
+  let dragging=false;
+  function joyMove(e){
+    const r=joy.getBoundingClientRect(), rr=r.width/2;
+    let dx=(e.clientX-(r.left+rr))/rr, dy=(e.clientY-(r.top+rr))/rr;
+    const m=Math.hypot(dx,dy); if(m>0.68){ dx=dx/m*0.68; dy=dy/m*0.68; }
+    knob.style.transform=`translate(${dx*rr}px,${dy*rr}px)`;
+    setStr(Math.max(-1,Math.min(1,dx/0.68)));
+  }
+  joy.addEventListener('pointerdown',e=>{dragging=true;joy.setPointerCapture(e.pointerId);joyMove(e);});
+  joy.addEventListener('pointermove',e=>dragging&&joyMove(e));
+  joy.addEventListener('pointerup',()=>{dragging=false;knob.style.transform='';setStr(-0.01);});
+  const trk=$('thrTrack'); let thrDrag=false;
+  function thrMove(e){
+    const r=trk.getBoundingClientRect();
+    setThr(Math.max(0,Math.min(1,(r.bottom-e.clientY)/r.height)));
+  }
+  trk.addEventListener('pointerdown',e=>{thrDrag=true;trk.setPointerCapture(e.pointerId);thrMove(e);});
+  trk.addEventListener('pointermove',e=>thrDrag&&thrMove(e));
+  trk.addEventListener('pointerup',()=>thrDrag=false);
+  setStr(-0.01); setThr(0.42);
+
+  /* ---------- gentle live flicker ---------- */
+  setInterval(()=>{ $('fpsVal').textContent = 29+Math.round(Math.random()*2); }, 1400);
+  setInterval(()=>{
+    const l = 21+Math.round(Math.random()*5);
+    $('latVal').textContent = l; $('latBar').style.width = l+'%';
+  }, 1700);
+})();
+</script>
+</body>
+</html>
