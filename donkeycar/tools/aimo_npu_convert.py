@@ -7,7 +7,7 @@
   * 状态字段是 ResultTaskInfo.task_status；
   * 量化 cle 快（Sim01 级别 ~25s）、ada 可能极慢；
   * 校准集用任务相关图片（tub 帧）优于内置 ImageNet/COCO；
-  * API Key 从文件读，绝不出现在命令行。
+  * API Key 只从环境变量读取（AIMO_API_KEY 值式 / AIMO_KEY_FILE 文件路径），绝不入库、不出现在命令行。
 
 车端用法：.aidem + 同目录 qnn_model_info.json → 模型类型 aidlite_linear
 （donkeycar/parts/npu_pilot.py，TYPE_QNN240+TYPE_DSP）。
@@ -15,6 +15,10 @@
 CLI:
     python3 -m donkeycar.tools.aimo_npu_convert --onnx model.onnx [--out 目录]
         [--calib-tubs tub1,tub2] [--calib-max 100] [--timeout 3600]
+
+环境变量:
+    AIMO_API_KEY   AIMO API Key 值（首选；不入库、不落盘）
+    AIMO_KEY_FILE  密钥文件路径（备选，默认 ~/.aidlux_cred/aimo_api_key）
 """
 from __future__ import annotations
 
@@ -25,7 +29,32 @@ import tempfile
 import time
 from typing import Optional
 
-KEY_FILE = os.environ.get("AIMO_KEY_FILE", "/home/aidlux/.aidlux_cred/aimo_api_key")
+KEY_ENV_VAR = "AIMO_API_KEY"        # 首选：环境变量直接给 key 值（不入库、不落盘）
+KEY_FILE_ENV_VAR = "AIMO_KEY_FILE"  # 备选：环境变量指向密钥文件
+DEFAULT_KEY_FILE = os.path.expanduser("~/.aidlux_cred/aimo_api_key")
+
+# 兼容旧引用；实际取值一律走 load_api_key()
+KEY_FILE = os.environ.get(KEY_FILE_ENV_VAR, DEFAULT_KEY_FILE)
+
+
+def load_api_key() -> Optional[str]:
+    """读取 AIMO API Key。优先级：AIMO_API_KEY(值) > AIMO_KEY_FILE(文件) > ~/.aidlux_cred/aimo_api_key。
+
+    key 只从环境变量 / 本机凭据文件读取，绝不写入仓库；返回值仅用于登录，不打印、不落日志。
+    """
+    val = (os.environ.get(KEY_ENV_VAR) or "").strip()
+    if val:
+        return val
+    for path in (os.environ.get(KEY_FILE_ENV_VAR) or "", DEFAULT_KEY_FILE):
+        if path and os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    val = fh.read().strip()
+            except OSError:
+                continue
+            if val:
+                return val
+    return None
 
 DEVICE = "Qualcomm_QCS6490"
 RUNTIME = "qnn_2_40"
@@ -67,10 +96,11 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
     if not os.path.isfile(onnx_path):
         print(f"源模型不存在: {onnx_path}")
         return None
-    if not os.path.isfile(KEY_FILE):
-        print(f"未找到 API Key 文件: {KEY_FILE}（可用环境变量 AIMO_KEY_FILE 指定）")
+    api_key = load_api_key()
+    if not api_key:
+        print(f"未找到 AIMO API Key：请设置环境变量 {KEY_ENV_VAR}=<key>"
+              f"（备选 {KEY_FILE_ENV_VAR}=<密钥文件路径>，默认 {DEFAULT_KEY_FILE}）")
         return None
-    api_key = open(KEY_FILE).read().strip()
 
     aimo = AimoApi()
     aimo.login(api_key=api_key)

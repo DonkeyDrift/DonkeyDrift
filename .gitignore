@@ -80,3 +80,7 @@ docs/architecture-guide.html
 
 # Web 后端运行时状态（车端选中模型/驾驶参数，运行期生成）
 web_ui/backend/data/
+
+# AIMO / NPU 转换密钥：只从环境变量取，本机凭据目录/密钥文件一律不入库
+.aidlux_cred/
+aimo_api_key
