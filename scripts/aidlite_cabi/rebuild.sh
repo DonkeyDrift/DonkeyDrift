@@ -33,6 +33,7 @@ log "该解释器用不了官方绑定（ABI 不匹配）→ 构建自建绑定"
 # 2) 依赖
 [ -f "$HPP" ] || die "缺 $HPP —— 先装 SDK: sudo aid-pkg install aidlite-sdk"
 [ -f "$LIB" ] || die "缺 $LIB —— 先装 SDK: sudo aid-pkg install aidlite-sdk"
+"$PY" -c 'import numpy' 2>/dev/null || die "缺 numpy —— 门面用它做数组转换: $VENV/bin/pip install numpy（工程的 venv 通常已自带）"
 command -v g++ >/dev/null 2>&1 || die "缺 g++ —— sudo apt-get install -y g++（本绑定是「共享库 + ctypes」，不需要 python3-dev）"
 
 # 3) 编译

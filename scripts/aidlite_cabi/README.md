@@ -61,6 +61,7 @@ bash scripts/aidlite_cabi/rebuild.sh              # 默认装进 .venv；也可�
 | `libaidlite_qnn240.so` | `aidlite-qnn240` | QNN240 模型必须；`sudo aid-pkg install aidlite-qnn240 --without-progress` |
 | `qairt/qnn240/*`（QNN 运行时） | `aidlux-aistack-base` | 随上一步级联安装 |
 | `g++` | `sudo apt-get install -y g++` | **只需 g++**（ctypes 路线，不需要 python3-dev） |
+| `numpy` | 工程的 venv 已自带（门面用它做数组/指针转换） | 脚本会检查并提示 |
 | 设备已激活 license | 镜像自带 | 日志会打 license ID |
 | DSP/RPC 通道 | 镜像自带 | `/dev/fastrpc-*` 或老式 `/dev/adsprpc-smd` **都可能**，别写死节点名 |
 
