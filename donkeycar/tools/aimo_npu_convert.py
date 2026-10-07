@@ -310,10 +310,44 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
 
     os.makedirs(out_dir, exist_ok=True)
     got = task.download(file_mode=DownloadFileMode.OutputModel, output_file_path=out_dir)
-    print(f"[5/5] 已下载到: {got}")
+    model_path = _unpack_if_archive(got, out_dir)
+    print(f"[5/5] 已下载到: {model_path}")
+    if model_path != got:
+        print(f"      （AIMO 产物为压缩包，已自动解压到 {os.path.dirname(model_path)}，zip 已清理）")
     print("      车端用 *.ctx.bin.aidem + 同目录 qnn_model_info.json "
           "（模型类型 aidlite_linear）")
-    return got
+    return model_path
+
+
+def _unpack_if_archive(path: str, out_dir: str) -> str:
+    """AIMO 产物是 zip 压缩包时解压到 out_dir/<包名>/ 自包含子目录。
+
+    qnn_model_info.json 必须与 .aidem 同目录（npu_pilot 硬性要求），且该文件名
+    固定不变——多个 NPU 模型平铺会互相覆盖形状定义，因此每次转换的完整产物集
+    放进以压缩包名命名的独立子目录。解压校验通过后删除压缩包本体。
+    返回车端可加载的模型路径（优先 *.ctx.bin.aidem；非压缩包原样返回）。
+    """
+    import zipfile
+
+    if not os.path.isfile(path) or not zipfile.is_zipfile(path):
+        return path
+    target = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0])
+    os.makedirs(target, exist_ok=True)
+    real_target = os.path.realpath(target)
+    with zipfile.ZipFile(path) as zf:
+        members = [i for i in zf.infolist() if not i.is_dir()]
+        for info in members:
+            dest = os.path.realpath(os.path.join(target, info.filename))
+            if not dest.startswith(real_target + os.sep):
+                raise ValueError(f"压缩包含不安全路径: {info.filename}")
+            zf.extract(info, target)
+    aidems = [i.filename for i in members if i.filename.endswith(".aidem")]
+    ctx = [n for n in aidems if ".ctx.bin." in os.path.basename(n)] or aidems
+    os.remove(path)  # zip 已完整落地，压缩包不再留（模型列表也不收 zip）
+    if ctx:
+        return os.path.join(target, ctx[0])
+    print(f"      !! 压缩包内未找到 .aidem，内容原样解压到 {target}")
+    return target
 
 
 def main():

@@ -41,6 +41,15 @@
   - 测试：后端新增 `test_trainer_aimo.py` 7 例（job 化与命令行组装/参数校验/key-status 不泄漏/key-status 未配置/result_path/阶段与产物路径解析），全套 582 passed；前端新增 15 例（isNpuConvertible/警告横幅/参数映射/SSE 驱动进度与终态产物路径/停止/行内按钮显隐/头部入口），全套 398 passed + `tsc` 与生产构建通过。
   - 实测（真机 Playwright + 临时 uvicorn 8027）：弹窗开合、SDK/Key 缺失警告横幅、提交后子进程日志回流（无 SDK 时友好报错行）、失败终态 + Exit code 展示均正常；AIMO 云端全链路（登录→提交→轮询→下载 .aidem）待板卡配置 `AIMO_API_KEY` 后按 CLI 同路径生效。
 
+## 2026-10-07 (262)
+
+- fix(npu): AIMO 产物为 zip 压缩包时自动解压进 Models——自包含子目录 + 列表透出 .ctx.bin.aidem
+  - 现象：Web 端「转 NPU」完成后 models 目录里落的是一个 zip（`<模型名>_save_path.zip`），车端/列表都不能直接用，还要 SSH 上车手动解压摆位。
+  - 根因：AIMO SDK 的 `task.download(OutputModel)` 下载的就是整包（内含 `*.ctx.bin.aidem`、x86 模拟器变体 `lib*.x86.so.aidem`、`qnn_model_info.json`、htp 配置等 7 个文件）。且 `npu_pilot.load()` 硬性要求 `qnn_model_info.json` 与 `.aidem` **同目录且文件名固定**（donkeycar/parts/npu_pilot.py:133）——多个 NPU 模型平铺在 models/ 会互相覆盖形状定义。
+  - 修复（`donkeycar/tools/aimo_npu_convert.py` 新增 `_unpack_if_archive`）：下载后检测 zip → 安全解压（zip-slip 校验）到 `models/<zip 名>/` 自包含子目录 → 删除压缩包 → `[5/5] 已下载到:` 直接报车端模型路径（Web 端弹窗的产物路径随之正确）；优先取 `*.ctx.bin.aidem`，无 .aidem 时报目录。CLI 与 Web 共用此路径，均即时生效。
+  - 配套：`/api/trainer/models` 扫描一级子目录，把其中的 `*.aidem` 以 `<目录>/<文件名>` 透出（跳过 x86 变体与 `.savedmodel`）；`load_model` 的相对路径校验本就允许 `models/<一级子目录>/<文件>`，前端 `./models/${name}` 拼接天然兼容，Drive 页「加载到车端」对解压产物直接可用。
+  - 迁移与实测：已把本次转出的 `pilot_1791379009443_save_path.zip` 用新逻辑落成 `models/pilot_1791379009443_save_path/`（zip 清理）；重启 8001 实例后模型列表同时显示 `.tflite` 与 `<目录>/…ctx.bin.aidem`，key-status 正常。测试：新增 `donkeycar/tests/test_aimo_npu_convert.py` 5 例（ctx.bin 优先/回退、zip-slip 拒收、非 zip 原样、无 .aidem 落目录）+ `test_trainer_models.py` 2 例（子目录透出与 .savedmodel 不误扫），backend 全套 584 passed。
+
 # 变更日志
 
 ## 2026-09-28 (259)

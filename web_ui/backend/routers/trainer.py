@@ -668,6 +668,43 @@ async def list_models(working_dir: Optional[str] = None):
             "finalLoss": loss_info.get("final_loss"),
             "bestLoss": loss_info.get("best_loss"),
         })
+        continue
+
+    def _add_subdir_aidem(subdir: str, display_prefix: str):
+        """AIMO zip 解压产物目录（<zip 名>/）：透出车端用的 .ctx.bin.aidem。
+
+        npu_pilot 要求 qnn_model_info.json 与 .aidem 同目录且文件名固定，
+        因此每次转换的产物集是自包含子目录；列表以 <目录>/<文件名> 展示，
+        load_model 相对路径 ./models/<目录>/<文件名> 同样可用。x86 模拟器
+        变体（lib*.x86.so.aidem）不上列表。
+        """
+        try:
+            entries = sorted(os.listdir(subdir))
+        except OSError:
+            return
+        for f in entries:
+            low = f.lower()
+            if not low.endswith(".aidem") or ".x86." in low:
+                continue
+            fpath = os.path.join(subdir, f)
+            if not os.path.isfile(fpath):
+                continue
+            stat = os.stat(fpath)
+            items.append({
+                "name": f"{display_prefix}/{f}",
+                "type": "file",
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "path": os.path.abspath(fpath),
+                "previewPath": None,
+                "finalLoss": None,
+                "bestLoss": None,
+            })
+
+    for dname in sorted(os.listdir(models_dir)):
+        dpath = os.path.join(models_dir, dname)
+        if os.path.isdir(dpath) and not dname.lower().endswith(".savedmodel"):
+            _add_subdir_aidem(dpath, dname)
     return {"models": items}
 
 
