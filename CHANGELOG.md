@@ -1,5 +1,12 @@
 ## 2026-10-07 (260)
 
+- fix(npu): 修「AIMO 单侧校准把输出头截死」——新增 `--calib-mix-synth`（校准集混入合成图）
+  - 现象：NPU 模型（INT8/INT16 均）在真实车帧上 steering **恒为 0**，而 float32 参考在同一批帧给出 −0.159~−0.338（21 帧去重抽样、21 个不同值）。先怀疑测试帧选取，遂去重（787 帧里仅 272 唯一）并按转角均匀抽样 —— **仍全 0**，排除。
+  - 定位：用合成输入（黑/白/灰/左右分块/上下分块）探响应 → 发现**每个输出头只保留一侧符号**（steering 负→0、throttle 正→0）；再读**原始整型**张量确认值为 0 → 不是索引/读取问题，是量化范围问题。
+  - 根因：AIMO 按**校准数据**的激活范围给每个张量定 min/max。tub 真实帧的参考输出恰好单侧（steering 全负、throttle 多为负）⇒ 输出张量被标成单侧范围 ⇒ 反号值被压到零点。
+  - 修复：`donkeycar/tools/aimo_npu_convert.py` 新增 `--calib-mix-synth N`（建议 ≥30），在校准集里混入 black/white/gray/左右分块/上下分块/渐变/噪声合成图，与真实帧按 `N:(max−N)` 混合，把输出范围拉回双侧。
+  - 实测（21 帧去重真实图 vs float32 参考）：steering 平均|Δ| **0.2307 → 0.0031**（最大 0.0058，非零 **21/21**）；throttle 平均|Δ| 0.0017 → 0.0020（非零 21/21）；推理 **0.84 ms/次**（50 次）。车端主用模型更新为 `DKG-1_qcs6490_w8a16_mixcal.qnn240.ctx.bin.aidem`（旧的取帧单侧校准版本移入 `models/_superseded/` 留档）。
+  - 判据与复现：`docs/npu/AIMO量化校准-单侧校准陷阱.md`（含"读原始整型张量 → 合成图推双侧 → 换混合校准集"三步判据）。
 - feat(npu): 收入 aidlite 的 C-ABI 外壳 + ctypes 门面 —— 工程 Python 版本直接跑 NPU（回到单环境）
   - 背景：本板镜像的官方 aidlite 绑定是 `soaidlitesdk.cpython-310-aarch64-linux-gnu.so`（pybind11 扩展模块，ABI 按 Python 版本锁死：3.12 实测 `ImportError: Python version mismatch ... compiled for Python 3.10 ... 3.12.14`），而工程 `python_requires >=3.11` 且 `donkeycar/__init__.py` 有 `minor < 11` 硬门槛 ⇒ 工程自己的解释器无法 `import aidlite`，NPU 只能依赖额外的 3.10 环境（而该环境装不进工程）。AidLux 亦不提供任何 py3.12 包。
   - 方案：镜像自带官方头文件 `/usr/local/include/aidlux/aidlite/aidlite.hpp`（726 行）与 `libaidlite.so`（与 Python 版本无关，任意解释器可 dlopen）→ 自建 `extern "C"` 外壳（151 行）+ ctypes 门面（375 行，API 形状对齐官方绑定：`Model/Config/InterpreterBuilder/Interpreter` + 各枚举）。`set_input_tensor/get_output_tensor` 一律 `is_native=false`，由 aidlite 按模型自带量化参数做量化/反量化。

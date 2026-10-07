@@ -77,6 +77,67 @@ CALIB_DATASET_MEMBER = {"imagenet": "ImageNet", "coco": "COCO",
                         "face": "Face", "normal": "Normal"}
 
 
+# 合成校准图：刻意让输出覆盖**双侧**（见 docs/npu/AIMO量化校准-单侧校准陷阱.md）。
+# 只喂真实 tub 帧时，若参考输出恰好是单侧的（如 steering 全为负），AIMO 会按该单侧范围
+# 给输出张量定标 → 反号的值被压到零点（读出来恒 0）。混入这些图即可把范围拉回双侧。
+SYNTH_SPECS = ("black", "white", "gray", "Lblack_Rwhite", "Lwhite_Rblack",
+               "Tblack_Bwhite", "Twhite_Bblack", "ramp_h", "ramp_h_rev",
+               "ramp_v", "ramp_v_rev", "noise")
+
+
+def _make_synth_images(out_dir: str, count: int, size=(160, 120)) -> int:
+    """生成 count 张合成图到 out_dir，返回实际生成数。循环使用 SYNTH_SPECS。"""
+    if count <= 0:
+        return 0
+    import numpy as np
+    W, H = size
+    z = np.zeros((H, W, 3), np.uint8)
+    o = np.full((H, W, 3), 255, np.uint8)
+    g = np.full((H, W, 3), 128, np.uint8)
+    ramp_h = np.tile(np.linspace(0, 255, W, dtype=np.uint8)[None, :, None], (H, 1, 3))
+    ramp_v = np.tile(np.linspace(0, 255, H, dtype=np.uint8)[:, None, None], (1, W, 3))
+    rng = np.random.RandomState(0)
+    made = 0
+    try:
+        import cv2
+    except ImportError:
+        cv2 = None
+    for i in range(count):
+        k = SYNTH_SPECS[i % len(SYNTH_SPECS)]
+        if k == "black":
+            img = z
+        elif k == "white":
+            img = o
+        elif k == "gray":
+            img = g
+        elif k == "Lblack_Rwhite":
+            img = np.concatenate([z[:, :W // 2], o[:, :W // 2]], axis=1)
+        elif k == "Lwhite_Rblack":
+            img = np.concatenate([o[:, :W // 2], z[:, :W // 2]], axis=1)
+        elif k == "Tblack_Bwhite":
+            img = np.concatenate([z[:H // 2], o[:H // 2]], axis=0)
+        elif k == "Twhite_Bblack":
+            img = np.concatenate([o[:H // 2], z[:H // 2]], axis=0)
+        elif k == "ramp_h":
+            img = ramp_h
+        elif k == "ramp_h_rev":
+            img = ramp_h[:, ::-1].copy()
+        elif k == "ramp_v":
+            img = ramp_v
+        elif k == "ramp_v_rev":
+            img = ramp_v[::-1].copy()
+        else:
+            img = rng.randint(0, 256, (H, W, 3), dtype=np.uint8)
+        name = os.path.join(out_dir, "synth_%02d_%s" % (i, k))
+        if cv2 is not None:
+            cv2.imwrite(name + ".jpg", img)
+        else:
+            from PIL import Image
+            Image.fromarray(img[:, :, ::-1]).save(name + ".png")
+        made += 1
+    return made
+
+
 def resolve_source_type(model_path: str, override: str = "") -> str:
     """推断 AIMO 的源模型类型枚举名；override 非空时直接用它。
 
@@ -102,7 +163,7 @@ RUNTIME = "qnn_2_40"
 
 
 def _collect_calib_images(tub_paths: str, max_images: int = 100,
-                          tmp_parent: str = "/tmp") -> Optional[str]:
+                          tmp_parent: str = "/tmp", mix_synth: int = 0) -> Optional[str]:
     """从 tub 的 images/ 目录取前 N 张图，软链到临时目录供上传。取不到返回 None。"""
     files = []
     for tub in tub_paths.split(','):
@@ -111,14 +172,18 @@ def _collect_calib_images(tub_paths: str, max_images: int = 100,
             files.extend(os.path.join(img_dir, f)
                          for f in sorted(os.listdir(img_dir))
                          if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')))
-    files = files[:max_images]
-    if not files:
+    synth = max(0, min(int(mix_synth or 0), max_images - 1)) if max_images > 1 else 0
+    files = files[:max_images - synth]
+    if not files and not synth:
         return None
     calib_dir = tempfile.mkdtemp(prefix='aimo_calib_', dir=tmp_parent)
     for i, src in enumerate(files):
         ext = os.path.splitext(src)[1]
         # 真实拷贝而非软链：AIMO SDK 上传时不跟随符号链接
         shutil.copy2(os.path.abspath(src), os.path.join(calib_dir, f"calib_{i:04d}{ext}"))
+    if synth:
+        n = _make_synth_images(calib_dir, synth)
+        print(f"      校准集混入合成图 {n} 张（覆盖输出双侧，避免单侧校准截断输出头）")
     print(f"      校准图 {len(files)} 张（来自 tub）")
     return calib_dir
 
@@ -129,7 +194,8 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
                           poll_s: int = 15,
                           precision: str = "INT8",
                           source_type: str = "",
-                          calib_dataset: str = "imagenet") -> Optional[str]:
+                          calib_dataset: str = "imagenet",
+                          calib_mix_synth: int = 0) -> Optional[str]:
     """转换并下载产物；返回 .aidem 路径，失败返回 None。
 
     形参名沿用 onnx_path 仅为兼容既有调用；实际支持多种源模型
@@ -196,7 +262,7 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
           f"({os.path.getsize(onnx_path)} B → {DEVICE}/{RUNTIME} {precision})")
 
     if calib_tub_paths:
-        calib_dir = _collect_calib_images(calib_tub_paths, calib_max)
+        calib_dir = _collect_calib_images(calib_tub_paths, calib_max, mix_synth=calib_mix_synth)
         if not calib_dir:
             print("      未从 tub 取到图片，改用内置校准集")
         else:
@@ -254,6 +320,8 @@ def main():
     p.add_argument("--calib-max", type=int, default=100)
     p.add_argument("--precision", default="INT8", choices=["INT8", "INT16", "FP16"],
                    help="AIMO 量化精度: INT8(A8_W8) / INT16(A16_W8) / FP16(Afp16_Wfp16)")
+    p.add_argument("--calib-mix-synth", type=int, default=0,
+                   help="校准集里混入多少张合成图（强烈建议 >=30）：只喂真实帧时若参考输出单侧，\n                         AIMO 会按单侧范围定标 → 反号输出被截成 0（见 docs/npu/AIMO量化校准-单侧校准陷阱.md）")
     p.add_argument("--calib-dataset", default="imagenet",
                    help="无 --calib-tubs 时使用的内置校准集: imagenet/coco/face/normal")
     p.add_argument("--timeout", type=int, default=3600)
@@ -261,7 +329,8 @@ def main():
     ret = convert_onnx_to_aidem(a.onnx, a.out, a.calib_tubs or None,
                                 a.calib_max, a.timeout,
                                 precision=a.precision,
-                                calib_dataset=a.calib_dataset)
+                                calib_dataset=a.calib_dataset,
+                                calib_mix_synth=a.calib_mix_synth)
     sys.exit(0 if ret else 1)
 
 
