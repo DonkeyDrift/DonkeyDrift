@@ -31,6 +31,16 @@
   - 实测（`DKG-1.tflite` → QCS6490 / QNN 2.40，tub 真实车帧 100 张校准）：`[2.5/5] 校准集已上传: 100 张 -> 100 个 URL`，服务端 **30 s** 完成 int8 转换（`w8a8`）；`--precision INT16` 亦成功（`w8a16`）。两版产物的 **steering 输出头量化后恒 0**（读原始整数张量即为 0，与校准集无关），throttle 与 float32 参考吻合（INT16 Δ6.8e-4）——属量化精度问题，另开条目跟进。
   - 注：**不要把 `onnx` / `tf2onnx` 装进带 TF 的项目 venv**（`AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'` 或 `VersionError: gencode 6.31.1 runtime 5.29.6`，两者不可共存）；确需 onnx 就在独立 venv 里转，只把产物交给 AIMO/设备。
 
+## 2026-10-07 (261)
+
+- feat(webui): Trainer 页模型列表新增「转 NPU」——图形化 AIMO 云转入口（.aidem 产出即列表可见）
+  - 动机：`donkeycar/tools/aimo_npu_convert.py` 此前只能 SSH 上车敲 CLI（参数长、云端轮询动辄几十分钟、日志肉眼盯），想把训练完的 `.tflite`/saved_model 转成 QCS6490 NPU 模型在网页端一步完成。
+  - 后端：完全复用训练 job 基础设施——`trainer_engine.py` 新增 `aimo` job 模式，以子进程跑 `python -m donkeycar.tools.aimo_npu_convert`（与 `run_local` 同管道：stdout/stderr 逐行泵进 SSE 日志流），解析 `[n/5]` 阶段行为粗粒度进度、`[5/5] 已下载到:` 为产物路径（`job.result_path`）；停止 = terminate 子进程。新端点：`POST /api/trainer/train/aimo`（状态/日志/停止复用 `/train/{job_id}/status|logs|stop`）、`GET /api/trainer/aimo/key-status`（`find_spec` 探测 aplux_aimo + 按工具同优先级判 API Key 是否已配置，只回布尔与来源不回 key；刻意不在后端进程 import donkeycar 避免连带加载 TF）。
+  - 前端：`ModelsList` 头部「转 NPU」按钮（任意路径手填）+ 可转换类型行内 Cpu 按钮（`.tflite/.onnx/.pb/.pt/.pth/.savedmodel`，`.h5/.aidem/.ckpt` 不显示）；新组件 `NpuConvertModal`：源路径/输出目录/精度 INT8|INT16|FP16/校准 tub 下拉（来自 `/trainer/tubs`）/校准张数/合成图混入数——无 tub 时切换为内置校准集选择，单侧校准陷阱提示直接进表单；转换期弹窗内 SSE 实时日志 + 阶段进度条，终态后查 REST 补拿产物路径展示；运行中可关窗（后端继续跑），完成后回调刷新模型列表。未装 SDK/Key 时开弹窗即黄色警告，避免白跑。
+  - 工具：`aimo_npu_convert.py` 的 `aplux_aimo` 导入失败改为友好报错（原样裸 traceback 会整屏进 Web 日志面板）。
+  - 测试：后端新增 `test_trainer_aimo.py` 7 例（job 化与命令行组装/参数校验/key-status 不泄漏/key-status 未配置/result_path/阶段与产物路径解析），全套 582 passed；前端新增 15 例（isNpuConvertible/警告横幅/参数映射/SSE 驱动进度与终态产物路径/停止/行内按钮显隐/头部入口），全套 398 passed + `tsc` 与生产构建通过。
+  - 实测（真机 Playwright + 临时 uvicorn 8027）：弹窗开合、SDK/Key 缺失警告横幅、提交后子进程日志回流（无 SDK 时友好报错行）、失败终态 + Exit code 展示均正常；AIMO 云端全链路（登录→提交→轮询→下载 .aidem）待板卡配置 `AIMO_API_KEY` 后按 CLI 同路径生效。
+
 # 变更日志
 
 ## 2026-09-28 (259)

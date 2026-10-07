@@ -54,8 +54,9 @@ class TrainingJob:
     # own computer (SSH callback, config train_my_pc.conf); 'mypc_install' =
     # dependency install job on the user's computer (pip install
     # "donkeydrifter[pc]"); 'online' = on the configured cloud server
-    # (config train_online.conf).
-    mode: Literal['local', 'mypc', 'mypc_install', 'online']
+    # (config train_online.conf); 'aimo' = AIMO cloud NPU conversion
+    # (donkeycar/tools/aimo_npu_convert.py, .aidem artifact).
+    mode: Literal['local', 'mypc', 'mypc_install', 'online', 'aimo']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
     log_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue())
     progress: TrainingProgress = field(default_factory=TrainingProgress)
@@ -70,6 +71,8 @@ class TrainingJob:
     trainer: Optional[object] = None
     stop_event: Optional[threading.Event] = None
     error_message: Optional[str] = None
+    # aimo 转换成功后的 .aidem 产物绝对路径（从工具输出 [5/5] 行解析）
+    result_path: Optional[str] = None
 
 
 class TrainingJobManager:
@@ -82,7 +85,7 @@ class TrainingJobManager:
             cls._instance.jobs: Dict[str, TrainingJob] = {}
         return cls._instance
 
-    def create_job(self, mode: Literal['local', 'mypc', 'mypc_install', 'online']) -> TrainingJob:
+    def create_job(self, mode: Literal['local', 'mypc', 'mypc_install', 'online', 'aimo']) -> TrainingJob:
         job_id = str(uuid.uuid4())[:8]
         job = TrainingJob(id=job_id, mode=mode)
         self.jobs[job_id] = job
@@ -99,7 +102,9 @@ class TrainingJobManager:
             return
 
         job.status = 'stopped'
-        if job.mode == 'local' and job.process:
+        # aimo 与 local 同为本地子进程：terminate 即可（AIMO 云端任务本身
+        # 无法取消，但本地轮询/上传进程终止后不再消耗资源）
+        if job.mode in ('local', 'aimo') and job.process:
             try:
                 job.process.terminate()
             except Exception:
@@ -200,6 +205,89 @@ class TrainingJobManager:
                                         "globalPercent": job.progress.global_percent,
                                     }
                                 })
+
+            await asyncio.gather(
+                read_stream(job.process.stdout),
+                read_stream(job.process.stderr, True)
+            )
+
+            await job.process.wait()
+
+            if job.status == 'stopped':
+                pass  # already set
+            elif job.process.returncode == 0:
+                job.status = 'completed'
+            else:
+                job.status = 'failed'
+                job.error_message = f"Exit code: {job.process.returncode}"
+        except Exception as e:
+            if job.status != 'stopped':
+                job.status = 'failed'
+                job.error_message = str(e)
+        finally:
+            job.finished_at = datetime.now().isoformat()
+            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+
+    # ------------------------------------------------------------------
+    # AIMO cloud NPU conversion (.onnx/.tflite/.pb/.pt/.pth/saved_model → .aidem)
+    # ------------------------------------------------------------------
+    async def run_aimo_convert(self, job: TrainingJob, model_path: str,
+                               out_dir: str = "./models", precision: str = "INT8",
+                               calib_tubs: Optional[str] = None,
+                               calib_max: int = 100,
+                               calib_mix_synth: int = 30,
+                               calib_dataset: str = "imagenet",
+                               timeout_s: int = 3600,
+                               working_dir: Optional[str] = None):
+        """Run donkeycar.tools.aimo_npu_convert as a subprocess, stream its log.
+
+        Same subprocess pipeline as run_local: the tool prints [0/5]..[5/5]
+        stage markers which are parsed into coarse progress, and the final
+        "[5/5] 已下载到:" line yields the .aidem artifact path. The AIMO API
+        key never passes through here — the tool reads it from the
+        environment / key file on the backend machine itself.
+        """
+        job.status = 'running'
+        cwd = working_dir or os.getcwd()
+        cmd = [sys.executable, "-m", "donkeycar.tools.aimo_npu_convert",
+               "--onnx", model_path, "--out", out_dir or "./models",
+               "--precision", precision,
+               "--calib-max", str(int(calib_max)),
+               "--calib-dataset", calib_dataset or "imagenet",
+               "--timeout", str(int(timeout_s))]
+        if calib_tubs:
+            cmd.extend(["--calib-tubs", calib_tubs])
+        if calib_mix_synth:
+            cmd.extend(["--calib-mix-synth", str(int(calib_mix_synth))])
+
+        try:
+            job.process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
+            )
+
+            async def read_stream(stream, is_stderr=False):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    text = line.decode('utf-8', errors='ignore').rstrip()
+                    if text:
+                        cleaned = _clean_training_line(text)
+                        if not cleaned:
+                            continue
+                        payload = {
+                            "type": "log",
+                            "line": cleaned,
+                            "is_stderr": is_stderr,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        await job.log_queue.put(payload)
+                        job.logs.append(cleaned)
+                        if not is_stderr:
+                            self._parse_aimo_line(job, cleaned)
 
             await asyncio.gather(
                 read_stream(job.process.stdout),
@@ -415,6 +503,28 @@ class TrainingJobManager:
     # ------------------------------------------------------------------
     # Shared parsing
     # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_aimo_line(job: TrainingJob, line: str):
+        """Parse aimo_npu_convert output into coarse stage progress.
+
+        The tool prints [0/5]..[5/5] stage markers (including [2.5/5] for the
+        calibration upload) and a final download line:
+            [3/5] 已提交，轮询中（间隔 15s，上限 3600s）...
+            [5/5] 已下载到: /abs/path/models/xxx.aidem
+        """
+        try:
+            m = re.match(r"^\[(\d+(?:\.\d)?)/5\]", line)
+            if m:
+                stage = float(m.group(1))
+                job.progress.current_step = int(stage)
+                job.progress.total_steps = 5
+                job.progress.global_percent = min(stage / 5.0 * 100.0, 100.0)
+            m = re.search(r"已下载到[:：]\s*(\S+)", line)
+            if m:
+                job.result_path = m.group(1)
+        except Exception:
+            pass
+
     def _parse_line(self, job: TrainingJob, line: str):
         """Parse Keras-style training output for local jobs."""
         try:

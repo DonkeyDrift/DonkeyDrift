@@ -87,6 +87,24 @@ class MyPcInstallRequest(BaseModel):
     key_path: str = ""
 
 
+class AimoConvertRequest(BaseModel):
+    """AIMO 云端 NPU 转换请求（.onnx/.tflite/.pb/.pt/.pth/saved_model → .aidem）。
+
+    model_path 为待转换源模型路径；calib_tubs 为逗号分隔的 tub 路径（取
+    images/ 帧做量化校准，留空则用内置数据集）；AIMO API Key 不经过本接口
+    ——转换子进程在后端机器上自行从环境变量/密钥文件读取。
+    """
+    model_path: str
+    out_dir: str = "./models"
+    working_dir: Optional[str] = None
+    precision: str = "INT8"
+    calib_tubs: Optional[str] = None
+    calib_max: int = 100
+    calib_mix_synth: int = 30
+    calib_dataset: str = "imagenet"
+    timeout_s: int = 3600
+
+
 class StopRequest(BaseModel):
     pass
 
@@ -1054,6 +1072,65 @@ async def start_mypc_resume_train(request: MyPcTrainRequest):
     return {"job_id": job.id, "status": job.status}
 
 
+@router.post("/train/aimo")
+async def start_aimo_convert(request: AimoConvertRequest):
+    """Start an AIMO cloud NPU conversion job (.aidem artifact).
+
+    Reuses the training job infrastructure: status via
+    /train/{job_id}/status, live logs via /train/{job_id}/logs (SSE),
+    stop via /train/{job_id}/stop.
+    """
+    if not request.model_path.strip():
+        raise HTTPException(status_code=400, detail="model_path is required")
+    if request.precision not in ("INT8", "INT16", "FP16"):
+        raise HTTPException(status_code=400, detail="precision must be INT8, INT16 or FP16")
+    job = job_manager.create_job("aimo")
+    asyncio.create_task(
+        job_manager.run_aimo_convert(
+            job,
+            model_path=request.model_path,
+            out_dir=request.out_dir,
+            precision=request.precision,
+            calib_tubs=request.calib_tubs or None,
+            calib_max=request.calib_max,
+            calib_mix_synth=request.calib_mix_synth,
+            calib_dataset=request.calib_dataset,
+            timeout_s=request.timeout_s,
+            working_dir=request.working_dir,
+        )
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.get("/aimo/key-status")
+async def get_aimo_key_status():
+    """AIMO 云转前置条件检查：SDK 是否安装、API Key 是否已配置。
+
+    只返回布尔与来源，绝不返回 key 本身。刻意不在本进程 import
+    donkeycar（会连带加载 TF）：SDK 用 find_spec 探测，key 判定与
+    donkeycar/tools/aimo_npu_convert.py 的 load_api_key 优先级保持一致。
+    """
+    sdk_ok = False
+    try:
+        import importlib.util
+        sdk_ok = importlib.util.find_spec("aplux_aimo") is not None
+    except Exception:
+        sdk_ok = False
+
+    key_env_var = "AIMO_API_KEY"
+    key_file_env_var = "AIMO_KEY_FILE"
+    default_key_file = os.path.expanduser("~/.aidlux_cred/aimo_api_key")
+    key_configured = False
+    key_source = None
+    if (os.environ.get(key_env_var) or "").strip():
+        key_configured, key_source = True, "env"
+    else:
+        key_file = os.environ.get(key_file_env_var) or default_key_file
+        if key_file and os.path.isfile(key_file):
+            key_configured, key_source = True, "file"
+    return {"sdk": sdk_ok, "key": key_configured, "keySource": key_source}
+
+
 @router.get("/train/{job_id}/status")
 async def get_job_status(job_id: str):
     job = job_manager.get_job(job_id)
@@ -1074,6 +1151,7 @@ async def get_job_status(job_id: str):
         "started_at": job.started_at,
         "finished_at": job.finished_at,
         "error": job.error_message,
+        "result_path": job.result_path,
     }
 
 

@@ -25,6 +25,13 @@ vi.mock('../../services/api', () => ({
   loadModelToCar: (...args: unknown[]) => mockLoadModelToCar(...args),
   importModel: vi.fn(() => Promise.resolve()),
   uploadModelLoss: vi.fn(() => Promise.resolve()),
+  // NpuConvertModal 依赖（行内「转 NPU」按钮打开弹窗时才会调用）
+  getAimoKeyStatus: vi.fn(() => Promise.resolve({ sdk: true, key: true, keySource: 'env' })),
+  listTrainerTubs: vi.fn(() => Promise.resolve({ tubs: [], current_tub_path: '' })),
+  startAimoConvert: vi.fn(() => Promise.resolve({ job_id: 'j1', status: 'pending' })),
+  stopTrain: vi.fn(() => Promise.resolve()),
+  getJobStatus: vi.fn(() => Promise.resolve({ result_path: null })),
+  createLogStream: vi.fn(() => ({ onmessage: null, onerror: null, close: vi.fn() })),
   API_URL: 'http://localhost',
   getApiErrorMessage: vi.fn(() => 'error'),
 }));
@@ -223,5 +230,44 @@ describe('ModelsList', () => {
 
     await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
     expect(screen.queryByTestId('models-empty-state')).toBeNull();
+  });
+
+  it('可转换类型的行显示「转 NPU」按钮，点击打开弹窗并预填路径', async () => {
+    renderList();
+    await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
+
+    // 三个 .tflite 行都有按钮
+    expect(screen.getAllByRole('button', { name: 'trainer.npuConvert' })).toHaveLength(3);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'trainer.npuConvert' })[0]);
+
+    const dialog = screen.getByTestId('npu-convert-dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(
+      screen.getByTestId('npu-model-path').getAttribute('value'),
+    ).toBe(models[0].path);
+  });
+
+  it('.h5 / .aidem 行不显示「转 NPU」按钮', async () => {
+    mockListModels.mockResolvedValue({
+      models: [
+        { name: 'pilot.h5', size: 1, modified: '2026-10-01T00:00:00Z', path: '/m/pilot.h5' },
+        { name: 'pilot.aidem', size: 1, modified: '2026-10-01T00:00:00Z', path: '/m/pilot.aidem' },
+      ],
+    });
+    renderList();
+    await waitFor(() => expect(screen.getByText('pilot.h5')).toBeInTheDocument());
+
+    expect(screen.queryByRole('button', { name: 'trainer.npuConvert' })).toBeNull();
+  });
+
+  it('头部「转 NPU」按钮打开空路径弹窗', async () => {
+    renderList();
+    await waitFor(() => expect(screen.getByText('m1.tflite')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('npu-convert-open'));
+
+    expect(screen.getByTestId('npu-convert-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('npu-model-path').getAttribute('value')).toBe('');
   });
 });

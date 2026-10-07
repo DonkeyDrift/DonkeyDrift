@@ -203,11 +203,15 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
     也可用 source_type 显式指定 SourceModelType 枚举名。
     calib_dataset: 无校准 tub 时使用的内置校准集（imagenet/coco/face/normal）。
     """
-    from aplux_aimo import AimoApi
-    from aplux_aimo.enums import (SourceModelType, TargetDevice, ModelRuntime,
-                                  ModelDataPrecision, DownloadFileMode,
-                                  CalibrationDataMode, CalibrationDatasetType)
-    from aplux_aimo.base_data import QuantizeOptions
+    try:
+        from aplux_aimo import AimoApi
+        from aplux_aimo.enums import (SourceModelType, TargetDevice, ModelRuntime,
+                                      ModelDataPrecision, DownloadFileMode,
+                                      CalibrationDataMode, CalibrationDatasetType)
+        from aplux_aimo.base_data import QuantizeOptions
+    except ImportError:
+        print("AIMO SDK 未安装：请先 pip install aplux-aimo（Web 端转换同样依赖它）")
+        return None
 
     onnx_path = os.path.abspath(onnx_path)
     if not os.path.exists(onnx_path):
