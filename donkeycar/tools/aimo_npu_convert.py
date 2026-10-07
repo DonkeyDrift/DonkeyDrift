@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 from typing import Optional
+import glob
 
 KEY_ENV_VAR = "AIMO_API_KEY"        # 首选：环境变量直接给 key 值（不入库、不落盘）
 KEY_FILE_ENV_VAR = "AIMO_KEY_FILE"  # 备选：环境变量指向密钥文件
@@ -188,6 +189,35 @@ def _collect_calib_images(tub_paths: str, max_images: int = 100,
     return calib_dir
 
 
+def _unpack_zips(out_dir: str, got=None) -> list:
+    """解包 AIMO 下载产物，返回解出的文件名列表（basename）。
+
+    ⚠ `task.download()` 返回的是**列表**（实测 `['/…/xxx_save_path.zip']`），不是字符串 ——
+    只判 `isinstance(got, str)` 会「下载成功但不解包」，脚本随后报"找不到 ctx"，
+    而 AIMO 额度已经花掉了。本函数同时兼容 list / str / 空（空则在 out_dir 里扫 zip 自愈）。
+    """
+    import zipfile
+
+    cands = []
+    for p in (got if isinstance(got, (list, tuple)) else ([got] if got else [])):
+        if p and os.path.isfile(p):
+            cands.append(p)
+    if not cands:
+        cands = sorted(glob.glob(os.path.join(out_dir, "*save_path*.zip"))
+                       or glob.glob(os.path.join(out_dir, "*.zip")))
+    names = []
+    for p in cands:
+        if not zipfile.is_zipfile(p):
+            names.append(os.path.basename(p))
+            continue
+        with zipfile.ZipFile(p) as z:
+            z.extractall(out_dir)
+            members = [m for m in z.namelist() if not m.endswith("/")]
+        names.extend(os.path.basename(m) for m in members)
+        print(f"      已解包 {os.path.basename(p)} → {len(members)} 个文件")
+    return names
+
+
 def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
                           calib_tub_paths: Optional[str] = None,
                           calib_max: int = 100, timeout_s: int = 3600,
@@ -305,10 +335,21 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
         return None
 
     os.makedirs(out_dir, exist_ok=True)
+    # 自愈：先把上次「下载成功但没解包」的产物解出来（AIMO 额度宝贵，别为本地解包 bug 重转）
+    _unpack_zips(out_dir)
     got = task.download(file_mode=DownloadFileMode.OutputModel, output_file_path=out_dir)
     print(f"[5/5] 已下载到: {got}")
-    print("      车端用 *.ctx.bin.aidem + 同目录 qnn_model_info.json "
-          "（模型类型 aidlite_linear）")
+    arts = _unpack_zips(out_dir, got)
+    aidem = [a for a in arts if a.endswith(".aidem") and "x86" not in a]
+    if aidem:
+        print(f"      ★ 车端模型: {aidem[0]}")
+        print("      ★ 与同目录的 qnn_model_info.json 必须一起拷贝上车")
+    else:
+        print(f"      ! 未解出 *.ctx.bin.aidem，请检查 {out_dir}")
+    if any("x86" in a for a in arts):
+        print("      ! 产物含 x86 仿真库 lib*.x86.so.aidem —— 仅 PC 仿真用，别拷到车上")
+    if any(a.endswith("qnn_model_info.json") for a in arts):
+        print("      ★ 推理时形状从 qnn_model_info.json 读，缺了会静默出 NaN")
     return got
 
 
