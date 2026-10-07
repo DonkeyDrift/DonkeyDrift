@@ -50,6 +50,16 @@
   - 配套：`/api/trainer/models` 扫描一级子目录，把其中的 `*.aidem` 以 `<目录>/<文件名>` 透出（跳过 x86 变体与 `.savedmodel`）；`load_model` 的相对路径校验本就允许 `models/<一级子目录>/<文件>`，前端 `./models/${name}` 拼接天然兼容，Drive 页「加载到车端」对解压产物直接可用。
   - 迁移与实测：已把本次转出的 `pilot_1791379009443_save_path.zip` 用新逻辑落成 `models/pilot_1791379009443_save_path/`（zip 清理）；重启 8001 实例后模型列表同时显示 `.tflite` 与 `<目录>/…ctx.bin.aidem`，key-status 正常。测试：新增 `donkeycar/tests/test_aimo_npu_convert.py` 5 例（ctx.bin 优先/回退、zip-slip 拒收、非 zip 原样、无 .aidem 落目录）+ `test_trainer_models.py` 2 例（子目录透出与 .savedmodel 不误扫），backend 全套 584 passed。
 
+## 2026-10-07 (263)
+
+- fix(npu): 修「切换 .aidem 失败 init rc=1」与「Arena 扫不到 aidlite_linear」——板卡缺 QNN240 后端 + Arena 列表不扫子目录
+  - 现象①：Drive 页切换 .aidem 模型，车端报 `interpreter.init() 失败 rc=1`；现象②：Pilot Arena 模型列表过滤 aidlite_linear 后为空。
+  - 根因①（环境）：aidlite 本体能 import，但 `_quiet_c()` 静默层下被吞的原生日志显示 `dlopen(/usr/local/lib/libaidlite_qnn240.so) failure → Backend retrieve failed (StatusCode[100061])`——**QNN240 后端插件未安装**（板上只有 qnn236；此前 3.12 实验时装过 2.5.1.304，环境还原回滚后被清掉）。AIMO 产物目标 runtime 是 QNN 2.40，缺它必然 init 失败。
+  - 修复①：`sudo aid-pkg install aidlite-qnn240`（2.5.1.304）。注意 aid-pkg 安装器**需要 PTY**（无 TTY 时报 `Get terminal width failed! Not Supported`），脚本化用 `printf 'y\n' | script -qec "sudo aid-pkg install ..." /dev/null`。装回后 npu_pilot 加载+推理实测通过（steering 0.042 / throttle −0.028，双侧非零——混合校准版输出头未被截断）；后端插件是 init 时 dlopen，车端常驻进程**无需重启**即生效。
+  - 根因②（代码）：与上一条目同款问题——`/api/arena/models` 只扫 models 顶层，AIMO 自包含子目录里的 `.ctx.bin.aidem` 不上列表。修复：同款一级子目录扫描（name 带 `<目录>/` 前缀，跳过 x86 变体与 .savedmodel，遵守 model_type 扩展名过滤）；`/pilots/load` 收列表返回的绝对路径，无需改动。
+  - 实测：重启 8001 后 `/api/arena/models?model_type=aidlite_linear` 列出该模型；`POST /api/arena/pilots/load`（aidlite_linear）加载成功、随 unload 释放。测试：`test_arena.py` 新增 2 例（子目录透出+过滤），backend 全套 586 passed。
+  - 注：`aidlite-qnn240` 是系统级包，不在 git 里——**换板/还原环境后需重装**（见环境备份记忆）。
+
 # 变更日志
 
 ## 2026-09-28 (259)
