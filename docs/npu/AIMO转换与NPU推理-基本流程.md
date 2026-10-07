@@ -188,3 +188,35 @@ it.destroy()
 | 设备 NPU 推理（完整 YOLOv5s 流程） | **12.62 ms/图** |
 | 设备 NPU 推理（零输入冒烟） | 11.75 ~ 13.75 ms |
 | CPU 对照（ONNX / TFLite） | 438.6 ms / 206.5 ms /图 |
+
+---
+
+## 附：与项目 venv（TF 2.19）的兼容性坑（2026-10-07 实测）
+
+本机项目环境 `.venv` 是 **Python 3.12 + TF 2.19**，而 TF 2.19 自己声明：
+
+```
+protobuf !=4.21.0..4.21.5,<6.0.0dev,>=3.20.3
+numpy    <2.2.0,>=1.26.0
+ml-dtypes<1.0.0,>=0.5.1
+```
+
+因此 **不要把 onnx / tf2onnx 装进项目 venv**：
+
+- `onnx 1.23.x` 由 protobuf **≥6.31** 的 gencode 生成 → 会强制把 protobuf 顶到 6/7，
+  而 TF 2.19 要 `<6`；表现为 `AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'`
+  以及 `VersionError: gencode 6.31.1 runtime 5.29.6`；
+- 反过来把 protobuf 钉回 5.29.6，则 `import onnx` 直接失败 —— **两者不可共存于同一解释器**；
+- 顺带：`onnx` 的依赖链还会把 numpy 顶到 2.x（本项目要求 numpy 1.26.4）。
+
+**正确做法**：转换源不需要 onnx。AIMO 的 `SourceModelType` 原生支持
+`TensorFlow_Lite` / `TensorFlow_PB` / `TensorFlow_Save_Model` / `PyTorch` / `Caffe` / `MXNet` / `PaddlePaddle`，
+`donkeycar/tools/aimo_npu_convert.py` 已按扩展名**自动识别**源类型，`.tflite` 可直接作为源：
+
+```bash
+python -m donkeycar.tools.aimo_npu_convert --onnx models/DKG-1.tflite --out out/ --calib-tubs ~/mycar/data
+# [0/5] 源模型类型: SourceModelType.TensorFlow_Lite  (DKG-1.tflite)
+```
+
+若确需 onnx（例如要先用 tf2onnx 做结构改造），请**另建独立 venv**（如 `~/.venvs/onnx-tools`）做转换，
+产物文件再交给本脚本；不要让 onnx 与 TF 2.19 共享解释器。

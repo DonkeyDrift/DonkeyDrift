@@ -1,3 +1,18 @@
+## 2026-10-07 (260)
+
+- fix(npu): AIMO 转换修复「校准集被静默跳过」+ 源模型类型自动识别 + 精度/校准集可选
+  - 现象：把 tub 真实车帧当校准集传入后，服务端仍报 `No quantization data uploaded`，一次任务白跑。
+  - 根因①（关键）：`CalibrationDatasetType.Custom` 的枚举值是**空字符串 `''`**，而脚本传的是字面量 `"custom"` —— SDK 内部「`mode == Image` 且 `dataset == Custom` 才真正上传」的守卫条件不成立，**上传被静默跳过**，调用不报错，直到提交后服务端才暴露。（`mode="cv"` 恰好没事：`CalibrationDataMode.Image` 的值就是 `'cv'`，字符串相等成立。）
+  - 根因②：源模型类型被写死 `SourceModelType.ONNX`，现成的 `.tflite` 必须先转 onnx 才能送 AIMO；而 onnx 与 TF 2.19 的 protobuf 依赖不可共存（onnx ≥1.23 需 protobuf ≥6.31，TF 2.19 需 <6），还会把 numpy 顶到 2.x（AidLite 要求 <2）。
+  - 修复：
+    1. 量化参数改传 **SDK 枚举成员**（`CalibrationDataMode.Image` / `CalibrationDatasetType.Custom` 或内置集成员），并新增**上传后自查**：`quantize_options.calibration_data_files` 为空时打印告警，不再静默。
+    2. 新增 `resolve_source_type()`：按扩展名/目录自动识别 `.tflite / .onnx / .pb(frozen) / .pt,.pth / saved_model`，也可用 `source_type` 显式指定；`new_task` 改用 `getattr(SourceModelType, src_type)`。
+    3. 新增 `--precision INT8|INT16|FP16`（`ModelDataPrecision` 的 `A8_W8 / A16_W8 / Afp16_Wfp16`），并**按精度组装参数**：`quantize_mode` 与 `enable_per_channel_quantize` 是 INT8/INT16 专用，与 FP16 混用会被服务端拒（`code=201 Transform Params Error : unsupported mix precision options`）。
+    4. 新增 `--calib-dataset imagenet|coco|face|normal`（无校准 tub 时的内置校准集）。
+    5. 校准图由**软链改为真实拷贝**（`shutil.copy2`）—— AIMO SDK 上传不跟随符号链接，软链等于没传。
+  - 实测（`DKG-1.tflite` → QCS6490 / QNN 2.40，tub 真实车帧 100 张校准）：`[2.5/5] 校准集已上传: 100 张 -> 100 个 URL`，服务端 **30 s** 完成 int8 转换（`w8a8`）；`--precision INT16` 亦成功（`w8a16`）。两版产物的 **steering 输出头量化后恒 0**（读原始整数张量即为 0，与校准集无关），throttle 与 float32 参考吻合（INT16 Δ6.8e-4）——属量化精度问题，另开条目跟进。
+  - 注：**不要把 `onnx` / `tf2onnx` 装进带 TF 的项目 venv**（`AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'` 或 `VersionError: gencode 6.31.1 runtime 5.29.6`，两者不可共存）；确需 onnx 就在独立 venv 里转，只把产物交给 AIMO/设备。
+
 # 变更日志
 
 ## 2026-09-28 (259)
