@@ -210,7 +210,7 @@ def convert_onnx_to_aidem(onnx_path: str, out_dir: str,
                                       CalibrationDataMode, CalibrationDatasetType)
         from aplux_aimo.base_data import QuantizeOptions
     except ImportError:
-        print("AIMO SDK 未安装：请先 pip install aplux-aimo（Web 端转换同样依赖它）")
+        print("AIMO SDK 未安装：请先 pip install aplux_aimo -i https://mirrors.aidlux.com/simple/")
         return None
 
     onnx_path = os.path.abspath(onnx_path)
