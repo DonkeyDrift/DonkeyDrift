@@ -24,8 +24,10 @@ class FakePeerConnection {
   remoteDescription: RTCSessionDescriptionInit | null = null;
   candidates: RTCIceCandidateInit[] = [];
   closed = false;
+  connectionState: RTCPeerConnectionState = 'new';
   ontrack: ((event: RTCTrackEvent) => void) | null = null;
   onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
+  onconnectionstatechange: (() => void) | null = null;
   statsReports: unknown[] = [];
 
   addTransceiver = vi.fn();
@@ -62,8 +64,33 @@ const HookProbe: React.FC<{
   negotiationTimeoutMs?: number;
   retryIntervalMs?: number;
   videoReadyTimeoutMs?: number;
-}> = ({ signal, onState, factory, negotiationTimeoutMs, retryIntervalMs, videoReadyTimeoutMs }) => {
-  const state = useDriveWebRtcVideo({ incomingSignal: signal, peerConnectionFactory: factory, negotiationTimeoutMs, retryIntervalMs, videoReadyTimeoutMs });
+  disconnectGraceMs?: number;
+  stallRecoveryMs?: number;
+  muteRecoveryMs?: number;
+  watchdogIntervalMs?: number;
+}> = ({
+  signal,
+  onState,
+  factory,
+  negotiationTimeoutMs,
+  retryIntervalMs,
+  videoReadyTimeoutMs,
+  disconnectGraceMs,
+  stallRecoveryMs,
+  muteRecoveryMs,
+  watchdogIntervalMs,
+}) => {
+  const state = useDriveWebRtcVideo({
+    incomingSignal: signal,
+    peerConnectionFactory: factory,
+    negotiationTimeoutMs,
+    retryIntervalMs,
+    videoReadyTimeoutMs,
+    disconnectGraceMs,
+    stallRecoveryMs,
+    muteRecoveryMs,
+    watchdogIntervalMs,
+  });
   onState(state);
   return <video ref={state.videoRef} />;
 };
@@ -294,5 +321,162 @@ describe('useDriveWebRtcVideo', () => {
     await waitFor(() => expect(pc.candidates).toEqual([
       { candidate: 'candidate:1', sdpMid: '0', sdpMLineIndex: 0 },
     ]));
+  });
+
+  it('connectionState 变为 failed 时自动重连', async () => {
+    const api = await import('../services/api');
+    const pc = new FakePeerConnection();
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} factory={factory} />);
+
+    await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+    await act(async () => {
+      pc.connectionState = 'failed';
+      pc.onconnectionstatechange?.();
+    });
+
+    await waitFor(() => expect(lastCallValue(onState).state).toBe('reconnecting'));
+    await waitFor(() => expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(2));
+  });
+
+  it('disconnected 宽限内自愈不重连，超过宽限仍断开才重连', async () => {
+    const api = await import('../services/api');
+    const pc = new FakePeerConnection();
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} factory={factory} disconnectGraceMs={30} />);
+
+    await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+    // 宽限内恢复 connected：不重连
+    await act(async () => {
+      pc.connectionState = 'disconnected';
+      pc.onconnectionstatechange?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      pc.connectionState = 'connected';
+      pc.onconnectionstatechange?.();
+    });
+    expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(1);
+    // 再次 disconnected 且超过宽限仍断开：重连
+    await act(async () => {
+      pc.connectionState = 'disconnected';
+      pc.onconnectionstatechange?.();
+    });
+    await waitFor(() => expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(2));
+  });
+
+  it('渲染帧停滞后看门狗自动重连', async () => {
+    const callbacks: VideoFrameRequestCallback[] = [];
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: VideoFrameRequestCallback) => {
+        callbacks.push(callback);
+        return callbacks.length;
+      }),
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const api = await import('../services/api');
+    const pc = new FakePeerConnection();
+    pc.connectionState = 'connected';
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} factory={factory} stallRecoveryMs={1000} watchdogIntervalMs={10} />);
+
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    try {
+      await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+      await act(async () => {
+        pc.ontrack?.({
+          streams: [{} as MediaStream],
+          track: {} as MediaStreamTrack,
+          receiver: {} as RTCRtpReceiver,
+        } as unknown as RTCTrackEvent);
+      });
+      await act(async () => {
+        document.querySelector('video')?.dispatchEvent(new Event('loadeddata'));
+      });
+      await waitFor(() => expect(lastCallValue(onState).videoReady).toBe(true));
+      // 出一帧渲染（此刻 performance.now=1000）后停摆：把本地时钟拨过 stallRecoveryMs
+      await act(async () => {
+        callbacks.at(-1)?.(0, { presentationTime: 0 } as VideoFrameCallbackMetadata);
+      });
+      nowSpy.mockReturnValue(61_000);
+
+      await waitFor(() => expect(lastCallValue(onState).state).toBe('reconnecting'));
+      await waitFor(() => expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(2));
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('track muted 超时后看门狗自动重连', async () => {
+    const api = await import('../services/api');
+    const pc = new FakePeerConnection();
+    pc.connectionState = 'connected';
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+    const track = {} as MediaStreamTrack;
+
+    render(<HookProbe onState={onState} factory={factory} muteRecoveryMs={20} watchdogIntervalMs={10} />);
+
+    await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+    await act(async () => {
+      pc.ontrack?.({
+        streams: [{} as MediaStream],
+        track,
+        receiver: {} as RTCRtpReceiver,
+      } as unknown as RTCTrackEvent);
+      document.querySelector('video')?.dispatchEvent(new Event('loadeddata'));
+      track.onmute?.(new Event('mute'));
+    });
+    await waitFor(() => expect(lastCallValue(onState).videoReady).toBe(true));
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await waitFor(() => expect(lastCallValue(onState).state).toBe('reconnecting'));
+    await waitFor(() => expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(2));
+  });
+
+  it('会话被其他客户端接管时不重连，回退 MJPEG', async () => {
+    const api = await import('../services/api');
+    const { getDriveWebRtcStats } = await import('../services/api');
+    (getDriveWebRtcStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+      session_id: 'session-other',
+      degraded: false,
+    });
+    const pc = new FakePeerConnection();
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    render(<HookProbe onState={onState} factory={factory} />);
+
+    try {
+      await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+      // 等 stats 轮询（1s 间隔）拿到「别人的会话」
+      await waitFor(() => expect(lastCallValue(onState).stats.session_id).toBe('session-other'), { timeout: 3000 });
+
+      await act(async () => {
+        pc.connectionState = 'failed';
+        pc.onconnectionstatechange?.();
+      });
+
+      await waitFor(() => expect(lastCallValue(onState).state).toBe('idle'));
+      expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(1);
+    } finally {
+      (getDriveWebRtcStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+        source_fps: 60,
+        sent_fps: 60,
+        browser_fps: 0,
+        browser_p95_frame_interval_ms: 0,
+        degraded: false,
+      });
+    }
   });
 });

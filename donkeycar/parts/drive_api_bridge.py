@@ -268,6 +268,12 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         self.clock = clock
         self.last_frame_id = 0
         self.pts = 0
+        # pts 墙钟锚点：RTP 时间戳 = pts * time_base，必须跟随帧的真实
+        # 采集时刻推进。若改成「每帧 +1」，实际发送速率低于声明 fps 时
+        # （编码/负载波动，实测 48~57fps vs 60fps）媒体时钟会持续慢于
+        # 墙钟，接收端缓冲时序随运行时长失真。
+        self._pts_anchor_t: Optional[float] = None
+        self._pts_anchor_pts = 0
         self.time_base = Fraction(1, fps)
         self.sent_timestamps = deque(maxlen=120)
         self.sent_frames = 0
@@ -281,9 +287,16 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
             latest = self.frame_buffer.get_latest()
             if latest is not None and latest.frame_id != self.last_frame_id:
                 self.last_frame_id = latest.frame_id
-                self.pts += 1
                 self.sent_frames += 1
                 self.sent_timestamps.append(self.clock())
+                if self._pts_anchor_t is None:
+                    self._pts_anchor_t = latest.timestamp
+                    self._pts_anchor_pts = self.pts
+                else:
+                    target = self._pts_anchor_pts + int(round(
+                        (latest.timestamp - self._pts_anchor_t) * self.fps))
+                    # 单调保护：墙钟回拨（NTP 校时）时退化为每帧 +1，保证 pts 不回退
+                    self.pts = target if target > self.pts else self.pts + 1
                 frame = av.VideoFrame.from_ndarray(latest.frame, format="rgb24")
                 frame.pts = self.pts
                 frame.time_base = self.time_base
