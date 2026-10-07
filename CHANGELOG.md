@@ -1,5 +1,12 @@
 ## 2026-10-07 (260)
 
+- feat(npu): 收入 aidlite 的 C-ABI 外壳 + ctypes 门面 —— 工程 Python 版本直接跑 NPU（回到单环境）
+  - 背景：本板镜像的官方 aidlite 绑定是 `soaidlitesdk.cpython-310-aarch64-linux-gnu.so`（pybind11 扩展模块，ABI 按 Python 版本锁死：3.12 实测 `ImportError: Python version mismatch ... compiled for Python 3.10 ... 3.12.14`），而工程 `python_requires >=3.11` 且 `donkeycar/__init__.py` 有 `minor < 11` 硬门槛 ⇒ 工程自己的解释器无法 `import aidlite`，NPU 只能依赖额外的 3.10 环境（而该环境装不进工程）。AidLux 亦不提供任何 py3.12 包。
+  - 方案：镜像自带官方头文件 `/usr/local/include/aidlux/aidlite/aidlite.hpp`（726 行）与 `libaidlite.so`（与 Python 版本无关，任意解释器可 dlopen）→ 自建 `extern "C"` 外壳（151 行）+ ctypes 门面（375 行，API 形状对齐官方绑定：`Model/Config/InterpreterBuilder/Interpreter` + 各枚举）。`set_input_tensor/get_output_tensor` 一律 `is_native=false`，由 aidlite 按模型自带量化参数做量化/反量化。
+  - 为什么 ctypes 可行：这是**运行期绑定**，不走 CPython C-API —— 外壳 `PyInit_*` 入口 0 个、引用的 Python C-API 符号 0 个（对比官方扩展模块：1 个入口 + 141 个 C-API 符号），因此**不锁 Python 版本、不需要 `python3-dev`**，只需 `g++`。
+  - 落地：`scripts/aidlite_cabi/`（外壳 cpp + 门面包 + `rebuild.sh` + README + 换设备依赖清单）。`rebuild.sh` 是**探测式且幂等**的：目标解释器已能用官方绑定则直接跳过；缺头文件/库/g++ 给准确修复命令；重复运行=重编重装（升级 aidlite-sdk 后正是需要跑一次）。`libaidlite_cabi.so` 按本机头文件编出，**不入库**（`.gitignore` 已加）。
+  - 实测（Python 3.12.14 + aidlite 2.5.1.304 + `DKG-1_qcs6490_w8a8.qnn240.ctx.bin.aidem`）：`Model.create_instance` ✅、`set_model_properties rc=0`、`init()=0`、`load_model()=0`、输出张量名 `['StatefulPartitionedCall_0','StatefulPartitionedCall_1']`；直调 aidlite **0.88 ms/次**（20 次），经工程 `NpuLinearPilot` **1.68 ms/次**（100 次，含 pilot 归一化）；与 3.10 官方绑定输出**逐位一致** `[0.0, -0.062795]`。授权不受影响（license 校验在 `libaidlite.so` 内）。
+  - 边界：只实现车端 NPU 用到的子集（`Context/TensorInfo/DeviceInfo/缓冲区接口` 未实现）；aidlite 的 TFLite/CPU 后端经此门面 `init()` 返回 1（有 TF 的解释器走原生 TF 路径，本环境不用该路）；**aidlite-sdk 升级后需重跑 `rebuild.sh`**；官方若提供匹配 ABI 的绑定应改回官方。
 - fix(npu): AIMO 转换修复「校准集被静默跳过」+ 源模型类型自动识别 + 精度/校准集可选
   - 现象：把 tub 真实车帧当校准集传入后，服务端仍报 `No quantization data uploaded`，一次任务白跑。
   - 根因①（关键）：`CalibrationDatasetType.Custom` 的枚举值是**空字符串 `''`**，而脚本传的是字面量 `"custom"` —— SDK 内部「`mode == Image` 且 `dataset == Custom` 才真正上传」的守卫条件不成立，**上传被静默跳过**，调用不报错，直到提交后服务端才暴露。（`mode="cv"` 恰好没事：`CalibrationDataMode.Image` 的值就是 `'cv'`，字符串相等成立。）

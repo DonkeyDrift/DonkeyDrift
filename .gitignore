@@ -84,3 +84,8 @@ web_ui/backend/data/
 # AIMO / NPU 转换密钥：只从环境变量取，本机凭据目录/密钥文件一律不入库
 .aidlux_cred/
 aimo_api_key
+
+# aidlite 自建绑定：libaidlite_cabi.so 按本机 aidlite.hpp/libaidlite.so 编出，换设备/换 SDK 都要重编
+# （bash scripts/aidlite_cabi/rebuild.sh）→ 产物不入库；门面装在 venv 里由脚本复制
+scripts/aidlite_cabi/libaidlite_cabi.so
+scripts/aidlite_cabi/aidlite/__pycache__/
