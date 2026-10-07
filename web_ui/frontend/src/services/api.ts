@@ -596,6 +596,36 @@ export const createLogStream = (jobId: string) => {
 };
 
 // ------------------------------------------------------------------
+// AIMO cloud NPU conversion (.aidem)
+// ------------------------------------------------------------------
+export interface AimoKeyStatus {
+  sdk: boolean;
+  key: boolean;
+  keySource: 'env' | 'file' | null;
+}
+
+export const getAimoKeyStatus = async (): Promise<AimoKeyStatus> => {
+  const response = await api.get('/trainer/aimo/key-status');
+  return response.data as AimoKeyStatus;
+};
+
+// 状态查询 / 停止 / SSE 日志复用训练任务的 getJobStatus / stopTrain / createLogStream
+export const startAimoConvert = async (params: {
+  model_path: string;
+  out_dir?: string;
+  working_dir?: string;
+  precision?: 'INT8' | 'INT16' | 'FP16';
+  calib_tubs?: string | null;
+  calib_max?: number;
+  calib_mix_synth?: number;
+  calib_dataset?: string;
+  timeout_s?: number;
+}) => {
+  const response = await api.post('/trainer/train/aimo', params);
+  return response.data as { job_id: string; status: string };
+};
+
+// ------------------------------------------------------------------
 // Car Connector APIs
 // ------------------------------------------------------------------
 export interface ConnectorConfig {

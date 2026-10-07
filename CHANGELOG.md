@@ -1,3 +1,65 @@
+## 2026-10-07 (260)
+
+- tools(npu): 收入 NPU/参考对照的固定流程四件套 `scripts/npu_eval/`
+  - 动机：每转一版模型都要回答"输出准不准、哪个头退化"，而临时脚本容易犯两个错——① 直接取 tub 前 N 张（实测 787 帧里仅 272 帧唯一，重复帧会让"连续帧输出相同"伪装成模型退化）；② 回归/标量输出上用余弦相似度（单元素向量符号翻转即误报 -1）。
+  - 内容：`make_eval_set.py`（去重 + 有真值时按真值分层抽样 + 生成能推双侧的合成图）、`npu_eval.py`（aidlite/QNN240+DSP，默认 AIMO 的 `/255` 输入约定）、`ref_eval.py`（工程 TFLite 的 float32 参考，尺度按源模型走）、`cmp_eval.py`（逐头平均/最大 |Δ|、非零帧数、合成输入逐项对照）、README（尺度对照表 + 实测样例 + 注意事项）。
+  - 实测（DKG-1，21 帧去重真实图）：混入合成图校准的 INT16 版 steering 平均|Δ| **0.0031**（非零 21/21）、throttle **0.0020**；仅 tub 校准的旧版 steering 非零 **0/21**。
+- fix(npu): 修「AIMO 单侧校准把输出头截死」——新增 `--calib-mix-synth`（校准集混入合成图）
+  - 现象：NPU 模型（INT8/INT16 均）在真实车帧上 steering **恒为 0**，而 float32 参考在同一批帧给出 −0.159~−0.338（21 帧去重抽样、21 个不同值）。先怀疑测试帧选取，遂去重（787 帧里仅 272 唯一）并按转角均匀抽样 —— **仍全 0**，排除。
+  - 定位：用合成输入（黑/白/灰/左右分块/上下分块）探响应 → 发现**每个输出头只保留一侧符号**（steering 负→0、throttle 正→0）；再读**原始整型**张量确认值为 0 → 不是索引/读取问题，是量化范围问题。
+  - 根因：AIMO 按**校准数据**的激活范围给每个张量定 min/max。tub 真实帧的参考输出恰好单侧（steering 全负、throttle 多为负）⇒ 输出张量被标成单侧范围 ⇒ 反号值被压到零点。
+  - 修复：`donkeycar/tools/aimo_npu_convert.py` 新增 `--calib-mix-synth N`（建议 ≥30），在校准集里混入 black/white/gray/左右分块/上下分块/渐变/噪声合成图，与真实帧按 `N:(max−N)` 混合，把输出范围拉回双侧。
+  - 实测（21 帧去重真实图 vs float32 参考）：steering 平均|Δ| **0.2307 → 0.0031**（最大 0.0058，非零 **21/21**）；throttle 平均|Δ| 0.0017 → 0.0020（非零 21/21）；推理 **0.84 ms/次**（50 次）。车端主用模型更新为 `DKG-1_qcs6490_w8a16_mixcal.qnn240.ctx.bin.aidem`（旧的取帧单侧校准版本移入 `models/_superseded/` 留档）。
+  - 判据与复现：`docs/npu/AIMO量化校准-单侧校准陷阱.md`（含"读原始整型张量 → 合成图推双侧 → 换混合校准集"三步判据）。
+- feat(npu): 收入 aidlite 的 C-ABI 外壳 + ctypes 门面 —— 工程 Python 版本直接跑 NPU（回到单环境）
+  - 背景：本板镜像的官方 aidlite 绑定是 `soaidlitesdk.cpython-310-aarch64-linux-gnu.so`（pybind11 扩展模块，ABI 按 Python 版本锁死：3.12 实测 `ImportError: Python version mismatch ... compiled for Python 3.10 ... 3.12.14`），而工程 `python_requires >=3.11` 且 `donkeycar/__init__.py` 有 `minor < 11` 硬门槛 ⇒ 工程自己的解释器无法 `import aidlite`，NPU 只能依赖额外的 3.10 环境（而该环境装不进工程）。AidLux 亦不提供任何 py3.12 包。
+  - 方案：镜像自带官方头文件 `/usr/local/include/aidlux/aidlite/aidlite.hpp`（726 行）与 `libaidlite.so`（与 Python 版本无关，任意解释器可 dlopen）→ 自建 `extern "C"` 外壳（151 行）+ ctypes 门面（375 行，API 形状对齐官方绑定：`Model/Config/InterpreterBuilder/Interpreter` + 各枚举）。`set_input_tensor/get_output_tensor` 一律 `is_native=false`，由 aidlite 按模型自带量化参数做量化/反量化。
+  - 为什么 ctypes 可行：这是**运行期绑定**，不走 CPython C-API —— 外壳 `PyInit_*` 入口 0 个、引用的 Python C-API 符号 0 个（对比官方扩展模块：1 个入口 + 141 个 C-API 符号），因此**不锁 Python 版本、不需要 `python3-dev`**，只需 `g++`。
+  - 落地：`scripts/aidlite_cabi/`（外壳 cpp + 门面包 + `rebuild.sh` + README + 换设备依赖清单）。`rebuild.sh` 是**探测式且幂等**的：目标解释器已能用官方绑定则直接跳过；缺头文件/库/g++ 给准确修复命令；重复运行=重编重装（升级 aidlite-sdk 后正是需要跑一次）。`libaidlite_cabi.so` 按本机头文件编出，**不入库**（`.gitignore` 已加）。
+  - 实测（Python 3.12.14 + aidlite 2.5.1.304 + `DKG-1_qcs6490_w8a8.qnn240.ctx.bin.aidem`）：`Model.create_instance` ✅、`set_model_properties rc=0`、`init()=0`、`load_model()=0`、输出张量名 `['StatefulPartitionedCall_0','StatefulPartitionedCall_1']`；直调 aidlite **0.88 ms/次**（20 次），经工程 `NpuLinearPilot` **1.68 ms/次**（100 次，含 pilot 归一化）；与 3.10 官方绑定输出**逐位一致** `[0.0, -0.062795]`。授权不受影响（license 校验在 `libaidlite.so` 内）。
+  - 边界：只实现车端 NPU 用到的子集（`Context/TensorInfo/DeviceInfo/缓冲区接口` 未实现）；aidlite 的 TFLite/CPU 后端经此门面 `init()` 返回 1（有 TF 的解释器走原生 TF 路径，本环境不用该路）；**aidlite-sdk 升级后需重跑 `rebuild.sh`**；官方若提供匹配 ABI 的绑定应改回官方。
+- fix(npu): AIMO 转换修复「校准集被静默跳过」+ 源模型类型自动识别 + 精度/校准集可选
+  - 现象：把 tub 真实车帧当校准集传入后，服务端仍报 `No quantization data uploaded`，一次任务白跑。
+  - 根因①（关键）：`CalibrationDatasetType.Custom` 的枚举值是**空字符串 `''`**，而脚本传的是字面量 `"custom"` —— SDK 内部「`mode == Image` 且 `dataset == Custom` 才真正上传」的守卫条件不成立，**上传被静默跳过**，调用不报错，直到提交后服务端才暴露。（`mode="cv"` 恰好没事：`CalibrationDataMode.Image` 的值就是 `'cv'`，字符串相等成立。）
+  - 根因②：源模型类型被写死 `SourceModelType.ONNX`，现成的 `.tflite` 必须先转 onnx 才能送 AIMO；而 onnx 与 TF 2.19 的 protobuf 依赖不可共存（onnx ≥1.23 需 protobuf ≥6.31，TF 2.19 需 <6），还会把 numpy 顶到 2.x（AidLite 要求 <2）。
+  - 修复：
+    1. 量化参数改传 **SDK 枚举成员**（`CalibrationDataMode.Image` / `CalibrationDatasetType.Custom` 或内置集成员），并新增**上传后自查**：`quantize_options.calibration_data_files` 为空时打印告警，不再静默。
+    2. 新增 `resolve_source_type()`：按扩展名/目录自动识别 `.tflite / .onnx / .pb(frozen) / .pt,.pth / saved_model`，也可用 `source_type` 显式指定；`new_task` 改用 `getattr(SourceModelType, src_type)`。
+    3. 新增 `--precision INT8|INT16|FP16`（`ModelDataPrecision` 的 `A8_W8 / A16_W8 / Afp16_Wfp16`），并**按精度组装参数**：`quantize_mode` 与 `enable_per_channel_quantize` 是 INT8/INT16 专用，与 FP16 混用会被服务端拒（`code=201 Transform Params Error : unsupported mix precision options`）。
+    4. 新增 `--calib-dataset imagenet|coco|face|normal`（无校准 tub 时的内置校准集）。
+    5. 校准图由**软链改为真实拷贝**（`shutil.copy2`）—— AIMO SDK 上传不跟随符号链接，软链等于没传。
+  - 实测（`DKG-1.tflite` → QCS6490 / QNN 2.40，tub 真实车帧 100 张校准）：`[2.5/5] 校准集已上传: 100 张 -> 100 个 URL`，服务端 **30 s** 完成 int8 转换（`w8a8`）；`--precision INT16` 亦成功（`w8a16`）。两版产物的 **steering 输出头量化后恒 0**（读原始整数张量即为 0，与校准集无关），throttle 与 float32 参考吻合（INT16 Δ6.8e-4）——属量化精度问题，另开条目跟进。
+  - 注：**不要把 `onnx` / `tf2onnx` 装进带 TF 的项目 venv**（`AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'` 或 `VersionError: gencode 6.31.1 runtime 5.29.6`，两者不可共存）；确需 onnx 就在独立 venv 里转，只把产物交给 AIMO/设备。
+
+## 2026-10-07 (261)
+
+- feat(webui): Trainer 页模型列表新增「转 NPU」——图形化 AIMO 云转入口（.aidem 产出即列表可见）
+  - 动机：`donkeycar/tools/aimo_npu_convert.py` 此前只能 SSH 上车敲 CLI（参数长、云端轮询动辄几十分钟、日志肉眼盯），想把训练完的 `.tflite`/saved_model 转成 QCS6490 NPU 模型在网页端一步完成。
+  - 后端：完全复用训练 job 基础设施——`trainer_engine.py` 新增 `aimo` job 模式，以子进程跑 `python -m donkeycar.tools.aimo_npu_convert`（与 `run_local` 同管道：stdout/stderr 逐行泵进 SSE 日志流），解析 `[n/5]` 阶段行为粗粒度进度、`[5/5] 已下载到:` 为产物路径（`job.result_path`）；停止 = terminate 子进程。新端点：`POST /api/trainer/train/aimo`（状态/日志/停止复用 `/train/{job_id}/status|logs|stop`）、`GET /api/trainer/aimo/key-status`（`find_spec` 探测 aplux_aimo + 按工具同优先级判 API Key 是否已配置，只回布尔与来源不回 key；刻意不在后端进程 import donkeycar 避免连带加载 TF）。
+  - 前端：`ModelsList` 头部「转 NPU」按钮（任意路径手填）+ 可转换类型行内 Cpu 按钮（`.tflite/.onnx/.pb/.pt/.pth/.savedmodel`，`.h5/.aidem/.ckpt` 不显示）；新组件 `NpuConvertModal`：源路径/输出目录/精度 INT8|INT16|FP16/校准 tub 下拉（来自 `/trainer/tubs`）/校准张数/合成图混入数——无 tub 时切换为内置校准集选择，单侧校准陷阱提示直接进表单；转换期弹窗内 SSE 实时日志 + 阶段进度条，终态后查 REST 补拿产物路径展示；运行中可关窗（后端继续跑），完成后回调刷新模型列表。未装 SDK/Key 时开弹窗即黄色警告，避免白跑。
+  - 工具：`aimo_npu_convert.py` 的 `aplux_aimo` 导入失败改为友好报错（原样裸 traceback 会整屏进 Web 日志面板）。
+  - 测试：后端新增 `test_trainer_aimo.py` 7 例（job 化与命令行组装/参数校验/key-status 不泄漏/key-status 未配置/result_path/阶段与产物路径解析），全套 582 passed；前端新增 15 例（isNpuConvertible/警告横幅/参数映射/SSE 驱动进度与终态产物路径/停止/行内按钮显隐/头部入口），全套 398 passed + `tsc` 与生产构建通过。
+  - 实测（真机 Playwright + 临时 uvicorn 8027）：弹窗开合、SDK/Key 缺失警告横幅、提交后子进程日志回流（无 SDK 时友好报错行）、失败终态 + Exit code 展示均正常；AIMO 云端全链路（登录→提交→轮询→下载 .aidem）待板卡配置 `AIMO_API_KEY` 后按 CLI 同路径生效。
+
+## 2026-10-07 (262)
+
+- fix(npu): AIMO 产物为 zip 压缩包时自动解压进 Models——自包含子目录 + 列表透出 .ctx.bin.aidem
+  - 现象：Web 端「转 NPU」完成后 models 目录里落的是一个 zip（`<模型名>_save_path.zip`），车端/列表都不能直接用，还要 SSH 上车手动解压摆位。
+  - 根因：AIMO SDK 的 `task.download(OutputModel)` 下载的就是整包（内含 `*.ctx.bin.aidem`、x86 模拟器变体 `lib*.x86.so.aidem`、`qnn_model_info.json`、htp 配置等 7 个文件）。且 `npu_pilot.load()` 硬性要求 `qnn_model_info.json` 与 `.aidem` **同目录且文件名固定**（donkeycar/parts/npu_pilot.py:133）——多个 NPU 模型平铺在 models/ 会互相覆盖形状定义。
+  - 修复（`donkeycar/tools/aimo_npu_convert.py` 新增 `_unpack_if_archive`）：下载后检测 zip → 安全解压（zip-slip 校验）到 `models/<zip 名>/` 自包含子目录 → 删除压缩包 → `[5/5] 已下载到:` 直接报车端模型路径（Web 端弹窗的产物路径随之正确）；优先取 `*.ctx.bin.aidem`，无 .aidem 时报目录。CLI 与 Web 共用此路径，均即时生效。
+  - 配套：`/api/trainer/models` 扫描一级子目录，把其中的 `*.aidem` 以 `<目录>/<文件名>` 透出（跳过 x86 变体与 `.savedmodel`）；`load_model` 的相对路径校验本就允许 `models/<一级子目录>/<文件>`，前端 `./models/${name}` 拼接天然兼容，Drive 页「加载到车端」对解压产物直接可用。
+  - 迁移与实测：已把本次转出的 `pilot_1791379009443_save_path.zip` 用新逻辑落成 `models/pilot_1791379009443_save_path/`（zip 清理）；重启 8001 实例后模型列表同时显示 `.tflite` 与 `<目录>/…ctx.bin.aidem`，key-status 正常。测试：新增 `donkeycar/tests/test_aimo_npu_convert.py` 5 例（ctx.bin 优先/回退、zip-slip 拒收、非 zip 原样、无 .aidem 落目录）+ `test_trainer_models.py` 2 例（子目录透出与 .savedmodel 不误扫），backend 全套 584 passed。
+
+## 2026-10-07 (263)
+
+- fix(npu): 修「切换 .aidem 失败 init rc=1」与「Arena 扫不到 aidlite_linear」——板卡缺 QNN240 后端 + Arena 列表不扫子目录
+  - 现象①：Drive 页切换 .aidem 模型，车端报 `interpreter.init() 失败 rc=1`；现象②：Pilot Arena 模型列表过滤 aidlite_linear 后为空。
+  - 根因①（环境）：aidlite 本体能 import，但 `_quiet_c()` 静默层下被吞的原生日志显示 `dlopen(/usr/local/lib/libaidlite_qnn240.so) failure → Backend retrieve failed (StatusCode[100061])`——**QNN240 后端插件未安装**（板上只有 qnn236；此前 3.12 实验时装过 2.5.1.304，环境还原回滚后被清掉）。AIMO 产物目标 runtime 是 QNN 2.40，缺它必然 init 失败。
+  - 修复①：`sudo aid-pkg install aidlite-qnn240`（2.5.1.304）。注意 aid-pkg 安装器**需要 PTY**（无 TTY 时报 `Get terminal width failed! Not Supported`），脚本化用 `printf 'y\n' | script -qec "sudo aid-pkg install ..." /dev/null`。装回后 npu_pilot 加载+推理实测通过（steering 0.042 / throttle −0.028，双侧非零——混合校准版输出头未被截断）；后端插件是 init 时 dlopen，车端常驻进程**无需重启**即生效。
+  - 根因②（代码）：与上一条目同款问题——`/api/arena/models` 只扫 models 顶层，AIMO 自包含子目录里的 `.ctx.bin.aidem` 不上列表。修复：同款一级子目录扫描（name 带 `<目录>/` 前缀，跳过 x86 变体与 .savedmodel，遵守 model_type 扩展名过滤）；`/pilots/load` 收列表返回的绝对路径，无需改动。
+  - 实测：重启 8001 后 `/api/arena/models?model_type=aidlite_linear` 列出该模型；`POST /api/arena/pilots/load`（aidlite_linear）加载成功、随 unload 释放。测试：`test_arena.py` 新增 2 例（子目录透出+过滤），backend 全套 586 passed。
+  - 注：`aidlite-qnn240` 是系统级包，不在 git 里——**换板/还原环境后需重装**（见环境备份记忆）。
+
 # 变更日志
 
 ## 2026-10-02 (266)

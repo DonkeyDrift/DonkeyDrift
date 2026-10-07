@@ -15,6 +15,14 @@ export type DriveVideoState = 'idle' | 'connecting' | 'connected' | 'unstable' |
 
 export const DRIVE_WEBRTC_NEGOTIATION_TIMEOUT_MS = 12000;
 export const DRIVE_WEBRTC_VIDEO_READY_TIMEOUT_MS = 8000;
+// connectionState=disconnected 的自愈宽限：网络瞬断（Wi-Fi 抖动）可能自行恢复，
+// 宽限期内回到 connected 则不打断；超过宽限仍断开才重连。
+export const DRIVE_WEBRTC_DISCONNECT_GRACE_MS = 3000;
+// 页面可见、track 已就绪后，渲染帧停止超过该时长判定画面卡死
+// （解码器等关键帧卡住时 connectionState 仍是 connected，只有渲染能暴露）。
+export const DRIVE_WEBRTC_STALL_RECOVERY_MS = 6000;
+// track muted（对端媒体包停止到达）超过该时长判定上行链路死亡并重连。
+export const DRIVE_WEBRTC_MUTE_RECOVERY_MS = 6000;
 
 interface UseDriveWebRtcVideoOptions {
   incomingSignal?: WebRtcSignal | null;
@@ -25,6 +33,14 @@ interface UseDriveWebRtcVideoOptions {
   disabled?: boolean;
   clientId?: string;
   carOnline?: boolean | null;
+  /** connectionState=disconnected 的自愈宽限毫秒数 */
+  disconnectGraceMs?: number;
+  /** 渲染帧停止多久判定卡死并重连（页面可见时才生效） */
+  stallRecoveryMs?: number;
+  /** track muted 多久判定媒体断流并重连 */
+  muteRecoveryMs?: number;
+  /** 卡死看门狗轮询间隔（测试用） */
+  watchdogIntervalMs?: number;
 }
 
 export interface DriveVideoMetrics {
@@ -138,6 +154,10 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     disabled = false,
     clientId,
     carOnline,
+    disconnectGraceMs = DRIVE_WEBRTC_DISCONNECT_GRACE_MS,
+    stallRecoveryMs = DRIVE_WEBRTC_STALL_RECOVERY_MS,
+    muteRecoveryMs = DRIVE_WEBRTC_MUTE_RECOVERY_MS,
+    watchdogIntervalMs = 1000,
   } = options;
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -158,6 +178,12 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const attemptIdRef = useRef(0);
   const startInFlightRef = useRef(false);
   const shouldRunRef = useRef(false);
+  // 中途故障恢复：最近一次渲染帧的本地时刻（rVFC 才有）、track 静音起点、
+  // disconnected 自愈宽限定时器、stats 轮询镜像（被接管判定用）。
+  const lastPresentationAtRef = useRef(0);
+  const mutedAtRef = useRef(0);
+  const disconnectTimerRef = useRef<number | null>(null);
+  const statsRef = useRef<DriveWebRtcStats>(EMPTY_STATS);
 
   const startRef = useRef<() => void>(() => undefined);
 
@@ -183,6 +209,12 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       window.clearTimeout(videoReadyTimerRef.current);
       videoReadyTimerRef.current = null;
     }
+    if (disconnectTimerRef.current !== null) {
+      window.clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
+    lastPresentationAtRef.current = 0;
+    mutedAtRef.current = 0;
     videoReadyRef.current = false;
     if (frameCallbackRef.current !== null && videoRef.current?.cancelVideoFrameCallback) {
       videoRef.current.cancelVideoFrameCallback(frameCallbackRef.current);
@@ -209,12 +241,37 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     }, delay);
   }, []);
 
+  // 中途故障恢复：WebRTC 在「传输已死/画面卡死」时 connectionState 可能长期
+  // 停在 connected（issue #221 修的是首帧黑屏，这里修的是中途卡死不恢复）。
+  // 恢复动作 = 关闭当前 peer 并按退避重连；若 stats 轮询发现活跃会话已换成
+  // 别的客户端，说明本页签被接管，回退 MJPEG 且不再重连（避免多页签互踢拉锯）。
+  const recover = useCallback((reason: string) => {
+    if (!mountedRef.current) {
+      return;
+    }
+    // 现场诊断口：卡死/断流恢复原因可在浏览器控制台回溯
+    console.info(`[drive-webrtc] recover: ${reason}`);
+    const polledSession = statsRef.current.session_id;
+    const superseded = Boolean(
+      polledSession && sessionIdRef.current && polledSession !== sessionIdRef.current,
+    );
+    closePeer();
+    if (superseded) {
+      setState('idle');
+      setStats((current) => ({ ...current, degraded: true }));
+      return;
+    }
+    setState('reconnecting');
+    scheduleRetry();
+  }, [closePeer, scheduleRetry]);
+
   const scheduleFrameStats = useCallback(() => {
     const video = videoRef.current;
     if (!video?.requestVideoFrameCallback) {
       return;
     }
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
+      lastPresentationAtRef.current = performance.now();
       frameTimestampsRef.current = [...frameTimestampsRef.current.slice(-119), metadata.presentationTime];
       const nextMetrics = calculateVideoMetrics(frameTimestampsRef.current);
       // FPS/延迟徽标无需逐帧刷新：500ms 节流一次，避免 60fps 重渲染 VideoStream（#135）
@@ -263,6 +320,9 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       window.clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
     }
+    // 重入前先关掉旧 peer：carOnline 抖动等路径会带旧连接再次 start()，
+    // 旧 peer 不关会在后台维持 ICE/DTLS（泄漏）并占用视频元素流
+    closePeer();
     setState('connecting');
     trackReceivedRef.current = false;
     try {
@@ -287,6 +347,27 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
           sendDriveWebRtcIce(sessionIdRef.current, event.candidate.toJSON()).catch(() => undefined);
         }
       };
+      // 连接状态监控：Wi-Fi 抖动/锁屏/会话被其他页签抢占后，媒体路径死亡
+      // 但没有任何信令通知本页——必须自己盯 connectionState 触发恢复。
+      peer.onconnectionstatechange = () => {
+        if (!isCurrentAttempt() || peerRef.current !== peer) return;
+        const connectionState = peer.connectionState;
+        if (connectionState === 'failed' || connectionState === 'closed') {
+          recover(`connectionState=${connectionState}`);
+        } else if (connectionState === 'disconnected') {
+          if (disconnectTimerRef.current === null) {
+            disconnectTimerRef.current = window.setTimeout(() => {
+              disconnectTimerRef.current = null;
+              if (peerRef.current === peer && peer.connectionState === 'disconnected') {
+                recover('connectionState=disconnected');
+              }
+            }, disconnectGraceMs);
+          }
+        } else if (connectionState === 'connected' && disconnectTimerRef.current !== null) {
+          window.clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+      };
       peer.ontrack = (event) => {
         if (!isCurrentAttempt()) return;
         const receiver = event.receiver as RTCRtpReceiver & { playoutDelayHint?: number };
@@ -295,6 +376,14 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
         }
         trackReceivedRef.current = true;
         retryAttemptRef.current = 0;
+        // track 静音 = 对端媒体包停止到达（车端编码器停摆/上行链路死亡），
+        // 由看门狗在 muteRecoveryMs 后判定恢复；恢复到帧则取消。
+        event.track.onmute = () => {
+          mutedAtRef.current = Date.now();
+        };
+        event.track.onunmute = () => {
+          mutedAtRef.current = 0;
+        };
         if (negotiationTimerRef.current !== null) {
           window.clearTimeout(negotiationTimerRef.current);
           negotiationTimerRef.current = null;
@@ -364,7 +453,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       scheduleRetry();
       startInFlightRef.current = false;
     }
-  }, [closePeer, createPeer, disabled, negotiationTimeoutMs, peerConnectionFactory, scheduleFrameStats, t, videoReadyTimeoutMs]);
+  }, [closePeer, createPeer, disconnectGraceMs, disabled, negotiationTimeoutMs, peerConnectionFactory, recover, scheduleFrameStats, scheduleRetry, t, videoReadyTimeoutMs]);
 
   useEffect(() => {
     startRef.current = start;
@@ -429,6 +518,49 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
         .catch(() => undefined);
     }, 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  // stats 镜像到 ref：recover/看门狗里读最新轮询结果做「被接管」判定，
+  // 不经过 state 闭包（避免陈旧 session_id 误判）。
+  useEffect(() => {
+    statsRef.current = stats;
+  }, [stats]);
+
+  // 中途卡死看门狗：只在页面可见且已成功出画后工作。
+  // - track muted 超时：对端媒体包停止到达（车端停摆/链路单通）；
+  // - 渲染帧停止超时：传输看似正常但解码卡住（等关键帧等不到）。
+  // 后台标签 rVFC 不触发、track 可能静音，属于正常现象，必须跳过。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (!trackReceivedRef.current || !videoReadyRef.current) return;
+      const peer = peerRef.current;
+      if (!peer || peer.connectionState !== 'connected') return;
+      if (mutedAtRef.current > 0 && Date.now() - mutedAtRef.current >= muteRecoveryMs) {
+        recover('track muted');
+        return;
+      }
+      if (
+        lastPresentationAtRef.current > 0
+        && performance.now() - lastPresentationAtRef.current >= stallRecoveryMs
+      ) {
+        recover('render stall');
+      }
+    }, watchdogIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [muteRecoveryMs, recover, stallRecoveryMs, watchdogIntervalMs]);
+
+  // 回到前台时重置渲染/静音时钟：后台期间 rVFC 停止是正常现象，
+  // 不重置的话切回页面的第一秒会被看门狗误判为卡死。
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        lastPresentationAtRef.current = performance.now();
+        mutedAtRef.current = 0;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
 
   return useMemo(() => ({

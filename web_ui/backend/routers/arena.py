@@ -396,6 +396,34 @@ async def list_models(working_dir: Optional[str] = None, model_type: Optional[st
             "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             "compatible": True,
         })
+
+    # AIMO 云转自包含产物目录（<zip 名>/ 内含 qnn_model_info.json + *.aidem）：
+    # 与 trainer /models 同样透出一级子目录里的模型，name 带 <目录>/ 前缀。
+    # x86 模拟器变体（lib*.x86.so.aidem）设备上不可用，不上列表。
+    for dname in sorted(os.listdir(models_dir)):
+        dpath = os.path.join(models_dir, dname)
+        if not os.path.isdir(dpath) or dname.lower().endswith(".savedmodel"):
+            continue
+        try:
+            entries = sorted(os.listdir(dpath))
+        except OSError:
+            continue
+        for fname in entries:
+            lower = fname.lower()
+            if ".x86." in lower or os.path.splitext(fname)[1].lower() not in extensions:
+                continue
+            fpath = os.path.join(dpath, fname)
+            if not os.path.isfile(fpath):
+                continue
+            stat = os.stat(fpath)
+            items.append({
+                "name": f"{dname}/{fname}",
+                "path": os.path.abspath(fpath),
+                "format": _format_for_path(fname),
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "compatible": True,
+            })
     return {"models": items}
 
 
