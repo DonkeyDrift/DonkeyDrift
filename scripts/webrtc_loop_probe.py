@@ -45,12 +45,29 @@ except ImportError:  # pragma: no cover
     websockets = None
 
 
+def _ws_connect_kwargs():
+    """探针连后端永远绕过代理 env，理由同 requests（见 run_probe）。"""
+    if websockets is None:
+        return {}
+    import inspect
+    try:
+        if "proxy" in inspect.signature(websockets.connect).parameters:
+            return {"proxy": None}
+    except (TypeError, ValueError):
+        pass
+    return {}
+
+
+WS_NO_PROXY_KWARGS = _ws_connect_kwargs()
+
+
 def sync_clock_to_backend(backend: str, samples: int = 5) -> tuple:
     """返回 (offset_s, rtt_s)：后端时钟 − 本机时钟，取 RTT 最小样本。"""
     best = None
     for _ in range(samples):
         t0 = time.time()
-        resp = requests.get(f"{backend}/api/drive/time", timeout=3)
+        resp = requests.get(f"{backend}/api/drive/time", timeout=3,
+                            proxies={'http': None, 'https': None})
         t1 = time.time()
         rtt = t1 - t0
         offset = float(resp.json()["server_time"]) - (t0 + rtt / 2.0)
@@ -75,6 +92,9 @@ async def run_probe(backend: str, duration: float, connect_timeout: float,
     ws_base = backend.replace("http://", "ws://").replace("https://", "wss://")
     client_id = f"loop-probe-{int(time.time() * 1000)}"
     session = requests.Session()
+    # 后端是本机/局域网地址：绕过 shell 代理 env（http_proxy 会把请求
+    # 发给代理机，回环目标会被解析到代理机自身的回环）
+    session.trust_env = False
 
     car_offset_ms = 0.0
     try:
@@ -116,7 +136,7 @@ async def run_probe(backend: str, duration: float, connect_timeout: float,
 
     async with websockets.connect(
         f"{ws_base}/api/drive/ws?role=client&client_id={client_id}",
-        open_timeout=connect_timeout,
+        open_timeout=connect_timeout, **WS_NO_PROXY_KWARGS,
     ) as ws:
 
         async def signal_reader():

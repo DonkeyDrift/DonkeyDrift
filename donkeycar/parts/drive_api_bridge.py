@@ -46,6 +46,30 @@ try:
 except Exception:  # pragma: no cover - 运行环境缺少 websockets 时由连接线程记录错误
     websockets = None
 
+
+def _no_proxy_connect_kwargs():
+    """车端连接永远绕过 shell 代理 env（http_proxy/all_proxy）。
+
+    实测代理会把 ws://127.0.0.1:<port> 以 CONNECT 转发到代理机自身的回环：
+    轻则握手失败（did not receive a valid HTTP response），重则代理机上
+    恰有同端口服务时静默连到**错误机器的后端**。websockets>=14 用
+    proxy=None 显式禁用；老版本不读代理 env，无需处理。
+    """
+    if websockets is None:
+        return {}
+    try:
+        import inspect
+        if "proxy" in inspect.signature(websockets.connect).parameters:
+            return {"proxy": None}
+    except (TypeError, ValueError):  # pragma: no cover - 签名不可读时保守不动
+        pass
+    return {}
+
+
+WS_NO_PROXY_KWARGS = _no_proxy_connect_kwargs()
+# requests 同理：本机/局域网后端不走任何代理（proxies 置 None 覆盖 env）
+NO_PROXY_PROXIES = {"http": None, "https": None}
+
 try:
     import av
 except Exception:  # pragma: no cover - 运行环境缺少 av 时只影响 WebRTC 媒体轨道
@@ -504,7 +528,7 @@ class DriveApiBridge:
 
         while self.running:
             try:
-                async with websockets.connect(self.server_url) as ws:
+                async with websockets.connect(self.server_url, **WS_NO_PROXY_KWARGS) as ws:
                     self.ws = ws
                     self.connected = True
                     logger.info("已连接到 Web Console Drive 服务端")
@@ -792,7 +816,7 @@ class DriveApiBridge:
 
     def _post_json(self, path: str, payload: dict):
         url = f"{self.http_api_base}{path}"
-        response = requests.post(url, json=payload, timeout=3)
+        response = requests.post(url, json=payload, timeout=3, proxies=NO_PROXY_PROXIES)
         response.raise_for_status()
         return response
 
@@ -801,7 +825,7 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: requests.post(url, json=payload, timeout=3)
+            None, lambda: requests.post(url, json=payload, timeout=3, proxies=NO_PROXY_PROXIES)
         )
         response.raise_for_status()
         return response
@@ -810,7 +834,7 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: requests.get(url, timeout=timeout)
+            None, lambda: requests.get(url, timeout=timeout, proxies=NO_PROXY_PROXIES)
         )
         response.raise_for_status()
         return response.json()

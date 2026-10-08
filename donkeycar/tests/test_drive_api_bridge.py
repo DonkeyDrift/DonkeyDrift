@@ -959,9 +959,14 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
             raise StopAsyncIteration
 
     class FakeWebsockets:
+        connect_kwargs = []
+
         @staticmethod
-        def connect(url):
-            # 真实 websockets.connect 是异步上下文管理器工厂（非协程）
+        def connect(url, **kwargs):
+            # 真实 websockets.connect 是异步上下文管理器工厂（非协程）。
+            # 车端连接必须显式绕过代理 env（websockets>=14 为 proxy=None；
+            # 代理会把 ws://127.0.0.1:<port> 转发到代理机自身的回环）
+            FakeWebsockets.connect_kwargs.append(kwargs)
             return FakeWs()
 
     monkeypatch.setattr(bridge_mod, "websockets", FakeWebsockets())
@@ -979,6 +984,41 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
     # 无退避的热重连两次间隔都趋近 0
     assert gap2 >= 0.04, f"第 2 次重连间隔 {gap2:.4f}s，缺少退避"
     assert gap3 >= 0.04, f"第 3 次重连间隔 {gap3:.4f}s，缺少退避"
+    # 每次连接都显式绕过代理（老版本 websockets 无 proxy 参数时 kwargs 为空）
+    assert all(kwargs.get("proxy", None) is None
+               for kwargs in FakeWebsockets.connect_kwargs)
+
+
+def test_connect_kwargs_bypass_proxy_when_supported():
+    """websockets>=14 必须给出 proxy=None；老版本无需（不读代理 env）。"""
+    from donkeycar.parts import drive_api_bridge as bridge_mod
+    kwargs = bridge_mod.WS_NO_PROXY_KWARGS
+    if "proxy" in kwargs:
+        assert kwargs["proxy"] is None
+    import inspect
+    has_proxy_param = "proxy" in inspect.signature(
+        bridge_mod.websockets.connect).parameters if bridge_mod.websockets else False
+    assert ("proxy" in kwargs) == has_proxy_param
+
+
+def test_post_json_bypasses_env_proxies(monkeypatch):
+    from donkeycar.parts import drive_api_bridge as bridge_mod
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, json=None, timeout=None, proxies=None):
+        captured.update(url=url, proxies=proxies)
+        return FakeResp()
+
+    monkeypatch.setattr(bridge_mod.requests, "post", fake_post)
+    bridge = DriveApiBridge(auto_start=False,
+                            server_url="ws://127.0.0.1:8000/api/drive/ws")
+    bridge._post_json("/webrtc/answer", {"session_id": "s", "sdp": "x", "type": "answer"})
+    # requests 的 proxies 置 None 字典才覆盖 http_proxy/all_proxy env
+    assert captured["proxies"] == {"http": None, "https": None}
 
 
 # ---------------- 端到端时延探针（video_timestamp + 时钟同步） ----------------
