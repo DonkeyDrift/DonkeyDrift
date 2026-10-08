@@ -25,10 +25,15 @@ def make_rgb_frame(pts=0, width=320, height=240):
 
 @pytest.fixture
 def restore_get_encoder():
-    """安装测试后恢复 aiortc 模块与幂等标记，避免污染其他用例。"""
+    """安装测试后恢复 aiortc 模块与幂等标记，避免污染其他用例。
+
+    预置 ``_installed = False``：其他测试文件构造 DriveApiBridge 时可能
+    已真实安装过补丁，这里强制本用例重新走完整安装路径才有效。
+    """
     import donkeycar.parts.webrtc_encoder as mod
     saved_get_encoder = aiortc.rtcrtpsender.get_encoder
     saved_installed = mod._installed
+    mod._installed = False
     yield
     aiortc.rtcrtpsender.get_encoder = saved_get_encoder
     mod._installed = saved_installed

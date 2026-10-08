@@ -12,6 +12,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from threading import Lock, Thread
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 from fractions import Fraction
 from urllib.parse import urlsplit, urlunsplit
@@ -19,6 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from .video_timestamp import draw_timestamp
+from . import cpu_affinity
 from .webrtc_encoder import (
     install_tuned_vp8_encoder,
     resolve_tune_enabled,
@@ -408,6 +410,8 @@ class DriveApiBridge:
         self.last_telemetry = 0.0
         self.telemetry_interval = 0.01  # 100Hz，与固件 $IMU 上行对齐
         self.last_num_records: int = 0
+        # P1a 可选：车辆线程（run_threaded 调用方）钉到媒体核之外的核
+        self._vehicle_pin_attempted = False
         self.active_webrtc_session_id = None
         self.webrtc_peer = None
         self.aiortc_track = None
@@ -461,8 +465,20 @@ class DriveApiBridge:
         logger.info(f"DriveApiBridge 启动中，服务端地址: {self.server_url}")
 
     def _run_loop(self):
+        # P1a 媒体线程绑核：bridge 线程 + 其编码线程池钉到高容量核，
+        # 避免与车辆循环（numpy/推理）在核间迁移互相拖慢（实测 p50 -12ms）。
+        if cpu_affinity.affinity_enabled():
+            media = cpu_affinity.media_cpu_set()
+            if cpu_affinity.pin_current_thread(media):
+                logger.info(f"bridge 线程已绑核: {sorted(media)}")
         self.loop = asyncio.new_event_loop()
         self.loop.set_exception_handler(self._handle_loop_exception)
+        if cpu_affinity.affinity_enabled():
+            self.loop.set_default_executor(ThreadPoolExecutor(
+                max_workers=4,
+                initializer=cpu_affinity.pin_current_thread,
+                initargs=(cpu_affinity.media_cpu_set(),),
+            ))
         asyncio.set_event_loop(self.loop)
         self.loop.run_until_complete(self._connect_loop())
 
@@ -950,6 +966,15 @@ class DriveApiBridge:
                     rc_mode=None, rc_park=None,
                     drift_yaw_error=None, drift_steering_correction=None,
                     drift_throttle_mode=None, sim_connected=None):
+        # P1a 可选绑核：默认关闭（车辆线程保持全核自由度，实车推理不受限）；
+        # DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE=1 时钉到媒体核之外的核（实测再省 ~3ms）
+        if not self._vehicle_pin_attempted:
+            self._vehicle_pin_attempted = True
+            if (cpu_affinity.affinity_enabled()
+                    and cpu_affinity.pin_vehicle_thread_enabled()):
+                cpus = cpu_affinity.vehicle_cpu_set()
+                if cpu_affinity.pin_current_thread(cpus):
+                    logger.info(f"车辆线程已绑核: {sorted(cpus)}（DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE=1）")
         if img_arr is not None and self.video_transport == "webrtc":
             self.frame_buffer.update(img_arr)
             now = time.time()

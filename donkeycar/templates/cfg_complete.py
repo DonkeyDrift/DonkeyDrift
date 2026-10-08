@@ -39,6 +39,10 @@ DRIVE_WEBRTC_ICE_SERVERS = []
 DRIVE_WEBRTC_ENCODER_TUNE = True
 # WebRTC 视频初始码率 bps（REMB 反馈仍会自动下调）
 DRIVE_WEBRTC_VIDEO_BITRATE = 1500000
+# P1a 媒体线程绑核（bridge/编码线程钉高容量核；0=关闭；实车推理重时可设 DRIVE_WEBRTC_MEDIA_CPUS=0-3 让媒体走小核）
+DRIVE_WEBRTC_AFFINITY = True
+# 可选：车辆线程也绑核（媒体核之外，再省 ~3ms；默认关，保持推理全核自由度）
+DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE = False
 # MJPEG 降级路径的 JPEG 编码质量（0-100，默认 95 接近无损，保证降级路径最高画质）。
 DRIVE_VIDEO_JPEG_QUALITY = 95
 
