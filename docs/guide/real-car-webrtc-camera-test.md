@@ -5,7 +5,7 @@
 时延印章（`video_timestamp`）+ 回环探针（`scripts/webrtc_loop_probe.py`）+
 浏览器探针（`web_ui/frontend/e2e/webrtc-browser-probe.mjs`）。
 
-代码基线要求：车端仓库 ≥ `8e1d6007`（P0+P1a 均默认生效，`mycar/` 无需改动）。
+代码基线要求：车端仓库 ≥ `8e1d6007`（P0+P1a 均默认生效，`~/projects/mycar/` 无需改动）。
 
 ```bash
 cd ~/projects/DonkeyDrift && git pull
@@ -37,9 +37,9 @@ v4l2-ctl -d /dev/video2 --list-formats-ext | head -30
 ### 方式 A：一键启动（推荐）
 
 ```bash
-cd ~/mycar
+cd ~/projects/mycar
 DRIVE_WEBRTC_LATENCY_PROBE=1 donkey drive \
-    --path ~/projects/DonkeyDrift/web_ui --car ~/mycar
+    --path ~/projects/DonkeyDrift/web_ui --car ~/projects/mycar
 ```
 
 一条命令拉起：后端+前端（生产模式同源，默认 :8000）+ 车端 `manage.py drive`
@@ -52,9 +52,9 @@ DRIVE_WEBRTC_LATENCY_PROBE=1 donkey drive \
 ```bash
 # 终端 1：Web UI（生产模式：前端+API 同源在 8000）
 donkey web --path ~/projects/DonkeyDrift/web_ui
-# 终端 2：车端（探针开）
-cd ~/mycar
-DRIVE_WEBRTC_LATENCY_PROBE=1 python manage.py drive
+# 终端 2：车端（探针开；显式用 venv 解释器，避免 PATH 上的 python 不是项目环境）
+cd ~/projects/mycar
+DRIVE_WEBRTC_LATENCY_PROBE=1 ~/projects/DonkeyDrift/.venv310/bin/python manage.py drive
 ```
 
 ### 启动后核对（三个信号）
