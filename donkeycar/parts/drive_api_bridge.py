@@ -19,6 +19,11 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from .video_timestamp import draw_timestamp
+from .webrtc_encoder import (
+    install_tuned_vp8_encoder,
+    resolve_tune_enabled,
+    resolve_video_bitrate,
+)
 
 # 车端 WebRTC 底层日志控制：默认抑制，DEBUG 模式开启
 def _configure_webrtc_logging():
@@ -359,7 +364,8 @@ class DriveApiBridge:
                  video_fps: int = 60, webrtc_enabled: bool = True,
                  webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0,
                  jpeg_quality: int = 95, preserve_source_resolution: bool = False,
-                 model_loader=None, latency_probe: bool = False):
+                 model_loader=None, latency_probe: bool = False,
+                 webrtc_video_bitrate=None, webrtc_encoder_tune=None):
         self.server_url = self._with_role(server_url, role)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
@@ -375,6 +381,10 @@ class DriveApiBridge:
         self.model_loader = model_loader
         self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height,
                                                  upscale_only=preserve_source_resolution)
+        # P0 编码调优：低时延 VP8 参数（cpu-used=15 / 关降噪 / 周期关键帧 /
+        # 1.5Mbps 初始码率）。进程级补丁、幂等；可用 env/参数关闭回退上游默认。
+        if video_transport == "webrtc" and webrtc_enabled and resolve_tune_enabled(webrtc_encoder_tune):
+            install_tuned_vp8_encoder(bitrate=resolve_video_bitrate(webrtc_video_bitrate))
 
         self.angle = 0.0
         self.throttle = 0.0

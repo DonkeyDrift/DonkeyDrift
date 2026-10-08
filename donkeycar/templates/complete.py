@@ -856,6 +856,8 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array',
         video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
         webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
         webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+        webrtc_video_bitrate=getattr(cfg, "DRIVE_WEBRTC_VIDEO_BITRATE", None),
+        webrtc_encoder_tune=getattr(cfg, "DRIVE_WEBRTC_ENCODER_TUNE", None),
         jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
         model_loader=model_loader,
     )

@@ -36,6 +36,8 @@ def make_web_controller(cfg):
         video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
         webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
         webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+        webrtc_video_bitrate=getattr(cfg, "DRIVE_WEBRTC_VIDEO_BITRATE", None),
+        webrtc_encoder_tune=getattr(cfg, "DRIVE_WEBRTC_ENCODER_TUNE", None),
     )
 
 
