@@ -17,7 +17,7 @@ export const getDriveVideoTransport = (): DriveVideoTransport => {
  * crypto.randomUUID() 仅在 secure context（HTTPS 或 localhost）下可用，
  * 通过局域网 IP 访问时需回退到 crypto.getRandomValues()。
  */
-const generateUuid = (): string => {
+export const generateUuid = (): string => {
   if (typeof crypto?.randomUUID === 'function') {
     return crypto.randomUUID();
   }
