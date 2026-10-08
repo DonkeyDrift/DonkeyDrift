@@ -732,6 +732,7 @@ def test_drive_api_bridge_sends_webrtc_stats_when_session_active(monkeypatch):
         "ice_connection_state": "completed",
         "ice_gathering_state": "complete",
         "local_description_error": None,
+        "answer_error": None,
         "local_description_elapsed_ms": None,
         "answer_sent_elapsed_ms": None,
         "local_candidates_sent": 0,
@@ -1121,3 +1122,52 @@ def test_drive_api_bridge_webrtc_stats_carry_clock_fields(monkeypatch):
 
     assert sent[0]["clock_offset_ms"] == 3.2
     assert sent[0]["clock_rtt_ms"] == 1.4
+
+
+def test_drive_api_bridge_offer_failure_recorded_and_reported(monkeypatch, caplog):
+    """offer→answer 任一环节抛异常：必须记录 answer_error 并随 stats 上报。
+
+    该协程经 run_coroutine_threadsafe 调度、future 无人 await，异常若不
+    显式捕获会被静默吞掉——真机曾表现为浏览器永久 MJPEG 降级且无日志。
+    """
+    import logging
+
+    class BrokenRemotePeer(FakePeerConnection):
+        async def setRemoteDescription(self, description):
+            raise RuntimeError("setRemoteDescription 失败")
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCPeerConnection",
+                        BrokenRemotePeer)
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCSessionDescription",
+                        FakeSessionDescription)
+
+    bridge = DriveApiBridge(auto_start=False)
+    posted = []
+
+    async def mock_post_webrtc_answer_async(session_id, sdp):
+        posted.append((session_id, sdp))
+
+    monkeypatch.setattr(bridge, "_post_webrtc_answer_async", mock_post_webrtc_answer_async)
+
+    with caplog.at_level(logging.WARNING, logger="donkeycar.parts.drive_api_bridge"):
+        bridge._handle_webrtc_signal({
+            "type": "webrtc_signal",
+            "signal_type": "offer",
+            "session_id": "session-x",
+            "sdp": "offer-sdp",
+            "description_type": "offer",
+        })
+
+    # answer 未发出；异常被记录到 webrtc_answer_error 并产生 WARNING 日志
+    assert posted == []
+    assert bridge.webrtc_answer_error is not None
+    assert "setRemoteDescription" in bridge.webrtc_answer_error
+    assert any("WebRTC offer 处理失败" in r.message for r in caplog.records)
+
+    # stats 携带 answer_error 字段
+    bridge.active_webrtc_session_id = "session-x"
+    sent = []
+    monkeypatch.setattr(bridge, "_send_json", lambda payload: sent.append(payload))
+    bridge._send_webrtc_stats()
+    stats_payload = next(p for p in sent if p.get("type") == "webrtc_stats")
+    assert stats_payload["answer_error"] == bridge.webrtc_answer_error

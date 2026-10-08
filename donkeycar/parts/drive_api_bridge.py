@@ -440,6 +440,9 @@ class DriveApiBridge:
         self.webrtc_peer = None
         self.aiortc_track = None
         self.webrtc_local_description_error = None
+        # offer→answer 全链路失败原因（setRemoteDescription/createAnswer/回传任一
+        # 环节抛异常都会被 _accept_webrtc_offer 记到这里并上报 stats）
+        self.webrtc_answer_error = None
         self.webrtc_local_description_elapsed_ms = None
         self.webrtc_answer_sent_elapsed_ms = None
         self.local_candidates_sent = 0
@@ -702,6 +705,19 @@ class DriveApiBridge:
             logger.warning("缺少 aiortc 依赖，无法建立 WebRTC PeerConnection")
             return
 
+        # offer 处理任何一步失败都必须可见：本协程经 run_coroutine_threadsafe
+        # 调度、future 无人 await，异常会被静默吞掉——真机曾表现为浏览器永久
+        # MJPEG 降级，stats 里 answer/ICE 全部停滞且无任何日志可查
+        self.webrtc_answer_error = None
+        try:
+            await self._accept_webrtc_offer_inner(msg)
+        except Exception as exc:
+            self.webrtc_answer_error = f"{type(exc).__name__}: {exc!r}"
+            logger.warning(
+                "WebRTC offer 处理失败（浏览器将因收不到 answer 降级 MJPEG）: %s",
+                self.webrtc_answer_error, exc_info=True)
+
+    async def _accept_webrtc_offer_inner(self, msg: dict):
         if self.webrtc_peer is not None:
             await self._close_webrtc_peer(self.webrtc_peer)
             self.webrtc_peer = None
@@ -907,6 +923,7 @@ class DriveApiBridge:
             "ice_connection_state": getattr(self.webrtc_peer, "iceConnectionState", None),
             "ice_gathering_state": getattr(self.webrtc_peer, "iceGatheringState", None),
             "local_description_error": self.webrtc_local_description_error,
+            "answer_error": self.webrtc_answer_error,
             "local_description_elapsed_ms": self.webrtc_local_description_elapsed_ms,
             "answer_sent_elapsed_ms": self.webrtc_answer_sent_elapsed_ms,
             "local_candidates_sent": self.local_candidates_sent,
