@@ -67,8 +67,11 @@ def _no_proxy_connect_kwargs():
 
 
 WS_NO_PROXY_KWARGS = _no_proxy_connect_kwargs()
-# requests 同理：本机/局域网后端不走任何代理（proxies 置 None 覆盖 env）
-NO_PROXY_PROXIES = {"http": None, "https": None}
+# requests 同理，用 trust_env=False 的直连 session。不能用
+# proxies={"http": None}：requests 的 merge_setting 会删除值为 None 的
+# 键，all_proxy env 依然生效——真机实测 answer 回传被代理拦成 502。
+_direct_session = requests.Session()
+_direct_session.trust_env = False
 
 try:
     import av
@@ -832,7 +835,7 @@ class DriveApiBridge:
 
     def _post_json(self, path: str, payload: dict):
         url = f"{self.http_api_base}{path}"
-        response = requests.post(url, json=payload, timeout=3, proxies=NO_PROXY_PROXIES)
+        response = _direct_session.post(url, json=payload, timeout=3)
         response.raise_for_status()
         return response
 
@@ -841,7 +844,7 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: requests.post(url, json=payload, timeout=3, proxies=NO_PROXY_PROXIES)
+            None, lambda: _direct_session.post(url, json=payload, timeout=3)
         )
         response.raise_for_status()
         return response
@@ -850,7 +853,7 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: requests.get(url, timeout=timeout, proxies=NO_PROXY_PROXIES)
+            None, lambda: _direct_session.get(url, timeout=timeout)
         )
         response.raise_for_status()
         return response.json()

@@ -29,6 +29,10 @@ from typing import List, Optional
 
 import requests
 
+# 直连 session：绕过 http_proxy/all_proxy env（同 drive_api_bridge）
+_direct_session = requests.Session()
+_direct_session.trust_env = False
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -66,8 +70,9 @@ def sync_clock_to_backend(backend: str, samples: int = 5) -> tuple:
     best = None
     for _ in range(samples):
         t0 = time.time()
-        resp = requests.get(f"{backend}/api/drive/time", timeout=3,
-                            proxies={'http': None, 'https': None})
+        # trust_env=False：all_proxy env 会把回环请求发给代理机（实测 502）；
+        # proxies={'http': None} 无效——requests merge_setting 删 None 键
+        resp = _direct_session.get(f"{backend}/api/drive/time", timeout=3)
         t1 = time.time()
         rtt = t1 - t0
         offset = float(resp.json()["server_time"]) - (t0 + rtt / 2.0)

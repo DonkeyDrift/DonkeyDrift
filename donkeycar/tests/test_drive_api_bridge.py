@@ -1004,22 +1004,24 @@ def test_connect_kwargs_bypass_proxy_when_supported():
 
 def test_post_json_bypasses_env_proxies(monkeypatch):
     from donkeycar.parts import drive_api_bridge as bridge_mod
+    # 直连 session：trust_env=False 才能挡住 all_proxy env
+    # （proxies={"http": None} 会被 requests merge_setting 删键，真机实测 502）
+    assert bridge_mod._direct_session.trust_env is False
     captured = {}
 
     class FakeResp:
         def raise_for_status(self):
             return None
 
-    def fake_post(url, json=None, timeout=None, proxies=None):
-        captured.update(url=url, proxies=proxies)
+    def fake_post(url, json=None, timeout=None):
+        captured.update(url=url, timeout=timeout)
         return FakeResp()
 
-    monkeypatch.setattr(bridge_mod.requests, "post", fake_post)
+    monkeypatch.setattr(bridge_mod._direct_session, "post", fake_post)
     bridge = DriveApiBridge(auto_start=False,
                             server_url="ws://127.0.0.1:8000/api/drive/ws")
     bridge._post_json("/webrtc/answer", {"session_id": "s", "sdp": "x", "type": "answer"})
-    # requests 的 proxies 置 None 字典才覆盖 http_proxy/all_proxy env
-    assert captured["proxies"] == {"http": None, "https": None}
+    assert "webrtc/answer" in captured["url"]
 
 
 # ---------------- 端到端时延探针（video_timestamp + 时钟同步） ----------------
