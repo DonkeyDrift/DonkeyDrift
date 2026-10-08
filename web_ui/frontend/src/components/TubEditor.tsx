@@ -38,42 +38,20 @@ ChartJS.register(
   Legend
 );
 
-const MIN_ZOOM_PERCENT = 100;
-const MAX_ZOOM_PERCENT = 1000;
-const ZOOM_STEP_PERCENT = 100;
-const MAX_UNDO_HISTORY = 10;
-const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
-const DRAG_SELECTION_THRESHOLD_PX = 5;
-const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
 
-/** 把全局播放位置写进下方的不受控进度条（value 直写 DOM，播放期零 re-render）。
- *  值一律夹到当前量程（records.length - 1）：越界时浏览器会静默截断显示值，量程变化后
- *  不重写 value 更会让下方进度条停在上一次的位置、与上方录制视频库的播放进度条脱节。 */
-const writeSliderValue = (slider: HTMLInputElement, index: number) => {
-  const max = Number(slider.max);
-  const upper = Number.isFinite(max) ? max : index;
-  const next = String(Math.max(0, Math.min(index, upper)));
-  if (slider.value !== next) {
-    slider.value = next;
-  }
-};
+import {
+  MIN_ZOOM_PERCENT,
+  MAX_ZOOM_PERCENT,
+  ZOOM_STEP_PERCENT,
+  MAX_UNDO_HISTORY,
+  PLAYHEAD_SCROLL_PADDING_RATIO,
+  DRAG_SELECTION_THRESHOLD_PX,
+  MIN_SELECTION_DRAFT_WIDTH_PX,
+  writeSliderValue,
+  cssVarColor,
+  type RecordAction,
 
-/** 从根元素 computed style 解析 CSS 变量颜色；取不到（jsdom/变量缺失）回退 fallback。
- *  canvas 配色按语义角色（转向=--accent、油门=--warn、选区=--ok、删除标记=--bad）
- *  随主题（深/浅）切换自动重取色；fallback 为原深/浅硬编码值。 */
-const cssVarColor = (name: string, fallback: string): string => {
-  try {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-type RecordAction = {
-  mode: 'delete' | 'restore';
-  indexes: number[];
-};
+} from './TubEditor.utils';
 
 // 两次点击选择的锚点（模块级变量，避免组件重新挂载时 ref 重置导致锚点丢失）
 let globalSelectionAnchorIndex: number | null = null;
