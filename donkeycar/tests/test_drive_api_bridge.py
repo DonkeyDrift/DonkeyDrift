@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import time
+from dataclasses import replace
 
 import numpy as np
 import cv2
@@ -399,7 +400,8 @@ def test_aiortc_video_track_converts_latest_frame(monkeypatch):
     assert isinstance(output, FakeVideoFrame)
     assert output.image is frame
     assert output.format == "rgb24"
-    assert output.pts == 1
+    # 首帧语义（546c21b5，tests/test_drive_webrtc_track.py 锁定）：锚点帧 pts=0
+    assert output.pts == 0
     assert output.time_base is not None
 
 
@@ -733,6 +735,8 @@ def test_drive_api_bridge_sends_webrtc_stats_when_session_active(monkeypatch):
         "local_description_elapsed_ms": None,
         "answer_sent_elapsed_ms": None,
         "local_candidates_sent": 0,
+        "clock_offset_ms": None,
+        "clock_rtt_ms": None,
     }]
 
 
@@ -975,3 +979,105 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
     # 无退避的热重连两次间隔都趋近 0
     assert gap2 >= 0.04, f"第 2 次重连间隔 {gap2:.4f}s，缺少退避"
     assert gap3 >= 0.04, f"第 3 次重连间隔 {gap3:.4f}s，缺少退避"
+
+
+# ---------------- 端到端时延探针（video_timestamp + 时钟同步） ----------------
+
+def test_drive_api_bridge_probe_flag_from_ctor_and_env(monkeypatch):
+    assert DriveApiBridge(auto_start=False).latency_probe is False
+    assert DriveApiBridge(auto_start=False, latency_probe=True).latency_probe is True
+    monkeypatch.setenv("DRIVE_WEBRTC_LATENCY_PROBE", "1")
+    assert DriveApiBridge(auto_start=False).latency_probe is True
+
+
+def test_aiortc_video_track_draws_stamp_only_when_probe_enabled(monkeypatch):
+    from donkeycar.parts.video_timestamp import read_timestamp
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+    ts = time.time()
+
+    # 探针开：帧内容被改写（副本），解码出印章
+    buffer_probe = DriveVideoFrameBuffer(width=320, height=240)
+    track_probe = DriveAiortcVideoTrack(buffer_probe, fps=60, latency_probe=True)
+    frame_probe = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_probe.update(frame_probe)
+    buffer_probe.latest = replace(buffer_probe.latest, timestamp=ts)
+    output_probe = asyncio.run(track_probe.recv())
+    assert output_probe.image is not frame_probe  # 副本，不污染缓冲
+    assert read_timestamp(output_probe.image) is not None
+    assert abs(read_timestamp(output_probe.image) - ts) * 1e6 < 128
+
+    # 探针关：原帧直通，无印章
+    buffer_plain = DriveVideoFrameBuffer(width=320, height=240)
+    track_plain = DriveAiortcVideoTrack(buffer_plain, fps=60)
+    frame_plain = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_plain.update(frame_plain)
+    output_plain = asyncio.run(track_plain.recv())
+    assert output_plain.image is frame_plain
+    assert read_timestamp(output_plain.image) is None
+
+
+def test_drive_api_bridge_syncs_clock_with_min_rtt_sample(monkeypatch):
+    async def scenario():
+        responses = [
+            {"server_time": 1000.0500},
+            {"server_time": 1000.0400},  # RTT 最小：0.01
+            {"server_time": 1000.0300},
+        ]
+        rtts = [0.03, 0.01, 0.05]
+        local_stamps = []
+
+        async def fake_get(path, timeout=3.0):
+            assert path == "/time"
+            t0 = time.time()
+            time.sleep(rtts.pop(0))
+            local_stamps.append((t0, time.time()))
+            return responses.pop(0)
+
+        bridge = DriveApiBridge(auto_start=False)
+        monkeypatch.setattr(bridge, "_get_json_async", fake_get)
+        await bridge._sync_clock(samples=3)
+
+        # 选中 min-RTT 样本（第 2 个）：offset ≈ server - (本机 t0 + rtt/2)
+        t0, t1 = local_stamps[1]
+        rtt = t1 - t0
+        # bridge 内部计的 t0/t1 与 fake_get 内记录的相差一次 await 开销，容差比较
+        assert abs(bridge.clock_rtt_ms - rtt * 1000.0) < 1.5
+        expected_offset_ms = (1000.0400 - (t0 + rtt / 2.0)) * 1000.0
+        assert abs(bridge.clock_offset_ms - expected_offset_ms) < 3.0
+        assert bridge._last_clock_sync > 0
+
+    asyncio.run(scenario())
+
+
+def test_drive_api_bridge_clock_sync_failure_is_non_fatal(monkeypatch):
+    async def scenario():
+        async def boom(path, timeout=3.0):
+            raise ConnectionError("backend down")
+
+        bridge = DriveApiBridge(auto_start=False)
+        monkeypatch.setattr(bridge, "_get_json_async", boom)
+        # 不抛异常：失败保留上次结果（此处为初始 None）
+        await bridge._sync_clock()
+
+        assert bridge.clock_offset_ms is None
+        assert bridge.clock_rtt_ms is None
+        assert bridge._last_clock_sync == 0.0
+
+    asyncio.run(scenario())
+
+
+def test_drive_api_bridge_webrtc_stats_carry_clock_fields(monkeypatch):
+    sent = []
+    bridge = DriveApiBridge(auto_start=False)
+    bridge.active_webrtc_session_id = "session-1"
+    bridge.clock_offset_ms = 3.2
+    bridge.clock_rtt_ms = 1.4
+    monkeypatch.setattr(bridge, "_send_json", sent.append)
+    monkeypatch.setattr(bridge.frame_buffer, "stats", lambda: {"source_fps": 60.0})
+    monkeypatch.setattr(bridge.webrtc_track, "stats", lambda: {"sent_fps": 60.0, "stale_frames": 0})
+
+    bridge._send_webrtc_stats()
+
+    assert sent[0]["clock_offset_ms"] == 3.2
+    assert sent[0]["clock_rtt_ms"] == 1.4
