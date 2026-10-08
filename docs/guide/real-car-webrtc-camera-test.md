@@ -38,17 +38,20 @@ v4l2-ctl -d /dev/video2 --list-formats-ext | head -30
 
 ```bash
 cd ~/mycar
-DRIVE_WEBRTC_LATENCY_PROBE=1 ~/projects/DonkeyDrift/.venv310/bin/donkey drive \
+DRIVE_WEBRTC_LATENCY_PROBE=1 donkey drive \
     --path ~/projects/DonkeyDrift/web_ui --car ~/mycar
 ```
 
-一条命令拉起：后端 :8000 + 前端 :5188 + 车端 `manage.py drive`（探针 env 随进程继承）。
+一条命令拉起：后端+前端（生产模式同源，默认 :8000）+ 车端 `manage.py drive`
+（探针 env 随进程继承，`DRIVE_API_SERVER_URL` 自动注入指向本机后端）。
+**浏览器访问 `http://<车端IP>:8000/#/drive`**（生产模式前端由后端端口托管，
+与 API 同源）；加 `--dev` 才是 Vite 的 5188。Ctrl+C 同时停三层。
 
 ### 方式 B：分开启动（调试用）
 
 ```bash
-# 终端 1：Web UI
-~/projects/DonkeyDrift/.venv310/bin/donkey web --path ~/projects/DonkeyDrift/web_ui
+# 终端 1：Web UI（生产模式：前端+API 同源在 8000）
+donkey web --path ~/projects/DonkeyDrift/web_ui
 # 终端 2：车端（探针开）
 cd ~/mycar
 DRIVE_WEBRTC_LATENCY_PROBE=1 python manage.py drive
@@ -104,16 +107,18 @@ cd ~/projects/DonkeyDrift
 ```bash
 cd ~/projects/DonkeyDrift/web_ui/frontend
 node e2e/webrtc-browser-probe.mjs \
-    --url http://<车端IP>:5188/ --duration 12000 \
+    --url http://<车端IP>:8000/ --duration 12000 \
     --gate-fps 59 --gate-e2e-ms 100        # --headed 可观察画面
 ```
+
+（`--url` 用后端端口：生产模式前端与 API 同源；`--dev` 启动时才是 5188。）
 
 浏览器探针指标：rVFC 的 `expectedDisplayTime − captureTime`（同处浏览器时钟域，
 含解码+呈现，不含跨机对时误差）+ 后端 stats 里浏览器自报 browser FPS / P95 间隔。
 
 ### 4b. 人工验收（按设计文档验收清单）
 
-浏览器打开 `http://<车端IP>:5188/#/drive`：
+浏览器打开 `http://<车端IP>:8000/#/drive`（生产模式同源端口；`--dev` 启动时为 `5188`）：
 
 1. 左上角确认传输模式为 **WebRTC**（非降级）；
 2. **连续运行 2 分钟**，记录徽标：browser FPS（平均）、帧间隔 P95、source/sent FPS；
@@ -153,7 +158,26 @@ node e2e/webrtc-browser-probe.mjs \
 | 探针报「采样帧数不足」 | 车端是否带 `DRIVE_WEBRTC_LATENCY_PROBE=1` 启动 | 该 env 必须在车端进程启动前设置 |
 | 探针期间页面变 MJPEG | 预期行为 | 单客户端会话被探针接管（issue #009 接管判定），刷新页面恢复 |
 
-## 8. 测完之后
+## 8. 同机基线对照（可选，推荐做一次）
+
+区分「相机/车辆循环慢」还是「网络/编码慢」：同一台车机、同一 Wi-Fi，换合成源跑一轮——
+合成源无相机采集与推理开销，等于链路的性能地板。
+
+```bash
+# 终端 1：只起 Web UI（避开 8000，不干扰真车栈）
+donkey web --path ~/projects/DonkeyDrift/web_ui --backend-port 8123
+# 终端 2：合成 60fps 源 + 探针印章
+cd ~/projects/DonkeyDrift
+.venv310/bin/python scripts/synthetic_car_video.py \
+    --server ws://127.0.0.1:8123/api/drive/ws --fps 60 --probe
+# 终端 3：探针（同第 3 节，backend 换 8123）
+```
+
+对照口径：合成源基线（P1a 后）fps≈60 / 回环 p50≈33ms / p95≈44ms /
+帧间隔 P95≈21ms。真车与它的差距即为相机采集 + 推理引入的额外成本，
+差距大才考虑 P1b（推流进程隔离）。
+
+## 9. 测完之后
 
 - 把真车数据与合成源基线（P1a 后：fps 59.94 / 回环 p50 33.9ms / p95 44.5ms /
   帧间隔 P95 21.8ms）对比：
