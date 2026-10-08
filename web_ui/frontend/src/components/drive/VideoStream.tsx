@@ -44,7 +44,11 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const degraded = forceMjpeg || mjpegFallbackAllowed;
   const [mjpegVisible, setMjpegVisible] = useState(!webRtcVisible);
   const browserFps = Math.round(metrics.browserFps || stats.browser_fps || 0);
-  const latencyMs = Math.round(metrics.p95FrameIntervalMs || stats.browser_p95_frame_interval_ms || 0);
+  // 徽标优先显示真实端到端时延（采集→呈现，rVFC captureTime 通路）；
+  // 不可用时回退旧的 p95 帧间隔（帧到达节奏，非时延，仅作降级参考）
+  const e2eP95Ms = metrics.e2eLatencyP95Ms || stats.e2e_latency_p95_ms || 0;
+  const hasTrueE2e = e2eP95Ms > 0 && (metrics.e2eSamples > 0 || (stats.e2e_samples ?? 0) > 0);
+  const latencyMs = Math.round(hasTrueE2e ? e2eP95Ms : metrics.p95FrameIntervalMs || stats.browser_p95_frame_interval_ms || 0);
 
   const resetRetry = () => {
     if (retryTimerRef.current) {
@@ -219,7 +223,10 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
             <StatusIcon className={`w-3 h-3 ${statusMeta.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
             {statusMeta.text}
           </div>
-          <div className="text-base font-mono leading-tight text-cyan-400">{latencyMs > 0 ? `${latencyMs}ms` : '-'}</div>
+          <div className="text-base font-mono leading-tight text-cyan-400">
+            {latencyMs > 0 ? `${latencyMs}ms` : '-'}
+            {hasTrueE2e && <span className="ml-1 text-[10px] text-zinc-400">E2E</span>}
+          </div>
         </div>
         {degraded && (
           <span className="rounded bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300">

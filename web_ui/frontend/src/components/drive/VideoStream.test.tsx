@@ -26,7 +26,7 @@ const connectedState = () => ({
     transport: 'webrtc' as const,
     degraded: false,
   },
-  metrics: { browserFps: 58, p95FrameIntervalMs: 24 },
+  metrics: { browserFps: 58, p95FrameIntervalMs: 24, e2eLatencyP50Ms: 18, e2eLatencyP95Ms: 26, e2eSamples: 120 },
   error: null,
   videoReady: true,
   sessionId: 'session-1',
@@ -48,7 +48,7 @@ const degradedState = () => ({
     transport: 'webrtc' as const,
     degraded: true,
   },
-  metrics: { browserFps: 0, p95FrameIntervalMs: 0 },
+  metrics: { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 },
   error: null,
   videoReady: false,
   sessionId: 'session-1',
@@ -72,12 +72,13 @@ beforeEach(() => {
 });
 
 describe('VideoStream', () => {
-  it('默认渲染 WebRTC video 与 FPS 指标', () => {
+  it('默认渲染 WebRTC video 与 FPS 指标（e2e 采样存在时徽标显示端到端时延）', () => {
     render(<VideoStream />);
 
     expect(screen.getByText('WebRTC')).toBeInTheDocument();
     expect(screen.getByText('58')).toBeInTheDocument();
-    expect(screen.getByText('24ms')).toBeInTheDocument();
+    expect(screen.getByText('26ms')).toBeInTheDocument();
+    expect(screen.getByText('E2E')).toBeInTheDocument();
     expect(screen.queryByText('P95 24ms')).not.toBeInTheDocument();
     expect(screen.queryByText('源 60')).not.toBeInTheDocument();
     expect(screen.queryByText('发 59')).not.toBeInTheDocument();
@@ -89,7 +90,26 @@ describe('VideoStream', () => {
     const onLatencyChange = vi.fn();
     render(<VideoStream onLatencyChange={onLatencyChange} />);
 
-    expect(onLatencyChange).toHaveBeenCalledWith(24);
+    expect(onLatencyChange).toHaveBeenCalledWith(26);
+  });
+
+  it('有真实 e2e 采样时徽标显示端到端时延并带 E2E 标记', () => {
+    render(<VideoStream />);
+
+    expect(screen.getByText('26ms')).toBeInTheDocument();
+    expect(screen.getByText('E2E')).toBeInTheDocument();
+    expect(screen.queryByText('24ms')).not.toBeInTheDocument();
+  });
+
+  it('无真实 e2e 采样时徽标回退 p95 帧间隔且不带 E2E 标记', () => {
+    mockWebRtc.mockReturnValue({
+      ...connectedState(),
+      metrics: { browserFps: 58, p95FrameIntervalMs: 24, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 },
+    });
+    render(<VideoStream />);
+
+    expect(screen.getByText('24ms')).toBeInTheDocument();
+    expect(screen.queryByText('E2E')).not.toBeInTheDocument();
   });
 
   it('WebRTC 降级后在 fallback 延迟前 video 透明、MJPEG 可见', () => {
@@ -230,7 +250,7 @@ describe('VideoStream', () => {
         transport: 'webrtc',
         degraded: true,
       },
-      metrics: { browserFps: 0, p95FrameIntervalMs: 0 },
+      metrics: { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 },
       error: null,
       videoReady: false,
       sessionId: null,

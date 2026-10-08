@@ -46,7 +46,25 @@ interface UseDriveWebRtcVideoOptions {
 export interface DriveVideoMetrics {
   browserFps: number;
   p95FrameIntervalMs: number;
+  /** 真实端到端时延 p50/p95（captureTime→expectedDisplayTime），无采样时为 0 */
+  e2eLatencyP50Ms: number;
+  e2eLatencyP95Ms: number;
+  e2eSamples: number;
 }
+
+/** rVFC 采样窗口：240 帧 ≈ 4s@60fps，足够稳定的 p95 */
+export const E2E_SAMPLE_WINDOW = 240;
+
+/** 单次 e2e 采样有效性上限：超过视为异常值（时钟毛刺/标签缺失），丢弃 */
+export const E2E_SAMPLE_MAX_MS = 1000;
+
+/** p50/p95 计算：排序后取分位点（样本 <2 时返回 0） */
+export const calculatePercentile = (samples: number[], ratio: number): number => {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index] ?? 0;
+};
 
 export const getDriveWebRtcIceServers = (): RTCIceServer[] => {
   const raw = import.meta.env.VITE_DRIVE_WEBRTC_ICE_SERVERS?.trim();
@@ -88,6 +106,9 @@ const EMPTY_STATS: DriveWebRtcStats = {
   frames_dropped: 0,
   jitter_ms: 0,
   jitter_buffer_delay_ms: 0,
+  e2e_latency_p50_ms: 0,
+  e2e_latency_p95_ms: 0,
+  e2e_samples: 0,
   transport: 'webrtc',
   degraded: false,
 };
@@ -101,7 +122,7 @@ interface BrowserInboundStats {
 
 export const calculateVideoMetrics = (timestamps: number[]): DriveVideoMetrics => {
   if (timestamps.length < 2) {
-    return { browserFps: 0, p95FrameIntervalMs: 0 };
+    return { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 };
   }
   const intervals = timestamps.slice(1).map((value, index) => value - timestamps[index]);
   const elapsed = timestamps[timestamps.length - 1] - timestamps[0];
@@ -110,6 +131,9 @@ export const calculateVideoMetrics = (timestamps: number[]): DriveVideoMetrics =
   return {
     browserFps: elapsed <= 0 ? 0 : ((timestamps.length - 1) * 1000) / elapsed,
     p95FrameIntervalMs: sorted[p95Index] ?? 0,
+    e2eLatencyP50Ms: 0,
+    e2eLatencyP95Ms: 0,
+    e2eSamples: 0,
   };
 };
 
@@ -165,6 +189,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const sessionIdRef = useRef<string | null>(null);
   const clientIdRef = useRef(clientId ?? createDriveClientId());
   const frameTimestampsRef = useRef<number[]>([]);
+  const e2eSamplesRef = useRef<number[]>([]);
   const frameCallbackRef = useRef<number | null>(null);
   const lastBrowserStatsSentAtRef = useRef(0);
   const lastMetricsAtRef = useRef(0);
@@ -189,7 +214,8 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
 
   const [state, setState] = useState<DriveVideoState>('idle');
   const [stats, setStats] = useState<DriveWebRtcStats>(EMPTY_STATS);
-  const [metrics, setMetrics] = useState<DriveVideoMetrics>({ browserFps: 0, p95FrameIntervalMs: 0 });
+  const [metrics, setMetrics] = useState<DriveVideoMetrics>(
+    { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 });
   const [error, setError] = useState<string | null>(null);
   const [videoReady, setVideoReady] = useState(false);
 
@@ -220,6 +246,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       videoRef.current.cancelVideoFrameCallback(frameCallbackRef.current);
       frameCallbackRef.current = null;
     }
+    e2eSamplesRef.current = [];
     if (videoRef.current) {
       videoRef.current.onloadeddata = null;
     }
@@ -273,7 +300,22 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
       lastPresentationAtRef.current = performance.now();
       frameTimestampsRef.current = [...frameTimestampsRef.current.slice(-119), metadata.presentationTime];
-      const nextMetrics = calculateVideoMetrics(frameTimestampsRef.current);
+      // 真实端到端时延：expectedDisplayTime(呈现时刻) − captureTime(采集时刻)，
+      // 两者同处浏览器时钟域（Chrome 经 RTCP SR 映射），无需跨机时钟同步。
+      // captureTime 由 aiortc 的 SR NTP 映射提供，含 ≤半帧周期的 pts 量化误差。
+      const captureTime = (metadata as VideoFrameCallbackMetadata & { captureTime?: number }).captureTime;
+      if (captureTime !== undefined && metadata.expectedDisplayTime !== undefined) {
+        const e2e = metadata.expectedDisplayTime - captureTime;
+        if (e2e >= 0 && e2e <= E2E_SAMPLE_MAX_MS) {
+          e2eSamplesRef.current = [...e2eSamplesRef.current.slice(-(E2E_SAMPLE_WINDOW - 1)), e2e];
+        }
+      }
+      const nextMetrics: DriveVideoMetrics = {
+        ...calculateVideoMetrics(frameTimestampsRef.current),
+        e2eLatencyP50Ms: calculatePercentile(e2eSamplesRef.current, 0.5),
+        e2eLatencyP95Ms: calculatePercentile(e2eSamplesRef.current, 0.95),
+        e2eSamples: e2eSamplesRef.current.length,
+      };
       // FPS/延迟徽标无需逐帧刷新：500ms 节流一次，避免 60fps 重渲染 VideoStream（#135）
       const now = performance.now();
       if (now - lastMetricsAtRef.current >= 500) {
@@ -287,6 +329,9 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
           .then((inboundStats) => sendDriveWebRtcBrowserStats(sessionId, {
             browser_fps: nextMetrics.browserFps,
             browser_p95_frame_interval_ms: nextMetrics.p95FrameIntervalMs,
+            e2e_latency_p50_ms: nextMetrics.e2eSamples > 0 ? nextMetrics.e2eLatencyP50Ms : undefined,
+            e2e_latency_p95_ms: nextMetrics.e2eSamples > 0 ? nextMetrics.e2eLatencyP95Ms : undefined,
+            e2e_samples: nextMetrics.e2eSamples,
             ...inboundStats,
           }))
           .catch(() => undefined);
@@ -370,9 +415,21 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       };
       peer.ontrack = (event) => {
         if (!isCurrentAttempt()) return;
-        const receiver = event.receiver as RTCRtpReceiver & { playoutDelayHint?: number };
+        const receiver = event.receiver as RTCRtpReceiver & {
+          playoutDelayHint?: number;
+          jitterBufferTarget?: number | null;
+        };
+        // 双通道压低接收端缓冲：playoutDelayHint 是旧 API（Chrome 可能忽略），
+        // jitterBufferTarget=0 是标准替代；目标 = 帧到即播，最小化抖动缓冲时延
         if ('playoutDelayHint' in receiver) {
           receiver.playoutDelayHint = 0;
+        }
+        if ('jitterBufferTarget' in receiver) {
+          try {
+            receiver.jitterBufferTarget = 0;
+          } catch {
+            // 部分实现仅接受 null/有限正值，设置失败按原值运行
+          }
         }
         trackReceivedRef.current = true;
         retryAttemptRef.current = 0;

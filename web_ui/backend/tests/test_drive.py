@@ -805,3 +805,76 @@ def test_client_control_echo_only_broadcasts_on_change(monkeypatch):
     car_state_messages = [m for m in broadcasted if m.get("type") == "car_state"]
     assert len(car_state_messages) == 2
     assert car_state_messages[1]["drive_mode"] == "local"
+
+
+# ---------------- 端到端时延测量基建（/time、e2e 字段、时钟偏移透传） ----------------
+
+def test_server_time_endpoint_returns_epoch():
+    client, _drive = make_client()
+
+    response = client.get("/api/drive/time")
+
+    assert response.status_code == 200
+    server_time = response.json()["server_time"]
+    assert abs(server_time - time.time()) < 5.0
+
+
+def test_browser_stats_accept_and_expose_e2e_latency():
+    client, drive = make_online_client()
+    session = client.post("/api/drive/webrtc/session", json={"client_id": "browser-1"}).json()
+
+    response = client.post("/api/drive/webrtc/browser-stats", json={
+        "session_id": session["session_id"],
+        "browser_fps": 60.0,
+        "browser_p95_frame_interval_ms": 16.7,
+        "e2e_latency_p50_ms": 12.5,
+        "e2e_latency_p95_ms": 24.8,
+        "e2e_samples": 240,
+    })
+
+    assert response.status_code == 200
+    stats = client.get("/api/drive/webrtc/stats").json()
+    assert stats["e2e_latency_p50_ms"] == 12.5
+    assert stats["e2e_latency_p95_ms"] == 24.8
+    assert stats["e2e_samples"] == 240
+    assert drive.drive_state.webrtc_stats["e2e_samples"] == 240
+
+
+def test_car_clock_offset_passthrough_to_stats():
+    client, drive = make_online_client()
+    session = client.post("/api/drive/webrtc/session", json={"client_id": "browser-1"}).json()
+
+    drive.drive_state.apply_car_webrtc_stats({
+        "type": "webrtc_stats",
+        "session_id": session["session_id"],
+        "clock_offset_ms": 2.7,
+        "clock_rtt_ms": 1.1,
+    })
+
+    stats = client.get("/api/drive/webrtc/stats").json()
+    assert stats["clock_offset_ms"] == 2.7
+    assert stats["clock_rtt_ms"] == 1.1
+
+
+def test_session_reset_clears_e2e_and_clock_fields():
+    client, drive = make_online_client()
+    first = client.post("/api/drive/webrtc/session", json={"client_id": "browser-1"}).json()
+    drive.drive_state.apply_car_webrtc_stats({
+        "type": "webrtc_stats",
+        "session_id": first["session_id"],
+        "clock_offset_ms": 2.7,
+    })
+    client.post("/api/drive/webrtc/browser-stats", json={
+        "session_id": first["session_id"],
+        "browser_fps": 60.0,
+        "browser_p95_frame_interval_ms": 16.7,
+        "e2e_latency_p95_ms": 24.8,
+        "e2e_samples": 240,
+    })
+
+    client.post("/api/drive/webrtc/session", json={"client_id": "browser-2"})
+
+    stats = client.get("/api/drive/webrtc/stats").json()
+    assert stats["clock_offset_ms"] is None
+    assert stats["e2e_latency_p95_ms"] == 0.0
+    assert stats["e2e_samples"] == 0

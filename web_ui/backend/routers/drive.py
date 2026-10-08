@@ -78,6 +78,11 @@ class DriveState:
             "last_answer_at": None,
             "last_client_ice_at": None,
             "last_car_ice_at": None,
+            "clock_offset_ms": None,
+            "clock_rtt_ms": None,
+            "e2e_latency_p50_ms": 0.0,
+            "e2e_latency_p95_ms": 0.0,
+            "e2e_samples": 0,
             "degraded": False,
         }
 
@@ -219,6 +224,8 @@ class DriveState:
             "local_description_elapsed_ms",
             "answer_sent_elapsed_ms",
             "local_candidates_sent",
+            "clock_offset_ms",
+            "clock_rtt_ms",
         ):
             if key in data:
                 self.webrtc_stats[key] = data[key]
@@ -266,6 +273,10 @@ class WebRtcBrowserStatsRequest(BaseModel):
     frames_dropped: Optional[int] = None
     jitter_ms: Optional[float] = None
     jitter_buffer_delay_ms: Optional[float] = None
+    # 真实端到端时延（rVFC captureTime → expectedDisplayTime，浏览器本地钟差自洽）
+    e2e_latency_p50_ms: Optional[float] = None
+    e2e_latency_p95_ms: Optional[float] = None
+    e2e_samples: Optional[int] = None
 
 
 # ------------------------------------------------------------------
@@ -501,6 +512,11 @@ async def create_webrtc_session(request: WebRtcSessionRequest):
         "last_answer_at": None,
         "last_client_ice_at": None,
         "last_car_ice_at": None,
+        "clock_offset_ms": None,
+        "clock_rtt_ms": None,
+        "e2e_latency_p50_ms": 0.0,
+        "e2e_latency_p95_ms": 0.0,
+        "e2e_samples": 0,
         "degraded": False,
     })
     return {"success": True, "session_id": session_id, "single_client": True}
@@ -570,11 +586,18 @@ async def update_webrtc_browser_stats(request: WebRtcBrowserStatsRequest):
     _require_webrtc_session(request.session_id)
     drive_state.webrtc_stats["browser_fps"] = request.browser_fps
     drive_state.webrtc_stats["browser_p95_frame_interval_ms"] = request.browser_p95_frame_interval_ms
-    for key in ("inbound_fps", "frames_dropped", "jitter_ms", "jitter_buffer_delay_ms"):
+    for key in ("inbound_fps", "frames_dropped", "jitter_ms", "jitter_buffer_delay_ms",
+                "e2e_latency_p50_ms", "e2e_latency_p95_ms", "e2e_samples"):
         value = getattr(request, key)
         if value is not None:
             drive_state.webrtc_stats[key] = value
     return {"success": True}
+
+
+@router.get("/time")
+async def server_time():
+    """时钟同步基准：车端/探针 NTP 式采样本端点估算时钟偏移。"""
+    return {"server_time": time.time()}
 
 
 @router.get("/webrtc/stats")
@@ -607,6 +630,11 @@ async def webrtc_stats():
         "last_answer_at": drive_state.webrtc_stats["last_answer_at"],
         "last_client_ice_at": drive_state.webrtc_stats["last_client_ice_at"],
         "last_car_ice_at": drive_state.webrtc_stats["last_car_ice_at"],
+        "clock_offset_ms": drive_state.webrtc_stats["clock_offset_ms"],
+        "clock_rtt_ms": drive_state.webrtc_stats["clock_rtt_ms"],
+        "e2e_latency_p50_ms": drive_state.webrtc_stats["e2e_latency_p50_ms"],
+        "e2e_latency_p95_ms": drive_state.webrtc_stats["e2e_latency_p95_ms"],
+        "e2e_samples": drive_state.webrtc_stats["e2e_samples"],
         "transport": "webrtc",
         "degraded": drive_state.webrtc_stats["degraded"],
     }

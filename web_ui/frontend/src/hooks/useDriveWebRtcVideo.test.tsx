@@ -271,12 +271,66 @@ describe('useDriveWebRtcVideo', () => {
     await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalledWith('session-1', {
       browser_fps: 1,
       browser_p95_frame_interval_ms: 1000,
+      e2e_latency_p50_ms: undefined,
+      e2e_latency_p95_ms: undefined,
+      e2e_samples: 0,
       inbound_fps: 58,
       frames_dropped: 3,
       jitter_ms: 4.2,
       jitter_buffer_delay_ms: 12.5,
     }));
     expect(receiver.playoutDelayHint).toBe(0);
+  });
+
+  it('captureTime 存在时回传真实端到端时延 p50/p95', async () => {
+    const api = await import('../services/api');
+    const callbacks: VideoFrameRequestCallback[] = [];
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: VideoFrameRequestCallback) => {
+        callbacks.push(callback);
+        return callbacks.length;
+      }),
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const pc = new FakePeerConnection();
+    pc.statsReports = [];
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+    // 带标准 jitterBufferTarget 的接收端：应被置 0（压低抖动缓冲）
+    const receiver = { playoutDelayHint: undefined, jitterBufferTarget: 0.5 } as unknown as RTCRtpReceiver & {
+      playoutDelayHint?: number;
+      jitterBufferTarget?: number | null;
+    };
+
+    render(<HookProbe onState={onState} factory={factory} />);
+
+    await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+    await act(async () => {
+      pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver } as unknown as RTCTrackEvent);
+    });
+    await act(async () => {
+      // 两帧采样：e2e = expectedDisplayTime − captureTime → [25, 40]
+      callbacks.shift()?.(0, { presentationTime: 0, captureTime: -25, expectedDisplayTime: 0 } as VideoFrameCallbackMetadata);
+      callbacks.shift()?.(1000, { presentationTime: 1000, captureTime: 960, expectedDisplayTime: 1000 } as VideoFrameCallbackMetadata);
+    });
+
+    await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalledWith('session-1', {
+      browser_fps: 1,
+      browser_p95_frame_interval_ms: 1000,
+      e2e_latency_p50_ms: 25,
+      e2e_latency_p95_ms: 40,
+      e2e_samples: 2,
+      inbound_fps: undefined,
+      frames_dropped: undefined,
+      jitter_ms: undefined,
+      jitter_buffer_delay_ms: undefined,
+    }));
+    expect(receiver.playoutDelayHint).toBe(0);
+    expect(receiver.jitterBufferTarget).toBe(0);
   });
 
   it('处理 answer 和 ICE 信令', async () => {
