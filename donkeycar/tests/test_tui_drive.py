@@ -21,6 +21,8 @@ def _isolate_process_registry(monkeypatch):
     monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
     # 局域网探测在测试环境不确定，默认固定 localhost；LAN 行为有专测
     monkeypatch.setattr(tui, "_lan_host", lambda: "localhost")
+    # Drive 流程含 WebRTC 时延探针 Confirm 询问：默认关（探针行为有专测）
+    monkeypatch.setattr(tui.Confirm, "ask", lambda *args, **kwargs: False)
 
 
 class FakeProcess:
@@ -390,3 +392,59 @@ def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path)
     tui.DriveCommand().execute()
 
     assert takeover_calls == ["called"]
+
+
+# ---------------- WebRTC 时延探针集成 ----------------
+
+def _drive_with_probe(monkeypatch, tmp_path, probe_answer):
+    popen_calls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(tui.Confirm, "ask", lambda *args, **kwargs: probe_answer)
+    monkeypatch.setattr(
+        tui.DriveCommand, "choose_available_backend_port",
+        lambda self, preferred_port=8100: 8000)
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+    tui.DriveCommand().execute()
+    return popen_calls
+
+
+def test_drive_command_probe_on_sets_env(monkeypatch, tmp_path):
+    popen_calls = _drive_with_probe(monkeypatch, tmp_path, probe_answer=True)
+    car_kwargs = popen_calls[1][1]
+    assert car_kwargs["env"]["DRIVE_WEBRTC_LATENCY_PROBE"] == "1"
+
+
+def test_drive_command_probe_off_sets_env_zero(monkeypatch, tmp_path):
+    # 显式置 0：shell 里残留的 DRIVE_WEBRTC_LATENCY_PROBE=1 不应泄漏进车进程
+    monkeypatch.setenv("DRIVE_WEBRTC_LATENCY_PROBE", "1")
+    popen_calls = _drive_with_probe(monkeypatch, tmp_path, probe_answer=False)
+    car_kwargs = popen_calls[1][1]
+    assert car_kwargs["env"]["DRIVE_WEBRTC_LATENCY_PROBE"] == "0"
+
+
+def test_get_preview_command_probe_env():
+    cmd = tui.DriveCommand()
+    base = cmd.get_preview_command(
+        ["donkey", "web"], ["python", "manage.py", "drive"],
+        "ws://localhost:8000/api/drive/ws")
+    on = cmd.get_preview_command(
+        ["donkey", "web"], ["python", "manage.py", "drive"],
+        "ws://localhost:8000/api/drive/ws", probe=True)
+    assert "DRIVE_WEBRTC_LATENCY_PROBE" not in base
+    assert "DRIVE_WEBRTC_LATENCY_PROBE=1" in on
+    # 前缀顺序：URL 在前，探针 env 跟随，随后是车命令本身
+    assert on.index("DRIVE_API_SERVER_URL=") < on.index("DRIVE_WEBRTC_LATENCY_PROBE=1")
+    assert "manage.py" in on

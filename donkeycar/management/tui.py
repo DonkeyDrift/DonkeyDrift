@@ -1259,7 +1259,16 @@ class DriveCommand(DonkeyCommand):
             web_cmd = self.get_command_line(current_params, backend_port=backend_port)
         car_cmd = self.get_car_command_line()
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
-        cmd_str = self.get_preview_command(web_cmd, car_cmd, drive_api_server_url)
+        # WebRTC 时延探针（docs/guide/real-car-webrtc-camera-test.md）：
+        # 帧上烧入捕获时间戳，供 scripts/webrtc_loop_probe.py 闭环实测；
+        # 画面左上角会出现可见时间戳，正常驾驶默认关闭
+        probe = Confirm.ask(
+            "开启 WebRTC 时延探针？（实测端到端时延用，画面会带时间戳印章）",
+            default=False,
+        )
+        current_params["latency_probe"] = probe
+        cmd_str = self.get_preview_command(
+            web_cmd, car_cmd, drive_api_server_url, probe=probe)
 
         console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
         console.print("\n[bold yellow]命令预览:[/bold yellow]")
@@ -1324,6 +1333,8 @@ class DriveCommand(DonkeyCommand):
             car_env = os.environ.copy()
             car_env["DRIVE_API_SERVER_URL"] = \
                 self.get_drive_api_server_url(backend_port=backend_port)
+            # 探针开关以本次 TUI 选择为准（显式置 0/1，不残留 shell env）
+            car_env["DRIVE_WEBRTC_LATENCY_PROBE"] = "1" if probe else "0"
             # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口；
             # 用局域网 IP，远程终端（DC/SSH）用户可直接点击（用户已显式设置时尊重其值）
             #（DriveApiBridge 未设置时硬编码回落 5188）
@@ -1355,6 +1366,16 @@ class DriveCommand(DonkeyCommand):
                 console.print(
                     f"\n[bold green]Drive 页面: {drive_url}[/bold green] "
                     "[dim]（远程终端请在自己的浏览器打开此地址）[/dim]"
+                )
+            if probe:
+                repo_root = Path(__file__).resolve().parents[2]
+                console.print(
+                    "\n[bold cyan]时延探针已开启[/bold cyan] "
+                    "[dim]（画面含时间戳印章；探针会接管浏览器视频会话，页面自动降级 MJPEG 属预期）。"
+                    "另开终端实测端到端时延:[/dim]\n"
+                    f"[green]{sys.executable} {repo_root / 'scripts' / 'webrtc_loop_probe.py'} "
+                    f"--backend http://127.0.0.1:{backend_port} --duration 10 "
+                    "--gate-fps 58 --gate-latency-ms 60[/green]"
                 )
 
             self.monitor_processes(web_process, car_process)
@@ -1409,8 +1430,14 @@ class DriveCommand(DonkeyCommand):
 
         return f"ws://localhost:{backend_port}/api/drive/ws"
 
-    def get_preview_command(self, web_cmd, car_cmd, drive_api_server_url=None):
-        car_prefix = f"DRIVE_API_SERVER_URL={drive_api_server_url or self.get_drive_api_server_url()}"
+    def get_preview_command(self, web_cmd, car_cmd, drive_api_server_url=None,
+                            probe=False):
+        prefixes = [
+            f"DRIVE_API_SERVER_URL={drive_api_server_url or self.get_drive_api_server_url()}",
+        ]
+        if probe:
+            prefixes.append("DRIVE_WEBRTC_LATENCY_PROBE=1")
+        car_prefix = " ".join(prefixes)
         web_section = (
             "Web Console（复用已有实例，不重复启动）"
             if web_cmd is None

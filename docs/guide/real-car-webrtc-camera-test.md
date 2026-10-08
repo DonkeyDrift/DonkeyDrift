@@ -47,6 +47,12 @@ DRIVE_WEBRTC_LATENCY_PROBE=1 donkey drive \
 **浏览器访问 `http://<车端IP>:8000/#/drive`**（生产模式前端由后端端口托管，
 与 API 同源）；加 `--dev` 才是 Vite 的 5188。Ctrl+C 同时停三层。
 
+### 方式 A'：TUI 入口（`donkey tui` 或直接 `donkey`）
+
+菜单选 `6 · Drive`，确认页会询问「开启 WebRTC 时延探针？」，选 `y` 等价于
+方式 A 带 `DRIVE_WEBRTC_LATENCY_PROBE=1`（选择显式覆盖 shell 残留 env），
+启动后直接给出针对本次端口的探针命令；正常驾驶选 `n`（默认）。
+
 ### 方式 B：分开启动（调试用）
 
 ```bash
