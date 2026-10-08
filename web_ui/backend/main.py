@@ -17,6 +17,57 @@ from routers import findcar as findcar_router
 
 DEBUG = os.environ.get("DRIVE_WEB_DEBUG", "").lower() in ("1", "true", "yes")
 
+# CORS 白名单默认收敛到回环（生产模式前后端同源，跨域默认不需要；
+# dev 模式下 Vite 走同源代理 /api -> 127.0.0.1:backend，同样不需要跨域）。
+# 局域网多机部署（浏览器在另一台机器上直连 0.0.0.0 后端）需显式放开：
+#   DRIVE_WEB_CORS_ORIGINS="*"                      # 允许任意来源（等同旧行为）
+#   DRIVE_WEB_CORS_ORIGINS="http://192.168.1.10:5188,http://car:8000"  # 白名单
+#   DRIVE_WEB_CORS_ALLOW_ORIGIN_REGEX="https?://.*\\.lan(:[0-9]+)?$"   # 正则（与白名单取并集）
+# 注意：allow_credentials=True 与通配符 origin 组合在浏览器侧会被拒绝
+# （Fetch 规范要求凭据模式下 Access-Control-Allow-Origin 不能是 *），
+# 因此 "*" 仅作为兼容旧部署的逃生舱，新部署请写明确来源或正则。
+#
+# Starlette 1.x 的 is_allowed_origin() 对 allow_origins 是**精确匹配**
+# （origin in self.allow_origins），不支持 scheme+host 前缀、也不剥端口，
+# 所以默认白名单必须列全「回环地址 × 端口」组合（Vite dev 5188 / 生产
+# 后端 8000），不能只写 http://localhost 就指望放行 http://localhost:5188。
+_DEFAULT_LOOPBACK_SCHEMES = ("http://", "https://")
+_DEFAULT_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+_DEFAULT_LOOPBACK_PORTS = ("", ":5188", ":8000")
+
+DEFAULT_CORS_ORIGINS = tuple(
+    f"{scheme}{host}{port}"
+    for scheme in _DEFAULT_LOOPBACK_SCHEMES
+    for host in _DEFAULT_LOOPBACK_HOSTS
+    for port in _DEFAULT_LOOPBACK_PORTS
+)
+
+
+def _resolve_cors_config():
+    """解析 CORS 配置，返回 (allow_origins, allow_origin_regex)。
+
+    - 未设置 DRIVE_WEB_CORS_ORIGINS → 回环白名单（默认安全行为）。
+    - 设置为 "*" → 任意来源（等同旧实现，兼容既有局域网部署）。
+    - 设置为逗号分隔列表 → 精确匹配这些来源。
+    - DRIVE_WEB_CORS_ALLOW_ORIGIN_REGEX 额外提供正则，与白名单取并集；
+      设为 "*" 时等价于任意来源。
+    """
+    raw = os.environ.get("DRIVE_WEB_CORS_ORIGINS", "").strip()
+    regex = os.environ.get("DRIVE_WEB_CORS_ALLOW_ORIGIN_REGEX", "").strip()
+    if regex == "*":
+        return ["*"], None
+    regex = regex or None
+    if not raw:
+        return list(DEFAULT_CORS_ORIGINS), regex
+    if raw == "*":
+        return ["*"], regex
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    return (origins or list(DEFAULT_CORS_ORIGINS)), regex
+
+
+def _resolve_cors_origins():
+    return _resolve_cors_config()[0]
+
 if not DEBUG:
     # 抑制 uvicorn 访问日志
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -57,10 +108,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="DonkeyDrifter Web API", lifespan=lifespan)
 
-# Configure CORS
+# Configure CORS（默认仅回环来源，详见 _resolve_cors_config 注释）
+_cors_origins, _cors_origin_regex = _resolve_cors_config()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development, allow all origins
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

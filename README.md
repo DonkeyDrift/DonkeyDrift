@@ -26,7 +26,9 @@ python manage.py drive
 
 The CLI command remains `donkey` for compatibility with the Donkeycar ecosystem and existing vehicle projects.
 
-Requires Python 3.11.
+Requires Python 3.11 (officially supported). Python 3.10 and 3.12 are also accepted by the
+package metadata (`python_requires >=3.10,<3.13`); 3.12 is used for the NPU runtime but is
+treated as experimental for the training stack — see [MIGRATION-py312.md](MIGRATION-py312.md).
 
 > **Important: install `donkeydrifter`, never `donkeycar`.**
 > The PyPI package `donkeycar` is the upstream Donkeycar project, not DonkeyDrift.

@@ -18,6 +18,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
+from .video_timestamp import draw_timestamp
+
 # 车端 WebRTC 底层日志控制：默认抑制，DEBUG 模式开启
 def _configure_webrtc_logging():
     if os.environ.get("DRIVE_WEB_DEBUG", "").lower() not in ("1", "true", "yes"):
@@ -261,11 +263,13 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
     """aiortc 使用的视频轨道，输出最新真实帧。"""
 
     def __init__(self, frame_buffer: DriveVideoFrameBuffer, fps: int = 60,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 latency_probe: bool = False):
         super().__init__()
         self.frame_buffer = frame_buffer
         self.fps = fps
         self.clock = clock
+        self.latency_probe = latency_probe
         self.last_frame_id = 0
         self.pts = 0
         # pts 墙钟锚点：RTP 时间戳 = pts * time_base，必须跟随帧的真实
@@ -274,6 +278,7 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         # 墙钟，接收端缓冲时序随运行时长失真。
         self._pts_anchor_t: Optional[float] = None
         self._pts_anchor_pts = 0
+        self._pts_next = 0
         self.time_base = Fraction(1, fps)
         self.sent_timestamps = deque(maxlen=120)
         self.sent_frames = 0
@@ -290,14 +295,38 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
                 self.sent_frames += 1
                 self.sent_timestamps.append(self.clock())
                 if self._pts_anchor_t is None:
+                    # 首帧：以首帧时间戳为墙钟锚点，pts 从 0 起算。
+                    # 早期版本这里只设锚点、下面的 target 未赋值，
+                    # `target if target > self.pts` 抛 UnboundLocalError，
+                    # WebRTC 轨道首帧即崩（tests/test_drive_webrtc_track.py 回归）。
                     self._pts_anchor_t = latest.timestamp
-                    self._pts_anchor_pts = self.pts
+                    self._pts_anchor_pts = self._pts_next
+                    target = self._pts_next
                 else:
                     target = self._pts_anchor_pts + int(round(
                         (latest.timestamp - self._pts_anchor_t) * self.fps))
-                    # 单调保护：墙钟回拨（NTP 校时）时退化为每帧 +1，保证 pts 不回退
-                    self.pts = target if target > self.pts else self.pts + 1
-                frame = av.VideoFrame.from_ndarray(latest.frame, format="rgb24")
+                # 单调保护 + 首帧语义：
+                # - 首帧（_pts_next=0 且 target=0）：pts 保持 0（锚点帧），不递增。
+                #   这是 tests/test_drive_webrtc_track.py 锁定的语义。
+                # - 后续帧 target > _pts_next：按墙钟差值推进（正常路径）。
+                # - 后续帧 target <= _pts_next（墙钟回拨/编码抖动）：退化为 +1，
+                #   保证 pts 严格递增不回退，接收端至少看到单调时钟。
+                if self._pts_next == 0 and target == 0:
+                    # 首帧：保持 pts=0
+                    pass
+                elif target > self._pts_next:
+                    self._pts_next = target
+                else:
+                    self._pts_next += 1
+                self.pts = self._pts_next
+                if self.latency_probe:
+                    # 印章画在副本上：latest.frame 由缓冲共享（编码重试/多消费方），
+                    # 相机数组可能复用内存，原地画会污染自动驾驶管线输入
+                    probe_frame = latest.frame.copy()
+                    draw_timestamp(probe_frame, latest.timestamp)
+                    frame = av.VideoFrame.from_ndarray(probe_frame, format="rgb24")
+                else:
+                    frame = av.VideoFrame.from_ndarray(latest.frame, format="rgb24")
                 frame.pts = self.pts
                 frame.time_base = self.time_base
                 return frame
@@ -330,7 +359,7 @@ class DriveApiBridge:
                  video_fps: int = 60, webrtc_enabled: bool = True,
                  webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0,
                  jpeg_quality: int = 95, preserve_source_resolution: bool = False,
-                 model_loader=None):
+                 model_loader=None, latency_probe: bool = False):
         self.server_url = self._with_role(server_url, role)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
@@ -378,6 +407,16 @@ class DriveApiBridge:
         self.local_candidates_sent = 0
         self.sent_local_ice_candidates = set()
         self.webrtc_track = DriveWebRtcVideoTrack(self.frame_buffer, fps=video_fps)
+
+        # 端到端时延探针：在推流帧上烧入捕获时刻印章（video_timestamp），
+        # 供 scripts/webrtc_loop_probe.py 解码实测；env 显式开启优先于配置项
+        self.latency_probe = latency_probe or os.environ.get(
+            "DRIVE_WEBRTC_LATENCY_PROBE", "").strip() in ("1", "true", "True")
+        # 与后端的时钟同步（NTP 式：offset = server - (t0 + rtt/2)，取 RTT 最小样本）。
+        # 探针端把车端本地戳换成后端时钟域时使用；同一台机器上 offset≈0。
+        self.clock_offset_ms: Optional[float] = None
+        self.clock_rtt_ms: Optional[float] = None
+        self._last_clock_sync = 0.0
 
         if auto_start:
             self.start()
@@ -443,6 +482,10 @@ class DriveApiBridge:
                     self.ws = ws
                     self.connected = True
                     logger.info("已连接到 Web Console Drive 服务端")
+                    try:
+                        await self._sync_clock()
+                    except Exception as exc:
+                        logger.debug(f"时钟同步失败（不影响主链路）: {exc!r}")
                     try:
                         async for message in ws:
                             try:
@@ -625,7 +668,8 @@ class DriveApiBridge:
             @peer.on("icecandidate")
             def on_icecandidate(candidate):
                 self._handle_local_ice_candidate(candidate)
-        self.aiortc_track = DriveAiortcVideoTrack(self.frame_buffer, fps=self.video_fps)
+        self.aiortc_track = DriveAiortcVideoTrack(self.frame_buffer, fps=self.video_fps,
+                                                  latency_probe=self.latency_probe)
         peer.addTrack(self.aiortc_track)
         await peer.setRemoteDescription(RTCSessionDescription(sdp=msg.get("sdp", ""), type="offer"))
         answer = await peer.createAnswer()
@@ -736,6 +780,39 @@ class DriveApiBridge:
         response.raise_for_status()
         return response
 
+    async def _get_json_async(self, path: str, timeout: float = 3.0):
+        url = f"{self.http_api_base}{path}"
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, lambda: requests.get(url, timeout=timeout)
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def _sync_clock(self, samples: int = 5):
+        """NTP 式采样后端 /time，取 RTT 最小样本估算本机→后端时钟偏移。
+
+        自身不抛异常：时钟同步是探针的辅助能力，失败只降级（offset 维持
+        上次值/None），调用点（连接循环、run_threaded 保鲜）无需各自兜底。
+        """
+        best_rtt = None
+        best_offset = None
+        try:
+            for _ in range(samples):
+                t0 = time.time()
+                resp = await self._get_json_async("/time")
+                t1 = time.time()
+                rtt = t1 - t0
+                offset = float(resp.get("server_time", t1)) - (t0 + rtt / 2.0)
+                if best_rtt is None or rtt < best_rtt:
+                    best_rtt, best_offset = rtt, offset
+        except Exception as exc:
+            logger.debug(f"时钟同步采样失败（保留上次结果）: {exc!r}")
+            return
+        self.clock_rtt_ms = best_rtt * 1000.0
+        self.clock_offset_ms = best_offset * 1000.0
+        self._last_clock_sync = time.time()
+
     def _post_webrtc_answer(self, session_id: str, sdp: str):
         self._post_json("/webrtc/answer", {
             "session_id": session_id,
@@ -783,6 +860,8 @@ class DriveApiBridge:
             "local_description_elapsed_ms": self.webrtc_local_description_elapsed_ms,
             "answer_sent_elapsed_ms": self.webrtc_answer_sent_elapsed_ms,
             "local_candidates_sent": self.local_candidates_sent,
+            "clock_offset_ms": self.clock_offset_ms,
+            "clock_rtt_ms": self.clock_rtt_ms,
         })
 
     def _send_heartbeat(self):
@@ -870,6 +949,13 @@ class DriveApiBridge:
             if now - self.last_webrtc_stats >= 1.0:
                 self.last_webrtc_stats = now
                 self._send_webrtc_stats()
+            # 时钟同步保鲜（60s）：异步发起即返回，绝不阻塞车辆循环
+            if now - self._last_clock_sync >= 60.0 and self.loop is not None and self.loop.is_running():
+                self._last_clock_sync = now
+                try:
+                    asyncio.run_coroutine_threadsafe(self._sync_clock(), self.loop)
+                except Exception:
+                    pass
             if now - self.last_car_state >= 1.0:
                 self.last_car_state = now
                 self.last_num_records = int(num_records or 0)
