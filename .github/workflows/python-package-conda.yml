@@ -48,3 +48,10 @@ jobs:
           cd web_ui/backend
           pip install -r requirements.txt
           python -m pytest tests -q
+
+      - name: Run drift controller simulation
+        run: |
+          cd web_ui/backend
+          python -m pytest tests/test_drift_controller.py -q
+          cd ../../
+          python scripts/simulate_drift_controller.py --beta-target 25 --duration 10
