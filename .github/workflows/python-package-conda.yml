@@ -55,3 +55,8 @@ jobs:
           python -m pytest tests/test_drift_controller.py -q
           cd ../../
           python scripts/simulate_drift_controller.py --beta-target 25 --duration 10
+
+      - name: Check version consistency
+        run: |
+          cd /home/aidlux/projects
+          python scripts/check_versions.py
