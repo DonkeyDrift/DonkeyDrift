@@ -250,6 +250,10 @@ GYM_CONF["bio"] = "I race robots."
 #   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示最高画质。
 GYM_CONF["render_img_w"] = 1920
 GYM_CONF["render_img_h"] = 1080
+# Drive 预览（WebRTC）编码分辨率上限：1080p 原生帧直接进软编码会把帧率
+# 拖垮（实测 fps 3.9/时延 447ms），超限帧等比缩到上限内；0 = 关闭上限
+DRIVE_WEBRTC_PREVIEW_MAX_WIDTH = 640
+DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT = 480
 
 def get_wsl_host_ip():
     # 尝试 1: 使用 ipconfig.exe (最准确，能获取 Windows 局域网 IP)

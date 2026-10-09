@@ -1173,3 +1173,62 @@ def test_drive_api_bridge_offer_failure_recorded_and_reported(monkeypatch, caplo
     bridge._send_webrtc_stats()
     stats_payload = next(p for p in sent if p.get("type") == "webrtc_stats")
     assert stats_payload["answer_error"] == bridge.webrtc_answer_error
+
+
+# ---------------- 预览编码分辨率上限（模拟器 1080p 时延修复） ----------------
+
+def test_frame_buffer_caps_oversized_preview_frames():
+    """1080p 原生帧超过上限 → 等比缩到上限内（640×360，宽高比保持、尺寸取偶）。"""
+    buf = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True,
+                                max_width=640, max_height=480)
+    frame1080 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    latest = buf.update(frame1080)
+    assert latest.frame.shape == (360, 640, 3)
+
+
+def test_frame_buffer_cap_passthrough_small_and_native():
+    """小于上限的帧不缩放；未设上限（None）保持原生直通。"""
+    buf = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True,
+                                max_width=640, max_height=480)
+    frame480 = np.zeros((480, 640, 3), dtype=np.uint8)
+    assert buf.update(frame480).frame.shape == (480, 640, 3)
+
+    native = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True)
+    frame1080 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    assert native.update(frame1080).frame.shape == (1080, 1920, 3)
+
+
+def test_frame_buffer_cap_applies_without_upscale_only():
+    """上限对非 upscale_only 路径同样生效（超限帧优先缩到上限而非拉伸到目标尺寸）。"""
+    buf = DriveVideoFrameBuffer(width=320, height=240,
+                                max_width=640, max_height=480)
+    frame1080 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    assert buf.update(frame1080).frame.shape == (360, 640, 3)
+
+
+def test_bridge_preview_max_resolution_precedence(monkeypatch):
+    for name in ("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT"):
+        monkeypatch.delenv(name, raising=False)
+    bridge = DriveApiBridge(auto_start=False)
+    assert bridge.frame_buffer.max_width == 640
+    assert bridge.frame_buffer.max_height == 480
+
+    # 显式参数优先；0 关闭（None 传给 buffer）
+    bridge = DriveApiBridge(auto_start=False,
+                            webrtc_preview_max_width=800, webrtc_preview_max_height=600)
+    assert (bridge.frame_buffer.max_width, bridge.frame_buffer.max_height) == (800, 600)
+    bridge = DriveApiBridge(auto_start=False,
+                            webrtc_preview_max_width=0, webrtc_preview_max_height=0)
+    assert bridge.frame_buffer.max_width is None
+    assert bridge.frame_buffer.max_height is None
+
+    # env 覆盖默认
+    monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "1280")
+    monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT", "720")
+    bridge = DriveApiBridge(auto_start=False)
+    assert (bridge.frame_buffer.max_width, bridge.frame_buffer.max_height) == (1280, 720)
+
+    # env 非法值回落默认
+    monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "abc")
+    bridge = DriveApiBridge(auto_start=False)
+    assert bridge.frame_buffer.max_width == 640

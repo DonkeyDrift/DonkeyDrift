@@ -132,6 +132,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             webrtc_encoder_tune=getattr(cfg, "DRIVE_WEBRTC_ENCODER_TUNE", None),
             jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
             preserve_source_resolution=True,
+            webrtc_preview_max_width=getattr(cfg, "DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", None),
+            webrtc_preview_max_height=getattr(cfg, "DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT", None),
         )
         # outputs 顺序必须与 DriveApiBridge.run_threaded 的 7 元组返回值严格一致
         # (Vehicle/Memory 按位置配对)：少写或错序会导致重连标志被静默丢弃。

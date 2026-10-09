@@ -158,10 +158,17 @@ class DriveVideoFrameBuffer:
 
     def __init__(self, width: int = 320, height: int = 240,
                  clock: Callable[[], float] = time.time, history_size: int = 120,
-                 upscale_only: bool = False):
+                 upscale_only: bool = False,
+                 max_width: Optional[int] = None, max_height: Optional[int] = None):
         self.width = width
         self.height = height
         self.upscale_only = upscale_only
+        # 预览编码分辨率上限：模拟器「保留原生分辨率」路径（upscale_only）
+        # 的帧可远大于编码器实时能力（1080p 软编实测 fps 3.9/时延 447ms），
+        # 超限帧按宽高比缩到上限内（软件编码才能跟上帧率）。
+        # None = 不设限（保留原有行为）。
+        self.max_width = max_width
+        self.max_height = max_height
         self.clock = clock
         self.frame_id = 0
         self.latest: Optional[DriveVideoFrame] = None
@@ -203,6 +210,13 @@ class DriveVideoFrameBuffer:
             return img_arr
         if cv2 is None:
             return img_arr
+        if self.max_width and self.max_height and \
+                (w > self.max_width or h > self.max_height):
+            # 超过编码分辨率上限：按宽高比等比缩到上限内（尺寸取偶，yuv420 色度对齐）
+            scale = min(self.max_width / w, self.max_height / h)
+            target_w = max(2, int(w * scale)) // 2 * 2
+            target_h = max(2, int(h * scale)) // 2 * 2
+            return cv2.resize(img_arr, (target_w, target_h))
         if self.upscale_only and h >= self.height and w >= self.width:
             # 预览源分辨率已不低于目标分辨率：保留原生高分辨率帧，避免有损降采样
             #（模拟器预览「最高画质」：渲染分辨率≥ DRIVE_VIDEO_WIDTH×HEIGHT 时直接使用）。
@@ -394,7 +408,8 @@ class DriveApiBridge:
                  webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0,
                  jpeg_quality: int = 95, preserve_source_resolution: bool = False,
                  model_loader=None, latency_probe: bool = False,
-                 webrtc_video_bitrate=None, webrtc_encoder_tune=None):
+                 webrtc_video_bitrate=None, webrtc_encoder_tune=None,
+                 webrtc_preview_max_width=None, webrtc_preview_max_height=None):
         self.server_url = self._with_role(server_url, role)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
@@ -408,8 +423,17 @@ class DriveApiBridge:
         # issue #003 热加载：车端常驻的可原子替换模型容器（PilotHolder）。
         # 为 None 表示当前车端不支持热加载（legacy json / 漂移回放占用 pilot 输出）。
         self.model_loader = model_loader
-        self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height,
-                                                 upscale_only=preserve_source_resolution)
+        # P2 预览编码分辨率上限：preserve_source_resolution（模拟器）路径的
+        # 高分辨率帧直接进软编会把帧率拖垮（1080p 实测 fps 3.9/时延 447ms）。
+        # 默认 640×480（等比缩放）；env 或参数显式 0 = 关闭上限定回原生。
+        self.frame_buffer = DriveVideoFrameBuffer(
+            width=video_width, height=video_height,
+            upscale_only=preserve_source_resolution,
+            max_width=self._resolve_preview_max(
+                webrtc_preview_max_width, "DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", 640),
+            max_height=self._resolve_preview_max(
+                webrtc_preview_max_height, "DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT", 480),
+        )
         # P0 编码调优：低时延 VP8 参数（cpu-used=15 / 关降噪 / 周期关键帧 /
         # 1.5Mbps 初始码率）。进程级补丁、幂等；可用 env/参数关闭回退上游默认。
         if video_transport == "webrtc" and webrtc_enabled and resolve_tune_enabled(webrtc_encoder_tune):
@@ -428,6 +452,11 @@ class DriveApiBridge:
         self.connected = False
         self.ws = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        # offer 处理串行锁：setLocalDescription 隐含 ICE gathering 可能耗时数秒，
+        # 期间新 offer（浏览器快速重连/会话接管）会并发进入，后到的清理会把
+        # 在途 peer 关掉（InvalidStateError: RTCPeerConnection is closed）。
+        # 串行化保证「最后一次 offer 的处理完整胜出」。
+        self._webrtc_accept_lock: Optional[asyncio.Lock] = None
         self.running = False
         self.last_frame = 0.0
         self.thread = None
@@ -464,6 +493,21 @@ class DriveApiBridge:
 
         if auto_start:
             self.start()
+
+    @staticmethod
+    def _resolve_preview_max(param, env_name: str, default: int) -> Optional[int]:
+        """预览上限优先级：参数 > env > 默认；0 = 关闭（None 传给 buffer）。"""
+        value = param
+        if value is None:
+            env = os.environ.get(env_name, "").strip()
+            if env:
+                try:
+                    value = int(env)
+                except ValueError:
+                    logger.warning(f"忽略非法 {env_name}: {env!r}")
+        if value is None:
+            return default
+        return None if int(value) <= 0 else int(value)
 
     @staticmethod
     def _with_role(server_url: str, role: str) -> str:
@@ -708,17 +752,21 @@ class DriveApiBridge:
             logger.warning("缺少 aiortc 依赖，无法建立 WebRTC PeerConnection")
             return
 
-        # offer 处理任何一步失败都必须可见：本协程经 run_coroutine_threadsafe
-        # 调度、future 无人 await，异常会被静默吞掉——真机曾表现为浏览器永久
-        # MJPEG 降级，stats 里 answer/ICE 全部停滞且无任何日志可查
-        self.webrtc_answer_error = None
-        try:
-            await self._accept_webrtc_offer_inner(msg)
-        except Exception as exc:
-            self.webrtc_answer_error = f"{type(exc).__name__}: {exc!r}"
-            logger.warning(
-                "WebRTC offer 处理失败（浏览器将因收不到 answer 降级 MJPEG）: %s",
-                self.webrtc_answer_error, exc_info=True)
+        if self._webrtc_accept_lock is None:
+            # 绑定到 bridge 事件循环；各 offer 处理在同一循环上排队
+            self._webrtc_accept_lock = asyncio.Lock()
+        async with self._webrtc_accept_lock:
+            # offer 处理任何一步失败都必须可见：本协程经 run_coroutine_threadsafe
+            # 调度、future 无人 await，异常会被静默吞掉——真机曾表现为浏览器永久
+            # MJPEG 降级，stats 里 answer/ICE 全部停滞且无任何日志可查
+            self.webrtc_answer_error = None
+            try:
+                await self._accept_webrtc_offer_inner(msg)
+            except Exception as exc:
+                self.webrtc_answer_error = f"{type(exc).__name__}: {exc!r}"
+                logger.warning(
+                    "WebRTC offer 处理失败（浏览器将因收不到 answer 降级 MJPEG）: %s",
+                    self.webrtc_answer_error, exc_info=True)
 
     async def _accept_webrtc_offer_inner(self, msg: dict):
         if self.webrtc_peer is not None:
