@@ -1,3 +1,24 @@
+## 2026-10-09 (264)
+
+- feat(camera): 车端分辨率 160x120 → 320x240，全链路（WebRTC/采集/筛选/训练/推理）原生 320x240
+  - 改动只有一处配置：`~/projects/mycar/myconfig.py` 增加 `IMAGE_W=320 / IMAGE_H=240`（此前 myconfig 未覆盖，config.py 默认 160x120 生效）。该值是五条链路的共同源头：相机采集（Webcam/pygame）、tub 记录、训练集加载 resize（`load_image_sized`）、模型输入 shape（`get_model_by_type`）、autopilot 输入帧。WebRTC 流尺寸 `DRIVE_VIDEO_WIDTH/HEIGHT` 本就是 320x240——升级前是 160x120 经 `DriveVideoFrameBuffer` cv2.resize 上采样的模糊画面，升级后 `_resize` 命中等尺寸直通分支，少一次 resize 且画面原生清晰。
+  - 实测（犀牛派 A1，Ubi Camera v4 @pygame/RGB，`manage.py drive` 重启后）：
+    - drive 主循环 58.7 Hz（`source_fps` 即 bridge `run_threaded` 节拍，与 160x120 时的 59.1 持平；4 倍像素几乎零成本，因为编码器此前就按 320x240@60 调优过——VP8 cpu-used/noise-sensitivity 那轮）；
+    - WebRTC 会话 sent_fps 58.7、frames_dropped 0、jitter 4ms、degraded=false；浏览器探针（`e2e/webrtc-browser-probe.mjs`）pass=true；
+    - TFLite 推理 p50 2.9ms(160x120 旧模型) → 13.7ms(320x240 新模型)，仍在 60Hz 预算 16.7ms 内；Keras float 路径 53.5ms 超预算——车端自动跑请选 `.tflite`（训练产物自动双份，UI 按扩展名下发类型）；
+    - 采集：TubWriter 写入 320x240 jpg 实测 696 fps（60Hz 需求的 11 倍），单帧 45.5KB（160x120 的 ~4 倍），录制时磁盘写入 ~2.7MB/s；
+    - 训练：本机 CPU linear 97~104s/epoch（651 records、BATCH_SIZE 64、与 drive 进程并行负载下），旧 160x120 tub 与新 320x240 tub 混训正常（加载时统一 resize 到 cfg 尺寸）；远端 GPU 训练流（train_online 打包上传）不受影响，分辨率随 cfg 打包带走；
+    - 筛选：`/api/tub/load` + `/api/tub/image` 对 320x240 tub 端到端取图验证通过（端点只透传 jpg 字节 + ETag 缓存，分辨率无关）。
+- fix(pilot_holder): 热加载新增模型输入形状校验——旧分辨率模型在加载期显式拒绝，不再等到 autopilot 首帧炸掉 drive 主循环
+  - 背景：`PilotHolder.run()` 直接把相机帧喂给模型，vehicle 主循环对部件异常的策略是 traceback 后整体 stop（`vehicle.py` 只捕 KeyboardInterrupt）。分辨率提升后若误选旧 160x120 模型（web UI 模型列表仍可见），首次推理形状不匹配异常会带停整个循环。校验放在 `PilotHolder._build`：`get_input_shape('img_in')` 尾三维 ≠ `(IMAGE_H, IMAGE_W, IMAGE_DEPTH)` 时抛 ValueError，经桥接层回传 Web UI「车端热加载失败」，旧模型保持不变。注意 shape 元素可能是 np.int32，须先转 Python int 再比较（否则 `isinstance(d, int)` 判断静默放行——首版就栽在这）。
+  - 实测：旧 `pilot_1791379009443.tflite` 加载被拒（报错含两边分辨率与两条出路：重训或改回配置）；新训 320x240 tflite 正常加载推理；`test_pilot_holder_hot_load` 等 77 项相关测试全过。
+- fix(webui/e2e): 修复浏览器探针采样必挂——`page.evaluate` 传入函数不能引用模块闭包
+  - 现象：探针每次都在采样期报 `Execution context was destroyed`，重试亦然；且无对应导航/请求失败日志，极具迷惑性。
+  - 根因：`sampleInPage` 内引用了模块作用域的 `percentile`。Playwright evaluate 只序列化函数源码，闭包变量不会进页面 → 页内 rVFC 采样结束时 `percentile is not defined`（PAGEERROR 可见），promise 永不 resolve，挂起的 evaluate 被页面后续 react-router 懒加载 chunk 失败触发的整页 reload（react-vendor 内置 location.reload()）以 "Execution context was destroyed" 拒绝。
+  - 修复：分位数计算内联为页内局部 `pctl`；等待/采样循环对 ctx-destroyed 容错并最多重试 3 次（首帧前后的首装 reload 同样容忍）。
+  - 实测：修复前连续 6+ 次失败，修复后 pass=true（headless 渲染 45fps 为 SwiftShader 软渲染瓶颈；硬件加速真标签页 browser_fps 58.4）。
+  - 边界与注意：旧 160x120 数据/模型仍可读可训（训练加载时放大插值，无新信息但流程兼容）；`models/pilot_1791379009443.*` 为旧分辨率模型，热加载会被新校验拦截；新采集请用 320x240，分辨率切换期不要混用不同分辨率模型。
+
 ## 2026-10-07 (260)
 
 - tools(npu): 收入 NPU/参考对照的固定流程四件套 `scripts/npu_eval/`
