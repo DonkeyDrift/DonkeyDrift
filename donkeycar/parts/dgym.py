@@ -6,6 +6,8 @@ import gym_donkeycar  # noqa: F401  -- registers donkey envs with gymnasium
 
 from donkeycar.config import Config
 
+from .frame_freshness import set_source_arrival
+
 try:
     import cv2
 except Exception:  # pragma: no cover - 缺少 OpenCV 时预览下采样退化为原样返回
@@ -197,6 +199,9 @@ class DonkeyGymEnv(object):
         """
         if raw_frame is None:
             return
+        # 帧到达时刻入侧信道：帧缓冲以它为时间戳并按它去重，让
+        # 「出帧→车辆循环轮询」等待计入时延口径、重复轮询不虚增帧率。
+        set_source_arrival()
         h, w = raw_frame.shape[:2]
         if h == self._img_h and w == self._img_w:
             self.frame = raw_frame

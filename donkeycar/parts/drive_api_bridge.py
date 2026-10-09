@@ -20,6 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from .video_timestamp import draw_timestamp
+from .frame_freshness import get_source_arrival
 from . import cpu_affinity
 from .webrtc_encoder import (
     install_tuned_vp8_encoder,
@@ -175,15 +176,30 @@ class DriveVideoFrameBuffer:
         self.timestamps = deque(maxlen=history_size)
         self.lock = Lock()
         self.waiters = []
+        # 模拟器模式下记录上次消费的帧到达时刻（侧信道值），用于按内容去重；
+        # 实车路径侧信道恒为 None，该字段保持 None、永不触发去重。
+        self._source_arrival: Optional[float] = None
 
     def update(self, img_arr):
         if img_arr is None:
             return None
 
+        # 模拟器模式（frame_freshness 有值）：同一到达帧被车辆循环重复轮询时
+        # 直接跳过——frame_id/时间戳只随真实新帧推进，source_fps 反映真实新帧率，
+        # 旧帧不再被重复编码；帧时间戳取到达时刻，把「出帧→轮询」等待纳入时延口径。
+        # 实车（侧信道为 None）：保持 update 时钟 + 不去重的原行为。
+        source_ts = get_source_arrival()
+        if source_ts is not None and source_ts == self._source_arrival:
+            return self.latest
+
         frame = self._resize(img_arr)
-        timestamp = self.clock()
+        timestamp = source_ts if source_ts is not None else self.clock()
         wakeups = []
         with self.lock:
+            if source_ts is not None and source_ts == self._source_arrival:
+                # 并发 update 双检：预检与加锁之间已有人消费同一到达帧
+                return self.latest
+            self._source_arrival = source_ts
             self.frame_id += 1
             self.timestamps.append(timestamp)
             self.latest = DriveVideoFrame(frame_id=self.frame_id, frame=frame, timestamp=timestamp)
@@ -318,6 +334,11 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         self.fps = fps
         self.clock = clock
         self.latency_probe = latency_probe
+        # 帧内时间戳印章默认常开：浏览器端「真实 E2E」徽标（像素印章读取）
+        # 与回环探针都依赖它。latency_probe（显式探针）恒开；
+        # env DRIVE_WEBRTC_FRAME_STAMP=0 可关（追求画面纯净时）。
+        stamp_env = os.environ.get("DRIVE_WEBRTC_FRAME_STAMP", "1").strip().lower()
+        self.frame_stamp = bool(latency_probe) or stamp_env not in ("0", "false", "off", "no")
         self.last_frame_id = 0
         self.pts = 0
         # pts 墙钟锚点：RTP 时间戳 = pts * time_base，必须跟随帧的真实
@@ -367,7 +388,7 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
                 else:
                     self._pts_next += 1
                 self.pts = self._pts_next
-                if self.latency_probe:
+                if self.frame_stamp:
                     # 印章画在副本上：latest.frame 由缓冲共享（编码重试/多消费方），
                     # 相机数组可能复用内存，原地画会污染自动驾驶管线输入
                     probe_frame = latest.frame.copy()

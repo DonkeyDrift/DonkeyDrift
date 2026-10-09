@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """帧内时间戳印章（WebRTC 端到端时延闭环测量的测量基准）。
 
-探针模式（DRIVE_WEBRTC_LATENCY_PROBE）下，车端把每帧的捕获时刻直接烧进像素，
-接收端（scripts/webrtc_loop_probe.py 的 aiortc 接收器）解码印章后与自身已同步
-时钟对比，得到不依赖任何信令假设的端到端时延实测值。
+车端默认把每帧的时间戳（模拟器模式=帧到达时刻，实车=入缓冲时刻）烧进像素，
+两个消费方据此实测端到端时延：
+
+- scripts/webrtc_loop_probe.py 的 aiortc 接收端：解码印章后与已同步时钟对比；
+- 浏览器 Drive 页：canvas 采样呈现帧的印章区域，得「呈现−时间戳」真实 E2E
+  （徽标口径）。env DRIVE_WEBRTC_FRAME_STAMP=0 关闭烧入（徽标降级回帧间隔）。
 
 编码为二进制单元条（cell bar）而非文本数字：实心色块对 H.264 有损压缩鲁棒，
 解码只需阈值采样，不引入 OCR 依赖。

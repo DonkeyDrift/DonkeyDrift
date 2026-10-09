@@ -44,8 +44,9 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const degraded = forceMjpeg || mjpegFallbackAllowed;
   const [mjpegVisible, setMjpegVisible] = useState(!webRtcVisible);
   const browserFps = Math.round(metrics.browserFps || stats.browser_fps || 0);
-  // 徽标优先显示真实端到端时延（采集→呈现，rVFC captureTime 通路）；
-  // 不可用时回退旧的 p95 帧间隔（帧到达节奏，非时延，仅作降级参考）
+  // 徽标优先显示真实端到端时延：rVFC captureTime 通路（浏览器原生）优先，
+  // 浏览器不提供时走像素印章兜底（帧内嵌车端捕获时刻，经双段时钟对齐）；
+  // 两者皆无时回退旧的 p95 帧间隔（帧到达节奏，非时延，仅作降级参考）
   const e2eP95Ms = metrics.e2eLatencyP95Ms || stats.e2e_latency_p95_ms || 0;
   const hasTrueE2e = e2eP95Ms > 0 && (metrics.e2eSamples > 0 || (stats.e2e_samples ?? 0) > 0);
   const latencyMs = Math.round(hasTrueE2e ? e2eP95Ms : metrics.p95FrameIntervalMs || stats.browser_p95_frame_interval_ms || 0);

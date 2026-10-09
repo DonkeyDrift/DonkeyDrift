@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '@/i18n';
 import {
+  API_URL,
   createDriveClientId,
   createDriveWebRtcSession,
   getDriveWebRtcStats,
@@ -9,6 +10,11 @@ import {
   sendDriveWebRtcOffer,
   type DriveWebRtcStats,
 } from '../services/api';
+import {
+  FRAME_STAMP_SAMPLE_HEIGHT,
+  FRAME_STAMP_SAMPLE_WIDTH,
+  readFrameTimestamp,
+} from '../utils/frameTimestamp';
 import type { WebRtcSignal } from './useDriveWebsocket';
 
 export type DriveVideoState = 'idle' | 'connecting' | 'connected' | 'unstable' | 'reconnecting' | 'degraded' | 'error';
@@ -57,6 +63,12 @@ export const E2E_SAMPLE_WINDOW = 240;
 
 /** 单次 e2e 采样有效性上限：超过视为异常值（时钟毛刺/标签缺失），丢弃 */
 export const E2E_SAMPLE_MAX_MS = 1000;
+
+/** 浏览器→后端时钟同步间隔（NTP 式采样 /drive/time，保 offset 不漂移） */
+export const DRIVE_CLOCK_SYNC_INTERVAL_MS = 30000;
+
+/** 时钟同步采样次数：取 RTT 最小样本估算 offset */
+export const DRIVE_CLOCK_SYNC_SAMPLES = 3;
 
 /** p50/p95 计算：排序后取分位点（样本 <2 时返回 0） */
 export const calculatePercentile = (samples: number[], ratio: number): number => {
@@ -209,6 +221,12 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const mutedAtRef = useRef(0);
   const disconnectTimerRef = useRef<number | null>(null);
   const statsRef = useRef<DriveWebRtcStats>(EMPTY_STATS);
+  // 像素印章 e2e 通路：浏览器↔后端时钟偏移（秒，NTP 式 /drive/time 采样），
+  // null = 未同步，像素通路不产样（宁缺毋滥，避免跨钟域假数）。
+  const clockOffsetRef = useRef<number | null>(null);
+  const stampCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 画布被跨域帧污染（SecurityError）等结构性失败：永久关像素通路，不逐帧重试
+  const stampBrokenRef = useRef(false);
 
   const startRef = useRef<() => void>(() => undefined);
 
@@ -292,6 +310,84 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     scheduleRetry();
   }, [closePeer, scheduleRetry]);
 
+  // 时钟锚：NTP 式采样后端 /drive/time（3 次取 RTT 最小），offset =
+  // server_time − 本机中点时刻（秒）。失败保留上次 offset（首同步失败保持 null，
+  // 像素通路随之静默停用，不产跨钟域假数）。
+  const syncClock = useCallback(async () => {
+    let bestRttMs = Number.POSITIVE_INFINITY;
+    let bestOffset: number | null = null;
+    for (let i = 0; i < DRIVE_CLOCK_SYNC_SAMPLES; i += 1) {
+      const t0 = Date.now();
+      let body: { server_time?: unknown };
+      try {
+        const resp = await fetch(`${API_URL}/drive/time`, { cache: 'no-store' });
+        if (!resp.ok) return;
+        body = await resp.json();
+      } catch {
+        return;
+      }
+      const t1 = Date.now();
+      const serverTime = Number(body?.server_time);
+      if (!Number.isFinite(serverTime)) return;
+      const rttMs = t1 - t0;
+      if (rttMs < bestRttMs) {
+        bestRttMs = rttMs;
+        bestOffset = serverTime - (t0 + rttMs / 2) / 1000;
+      }
+    }
+    if (bestOffset !== null) {
+      clockOffsetRef.current = bestOffset;
+    }
+  }, []);
+
+  // 像素印章 e2e：canvas 采样呈现帧左上角印章区并解码车端捕获时刻，
+  // 与「本机钟 + 时钟锚」对齐后相减 = 内容到达→屏幕呈现的真实时延。
+  // captureTime 通路（浏览器原生）失效时的兜底——也是无 captureTime 浏览器的唯一口径。
+  const readPixelStampE2e = useCallback((): number | null => {
+    if (stampBrokenRef.current) return null;
+    const offsetSec = clockOffsetRef.current;
+    const video = videoRef.current;
+    if (offsetSec === null || !video) return null;
+    if (video.readyState < 2) return null;
+    // 源帧比印章区小（如 160×120 mock）→ 车端 draw_timestamp 同样跳过，无印章
+    if (video.videoWidth < FRAME_STAMP_SAMPLE_WIDTH || video.videoHeight < FRAME_STAMP_SAMPLE_HEIGHT) {
+      return null;
+    }
+    try {
+      let canvas = stampCanvasRef.current;
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.width = FRAME_STAMP_SAMPLE_WIDTH;
+        canvas.height = FRAME_STAMP_SAMPLE_HEIGHT;
+        stampCanvasRef.current = canvas;
+      }
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
+      // 源矩形取帧左上 240×24（印章在编码帧左上，resize 后绘制），
+      // 1:1 拷贝到画布：drawImage 源坐标按视频固有像素，与 CSS 缩放无关
+      ctx.drawImage(
+        video,
+        0, 0, FRAME_STAMP_SAMPLE_WIDTH, FRAME_STAMP_SAMPLE_HEIGHT,
+        0, 0, FRAME_STAMP_SAMPLE_WIDTH, FRAME_STAMP_SAMPLE_HEIGHT,
+      );
+      const image = ctx.getImageData(0, 0, FRAME_STAMP_SAMPLE_WIDTH, FRAME_STAMP_SAMPLE_HEIGHT);
+      const stamp = readFrameTimestamp(image.data, FRAME_STAMP_SAMPLE_WIDTH);
+      if (stamp === null) return null;
+      // 印章是车端钟域，先经车端→后端 offset 归一，再与本机↔后端锚对齐
+      const carOffsetSec = ((statsRef.current.clock_offset_ms ?? 0) as number) / 1000;
+      const e2eMs = (Date.now() / 1000 + offsetSec - stamp - carOffsetSec) * 1000;
+      if (e2eMs < 0 || e2eMs > E2E_SAMPLE_MAX_MS) return null;
+      return e2eMs;
+    } catch (exc) {
+      // 只有跨域污染（画布 SecurityError）是结构性失败才永久停用；
+      // 其余偶发异常丢弃本帧即可，避免一次毛刺永久杀死测量通路
+      if (exc instanceof DOMException && exc.name === 'SecurityError') {
+        stampBrokenRef.current = true;
+      }
+      return null;
+    }
+  }, []);
+
   const scheduleFrameStats = useCallback(() => {
     const video = videoRef.current;
     if (!video?.requestVideoFrameCallback) {
@@ -304,11 +400,20 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       // 两者同处浏览器时钟域（Chrome 经 RTCP SR 映射），无需跨机时钟同步。
       // captureTime 由 aiortc 的 SR NTP 映射提供，含 ≤半帧周期的 pts 量化误差。
       const captureTime = (metadata as VideoFrameCallbackMetadata & { captureTime?: number }).captureTime;
+      let sampledE2e: number | null = null;
       if (captureTime !== undefined && metadata.expectedDisplayTime !== undefined) {
         const e2e = metadata.expectedDisplayTime - captureTime;
         if (e2e >= 0 && e2e <= E2E_SAMPLE_MAX_MS) {
-          e2eSamplesRef.current = [...e2eSamplesRef.current.slice(-(E2E_SAMPLE_WINDOW - 1)), e2e];
+          sampledE2e = e2e;
         }
+      }
+      if (sampledE2e === null) {
+        // 浏览器不提供 captureTime（如部分移动浏览器）→ 像素印章兜底：
+        // 从呈现帧解出车端捕获时刻，经双段时钟对齐后计算真实 e2e
+        sampledE2e = readPixelStampE2e();
+      }
+      if (sampledE2e !== null) {
+        e2eSamplesRef.current = [...e2eSamplesRef.current.slice(-(E2E_SAMPLE_WINDOW - 1)), sampledE2e];
       }
       const nextMetrics: DriveVideoMetrics = {
         ...calculateVideoMetrics(frameTimestampsRef.current),
@@ -339,7 +444,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       frameCallbackRef.current = video.requestVideoFrameCallback(onFrame);
     };
     frameCallbackRef.current = video.requestVideoFrameCallback(onFrame);
-  }, []);
+  }, [readPixelStampE2e]);
 
   const start = useCallback(async () => {
     if (startInFlightRef.current) {
@@ -576,6 +681,17 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // 浏览器↔后端时钟锚：挂载即同步一次 + 周期刷新，供像素印章 e2e 换算。
+  // 同步失败保持既有 offset（或 null），不打断视频；disabled（MJPEG 模式）无印章可读。
+  useEffect(() => {
+    if (disabled) return undefined;
+    syncClock().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      syncClock().catch(() => undefined);
+    }, DRIVE_CLOCK_SYNC_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [disabled, syncClock]);
 
   // stats 镜像到 ref：recover/看门狗里读最新轮询结果做「被接管」判定，
   // 不经过 state 闭包（避免陈旧 session_id 误判）。

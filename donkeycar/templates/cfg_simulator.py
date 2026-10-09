@@ -23,7 +23,10 @@ DATA_PATH = os.path.join(CAR_PATH, 'data')
 MODELS_PATH = os.path.join(CAR_PATH, 'models')
 
 #VEHICLE
-DRIVE_LOOP_HZ = 20      # the vehicle loop will pause if faster than this speed.
+DRIVE_LOOP_HZ = 60      # the vehicle loop will pause if faster than this speed.
+                        # 模拟器模式与 DRIVE_VIDEO_FPS(60) 对齐：轮询节拍低于出帧
+                        # 速率会把「出帧→轮询」等待（20Hz 平均 25ms）计入 FPV
+                        # 端到端时延，且轮询拿不到新帧的拍次是纯空转。
 MAX_LOOPS = None        # the vehicle loop can abort after this many iterations, when given a positive integer.
 
 #CAMERA

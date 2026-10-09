@@ -390,6 +390,9 @@ class FakeAvModule:
 
 def test_aiortc_video_track_converts_latest_frame(monkeypatch):
     monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+    # 转换语义测试走「印章关闭」直通路径（默认印章开走副本，由
+    # test_aiortc_video_track_stamp_default_on_env_can_disable 覆盖）
+    monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
     buffer = DriveVideoFrameBuffer(width=320, height=240)
     track = DriveAiortcVideoTrack(buffer, fps=60)
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
@@ -408,6 +411,7 @@ def test_aiortc_video_track_converts_latest_frame(monkeypatch):
 def test_aiortc_video_track_waits_for_next_frame(monkeypatch):
     async def scenario():
         monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+        monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
         buffer = DriveVideoFrameBuffer(width=320, height=240)
         track = DriveAiortcVideoTrack(buffer, fps=60)
         first = np.zeros((240, 320, 3), dtype=np.uint8)
@@ -1033,31 +1037,44 @@ def test_drive_api_bridge_probe_flag_from_ctor_and_env(monkeypatch):
     assert DriveApiBridge(auto_start=False).latency_probe is True
 
 
-def test_aiortc_video_track_draws_stamp_only_when_probe_enabled(monkeypatch):
+def test_aiortc_video_track_stamp_default_on_env_can_disable(monkeypatch):
     from donkeycar.parts.video_timestamp import read_timestamp
 
     monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
     ts = time.time()
 
-    # 探针开：帧内容被改写（副本），解码出印章
+    # 默认（无探针标志、无 env）：印章常开——浏览器「真实 E2E」徽标与
+    # 回环探针都依赖像素印章；帧内容改写在副本上，不污染缓冲。
+    buffer_default = DriveVideoFrameBuffer(width=320, height=240)
+    track_default = DriveAiortcVideoTrack(buffer_default, fps=60)
+    assert track_default.frame_stamp is True
+    frame_default = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_default.update(frame_default)
+    buffer_default.latest = replace(buffer_default.latest, timestamp=ts)
+    output_default = asyncio.run(track_default.recv())
+    assert output_default.image is not frame_default  # 副本，不污染缓冲
+    assert read_timestamp(output_default.image) is not None
+    assert abs(read_timestamp(output_default.image) - ts) * 1e6 < 128
+
+    # env 显式关闭：原帧直通，无印章
+    monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
+    buffer_off = DriveVideoFrameBuffer(width=320, height=240)
+    track_off = DriveAiortcVideoTrack(buffer_off, fps=60)
+    assert track_off.frame_stamp is False
+    frame_off = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_off.update(frame_off)
+    output_off = asyncio.run(track_off.recv())
+    assert output_off.image is frame_off
+    assert read_timestamp(output_off.image) is None
+
+    # 探针标志恒开（覆盖 env 关闭）：显式探针要求必须可测
     buffer_probe = DriveVideoFrameBuffer(width=320, height=240)
     track_probe = DriveAiortcVideoTrack(buffer_probe, fps=60, latency_probe=True)
+    assert track_probe.frame_stamp is True
     frame_probe = np.zeros((240, 320, 3), dtype=np.uint8)
     buffer_probe.update(frame_probe)
-    buffer_probe.latest = replace(buffer_probe.latest, timestamp=ts)
     output_probe = asyncio.run(track_probe.recv())
-    assert output_probe.image is not frame_probe  # 副本，不污染缓冲
     assert read_timestamp(output_probe.image) is not None
-    assert abs(read_timestamp(output_probe.image) - ts) * 1e6 < 128
-
-    # 探针关：原帧直通，无印章
-    buffer_plain = DriveVideoFrameBuffer(width=320, height=240)
-    track_plain = DriveAiortcVideoTrack(buffer_plain, fps=60)
-    frame_plain = np.zeros((240, 320, 3), dtype=np.uint8)
-    buffer_plain.update(frame_plain)
-    output_plain = asyncio.run(track_plain.recv())
-    assert output_plain.image is frame_plain
-    assert read_timestamp(output_plain.image) is None
 
 
 def test_drive_api_bridge_syncs_clock_with_min_rtt_sample(monkeypatch):

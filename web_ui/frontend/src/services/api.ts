@@ -487,6 +487,8 @@ export interface DriveWebRtcStats {
   e2e_latency_p50_ms?: number;
   e2e_latency_p95_ms?: number;
   e2e_samples?: number;
+  /** 车端↔后端时钟偏移（后端钟 − 车端钟，ms）：像素印章 e2e 的车钟域校正项 */
+  clock_offset_ms?: number;
   transport: 'webrtc' | 'mjpeg';
   degraded: boolean;
 }

@@ -3,8 +3,11 @@ import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDriveWebRtcIceServers, useDriveWebRtcVideo } from './useDriveWebRtcVideo';
 import type { WebRtcSignal } from './useDriveWebsocket';
+// 印章夹具由 Python 参考实现生成：ts = 车端捕获时刻（秒），rgba = 240×24 采样区
+import fixture from '../utils/__fixtures__/frameStamp.json';
 
 vi.mock('../services/api', () => ({
+  API_URL: '/api',
   createDriveClientId: vi.fn(() => 'client-1'),
   createDriveWebRtcSession: vi.fn(async () => ({ session_id: 'session-1' })),
   sendDriveWebRtcOffer: vi.fn(async () => ({ success: true })),
@@ -331,6 +334,81 @@ describe('useDriveWebRtcVideo', () => {
     }));
     expect(receiver.playoutDelayHint).toBe(0);
     expect(receiver.jitterBufferTarget).toBe(0);
+  });
+
+  it('无 captureTime 时用像素印章兜底采样真实端到端时延', async () => {
+    const api = await import('../services/api');
+    // 冻结本机钟：syncClock 的 NTP 中点与读帧时刻同源 → e2e 精确等于
+    // (server_time − stamp)·1000 = 42ms（server_time 由测试钉在 stamp+42ms）
+    const FIXED_NOW = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ server_time: fixture.ts + 0.042 }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    // jsdom 无 canvas 后端：伪造 ctx，getImageData 吐出 Python 生成的印章像素
+    const fakeCtx = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({
+        data: new Uint8ClampedArray(fixture.rgba),
+        width: fixture.width,
+        height: fixture.height,
+      })),
+    };
+    const ctxSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(fakeCtx as unknown as CanvasRenderingContext2D);
+    const callbacks: VideoFrameRequestCallback[] = [];
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: VideoFrameRequestCallback) => {
+        callbacks.push(callback);
+        return callbacks.length;
+      }),
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const pc = new FakePeerConnection();
+    pc.statsReports = [];
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    try {
+      render(<HookProbe onState={onState} factory={factory} />);
+
+      await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+      // 等 3 次 NTP 采样发完，再冲刷微任务让 clockOffsetRef 落库
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await act(async () => {
+        pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver: {} as RTCRtpReceiver } as unknown as RTCTrackEvent);
+      });
+      // jsdom 视频无解码数据：桩出可采样状态（印章区 240×24 要求源 ≥ 240×24）
+      const video = document.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 640 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 480 });
+      await act(async () => {
+        // 帧不带 captureTime（部分浏览器不提供）→ 触发像素印章兜底通路
+        callbacks.shift()?.(0, { presentationTime: 0 } as VideoFrameCallbackMetadata);
+        callbacks.shift()?.(1000, { presentationTime: 1000 } as VideoFrameCallbackMetadata);
+      });
+
+      await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalled());
+      const payload = (api.sendDriveWebRtcBrowserStats as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
+      expect(payload.e2e_samples).toBe(2);
+      expect(payload.e2e_latency_p50_ms).toBeCloseTo(42, 0);
+      expect(payload.e2e_latency_p95_ms).toBeCloseTo(42, 0);
+      expect(payload.browser_fps).toBe(1);
+      expect(payload.browser_p95_frame_interval_ms).toBe(1000);
+    } finally {
+      nowSpy.mockRestore();
+      ctxSpy.mockRestore();
+    }
   });
 
   it('处理 answer 和 ICE 信令', async () => {
