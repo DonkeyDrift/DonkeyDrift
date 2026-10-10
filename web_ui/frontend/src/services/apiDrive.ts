@@ -83,6 +83,9 @@ export interface DriveWebRtcStats {
   frames_dropped?: number;
   jitter_ms?: number;
   jitter_buffer_delay_ms?: number;
+  e2e_latency_p50_ms?: number;
+  e2e_latency_p95_ms?: number;
+  e2e_samples?: number;
   transport: 'webrtc' | 'mjpeg';
   degraded: boolean;
 }
@@ -106,6 +109,9 @@ export const sendDriveWebRtcBrowserStats = async (
     frames_dropped?: number;
     jitter_ms?: number;
     jitter_buffer_delay_ms?: number;
+    e2e_latency_p50_ms?: number;
+    e2e_latency_p95_ms?: number;
+    e2e_samples?: number;
   }
 ) => {
   const response = await api.post('/drive/webrtc/browser-stats', { session_id: sessionId, ...metrics });

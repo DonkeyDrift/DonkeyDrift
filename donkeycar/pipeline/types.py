@@ -6,6 +6,8 @@ import logging
 import numpy as np
 from donkeycar.config import Config
 from donkeycar.parts.tub_v2 import Tub
+from donkeycar.pipeline.image_cache import DEFAULT_CACHE_MAX_BYTES, \
+    get_global_image_cache
 from donkeycar.utils import load_image, load_pil_image, binary_to_img, \
     img_to_arr, img_to_binary, arr_to_binary
 from typing_extensions import TypedDict
@@ -50,7 +52,41 @@ class TubRecord(object):
         self._cache_policy = CachePolicy[
             getattr(self.config, 'CACHE_POLICY', 'ARRAY')]
         self._cache_images = getattr(self.config, 'CACHE_IMAGES', True)
-        self._image: Optional[Any] = None
+        # Images are kept in a process-wide, byte-budgeted LRU cache
+        # instead of an unbounded per-record slot: one epoch over a large
+        # tub used to leave every frame resident in RAM (20k 320x240
+        # frames ~ 4.4GB -> OOM on the 7.1GB board). The most recently
+        # constructed record's CACHE_MAX_BYTES wins for the whole process.
+        self._image_cache = get_global_image_cache()
+        self._image_cache.configure(
+            getattr(self.config, 'CACHE_MAX_BYTES', DEFAULT_CACHE_MAX_BYTES))
+        self._image = None
+
+    def _image_cache_key(self) -> Optional[str]:
+        """Unique key of this record's image: tub path + image filename."""
+        image_path = self.underlying.get('cam/image_array')
+        if image_path is None:
+            return None
+        return os.path.join(self.base_path, 'images', image_path)
+
+    @property
+    def _image(self) -> Optional[Any]:
+        """This record's cache slot, served from the global bounded LRU.
+
+        Preserves the old per-record slot semantics (returns whatever was
+        last cached for this record, e.g. the processed image when a
+        processor ran), except that the entry may have been evicted to
+        stay under CACHE_MAX_BYTES -- a miss simply reloads from disk.
+        """
+        if self._cache_policy == CachePolicy.NOCACHE:
+            return None
+        return self._image_cache.get(self._image_cache_key())
+
+    @_image.setter
+    def _image(self, value: Optional[Any]) -> None:
+        if value is None or self._cache_policy == CachePolicy.NOCACHE:
+            return
+        self._image_cache.put(self._image_cache_key(), value)
 
     def __copy__(self):
         """ Make shallow copies of config and image and full copies of the rest.

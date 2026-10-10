@@ -5,6 +5,20 @@ from time import time
 from typing import List, Dict, Union, Tuple
 import logging
 
+# Cap glibc malloc arenas BEFORE tensorflow spawns its thread pools: with the
+# default per-core arenas, the float64 batch churn of the tf.data pipeline
+# leaves ~0.6-1GB of freed-but-resident heap behind (measured on AidLux A1,
+# 2026-10-09: 20k-frame tub, BATCH_SIZE=64, peak 2830MB -> ~1.9-2.2GB). The
+# env var alone is read by glibc only at the first malloc (i.e. before this
+# module runs), so also apply it live via mallopt(M_ARENA_MAX). setdefault
+# keeps an explicit value from the environment in charge.
+import ctypes
+os.environ.setdefault('MALLOC_ARENA_MAX', '2')
+try:
+    ctypes.CDLL(None).mallopt(-8, 2)  # M_ARENA_MAX
+except Exception:  # pragma: no cover - non-glibc platforms
+    pass
+
 from tensorflow.python.keras.models import load_model
 
 from donkeycar.config import Config
@@ -12,6 +26,8 @@ from donkeycar.parts.keras import KerasPilot
 from donkeycar.parts.interpreter import keras_model_to_tflite, \
     saved_model_to_tensor_rt
 from donkeycar.pipeline.database import PilotDatabase
+from donkeycar.pipeline.image_cache import DEFAULT_CACHE_MAX_BYTES, \
+    get_global_image_cache
 from donkeycar.pipeline.sequence import TubRecord, TubSequence, TfmIterator
 from donkeycar.pipeline.types import TubDataset
 from donkeycar.pipeline.augmentations import ImageAugmentation
@@ -160,8 +176,11 @@ def train(cfg: Config, tub_paths: str, model: str = None,
 
     assert val_size > 0, "Not enough validation data, decrease the batch " \
                          "size or add more data."
-    logger.info(f'Train with image caching: '
-                f'{getattr(cfg, "CACHE_IMAGES", "ARRAY")}')
+    cache_policy = getattr(cfg, 'CACHE_POLICY', 'ARRAY')
+    cache_budget = getattr(cfg, 'CACHE_MAX_BYTES', DEFAULT_CACHE_MAX_BYTES)
+    logger.info(f'Train with image caching: policy={cache_policy}, '
+                f'global_budget={cache_budget / (1024 * 1024):.0f}MiB '
+                f'(CACHE_MAX_BYTES, LRU-evicted)')
     history = kl.train(model_path=model_path,
                        train_data=dataset_train,
                        train_steps=train_size,
@@ -173,6 +192,8 @@ def train(cfg: Config, tub_paths: str, model: str = None,
                        min_delta=cfg.MIN_DELTA,
                        patience=cfg.EARLY_STOP_PATIENCE,
                        show_plot=cfg.SHOW_PLOT)
+    logger.info(f'Image cache after training: '
+                f'{get_global_image_cache().stats()}')
 
     # Save loss metadata for web UI
     try:

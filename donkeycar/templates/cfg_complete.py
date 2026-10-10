@@ -425,6 +425,7 @@ CREATE_TF_LITE = True           # automatically create tflite model in training
 CREATE_TENSOR_RT = False        # automatically create tensorrt model in training
 SAVE_MODEL_AS_H5 = False        # if old keras format should be used instead of savedmodel
 CACHE_POLICY = 'ARRAY'          # if images are cached as array in training other options are 'NOCACHE' and 'BINARY'
+CACHE_MAX_BYTES = 268435456     # total byte budget of the process-wide image cache; with CACHE_POLICY ARRAY/BINARY the least-recently-used images are evicted beyond this budget (256MiB = ~1194 frames of 320x240x3). NOCACHE ignores it. Raise to keep a small tub fully hot in RAM for speed; lower to cap training memory harder.
 
 PRUNE_CNN = False               #This will remove weights from your model. The primary goal is to increase performance.
 PRUNE_PERCENT_TARGET = 75       # The desired percentage of pruning.

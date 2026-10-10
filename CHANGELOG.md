@@ -1,3 +1,19 @@
+## 2026-10-09 (265)
+
+- fix(training): 训练 OOM 根治——TubRecord 无界图像缓存改为全局字节预算 LRU（新配置 `CACHE_MAX_BYTES`，默认 256MiB）+ 训练进程 glibc arena 封顶，板上 2 万帧训练峰值 RSS 从 3.4GB（死亡区）降到 ~1.2GB（安全区）
+  - 背景：10-08/10-09 两次整机死机，内核日志为训练 python anon ~3.4GB、swap 耗尽触发 OOM 风暴误杀 dbus/journald。第一层根因在 `TubRecord._image`：`CACHE_POLICY=ARRAY`（默认）把每个加载过的 uint8 图像永驻 record（无上限不淘汰），`from_generator().repeat().batch()` 每 epoch 遍历全部 records → 一个 epoch 后整根 tub 常驻（2 万帧 320x240×3 ≈ 4.4GB 量级）。
+  - 修复一（缓存层，`donkeycar/pipeline/image_cache.py` 新模块）：保留 NOCACHE/ARRAY/BINARY 三态语义，ARRAY/BINARY 的存储从"每 record 无界槽位"换成进程级 `BoundedImageCache`——以 tub 图像绝对路径为键的 LRU，总字节预算 `CACHE_MAX_BYTES` 超限按 LRU 淘汰（单条超预算时保留最新一条，退化为单条缓存而非死循环）。`TubRecord._image` 改为该缓存上的属性槽位，per-record 语义原样保留（含 test_train 依赖的"processor 结果驻留后、下次带不同 processor 的调用作用在缓存值上"）。未改默认策略为 NOCACHE 的原因：`test_train.py::test_training_pipeline` 显式依赖默认回退 ARRAY 的缓存命中语义；且集中修复同时覆盖 training/benchmarks/web_ui/管理 UI/torch_data 等全部 `TubRecord.image()` 消费方。
+  - 修复二（训练进程，`pipeline/training.py`）：TF import 前 `mallopt(M_ARENA_MAX=2)` + env setdefault——tf.data 的 float64 batch 高速流转（BATCH_SIZE×320×240×3×8B，BS=64 时 118MB/批）在默认 per-core arena 下留下 0.6~1GB"已释放未归还"堆驻留；进程内 mallopt 实测有效（env 变量在解释器启动时已被 glibc 读掉，运行中设 env 无效）。数值行为零变化（纯分配器调优）。
+  - 数值行为红线验证：NOCACHE/有界缓存下喂给模型的数据与改动前逐位一致（增强仍按 batch 在线、归一化仍在 `get_x` 现场、只缓存 uint8 不缓存 float64 归一化结果）；"缓存命中值 == 磁盘重载值"、"槽位被淘汰后回退重读原图" 均有单测锁定。tf.data 管线、`TubDataset.get_records()`、Collator 接口未动；车上 .tflite 推理与 320x240 五链路不受影响。
+  - 配置：`CACHE_MAX_BYTES` 进 cfg_complete/cfg_basic 模板与代码默认（256MiB ≈ 1194 帧 320x240x3）。权衡：小 tub（≲1200 帧）可全量热缓存（命中 0.001ms/帧 vs 未命中 0.55ms/帧）；大 tub 固定顺序循环访问下 LRU 命中率→0，预算纯属封顶，可调小（如 128MiB）给 tf.data/激活让内存。
+  - 实测矩阵（本机 A1，合成 tub，`donkeycar/benchmarks/image_cache_bench.py`）：
+    - 缓存基准（3000 帧/2400 训练帧）：改动前 ARRAY 一个 epoch RSS +608MB 且随帧数线性外推（1.6 万帧 ≈ 3.7GB+，与事故吻合）→ 改动后 ARRAY@256MiB 驻留钉死 268416000B（1165 帧）、峰值 328MB、连续 3 epoch 平稳（328→309→290MB）；NOCACHE 全程 +2MB；NOCACHE 解码开销 0.55ms/帧（2 万帧一个 epoch 仅 +11s，可接受）。
+    - 2 万帧全量训练（linear，2 epochs）：BS=128+默认分配器（=改动前实况）峰值 3431MB、Epoch 2 被 memguard 按预案消灭（journal 留痕 avail=834MB→579MB、进程 3.35→3.44GB）——即缓存封顶后 BS=128 仍然致命，剩余大头是 tf.data/激活的分配器高水位（与 batch/预取无关：prefetch(1) 实验无改善）；+arena 封顶后分解实验 2830→2231（env）/1863（mallopt）；**BS=32 + CACHE 128MiB + mallopt：Epoch 1 稳态 ~1.0GB，全程峰值 1491.5MB（≤1.5GB 达标），loss 0.065→0.021 / val_loss 0.0039→0.0020 正常收敛，memguard 全程静默**（墙钟 1626s/2 epochs）。
+    - 内存分相（BS=64）：import TF 490MB → 建 model+2 万 records +85MB → 纯 tf.data 50 批 +~550MB → fit 工作区 +~1.2GB；图像缓存钉在预算内（stats：entries=1165/268416000B/hits=0）。
+  - 板上训练配置建议（数据支撑）：320x240 CPU 训练 BATCH_SIZE=128 物理不可行（激活+工作区 ~2GB 起，无论缓存/预取怎么调）；建议 `BATCH_SIZE ≤ 64`（余量紧）或 **32**（实测安全），大 tub 配 `CACHE_MAX_BYTES = 134217728`（128MiB）。`mycar/myconfig.py` 当前 BATCH_SIZE=128，板上自训请改为 32/64——本次未代改，属用户训练策略决策；远端 GPU 训练流不受影响。
+  - 测试：新增 `donkeycar/tests/test_image_cache.py` 14 项（LRU 淘汰/预算不变量/get 刷新/缩预算/覆盖同键/槽位语义/命中==重载/多 epoch 平稳/__copy__ 共享/预算下放）；`test_pipeline`+`test_training_pipeline`×24+`test_drift_replay`×14+`test_image_cache` 全绿。工作区纪律：未 commit，模板 CRLF 行尾保持（cfg_basic 以二进制方式插入单行）。
+  - 定位沉淀（2026-10-10）：实测证明板上训练内存贴红线且速度无收益，用户拍板 **A1 只做推理、训练走远端 GPU**；应急配方与完整实验矩阵/手法/教训见 `docs/arch/a1-board-train-vs-inference.md`。
+
 ## 2026-10-09 (264)
 
 - feat(camera): 车端分辨率 160x120 → 320x240，全链路（WebRTC/采集/筛选/训练/推理）原生 320x240
