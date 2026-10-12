@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+import auth as web_auth
 from drift_engine import drift_engine
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,11 @@ class DriveState:
 
         # 心跳
         self.car_last_seen: Optional[datetime] = None
+
+        # 车端上报的模拟器连接状态（遥测 sim_connected 字段）。
+        # 恢复 worker 据此判断是否真的需要重连，避免把健康连接杀掉。
+        self.car_sim_connected: Optional[bool] = None
+        self.car_sim_seen_at: float = 0.0
 
         # 车端槽位易主记录：新车端连接顶掉旧连接时打点，
         # 短窗口内多次易主 = 多个 drive 进程互踢的连接风暴指纹
@@ -116,6 +122,24 @@ class DriveState:
             os.environ.get("SIM_RECOVERY_INTERVAL", "5.0")
         )
 
+    def note_telemetry_sim_state(self, msg: dict) -> None:
+        """从车端遥测消息提取模拟器连接状态。"""
+        if msg.get("sim_connected") is not None:
+            self.car_sim_connected = bool(msg["sim_connected"])
+            self.car_sim_seen_at = time.time()
+
+    def should_skip_sim_recovery(self) -> bool:
+        """恢复 worker 是否应跳过本轮重连：模拟器确认在线且状态新鲜。
+
+        遥测丢失超过 3 个恢复周期视为状态过期，回到「未知」档照常发
+        重连命令——此时车端可能已换进程，旧状态不可信。
+        """
+        fresh = (
+            self.car_sim_connected is not None
+            and time.time() - self.car_sim_seen_at < self.sim_recovery_interval * 3
+        )
+        return bool(fresh and self.car_sim_connected)
+
     async def broadcast_to_clients(self, data: dict):
         """向所有已连接的客户端广播消息，失败时关闭并清理失效连接。"""
         payload = json.dumps(data)
@@ -156,7 +180,12 @@ class DriveState:
             return False
 
     async def _sim_recovery_worker(self):
-        """周期性向车端发送重连模拟器请求。"""
+        """周期性向车端发送重连模拟器请求。
+
+        仅在车端遥测确认模拟器离线（或状态未知且已过期）时才发送：
+        重连命令会让车端重建模拟器连接，健康连接被反复杀掉曾导致
+        车端永久掉线（dgym update 线程卡死在 observe() 自旋后不再自愈）。
+        """
         while True:
             try:
                 await asyncio.sleep(self.sim_recovery_interval)
@@ -165,6 +194,11 @@ class DriveState:
 
             if self.car_ws is None:
                 logger.debug("恢复任务：车端不在线，跳过本次重连")
+                continue
+
+            # 遥测确认模拟器已连接（且信息新鲜）时跳过本次重连
+            if self.should_skip_sim_recovery():
+                logger.debug("恢复任务：模拟器已连接，跳过本次重连")
                 continue
 
             try:
@@ -653,6 +687,19 @@ async def drive_ws(
     role: str = Query("client", description="连接角色: car 或 client"),
     client_id: Optional[str] = Query(None, description="浏览器客户端标识"),
 ):
+    # P0 鉴权门（Starlette HTTP 中间件不覆盖 WS 握手）：非回环客户端须
+    # 携带令牌（?token= / Cookie / Bearer / X-Donkey-Token），判定与
+    # auth.py 一致；拒绝时 close 先于 accept，握手被 ASGI 服务器判 403。
+    # 只对真实网络连接设门：ASGI scope["client"] 由服务器传输层填写
+    # （(host, port) 元组，unix socket 为 None），外部不可伪造；其余形态
+    # 是进程内直调的测试替身，无网络对端，直接放行。
+    client = websocket.client
+    if isinstance(client, (tuple, list)) or client is None:
+        query = dict(websocket.query_params)
+        if not web_auth.is_authorized(websocket.headers, query, client):
+            await websocket.close(code=1008)
+            return
+
     await websocket.accept()
 
     if role == "car":
@@ -706,6 +753,7 @@ async def drive_ws(
 
                 # 车端遥测曲线数据，原样广播给所有客户端（车端已按 100Hz 节流）
                 if msg.get("type") == "telemetry":
+                    drive_state.note_telemetry_sim_state(msg)
                     for hook in list(drive_state.telemetry_hooks):
                         try:
                             hook(msg)
@@ -762,6 +810,9 @@ async def drive_ws(
             # 页面表现为「车端在线却始终无画面」（线上复现过）。
             if drive_state.car_ws is websocket:
                 drive_state.car_ws = None
+                # 模拟器状态随车端失效，恢复 worker 回到「状态未知」档
+                drive_state.car_sim_connected = None
+                drive_state.car_sim_seen_at = 0.0
                 await drive_state.broadcast_to_clients({
                     "type": "car_connection",
                     "online": False,

@@ -66,9 +66,11 @@ def test_simulator_config_defines_render_and_jpeg_quality():
     assert "render_img_w" in cfg
     assert "render_img_h" in cfg
     assert "DRIVE_VIDEO_JPEG_QUALITY" in cfg
-    # 模拟器预览必须是全高清：默认渲染分辨率 1920×1080
-    assert 'GYM_CONF["render_img_w"] = 1920' in cfg
-    assert 'GYM_CONF["render_img_h"] = 1080' in cfg
+    # 渲染分辨率与预览编码上限（DRIVE_WEBRTC_PREVIEW_MAX_*，640×480）对齐：
+    # 实测模拟器遥测节拍固定 20fps 与渲染分辨率无关，更高渲染不涨帧率/画质，
+    # 只多烧模拟器 CPU 与编解码时延
+    assert 'GYM_CONF["render_img_w"] = 640' in cfg
+    assert 'GYM_CONF["render_img_h"] = 480' in cfg
 
 
 def test_complete_config_defines_jpeg_quality():

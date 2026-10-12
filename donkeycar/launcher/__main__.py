@@ -1,7 +1,11 @@
 """python -m donkeycar.launcher 入口。
 
 用法:
-    python -m donkeycar.launcher [--port 8090] [--host 0.0.0.0]
+    python -m donkeycar.launcher [--port 8090] [--host 127.0.0.1]
+
+默认只监听 127.0.0.1（P0 安全补强）；对外监听需显式 ``--host 0.0.0.0``
+或设 ``DONKEY_LAUNCHER_HOST``，非本机访问还需携带访问令牌（见
+launcher/auth.py）。
 """
 
 import argparse
@@ -18,8 +22,9 @@ def main():
         help="监听端口 (默认: 8090)"
     )
     parser.add_argument(
-        "--host", default="0.0.0.0",
-        help="监听地址 (默认: 0.0.0.0)"
+        "--host", default=None,
+        help="监听地址 (默认: 127.0.0.1，仅本机；对外监听请显式传 0.0.0.0 "
+             "或设 DONKEY_LAUNCHER_HOST)"
     )
     args = parser.parse_args()
     run_server(host=args.host, port=args.port)

@@ -941,8 +941,17 @@ def add_simulator(V, cfg):
     if cfg.DONKEY_GYM:
         from donkeydrifter.parts.dgym import DonkeyGymEnv
 
+        # 模拟器出图（cam/image_array）必须等于 NN 输入分辨率 IMAGE_W×IMAGE_H——
+        # 它与真机相机路径、TubWriter、模型输入是同一契约；GYM_CONF 缺 img_w/img_h
+        # 时 dgym 回退 160x120（与模型/录制错位，首帧推理形状不匹配会带停整个
+        # drive 主循环），带旧值同理。渲染分辨率仍由 render_img_w/render_img_h
+        # 独立控制，dgym 内部按它出图再下采样回此分辨率。
+        sim_conf = dict(cfg.GYM_CONF)
+        sim_conf["img_w"] = cfg.IMAGE_W
+        sim_conf["img_h"] = cfg.IMAGE_H
+
         # rbx
-        gym = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF,
+        gym = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=sim_conf,
                            record_location=cfg.SIM_RECORD_LOCATION, record_gyroaccel=cfg.SIM_RECORD_GYROACCEL,
                            record_velocity=cfg.SIM_RECORD_VELOCITY, record_lidar=cfg.SIM_RECORD_LIDAR,
                         #    record_distance=cfg.SIM_RECORD_DISTANCE, record_orientation=cfg.SIM_RECORD_ORIENTATION,

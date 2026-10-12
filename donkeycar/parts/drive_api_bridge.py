@@ -11,11 +11,12 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Lock, Thread
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 from fractions import Fraction
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 
@@ -334,11 +335,12 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         self.fps = fps
         self.clock = clock
         self.latency_probe = latency_probe
-        # 帧内时间戳印章默认常开：浏览器端「真实 E2E」徽标（像素印章读取）
-        # 与回环探针都依赖它。latency_probe（显式探针）恒开；
-        # env DRIVE_WEBRTC_FRAME_STAMP=0 可关（追求画面纯净时）。
-        stamp_env = os.environ.get("DRIVE_WEBRTC_FRAME_STAMP", "1").strip().lower()
-        self.frame_stamp = bool(latency_probe) or stamp_env not in ("0", "false", "off", "no")
+        # 帧内时间戳印章默认关闭（日常驾驶画面纯净优先）：浏览器端「真实 E2E」
+        # 徽标（像素印章读取）需要时 env DRIVE_WEBRTC_FRAME_STAMP=1 显式开启，
+        # 徽标随之从帧间隔口径升级为真时延；latency_probe（显式探针）恒开，
+        # 不受该 env 影响。
+        stamp_env = os.environ.get("DRIVE_WEBRTC_FRAME_STAMP", "0").strip().lower()
+        self.frame_stamp = bool(latency_probe) or stamp_env not in ("0", "false", "off", "no", "")
         self.last_frame_id = 0
         self.pts = 0
         # pts 墙钟锚点：RTP 时间戳 = pts * time_base，必须跟随帧的真实
@@ -421,6 +423,10 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
 class DriveApiBridge:
     """车端 WebSocket 桥接 Part。"""
 
+    # 访问令牌来源（与 web_ui/backend/auth.py 同源）：环境变量 > 令牌文件
+    API_TOKEN_ENV = "DRIVE_API_TOKEN"
+    API_TOKEN_FILE = Path.home() / ".donkeycar" / "drive_api.token"
+
     def __init__(self, server_url: str = "ws://localhost:8000/api/drive/ws",
                  role: str = "car", reconnect_interval: float = 3.0,
                  auto_start: bool = True, video_transport: str = "webrtc",
@@ -431,7 +437,9 @@ class DriveApiBridge:
                  model_loader=None, latency_probe: bool = False,
                  webrtc_video_bitrate=None, webrtc_encoder_tune=None,
                  webrtc_preview_max_width=None, webrtc_preview_max_height=None):
-        self.server_url = self._with_role(server_url, role)
+        self.api_token = self._load_api_token()
+        self.server_url = self._with_token(
+            self._with_role(server_url, role), self.api_token)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
         self.video_transport = video_transport
@@ -534,6 +542,34 @@ class DriveApiBridge:
     def _with_role(server_url: str, role: str) -> str:
         separator = "&" if "?" in server_url else "?"
         return f"{server_url}{separator}role={role}"
+
+    @classmethod
+    def _load_api_token(cls) -> str:
+        """车端访问令牌：DRIVE_API_TOKEN 环境变量 > ~/.donkeycar/drive_api.token。
+
+        与后端 auth.load_or_create_token 同源（后端把令牌落盘在该文件，
+        同机车进程直接复用）；取不到返回 ""（后端关闭鉴权/仅回环时的常态）。
+        """
+        token = os.environ.get(cls.API_TOKEN_ENV, "").strip()
+        if token:
+            return token
+        try:
+            return cls.API_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _with_token(server_url: str, token: str) -> str:
+        """把访问令牌拼进 WS URL 查询串（浏览器无法给 WS 握手自定义头，
+        URL 令牌是远程车端唯一的握手凭据通道）。"""
+        if not token:
+            return server_url
+        separator = "&" if "?" in server_url else "?"
+        return f"{server_url}{separator}token={quote(token, safe='')}"
+
+    def _auth_headers(self) -> Dict[str, str]:
+        """HTTP 调用的显式令牌头（与后端 auth 的 X-Donkey-Token 通道一致）。"""
+        return {"X-Donkey-Token": self.api_token} if self.api_token else {}
 
     @staticmethod
     def _http_api_base(server_url: str) -> str:
@@ -904,7 +940,8 @@ class DriveApiBridge:
 
     def _post_json(self, path: str, payload: dict):
         url = f"{self.http_api_base}{path}"
-        response = _direct_session.post(url, json=payload, timeout=3)
+        response = _direct_session.post(
+            url, json=payload, timeout=3, headers=self._auth_headers())
         response.raise_for_status()
         return response
 
@@ -913,7 +950,8 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: _direct_session.post(url, json=payload, timeout=3)
+            None, lambda: _direct_session.post(
+                url, json=payload, timeout=3, headers=self._auth_headers())
         )
         response.raise_for_status()
         return response
@@ -922,7 +960,8 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: _direct_session.get(url, timeout=timeout)
+            None, lambda: _direct_session.get(
+                url, timeout=timeout, headers=self._auth_headers())
         )
         response.raise_for_status()
         return response.json()

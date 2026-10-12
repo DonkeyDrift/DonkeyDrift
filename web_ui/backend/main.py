@@ -1,17 +1,19 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 import atexit
 import uvicorn
 import os
 import sys
 import logging
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qsl, urlencode
 
 # Add project root to sys.path to allow importing donkeycar if not installed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
+import auth as web_auth
 from routers import config, tub, trainer, drive, arena, connector, launch, console, simcollect, zcode_remote, ai_config, harness_updater, drift
 from routers import findcar as findcar_router
 
@@ -91,6 +93,10 @@ async def lifespan(app: FastAPI):
     findcar 主机心跳已迁至常驻 launcher（donkeycar/launcher/server.py），
     不再随本后端启停；本后端只保留 /api/findcar/config 配置接口。
     """
+    # 启动即落盘访问令牌（~/.donkeycar/drive_api.token）：launcher 跳转 URL
+    # 携带的 ?token= 从该文件读取（只读不生成），必须先于首次跳转存在
+    if web_auth.auth_enabled():
+        web_auth.load_or_create_token()
     harness_updater.start_background_check()
     try:
         drift.install_drive_hooks()
@@ -136,6 +142,110 @@ def apply_cache_headers(response, path: str) -> None:
 
 @app.middleware("http")
 async def cache_control_middleware(request, call_next):
+    response = await call_next(request)
+    apply_cache_headers(response, request.url.path)
+    return response
+
+
+# 非本机访问被拒时的提示页：只讲怎么带令牌，不回显令牌本身
+_AUTH_REQUIRED_HTML = """<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>401 · DonkeyDrifter</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.box{max-width:520px;padding:0 24px}
+h1{font-size:20px;margin:0 0 12px}
+p{line-height:1.7;color:#aab7c4;font-size:14px}
+code{background:#1b222c;border-radius:4px;padding:2px 6px;color:#5cc8ff;font-size:13px}
+.hint{margin-top:16px;font-size:13px;color:#7a8896}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>需要访问令牌 / Token required</h1>
+<p>从非本机设备访问 DonkeyDrifter Web UI 需要在 URL 后携带令牌，例如
+<code>http://&lt;主机&gt;:8000/?token=你的令牌</code>，成功后浏览器会保存
+Cookie，之后访问无需再带。</p>
+<p>令牌见启动日志，或本机文件
+<code>~/.donkeycar/drive_api.token</code>（也可由环境变量
+<code>DRIVE_API_TOKEN</code> 指定）。</p>
+<p>Remote access requires a token appended to the URL. The token is printed
+at startup and stored in <code>~/.donkeycar/drive_api.token</code>.</p>
+<p class="hint">本机访问无需令牌。如果你在可信局域网上想恢复免密（不推荐），
+可在启动环境设 <code>DRIVE_API_AUTH=off</code>。</p>
+</div>
+</body>
+</html>
+"""
+
+
+def _token_cookie_redirect(request):
+    """合法 ?token= 的页面 GET：种 HttpOnly Cookie 后 302 回干净 URL。
+
+    浏览器重定向时会保留 Location 中缺失的 #fragment，HashRouter 深链
+    （/?token=...#/drive）经此跳转后路由不丢。Cookie 不带 Secure——
+    生产走明文 HTTP，Secure 标记会让车机页面直接存不下 Cookie。
+    """
+    token = web_auth.load_or_create_token()
+    kept = [
+        (k, v) for k, v in parse_qsl(request.url.query, keep_blank_values=True)
+        if k != web_auth.QUERY_KEY
+    ]
+    target = request.url.path
+    if kept:
+        target += "?" + urlencode(kept)
+    response = RedirectResponse(target, status_code=302)
+    response.headers["Cache-Control"] = "no-store"
+    response.set_cookie(
+        web_auth.COOKIE_NAME, token, httponly=True, samesite="lax", path="/",
+    )
+    return response
+
+
+def _auth_required_response(path):
+    """未授权响应：/api/* 返回 JSON 401，页面返回 HTML 401 提示页。"""
+    if path.startswith("/api/"):
+        return JSONResponse(
+            {
+                "error": "unauthorized",
+                "hint": (
+                    "非本机访问需携带令牌：?token= / "
+                    "Authorization: Bearer / X-Donkey-Token / Cookie"
+                ),
+            },
+            status_code=401,
+        )
+    return HTMLResponse(
+        _AUTH_REQUIRED_HTML, status_code=401,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.middleware("http")
+async def auth_middleware(request, call_next):
+    """P0 访问控制（2026-10-12，策略详见 auth.py 模块注释）。
+
+    注册顺序在 cache 中间件之后 → 本中间件最外层、最先执行，未授权请求
+    不进路由。OPTIONS（CORS 预检）放行：预检不携带凭据/自定义头，卡它
+    只会断跨域调试链路，实际请求仍在门内。WS 握手不经过 HTTP 中间件，
+    由 routers/drive.py 的 pre-accept 门把守。
+    """
+    if request.method != "OPTIONS":
+        path = request.url.path
+        query = dict(request.query_params)
+        is_ws = (request.headers.get("upgrade") or "").lower() == "websocket"
+        if (
+            request.method == "GET"
+            and not is_ws
+            and not path.startswith("/api/")
+            and web_auth.query_token_valid(query)
+        ):
+            return _token_cookie_redirect(request)
+        if not web_auth.is_authorized(request.headers, query, request.client):
+            return _auth_required_response(path)
     response = await call_next(request)
     apply_cache_headers(response, request.url.path)
     return response
@@ -200,4 +310,10 @@ else:
 
 if __name__ == "__main__":
     port = int(os.environ.get("DRIVE_WEB_PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    # 默认只监听 127.0.0.1（P0 安全补强）；对外监听需显式 DRIVE_WEB_HOST=0.0.0.0
+    # 或 `donkey web --backend-host 0.0.0.0`
+    host = os.environ.get("DRIVE_WEB_HOST", "").strip() or "127.0.0.1"
+    if web_auth.auth_enabled() and not web_auth.is_local_client((host, 0)):
+        print(f"访问令牌已启用，远程入口: http://{host}:{port}/?token="
+              f"{web_auth.load_or_create_token()}")
+    uvicorn.run("main:app", host=host, port=port, reload=True)

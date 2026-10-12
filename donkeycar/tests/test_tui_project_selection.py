@@ -219,11 +219,30 @@ def test_open_project_command_prompts_when_multiple_projects(monkeypatch, tmp_pa
 
     assert Path.cwd() == second_project
     assert rc_handler.data["last_project_path"] == str(second_project)
-    assert prompts[0] == "请输入编号"
+    # 提示文案已支持粘贴项目路径（"请输入编号或项目路径"），只要求仍是编号入口
+    assert prompts[0].startswith("请输入编号")
 
 
 def _patch_no_sleep(monkeypatch):
     monkeypatch.setattr(tui.time, "sleep", lambda *args, **kwargs: None)
+
+
+def _patch_confirm_off(monkeypatch):
+    """WebRTC 时延探针等 Confirm 询问一律答否：去读 pytest 捕获的 stdin 会抛
+    OSError: reading from stdin while output is captured（同 test_tui_drive.py 的做法）。"""
+    monkeypatch.setattr(tui.Confirm, "ask", lambda *args, **kwargs: False)
+
+
+def _drive_ask(asks):
+    """Drive 全流程的 Prompt 替身：记录提示文本；编号/路径类提问回「取消」，
+    其余回「不执行」。编号/路径类若回无效值，产品侧会一直重新提示，
+    叠加 _patch_no_sleep 把 sleep 置空就成了死循环。"""
+    def fake_ask(message, **kwargs):
+        asks.append(message)
+        if "编号" in message or "项目路径" in message:
+            return "0"
+        return "n"
+    return fake_ask
 
 
 def test_drive_command_auto_enters_single_project(monkeypatch, tmp_path):
@@ -237,6 +256,8 @@ def test_drive_command_auto_enters_single_project(monkeypatch, tmp_path):
     monkeypatch.chdir(start_dir)
     _patch_projects_root(monkeypatch, projects_dir)
     _patch_no_sleep(monkeypatch)
+    # 进入项目后 has_car_process 为真，会先问 WebRTC 探针再问执行确认
+    _patch_confirm_off(monkeypatch)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: "n")
 
     tui.DriveCommand().execute()
@@ -255,15 +276,15 @@ def test_drive_command_opens_without_any_project(monkeypatch, tmp_path):
     monkeypatch.chdir(start_dir)
     _patch_projects_root(monkeypatch, projects_dir)
     _patch_no_sleep(monkeypatch)
+    _patch_confirm_off(monkeypatch)
     asks = []
-    monkeypatch.setattr(
-        tui.Prompt, "ask", lambda message, **kwargs: asks.append(message) or "n"
-    )
+    monkeypatch.setattr(tui.Prompt, "ask", _drive_ask(asks))
 
     tui.DriveCommand().execute()
 
-    # 未被环境检查拦截：到达了执行确认提示，且目录未切换
-    assert asks == ["请选择操作"]
+    # 未被环境检查拦截：先走手动输入项目路径的兜底（答 0 取消），
+    # 再到达执行确认提示，且目录未切换
+    assert asks == ["请输入项目路径", "请选择操作"]
     assert Path.cwd() == start_dir
     assert "last_project_path" not in rc_handler.data
 
@@ -279,12 +300,12 @@ def test_drive_command_does_not_auto_enter_when_multiple_projects(monkeypatch, t
     monkeypatch.chdir(start_dir)
     _patch_projects_root(monkeypatch, projects_dir)
     _patch_no_sleep(monkeypatch)
+    _patch_confirm_off(monkeypatch)
     asks = []
-    monkeypatch.setattr(
-        tui.Prompt, "ask", lambda message, **kwargs: asks.append(message) or "n"
-    )
+    monkeypatch.setattr(tui.Prompt, "ask", _drive_ask(asks))
 
     tui.DriveCommand().execute()
 
-    assert asks == ["请选择操作"]
+    # 多项目选择（答 0 取消）→ 手动输入路径兜底（答 0 取消）→ 执行确认
+    assert asks == ["请输入编号或项目路径", "请输入项目路径", "请选择操作"]
     assert Path.cwd() == start_dir

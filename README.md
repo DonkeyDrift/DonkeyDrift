@@ -11,7 +11,7 @@ DonkeyDrift is a Python autonomous driving and drifting robotics platform derive
 - **Data and training**: Tub recording, local and online training of neural-network pilots, TFLite conversion, and dataset tooling under `scripts/`.
 - **Simulator support**: Donkey gym / simulator integration for driving and training without hardware.
 - **Unified Web UI**: FastAPI backend plus React/Vite frontend for driving, Tub management, training, connectors, and arena views.
-- **Launcher service**: a menu and process-launch service (default port `8090`) that starts the drive stack and Web UI, and serves a browser-based host terminal at `/terminal`.
+- **Launcher service**: a menu and process-launch service (default port `8090`) that starts the drive stack and Web UI, and serves a browser-based host terminal at `/terminal` (token-authenticated, default bind `127.0.0.1`).
 - **MUS4 firmware integration**: serial Pilot control and telemetry pairing with the ESP32 firmware in the companion [Firmware](https://github.com/DonkeyDrift/Firmware) repository.
 - **Overhead drift control**: an overhead USB camera tracks an AprilTag on the car roof, estimates field-coordinate pose and drift angle β, records synchronized telemetry tubs, and later closes the loop with a cascaded PID + throttle-pulse controller — see the [中文章节](#俯拍漂移监控系统-overhead-drift-control) below.
 
@@ -29,6 +29,9 @@ The CLI command remains `donkey` for compatibility with the Donkeycar ecosystem 
 Requires Python 3.11 (officially supported). Python 3.10 and 3.12 are also accepted by the
 package metadata (`python_requires >=3.10,<3.13`); 3.12 is used for the NPU runtime but is
 treated as experimental for the training stack — see [MIGRATION-py312.md](MIGRATION-py312.md).
+For a verified uv-based setup on macOS (shared venv with GymDonkeyCar, CN mirrors, and known
+pitfalls such as relocating the repo), see
+[docs/guide/uv-venv-setup.md](docs/guide/uv-venv-setup.md).
 
 > **Important: install `donkeydrifter`, never `donkeycar`.**
 > The PyPI package `donkeycar` is the upstream Donkeycar project, not DonkeyDrift.
@@ -45,7 +48,7 @@ treated as experimental for the training stack — see [MIGRATION-py312.md](MIGR
 
 ### Platform extras
 
-- `pc` — desktop platforms (TensorFlow, matplotlib, Kivy UI, training stack, Web UI backend).
+- `pc` — desktop platforms (TensorFlow, matplotlib, training stack, Web UI backend).
 - `macos` — same as `pc` plus `tensorflow-metal` for Apple Silicon GPU acceleration.
 
 On macOS the default shell is zsh, which treats bare `[...]` as a glob pattern and fails
@@ -98,6 +101,13 @@ donkey web
 ```
 
 The launcher service (`donkeycar/launcher/`) provides the host menu page on port `8090`, starts the drive stack and Web UI as background processes, and exposes a full host shell in the browser at `/terminal` (xterm.js over a WebSocket↔PTY bridge).
+
+## Security
+
+- **Local-first binding**: the launcher (`8090`) and the Web UI backend (`8000`) bind `127.0.0.1` by default. Remote listening is an explicit opt-in (`--host 0.0.0.0` / `DONKEY_LAUNCHER_HOST` / `DRIVE_WEB_HOST`; the real-car systemd unit and the launcher's drive chain pass it explicitly).
+- **Token auth**: remote clients must present a token (`?token=`, `Authorization: Bearer`, `X-Donkey-Token`, or cookie). Tokens live in `~/.donkeycar/launcher.token` / `~/.donkeycar/drive_api.token` (0600), overridable via `DONKEY_LAUNCHER_TOKEN` / `DRIVE_API_TOKEN`. Loopback clients with a clean same-origin `Host`/`Origin` pass without a token (DNS-rebinding is blocked by Host pinning). Kill switches: `DONKEY_LAUNCHER_AUTH=off` / `DRIVE_API_AUTH=off`.
+- **Dependency audit**: `requirements-lock.txt` (pinned + hashed, regenerate via `scripts/regenerate_lock.sh`) is scanned by `pip-audit` in CI (`.github/workflows/dependency-audit.yml`) on every dependency change and weekly.
+- **Docker image**: Jupyter starts with a mandatory token (`JUPYTER_TOKEN`, randomly generated and logged when unset) — never a blank password/token — and runs as a non-root user.
 
 ## 俯拍漂移监控系统 (Overhead Drift Control)
 

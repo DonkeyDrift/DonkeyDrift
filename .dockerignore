@@ -1,0 +1,25 @@
+# 构建上下文瘦身 + 防止把本机环境/数据带进镜像（P0.3，2026-10-12）
+.git
+.github
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+**/*.pyc
+node_modules
+**/node_modules
+web_ui/frontend/dist
+donkeydrifter.egg-info
+*.egg-info
+models
+*.npz
+*.tflite
+*.h5
+*.ckpt*
+.ipynb_checkpoints
+**/.ipynb_checkpoints
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov

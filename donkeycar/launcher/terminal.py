@@ -31,9 +31,14 @@ donkey 等 TUI 程序）。之所以走局域网 WebSocket 而不是 Serial2 串
 exit）时会话立即销毁。浏览器对小输入帧不分片，binary 输入按帧直写 PTY
 （字节流语义，分片也安全）；text 控制帧极小，不会被分片。
 
-安全说明：本服务无认证（与整车免密策略一致，2026-08-14 用户决策）。Launcher
-监听 0.0.0.0:8090，任何能访问该局域网端口的设备都可获得本机登录用户的
-shell。仅供家庭/实验室可信网络使用。
+安全说明（2026-10-12 更新，取代 2026-08-14 "整车免密" 决策）：/terminal/ws
+的 HTTP 握手先过 launcher/server 的鉴权门（launcher/auth.py）——非本机
+TCP 客户端须携带访问令牌（?token= / Cookie / Authorization: Bearer /
+X-Donkey-Token），跨站 Origin 一律拒绝；本机访问免令牌。浏览器无法给
+WebSocket 握手追加自定义头，远程终端页统一走 ?token= 首开存 Cookie、
+随后 /terminal/ws 握手凭 Cookie 通过。本模块自身不再做鉴权，仅信任
+鉴权门放行后的连接；令牌泄露等同 shell 权限，注意保护启动日志与
+~/.donkeycar/launcher.token（0600）。
 """
 
 import base64

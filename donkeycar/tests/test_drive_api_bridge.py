@@ -47,7 +47,12 @@ def test_drive_api_bridge_is_available_from_donkeydrifter_alias():
     assert DrifterDriveApiBridge is DriveApiBridge
 
 
-def test_drive_api_bridge_appends_car_role_to_url():
+def test_drive_api_bridge_appends_car_role_to_url(monkeypatch, tmp_path):
+    # 隔离真实 ~/.donkeycar/drive_api.token：无令牌时 URL 只带 role，
+    # 令牌注入语义由 test_drive_api_bridge_token.py 单独覆盖
+    monkeypatch.delenv(DriveApiBridge.API_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(DriveApiBridge, "API_TOKEN_FILE",
+                        tmp_path / "no_such.token")
     bridge = DriveApiBridge("ws://host:8000/api/drive/ws", auto_start=False)
     bridge_with_query = DriveApiBridge("ws://host/ws?token=x", auto_start=False)
 
@@ -390,8 +395,8 @@ class FakeAvModule:
 
 def test_aiortc_video_track_converts_latest_frame(monkeypatch):
     monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
-    # 转换语义测试走「印章关闭」直通路径（默认印章开走副本，由
-    # test_aiortc_video_track_stamp_default_on_env_can_disable 覆盖）
+    # 转换语义测试走「印章关闭」直通路径（默认即关；印章开启走副本，由
+    # test_aiortc_video_track_stamp_default_off_env_can_enable 覆盖）
     monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
     buffer = DriveVideoFrameBuffer(width=320, height=240)
     track = DriveAiortcVideoTrack(buffer, fps=60)
@@ -1006,19 +1011,23 @@ def test_connect_kwargs_bypass_proxy_when_supported():
     assert ("proxy" in kwargs) == has_proxy_param
 
 
-def test_post_json_bypasses_env_proxies(monkeypatch):
+def test_post_json_bypasses_env_proxies(monkeypatch, tmp_path):
     from donkeycar.parts import drive_api_bridge as bridge_mod
     # 直连 session：trust_env=False 才能挡住 all_proxy env
     # （proxies={"http": None} 会被 requests merge_setting 删键，真机实测 502）
     assert bridge_mod._direct_session.trust_env is False
+    # 隔离真实令牌文件：无令牌时 headers 应为空
+    monkeypatch.delenv(DriveApiBridge.API_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(DriveApiBridge, "API_TOKEN_FILE",
+                        tmp_path / "no_such.token")
     captured = {}
 
     class FakeResp:
         def raise_for_status(self):
             return None
 
-    def fake_post(url, json=None, timeout=None):
-        captured.update(url=url, timeout=timeout)
+    def fake_post(url, json=None, timeout=None, headers=None):
+        captured.update(url=url, timeout=timeout, headers=headers)
         return FakeResp()
 
     monkeypatch.setattr(bridge_mod._direct_session, "post", fake_post)
@@ -1026,6 +1035,7 @@ def test_post_json_bypasses_env_proxies(monkeypatch):
                             server_url="ws://127.0.0.1:8000/api/drive/ws")
     bridge._post_json("/webrtc/answer", {"session_id": "s", "sdp": "x", "type": "answer"})
     assert "webrtc/answer" in captured["url"]
+    assert captured["headers"] == {}
 
 
 # ---------------- 端到端时延探针（video_timestamp + 时钟同步） ----------------
@@ -1037,37 +1047,39 @@ def test_drive_api_bridge_probe_flag_from_ctor_and_env(monkeypatch):
     assert DriveApiBridge(auto_start=False).latency_probe is True
 
 
-def test_aiortc_video_track_stamp_default_on_env_can_disable(monkeypatch):
+def test_aiortc_video_track_stamp_default_off_env_can_enable(monkeypatch):
     from donkeycar.parts.video_timestamp import read_timestamp
 
     monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
     ts = time.time()
 
-    # 默认（无探针标志、无 env）：印章常开——浏览器「真实 E2E」徽标与
-    # 回环探针都依赖像素印章；帧内容改写在副本上，不污染缓冲。
+    # 默认（无探针标志、无 env）：印章关闭——日常驾驶画面纯净，
+    # 徽标降级回帧间隔口径；原帧直通，无副本。
     buffer_default = DriveVideoFrameBuffer(width=320, height=240)
     track_default = DriveAiortcVideoTrack(buffer_default, fps=60)
-    assert track_default.frame_stamp is True
+    assert track_default.frame_stamp is False
     frame_default = np.zeros((240, 320, 3), dtype=np.uint8)
     buffer_default.update(frame_default)
-    buffer_default.latest = replace(buffer_default.latest, timestamp=ts)
     output_default = asyncio.run(track_default.recv())
-    assert output_default.image is not frame_default  # 副本，不污染缓冲
-    assert read_timestamp(output_default.image) is not None
-    assert abs(read_timestamp(output_default.image) - ts) * 1e6 < 128
+    assert output_default.image is frame_default
+    assert read_timestamp(output_default.image) is None
 
-    # env 显式关闭：原帧直通，无印章
-    monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
-    buffer_off = DriveVideoFrameBuffer(width=320, height=240)
-    track_off = DriveAiortcVideoTrack(buffer_off, fps=60)
-    assert track_off.frame_stamp is False
-    frame_off = np.zeros((240, 320, 3), dtype=np.uint8)
-    buffer_off.update(frame_off)
-    output_off = asyncio.run(track_off.recv())
-    assert output_off.image is frame_off
-    assert read_timestamp(output_off.image) is None
+    # env 显式开启（DRIVE_WEBRTC_FRAME_STAMP=1）：烧入印章——浏览器
+    # 「真实 E2E」徽标与回环探针的像素通路依赖它；帧内容改写在副本上，
+    # 不污染缓冲。
+    monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "1")
+    buffer_on = DriveVideoFrameBuffer(width=320, height=240)
+    track_on = DriveAiortcVideoTrack(buffer_on, fps=60)
+    assert track_on.frame_stamp is True
+    frame_on = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_on.update(frame_on)
+    buffer_on.latest = replace(buffer_on.latest, timestamp=ts)
+    output_on = asyncio.run(track_on.recv())
+    assert output_on.image is not frame_on  # 副本，不污染缓冲
+    assert read_timestamp(output_on.image) is not None
+    assert abs(read_timestamp(output_on.image) - ts) * 1e6 < 128
 
-    # 探针标志恒开（覆盖 env 关闭）：显式探针要求必须可测
+    # 探针标志恒开（默认 env 下也烧入）：显式探针要求必须可测
     buffer_probe = DriveVideoFrameBuffer(width=320, height=240)
     track_probe = DriveAiortcVideoTrack(buffer_probe, fps=60, latency_probe=True)
     assert track_probe.frame_stamp is True

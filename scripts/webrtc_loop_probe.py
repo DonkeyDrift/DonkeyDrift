@@ -43,6 +43,57 @@ from aiortc.sdp import candidate_from_sdp  # noqa: E402
 
 from donkeycar.parts.video_timestamp import read_timestamp  # noqa: E402
 
+from aiortc.jitterbuffer import JitterBuffer as _JitterBuffer, JitterFrame as _JitterFrame  # noqa: E402
+from aiortc import rtcrtpreceiver as _rtcrtpreceiver  # noqa: E402
+
+
+class MarkerReleaseJitterBuffer(_JitterBuffer):
+    """按 marker 位立即释放完整帧的抖动缓冲（修正探针测量口径）。
+
+    aiortc 上游 JitterBuffer._remove_frame 靠「下一帧首包的时间戳变化」判界，
+    每个已完整收齐的视频帧会被押到下一帧首包到达才交给解码——接收端固定
+    多付一个帧周期（20fps 源 +50ms、60fps 源 +16.7ms），使本探针的时延
+    测量系统性虚高（实测 20fps 真实流 p50 63ms，实际 15ms）。浏览器不走
+    这段逻辑（Chrome jitterBufferTarget=0 立即出帧），故只修探针侧。
+    车端 VP8 打包器（aiortc Vp8Encoder._packetize）在每个帧最后一个包置
+    marker=1，这里据此立即出帧，与浏览器行为对齐。
+    """
+
+    def add(self, packet):
+        pli, frame = super().add(packet)
+        if frame is None and getattr(packet, "marker", 0):
+            frame = self._release_through_marker()
+        return pli, frame
+
+    def _release_through_marker(self):
+        packets = []
+        remove = 0
+        timestamp = None
+        found = False
+        for count in range(self._capacity):
+            pos = (self._origin + count) % self._capacity
+            pkt = self._packets[pos]
+            if pkt is None:
+                break
+            if timestamp is None:
+                timestamp = pkt.timestamp
+            elif pkt.timestamp != timestamp:
+                break
+            packets.append(pkt)
+            remove = count + 1
+            if pkt.marker:
+                found = True
+                break
+        if not found:
+            return None
+        frame = _JitterFrame(data=b"".join(p._data for p in packets), timestamp=timestamp)
+        self.remove(remove)
+        return frame
+
+
+# 探针进程内替换：RTCRtpReceiver 构造 video 抖动缓冲时用 marker 释放版
+_rtcrtpreceiver.JitterBuffer = MarkerReleaseJitterBuffer
+
 try:
     import websockets
 except ImportError:  # pragma: no cover

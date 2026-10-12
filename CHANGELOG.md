@@ -1,3 +1,86 @@
+## 2026-10-12 (271)
+
+- feat(webrtc): 端到端图传闭环测试编排器 `scripts/e2e_video_test.py`——一条命令跑通「隔离后端→合成源→回环探针门禁→headless 真实浏览器实测」，历史落盘 + `--compare-last` 指标对比，把图传优化变成「改旋钮→重跑→看增减」的闭环
+  - 场景矩阵：`pipeline-320p60`/`pipeline-480p60`（管线能力，fps≥58）、`simcadence-320p20`/`simcadence-480p20`（模拟器 20fps 节拍仿真，fps≥19）、`live`（直测在跑车端，须 `--backend`）；统一门禁 p95≤50ms + 印章覆盖 100%。
+  - 浏览器支路（`--browser`）：自动探测 Chrome/Chromium/Edge，`--headless=new` 打开 Drive 页，页面自身完成 WebRTC 接入与像素印章采样并 POST 回后端，编排器轮询 `/api/drive/webrtc/stats` 取**含抖动缓冲与呈现的真实用户口径**（本机 Edge 实测：480p60 inbound 60fps / p50 28.9ms；20fps 节拍 p50 45.2ms——与有窗浏览器 44ms 互证）。
+  - 隔离：默认自动起随机端口的独立后端实例，不干扰在跑正式实例；`live` 场景例外。全部子进程剥代理 env，失败时倒合成源日志尾部。
+  - `--set K=V` 把任意 env（如 `DRIVE_WEBRTC_VIDEO_BITRATE`）注入合成源做 A/B；`--compare-last` 对历史 JSONL（`~/.donkeycar/video_pipeline_history.jsonl`）按场景对比 fps/p50/p95 增减；退出码可作 CI 门禁。
+  - 实测：三场景 + live 全 PASS（pipeline-320p60 60.07fps/p95 4.6ms；480p60 60.07fps/5.45ms；simcadence 20.06fps/7.38ms；live 真实模拟器流 20.06fps/p95 24.3ms）。
+  - 文档：新增 `docs/guide/e2e-video-pipeline-testing.md`（分段时延预算表、场景矩阵、优化闭环工作流、可 A/B 旋钮清单、判读规则与陷阱），`docs/arch/webrtc-e2e-latency.md` 复现方法节挂链接。
+
+
+## 2026-10-12 (270)
+
+- fix(webrtc): 模拟器链路「时延大、帧率低」三连根因修复——探针押帧假象 + 消费循环节拍 + 渲染分辨率错配；实测模拟器流 e2e p95 25.3ms、浏览器徽标 44ms E2E（目标 <50ms 达成；60FPS 对管线成立、模拟器源有 20fps 硬上限）
+  - **先修测量**：`webrtc_loop_probe` 的 aiortc 接收端 `JitterBuffer` 靠「下一帧首包时间戳变化」判帧界、无视 marker 位，每个收齐的帧被押到下一帧首包到达才解码——探针读数系统性虚高一整个帧周期（20fps 源 +50ms、60fps 源 +16.7ms；20fps 模拟器流旧读数 p50 63.4ms，逐段插桩证明车端仅 ~12ms）。浏览器不受影响（Chrome `jitterBufferTarget=0`）。修复：探针进程内替换 `MarkerReleaseJitterBuffer`，按车端 VP8 打包器置位的 marker=1 立即出帧，与浏览器行为对齐。
+  - **模拟器源 20fps 硬上限（闭源端行为，非本仓库可修）**：同一模拟器在 1920×1080/640×480/320×240 渲染下 gym step 均恒定 20.00fps（p50 ~50ms/步）；`cam_config` 协议无帧率键、客户端 `observe()` 1ms 自旋不限速。模拟器预览帧率预期上限 20fps；60FPS 门禁对合成源/真车相机成立。
+  - **消费循环节拍**：本机 `mycar/config.py` `DRIVE_LOOP_HZ` 20→60（旧模板残留）——20Hz 轮询把「帧到达→被消费」平均拖 25ms 且漏帧（实测 source_fps 17.5 < 20）；改后 source/sent 满速率 20.0fps、0 丢帧。
+  - **渲染分辨率对齐预览编码上限**：`dgym` 缺省渲染 1920×1080→640×480、`cfg_simulator` 模板同步（并更新 `test_dgym_preview`/`test_template_simulator_preview`/`test_resolution_consistency` 断言）——实测渲染分辨率不影响模拟器帧率，1080p 渲染只多烧模拟器 CPU（实测 71%）并放大每帧编解码与传输耗时，而 `DRIVE_WEBRTC_PREVIEW_MAX_*` 本就把预览编码限制在 640×480，高渲染像素全被丢弃。
+  - 实测（25s 门禁，探针修正后）：模拟器真实流 `--gate-fps 19 --gate-latency-ms 50` → **stamp_fps 20.04、p50 15.15 / p95 25.29ms PASS**；合成源 60fps `--gate-fps 58` → **stamp_fps 60.04、p50 4.11 / p95 4.64ms PASS**；真实浏览器 Drive 页徽标 **「WebRTC 44ms E2E」**（inbound 20fps、Chrome 抖动缓冲 13.9ms、丢帧 0）。
+  - 逐段插桩（真实 drive 进程）：到达→取帧 p50 9.8ms + 编码 1.4ms + 编码→发包 0.3ms ≈ 车端 12ms，与修正后探针读数吻合。
+  - 文档：`docs/arch/webrtc-e2e-latency.md` 新增 2026-10-12 实测与三个新陷阱（押帧口径、遮挡窗口 rVFC 停摆、模拟器 20fps 上限），复现命令补模拟器门禁变体。
+  - 本机非仓库文件：`mycar/config.py`（备份 `/tmp/mycar_config.py.bak`）；drive 进程以 `DRIVE_WEBRTC_FRAME_STAMP=1` 重启（徽标报真 E2E 依赖印章，日常可按 (269) 默认关闭）。
+
+
+## 2026-10-12 (269)
+
+- feat(webrtc): 帧时间戳印章默认关闭（用户报障「画面左上角黑白条纹闪动」）——画面纯净优先，`DRIVE_WEBRTC_FRAME_STAMP=1` 显式开启
+  - 定性：左上角黑白方块条非故障，是 `video_timestamp` 印章每帧烧入微秒时间戳，比特逐帧变化即视觉上的「闪动」；浏览器「XXms E2E」真时延徽标与 `webrtc_loop_probe` 回环探针都靠它解码。
+  - 默认翻转：`DriveAiortcVideoTrack` 的 env 缺省 `1` → `0`（`drive_api_bridge.py`），日常驾驶原帧直通不再烧入；`latency_probe` 显式探针恒开不受影响（探针口径见 `webrtc_loop_probe` 文档）；空串值视同关闭。开启时行为不变（帧副本上烧入、不污染自动驾驶管线输入）。
+  - 前端零改动：`useDriveWebRtcVideo` 本就按「无印章 → 降级」设计，徽标自动退回帧间隔口径（参考值，非时延）；要报真 E2E 时车端开 env 重启即可。
+  - 同步：`video_timestamp` 模块 docstring、`docs/arch/webrtc-e2e-latency.md` 两处口径、测试改写 `test_aiortc_video_track_stamp_default_off_env_can_enable`（默认关原帧直通 / env 开含副本与解码精度断言 / 探针恒开）。
+
+## 2026-10-12 (268)
+
+- fix(sim): 模拟器画面恒 160x120——全链路统一 320x240（模板默认 + 接线契约 + 本机 mycar）
+  - 背景（用户报障「模拟器能启动了，但画面还是 160x120」），两处叠加：
+    1. `mycar/config.py` 的 `IMAGE_W/H` 仍是 160/120——2026-10-09 (265) 那轮「`myconfig.py` 加 `IMAGE_W=320/IMAGE_H=240`」的覆盖随 myconfig 后续改写丢失（现只剩 SIM_HOST/DONKEY_GYM/DONKEY_SIM_PATH 三项），config.py 的默认值重新生效；
+    2. 更隐蔽：`cfg_complete/cfg_basic/cfg_square/cfg_path_follow` 的 `GYM_CONF` 压根没有 `img_w/img_h` 键，`dgym` 缺省回退 160x120——只改 `IMAGE_W/H` 模拟器出图仍 160x120，且与 320x240 的模型/录制错位，autopilot 首帧形状不匹配会带停整个 drive 主循环（`vehicle.py` 对部件异常整体 stop）。
+    实测日志：模拟器按 1920×1080 渲染（`done sending cam config. {'img_w': 1920, 'img_h': 1080}`），dgym 把它下采样成 160x120，再由 `DriveVideoFrameBuffer` 上采样成 320x240 的糊画。
+  - 模板默认：`cfg_basic/cfg_complete/cfg_path_follow/cfg_simulator/cfg_square` 的 `IMAGE_W/H` 160/120 → 320/240（`cfg_cv_control` 本就 320x240），与 (265) 定下的「车端原生 320x240」口径对齐；`cfg_simulator` 中「img_w/img_h 仍为 160×120」注释同步。
+  - 接线契约（`templates/{complete,basic,simulator}.py` 的 `add_simulator`）：构造 `sim_conf` 时强制 `img_w/img_h = IMAGE_W/H`——不是 `setdefault`，GYM_CONF 停留旧值同样会错位；渲染分辨率不受影响，仍由 `render_img_w/render_img_h` 独立控制（缺省 1920×1080），dgym 按渲染分辨率出图再下采样回 NN 分辨率。
+  - 本机（非仓库文件）：`mycar/config.py` `IMAGE_W/H = 320/240`、`mycar/manage.py` 同步注入。
+  - 可观测性：`dgym` 连接成功日志带上分辨率 `[DonkeyGymEnv] 已连接到模拟器 …（cam/image_array 320x240，渲染 1920x1080）`——「配置改了但出图还是旧分辨率」这类问题以后看日志即判。
+  - 实测（重启车端后）：连接日志 `cam/image_array 320x240，渲染 1920x1080`；Playwright 打开 Drive 页读 `<video>` = **320×240**（`videoWidth/videoHeight`），源帧 native 等尺寸直通 `_resize`，不再有 160x120→320x240 上采样；source/sent ~17.6fps（`DRIVE_LOOP_HZ=20`），车端 20Hz 循环无异常。
+  - 测试：新增 `donkeycar/tests/test_resolution_consistency.py` 3 项（模板默认分辨率 / 三个 drive 模板强制对齐 / cfg_simulator 的 GYM_CONF 引用 `IMAGE_W/H`），连同 `test_template_simulator_preview`、`test_dgym_preview` 全绿。
+  - 影响面：既有 160x120 tub 可继续训练（加载时统一 resize 到 cfg 尺寸，混训正常）；旧 160x120 模型在 320x240 配置下热加载会被 PilotHolder 形状校验拒绝（预期行为，报错带两边分辨率与出路）；新采集帧为 320x240。
+  - 回归：`donkeycar/tests`、`tests`、`web_ui/backend/tests` 三段分别跑通（backend **632 passed / 3 skipped**；`tests` **525 passed / 2 failed**；`donkeycar/tests` 全量跑完，13 failed 逐项复核均为既有问题，见下）。新增 `tests/conftest.py`：补 `frame_freshness` 侧信道重置（`donkeycar/tests/conftest.py` 同款 autouse 夹具）——此前 `test_dgym_rst_e2e` 留下的到达时刻会让 `DriveVideoFrameBuffer.update()` 在紧随其后的 `test_drive_webrtc_track` 里按陈旧侧信道去重、帧永不推进，`recv()` 无限等待把整个套件卡死；补上后该组合由挂死转 4 passed。
+  - 既有失败（与本次改动无关，逐项定位）：`test_dgym_reconnect` 2 项看门狗用例（把 dgym 连接日志回退成旧 print 仍复现）；`test_launcher_terminal::test_enable_tcp_keepalive`（macOS 平台断言，单跑也挂）；`test_web_ui_branding`（index.html 标题已是 DonkeyDrifter，测试仍期望 DonkeyDrift Web UI）；`test_train` 4 项（注释自陈收敛断言 flaky）；`test_launcher_kimi_web::test_cwd_matching_instance_reused`、`test_webui_instance::test_kill_only_car_processes`（单跑同样失败）；`test_scripts` 4 项与 `test_template::test_drive` 属环境问题（`donkey` 不在 PATH、车端 drive 单实例锁挡住，补 PATH / 改 HOME 后分别 4 passed、5 passed）。
+  - 已知卡点（`donkeycar/tests/test_tui_project_selection.py`：1 项 100% CPU 死循环 + 2 项 `OSError: reading from stdin`，上一轮用 `--ignore` 绕开）——本轮已修，根因三层：
+    1. 死循环：未提交的「手动输入项目路径兜底」特性给 `DriveCommand.execute` 加了 `_prompt_project_path()` 回退、`_choose_project` 提示改名「请输入编号或项目路径」，而测试里的 `Prompt.ask` 替身恒回 `"n"`（既非 `"0"` 也非空）→ 产品侧重新提示环无限转，`_patch_no_sleep` 又把 `time.sleep` 置空 → 100% CPU；
+    2. 断言过期：`test_open_project_command_prompts_when_multiple_projects` 仍断言旧文案「请输入编号」；
+    3. `OSError`：10-08 `10f85fdd` 给 Drive 加的 WebRTC 探针用 `rich.prompt.Confirm.ask` 读真实 stdin，绕开只 mock 了 `tui.Prompt.ask` 的用例（pytest 捕获 stdin 下必抛）。
+  - fix(tests)：只动测试、`tui.py` 一行未改（探针 Confirm 问法是既有产品惯例，`test_tui_drive.py` 已示范在测试侧关掉）——新增 `_patch_confirm_off`（Confirm 一律答否）与 `_drive_ask`（记录提示文本；编号/路径类回 `"0"` 取消、其余回 `"n"` 不执行，杜绝无效答案触发重新提示环）；断言对齐新流程：无项目 `["请输入项目路径", "请选择操作"]`、多项目 `["请输入编号或项目路径", "请输入项目路径", "请选择操作"]`、编号文案改 `startswith`。
+  - 验证：`donkeycar/tests/test_tui_*.py` + `tests/test_tui_project_selection.py` 共 **64 passed**（1.3s）；全量 `donkeycar/tests` 不再需要 `--ignore`、无挂起，**13 failed / 660 passed / 29 skipped**（246s）——失败项与上文逐项定位的既有问题一致（`test_launcher_kimi_web`/`test_webui_instance` 两项本轮未复现），原 3 项 TUI 失败/挂起全部转绿。
+
+## 2026-10-12 (267)
+
+- security(P0.1): launcher :8090 与 Web 后端 token 鉴权 + 默认只绑 127.0.0.1——对外监听改显式 opt-in
+  - 动机：此前 launcher（含 `/terminal` 浏览器 shell）与 Web 后端（含 `/api/drive/ws` 车控通道）对 LAN 裸奔无鉴权，任一局域网设备可开 shell/控车。P0 评估后按「本机免密、远程要令牌」收紧。
+  - 鉴权策略（`donkeycar/launcher/auth.py` + `web_ui/backend/auth.py` 同构）：回环 TCP 客户端 + 自身 Host + 干净 Origin 自动放行（本机体验/代理/curl/TestClient 不受影响）；非回环客户端须带令牌（`?token=` / `Authorization: Bearer` / `X-Donkey-Token` / Cookie）。DNS-rebinding 防线=Host 钉死（仅回环字面量/主机名变体/本机 IP；缺 Host 一律拒）；Cookie 过门额外要求自身 Host + 干净 Origin（挡跨站导航自动带 Cookie 的 CSRF），显式令牌豁免 Origin 检查。令牌生命周期 env > `~/.donkeycar/{launcher,drive_api}.token`（0600 原子写）> 首次生成落盘，`hmac.compare_digest` 比较；`?token=` 首访页面 → Set-Cookie(HttpOnly) + 302 剥参（/api/* 与 WS 不重定向保 curl/桥接兼容）。总开关 `DONKEY_LAUNCHER_AUTH=off` / `DRIVE_API_AUTH=off`。
+  - 默认绑定收紧：launcher 与 `donkey web/drive` 后端默认 `127.0.0.1`；实车远程显式 opt-in——systemd unit 传 `--host 0.0.0.0`、launcher 起 web 传 `--backend-host 0.0.0.0`（token 鉴权兜底）。launcher 跳转 URL 自动带 `?token=`（fragment 之前）过后端鉴权门，令牌由后端启动时生成落盘、launcher 只读防两进程竞态。
+  - 车端桥接（`drive_api_bridge.py`）：WS URL 注入 `?token=`（quote 编码）+ HTTP 请求带 `X-Donkey-Token`，令牌取 env/文件只读不生成。
+  - Starlette `@app.middleware("http")` 不覆盖 WebSocket——`drive_ws` 在 `accept()` 前独立鉴权门（真网络客户端才查，测试替身跳过）；OPTIONS 预检豁免保跨域开发链路。
+  - 测试：新增 `tests/test_launcher_auth.py` 47 项（令牌生命周期/开关/回环矩阵/Host 钉死/CSRF/HTTP 门/cookie 流转）、`web_ui/backend/tests/test_api_auth.py`（判定矩阵 + HTTP 门 + drive_ws 门）、`donkeycar/tests/test_drive_api_bridge_token.py`（令牌加载/注入/URL 构造）；`test_launcher_drive_launch.py` 补令牌跳转 URL 与 0.0.0.0 opt-in 断言（autouse 桩隔离真实令牌文件）。既有 TestClient 用例经 testclient/testserver 标记与 None-client 容忍全数保持绿色。
+- security(P0.2): 依赖锁定 + pip-audit CI 门禁
+  - `requirements.in`（声明锁定范围：core + pc + fastapi-backend + dev，torch/pi/nano/macos 有意排除）→ `scripts/regenerate_lock.sh` 用 `uv pip compile` 生成 `requirements-lock.txt`（Linux x86_64 / Py3.11 全量 `==` 固定 + sha256 哈希，115 包；国内默认清华源，`LOCK_INDEX_URL` 可覆盖）。
+  - `.github/workflows/dependency-audit.yml`：依赖文件变更推送/PR + 每周定时复扫，`pip-audit -r requirements-lock.txt --disable-pip --strict`，任何已知 CVE 即红。当前锁全量审计 **0 已知漏洞**。
+- security(P0.3): Dockerfile 安全重写——旧镜像 python:3.6（EOL）+ 引用不存在的 `setup.py`/`[tf]`（根本构建不过）+ Jupyter 空密码空 token 绑 0.0.0.0（匿名 RCE）
+  - 新镜像 python:3.11-slim、按 setup.cfg 真实 extras 安装（editable 保持代码即导入源）、非 root `donkey` 用户、`ENV DRIVE_WEB_HOST=0.0.0.0`（容器内端口映射语义，token 鉴权兜底）；Jupyter 必须持令牌启动（`JUPYTER_TOKEN` 缺省启动时随机生成打日志），绝不空密码/空 token。新增 `.dockerignore` 防 .venv/node_modules/模型数据混入构建上下文。本机无 Docker 未能 build 验证，CMD 语法已 `sh -n` 校验。
+- feat(P1): 实车安全联锁验收 runbook + 可执行清单脚本
+  - `docs/plan/overhead-drift-safety-acceptance.md`：把测试计划 §4.3/§5/§6 的安全链路核对固化为独立验收 runbook（三层兜底模型、R1~R8 清单、失败升级路径），两条「带回分析」决策点改为当场判定。
+  - `scripts/safety_acceptance.py`：`radius-sign`（半径环符号三值判定：r≤-0.6 保持 -1 / r≥+0.6 置 +1 打热改载荷 / 其余停下修机理模型）；`beta-noise`（低速 β 序列上回放三种接管判据——现行 500ms 零次跌破 / 滑窗均值 / 超阈占比，与 `drift_session.py` 语义逐条对齐，输出噪声水位 + 接管延迟 + 判定建议）；`checklist`（R1~R8 交互或 `--answers` 驱动，`--server` 拉 `/api/drift/state` 取证含 `--token`，JSON 验收记录 + 终判）。判定逻辑 19 项单测 + CLI 冒烟（no_data / criterion_mismatch→window_mean / incomplete 终判）锁定。
+  - 文档同步：README 增安全段（默认绑定/令牌/审计/镜像），`docs/guide/uv-venv-setup.md` 的 uv.lock 空壳说明指向新的 requirements-lock.txt。
+
+## 2026-10-12 (266)
+
+- refactor(management): 退役 Kivy 桌面 GUI——Web UI 功能对齐后整体移除，全平台安装瘦身
+  - 删除 `donkeycar/management/ui/` 整包（car/tub/train/pilot 四屏 + 全部 .kv）与只服务于它的 `management/graph.py`；`base.py` 移除 `Gui` 命令与 `'ui'` 注册，`donkey ui` 不复存在。四大屏能力均已由 Web UI 覆盖（Tub Manager/Trainer/Drive/Pilot Arena，迁移记录见 `docs/plan/pilot-arena-web-ui-migration.md`）。
+  - `rc_file_handler.py`（`~/.donkeyrc` 持久化，TUI 与 launcher server 共用）从 ui 包迁至 `management/` 包根，导入路径同步更新；`from kivy import Logger` 换标准库 logging。替换暴露一个边界：atexit 阶段（如 pytest 退出）logging 向已关闭的捕获流打错误报告（不抛异常但刷屏），新增 `log_safe()` 在调用期间临时关 `logging.raiseExceptions` 吞掉，rc 文件写入不再受日志影响。
+  - setup.cfg 四个 extras（pc/macos/pi/nano）删去 `kivy` + `kivy-garden.matplotlib`；`package_data` 删 `*.kv`（全部 .kv 都在已删的 ui 包内）。Pi/Jetson 安装少编译一条 SDL2 重依赖链。pyproject/uv.lock 本就未含 kivy，无需重锁。
+  - venv 卸载 Kivy 2.3.1 / Kivy-Garden / kivy_garden.matplotlib；`import kivy` 确认失败，rc_handler、base、tui、launcher 导入正常，`donkey` 命令表与 TUI 入口可用。
+  - 文档同步：README extras 描述、`docs/arch/donkeydrifter-architecture.md` 命令表删 `ui` 行；docs/plan 两篇迁移文档与 CHANGELOG 历史条目按惯例保留原状。
+
 ## 2026-10-09 (265)
 
 - fix(training): 训练 OOM 根治——TubRecord 无界图像缓存改为全局字节预算 LRU（新配置 `CACHE_MAX_BYTES`，默认 256MiB）+ 训练进程 glibc arena 封顶，板上 2 万帧训练峰值 RSS 从 3.4GB（死亡区）降到 ~1.2GB（安全区）

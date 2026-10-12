@@ -25,8 +25,8 @@ DRIVE_LOOP_HZ = 20
 MAX_LOOPS = 100000
 
 #CAMERA
-IMAGE_W = 160
-IMAGE_H = 120
+IMAGE_W = 320           # 全链路原生 320x240（采集/tub/训练/推理/预览同分辨率）
+IMAGE_H = 240
 IMAGE_DEPTH = 3         # default RGB=3, make 1 for mono
 
 #9865, over rides only if needed, ie. TX2..

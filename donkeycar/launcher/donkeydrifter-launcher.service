@@ -5,7 +5,11 @@ After=network.target
 [Service]
 Type=simple
 # 部署模板：安装前请把 <user> 替换为本机实际用户名，并按实际路径调整
-ExecStart=/home/<user>/miniconda3/envs/donkey/bin/python3 -m donkeycar.launcher
+# --host 0.0.0.0 为实车显式对外监听（DC 浏览器/手机在局域网访问）；
+# launcher 默认只绑 127.0.0.1。对外监听时非本机访问需携带访问令牌：
+# 首次用启动日志打印的 http://<车机IP>:8090/?token=... 入口，之后凭 Cookie；
+# 令牌也可读 ~/.donkeycar/launcher.token 或用 Environment=DONKEY_LAUNCHER_TOKEN 指定。
+ExecStart=/home/<user>/miniconda3/envs/donkey/bin/python3 -m donkeycar.launcher --host 0.0.0.0
 WorkingDirectory=/home/<user>/projects/mycar
 Restart=always
 RestartSec=3

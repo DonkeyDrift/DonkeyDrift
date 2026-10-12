@@ -81,9 +81,14 @@ def drive(cfg, model_path=None, model_type=None):
     # add camera
     inputs = []
     if cfg.DONKEY_GYM:
-        from donkeydrifter.parts.dgym import DonkeyGymEnv 
+        from donkeydrifter.parts.dgym import DonkeyGymEnv
+        # 模拟器出图必须等于 IMAGE_W×IMAGE_H（GYM_CONF 缺 img 键时 dgym 回退 160x120，
+        # 与模型/录制分辨率错位）；渲染分辨率仍由 render_img_w/h 独立控制
+        sim_conf = dict(cfg.GYM_CONF)
+        sim_conf["img_w"] = cfg.IMAGE_W
+        sim_conf["img_h"] = cfg.IMAGE_H
         cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST,
-                           env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF,
+                           env_name=cfg.DONKEY_GYM_ENV_NAME, conf=sim_conf,
                            delay=cfg.SIM_ARTIFICIAL_LATENCY)
         inputs = ['angle', 'throttle', 'brake']
     elif cfg.CAMERA_TYPE == "PICAM":

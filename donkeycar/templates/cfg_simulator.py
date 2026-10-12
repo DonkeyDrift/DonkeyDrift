@@ -31,8 +31,8 @@ MAX_LOOPS = None        # the vehicle loop can abort after this many iterations,
 
 #CAMERA
 CAMERA_TYPE = "MOCK"   # (PICAM|WEBCAM|CVCAM|CSIC|V4L|D435|MOCK|IMAGE_LIST)
-IMAGE_W = 160
-IMAGE_H = 120
+IMAGE_W = 320           # 全链路原生 320x240（采集/tub/训练/推理/预览同分辨率）
+IMAGE_H = 240
 IMAGE_DEPTH = 3         # default RGB=3, make 1 for mono
 CAMERA_FRAMERATE = DRIVE_LOOP_HZ
 CAMERA_VFLIP = False
@@ -247,14 +247,16 @@ GYM_CONF["country"] = "Place"
 GYM_CONF["bio"] = "I race robots."
 
 # 模拟器相机渲染分辨率（预览用），与 NN 输入 IMAGE_W×IMAGE_H 解耦：
-# - img_w/img_h 仍为 NN 输入分辨率（160×120），训练/推理不受影响；
-# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 1920×1080 全高清），
+# - img_w/img_h 仍为 NN 输入分辨率（IMAGE_W×IMAGE_H，模板默认 320×240），训练/推理不受影响；
+# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 640×480，与下方预览编码上限对齐），
 #   dgym 内部会把渲染帧下采样回 img_w×img_h 作为 cam/image_array，
-#   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示最高画质。
-GYM_CONF["render_img_w"] = 1920
-GYM_CONF["render_img_h"] = 1080
-# Drive 预览（WebRTC）编码分辨率上限：1080p 原生帧直接进软编码会把帧率
-# 拖垮（实测 fps 3.9/时延 447ms），超限帧等比缩到上限内；0 = 关闭上限
+#   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示。
+#   实测模拟器遥测/出图节拍固定 20fps、与渲染分辨率无关：更高渲染不涨帧率也不涨预览
+#   画质（编码上限就在 640×480），只多烧模拟器 CPU、放大编解码与传输时延。
+GYM_CONF["render_img_w"] = 640
+GYM_CONF["render_img_h"] = 480
+# Drive 预览（WebRTC）编码分辨率上限：原生帧直接进软编码超过实时能力会把帧率
+# 拖垮（实测 1080p fps 3.9/时延 447ms），超限帧等比缩到上限内；0 = 关闭上限定回原生
 DRIVE_WEBRTC_PREVIEW_MAX_WIDTH = 640
 DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT = 480
 

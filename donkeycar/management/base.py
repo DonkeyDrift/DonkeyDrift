@@ -897,16 +897,22 @@ class ModelDatabase(BaseCommand):
         print(tub_txt)
 
 
-class Gui(BaseCommand):
-    def run(self, args):
-        from donkeycar.management.ui.ui import main
-        main()
-
-
 class Tui(BaseCommand):
     def run(self, args):
         from donkeycar.management.tui import main
         main()
+
+
+def resolve_backend_host(host=None):
+    """解析后端监听地址：显式参数 > DRIVE_WEB_HOST > 127.0.0.1。
+
+    P0 安全补强前默认 0.0.0.0（局域网任意设备可直连无鉴权 API）；现默认
+    仅回环，对外监听必须显式 --backend-host 0.0.0.0 或设 DRIVE_WEB_HOST
+    （launcher/_launch_drive 的实车链路即显式传 0.0.0.0）。
+    """
+    if host:
+        return host
+    return os.environ.get('DRIVE_WEB_HOST', '').strip() or '127.0.0.1'
 
 
 class Web(BaseCommand):
@@ -918,8 +924,8 @@ class Web(BaseCommand):
                             help='前端端口 (默认: 5188)')
         parser.add_argument('--backend-port', type=int, default=8000,
                             help='后端端口 (默认: 8000)')
-        parser.add_argument('--backend-host', default='0.0.0.0',
-                            help='后端监听地址 (默认: 0.0.0.0)')
+        parser.add_argument('--backend-host', default=None,
+                            help='后端监听地址 (默认: 127.0.0.1 仅本机；对外监听请显式传 0.0.0.0 或设 DRIVE_WEB_HOST)')
         parser.add_argument('--install-deps', action='store_true',
                             help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
         parser.add_argument('--open', action='store_true',
@@ -931,7 +937,9 @@ class Web(BaseCommand):
                                  '默认为生产模式：构建 dist 后由后端静态托管（#135）')
         parser.add_argument('--debug', action='store_true',
                             help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
-        return parser.parse_args(args)
+        parsed = parser.parse_args(args)
+        parsed.backend_host = resolve_backend_host(parsed.backend_host)
+        return parsed
 
     def run(self, args):
         args = self.parse_args(args)
@@ -1342,8 +1350,8 @@ class Drive(Web):
                             help='前端端口 (默认: 5188)')
         parser.add_argument('--backend-port', type=int, default=8000,
                             help='后端端口 (默认: 8000)')
-        parser.add_argument('--backend-host', default='0.0.0.0',
-                            help='后端监听地址 (默认: 0.0.0.0)')
+        parser.add_argument('--backend-host', default=None,
+                            help='后端监听地址 (默认: 127.0.0.1 仅本机；对外监听请显式传 0.0.0.0 或设 DRIVE_WEB_HOST)')
         parser.add_argument('--install-deps', action='store_true',
                             help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
         parser.add_argument('--open', action='store_true',
@@ -1355,7 +1363,9 @@ class Drive(Web):
                                  '默认为生产模式：构建 dist 后由后端静态托管（#135）')
         parser.add_argument('--debug', action='store_true',
                             help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
-        return parser.parse_args(args)
+        parsed = parser.parse_args(args)
+        parsed.backend_host = resolve_backend_host(parsed.backend_host)
+        return parsed
 
     def run(self, args):
         args = self.parse_args(args)
@@ -1651,7 +1661,6 @@ def execute_from_command_line():
         'update': UpdateCar,
         'train': Train,
         'models': ModelDatabase,
-        'ui': Gui,
         'tui': Tui,
         'web': Web,
         'drive': Drive,

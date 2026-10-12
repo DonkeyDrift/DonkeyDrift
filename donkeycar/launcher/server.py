@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse, quote, parse_qs
+from urllib.parse import urlparse, quote, parse_qs, parse_qsl, urlencode
 
 from donkeycar._version import __version__
 from donkeycar import findcar
@@ -28,6 +28,7 @@ from donkeycar.launcher.dc_discovery import find_drifter_console
 from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
 from donkeycar.launcher.dsh_web import _entry_url_for_client, launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws, kill_session
+from donkeycar.launcher import auth as launch_auth
 from donkeycar.webui_instance import (
     probe_http_ok,
     find_live_instance,
@@ -172,6 +173,23 @@ def _wait_for_web_ready(web_proc, frontend_port, backend_port,
             "前端端口已登记但 HTTP 探测未通过，页面可能仍在启动")
 
 
+def _drive_web_token() -> str:
+    """Web 后端访问令牌（跳转 URL 带 ?token= 过后端鉴权门用）。
+
+    只读 ``DRIVE_API_TOKEN`` 环境变量 / ``~/.donkeycar/drive_api.token``，
+    绝不生成——令牌由后端（web_ui/backend/auth.py）生成落盘，避免两进程
+    竞态各生成一把互相不认。取不到返回 ""（后端关闭鉴权时的常态）。
+    """
+    token = os.environ.get("DRIVE_API_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        return (Path.home() / ".donkeycar" / "drive_api.token").read_text(
+            encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def _launch_drive():
     """启动 donkey web + manage.py drive，返回结果字典。
 
@@ -226,6 +244,10 @@ def _launch_drive():
                 web_cmd.extend(["--path", str(web_ui_path)])
             web_cmd.extend(["--backend-port", str(backend_port)])
             web_cmd.extend(["--frontend-port", str(frontend_port)])
+            # 实车部署显式对外监听（P0 安全默认只绑 127.0.0.1）：遥控浏览器
+            # 在局域网另一台设备上，须能直连后端；非本机访问由后端令牌鉴权
+            # 把守（web_ui/backend/auth.py），跳转 URL 携带 ?token= 交接。
+            web_cmd.extend(["--backend-host", "0.0.0.0"])
 
         # 启动 web 进程（复用实例时不起）
         warning = None
@@ -331,9 +353,18 @@ def _launch_drive():
         _processes["frontend_port"] = frontend_port
         _processes["project"] = str(project_path)
 
+        # 跳转 URL 的 ?token= 必须放在 # 之前：查询串是发给服务器过鉴权门的
+        #（种 Cookie + 302 后浏览器保留 #fragment），# 之后是 HashRouter
+        # 路由，服务器看不见。
+        entry = f"http://localhost:{frontend_port}/"
+        token = _drive_web_token()
+        if token:
+            entry += f"?token={token}"
+        entry += "#/drive"
+
         return {
             "status": "launched",
-            "url": f"http://localhost:{frontend_port}/#/drive",
+            "url": entry,
             "backend_port": backend_port,
             "frontend_port": frontend_port,
             "project": str(project_path),
@@ -414,7 +445,7 @@ def _find_valid_projects_local():
 def _save_last_project_path_local(project_path):
     """持久化 last_project_path（对齐 TUI _save_last_project_path，失败静默）。"""
     try:
-        from donkeycar.management.ui.rc_file_handler import rc_handler
+        from donkeycar.management.rc_file_handler import rc_handler
         if rc_handler is None:
             return
         rc_handler.data["last_project_path"] = str(project_path)
@@ -1057,12 +1088,53 @@ def _client_host_header(headers, client_address):
     return headers.get("Host")
 
 
+# 走浏览器地址栏的 HTML 页面路径：合法 ?token= 命中时种 Cookie + 302 去查询串
+_PAGE_PATHS = ("/", "/index.html", "/launch/drive",
+               "/terminal", "/terminal/index.html")
+
+# 非本机访问被拒时的提示页：只讲怎么带令牌，不回显令牌本身
+_AUTH_REQUIRED_HTML = """<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>401 · DonkeyDrifter</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",sans-serif;margin:0;background:#101318;color:#e8edf2;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.box{max-width:520px;padding:0 24px}
+h1{font-size:20px;margin:0 0 12px}
+p{line-height:1.7;color:#aab7c4;font-size:14px}
+code{background:#1b222c;border-radius:4px;padding:2px 6px;color:#5cc8ff;font-size:13px}
+.hint{margin-top:16px;font-size:13px;color:#7a8896}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>需要访问令牌 / Token required</h1>
+<p>从非本机设备访问 DonkeyDrifter 需要在 URL 后携带令牌，例如
+<code>http://&lt;主机&gt;:8090/?token=你的令牌</code>，成功后浏览器会保存
+Cookie，之后访问无需再带。</p>
+<p>令牌见上位机启动日志，或本机文件
+<code>~/.donkeycar/launcher.token</code>（也可由环境变量
+<code>DONKEY_LAUNCHER_TOKEN</code> 指定）。</p>
+<p>Remote access requires a token appended to the URL. The token is printed
+at service startup and stored in <code>~/.donkeycar/launcher.token</code>.</p>
+<p class="hint">本机访问无需令牌。如果你在可信局域网上想恢复免密（不推荐），
+可在启动环境设 <code>DONKEY_LAUNCHER_AUTH=off</code>。</p>
+</div>
+</body>
+</html>
+"""
+
+
 class LauncherHandler(http.server.BaseHTTPRequestHandler):
     """Launcher HTTP 请求处理器。"""
 
     def do_GET(self):
         """处理 GET 请求。"""
         parsed = urlparse(self.path)
+        if not self._authorize(parsed, is_get=True):
+            return
         path = parsed.path
 
         if path == "/" or path == "/index.html":
@@ -1103,6 +1175,8 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         """处理 POST 请求。"""
         parsed = urlparse(self.path)
+        if not self._authorize(parsed, is_get=False):
+            return
         path = parsed.path
 
         if path == "/terminal/kill":
@@ -1532,6 +1606,84 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
             self._serve_json(
                 {"status": "error", "error": "session not found"}, code=404)
 
+    def _authorize(self, parsed, is_get):
+        """鉴权门（P0 安全补强，2026-10-12）。返回 True 继续分发；False 表示
+        响应已写出（401 或 302）。
+
+        页面 GET 带合法 ``?token=`` 时种 Cookie 并 302 去掉查询串（令牌不
+        留在地址栏/历史/日志）；WS 握手与 /api/* 不跳转，令牌直接可用。
+        其余判定见 launcher/auth.py 策略注释。
+        """
+        query = parse_qs(parsed.query)
+        is_ws = (self.headers.get("Upgrade") or "").lower() == "websocket"
+        if (
+            is_get
+            and not is_ws
+            and parsed.path in _PAGE_PATHS
+            and launch_auth.query_token_valid(query)
+        ):
+            self._redirect_with_token_cookie(parsed)
+            return False
+        if launch_auth.is_authorized(self.headers, query, self.client_address):
+            return True
+        self._serve_auth_required(parsed.path, is_ws=is_ws)
+        return False
+
+    def _redirect_with_token_cookie(self, parsed):
+        """合法 ?token= 的页面 GET：种 HttpOnly Cookie 后 302 回干净 URL。
+
+        之后同源请求凭 Cookie 通行；Cookie 不带 Secure——launcher 走明文
+        HTTP，Secure 标记会让非 https 的车机页面直接存不下 Cookie。
+        """
+        token = launch_auth.load_or_create_token()
+        kept = [
+            (k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+            if k != launch_auth.QUERY_KEY
+        ]
+        target = parsed.path
+        if kept:
+            target += "?" + urlencode(kept)
+        self.send_response(302)
+        self.send_header("Location", target)
+        self.send_header(
+            "Set-Cookie",
+            f"{launch_auth.COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax",
+        )
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _serve_auth_required(self, path, is_ws=False):
+        """未授权响应：/api/* 返回 JSON 401，页面返回 HTML 401 提示页，
+        WS 握手直接 401 短响应。任何分支都不回显令牌本身。"""
+        if is_ws:
+            body = b"401 unauthorized"
+            self.send_response(401)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path.startswith("/api/"):
+            self._serve_json(
+                {
+                    "error": "unauthorized",
+                    "hint": (
+                        "非本机访问需携带令牌：?token= / "
+                        "Authorization: Bearer / X-Donkey-Token / Cookie"
+                    ),
+                },
+                code=401,
+            )
+            return
+        body = _AUTH_REQUIRED_HTML.encode("utf-8")
+        self.send_response(401)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_json(self, data, code=200, extra_headers=None):
         """提供 JSON 响应。extra_headers 为额外的响应头名值对序列（如
         _KIMI_WEB_CORS_HEADERS），仅需要跨域放行的端点使用。"""
@@ -1553,8 +1705,48 @@ class LauncherHandler(http.server.BaseHTTPRequestHandler):
         )
 
 
-def run_server(host="0.0.0.0", port=8090):
+def _is_loopback_bind(host) -> bool:
+    """监听地址是否只对本机可达。"""
+    host = str(host or "")
+    return host in ("127.0.0.1", "localhost", "::1") or host.startswith("127.")
+
+
+def resolve_bind_host(host=None) -> str:
+    """解析监听地址：显式参数 > ``DONKEY_LAUNCHER_HOST`` 环境变量 > 127.0.0.1。
+
+    P0 安全补强前默认 0.0.0.0（局域网任意设备都能摸到无鉴权面板）；现默认
+    仅回环，对外监听必须显式传 ``--host 0.0.0.0`` 或设环境变量（实车部署
+    模板 donkeydrifter-launcher.service 即为显式对外）。
+    """
+    if host:
+        return host
+    return os.environ.get(launch_auth.HOST_ENV, "").strip() or "127.0.0.1"
+
+
+def _print_auth_banner(host, port):
+    """启动横幅：鉴权状态、令牌来源、对外监听时的带令牌远程入口。"""
+    if not launch_auth.auth_enabled():
+        if not _is_loopback_bind(host):
+            print(
+                "!! 警告：已关闭鉴权且监听非回环地址，局域网内任何设备都"
+                "能完全控制本机（启动 drive、开终端、删数据）。仅建议在"
+                "隔离网络/调试环境使用。"
+            )
+        return
+    if os.environ.get(launch_auth.TOKEN_ENV, "").strip():
+        source = f"环境变量 {launch_auth.TOKEN_ENV}"
+    else:
+        source = f"文件 {launch_auth.TOKEN_FILE}"
+    print(f"访问令牌已启用（来源: {source}）")
+    if not _is_loopback_bind(host):
+        entry_host = _get_local_ip() or host
+        print(f"远程入口: http://{entry_host}:{port}/?token={launch_auth.load_or_create_token()}")
+        print("（首次打开自动存 Cookie，之后免输；本机访问无需令牌）")
+
+
+def run_server(host=None, port=8090):
     """启动 Launcher HTTP 服务器。"""
+    host = resolve_bind_host(host)
     # 启动 HOSTIP 报告后台线程
     _start_hostip_reporter()
     # 启动 Find DKC 主机心跳后台线程（无存活 DD Web 实例时上报 launcher 自身端口）
@@ -1564,6 +1756,7 @@ def run_server(host="0.0.0.0", port=8090):
     )
     print(f"DonkeyDrifter Launcher 服务已启动: http://{host}:{port}")
     print(f"当前工作目录: {Path.cwd()}")
+    _print_auth_banner(host, port)
     # 接管 SIGTERM（systemd stop / 关机），走统一退出路径补发下线标记；
     # signal 只能在主线程注册，测试在子线程起服务时跳过（保留默认行为）
     if threading.current_thread() is threading.main_thread():
