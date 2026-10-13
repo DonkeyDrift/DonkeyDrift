@@ -89,3 +89,6 @@ aimo_api_key
 # （bash scripts/aidlite_cabi/rebuild.sh）→ 产物不入库；门面装在 venv 里由脚本复制
 scripts/aidlite_cabi/libaidlite_cabi.so
 scripts/aidlite_cabi/aidlite/__pycache__/
+
+# 根级 node_modules(vitest 缓存解析到仓库根时的产物;web_ui/frontend/node_modules 已单独忽略)
+node_modules/
