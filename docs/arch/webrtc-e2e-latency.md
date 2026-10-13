@@ -1,5 +1,14 @@
 # WebRTC 真实端到端时延：诚实测量体系与 <50ms 实测
 
+## 2026-10-13(晚):方案 B 落地——源码重编原生 arm64,BepInEx 退役
+
+sdsandbox 源码补丁(`feature/telemetry-fps-60` 分支,DonkeyDrift/sdsandbox)构建的
+原生 arm64 donkey_sim.app 替换 BepInEx 补丁版。实测 live 门禁:**stamp_fps 59.0、
+e2e p50 3.25 / p95 3.71ms**(门禁 58/30ms 全 PASS)——比 BepInEx 版(60.05 /
+4.62ms)时延再降 ~1ms,Rosetta 偶发 SIGSEGV 随之消灭。协议方式:GYM_CONF 加
+`"fps": 60`(cam_config fps 键,旧模拟器忽略);不再需要任何运行时注入。
+Windows 部署包打同样源码补丁后同理(原生 x64,无 Rosetta 税)。
+
 ## 2026-10-13：60fps 真实采集 + 全链路 60fps（BepInEx 补丁 + 事件驱动直推）
 
 **模拟器源 20fps 硬上限已被打破**。sdsandbox 源码里 `TcpCarHandler.limitFPS=20`

@@ -1,3 +1,10 @@
+## 2026-10-13 (273)
+
+- feat(sim): 方案 B 落地——sdsandbox 源码重编原生 arm64 DonkeySim,**替代 BepInEx 补丁**;实测 stamp_fps 59.0 / e2e p50 3.25 / p95 3.71ms(live 门禁 58/30ms 全 PASS,较方案 A 的 4.62ms 又降 ~1ms,且消灭 Rosetta 偶发 SIGSEGV)
+  - sdsandbox 分支 `feature/telemetry-fps-60`(DonkeyDrift/sdsandbox,已推送):`cam_config` 可选 `fps` 键(默认 20 向后兼容),遥测发送节流从 FixedUpdate(50Hz 上限)挪到 Update(跟随渲染帧率);项目升级 Unity 2020.3.49f1→2022.3.49f1(编辑器原生 arm64);移除在 2022.3 下编译报错的 win/linux 交叉编译工具链包;`BuildCommand` 场景列表修全(只编 menu 会导致收不到遥测)。
+  - 构建:`Unity -batchmode -projectPath sdsim -executeMethod BuildCommand.Build -buildTargetStandaloneOSX <out.app> -quit`(universal 二进制,M4 跑原生 arm64)。旧 BepInEx app 备份在 `donkey_sim.app.bepinex-backup`。
+  - gym-donkeycar master:`fps` 键三处透传(已推送);mycar `GYM_CONF` 加 `"fps": 60`(旧模拟器忽略此键,Windows 装包后即生效)。
+
 ## 2026-10-13 (272)
 
 - feat(webrtc): 模拟器源 60fps 真实采集 + 事件驱动直推——全链路实测 **stamp_fps 60.05、e2e p50 3.95 / p95 4.62ms**（此前 20fps / p95 44ms；目标 ≥60FPS、≤30ms 双双达成，live 门禁 `--gate-fps 58 --gate-latency-ms 30` 全 PASS）
