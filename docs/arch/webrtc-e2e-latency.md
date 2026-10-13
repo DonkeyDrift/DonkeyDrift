@@ -1,5 +1,24 @@
 # WebRTC 真实端到端时延：诚实测量体系与 <50ms 实测
 
+## 2026-10-13(晚,续):异步采集管线——主线程采包 0.5ms,58.3Hz ceiling 消除
+
+`sdsandbox` 分支 `feature/telemetry-fps-60` 追加:AsyncGPUReadback(2022.3 里
+在 `UnityEngine.Rendering` 命名空间)替 ReadPixels、去掉每发送一次的冗余
+`sensorCam.Render()`、stb_image_write 工作线程 JPEG、sim 自检仪表
+(`[telemetry-stats] send_fps/render_fps/capture_ms`,每 5s)、`--quality/--vsync/
+--telemetry_fps` 命令行开关。M4 原生 arm64 实测:
+
+| 配置 | client 遥测 fps | sim send_fps | sim render_fps | capture_ms |
+|---|---|---|---|---|
+| baseline(Ultra,vsync on,fps60) | **60.62** | 60.0 | 60.0 | **0.5** |
+| --quality 0 | 59.98 | 60.0 | 60.0 | 0.5 |
+| --vsync 0 | 60.74 | 59.9 | 59.9 | 0.5 |
+| --telemetry_fps 30 | 30.53 | 30.0 | 60.0 | 0.0 |
+
+全链路 live 门禁:**stamp_fps 59.77 / e2e p50 2.9 / p95 4.55ms PASS**。M4 上画质/
+同步开关已不再影响帧率(成为弱机余量旋钮);旧实现 ~6-12ms 主线程采包是 58.3Hz
+ceiling 的根因,现已消除。附带修复 Car.cs 加速度遥测 `fixedDeltaTime` bug。
+
 ## 2026-10-13(晚):方案 B 落地——源码重编原生 arm64,BepInEx 退役
 
 sdsandbox 源码补丁(`feature/telemetry-fps-60` 分支,DonkeyDrift/sdsandbox)构建的

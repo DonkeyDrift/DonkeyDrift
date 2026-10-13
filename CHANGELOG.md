@@ -1,3 +1,10 @@
+## 2026-10-13 (274)
+
+- perf(sim): sdsandbox 异步采集管线——AsyncGPUReadback 替 ReadPixels + 去冗余 `sensorCam.Render()` + stb 工作线程 JPEG + 自检仪表 + `--quality/--vsync/--telemetry_fps` 二分开关(分支 `feature/telemetry-fps-60`,已推送)。实测 **sim 主线程采包段 ~6-12ms→0.5ms,遥测 ceiling ~58.3Hz 消除**(baseline send_fps=60.0);全链路 live 门禁 **stamp_fps 59.77 / e2e p50 2.9 / p95 4.55ms** PASS
+  - 二分数据(M4 原生 arm64,640×480):baseline 60.62 / quality0 59.98 / vsync0 60.74 / CLI fps30 30.53(sim 侧 send/render_fps 自检确认各自生效)——M4 上质量/同步开关已无关帧率(余量旋钮,留给弱机如 Windows 宿主/Linux 板);CLI 30fps 时 render 仍 60、发送精确 30。
+  - 附带修复:Car.cs FixedUpdate 内加速度改用 `fixedDeltaTime`(原 `deltaTime` 帧率波动失真)。
+  - 注意:2022.3 中 `AsyncGPUReadback(Request)` 位于 **`UnityEngine.Rendering`** 命名空间。
+
 ## 2026-10-13 (273)
 
 - feat(sim): 方案 B 落地——sdsandbox 源码重编原生 arm64 DonkeySim,**替代 BepInEx 补丁**;实测 stamp_fps 59.0 / e2e p50 3.25 / p95 3.71ms(live 门禁 58/30ms 全 PASS,较方案 A 的 4.62ms 又降 ~1ms,且消灭 Rosetta 偶发 SIGSEGV)
