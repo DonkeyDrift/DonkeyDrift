@@ -12,7 +12,15 @@ interface VirtualJoystickProps {
  * 虚拟摇杆组件 - 不依赖第三方库
  * 横向输出 angle [-1, 1]：左负右正
  * 纵向输出 throttle [-1, 1]：上正下负（向前推油门为正）
+ *
+ * 松开/取消不立即拍零：先进入 GRACE 宽限期（期内重新按下视为继续拖拽，
+ * 可吸收"微释放"抖动），超时后按 RAMP 时长斜坡回中，避免瞬时阶跃。
  */
+
+/** 微释放宽限期：指针抬起后这段时间内重新按下则不回中 */
+const RETURN_GRACE_MS = 200;
+/** 宽限期过后摇杆回中的斜坡时长 */
+const RETURN_RAMP_MS = 180;
 export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
   onChange,
   size = 220,
@@ -24,8 +32,22 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const activePointerId = useRef<number | null>(null);
   const centerRef = useRef({ x: 0, y: 0 });
+  const graceTimerRef = useRef<number | null>(null);
+  const rampAnimRef = useRef<number | null>(null);
 
   const maxRadius = size / 2 - 28;
+
+  /** 取消待执行/进行中的回中（宽限期计时器 + 斜坡动画） */
+  const cancelReturnToCenter = useCallback(() => {
+    if (graceTimerRef.current !== null) {
+      clearTimeout(graceTimerRef.current);
+      graceTimerRef.current = null;
+    }
+    if (rampAnimRef.current !== null) {
+      cancelAnimationFrame(rampAnimRef.current);
+      rampAnimRef.current = null;
+    }
+  }, []);
 
   const updateCenter = useCallback(() => {
     if (!containerRef.current) return;
@@ -52,8 +74,32 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     onChange(angle, throttle);
   }, [onChange, maxRadius]);
 
+  /** 宽限期结束后从当前偏移斜坡回中，逐帧 emit 衰减值，终点精确 (0,0) */
+  const rampToCenter = useCallback((fromX: number, fromY: number) => {
+    const start = performance.now();
+    const tick = (now: number) => {
+      const k = Math.min(1, (now - start) / RETURN_RAMP_MS);
+      // ease-out：先快后慢，回中末段更柔和
+      const e = 1 - (1 - k) * (1 - k);
+      if (k >= 1) {
+        rampAnimRef.current = null;
+        setOffset({ x: 0, y: 0 });
+        emitChange(0, 0);
+        return;
+      }
+      const x = fromX * (1 - e);
+      const y = fromY * (1 - e);
+      setOffset({ x, y });
+      emitChange(x, y);
+      rampAnimRef.current = requestAnimationFrame(tick);
+    };
+    rampAnimRef.current = requestAnimationFrame(tick);
+  }, [emitChange]);
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (activePointerId.current !== null) return;
+    // 宽限期/回中动画内重新按下：取消回中，视为继续拖拽
+    cancelReturnToCenter();
     activePointerId.current = e.pointerId;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     updateCenter();
@@ -80,9 +126,17 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     activePointerId.current = null;
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     setDragging(false);
-    setOffset({ x: 0, y: 0 });
-    emitChange(0, 0);
+    // 不立即拍零：先宽限期（吸收微释放），再斜坡回中
+    const { x, y } = offset;
+    graceTimerRef.current = window.setTimeout(() => {
+      graceTimerRef.current = null;
+      rampToCenter(x, y);
+    }, RETURN_GRACE_MS);
   };
+
+  useEffect(() => {
+    return () => cancelReturnToCenter();
+  }, [cancelReturnToCenter]);
 
   useEffect(() => {
     updateCenter();

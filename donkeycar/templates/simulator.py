@@ -28,6 +28,7 @@ from donkeydrifter.parts.datastore import TubHandler
 from donkeydrifter.parts.controller import JoystickController
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
 from donkeydrifter.parts.throttle_filter import ThrottleFilter
+from donkeydrifter.parts.steering_smoother import SteeringSmoother
 from donkeydrifter.parts.behavior import BehaviorPart
 from donkeydrifter.parts.file_watcher import FileWatcher
 from donkeydrifter.parts.launch import AiLaunch
@@ -391,6 +392,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
           inputs=['user/mode', 'user/angle', 'user/throttle', 'user/brake',
                   'pilot/angle', 'pilot/throttle', 'pilot/brake'],
           outputs=['angle', 'throttle', 'brake'])
+
+    # 转向平滑：滤掉上游瞬时跳变（虚拟摇杆微释放拍零、控制链路抖动），
+    # 避免转向阶跃直达模拟器/执行器引发车身弹跳。
+    # STEERING_SMOOTHER_ALPHA=1 且 STEERING_SMOOTHER_SLEW_PER_SEC=0 可完全禁用。
+    V.add(SteeringSmoother(getattr(cfg, 'STEERING_SMOOTHER_ALPHA', 0.35),
+                           getattr(cfg, 'STEERING_SMOOTHER_SLEW_PER_SEC', 8.0)),
+          inputs=['angle'], outputs=['angle'])
 
 
     #to give the car a boost when starting ai mode in a race.

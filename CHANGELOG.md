@@ -1,3 +1,7 @@
+## 2026-10-13 (275)
+
+- fix(webui): 连接器便签页「保存后重开显示未配置」——自动加载逻辑从「加载器」抽屉的 ConfigLoader 上移到 App 级 `useConfigAutoLoad`(随应用常驻):持久化 configPath 恢复 + 无路径时自动发现 mycar 不再依赖抽屉挂载(刷新后直接打开连接器时 ConfigLoader 未挂载,config 恒 null,表单显示未配置;实际保存一直成功,可抓帧验证)。ConfigLoader 移除重复逻辑,8 项回归测试迁移至 hook 测试(394 全过)。
+
 ## 2026-10-13 (274)
 
 - perf(sim): sdsandbox 异步采集管线——AsyncGPUReadback 替 ReadPixels + 去冗余 `sensorCam.Render()` + stb 工作线程 JPEG + 自检仪表 + `--quality/--vsync/--telemetry_fps` 二分开关(分支 `feature/telemetry-fps-60`,已推送)。实测 **sim 主线程采包段 ~6-12ms→0.5ms,遥测 ceiling ~58.3Hz 消除**(baseline send_fps=60.0);全链路 live 门禁 **stamp_fps 59.77 / e2e p50 2.9 / p95 4.55ms** PASS
