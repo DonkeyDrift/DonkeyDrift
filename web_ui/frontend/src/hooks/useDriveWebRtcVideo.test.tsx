@@ -5,6 +5,7 @@ import { getDriveWebRtcIceServers, useDriveWebRtcVideo } from './useDriveWebRtcV
 import type { WebRtcSignal } from './useDriveWebsocket';
 // 印章夹具由 Python 参考实现生成：ts = 车端捕获时刻（秒），rgba = 240×24 采样区
 import fixture from '../utils/__fixtures__/frameStamp.json';
+import fixture2 from '../utils/__fixtures__/frameStamp2.json';
 
 vi.mock('../services/api', () => ({
   API_URL: '/api',
@@ -327,6 +328,13 @@ describe('useDriveWebRtcVideo', () => {
       e2e_latency_p50_ms: 25,
       e2e_latency_p95_ms: 40,
       e2e_samples: 2,
+      e2e_latency_max_ms: 40,
+      e2e_present_p50_ms: undefined,
+      e2e_present_p95_ms: undefined,
+      e2e_display_p50_ms: undefined,
+      e2e_display_p95_ms: undefined,
+      callback_late_p95_ms: undefined,
+      vsync_quantum_p95_ms: undefined,
       inbound_fps: undefined,
       frames_dropped: undefined,
       jitter_ms: undefined,
@@ -336,10 +344,11 @@ describe('useDriveWebRtcVideo', () => {
     expect(receiver.jitterBufferTarget).toBe(0);
   });
 
-  it('无 captureTime 时用像素印章兜底采样真实端到端时延', async () => {
+  it('无 captureTime 时用像素印章采样真实端到端时延', async () => {
     const api = await import('../services/api');
     // 冻结本机钟：syncClock 的 NTP 中点与读帧时刻同源 → e2e 精确等于
-    // (server_time − stamp)·1000 = 42ms（server_time 由测试钉在 stamp+42ms）
+    // (server_time − stamp)·1000（server_time 由测试钉在 fixture.ts+42ms）
+    // 两帧不同印章 → 都是内容新帧：e2e = [42, 25.3]ms（fixture2 晚 16.7ms）
     const FIXED_NOW = 1_700_000_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
     const fetchMock = vi.fn(async () => ({
@@ -347,14 +356,20 @@ describe('useDriveWebRtcVideo', () => {
       json: async () => ({ server_time: fixture.ts + 0.042 }),
     }));
     vi.stubGlobal('fetch', fetchMock);
-    // jsdom 无 canvas 后端：伪造 ctx，getImageData 吐出 Python 生成的印章像素
+    // jsdom 无 canvas 后端：伪造 ctx，getImageData 依次吐出两枚印章像素
     const fakeCtx = {
       drawImage: vi.fn(),
-      getImageData: vi.fn(() => ({
-        data: new Uint8ClampedArray(fixture.rgba),
-        width: fixture.width,
-        height: fixture.height,
-      })),
+      getImageData: vi.fn()
+        .mockReturnValueOnce({
+          data: new Uint8ClampedArray(fixture.rgba),
+          width: fixture.width,
+          height: fixture.height,
+        })
+        .mockReturnValueOnce({
+          data: new Uint8ClampedArray(fixture2.rgba),
+          width: fixture2.width,
+          height: fixture2.height,
+        }),
     };
     const ctxSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
       .mockReturnValue(fakeCtx as unknown as CanvasRenderingContext2D);
@@ -393,7 +408,7 @@ describe('useDriveWebRtcVideo', () => {
       Object.defineProperty(video, 'videoWidth', { configurable: true, value: 640 });
       Object.defineProperty(video, 'videoHeight', { configurable: true, value: 480 });
       await act(async () => {
-        // 帧不带 captureTime（部分浏览器不提供）→ 触发像素印章兜底通路
+        // 帧不带 captureTime（部分浏览器不提供）→ 走像素印章口径
         callbacks.shift()?.(0, { presentationTime: 0 } as VideoFrameCallbackMetadata);
         callbacks.shift()?.(1000, { presentationTime: 1000 } as VideoFrameCallbackMetadata);
       });
@@ -401,10 +416,81 @@ describe('useDriveWebRtcVideo', () => {
       await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalled());
       const payload = (api.sendDriveWebRtcBrowserStats as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
       expect(payload.e2e_samples).toBe(2);
-      expect(payload.e2e_latency_p50_ms).toBeCloseTo(42, 0);
+      expect(payload.e2e_latency_p50_ms).toBeCloseTo(25.3, 0);
       expect(payload.e2e_latency_p95_ms).toBeCloseTo(42, 0);
       expect(payload.browser_fps).toBe(1);
       expect(payload.browser_p95_frame_interval_ms).toBe(1000);
+    } finally {
+      nowSpy.mockRestore();
+      ctxSpy.mockRestore();
+    }
+  });
+
+  it('同印章节拍重复帧只取首现，e2e 不掺补帧间隔', async () => {
+    const api = await import('../services/api');
+    // 60Hz 节拍给同一内容帧补重复帧（同印章）：时延口径=「采集→首现」，
+    // 重复帧再采样会把补帧间隔（16.7ms）掺进真实时延，必须去重
+    const FIXED_NOW = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ server_time: fixture.ts + 0.042 }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const fakeCtx = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({
+        data: new Uint8ClampedArray(fixture.rgba),
+        width: fixture.width,
+        height: fixture.height,
+      })),
+    };
+    const ctxSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(fakeCtx as unknown as CanvasRenderingContext2D);
+    const callbacks: VideoFrameRequestCallback[] = [];
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: VideoFrameRequestCallback) => {
+        callbacks.push(callback);
+        return callbacks.length;
+      }),
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const pc = new FakePeerConnection();
+    pc.statsReports = [];
+    const factory = () => pc as unknown as RTCPeerConnection;
+    const onState = vi.fn();
+
+    try {
+      render(<HookProbe onState={onState} factory={factory} />);
+
+      await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await act(async () => {
+        pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver: {} as RTCRtpReceiver } as unknown as RTCTrackEvent);
+      });
+      const video = document.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 640 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 480 });
+      await act(async () => {
+        // 三帧同一印章（内容帧 + 2 节拍重复帧）；第三帧跨过 1s 统计上报阈值
+        callbacks.shift()?.(0, { presentationTime: 0 } as VideoFrameCallbackMetadata);
+        callbacks.shift()?.(16, { presentationTime: 16 } as VideoFrameCallbackMetadata);
+        callbacks.shift()?.(1016, { presentationTime: 1016 } as VideoFrameCallbackMetadata);
+      });
+
+      await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalled());
+      const payload = (api.sendDriveWebRtcBrowserStats as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
+      expect(payload.e2e_samples).toBe(1);
+      expect(payload.e2e_latency_p50_ms).toBeCloseTo(42, 0);
+      expect(payload.e2e_latency_p95_ms).toBeCloseTo(42, 0);
     } finally {
       nowSpy.mockRestore();
       ctxSpy.mockRestore();

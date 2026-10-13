@@ -487,6 +487,16 @@ export interface DriveWebRtcStats {
   e2e_latency_p50_ms?: number;
   e2e_latency_p95_ms?: number;
   e2e_samples?: number;
+  /** 诊断口径：同一印章样本三锚点时延拆解（now/present/display）与回调迟滞、vsync 量子 */
+  e2e_latency_max_ms?: number;
+  e2e_present_p50_ms?: number;
+  e2e_present_p95_ms?: number;
+  e2e_display_p50_ms?: number;
+  e2e_display_p95_ms?: number;
+  callback_late_p95_ms?: number;
+  vsync_quantum_p95_ms?: number;
+  /** 真实新帧 pts 被顶号次数（呈现晚一拍的帧数，e2e 尾部来源） */
+  pts_bumps?: number;
   /** 车端↔后端时钟偏移（后端钟 − 车端钟，ms）：像素印章 e2e 的车钟域校正项 */
   clock_offset_ms?: number;
   transport: 'webrtc' | 'mjpeg';
@@ -520,6 +530,13 @@ export const sendDriveWebRtcBrowserStats = async (
     e2e_latency_p50_ms?: number;
     e2e_latency_p95_ms?: number;
     e2e_samples?: number;
+    e2e_latency_max_ms?: number;
+    e2e_present_p50_ms?: number;
+    e2e_present_p95_ms?: number;
+    e2e_display_p50_ms?: number;
+    e2e_display_p95_ms?: number;
+    callback_late_p95_ms?: number;
+    vsync_quantum_p95_ms?: number;
   }
 ) => {
   const response = await api.post('/drive/webrtc/browser-stats', { session_id: sessionId, ...metrics });

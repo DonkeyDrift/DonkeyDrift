@@ -160,6 +160,11 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
                       'sim/connected'],
               outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
               threaded=True)
+        # 预览帧事件驱动直推 WebRTC 帧缓冲:车辆循环轮询喂帧会被循环负载欠采样
+        # (实测 58Hz 源经轮询只剩 ~50Hz 进编码器),直推后编码器吃满源帧率,
+        # 「出帧→被拾取」的轮询等待同时归零。run_threaded 里的 update 保留作
+        # 兜底(帧缓冲按到达时刻去重,双写不会重复进编码器)。
+        cam.set_frame_sink(ctr.frame_buffer.update)
 
     #this throttle filter will allow one tap back for esc reverse
     th_filter = ThrottleFilter()

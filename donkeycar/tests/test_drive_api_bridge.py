@@ -418,7 +418,10 @@ def test_aiortc_video_track_waits_for_next_frame(monkeypatch):
         monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
         monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
         buffer = DriveVideoFrameBuffer(width=320, height=240)
-        track = DriveAiortcVideoTrack(buffer, fps=60)
+        # pacing=False：本测锁定「等真实新帧」语义。节拍补帧（默认开）下
+        # 第二次 recv 可能在节拍槽返回重复帧，等待语义由
+        # tests/test_drive_webrtc_track.py 的 pacing 用例覆盖。
+        track = DriveAiortcVideoTrack(buffer, fps=60, pacing=False)
         first = np.zeros((240, 320, 3), dtype=np.uint8)
         second = np.ones((240, 320, 3), dtype=np.uint8)
 
@@ -735,8 +738,22 @@ def test_drive_api_bridge_sends_webrtc_stats_when_session_active(monkeypatch):
         "type": "webrtc_stats",
         "session_id": "session-1",
         "source_fps": 60.0,
+        "arrival_gap_p50_ms": None,
+        "arrival_gap_p95_ms": None,
+        "recent_gaps_ms": None,
+        "ts_tail_age_ms": None,
+        "deque_len": None,
+        "deque_span_ms": None,
+        "deque_tail3": None,
+        "send_loop": {"frames": 0, "encode_avg_ms": 0.0, "encode_work_ms": 0.0, "send_avg_ms": 0.0, "loop_avg_ms": 0.0},
+        "push_total": 0,
+        "push_dedup_skipped": 0,
+        "push_appended": 0,
+        "past_dedup1": 0,
+        "past_resize": 0,
         "sent_fps": 59.0,
         "stale_frames": 2,
+        "pts_bumps": 0,
         "peer_connection_state": "connected",
         "ice_connection_state": "completed",
         "ice_gathering_state": "complete",

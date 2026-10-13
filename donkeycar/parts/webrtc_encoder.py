@@ -30,6 +30,7 @@ REMB 后仍会经 ``target_bitrate`` setter 自动下调，不会失控。
 import logging
 import multiprocessing
 import os
+import time
 from fractions import Fraction
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ class TunedVp8Encoder(Vp8Encoder):
         self.gop_size = int(gop_size)
 
     def encode(self, frame, force_keyframe: bool = False):
+        _t0 = time.perf_counter()
         if frame.format.name != "yuv420p":
             frame = frame.reformat(format="yuv420p")
 
@@ -115,10 +117,75 @@ class TunedVp8Encoder(Vp8Encoder):
         payloads = self._packetize(data_to_send, self.picture_id)
         timestamp = convert_timebase(frame.pts, frame.time_base, Fraction(1, 90000))
         self.picture_id = (self.picture_id + 1) % (1 << 15)
+        SEND_LOOP["encode_work_s"] += time.perf_counter() - _t0
         return payloads, timestamp
 
 
 _installed = False
+
+# 发送循环分段耗时(诊断):_run_rtp 是 recv→编码(await 线程池)→逐包发送的
+# 串行循环,单帧串行耗时直接决定发送帧率上限。encode_s 只含编码 await,
+# send_s 只含发包;loop_s = 相邻两帧 _next_encoded_frame 入口间隔(真实节拍)。
+SEND_LOOP = {"frames": 0, "encode_s": 0.0, "send_s": 0.0,
+             "loop_s": 0.0, "t_prev": None, "first_at": None, "last_reset": None,
+             "encode_work_s": 0.0}
+
+
+def install_send_loop_probe():
+    """给 aiortc RTCRtpSender 串行发送循环装计时探针(进程级、幂等)。"""
+    if aiortc is None:
+        return False
+    from aiortc.rtcrtpsender import RTCRtpSender
+    from aiortc.rtcdtlstransport import RTCDtlsTransport
+
+    if getattr(RTCRtpSender, "_donkeydrift_probed", False):
+        return True
+
+    orig_next = RTCRtpSender._next_encoded_frame
+
+    async def timed_next(self, codec):
+        now = time.perf_counter()
+        if SEND_LOOP["t_prev"] is not None:
+            SEND_LOOP["loop_s"] += now - SEND_LOOP["t_prev"]
+        SEND_LOOP["t_prev"] = now
+        t0 = now
+        try:
+            return await orig_next(self, codec)
+        finally:
+            SEND_LOOP["encode_s"] += time.perf_counter() - t0
+            SEND_LOOP["frames"] += 1
+
+    orig_send = RTCDtlsTransport._send_rtp
+
+    async def timed_send(self, data):
+        t0 = time.perf_counter()
+        try:
+            return await orig_send(self, data)
+        finally:
+            SEND_LOOP["send_s"] += time.perf_counter() - t0
+
+    RTCRtpSender._next_encoded_frame = timed_next
+    RTCRtpSender._donkeydrift_probed = True
+    RTCDtlsTransport._send_rtp = timed_send
+    RTCDtlsTransport._donkeydrift_probed = True
+    logger.info("已安装发送循环计时探针")
+    return True
+
+
+def send_loop_stats():
+    """返回并清零发送循环统计;loop_avg = 串行循环真实帧节拍(秒/帧)。"""
+    frames = SEND_LOOP["frames"]
+    stats = {
+        "frames": frames,
+        "encode_avg_ms": round(SEND_LOOP["encode_s"] / frames * 1000, 2) if frames else 0.0,
+        "encode_work_ms": round(SEND_LOOP["encode_work_s"] / frames * 1000, 2) if frames else 0.0,
+        "send_avg_ms": round(SEND_LOOP["send_s"] / frames * 1000, 2) if frames else 0.0,
+        "loop_avg_ms": round(SEND_LOOP["loop_s"] / max(frames - 1, 1) * 1000, 2) if frames > 1 else 0.0,
+    }
+    for key in ("frames", "encode_s", "send_s", "loop_s", "encode_work_s"):
+        SEND_LOOP[key] = 0.0
+    SEND_LOOP["t_prev"] = None
+    return stats
 
 
 def resolve_video_bitrate(param=None) -> int:

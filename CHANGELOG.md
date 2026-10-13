@@ -1,3 +1,13 @@
+## 2026-10-13 (272)
+
+- feat(webrtc): 模拟器源 60fps 真实采集 + 事件驱动直推——全链路实测 **stamp_fps 60.05、e2e p50 3.95 / p95 4.62ms**（此前 20fps / p95 44ms；目标 ≥60FPS、≤30ms 双双达成，live 门禁 `--gate-fps 58 --gate-latency-ms 30` 全 PASS）
+  - **破 20fps 硬上限（方案 A：BepInEx 运行时补丁）**：sdsandbox 源码 `TcpCarHandler.limitFPS=20` 锁死遥测/JPEG 推流（游戏渲染本就 60fps，发送是现拍现编，提节流即真 60fps 内容、无插帧）。SimTelemetryFps 插件把 `limitFPS`→60、`Time.fixedDeltaTime`→1/60（发送在 FixedUpdate，不改只发 50Hz）、画质档 0 + 关 vsync；Mac 已装进 `donkey_sim.app`（启动 shim 注入，BepInEx 5 arm64 Mono 会崩预载器故走 x86_64 Rosetta），Windows 部署包另行分发。
+  - **事件驱动直推**：`DonkeyGymEnv.set_frame_sink` 让模拟器帧在 `_set_frame` 里直推 `frame_buffer.update`，不再等车辆主循环轮询——循环负载高时轮询节拍跌破源帧率，60Hz 源被欠采样到 ~52Hz；直推后吃满源帧率且轮询等待归零。**顺序约束**：先换 `preview_frame` 再记到达时刻（`_arrive_and_push`），否则车辆循环读到「旧帧+新时刻」会去重竞态吞掉真实新帧。模板 `simulator.py` 与已有 `mycar/manage.py`（内联 drive）各自接线。
+  - **gym_donkeycar fork 客户端**：`SO_RCVBUF` 8MB（默认缓冲只够几条 60KB 消息，消费抖动直接反压模拟器发送线程）、JPEG 解码 PIL→cv2（GIL 释放、逐字节一致）。
+  - **观测性**：`/api/drive/webrtc/stats` 新增到达间隔 p50/p95/recent 采样、push 分段计数（total/dedup/appended/resize）、发送循环分段（编码 await/本体/发包/节拍）；`DRIVE_DGYM_TIMING=1` 打采集分段日志。
+  - 排查链存档：源端 58.8Hz 独立验证 → 车辆循环欠采样（50.4）→ 直推接线在 mycar 未生效（sink_pushes=0 暴露模板≠实车 manage.py）→ 修复后 60.05 PASS。Rosetta 模拟器偶发 SIGSEGV（~15-30min）为已知残留，原生 arm64 需方案 B 源码重编。
+  - 测试：相关 83 项全过；全量套件失败项经 stash 基线逐一确认为既有。文档：`docs/arch/webrtc-e2e-latency.md` 新增 2026-10-13 节。
+
 ## 2026-10-12 (271)
 
 - feat(webrtc): 端到端图传闭环测试编排器 `scripts/e2e_video_test.py`——一条命令跑通「隔离后端→合成源→回环探针门禁→headless 真实浏览器实测」，历史落盘 + `--compare-last` 指标对比，把图传优化变成「改旋钮→重跑→看增减」的闭环

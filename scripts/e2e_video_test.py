@@ -58,14 +58,14 @@ STRIP_PROXY = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
 
 SCENARIOS = {
     "pipeline-320p60": {"fps": 60, "width": 320, "height": 240,
-                        "gate_fps": 58, "gate_latency_ms": 50},
+                        "gate_fps": 58, "gate_link_fps": 58, "gate_latency_ms": 50},
     "pipeline-480p60": {"fps": 60, "width": 640, "height": 480,
-                        "gate_fps": 58, "gate_latency_ms": 50},
+                        "gate_fps": 58, "gate_link_fps": 58, "gate_latency_ms": 50},
     "simcadence-320p20": {"fps": 20, "width": 320, "height": 240,
-                          "gate_fps": 19, "gate_latency_ms": 50},
+                          "gate_fps": 19, "gate_link_fps": 58, "gate_latency_ms": 50},
     "simcadence-480p20": {"fps": 20, "width": 640, "height": 480,
-                          "gate_fps": 19, "gate_latency_ms": 50},
-    "live": {"gate_fps": 19, "gate_latency_ms": 50},
+                          "gate_fps": 19, "gate_link_fps": 58, "gate_latency_ms": 50},
+    "live": {"gate_fps": 19, "gate_link_fps": 58, "gate_latency_ms": 50},
 }
 
 CHROME_CANDIDATES = (
@@ -197,7 +197,13 @@ def find_chrome(explicit: str = None):
 
 def run_browser_leg(backend: str, chrome: str, duration: float,
                     min_samples: int = 60) -> dict:
-    """headless 真实浏览器支路：页面自行接入 WebRTC 并上报 e2e 样本。"""
+    """headless 真实浏览器支路：页面自行接入 WebRTC 并上报 e2e 样本。
+
+    全程采样到 duration 结束，不提前退出：浏览器上报的 fps/间隔是 2s 滑窗，
+    前几秒处于抖动缓冲/码控预热期，提前截取会把预热毛刺误当稳态。稳态口径 =
+    首次 e2e_samples 达标并跳过前 5 个预热窗口后的快照：fps 取均值；呈现
+    间隔「稳」看窗口 p95 的中位数 + 坏窗口占比（单窗口毛刺如实暴露但不一票否决）。
+    """
     user_data = tempfile.mkdtemp(prefix="e2evid-chrome-")
     args = [
         chrome,
@@ -216,6 +222,12 @@ def run_browser_leg(backend: str, chrome: str, duration: float,
     try:
         deadline = time.monotonic() + duration
         stats = {}
+        steady_fps = []
+        steady_p95 = []
+        steady_e2e = []
+        steady_display_e2e = []
+        warm = False
+        warm_skips = 5
         while time.monotonic() < deadline:
             time.sleep(2.0)
             try:
@@ -223,13 +235,45 @@ def run_browser_leg(backend: str, chrome: str, duration: float,
             except (urllib.error.URLError, TimeoutError, OSError):
                 continue
             if stats.get("e2e_samples", 0) >= min_samples:
-                break
+                warm = True
+            if not warm:
+                continue
+            if warm_skips > 0:
+                warm_skips -= 1
+                continue
+            if stats.get("browser_fps"):
+                steady_fps.append(stats["browser_fps"])
+            if stats.get("browser_p95_frame_interval_ms") is not None:
+                steady_p95.append(stats["browser_p95_frame_interval_ms"])
+            if stats.get("e2e_latency_p95_ms") is not None:
+                steady_e2e.append(stats["e2e_latency_p95_ms"])
+            if stats.get("e2e_display_p95_ms") is not None:
+                steady_display_e2e.append(stats["e2e_display_p95_ms"])
+        p95_sorted = sorted(steady_p95)
+        p95_median = p95_sorted[len(p95_sorted) // 2] if p95_sorted else None
+        bad_windows = sum(1 for v in steady_p95 if v > 25.0)
         return {
             "e2e_latency_p50_ms": stats.get("e2e_latency_p50_ms"),
             "e2e_latency_p95_ms": stats.get("e2e_latency_p95_ms"),
+            "e2e_latency_max_ms": stats.get("e2e_latency_max_ms"),
             "e2e_samples": stats.get("e2e_samples", 0),
+            "e2e_present_p95_ms": stats.get("e2e_present_p95_ms"),
+            "e2e_display_p50_ms": stats.get("e2e_display_p50_ms"),
+            "e2e_display_p95_ms": stats.get("e2e_display_p95_ms"),
+            "callback_late_p95_ms": stats.get("callback_late_p95_ms"),
+            "vsync_quantum_p95_ms": stats.get("vsync_quantum_p95_ms"),
+            "pts_bumps": stats.get("pts_bumps"),
             "inbound_fps": stats.get("inbound_fps"),
-            "browser_fps": stats.get("browser_fps"),
+            "browser_fps": (round(sum(steady_fps) / len(steady_fps), 2)
+                            if steady_fps else stats.get("browser_fps")),
+            "browser_p95_frame_interval_ms": (round(p95_median, 1)
+                                              if p95_median is not None
+                                              else stats.get("browser_p95_frame_interval_ms")),
+            "browser_interval_bad_windows": bad_windows,
+            "browser_steady_windows": len(steady_p95),
+            "browser_p95_series": [round(v, 1) for v in steady_p95],
+            "browser_e2e_p95_series": [round(v, 1) for v in steady_e2e],
+            "browser_e2e_display_p95_series": [round(v, 1) for v in steady_display_e2e],
             "jitter_buffer_delay_ms": stats.get("jitter_buffer_delay_ms"),
             "frames_dropped": stats.get("frames_dropped"),
         }
@@ -249,6 +293,11 @@ def evaluate_gates(scenario: dict, cfg: dict, probe: dict, browser: dict,
     p95 = probe.get("e2e_ms", {}).get("p95")
     checks.append(("探针帧率 ≥ 门限", fps >= gate_fps,
                    f"{fps} vs ≥{gate_fps}"))
+    gate_link_fps = cfg.get("gate_link_fps")
+    if gate_link_fps is not None:
+        link_fps = probe.get("link_fps", 0.0)
+        checks.append(("链路帧率（含补帧）≥ 门限", link_fps >= gate_link_fps,
+                       f"{link_fps} vs ≥{gate_link_fps}"))
     checks.append(("探针 e2e p95 ≤ 门限", p95 is not None and p95 <= gate_latency_ms,
                    f"{p95}ms vs ≤{gate_latency_ms}ms"))
     no_stamp = probe.get("frames_without_stamp")
@@ -260,6 +309,23 @@ def evaluate_gates(scenario: dict, cfg: dict, probe: dict, browser: dict,
         checks.append(("浏览器 e2e p95 ≤ 门限",
                        bp95 is not None and bp95 <= gate_latency_ms,
                        f"{bp95}ms vs ≤{gate_latency_ms}ms"))
+        if gate_link_fps is not None:
+            bfps = browser.get("browser_fps")
+            checks.append(("浏览器呈现帧率 ≥ 门限",
+                           bfps is not None and bfps >= gate_link_fps,
+                           f"{bfps} vs ≥{gate_link_fps}"))
+        # 呈现帧间隔稳态口径（设计稿 60FPS 稳定）：窗口 p95 中位数 ≤ 25ms，
+        # 且毛刺窗口（p95 > 25ms）占比 ≤ 20%——单窗口抖动如实暴露但不一票否决
+        interval95 = browser.get("browser_p95_frame_interval_ms")
+        checks.append(("浏览器帧间隔 p95（窗口中位数）≤ 25ms",
+                       interval95 is not None and interval95 <= 25.0,
+                       f"{interval95}ms vs ≤25ms"))
+        total_w = browser.get("browser_steady_windows") or 0
+        bad_w = browser.get("browser_interval_bad_windows") or 0
+        if total_w:
+            checks.append(("帧间隔毛刺窗口占比 ≤ 20%",
+                           bad_w / total_w <= 0.2,
+                           f"{bad_w}/{total_w}"))
     return checks
 
 
@@ -287,6 +353,7 @@ def print_compare(entries, scenario: str):
     print(f"  [对比] {scenario}（vs 上一次同场景）:")
     for label, p_val, c_val in (
         ("stamp_fps", p_probe.get("stamp_fps"), c_probe.get("stamp_fps")),
+        ("link_fps", p_probe.get("link_fps"), c_probe.get("link_fps")),
         ("e2e p50", (p_probe.get("e2e_ms") or {}).get("p50"),
          (c_probe.get("e2e_ms") or {}).get("p50")),
         ("e2e p95", (p_probe.get("e2e_ms") or {}).get("p95"),
@@ -431,14 +498,35 @@ def main() -> int:
                 if probe:
                     e2e = probe.get("e2e_ms", {})
                     print(f"    stamp_fps={probe.get('stamp_fps')} "
+                          f"link_fps={probe.get('link_fps')} "
+                          f"补帧={probe.get('repeat_frames')} "
                           f"e2e p50={e2e.get('p50')}ms p95={e2e.get('p95')}ms "
+                          f"max={e2e.get('max')}ms "
                           f"帧间隔 p95={probe.get('frame_interval_ms', {}).get('p95')}ms")
                 if browser:
                     print(f"    浏览器: p50={browser.get('e2e_latency_p50_ms')}ms "
                           f"p95={browser.get('e2e_latency_p95_ms')}ms "
                           f"samples={browser.get('e2e_samples')} "
+                          f"fps={browser.get('browser_fps')} "
                           f"inbound={browser.get('inbound_fps')}fps "
+                          f"呈现间隔p95={browser.get('browser_p95_frame_interval_ms')}ms "
+                          f"稳态窗口={browser.get('browser_steady_windows')} "
                           f"jb={browser.get('jitter_buffer_delay_ms')}ms")
+                    print(f"    诊断: display锚 p50={browser.get('e2e_display_p50_ms')}ms "
+                          f"p95={browser.get('e2e_display_p95_ms')}ms "
+                          f"present锚p95={browser.get('e2e_present_p95_ms')}ms "
+                          f"回调迟滞p95={browser.get('callback_late_p95_ms')}ms "
+                          f"vsync量子p95={browser.get('vsync_quantum_p95_ms')}ms "
+                          f"顶号={browser.get('pts_bumps')} "
+                          f"e2e max={browser.get('e2e_latency_max_ms')}ms")
+                series = (browser or {}).get("browser_p95_series") or []
+                if series:
+                    bad = sum(1 for v in series if v > 25)
+                    print(f"    呈现间隔 p95 序列（每 2s 窗口）: {series} "
+                          f"—— 超 25ms 窗口 {bad}/{len(series)}")
+                e2e_series = (browser or {}).get("browser_e2e_p95_series") or []
+                if e2e_series:
+                    print(f"    浏览器 e2e p95 序列: {e2e_series}")
                 for cname, ok, detail in checks:
                     print(f"    {'✓' if ok else '✗'} {cname}（{detail}）")
                 if error:

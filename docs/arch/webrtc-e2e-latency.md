@@ -1,5 +1,54 @@
 # WebRTC 真实端到端时延：诚实测量体系与 <50ms 实测
 
+## 2026-10-13：60fps 真实采集 + 全链路 60fps（BepInEx 补丁 + 事件驱动直推）
+
+**模拟器源 20fps 硬上限已被打破**。sdsandbox 源码里 `TcpCarHandler.limitFPS=20`
+（遥测/JPEG 推流每 50ms 一发；游戏渲染本就有 60fps），每次发送都是现拍现编
+（`CameraSensor.Render()`+`ReadPixels`+`EncodeToJPG`），把发送节流提上去即
+真实 60fps 内容帧、无插帧。两项改动叠加后的实测（live 门禁,真实模拟器源）:
+
+| 指标 | 此前(20fps 源+轮询) | 现在 |
+|---|---|---|
+| 源帧率 | 20.00 硬上限 | **60.05**(stamp_fps,0 丢帧) |
+| e2e p50 / p95 | 15.15 / 25.29ms | **3.95 / 4.62ms** |
+| 车端段逐段 | 轮询拾取 9.8ms+编码+发包≈12ms | 直推零等待,合计 <5ms |
+
+改动清单:
+
+1. **BepInEx 5.4.23.5 + SimTelemetryFps 插件**（Mac 已装进
+   `~/Dev/DKC/DonkeySimMac/donkey_sim.app`,Windows 部署包
+   `~/Dev/DKC/bepinex_work/DonkeySim_Windows_60fps_BepInEx.zip`）:
+   运行时把 `TcpCarHandler.limitFPS` 提 60、`Time.fixedDeltaTime` 提 1/60
+   (发送在 FixedUpdate,不改只能 50Hz)、画质档 0 + 关 vsync 给编码让预算。
+   注意:BepInEx 5 的 MonoMod 在 **arm64 Mono 上崩预载器**,Mac 被迫 x86_64
+   Rosetta 运行(模拟器偶发 SIGSEGV,~15-30min 一次);doorstop 原生 arm64
+   在本 Unity 2020.3 构建上不可用(3.4 崩、4.5 静默不加载)。Windows 无此问题。
+2. **事件驱动直推**(donkeycar/parts/dgym.py `set_frame_sink` +
+   mycar/manage.py 接线):模拟器帧在 `_set_frame` 里直接推
+   `frame_buffer.update`,不再等车辆主循环轮询。车辆循环负载高时轮询节拍
+   跌破源帧率,60Hz 源被欠采样到 ~52Hz;直推后吃满源帧率,轮询等待归零。
+   顺序约束:先换 `preview_frame` 再记到达时刻(`_arrive_and_push`),否则
+   车辆循环会读到「旧帧+新时刻」,去重竞态吞掉真实新帧。
+   注意:**donkeycar/templates/simulator.py 是新建车的模板**;已有 mycar 的
+   `manage.py` 内联 `drive()` 需各自接线(本次已接 mycar)。
+3. **gym_donkeycar fork** 客户端:`SO_RCVBUF` 提到 8MB(默认缓冲只够几条
+   60KB 消息,消费抖动直接反压模拟器发送线程)、JPEG 解码 PIL→cv2
+   (GIL 释放、实测逐字节一致)。
+4. 观测性(默认零开销):`/api/drive/webrtc/stats` 新增到达间隔 p50/p95、
+   发送循环分段(编码 await/本体/节拍);`DRIVE_DGYM_TIMING=1` 打采集分段。
+
+复现门禁:
+
+```bash
+env -u http_proxy -u https_proxy .venv/bin/python scripts/e2e_video_test.py \
+  --scenarios live --backend http://127.0.0.1:8123 --duration 30 \
+  --gate-fps 58 --gate-latency-ms 30
+# 期望全 PASS:stamp_fps≥58、e2e p95≤30ms
+```
+
+剩余限制:Mac 模拟器 Rosetta 运行有偶发崩溃(原生 arm64 需方案 B 源码重编);
+真实浏览器徽标数值在窗口被遮挡时 Chromium 暂停合成会停更(见下文已知陷阱)。
+
 ## 背景：徽标曾经是假的
 
 Drive 页 WebRTC 徽标长期显示「33ms」，但用户实际体感约 100ms。排查结论：

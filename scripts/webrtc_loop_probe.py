@@ -243,6 +243,10 @@ async def run_probe(backend: str, duration: float, connect_timeout: float,
         connected_at = time.time()
         stamp_times: List[float] = []
         recv_times: List[float] = []
+        all_recv_times: List[float] = []
+        seen_stamps = set()
+        repeats = 0
+        decoded = 0
         no_stamp = 0
         checksum_ok_probe_start = time.time()
 
@@ -253,12 +257,21 @@ async def run_probe(backend: str, duration: float, connect_timeout: float,
             except asyncio.TimeoutError:
                 break
             arr = frame.to_ndarray(format="rgb24")
+            decoded += 1
             # 接收时刻统一到后端时钟域：本机钟 + 探针 offset
             recv_at = time.time() + probe_offset_s
+            all_recv_times.append(recv_at)
             stamp = read_timestamp(arr)
             if stamp is None:
                 no_stamp += 1
                 continue
+            if stamp in seen_stamps:
+                # 节拍重复帧（同印章，60Hz 补帧产物）：计入链路帧率 link_fps，
+                # 不进时延/间隔样本——时延口径是「采集→首现」，重复帧内容
+                # 早已首现计过，再计会把补帧间隔掺进真实时延。
+                repeats += 1
+                continue
+            seen_stamps.add(stamp)
             stamp_times.append(stamp + car_offset_ms / 1000.0)
             recv_times.append(recv_at)
 
@@ -279,13 +292,21 @@ async def run_probe(backend: str, duration: float, connect_timeout: float,
         for i in range(1, len(stamp_times)) if stamp_times[i] > stamp_times[i - 1]
     ]
     wall = stamp_times[-1] - stamp_times[0]
+    link_intervals = [
+        (all_recv_times[i] - all_recv_times[i - 1]) * 1000.0
+        for i in range(1, len(all_recv_times)) if all_recv_times[i] > all_recv_times[i - 1]
+    ]
     report = {
         "backend": backend,
         "car_clock_offset_ms": car_offset_ms,
         "duration_s": round(wall, 3),
-        "frames_decoded": total,
+        "frames_decoded": decoded,
         "frames_without_stamp": no_stamp,
+        # 印章去重帧率 = 真实新内容帧率（源速率，瓶颈如实暴露）；
+        # link_fps = 含节拍重复帧的链路出帧率（60Hz 补帧后应≈声明 fps）。
         "stamp_fps": round(total / wall, 2) if wall > 0 else 0.0,
+        "link_fps": round(decoded / wall, 2) if wall > 0 else 0.0,
+        "repeat_frames": repeats,
         "e2e_ms": {
             "p50": round(percentile(latencies, 0.5), 2),
             "p95": round(percentile(latencies, 0.95), 2),
@@ -298,6 +319,12 @@ async def run_probe(backend: str, duration: float, connect_timeout: float,
             "p95": round(percentile(intervals, 0.95), 2),
             "max": round(max(intervals), 2) if intervals else 0.0,
         },
+        # 链路出帧间隔（含补帧）：60Hz 节拍稳定性口径
+        "link_interval_ms": {
+            "p50": round(percentile(link_intervals, 0.5), 2),
+            "p95": round(percentile(link_intervals, 0.95), 2),
+            "max": round(max(link_intervals), 2) if link_intervals else 0.0,
+        },
     }
     return report
 
@@ -308,6 +335,8 @@ async def main_async() -> int:
     parser.add_argument("--duration", type=float, default=10.0, help="采样时长（秒）")
     parser.add_argument("--connect-timeout", type=float, default=15.0)
     parser.add_argument("--gate-fps", type=float, default=None, help="门禁：印章去重帧率下限")
+    parser.add_argument("--gate-link-fps", type=float, default=None,
+                        help="门禁：链路出帧率下限（含节拍重复帧）")
     parser.add_argument("--gate-latency-ms", type=float, default=None, help="门禁：e2e p95 上限")
     parser.add_argument("--json", action="store_true", help="仅输出 JSON")
     args = parser.parse_args()
@@ -327,6 +356,9 @@ async def main_async() -> int:
     failed = False
     if args.gate_fps is not None and report["stamp_fps"] < args.gate_fps:
         print(f"门禁失败：帧率 {report['stamp_fps']} < {args.gate_fps}", file=sys.stderr)
+        failed = True
+    if args.gate_link_fps is not None and report["link_fps"] < args.gate_link_fps:
+        print(f"门禁失败：链路帧率 {report['link_fps']} < {args.gate_link_fps}", file=sys.stderr)
         failed = True
     if args.gate_latency_ms is not None and report["e2e_ms"]["p95"] > args.gate_latency_ms:
         print(f"门禁失败：e2e p95 {report['e2e_ms']['p95']}ms > {args.gate_latency_ms}ms",

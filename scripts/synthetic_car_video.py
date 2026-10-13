@@ -37,7 +37,10 @@ def generate_frame(counter: int, width: int, height: int) -> np.ndarray:
 def main() -> int:
     parser = argparse.ArgumentParser(description="合成车端 60fps 视频源")
     parser.add_argument("--server", default="ws://127.0.0.1:8000/api/drive/ws")
-    parser.add_argument("--fps", type=float, default=60.0)
+    parser.add_argument("--fps", type=float, default=60.0, help="内容生产节拍（捕获帧率）")
+    parser.add_argument("--video-fps", type=int, default=60,
+                        help="声明给 WebRTC 轨道的视频帧率（与内容节拍解耦，"
+                             "对应实车 DRIVE_VIDEO_FPS=60 + 模拟器 20fps 源）")
     parser.add_argument("--width", type=int, default=320)
     parser.add_argument("--height", type=int, default=240)
     parser.add_argument("--probe", action="store_true", help="开启时延印章")
@@ -49,7 +52,7 @@ def main() -> int:
         video_transport="webrtc",
         video_width=args.width,
         video_height=args.height,
-        video_fps=int(args.fps),
+        video_fps=args.video_fps,
         auto_start=True,
         latency_probe=args.probe,
     )
@@ -73,7 +76,13 @@ def main() -> int:
         next_tick += interval
         sleep = next_tick - time.monotonic()
         if sleep > 0:
-            time.sleep(sleep)
+            # 分层睡眠：粗睡到 2ms 内再自旋对齐。time.sleep 过冲 ~1-3ms，
+            # 会让「60fps 源」实测间隔 p95 到 20ms——真实相机是硬件节拍
+            # （±<1ms），合成源须贴近硬件口径，否则测的是 Python 调度抖动
+            if sleep > 0.002:
+                time.sleep(sleep - 0.002)
+            while time.monotonic() < next_tick:
+                pass
         else:
             # 节拍落后（GC/调度抖动）：跳过补偿，避免突发补帧
             dropped_ticks += 1

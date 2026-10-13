@@ -60,6 +60,9 @@ class DonkeyGymEnv(object):
         self._empty_preview_frame = np.zeros((self._render_img_h, self._render_img_w, 3), dtype=np.uint8)
         self.frame = self._empty_frame.copy()
         self.preview_frame = self._empty_preview_frame.copy()
+        # 预览帧直推回调（如 DriveApiBridge.frame_buffer.update）：模拟器帧到达即推，
+        # 不经过车辆主循环轮询。None = 保持轮询喂帧的旧行为。
+        self._frame_sink = None
 
         # 看门狗：记录最近一次 env.step() 成功返回的时间戳。底层 gym_donkeycar 的
         # observe() 在模拟器断连后会无限自旋（无超时），update() 线程会被卡死在
@@ -203,6 +206,32 @@ class DonkeyGymEnv(object):
             self.preview_frame = self._empty_preview_frame.copy()
             self.connected = False
 
+    def set_frame_sink(self, sink):
+        """注册预览帧直推回调(如 DriveApiBridge.frame_buffer.update)。
+
+        模拟器源是事件驱动推送(update 线程在 env.step 返回时即拿到新帧),而
+        WebRTC 帧缓冲此前只能等车辆主循环轮询 run_threaded 喂帧——车辆循环
+        负载一高(推理/录制)实际节拍跌破源帧率时,预览帧被欠采样(实测 58Hz
+        源经 60Hz 轮询只采样到 ~50Hz 进编码器)。直推后帧路径不再经过车辆循环,
+        编码器吃满真实源帧率,「出帧→被拾取」的轮询等待也归零。
+        实车路径(侧信道恒 None)不受帧率影响,但同样的欠采样逻辑适用,故接线
+        由模板按 video_transport 决定,本方法本身与传输方式无关。
+        """
+        self._frame_sink = sink
+
+    def _push_frame_sink(self):
+        # getattr 兜底:单测可能绕过 __init__ 构造实例
+        sink = getattr(self, "_frame_sink", None)
+        if sink is not None:
+            try:
+                self._sink_pushes = getattr(self, "_sink_pushes", 0) + 1
+                sink(self.preview_frame)
+            except Exception as e:
+                # 喂帧失败绝不能拖死模拟器采集线程;丢帧计数用于诊断
+                self._sink_errors = getattr(self, "_sink_errors", 0) + 1
+                if self._sink_errors % 50 == 1:
+                    print(f"[DonkeyGymEnv] frame sink 异常 #{self._sink_errors}: {e!r}")
+
     def _set_frame(self, raw_frame):
         """把模拟器返回的原始渲染帧拆分为 NN 输入帧与预览帧。
 
@@ -213,15 +242,14 @@ class DonkeyGymEnv(object):
         """
         if raw_frame is None:
             return
-        # 帧到达时刻入侧信道：帧缓冲以它为时间戳并按它去重，让
-        # 「出帧→车辆循环轮询」等待计入时延口径、重复轮询不虚增帧率。
-        set_source_arrival()
         h, w = raw_frame.shape[:2]
         if h == self._img_h and w == self._img_w:
             self.frame = raw_frame
             self.preview_frame = raw_frame
+            self._arrive_and_push()
             return
         self.preview_frame = raw_frame
+        self._arrive_and_push()
         if cv2 is not None:
             try:
                 self.frame = cv2.resize(raw_frame, (self._img_w, self._img_h))
@@ -229,6 +257,23 @@ class DonkeyGymEnv(object):
                 self.frame = raw_frame
         else:
             self.frame = raw_frame
+
+    def _arrive_and_push(self):
+        """帧对象先落地、再记到达、后直推——三步顺序是正确性关键。
+
+        车辆循环的 run_threaded 与采集线程并发读 preview_frame；若先把到达
+        时刻写入侧信道再换 preview_frame，车辆循环可能在两操作之间读到
+        「旧帧 + 新到达时刻」——帧缓冲按到达时刻去重时会吞掉紧随其后的真实
+        新帧（实测 60Hz 源因此掉到 ~52Hz，且旧帧被盖上新时间戳污染时延口径）。
+        先换帧对象再记时刻则要么读到「新帧+旧时刻」去重跳过（安全），要么
+        整套一致，永远不会错杀真实新帧。
+        """
+        fid = id(self.preview_frame)
+        if fid == getattr(self, "_last_frame_obj", None):
+            self._dup_frame_objs = getattr(self, "_dup_frame_objs", 0) + 1
+        self._last_frame_obj = fid
+        set_source_arrival()
+        self._push_frame_sink()
 
     def delay_buffer(self, frame, info):
         now = time.time()
@@ -404,10 +449,17 @@ class DonkeyGymEnv(object):
                     current_frame, _, _, _, current_info = step_result
                     self.delay_buffer(current_frame, current_info)
                 else:
+                    _t0 = time.perf_counter()
                     step_result = env.step(self.action)
+                    _t1 = time.perf_counter()
                     current_frame, _, _, _, current_info = step_result
                     self._set_frame(current_frame)
+                    _t2 = time.perf_counter()
                     self.info = current_info
+                    # 采集循环诊断:step 等待+返回 vs 本帧处理的分段耗时
+                    self._upd_step_s = getattr(self, "_upd_step_s", 0.0) + (_t1 - _t0)
+                    self._upd_frame_s = getattr(self, "_upd_frame_s", 0.0) + (_t2 - _t1)
+                    self._upd_n = getattr(self, "_upd_n", 0) + 1
                 if self.env is env:
                     self._last_frame_ts = time.time()
             except Exception as e:
@@ -417,6 +469,36 @@ class DonkeyGymEnv(object):
                 time.sleep(1.0)
 
     def run_threaded(self, steering, throttle, brake=None, reconnect=False):
+        # 采集链路分段耗时诊断:DRIVE_DGYM_TIMING=1 时每 5s 把 gym 客户端
+        # recv/parse/telemetry 累计耗时打到 drive 日志(排查源帧率问题用,默认关)。
+        now_diag = time.time()
+        if os.environ.get("DRIVE_DGYM_TIMING", "").strip() in ("1", "true", "yes") and \
+                now_diag - getattr(self, "_last_timing_log", 0.0) >= 5.0:
+            self._last_timing_log = now_diag
+            try:
+                from gym_donkeycar.core.client import TIMING
+                n = max(TIMING.get("n", 0), 1)
+                print(f"[dgym-timing] n={TIMING['n']} "
+                      f"telemetry={TIMING['telemetry']/n*1000:.2f}ms/帧 "
+                      f"parse={TIMING['parse']/n*1000:.2f}ms/帧 "
+                      f"recv_xfer={TIMING['recv_xfer']/n*1000:.2f}ms/帧 "
+                      f"recv_wait={TIMING['recv_wait']:.2f}s/5s | "
+                      f"更新循环: n={getattr(self,'_upd_n',0)} "
+                      f"step={getattr(self,'_upd_step_s',0)/max(getattr(self,'_upd_n',1),1)*1000:.2f}ms/iter "
+                      f"set_frame={getattr(self,'_upd_frame_s',0)/max(getattr(self,'_upd_n',1),1)*1000:.2f}ms/iter "
+                      f"sink_errors={getattr(self,'_sink_errors',0)} "
+                      f"dup_frame_objs={getattr(self,'_dup_frame_objs',0)} "
+                      f"sink_pushes={getattr(self,'_sink_pushes',0)}")
+                for k in ("recv_wait", "recv_xfer", "parse", "telemetry", "n"):
+                    TIMING[k] = 0.0
+                self._upd_step_s = 0.0
+                self._upd_frame_s = 0.0
+                self._upd_n = 0
+                self._sink_pushes = 0
+                self._dup_frame_objs = 0
+            except Exception:
+                pass
+
         if reconnect:
             self._request_reconnect()
 

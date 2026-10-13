@@ -63,6 +63,8 @@ class DriveState:
         self.webrtc_session: Optional[dict] = None
         self.webrtc_stats = {
             "source_fps": 0.0,
+            "arrival_gap_p50_ms": None,
+            "arrival_gap_p95_ms": None,
             "sent_fps": 0.0,
             "browser_fps": 0.0,
             "browser_p95_frame_interval_ms": 0.0,
@@ -72,6 +74,7 @@ class DriveState:
             "jitter_buffer_delay_ms": 0.0,
             "disconnect_count": 0,
             "stale_frames": 0,
+            "pts_bumps": 0,
             "peer_connection_state": None,
             "ice_connection_state": None,
             "ice_gathering_state": None,
@@ -89,7 +92,14 @@ class DriveState:
             "clock_rtt_ms": None,
             "e2e_latency_p50_ms": 0.0,
             "e2e_latency_p95_ms": 0.0,
+            "e2e_latency_max_ms": 0.0,
             "e2e_samples": 0,
+            "e2e_present_p50_ms": 0.0,
+            "e2e_present_p95_ms": 0.0,
+            "e2e_display_p50_ms": 0.0,
+            "e2e_display_p95_ms": 0.0,
+            "callback_late_p95_ms": 0.0,
+            "vsync_quantum_p95_ms": 0.0,
             "degraded": False,
         }
 
@@ -250,8 +260,22 @@ class DriveState:
             return
         for key in (
             "source_fps",
+            "arrival_gap_p50_ms",
+            "arrival_gap_p95_ms",
+            "push_total",
+            "push_dedup_skipped",
+            "push_appended",
+            "past_dedup1",
+            "past_resize",
+            "recent_gaps_ms",
+            "ts_tail_age_ms",
+            "deque_len",
+            "deque_span_ms",
+            "deque_tail3",
+            "send_loop",
             "sent_fps",
             "stale_frames",
+            "pts_bumps",
             "peer_connection_state",
             "ice_connection_state",
             "ice_gathering_state",
@@ -313,6 +337,16 @@ class WebRtcBrowserStatsRequest(BaseModel):
     e2e_latency_p50_ms: Optional[float] = None
     e2e_latency_p95_ms: Optional[float] = None
     e2e_samples: Optional[int] = None
+    # 诊断口径：同一印章样本在三个时间锚点上的时延拆解，定位尾部来源
+    # （now=回调执行时刻；present=合成提交时刻；display=预期可见时刻）
+    e2e_latency_max_ms: Optional[float] = None
+    e2e_present_p50_ms: Optional[float] = None
+    e2e_present_p95_ms: Optional[float] = None
+    e2e_display_p50_ms: Optional[float] = None
+    e2e_display_p95_ms: Optional[float] = None
+    # 回调迟滞（rVFC 回调执行 − 合成提交）与合成→可见 vsync 量子的 p95
+    callback_late_p95_ms: Optional[float] = None
+    vsync_quantum_p95_ms: Optional[float] = None
 
 
 # ------------------------------------------------------------------
@@ -536,6 +570,7 @@ async def create_webrtc_session(request: WebRtcSessionRequest):
         "browser_p95_frame_interval_ms": 0.0,
         "disconnect_count": 0,
         "stale_frames": 0,
+        "pts_bumps": 0,
         "peer_connection_state": None,
         "ice_connection_state": None,
         "ice_gathering_state": None,
@@ -553,7 +588,14 @@ async def create_webrtc_session(request: WebRtcSessionRequest):
         "clock_rtt_ms": None,
         "e2e_latency_p50_ms": 0.0,
         "e2e_latency_p95_ms": 0.0,
+        "e2e_latency_max_ms": 0.0,
         "e2e_samples": 0,
+        "e2e_present_p50_ms": 0.0,
+        "e2e_present_p95_ms": 0.0,
+        "e2e_display_p50_ms": 0.0,
+        "e2e_display_p95_ms": 0.0,
+        "callback_late_p95_ms": 0.0,
+        "vsync_quantum_p95_ms": 0.0,
         "degraded": False,
     })
     return {"success": True, "session_id": session_id, "single_client": True}
@@ -624,7 +666,10 @@ async def update_webrtc_browser_stats(request: WebRtcBrowserStatsRequest):
     drive_state.webrtc_stats["browser_fps"] = request.browser_fps
     drive_state.webrtc_stats["browser_p95_frame_interval_ms"] = request.browser_p95_frame_interval_ms
     for key in ("inbound_fps", "frames_dropped", "jitter_ms", "jitter_buffer_delay_ms",
-                "e2e_latency_p50_ms", "e2e_latency_p95_ms", "e2e_samples"):
+                "e2e_latency_p50_ms", "e2e_latency_p95_ms", "e2e_samples",
+                "e2e_latency_max_ms", "e2e_present_p50_ms", "e2e_present_p95_ms",
+                "e2e_display_p50_ms", "e2e_display_p95_ms",
+                "callback_late_p95_ms", "vsync_quantum_p95_ms"):
         value = getattr(request, key)
         if value is not None:
             drive_state.webrtc_stats[key] = value
@@ -646,6 +691,19 @@ async def webrtc_stats():
         "session_id": session.get("session_id") if session else None,
         "webrtc_available": True,
         "source_fps": drive_state.webrtc_stats["source_fps"],
+        "arrival_gap_p50_ms": drive_state.webrtc_stats.get("arrival_gap_p50_ms"),
+        "arrival_gap_p95_ms": drive_state.webrtc_stats.get("arrival_gap_p95_ms"),
+        "send_loop": drive_state.webrtc_stats.get("send_loop"),
+        "push_total": drive_state.webrtc_stats.get("push_total"),
+        "push_dedup_skipped": drive_state.webrtc_stats.get("push_dedup_skipped"),
+        "push_appended": drive_state.webrtc_stats.get("push_appended"),
+        "past_dedup1": drive_state.webrtc_stats.get("past_dedup1"),
+        "past_resize": drive_state.webrtc_stats.get("past_resize"),
+        "recent_gaps_ms": drive_state.webrtc_stats.get("recent_gaps_ms"),
+        "ts_tail_age_ms": drive_state.webrtc_stats.get("ts_tail_age_ms"),
+        "deque_len": drive_state.webrtc_stats.get("deque_len"),
+        "deque_span_ms": drive_state.webrtc_stats.get("deque_span_ms"),
+        "deque_tail3": drive_state.webrtc_stats.get("deque_tail3"),
         "sent_fps": drive_state.webrtc_stats["sent_fps"],
         "browser_fps": drive_state.webrtc_stats["browser_fps"],
         "browser_p95_frame_interval_ms": drive_state.webrtc_stats["browser_p95_frame_interval_ms"],
@@ -670,9 +728,17 @@ async def webrtc_stats():
         "last_car_ice_at": drive_state.webrtc_stats["last_car_ice_at"],
         "clock_offset_ms": drive_state.webrtc_stats["clock_offset_ms"],
         "clock_rtt_ms": drive_state.webrtc_stats["clock_rtt_ms"],
+        "pts_bumps": drive_state.webrtc_stats["pts_bumps"],
         "e2e_latency_p50_ms": drive_state.webrtc_stats["e2e_latency_p50_ms"],
         "e2e_latency_p95_ms": drive_state.webrtc_stats["e2e_latency_p95_ms"],
+        "e2e_latency_max_ms": drive_state.webrtc_stats["e2e_latency_max_ms"],
         "e2e_samples": drive_state.webrtc_stats["e2e_samples"],
+        "e2e_present_p50_ms": drive_state.webrtc_stats["e2e_present_p50_ms"],
+        "e2e_present_p95_ms": drive_state.webrtc_stats["e2e_present_p95_ms"],
+        "e2e_display_p50_ms": drive_state.webrtc_stats["e2e_display_p50_ms"],
+        "e2e_display_p95_ms": drive_state.webrtc_stats["e2e_display_p95_ms"],
+        "callback_late_p95_ms": drive_state.webrtc_stats["callback_late_p95_ms"],
+        "vsync_quantum_p95_ms": drive_state.webrtc_stats["vsync_quantum_p95_ms"],
         "transport": "webrtc",
         "degraded": drive_state.webrtc_stats["degraded"],
     }
