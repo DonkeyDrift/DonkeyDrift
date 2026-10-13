@@ -1,5 +1,48 @@
 # WebRTC 真实端到端时延：诚实测量体系与 <50ms 实测
 
+## 经验与教训（2026-10-13 全天战役存档）
+
+**成果线**:20fps / 44ms → **60fps / e2e p50 2.9ms(p95 4.55ms)**。三级跳跃:
+BepInEx 运行时补丁(过渡)→ sdsandbox 源码方案(原生 arm64 + `cam_config` fps 键)
+→ 异步采集管线(AsyncGPUReadback + 工作线程 JPEG,sim 主线程采包 6-12ms→0.5ms,
+~58.3Hz ceiling 消除)。过程产物:事件驱动直推、gym fork 客户端加固、
+全链路观测体系、二分命令行开关。
+
+### 方法论(可复用)
+
+1. **先修测量,再修性能**。每一环都有独立计数器(gym 客户端分段 / 帧缓冲 push
+   分段 / 发送循环 await-vs-本体),否则死在"感觉像 CPU 问题"的猜测上。最后一击
+   是 `sink_pushes=0` 一眼看穿"直推接线根本没生效"。
+2. **分段夹逼**:源端独立客户端测速(58.8)→ 独立 dgym(59.9)→ 全栈(52),两
+   边一夹,范围立刻收窄到"全栈共置"而非"模拟器不行"。
+3. **轮询喂帧是隐形采样器**:消费者节拍跟不上生产者时,高帧率源被静默欠采样。
+   事件驱动直推(事件源→缓冲直连)消灭整类问题,顺带把轮询等待从时延里消掉。
+4. **共享状态的赋值顺序即并发正确性**:"先换帧对象、再记到达时刻",否则去重逻辑
+   被「旧帧+新时刻」竞态骗过、静默吞帧——这类 bug 无日志无异常,只能靠计数器
+   对账(appended≠received 时逐段钉桩)。
+5. **跨仓库改动核对真实运行入口**:`donkeycar/templates/simulator.py` 只是新建车
+   模板;已有 mycar 的 `manage.py` 内联 `drive()` 是另一份代码——改模板≠改实车。
+6. **UI 状态恢复挂在常驻层**:自动加载逻辑放抽屉组件里,刷新后直达其他标签页的
+   用户永远等不到恢复(连接器"保存后未配置"案)。
+
+### 教训(踩过的坑)
+
+1. **门禁盲区**:像素印章叠加在黑帧上照样可读——e2e/印章门禁无法发现"内容全黑"。
+   内容验证必须独立于叠加标记:抓原始帧看 mean/直方图,或存图目检。
+2. **"显而易见的冗余"先验证再删**:`sensorCam.Render()` 看着是重复渲染,实为
+   prefab 里 component-disabled 相机的**唯一**出图路径;删掉即全黑。
+3. **AsyncGPUReadback 两个暗坑**:原始数据 bottom-up(逐行翻转,否则颠倒);
+   2022.3 中类型在 `UnityEngine.Rendering` 命名空间(根命名空间无别名)。
+4. **运行时注入在 Apple Silicon 的坑**:BepInEx 5 的 MonoMod ILHook 在 arm64 Mono
+   崩预载器(被迫 Rosetta);doorstop 3.4/4.5 在该 Unity 2020.3 构建上或崩或静默。
+   源码重编是正解,且 2022.3 编辑器原生 arm64。
+5. **`git add -A` 前务必 `git status`**:把用户并行的 WIP(steering_smoother)与
+   根级 node_modules 缓存扫进了提交;仓库根 .gitignore 曾漏 `node_modules/`。
+6. **myconfig 在独立命名空间执行**:只能整体重定义 GYM_CONF,读改父配置会
+   NameError。
+7. **小心脆弱的字符串契约**:store 的 setError 用英文子串('Failed'/'not found')
+   决定是否联动关抽屉——自定义错误文案踩了关键字,抽屉行为翻转。
+
 ## 2026-10-13(晚,续):异步采集管线——主线程采包 0.5ms,58.3Hz ceiling 消除
 
 `sdsandbox` 分支 `feature/telemetry-fps-60` 追加:AsyncGPUReadback(2022.3 里
