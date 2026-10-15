@@ -237,6 +237,16 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   const e2eDisplaySamplesRef = useRef<number[]>([]);
   const lateSamplesRef = useRef<number[]>([]);
   const quantumSamplesRef = useRef<number[]>([]);
+  // 印章探测自适应降频：车端默认不烧印章（DRIVE_WEBRTC_FRAME_STAMP=0），
+  // 此时逐帧 drawImage+getImageData 是纯开销且落在 60Hz 呈现关键路径上；
+  // 未激活时每 15 帧（≈4Hz@60fps）探一次，一旦读到印章即恢复逐帧精确采样。
+  // 印章探测自适应降频：车端默认不烧印章（DRIVE_WEBRTC_FRAME_STAMP=0），
+  // 此时逐帧 drawImage+getImageData 是纯开销且落在 60Hz 呈现关键路径上；
+  // 未激活时每 15 帧（≈4Hz@60fps）探一次，一旦读到印章即恢复逐帧精确采样。
+  const STAMP_PROBE_STRIDE = 15;
+  const stampActiveRef = useRef(false);
+  // 初始值 = STRIDE-1：会话首帧立即探测一次，快速识别车端是否烧印章
+  const stampProbeCounterRef = useRef(STAMP_PROBE_STRIDE - 1);
 
   const startRef = useRef<() => void>(() => undefined);
 
@@ -282,6 +292,8 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     e2eDisplaySamplesRef.current = [];
     lateSamplesRef.current = [];
     quantumSamplesRef.current = [];
+    stampActiveRef.current = false;
+    stampProbeCounterRef.current = STAMP_PROBE_STRIDE - 1;
     if (videoRef.current) {
       videoRef.current.onloadeddata = null;
     }
@@ -450,7 +462,21 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       // 且重复帧的 captureTime 是补帧出帧时刻（时延会报小）——开节拍补帧时
       // 该通路样本仅供参考，精确口径以像素印章为准。
       let sampledE2e: number | null = null;
-      const pixelSample = readPixelStampE2e(perfNowMs, unixNowMs, metadata);
+      // 像素印章读回自适应降频：印章激活后逐帧精确采样；未激活时段内
+      // 每 15 帧探测一次，避免无印章时对每帧呈现路径造成固定开销
+      let pixelSample: ReturnType<typeof readPixelStampE2e> = null;
+      if (stampActiveRef.current) {
+        pixelSample = readPixelStampE2e(perfNowMs, unixNowMs, metadata);
+      } else {
+        stampProbeCounterRef.current += 1;
+        if (stampProbeCounterRef.current >= STAMP_PROBE_STRIDE) {
+          stampProbeCounterRef.current = 0;
+          pixelSample = readPixelStampE2e(perfNowMs, unixNowMs, metadata);
+        }
+      }
+      if (pixelSample !== null) {
+        stampActiveRef.current = true;
+      }
       if (pixelSample !== null) {
         // 同印章 = 同一内容帧的节拍重复帧：只取首现时刻
         const seen = stampSeenRef.current;

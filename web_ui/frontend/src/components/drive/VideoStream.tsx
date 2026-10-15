@@ -252,7 +252,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       {/* 摄像头未连接时不画四角取景框，仅靠容器圆角呈现干净外框 */}
 
       <div className="absolute top-2 left-2 z-30 flex items-start gap-2">
-        <div className="rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-lg backdrop-blur-md min-w-[4.5rem]">
+        <div className="rounded-md border border-white/10 bg-zinc-900/85 px-2 py-1 text-center shadow-lg min-w-[4.5rem]">
           <div className={`text-xs leading-none flex items-center justify-center gap-1 ${statusMeta.color}`}>
             <StatusIcon className={`w-3 h-3 ${statusMeta.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
             {statusMeta.text}
@@ -274,7 +274,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           </span>
         )}
       </div>
-      <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-lg backdrop-blur-md">
+      <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/85 px-2 py-1 text-center shadow-lg">
         <div className="text-xs text-zinc-400 uppercase leading-none">FPS</div>
         <div className="text-base font-mono leading-tight text-cyan-400">{webRtcConnected ? browserFps : mjpegFps}</div>
       </div>
