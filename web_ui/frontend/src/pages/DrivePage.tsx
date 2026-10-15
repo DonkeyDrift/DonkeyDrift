@@ -151,7 +151,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   useEffect(() => {
     inputSourceRef.current = inputSource;
   }, [inputSource]);
-  const [joystickOpen, setJoystickOpen] = useState(false);
+  const [dockPanel, setDockPanel] = useState<'joystick' | 'sim' | null>(null);
+  const joystickOpen = dockPanel === 'joystick';
+  const simCollectOpen = dockPanel === 'sim';
   // 摇杆抽屉布局：观测「视频 + 抽屉」行的实际宽度，驱动连续缩放与悬浮模式（docs/issues/008）。
   // 注意 main 用的是 Tailwind container（640/768/1024/1280 断点量化），行宽非连续变化属预期。
   const [dockRowRef, dockRowW] = useElementWidth<HTMLDivElement>();
@@ -162,7 +164,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const dockScale = Math.min(1, Math.max(DOCK_MIN_SCALE, (dockRowW - 360) / DOCK_CLUSTER_W));
   // 悬浮阈值按「展开态等效宽」判定（收起时 = 把手 + 面板 + gap，恰与展开自然宽相等），
   // 保证收起/展开切换时模式不跳变
-  const dockOpenW = joystickOpen ? dockAsideW : dockAsideW + DOCK_PANEL_W + 8;
+  const dockOpenW = dockPanel !== null ? dockAsideW : dockAsideW + DOCK_PANEL_W + 8;
   const dockOverlay = dockRowW < DOCK_MIN_VIDEO_W + 12 + DOCK_MIN_SCALE * dockOpenW;
   // 悬浮模式下面板顶对齐视频顶：实测工具栏高度让过（工具栏 mb-4 = 16px 间距）
   const [driveToolbarRef, driveToolbarH] = useElementHeight<HTMLDivElement>();
@@ -469,9 +471,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       />
       {/* 手柄桥模式：仅真车目标下显示（ESP32 双槽位 车固件 ↔ RC_BLE_Bridge 切换） */}
       {driveTarget === 'car' && <GamepadBridgeCard />}
-      {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
+      {/* 模式卡随目标切换：真车/未知显示漂移卡；模拟器采集移到右侧抽屉把手（虚拟摇杆下侧） */}
       {driveTarget !== 'sim' && <DriftCard />}
-      {driveTarget !== 'car' && <SimCollectCard />}
       {/* 视频 + 遥测 | 右侧抽屉：任何屏宽保持左右并排，抽屉右缘常驻、随宽度连续缩放（008）；
           窄屏抽屉转悬浮半透明浮层，不再折叠到视频下方 */}
       <div ref={dockRowRef} className="relative flex flex-row items-start gap-3">
@@ -629,81 +630,110 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           }}
         >
           <div className="flex items-start gap-2">
-            {/* 面板内容：夹在视频画面与把手（展开开关）之间；宽度固定自然宽，缩放交给 transform */}
+            {/* 面板槽：摇杆 / 模拟器采集共用（互斥展开，把手点哪个显示哪个）；
+                夹在视频画面与把手列之间；宽度固定自然宽，缩放交给 transform */}
             <div
-              className={`${joystickOpen ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-float overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
-                joystickOpen && dockOverlay ? 'border-cyan-500/30 backdrop-blur-[2px]' : ''
+              className={`${dockPanel !== null ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-float overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
+                dockPanel !== null && dockOverlay ? 'border-cyan-500/30 backdrop-blur-[2px]' : ''
               }`}
-              style={joystickOpen && dockOverlay ? { opacity: DOCK_OVERLAY_OPACITY } : undefined}
+              style={dockPanel !== null && dockOverlay ? { opacity: DOCK_OVERLAY_OPACITY } : undefined}
             >
-              <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <SectionCardTitle
-                    icon={<Joystick className="w-5 h-5" />}
-                    title={t('drive.virtualJoystick')}
-                    subtitle={t('drive.virtualJoystickSubtitle')}
-                    subtitleMarquee
-                  />
-                  <InputSourceSelector
-                    value={inputSource}
-                    onChange={setInputSource}
-                    gamepadConnected={gamepadConnected}
-                    gyroAvailable={permissionState !== 'unsupported'}
-                  />
-                </div>
-                <div className="flex flex-col items-center gap-4">
-                  <div className="grid grid-cols-[auto_220px] gap-6">
-                    <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
-                    <div className="flex flex-col items-center gap-2 w-[220px]">
-                      <VirtualJoystick
-                        scale={dockScale}
-                        onChange={(a, t) => {
-                          joystickRef.current = { angle: a, throttle: t };
-                          lastInputType.current = 'joystick';
-                        }}
-                        size={220}
+              <div className={`p-4 space-y-4 transition-opacity duration-300 ${dockPanel !== null ? 'opacity-100' : 'opacity-0'}`}>
+                {joystickOpen && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <SectionCardTitle
+                        icon={<Joystick className="w-5 h-5" />}
+                        title={t('drive.virtualJoystick')}
+                        subtitle={t('drive.virtualJoystickSubtitle')}
+                        subtitleMarquee
                       />
-                      <ControlBars angle={angle} className="w-full" />
+                      <InputSourceSelector
+                        value={inputSource}
+                        onChange={setInputSource}
+                        gamepadConnected={gamepadConnected}
+                        gyroAvailable={permissionState !== 'unsupported'}
+                      />
                     </div>
-                  </div>
-                  <ProgrammableButtons className="w-full max-w-[240px]" />
-                  <GamepadConfigPanel
-                    axes={gamepadAxes}
-                    padId={gamepadPadId}
-                    mapping={gamepadMapping}
-                    connected={gamepadConnected}
-                    defaultOpen={inputSource === 'gamepad'}
-                    className="max-w-[360px]"
-                  />
-                  <ParameterPanel className="w-full max-w-[360px]" />
-                  <div className="text-xs text-zinc-500 text-center">
-                    {t('drive.hotkeysLine1')}<br />
-                    {t('drive.hotkeysLine2')}
-                  </div>
-                </div>
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="grid grid-cols-[auto_220px] gap-6">
+                        <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+                        <div className="flex flex-col items-center gap-2 w-[220px]">
+                          <VirtualJoystick
+                            scale={dockScale}
+                            onChange={(a, t) => {
+                              joystickRef.current = { angle: a, throttle: t };
+                              lastInputType.current = 'joystick';
+                            }}
+                            size={220}
+                          />
+                          <ControlBars angle={angle} className="w-full" />
+                        </div>
+                      </div>
+                      <ProgrammableButtons className="w-full max-w-[240px]" />
+                      <GamepadConfigPanel
+                        axes={gamepadAxes}
+                        padId={gamepadPadId}
+                        mapping={gamepadMapping}
+                        connected={gamepadConnected}
+                        defaultOpen={inputSource === 'gamepad'}
+                        className="max-w-[360px]"
+                      />
+                      <ParameterPanel className="w-full max-w-[360px]" />
+                      <div className="text-xs text-zinc-500 text-center">
+                        {t('drive.hotkeysLine1')}<br />
+                        {t('drive.hotkeysLine2')}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {/* 模拟器采集：仅模拟器目标渲染；有任务时内容自动展开详情 */}
+                {simCollectOpen && driveTarget === 'sim' && <SimCollectCard />}
               </div>
             </div>
 
-            {/* 浮动触发把手：抽屉收起/展开开关；中文竖排、英文横排两行。
+            {/* 浮动触发把手列：虚拟摇杆在上、模拟器采集在下（同款样式，中文竖排、英文横排两行）。
                 hit-44 把触控热区扩到 44px（视觉尺寸不变，抽屉布局常量 DOCK_CLUSTER_W 不受影响） */}
-            <button
-              onClick={() => setJoystickOpen(!joystickOpen)}
-              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
-              className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
-            >
-              {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
-              {lang === 'en' ? (
-                <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
-                  {t('drive.virtualJoystick').split(' ').map((word) => (
-                    <span key={word}>{word}</span>
-                  ))}
-                </span>
-              ) : (
-                <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
-                  {t('drive.virtualJoystick')}
-                </span>
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <button
+                onClick={() => setDockPanel(joystickOpen ? null : 'joystick')}
+                title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
+                className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+              >
+                {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+                {lang === 'en' ? (
+                  <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
+                    {t('drive.virtualJoystick').split(' ').map((word) => (
+                      <span key={word}>{word}</span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                    {t('drive.virtualJoystick')}
+                  </span>
+                )}
+              </button>
+              {driveTarget === 'sim' && (
+                <button
+                  onClick={() => setDockPanel(simCollectOpen ? null : 'sim')}
+                  title={simCollectOpen ? t('drive.collapseSimCollect') : t('drive.expandSimCollect')}
+                  className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                >
+                  {simCollectOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+                  {lang === 'en' ? (
+                    <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
+                      {t('drive.simCollectTitle').split(' ').map((word) => (
+                        <span key={word}>{word}</span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                      {t('drive.simCollectTitle')}
+                    </span>
+                  )}
+                </button>
               )}
-            </button>
+            </div>
           </div>
         </aside>
       </div>

@@ -16,6 +16,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.virtualJoystickSubtitle': '驾驶控制：摇杆、键盘、手柄与陀螺仪输入',
     'drive.collapseJoystick': '折叠虚拟摇杆',
     'drive.expandJoystick': '展开虚拟摇杆',
+    'drive.collapseSimCollect': '收起模拟器采集',
+    'drive.expandSimCollect': '展开模拟器采集',
     'drive.hotkeysLine1': '键盘快捷键: I 前进 · K 倒车 · J 左转 · L 右转',
     'drive.hotkeysLine2': 'R 切换录制 · M 切换模式',
     // DriveModeSelector
@@ -228,6 +230,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.virtualJoystickSubtitle': 'Drive controls: joystick, keyboard, gamepad, and gyroscope input',
     'drive.collapseJoystick': 'Collapse virtual joystick',
     'drive.expandJoystick': 'Expand virtual joystick',
+    'drive.collapseSimCollect': 'Collapse sim collector',
+    'drive.expandSimCollect': 'Expand sim collector',
     'drive.hotkeysLine1': 'Keyboard shortcuts: I forward · K reverse · J left · L right',
     'drive.hotkeysLine2': 'R toggle recording · M cycle mode',
     // DriveModeSelector
