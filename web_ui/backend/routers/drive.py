@@ -708,6 +708,7 @@ async def webrtc_stats():
         "browser_fps": drive_state.webrtc_stats["browser_fps"],
         "browser_p95_frame_interval_ms": drive_state.webrtc_stats["browser_p95_frame_interval_ms"],
         "inbound_fps": drive_state.webrtc_stats["inbound_fps"],
+        "render_fps_gap": (drive_state.webrtc_stats["inbound_fps"] or 0) - (drive_state.webrtc_stats["browser_fps"] or 0),
         "frames_dropped": drive_state.webrtc_stats["frames_dropped"],
         "jitter_ms": drive_state.webrtc_stats["jitter_ms"],
         "jitter_buffer_delay_ms": drive_state.webrtc_stats["jitter_buffer_delay_ms"],

@@ -115,6 +115,7 @@ const EMPTY_STATS: DriveWebRtcStats = {
   local_candidates_sent: 0,
   offer_to_answer_elapsed_ms: null,
   inbound_fps: 0,
+  render_fps_gap: 0,
   frames_dropped: 0,
   jitter_ms: 0,
   jitter_buffer_delay_ms: 0,
@@ -245,6 +246,9 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 });
   const [error, setError] = useState<string | null>(null);
   const [videoReady, setVideoReady] = useState(false);
+  const [renderThrottleDetected, setRenderThrottleDetected] = useState(false);
+  const renderThrottleAtRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   const createPeer = useCallback(() => {
     if (peerConnectionFactory) {
@@ -784,6 +788,24 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     statsRef.current = stats;
   }, [stats]);
 
+  // 渲染降频检测：浏览器接收帧率正常但呈现帧率过低（后台标签/窗口遮挡/省电策略），
+  // 持续 2 秒即告警，帮助用户识别 "source/sent/inbound 都 60fps 但画面卡顿" 的场景。
+  useEffect(() => {
+    const inbound = stats.inbound_fps ?? 0;
+    const rendered = metrics.browserFps ?? 0;
+    const connected = state === 'connected' && stats.peer_connection_state === 'connected';
+    if (connected && inbound >= 50 && rendered > 0 && rendered < 40) {
+      if (renderThrottleAtRef.current === null) {
+        renderThrottleAtRef.current = performance.now();
+      } else if (performance.now() - renderThrottleAtRef.current >= 2000) {
+        setRenderThrottleDetected(true);
+      }
+    } else {
+      renderThrottleAtRef.current = null;
+      setRenderThrottleDetected(false);
+    }
+  }, [metrics.browserFps, stats.inbound_fps, stats.peer_connection_state, state]);
+
   // 中途卡死看门狗：只在页面可见且已成功出画后工作。
   // - track muted 超时：对端媒体包停止到达（车端停摆/链路单通）；
   // - 渲染帧停止超时：传输看似正常但解码卡住（等关键帧等不到）。
@@ -810,16 +832,45 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
 
   // 回到前台时重置渲染/静音时钟：后台期间 rVFC 停止是正常现象，
   // 不重置的话切回页面的第一秒会被看门狗误判为卡死。
+  // 同时请求屏幕常亮 WakeLock，减少移动端/笔记本因息屏或省电策略降频。
   useEffect(() => {
+    const releaseWakeLock = () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => undefined);
+        wakeLockRef.current = null;
+      }
+    };
+    const requestWakeLock = async () => {
+      if (!('wakeLock' in navigator) || wakeLockRef.current) return;
+      try {
+        wakeLockRef.current = await (navigator as Navigator & { wakeLock: { request: (type: string) => Promise<WakeLockSentinel> } }).wakeLock.request('screen');
+        wakeLockRef.current.addEventListener('release', () => {
+          wakeLockRef.current = null;
+        });
+      } catch {
+        // 浏览器不支持或用户拒绝：静默失败，不影响视频
+      }
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         lastPresentationAtRef.current = performance.now();
         mutedAtRef.current = 0;
+        if (state === 'connected') {
+          requestWakeLock();
+        }
+      } else {
+        releaseWakeLock();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, []);
+    if (document.visibilityState === 'visible' && state === 'connected') {
+      requestWakeLock();
+    }
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      releaseWakeLock();
+    };
+  }, [state]);
 
   return useMemo(() => ({
     videoRef,
@@ -828,7 +879,8 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     metrics,
     error,
     videoReady,
+    renderThrottleDetected,
     sessionId: sessionIdRef.current,
     reconnect: start,
-  }), [error, metrics, start, state, stats, videoReady]);
+  }), [error, metrics, renderThrottleDetected, start, state, stats, videoReady]);
 };

@@ -39,9 +39,12 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const prevWebRtcVisibleRef = useRef(false);
   const selectedTransport = transport ?? getDriveVideoTransport();
   const forceMjpeg = selectedTransport === 'mjpeg';
-  const { videoRef, state, stats, metrics, videoReady } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline });
+  const diagnosticMode = import.meta.env.VITE_DRIVE_WEBRTC_DIAGNOSTIC === '1';
+  const { videoRef, state, stats, metrics, videoReady, renderThrottleDetected } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline });
 
   const streamUrl = `${API_URL}/drive/video`;
+  const [mjpegSrc, setMjpegSrc] = useState<string | undefined>(streamUrl);
+  const mjpegSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 浮层阴影走语义 shadow-lg（--shadow-lg）：Apple 扁平浮层阴影（深/浅各有取值）
   const webRtcConnected = state === 'connected' && !stats.degraded;
   const webRtcVisible = webRtcConnected && videoReady;
@@ -136,7 +139,12 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         clearTimeout(mjpegFadeTimerRef.current);
         mjpegFadeTimerRef.current = null;
       }
+      if (mjpegSrcTimerRef.current) {
+        clearTimeout(mjpegSrcTimerRef.current);
+        mjpegSrcTimerRef.current = null;
+      }
       setMjpegVisible(true);
+      setMjpegSrc(streamUrl);
     }
     prevWebRtcVisibleRef.current = webRtcVisible;
     return () => {
@@ -145,7 +153,25 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         mjpegFadeTimerRef.current = null;
       }
     };
-  }, [webRtcVisible]);
+  }, [webRtcVisible, streamUrl]);
+
+  // MJPEG 淡出动画完成后彻底断开 src，避免在 WebRTC 显示期间仍后台解码/占用带宽
+  useEffect(() => {
+    if (!mjpegVisible && mjpegSrc) {
+      mjpegSrcTimerRef.current = setTimeout(() => {
+        mjpegSrcTimerRef.current = null;
+        setMjpegSrc(undefined);
+      }, 500);
+    } else if (mjpegVisible && !mjpegSrc) {
+      setMjpegSrc(streamUrl);
+    }
+    return () => {
+      if (mjpegSrcTimerRef.current) {
+        clearTimeout(mjpegSrcTimerRef.current);
+        mjpegSrcTimerRef.current = null;
+      }
+    };
+  }, [mjpegVisible, mjpegSrc, streamUrl]);
 
   // 车端在线状态与多车端抢占告警：不依赖降级状态常驻轮询
   // （WebRTC 正常时也需要 carOnline 供其心跳判断、multi_car_warning 提示多开）
@@ -178,6 +204,16 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   useEffect(() => {
     onLatencyChange?.(latencyMs);
   }, [latencyMs, onLatencyChange]);
+
+  // 测量口径提示：未开启像素印章时，徽章显示的是帧间隔而非真实端到端时延。
+  useEffect(() => {
+    if (webRtcConnected && (stats.e2e_samples ?? 0) === 0) {
+      console.warn(
+        '[drive-webrtc] 当前徽章显示的是帧间隔而非真实 E2E 时延。' +
+        '如需精确测量，请车端启用 DRIVE_WEBRTC_FRAME_STAMP=1（或 VITE_DRIVE_WEBRTC_DIAGNOSTIC=1 模式）。',
+      );
+    }
+  }, [webRtcConnected, stats.e2e_samples]);
 
   const statusMeta = (() => {
     if (forceMjpeg) {
@@ -224,11 +260,17 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           <div className="text-base font-mono leading-tight text-cyan-400">
             {latencyMs > 0 ? `${latencyMs}ms` : '-'}
             {hasTrueE2e && <span className="ml-1 text-[10px] text-zinc-400">E2E</span>}
+            {diagnosticMode && <span className="ml-1 text-[10px] text-amber-400">{t('driveViz.diagnostic')}</span>}
           </div>
         </div>
         {degraded && (
           <span className="rounded bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300">
             {t('driveViz.non60FpsPath')}
+          </span>
+        )}
+        {renderThrottleDetected && (
+          <span className="rounded bg-red-400/10 px-2 py-0.5 text-xs text-red-300" title={t('driveViz.renderThrottleTooltip')}>
+            {t('driveViz.renderThrottle')}
           </span>
         )}
       </div>
@@ -247,7 +289,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       <img
         key={retryCount}
         ref={imgRef}
-        src={streamUrl}
+        src={mjpegSrc}
         alt={t('driveViz.cameraFeedAlt')}
         onLoad={() => setStatus('connected')}
         onError={() => {
@@ -264,6 +306,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           autoPlay
           playsInline
           muted
+          disablePictureInPicture
           className={`absolute inset-0 w-full h-full ${objectFit === 'cover' ? 'object-cover' : 'object-contain'} transition-opacity duration-500 ${
             webRtcVisible ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
           }`}

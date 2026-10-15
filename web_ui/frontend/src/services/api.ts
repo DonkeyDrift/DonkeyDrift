@@ -481,6 +481,7 @@ export interface DriveWebRtcStats {
   local_candidates_sent?: number;
   offer_to_answer_elapsed_ms?: number | null;
   inbound_fps?: number;
+  render_fps_gap?: number;
   frames_dropped?: number;
   jitter_ms?: number;
   jitter_buffer_delay_ms?: number;

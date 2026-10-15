@@ -19,6 +19,9 @@ vi.mock('../services/api', () => ({
     sent_fps: 60,
     browser_fps: 0,
     browser_p95_frame_interval_ms: 0,
+    inbound_fps: 0,
+    render_fps_gap: 0,
+    peer_connection_state: 'new',
     degraded: false,
   })),
 }));
@@ -693,6 +696,9 @@ describe('useDriveWebRtcVideo', () => {
         sent_fps: 60,
         browser_fps: 0,
         browser_p95_frame_interval_ms: 0,
+        inbound_fps: 0,
+        render_fps_gap: 0,
+        peer_connection_state: 'new',
         degraded: false,
       });
     }

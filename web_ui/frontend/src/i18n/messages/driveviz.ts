@@ -15,6 +15,9 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.connectingCamera': '正在连接摄像头...',
     'driveViz.cameraNotConnected': '摄像头未连接',
     'driveViz.multiCarWarning': '检测到多个车端进程抢占连接：请关闭多余的 manage.py drive 进程后等待自动恢复',
+    'driveViz.renderThrottle': '渲染降频',
+    'driveViz.renderThrottleTooltip': '浏览器接收帧率正常但呈现帧率过低，可能因标签页后台、窗口遮挡或省电策略。请保持页面前台可见并开启硬件加速。',
+    'driveViz.diagnostic': '诊断',
     // TelemetryChart
     'driveViz.chartTitle': '遥测曲线',
     'driveViz.chartTitleSteering': '转向 / 姿态',
@@ -70,6 +73,9 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.connectingCamera': 'Connecting to camera...',
     'driveViz.cameraNotConnected': 'Camera not connected',
     'driveViz.multiCarWarning': 'Multiple drive processes are fighting for the car connection: stop the extra manage.py drive process and wait for auto recovery',
+    'driveViz.renderThrottle': 'Render throttled',
+    'driveViz.renderThrottleTooltip': 'Browser receives frames at full rate but presents slowly. Keep the tab visible, avoid window occlusion, and enable hardware acceleration.',
+    'driveViz.diagnostic': 'DIAG',
     // TelemetryChart
     'driveViz.chartTitle': 'Telemetry Chart',
     'driveViz.chartTitleSteering': 'Steering / Attitude',
