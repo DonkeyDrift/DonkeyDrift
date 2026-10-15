@@ -2,7 +2,14 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS, DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS, VideoStream } from './VideoStream';
+import {
+  DRIVE_VIDEO_ASPECT_RATIO,
+  DRIVE_VIDEO_MAX_WIDTH_PX,
+  DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS,
+  DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS,
+  DRIVE_VIDEO_MIN_WIDTH_PX,
+  VideoStream,
+} from './VideoStream';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 
 vi.mock('../../hooks/useDriveWebRtcVideo', () => ({
@@ -84,6 +91,16 @@ describe('VideoStream', () => {
     expect(screen.queryByText('发 59')).not.toBeInTheDocument();
     expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-100');
     expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-0');
+  });
+
+  it('画面比例锁定 4:3 且显示尺寸钳制在 320×240~640×480', () => {
+    const { container } = render(<VideoStream />);
+    const box = container.firstElementChild as HTMLElement;
+    expect(box.style.aspectRatio).toBe(DRIVE_VIDEO_ASPECT_RATIO);
+    expect(box.style.width).toBe('100%');
+    expect(box.style.minWidth).toBe(`${DRIVE_VIDEO_MIN_WIDTH_PX}px`);
+    expect(box.style.maxWidth).toBe(`${DRIVE_VIDEO_MAX_WIDTH_PX}px`);
+    expect(box.style.height).toBe('auto');
   });
 
   it('WebRTC 连接时通过 onLatencyChange 回传 P95 延迟', () => {

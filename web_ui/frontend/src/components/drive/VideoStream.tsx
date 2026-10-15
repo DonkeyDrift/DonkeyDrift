@@ -7,6 +7,11 @@ import { useTranslation } from '@/i18n';
 
 export const DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS = 3000;
 export const DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS = 5000;
+// 画面比例锁定 4:3（车端相机 320×240）：页面宽度只改变显示尺寸，不改变比例
+export const DRIVE_VIDEO_ASPECT_RATIO = '4 / 3';
+// 显示尺寸钳制：宽度 320~640px ↔ 画面 320×240 ~ 640×480（原生分辨率到 2 倍放大）
+export const DRIVE_VIDEO_MIN_WIDTH_PX = 320;
+export const DRIVE_VIDEO_MAX_WIDTH_PX = 640;
 
 interface VideoStreamProps {
   className?: string;
@@ -26,7 +31,6 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const [carOnline, setCarOnline] = useState<boolean | null>(null);
   const [mjpegFallbackAllowed, setMjpegFallbackAllowed] = useState(false);
   const [multiCarWarning, setMultiCarWarning] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<string>('16/9');
   const imgRef = useRef<HTMLImageElement>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -120,23 +124,6 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
 
   useEffect(() => resetFallbackTimer, []);
 
-  // 动态根据实际 WebRTC 视频画面调整容器宽高比
-  useEffect(() => {
-    if (!webRtcVisible) return;
-    const video = videoRef.current;
-    if (!video) return;
-    const updateRatio = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setAspectRatio(`${video.videoWidth}/${video.videoHeight}`);
-      }
-    };
-    if (video.readyState >= 1) {
-      updateRatio();
-    } else {
-      video.addEventListener('loadedmetadata', updateRatio, { once: true });
-    }
-  }, [webRtcVisible]);
-
   useEffect(() => {
     const wasVisible = prevWebRtcVisibleRef.current;
     if (webRtcVisible && !wasVisible) {
@@ -215,7 +202,17 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const StatusIcon = statusMeta.icon;
 
   return (
-    <div className={`relative bg-zinc-950 overflow-hidden ${className}`} style={{ aspectRatio }}>
+    <div
+      className={`relative bg-zinc-950 overflow-hidden ${className}`}
+      style={{
+        // 高度固定走 aspectRatio；height:auto 防调用方传入 h-full 之类把比例顶掉
+        aspectRatio: DRIVE_VIDEO_ASPECT_RATIO,
+        width: '100%',
+        minWidth: DRIVE_VIDEO_MIN_WIDTH_PX,
+        maxWidth: DRIVE_VIDEO_MAX_WIDTH_PX,
+        height: 'auto',
+      }}
+    >
       {/* 摄像头未连接时不画四角取景框，仅靠容器圆角呈现干净外框 */}
 
       <div className="absolute top-2 left-2 z-30 flex items-start gap-2">
@@ -252,12 +249,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         ref={imgRef}
         src={streamUrl}
         alt={t('driveViz.cameraFeedAlt')}
-        onLoad={() => {
-          setStatus('connected');
-          if (imgRef.current && imgRef.current.naturalWidth > 0 && imgRef.current.naturalHeight > 0) {
-            setAspectRatio(`${imgRef.current.naturalWidth}/${imgRef.current.naturalHeight}`);
-          }
-        }}
+        onLoad={() => setStatus('connected')}
         onError={() => {
           setStatus('error');
           scheduleRetry();

@@ -562,18 +562,19 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
+          {/* 摄像头：画面比例锁定 4:3（320×240），显示尺寸随页面宽度在 320×240~640×480 之间缩放
+              （VideoStream 内钳制，全屏同样受限）；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
           <div
             ref={videoContainerRef}
             className={cn(
-              'relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black',
+              'relative bg-black flex items-center justify-center',
               !fullscreen && 'rounded-lg overflow-hidden',
             )}
           >
             {active ? (
-              <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+              <VideoStream objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
             ) : (
-              <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
+              <div className="w-full h-full min-h-[240px] bg-zinc-950 border border-zinc-800 rounded-lg" />
             )}
             <div className="absolute inset-x-3 bottom-3 z-20 grid grid-cols-1 md:grid-cols-2 gap-3">
               <TelemetryChart
