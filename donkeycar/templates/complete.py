@@ -53,6 +53,7 @@ from donkeydrifter.parts.kinematics import (Bicycle,
 from donkeydrifter.parts.launch import AiLaunch
 from donkeydrifter.parts.pipe import Pipe
 from donkeydrifter.parts.throttle_filter import ThrottleFilter
+from donkeydrifter.parts.steering_smoother import EmaSmoother, SteeringSmoother
 from donkeydrifter.parts.transform import DelayedTrigger, Lambda, TriggeredCallback
 from donkeydrifter.parts.tub_v2 import TubWriter, TubRotator
 from donkeydrifter.utils import *
@@ -243,9 +244,12 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     V.add(Lambda(lambda v: print(f"web/w4 clicked")), inputs=["web/w4"], run_condition="web/w4")
     V.add(Lambda(lambda v: print(f"web/w5 clicked")), inputs=["web/w5"], run_condition="web/w5")
 
-    #this throttle filter will allow one tap back for esc reverse
-    th_filter = ThrottleFilter()
-    V.add(th_filter, inputs=['user/throttle'], outputs=['user/throttle'])
+    # ESC「先点一下刹车才能倒车」确认协议，仅真车执行器需要。
+    # 模拟器无 ESC：该过滤器的负向过零首帧钳 0 会让画圈每次过零都产生一次
+    # 跳零毛刺（同时进遥测曲线与模拟器执行），故模拟器模式不挂。
+    if not getattr(cfg, 'DONKEY_GYM', False):
+        th_filter = ThrottleFilter()
+        V.add(th_filter, inputs=['user/throttle'], outputs=['user/throttle'])
 
     #
     # maintain run conditions for user mode and autopilot mode parts.
@@ -560,6 +564,21 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
           inputs=['user/mode', 'user/angle', 'user/throttle',
                   'pilot/angle', 'pilot/throttle'],
           outputs=['steering', 'throttle'])
+
+    # 转向平滑：滤掉上游瞬时跳变（虚拟摇杆微释放拍零、控制链路抖动），
+    # 避免转向阶跃直达模拟器/执行器引发车身弹跳。
+    # STEERING_SMOOTHER_ALPHA=1 且 STEERING_SMOOTHER_SLEW_PER_SEC=0 可完全禁用。
+    V.add(SteeringSmoother(getattr(cfg, 'STEERING_SMOOTHER_ALPHA', 0.35),
+                           getattr(cfg, 'STEERING_SMOOTHER_SLEW_PER_SEC', 8.0)),
+          inputs=['steering'], outputs=['steering'])
+
+    # 油门平滑：与转向对称（此前油门裸奔，手抖/像素量化/双时钟采样跳帧直达
+    # 曲线与模拟器）。油门比转向更怕时延，参数更跟手：alpha=0.5（60Hz 下
+    # τ≈17ms）、slew=6.0/s（0→满油门最快 167ms，只拦毛刺不限制正常操作）。
+    # THROTTLE_SMOOTHER_ALPHA=1 且 THROTTLE_SMOOTHER_SLEW_PER_SEC=0 可完全禁用。
+    V.add(EmaSmoother(getattr(cfg, 'THROTTLE_SMOOTHER_ALPHA', 0.5),
+                      getattr(cfg, 'THROTTLE_SMOOTHER_SLEW_PER_SEC', 6.0)),
+          inputs=['throttle'], outputs=['throttle'])
 
 
     if (cfg.CONTROLLER_TYPE != "pigpio_rc") and (cfg.CONTROLLER_TYPE != "MM1"):
