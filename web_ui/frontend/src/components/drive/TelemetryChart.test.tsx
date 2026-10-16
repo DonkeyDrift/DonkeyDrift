@@ -1,53 +1,63 @@
 import '@testing-library/jest-dom/vitest';
-import React from 'react';
+import React, { useState } from 'react';
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-// 共享：记录每次创建的 chart 实例，供断言检查 dataset 数据。
-const chartInstances = vi.hoisted(() => {
-  const instances: Array<{
-    data: { datasets: { label: string; data: number[] }[] };
-    options: Record<string, unknown>;
-    update: ReturnType<typeof vi.fn>;
-    destroy: ReturnType<typeof vi.fn>;
-  }> = [];
-  return {
-    instances,
-    reset() {
-      instances.length = 0;
-    },
-  };
-});
-
-// mock chart.js 的 Chart 构造器：只记录 config，不真正渲染 canvas。
-vi.mock('chart.js', () => {
-  class MockChart {
-    static register = vi.fn();
-    update = vi.fn();
-    destroy = vi.fn();
-    data: { datasets: { label: string; data: number[] }[] };
-    options: Record<string, unknown>;
-    constructor(_ctx: unknown, config: { data: { datasets: { label: string; data: number[] }[] }; options: Record<string, unknown> }) {
-      this.data = config.data;
-      this.options = config.options;
-      chartInstances.instances.push(this);
-    }
-  }
-  return {
-    Chart: MockChart,
-    CategoryScale: {},
-    LinearScale: {},
-    PointElement: {},
-    LineElement: {},
-    Title: {},
-    Legend: {},
-    Tooltip: {},
-  };
-});
-
-import { TelemetryChart } from './TelemetryChart';
+import { TelemetryChart, CURVES, curvesByGroup, BUFFER_SIZE } from './TelemetryChart';
+import { RingSeries, drawRingCurves } from './telemetryCurveRenderer';
 import type { Telemetry } from '../../hooks/useDriveWebsocket';
 import { useTelemetryStore } from '../../store/useTelemetryStore';
+
+// 记录器 ctx：替代真实 2D 上下文，把每条曲线的路径点与颜色记录下来供断言。
+// （自绘渲染器只用到 clearRect/beginPath/moveTo/lineTo/stroke + strokeStyle/lineWidth。）
+class RecorderCtx {
+  paths: Array<{ color: string; points: Array<[number, number]> }> = [];
+  private current: { color: string; points: Array<[number, number]> } | null = null;
+  strokeStyle = '';
+  lineWidth = 1;
+  clearRect = vi.fn();
+  setTransform = vi.fn();
+  beginPath() {
+    this.current = { color: this.strokeStyle, points: [] };
+  }
+  moveTo(x: number, y: number) {
+    this.current?.points.push([x, y]);
+  }
+  lineTo(x: number, y: number) {
+    this.current?.points.push([x, y]);
+  }
+  stroke() {
+    if (this.current) this.paths.push(this.current);
+    this.current = null;
+  }
+  reset() {
+    this.paths.length = 0;
+    this.clearRect.mockClear();
+  }
+}
+
+// 测试统一量取 320×112（≈ overlay 实际比例）：y(v) = 56 − v·55
+const CANVAS_W = 320;
+const CANVAS_H = 112;
+const yOf = (v: number) => CANVAS_H / 2 - v * (CANVAS_H / 2 - 1);
+
+const recorder = new RecorderCtx();
+
+beforeAll(() => {
+  // jsdom 无 canvas：getContext 返回记录器；布局恒为 0，给容器固定尺寸让路径可断言。
+  HTMLCanvasElement.prototype.getContext = vi.fn(() => recorder) as never;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    width: CANVAS_W,
+    height: CANVAS_H,
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    bottom: CANVAS_H,
+    right: CANVAS_W,
+    toJSON: () => ({}),
+  } as DOMRect);
+});
 
 const sampleTelemetry = (overrides: Partial<Telemetry> = {}): Telemetry => ({
   type: 'telemetry',
@@ -58,32 +68,80 @@ const sampleTelemetry = (overrides: Partial<Telemetry> = {}): Telemetry => ({
   ...overrides,
 });
 
-function latestChart() {
-  const chart = chartInstances.instances.at(-1);
-  if (!chart) throw new Error('no chart created');
-  return chart;
+const colorOf = (key: string): string => {
+  const c = CURVES.find((x) => x.key === key);
+  if (!c) throw new Error(`curve not found: ${key}`);
+  return c.color;
+};
+
+/** 最近一次绘制中该曲线的路径（每次绘制按曲线顺序各追加一条）。 */
+const lastPathOf = (key: string) => {
+  const path = recorder.paths.filter((p) => p.color === colorOf(key)).at(-1);
+  if (!path) throw new Error(`path not found for ${key}`);
+  return path;
+};
+
+const drawnColors = () => recorder.paths.map((p) => p.color);
+
+function findCheckbox(label: string): HTMLInputElement {
+  const cb = screen
+    .getAllByRole('checkbox')
+    .find((el) => el.parentElement?.querySelector('span')?.textContent === label);
+  if (!cb) throw new Error(`checkbox not found: ${label}`);
+  return cb as HTMLInputElement;
 }
 
-function dataset(label: string): number[] {
-  const ds = latestChart().data.datasets.find((d) => d.label === label);
-  if (!ds) throw new Error(`dataset not found: ${label}`);
-  return ds.data;
-}
-
-async function waitForChart() {
-  await waitFor(() => {
-    expect(chartInstances.instances.length).toBeGreaterThan(0);
+describe('RingSeries', () => {
+  it('push 后按最旧→最新读取，未填满处为 NaN', () => {
+    const s = new RingSeries(4);
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    expect([s.at(0), s.at(1), s.at(2), s.at(3)]).toEqual([1, 2, 3, NaN]);
   });
-}
+
+  it('填满后环形覆盖最旧点', () => {
+    const s = new RingSeries(4);
+    for (const v of [1, 2, 3, 4, 5]) s.push(v);
+    expect([s.at(0), s.at(1), s.at(2), s.at(3)]).toEqual([2, 3, 4, 5]);
+  });
+});
+
+describe('drawRingCurves', () => {
+  it('按 [-1,1]→[height,0] 映射画折线，NaN 断开曲线', () => {
+    const s = new RingSeries(4);
+    s.push(0);
+    s.push(1);
+    s.push(NaN);
+    s.push(-1);
+    const ctx = new RecorderCtx();
+    drawRingCurves(ctx as unknown as CanvasRenderingContext2D, 300, 100, [{ color: '#fff', series: s }]);
+
+    expect(ctx.clearRect).toHaveBeenCalledWith(0, 0, 300, 100);
+    expect(ctx.paths).toHaveLength(1);
+    expect(ctx.paths[0].color).toBe('#fff');
+    expect(ctx.lineWidth).toBe(1.5);
+    // x 均分：0/100/200/300；v=1 → y=1，v=-1 → y=99；NaN 断开 → 第三点重新起笔
+    expect(ctx.paths[0].points).toEqual([
+      [0, 50],
+      [100, 1],
+      [300, 99],
+    ]);
+  });
+
+  it('少于 2 个点时只清屏不绘制', () => {
+    const ctx = new RecorderCtx();
+    drawRingCurves(ctx as unknown as CanvasRenderingContext2D, 300, 100, [
+      { color: '#fff', series: new RingSeries(1) },
+    ]);
+    expect(ctx.clearRect).toHaveBeenCalledTimes(1);
+    expect(ctx.paths).toHaveLength(0);
+  });
+});
 
 describe('TelemetryChart', () => {
-  beforeAll(() => {
-    // jsdom 无 canvas，给 getContext 返回一个空对象即可满足 Chart 构造。
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
-  });
-
   beforeEach(() => {
-    chartInstances.reset();
+    recorder.reset();
     useTelemetryStore.getState().reset();
   });
 
@@ -93,93 +151,97 @@ describe('TelemetryChart', () => {
     expect(screen.getByText('（等待数据）')).toBeInTheDocument();
   });
 
-  it('收到遥测后默认显示全部曲线', async () => {
-    useTelemetryStore.getState().push(sampleTelemetry());
+  it('收到遥测后默认绘制全部曲线', async () => {
+    useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5 }));
     render(<TelemetryChart />);
 
-    await waitForChart();
-    const labels = latestChart().data.datasets.map((d) => d.label);
-    expect(labels).toEqual(
-      expect.arrayContaining(['油门', '转向', '陀螺仪 Z', 'RC 转向', 'RC 油门', '陀螺仪 X', '加速度 X', 'Pilot 角度', 'Pilot 油门']),
-    );
-    expect(labels).toHaveLength(12);
+    await waitFor(() => {
+      expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
+    });
+    const colors = new Set(drawnColors());
+    for (const c of CURVES) {
+      expect(colors.has(c.color)).toBe(true);
+    }
   });
 
-  it('RC 手柄输入写入 RC 曲线', async () => {
+  it('RC 手柄输入写入 RC 曲线（y 轴 [-1,1] 映射）', async () => {
     useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5, rc_throttle: 0.8 }));
     render(<TelemetryChart />);
 
     await waitFor(() => {
-      expect(dataset('RC 转向')).toContain(-0.5);
+      expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
     });
-    expect(dataset('RC 油门')).toContain(0.8);
+    expect(lastPathOf('rc_steering').points[0]).toEqual([0, yOf(-0.5)]);
+    expect(lastPathOf('rc_throttle').points[0]).toEqual([0, yOf(0.8)]);
   });
 
   it('gyro/accel 曲线按 scale 缩放后写入缓冲', async () => {
     useTelemetryStore.getState().push(sampleTelemetry({ gz: 0.5, ax: 4.9 }));
     render(<TelemetryChart />);
 
-    // gz scale=0.2 -> 0.5*0.2=0.1
+    // gz scale=0.2 → 0.1；ax scale=1/9.8 → 0.5
     await waitFor(() => {
-      const vals = dataset('陀螺仪 Z').filter((v): v is number => Number.isFinite(v));
-      expect(vals.length).toBeGreaterThan(0);
-      expect(vals[0]).toBeCloseTo(0.1, 10);
+      expect(lastPathOf('gz').points.length).toBeGreaterThan(0);
     });
-
-    // ax scale=1/9.8 -> 4.9/9.8≈0.5（默认已勾选）
-    await waitFor(() => {
-      const vals = dataset('加速度 X').filter((v): v is number => Number.isFinite(v));
-      expect(vals.length).toBeGreaterThan(0);
-      expect(vals[0]).toBeCloseTo(0.5, 10);
-    });
+    expect(lastPathOf('gz').points[0][1]).toBeCloseTo(yOf(0.1), 6);
+    expect(lastPathOf('ax').points[0][1]).toBeCloseTo(yOf(0.5), 6);
   });
 
-  it('取消勾选默认显示的曲线后隐藏对应数据集', async () => {
+  it('连续多帧按窗口「最旧→最新」从左到右推进', async () => {
+    render(<TelemetryChart />);
+    // 等挂载绘制就绪后再推帧（订阅前 push 只保留最后一帧，是 store 既有语义）
+    await waitFor(() => {
+      expect(recorder.paths.length).toBeGreaterThanOrEqual(CURVES.length);
+    });
+    recorder.reset();
+    useTelemetryStore.getState().push(sampleTelemetry({ steering: 0.1 }));
+    useTelemetryStore.getState().push(sampleTelemetry({ steering: 0.3 }));
+    useTelemetryStore.getState().push(sampleTelemetry({ steering: -0.2 }));
+
+    await waitFor(() => {
+      expect(lastPathOf('steering').points).toHaveLength(3);
+    });
+    const step = CANVAS_W / (BUFFER_SIZE - 1);
+    const pts = lastPathOf('steering').points;
+    expect(pts[0][0]).toBeCloseTo(0, 6);
+    expect(pts[0][1]).toBeCloseTo(yOf(0.1), 6);
+    expect(pts[1][0]).toBeCloseTo(step, 6);
+    expect(pts[1][1]).toBeCloseTo(yOf(0.3), 6);
+    expect(pts[2][0]).toBeCloseTo(step * 2, 6);
+    expect(pts[2][1]).toBeCloseTo(yOf(-0.2), 6);
+  });
+
+  it('取消勾选默认显示的曲线后停止绘制对应曲线', async () => {
     useTelemetryStore.getState().push(sampleTelemetry({ gx: 0.5 }));
     render(<TelemetryChart />);
 
-    await waitForChart();
+    await waitFor(() => {
+      expect(lastPathOf('gx').points.length).toBeGreaterThan(0);
+    });
 
-    // GyroX 默认已显示
-    expect(latestChart().data.datasets.map((d) => d.label)).toContain('陀螺仪 X');
-
-    // 取消勾选 GyroX 复选框
-    const checkboxes = screen.getAllByRole('checkbox');
-    const gyroXCheckbox = checkboxes.find((cb) => {
-      const label = cb.parentElement?.querySelector('span');
-      return label?.textContent === '陀螺仪 X';
-    }) as HTMLInputElement;
-    fireEvent.click(gyroXCheckbox);
+    // 清空历史绘制，只看点击后的重绘结果
+    recorder.reset();
+    fireEvent.click(findCheckbox('陀螺仪 X'));
 
     await waitFor(() => {
-      expect(latestChart().data.datasets.map((d) => d.label)).not.toContain('陀螺仪 X');
+      expect(drawnColors()).toHaveLength(CURVES.length - 1);
     });
+    expect(drawnColors()).not.toContain(colorOf('gx'));
   });
 
-  it('缺失字段的曲线仍渲染数据集（NaN 点断开）', async () => {
-    // 只传 steering，throttle/gz 缺失
+  it('缺失字段的曲线该点断开（不画线段）', async () => {
     const partial: Telemetry = { type: 'telemetry', t: 1, steering: 0.5 };
     useTelemetryStore.getState().push(partial);
     render(<TelemetryChart />);
 
-    // 全部默认曲线（油门/转向/陀螺仪 Z 属不同分组，但组件默认管全部曲线）都应渲染
-    await waitForChart();
-    const labels = latestChart().data.datasets.map((d) => d.label);
-    expect(labels).toEqual(expect.arrayContaining(['油门', '转向', '陀螺仪 Z']));
+    await waitFor(() => {
+      expect(lastPathOf('steering').points).toHaveLength(1);
+    });
+    expect(lastPathOf('throttle').points).toHaveLength(0);
   });
 
-  it('数据集未禁用 parsing（否则曲线不渲染，回归 #修复遥测曲线）', async () => {
-    useTelemetryStore.getState().push(sampleTelemetry());
-    render(<TelemetryChart />);
-
-    await waitForChart();
-    for (const ds of latestChart().data.datasets) {
-      expect((ds as unknown as { parsing?: boolean }).parsing).not.toBe(false);
-    }
-  });
-
-  it('group 模式下只渲染该分组的曲线与图例', async () => {
-    useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5, pilot_angle: 0.3 }));
+  it('group 模式下只绘制该分组的曲线，图例只含本组', async () => {
+    useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5, rc_throttle: 0.8 }));
     render(
       <TelemetryChart
         title="driveViz.chartTitleSteering"
@@ -189,10 +251,10 @@ describe('TelemetryChart', () => {
 
     expect(screen.getByText('转向 / 姿态')).toBeInTheDocument();
 
-    await waitForChart();
-    const labels = latestChart().data.datasets.map((d) => d.label);
-    expect(labels).toEqual(expect.arrayContaining(['转向', '陀螺仪 Z', 'RC 转向']));
-    expect(labels).not.toEqual(expect.arrayContaining(['油门', 'RC 油门']));
+    await waitFor(() => {
+      expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
+    });
+    expect(new Set(drawnColors())).toEqual(new Set(curvesByGroup('steering').map((c) => c.color)));
 
     const legendLabels = screen
       .getAllByRole('checkbox')
@@ -205,18 +267,13 @@ describe('TelemetryChart', () => {
     expect(legendLabels).not.toEqual(expect.arrayContaining(['油门', 'RC 油门', '加速度 X']));
   });
 
-  it('y 轴整体隐藏：去掉横向网格线与左侧刻度数字，但保留 [-1,1] 量程', async () => {
-    useTelemetryStore.getState().push(sampleTelemetry());
-    render(<TelemetryChart />);
+  it('overlay 模式不渲染图例（由父组件在画面外部渲染）', () => {
+    render(<TelemetryChart overlay />);
 
-    await waitForChart();
-    const y = (latestChart().options.scales as Record<string, unknown>).y as Record<string, unknown>;
-    expect(y.display).toBe(false);
-    expect(y.min).toBe(-1);
-    expect(y.max).toBe(1);
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
-  it('面板标题渲染在曲线画布下方', async () => {
+  it('面板标题渲染在曲线画布下方', () => {
     render(<TelemetryChart title="driveViz.chartTitleSteering" group="steering" />);
 
     const title = screen.getByText('转向 / 姿态');
@@ -230,36 +287,84 @@ describe('TelemetryChart', () => {
     useTelemetryStore.getState().push(sampleTelemetry());
     render(<TelemetryChart group="steering" />);
 
-    await waitForChart();
+    await waitFor(() => {
+      expect(recorder.paths.length).toBeGreaterThanOrEqual(6);
+    });
     // steering 组 6 条曲线全部 defaultOn=true，初始全选
-    expect(latestChart().data.datasets).toHaveLength(6);
-
-    const checkboxes = screen.getAllByRole('checkbox');
-    const selectAll = checkboxes.find((cb) => cb.parentElement?.querySelector('span')?.textContent === '全选') as HTMLInputElement;
+    const selectAll = findCheckbox('全选');
     expect(selectAll.checked).toBe(true);
 
-    // 取消一条曲线 → 半选：全选框 indeterminate、unchecked，曲线数 5
-    const gyroX = checkboxes.find((cb) => cb.parentElement?.querySelector('span')?.textContent === '陀螺仪 X') as HTMLInputElement;
-    fireEvent.click(gyroX);
+    // 取消一条曲线 → 半选：全选框 indeterminate、unchecked，重绘只剩 5 条
+    recorder.reset();
+    fireEvent.click(findCheckbox('陀螺仪 X'));
     await waitFor(() => {
-      expect(selectAll.indeterminate).toBe(true);
+      expect(drawnColors()).toHaveLength(5);
     });
+    expect(drawnColors()).not.toContain(colorOf('gx'));
+    expect(selectAll.indeterminate).toBe(true);
     expect(selectAll.checked).toBe(false);
-    expect(latestChart().data.datasets).toHaveLength(5);
 
     // 半选时点击全选 → 全选（6 条），全选框 checked
+    recorder.reset();
     fireEvent.click(selectAll);
     await waitFor(() => {
-      expect(latestChart().data.datasets).toHaveLength(6);
-      expect(selectAll.checked).toBe(true);
+      expect(drawnColors()).toHaveLength(6);
     });
+    expect(drawnColors()).toContain(colorOf('gx'));
+    expect(selectAll.checked).toBe(true);
 
     // 已全选时点击全选 → 全不选（0 条）
+    recorder.reset();
     fireEvent.click(selectAll);
     await waitFor(() => {
-      expect(latestChart().data.datasets).toHaveLength(0);
-      expect(selectAll.checked).toBe(false);
+      expect(drawnColors()).toHaveLength(0);
+    });
+    expect(selectAll.checked).toBe(false);
+  });
+
+  it('受控模式：visibleKeys 决定绘制集合，onToggleCurve 生效', async () => {
+    function Harness() {
+      const [keys, setKeys] = useState(new Set<string>(['steering']));
+      return (
+        <TelemetryChart
+          visibleKeys={keys}
+          onToggleCurve={(key) =>
+            setKeys((prev) => {
+              const next = new Set(prev);
+              if (next.has(key)) {
+                next.delete(key);
+              } else {
+                next.add(key);
+              }
+              return next;
+            })
+          }
+        />
+      );
+    }
+    useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5 }));
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(lastPathOf('steering').points.length).toBeGreaterThan(0);
+    });
+    expect(drawnColors()).not.toContain(colorOf('rc_steering'));
+
+    fireEvent.click(findCheckbox('RC 转向'));
+
+    await waitFor(() => {
+      expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
     });
   });
 
+  it('active=false 时不订阅遥测（缓冲保持空）', async () => {
+    useTelemetryStore.getState().push(sampleTelemetry({ steering: 0.7 }));
+    render(<TelemetryChart active={false} />);
+
+    // 挂载仍会空画一次（缓冲全 NaN → 无线段），但数据不会写入
+    await waitFor(() => {
+      expect(recorder.paths.length).toBeGreaterThan(0);
+    });
+    expect(lastPathOf('steering').points).toHaveLength(0);
+  });
 });

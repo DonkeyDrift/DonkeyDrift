@@ -327,6 +327,13 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     return { angle: a, throttle: t, drive_mode: mode };
   }, [mode]);
 
+  // 摇杆输入回调：稳定引用（读 ref、无闭包依赖），避免 20Hz 重渲染时把
+  // VirtualJoystick 的 memo/比较打穿
+  const handleJoystickChange = useCallback((a: number, t: number) => {
+    joystickRef.current = { angle: a, throttle: t };
+    lastInputType.current = 'joystick';
+  }, []);
+
   // 控制循环：60Hz 持续发送完整控制状态，避免视频链路影响控制输出。
   useDriveControlLoop({
     connected,
@@ -662,10 +669,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                         <div className="flex flex-col items-center gap-2 w-[220px]">
                           <VirtualJoystick
                             scale={dockScale}
-                            onChange={(a, t) => {
-                              joystickRef.current = { angle: a, throttle: t };
-                              lastInputType.current = 'joystick';
-                            }}
+                            onChange={handleJoystickChange}
                             size={220}
                           />
                           <ControlBars angle={angle} className="w-full" />

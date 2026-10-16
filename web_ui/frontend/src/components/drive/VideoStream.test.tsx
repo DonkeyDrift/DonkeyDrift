@@ -177,7 +177,9 @@ describe('VideoStream', () => {
     expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
 
     mockWebRtc.mockReturnValue(connectedState());
-    rerender(<VideoStream />);
+    // VideoStream 已 memo：需用变化的 props 触发重渲染（生产中 hook 内部 setState
+    // 自会触发重渲染，这里 hook 被 mock，状态翻转只能由父级重渲染带入）
+    rerender(<VideoStream clientId="retry-2" />);
 
     // WebRTC 立即开始渐入
     expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-100');

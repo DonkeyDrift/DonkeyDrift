@@ -23,7 +23,16 @@ interface VideoStreamProps {
   objectFit?: 'contain' | 'cover';
 }
 
-export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomingSignal = null, transport, clientId, onLatencyChange, objectFit = 'contain' }) => {
+// React.memo：DrivePage 的转向/油门显示 state 以 20Hz 更新会重渲染整页，
+// 视频 subtree（WebRTC <video> + 徽标）props 稳定，memo 掉这批无效重渲染
+export const VideoStream = React.memo(function VideoStream({
+  className = '',
+  incomingSignal = null,
+  transport,
+  clientId,
+  onLatencyChange,
+  objectFit = 'contain',
+}: VideoStreamProps) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<'loading' | 'connected' | 'error'>('loading');
   const [retryCount, setRetryCount] = useState(0);
@@ -323,4 +332,4 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       )}
     </div>
   );
-};
+});
