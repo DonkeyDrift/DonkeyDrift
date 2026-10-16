@@ -1,5 +1,7 @@
 import atexit
 import os
+import queue
+import threading
 import time
 from datetime import datetime
 import json
@@ -119,14 +121,39 @@ class Tub(object):
 class TubWriter(object):
     """
     A Donkey part, which can write records to the datastore.
+
+    async_write=True（模板经 cfg.TUB_ASYNC_WRITE 默认开启）时，run() 只把记录
+    投递进有界队列立即返回，磁盘写入（图像编码 + catalog 落盘）由后台线程串行
+    执行——同步写会把录制时毫秒级的磁盘抖动直接灌进车辆主循环，任一轮超时即
+    掉帧。队列满时丢最旧、保最新（计数并限频告警）；new_tub 的换 tub 命令与
+    记录共用同一队列，先后顺序天然保持；close/shutdown 排空队列后再关闭。
     """
+    _SENTINEL = object()
+
     def __init__(self, base_path, inputs=[], types=[], metadata=[],
-                 max_catalog_len=1000):
+                 max_catalog_len=1000, async_write=False, queue_size=120):
         self.inputs = inputs
         self.types = types
         self.metadata = metadata
         self.max_catalog_len = max_catalog_len
         self.tub = Tub(base_path, inputs, types, metadata, max_catalog_len)
+        self.async_write = bool(async_write)
+        self._queue = None
+        self._thread = None
+        self._dropped = 0
+        if self.async_write:
+            # 120 条 ≈ 60Hz 下 2s 抖动缓冲；320x240 图像约占 30MB 内存上限
+            self._queue = queue.Queue(maxsize=queue_size)
+            self._thread = threading.Thread(
+                target=self._writer_loop, name='tub-writer', daemon=True)
+            self._thread.start()
+
+    def num_records(self):
+        """已落盘 + 仍在队列中的记录数（TubRotator 判断是否需要换 tub 用）。"""
+        count = self.tub.manifest.current_index
+        if self.async_write and self._queue is not None:
+            count += self._queue.qsize()
+        return count
 
     def new_tub(self, base_path):
         """
@@ -134,14 +161,74 @@ class TubWriter(object):
         schema. Recording continues in the new tub with the record count
         (manifest.current_index) restarting from zero.
         """
+        if self.async_write:
+            if self._thread is not None:
+                # 换 tub 命令进同一队列串行化：此前入队的记录仍写进旧 tub
+                self._enqueue(('tub', base_path))
+                return
+            self._close_tub()
+            self.tub = Tub(base_path, self.inputs, self.types, self.metadata,
+                           self.max_catalog_len)
+            return
         self.close()
         self.tub = Tub(base_path, self.inputs, self.types, self.metadata,
                        self.max_catalog_len)
+
+    def _enqueue(self, item):
+        while True:
+            try:
+                self._queue.put_nowait(item)
+                return
+            except queue.Full:
+                # 丢最旧保最新：驾驶录制里越新的数据越接近当前操控意图
+                try:
+                    self._queue.get_nowait()
+                    self._dropped += 1
+                    if self._dropped % 100 == 1:
+                        print(f"[TubWriter] 写入队列已满，丢弃最旧记录"
+                              f"（累计 {self._dropped} 条）；磁盘写入跟不上录制帧率")
+                except queue.Empty:
+                    pass
+
+    def _writer_loop(self):
+        while True:
+            item = self._queue.get()
+            if item is self._SENTINEL:
+                break
+            kind, payload = item
+            try:
+                if kind == 'record':
+                    self.tub.write_record(payload)
+                elif kind == 'tub':
+                    self._close_tub()
+                    self.tub = Tub(payload, self.inputs, self.types,
+                                   self.metadata, self.max_catalog_len)
+            except Exception as e:
+                # 单条失败不能拖死 writer 线程，继续消费后续记录
+                print(f"[TubWriter] 后台写入失败: {e}")
+
+    def _close_tub(self):
+        try:
+            self.tub.close()
+        except Exception as e:
+            logger.warning(f"Closing tub {self.tub.base_path} failed: {e}")
+
+    def _flush_and_stop_worker(self):
+        if self._thread is None:
+            return
+        # 哨兵排在队列尾：先入队的记录都会被写完再退出
+        self._queue.put(self._SENTINEL)
+        self._thread.join(timeout=10.0)
+        self._thread = None
 
     def run(self, *args):
         assert len(self.tub.inputs) == len(args), \
             f'Expected {len(self.tub.inputs)} inputs but received {len(args)}'
         record = dict(zip(self.tub.inputs, args))
+        if self.async_write:
+            self._enqueue(('record', record))
+            # 返回已落盘记录数；队列未排空时略滞后于投递数（被丢弃的记录不计入）
+            return self.tub.manifest.current_index
         self.tub.write_record(record)
         return self.tub.manifest.current_index
 
@@ -149,7 +236,9 @@ class TubWriter(object):
         return self.tub.__iter__()
 
     def close(self):
-        self.tub.close()
+        if self.async_write:
+            self._flush_and_stop_worker()
+        self._close_tub()
 
     def shutdown(self):
         self.close()
@@ -176,7 +265,13 @@ class TubRotator:
         if recording and not self._was_recording:
             # 延迟 import 避免 datastore <-> tub_v2 循环依赖
             from donkeycar.parts.datastore import TubHandler
-            if self.tub_writer.tub.manifest.current_index > 0:
+            # 异步 TubWriter 下 current_index 只含已落盘数，须叠加队列中的
+            # 待写记录，否则写盘滞后时上一段会话被误判为空 tub 而不轮转
+            if hasattr(self.tub_writer, 'num_records'):
+                has_records = self.tub_writer.num_records() > 0
+            else:
+                has_records = self.tub_writer.tub.manifest.current_index > 0
+            if has_records:
                 tub_path = TubHandler(path=self.data_path).create_tub_path()
                 self.tub_writer.new_tub(tub_path)
         self._was_recording = recording

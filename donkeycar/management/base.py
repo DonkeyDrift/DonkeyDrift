@@ -8,6 +8,7 @@ import sys
 import logging
 import subprocess
 import time
+from datetime import datetime
 import signal
 import webbrowser
 
@@ -164,6 +165,25 @@ class CreateCar(BaseCommand):
         args = self.parse_args(args)
         self.create_car(path=args.path, template=args.template, overwrite=args.overwrite)
 
+    @staticmethod
+    def _backup_existing(file_path):
+        """overwrite 前把将被覆盖的文件备份到 <car>/backups/，返回备份路径。
+
+        createcar 是无版本跟踪的一次性覆盖（manage.py/config.py 常被用户深度
+        定制），没有这层备份，`donkey update` 一次就能抹掉全部本地改动。
+        """
+        if not os.path.exists(file_path):
+            return None
+        backup_dir = os.path.join(os.path.dirname(file_path), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        backup_path = os.path.join(
+            backup_dir, '%s.%s' % (os.path.basename(file_path), stamp))
+        shutil.copy2(file_path, backup_path)
+        print("Backed up existing %s to %s" % (os.path.basename(file_path),
+                                               backup_path))
+        return backup_path
+
     def create_car(self, path, template='complete', overwrite=False):
         """
         This script sets up the folder structure for donkey to work.
@@ -196,6 +216,7 @@ class CreateCar(BaseCommand):
         if os.path.exists(car_app_path) and not overwrite:
             print('Car app already exists. Delete it and rerun createcar to replace.')
         else:
+            self._backup_existing(car_app_path)
             print(f"Copying car application template: {template}")
             shutil.copyfile(app_template_path, car_app_path)
             os.chmod(car_app_path, stat.S_IRWXU)
@@ -203,12 +224,15 @@ class CreateCar(BaseCommand):
         if os.path.exists(car_config_path) and not overwrite:
             print('Car config already exists. Delete it and rerun createcar to replace.')
         else:
-            print("Copying car config defaults. Adjust these before starting your car.")
+            self._backup_existing(car_config_path)
+            print("Copying car config defaults. Adjust these before starting your car. "
+                  "Put personal overrides in myconfig.py so updates don't clobber them.")
             shutil.copyfile(config_template_path, car_config_path)
 
         if os.path.exists(train_app_path) and not overwrite:
             print('Train already exists. Delete it and rerun createcar to replace.')
         else:
+            self._backup_existing(train_app_path)
             print("Copying train script. Adjust these before starting your car.")
             shutil.copyfile(train_template_path, train_app_path)
             os.chmod(train_app_path, stat.S_IRWXU)
@@ -917,27 +941,40 @@ def resolve_backend_host(host=None):
 
 
 class Web(BaseCommand):
+    # Web 与 Drive 共享的参数（Drive 逐字复用，仅 --route 默认值不同）——
+    # 新增参数只改这里，两个命令自动同步
+    WEB_COMMON_ARGS = [
+        (('--path',), dict(default='./web_ui',
+                           help='web_ui 根目录路径 (默认: ./web_ui)')),
+        (('--frontend-port',), dict(type=int, default=5188,
+                                    help='前端端口 (默认: 5188)')),
+        (('--backend-port',), dict(type=int, default=8000,
+                                   help='后端端口 (默认: 8000)')),
+        (('--backend-host',), dict(default=None,
+                                   help='后端监听地址 (默认: 127.0.0.1 仅本机；对外监听请显式传 0.0.0.0 或设 DRIVE_WEB_HOST)')),
+        (('--install-deps',), dict(action='store_true',
+                                   help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')),
+        (('--open',), dict(action='store_true',
+                           help='启动后自动打开浏览器')),
+        (('--route',), dict(default=None,
+                            help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')),
+        (('--dev',), dict(action='store_true',
+                          help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
+                               '默认为生产模式：构建 dist 后由后端静态托管（#135）')),
+        (('--debug',), dict(action='store_true',
+                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')),
+    ]
+
+    @classmethod
+    def _add_web_args(cls, parser, route_default='/'):
+        for names, kwargs in cls.WEB_COMMON_ARGS:
+            if names == ('--route',):
+                kwargs = dict(kwargs, default=route_default)
+            parser.add_argument(*names, **kwargs)
+
     def parse_args(self, args):
         parser = argparse.ArgumentParser(prog='web', usage='%(prog)s [options]')
-        parser.add_argument('--path', default='./web_ui',
-                            help='web_ui 根目录路径 (默认: ./web_ui)')
-        parser.add_argument('--frontend-port', type=int, default=5188,
-                            help='前端端口 (默认: 5188)')
-        parser.add_argument('--backend-port', type=int, default=8000,
-                            help='后端端口 (默认: 8000)')
-        parser.add_argument('--backend-host', default=None,
-                            help='后端监听地址 (默认: 127.0.0.1 仅本机；对外监听请显式传 0.0.0.0 或设 DRIVE_WEB_HOST)')
-        parser.add_argument('--install-deps', action='store_true',
-                            help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
-        parser.add_argument('--open', action='store_true',
-                            help='启动后自动打开浏览器')
-        parser.add_argument('--route', default='/',
-                            help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')
-        parser.add_argument('--dev', action='store_true',
-                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
-                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
-        parser.add_argument('--debug', action='store_true',
-                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
+        self._add_web_args(parser)
         parsed = parser.parse_args(args)
         parsed.backend_host = resolve_backend_host(parsed.backend_host)
         return parsed
@@ -1382,8 +1419,6 @@ class Drive(Web):
 
     def parse_args(self, args):
         parser = argparse.ArgumentParser(prog='drive', usage='%(prog)s [options]')
-        parser.add_argument('--path', default='./web_ui',
-                            help='web_ui 根目录路径 (默认: ./web_ui)')
         parser.add_argument('--car', default=None,
                             help='车目录路径（须含 manage.py，默认: 当前目录）')
         parser.add_argument('--model', default=None,
@@ -1392,23 +1427,7 @@ class Drive(Web):
                             help='模型类型 (linear|categorical)，透传给 manage.py drive --type')
         parser.add_argument('--js', action='store_true',
                             help='使用物理摇杆，透传给 manage.py drive --js')
-        parser.add_argument('--frontend-port', type=int, default=5188,
-                            help='前端端口 (默认: 5188)')
-        parser.add_argument('--backend-port', type=int, default=8000,
-                            help='后端端口 (默认: 8000)')
-        parser.add_argument('--backend-host', default=None,
-                            help='后端监听地址 (默认: 127.0.0.1 仅本机；对外监听请显式传 0.0.0.0 或设 DRIVE_WEB_HOST)')
-        parser.add_argument('--install-deps', action='store_true',
-                            help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
-        parser.add_argument('--open', action='store_true',
-                            help='启动后自动打开浏览器')
-        parser.add_argument('--route', default='/drive',
-                            help='自动打开的前端路由 (默认: /drive)')
-        parser.add_argument('--dev', action='store_true',
-                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
-                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
-        parser.add_argument('--debug', action='store_true',
-                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
+        self._add_web_args(parser, route_default='/drive')
         parsed = parser.parse_args(args)
         parsed.backend_host = resolve_backend_host(parsed.backend_host)
         return parsed
