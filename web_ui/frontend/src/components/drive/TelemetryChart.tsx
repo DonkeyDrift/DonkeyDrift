@@ -42,7 +42,7 @@ interface CurveConfig {
   key: keyof Pick<Telemetry, 'gz' | 'steering' | 'throttle' | 'gx' | 'gy' | 'ax' | 'ay' | 'az' | 'pilot_angle' | 'pilot_throttle' | 'rc_steering' | 'rc_throttle'>;
   /** 所属分组。 */
   group: CurveGroup;
-  /** 是否默认显示。 */
+  /** 是否默认显示（合并单图后默认只开核心驾驶信号，陀螺仪/加速度由图例勾选开启）。 */
   defaultOn: boolean;
   /**
    * 显示缩放系数（写入缓冲前乘上）。y 轴固定 [-1, 1]，
@@ -72,14 +72,14 @@ const curveColor = (c: CurveConfig, theme: ResolvedTheme): string => {
 export const CURVES: CurveConfig[] = [
   { labelKey: 'driveViz.curveThrottle', color: '#39d98a', lightColor: '#1fae6b', cssVar: '--ok', key: 'throttle', group: 'throttle', defaultOn: true },
   { labelKey: 'driveViz.curveSteering', color: '#5cc8ff', lightColor: '#0c9bd6', cssVar: '--accent', key: 'steering', group: 'steering', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', cssVar: '--bad', key: 'gz', group: 'steering', defaultOn: true, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroZ', color: '#ff6b6b', lightColor: '#e5484d', cssVar: '--bad', key: 'gz', group: 'steering', defaultOn: false, scale: 0.2 },
   { labelKey: 'driveViz.curveRcSteering', color: '#2563eb', key: 'rc_steering', group: 'steering', defaultOn: true },
   { labelKey: 'driveViz.curveRcThrottle', color: '#15803d', lightColor: '#14532d', key: 'rc_throttle', group: 'throttle', defaultOn: true },
-  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', cssVar: '--warn', key: 'gx', group: 'steering', defaultOn: true, scale: 0.2 },
-  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', group: 'steering', defaultOn: true, scale: 0.2 },
-  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
-  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', group: 'throttle', defaultOn: true, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveGyroX', color: '#ffcc66', lightColor: '#d99a17', cssVar: '--warn', key: 'gx', group: 'steering', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveGyroY', color: '#d96bff', lightColor: '#c026d3', key: 'gy', group: 'steering', defaultOn: false, scale: 0.2 },
+  { labelKey: 'driveViz.curveAccX', color: '#a3e635', lightColor: '#65a30d', key: 'ax', group: 'throttle', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccY', color: '#fb923c', lightColor: '#ea580c', key: 'ay', group: 'throttle', defaultOn: false, scale: 1 / 9.8 },
+  { labelKey: 'driveViz.curveAccZ', color: '#f472b6', lightColor: '#db2777', key: 'az', group: 'throttle', defaultOn: false, scale: 1 / 9.8 },
   { labelKey: 'driveViz.curvePilotAngle', color: '#22d3ee', lightColor: '#0891b2', key: 'pilot_angle', group: 'steering', defaultOn: true },
   { labelKey: 'driveViz.curvePilotThrottle', color: '#c084fc', lightColor: '#9333ea', key: 'pilot_throttle', group: 'throttle', defaultOn: true },
 ];
@@ -166,6 +166,8 @@ interface TelemetryChartProps {
   visibleKeys?: Set<string>;
   /** 受控：切换曲线显隐；不传则组件内部自管 */
   onToggleCurve?: (key: string) => void;
+  /** 受控：全选/全不选本图全部曲线（透传给非 overlay 内置图例的「全选」）；不传则受控模式不显示全选 */
+  onToggleAllCurves?: (select: boolean) => void;
   /** 面板标题 i18n key；缺省用 driveViz.chartTitle。 */
   title?: string;
   /** 本实例管理的曲线分组；不传则管理全部曲线。 */
@@ -195,6 +197,7 @@ export const TelemetryChart = React.memo(function TelemetryChart({
   overlay = false,
   visibleKeys: controlledVisibleKeys,
   onToggleCurve,
+  onToggleAllCurves,
   title,
   group,
   chartHeightClassName,
@@ -407,7 +410,7 @@ export const TelemetryChart = React.memo(function TelemetryChart({
           group={group}
           visibleKeys={visibleKeys}
           onToggle={toggleCurve}
-          onToggleAll={controlledVisibleKeys ? undefined : toggleAll}
+          onToggleAll={onToggleAllCurves ?? (controlledVisibleKeys ? undefined : toggleAll)}
           className="mt-2"
         />
       )}

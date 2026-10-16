@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
-import { TelemetryChart, TelemetryLegend, curvesByGroup } from '../components/drive/TelemetryChart';
+import { TelemetryChart, TelemetryLegend, CURVES } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
@@ -49,6 +49,11 @@ const DOCK_CLUSTER_W = DOCK_PANEL_W + 8 + 30; // 设计基准：面板 + 簇内 
 const DOCK_MIN_SCALE = 0.62;
 const DOCK_MIN_VIDEO_W = 320;
 const DOCK_OVERLAY_OPACITY = 0.4; // 悬浮模式面板整体不透明度（设计方案确认值）
+
+// 遥测曲线单图布局：视频列实测宽度低于该值时曲线叠加回画面上（宽屏默认下置面板）。
+// 取值与 VideoStream 显示尺寸上限（DRIVE_VIDEO_MAX_WIDTH_PX=640）对齐——视频已到最大
+// 钳制宽度仍放不下下置面板的列宽以下，叠加比下置更省竖向空间；全屏恒为叠加。
+const CURVE_OVERLAY_MAX_W = 640;
 
 export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
   const { t, lang } = useTranslation();
@@ -169,18 +174,19 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   // 悬浮模式下面板顶对齐视频顶：实测工具栏高度让过（工具栏 mb-4 = 16px 间距）
   const [driveToolbarRef, driveToolbarH] = useElementHeight<HTMLDivElement>();
   const [fullscreen, setFullscreen] = useState(false);
-  const videoContainerRef = useRef<HTMLDivElement>(null);
-  const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
-    () => new Set(curvesByGroup('steering').filter((c) => c.defaultOn).map((c) => c.key as string)),
-  );
-  const [throttleVisibleKeys, setThrottleVisibleKeys] = useState<Set<string>>(
-    () => new Set(curvesByGroup('throttle').filter((c) => c.defaultOn).map((c) => c.key as string)),
+  // 视频容器：ref 供原生全屏用，实测宽度驱动曲线下置/叠加布局切换（与 dockOverlay 同模式，
+  // 不依赖 window.innerWidth，规避页面留白/滚动条偏差）
+  const [videoContainerRef, videoContainerW] = useElementWidth<HTMLDivElement>();
+  // 曲线显隐（合并单图后统一一套，不再分转向/油门两组）：默认核心驾驶信号，
+  // 陀螺仪/加速度 6 条默认关、由图例勾选开启，避免单图 12 条线过密
+  const [curveVisibleKeys, setCurveVisibleKeys] = useState<Set<string>>(
+    () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
   const gamepadRef = useRef({ angle: 0, throttle: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0 });
 
-  const toggleSteeringCurve = useCallback((key: string) => {
-    setSteeringVisibleKeys((prev) => {
+  const toggleCurve = useCallback((key: string) => {
+    setCurveVisibleKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
@@ -191,26 +197,13 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     });
   }, []);
 
-  const toggleThrottleCurve = useCallback((key: string) => {
-    setThrottleVisibleKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+  // 全选/全不选：把全部曲线一次性设为显示或隐藏
+  const setCurveAll = useCallback((select: boolean) => {
+    setCurveVisibleKeys(select ? new Set(CURVES.map((c) => c.key as string)) : new Set());
   }, []);
 
-  // 全选/全不选：把整组曲线一次性设为显示或隐藏
-  const setSteeringAll = useCallback((select: boolean) => {
-    setSteeringVisibleKeys(select ? new Set(curvesByGroup('steering').map((c) => c.key as string)) : new Set());
-  }, []);
-
-  const setThrottleAll = useCallback((select: boolean) => {
-    setThrottleVisibleKeys(select ? new Set(curvesByGroup('throttle').map((c) => c.key as string)) : new Set());
-  }, []);
+  // 曲线布局模式：默认下置面板；视频列实测宽不足 CURVE_OVERLAY_MAX_W 或全屏时叠加到画面上
+  const curveOverlay = fullscreen || videoContainerW < CURVE_OVERLAY_MAX_W;
 
   const toggleFullscreen = useCallback(() => {
     const el = videoContainerRef.current;
@@ -570,7 +563,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           </div>
 
           {/* 摄像头：画面比例锁定 4:3（320×240），显示尺寸随页面宽度在 320×240~640×480 之间缩放
-              （VideoStream 内钳制，全屏同样受限）；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
+              （VideoStream 内钳制，全屏同样受限）；遥测曲线合并为单图——宽屏下置面板、窄屏叠加在
+              画面下方（curveOverlay 实测切换）；右下角为原生全屏放大 */}
           <div
             ref={videoContainerRef}
             className={cn(
@@ -583,26 +577,17 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             ) : (
               <div className="w-full h-full min-h-[240px] bg-zinc-950 border border-zinc-800 rounded-lg" />
             )}
-            <div className="absolute inset-x-3 bottom-3 z-20 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <TelemetryChart
-                active={active}
-                overlay
-                title="driveViz.chartTitleSteering"
-                group="steering"
-                visibleKeys={steeringVisibleKeys}
-                onToggleCurve={toggleSteeringCurve}
-                chartHeightClassName={fullscreen ? 'h-44' : undefined}
-              />
-              <TelemetryChart
-                active={active}
-                overlay
-                title="driveViz.chartTitleThrottle"
-                group="throttle"
-                visibleKeys={throttleVisibleKeys}
-                onToggleCurve={toggleThrottleCurve}
-                chartHeightClassName={fullscreen ? 'h-44' : undefined}
-              />
-            </div>
+            {curveOverlay && (
+              <div className="absolute inset-x-3 bottom-3 z-20">
+                <TelemetryChart
+                  active={active}
+                  overlay
+                  visibleKeys={curveVisibleKeys}
+                  onToggleCurve={toggleCurve}
+                  chartHeightClassName={fullscreen ? 'h-44' : undefined}
+                />
+              </div>
+            )}
             {/* 全屏/放大：整个视频画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
             <button
               type="button"
@@ -614,11 +599,24 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
           </div>
-          {/* 曲线显隐图例：分左右两组放在视频画面外部（下方），不再遮挡画面；每组左侧带「全选」 */}
-          <div className="mt-3 shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <TelemetryLegend group="steering" visibleKeys={steeringVisibleKeys} onToggle={toggleSteeringCurve} onToggleAll={setSteeringAll} />
-            <TelemetryLegend group="throttle" visibleKeys={throttleVisibleKeys} onToggle={toggleThrottleCurve} onToggleAll={setThrottleAll} />
-          </div>
+          {/* 曲线（合并单图）：宽屏为视频下方面板（内置图例 + 全选，宽度与钳制后的画面对齐）；
+              窄屏叠加在画面上，合并后的图例放视频下方保持可操作；全屏时无外部内容 */}
+          {curveOverlay ? (
+            !fullscreen && (
+              <div className="mt-3 shrink-0">
+                <TelemetryLegend visibleKeys={curveVisibleKeys} onToggle={toggleCurve} onToggleAll={setCurveAll} />
+              </div>
+            )
+          ) : (
+            <div className="mt-3 shrink-0 mx-auto w-full max-w-[640px]">
+              <TelemetryChart
+                active={active}
+                visibleKeys={curveVisibleKeys}
+                onToggleCurve={toggleCurve}
+                onToggleAllCurves={setCurveAll}
+              />
+            </div>
+          )}
         </div>
 
         {/* 右：摇杆抽屉（面板 + 把手）——右缘常驻（008）：贴地时以负 margin-left 把缩放省出的

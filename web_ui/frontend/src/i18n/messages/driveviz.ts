@@ -20,8 +20,6 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.diagnostic': '诊断',
     // TelemetryChart
     'driveViz.chartTitle': '遥测曲线',
-    'driveViz.chartTitleSteering': '转向 / 姿态',
-    'driveViz.chartTitleThrottle': '油门 / 加速度',
     'driveViz.waitingData': '（等待数据）',
     'driveViz.fullscreen': '全屏',
     'driveViz.exitFullscreen': '退出全屏',
@@ -78,8 +76,6 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.diagnostic': 'DIAG',
     // TelemetryChart
     'driveViz.chartTitle': 'Telemetry Chart',
-    'driveViz.chartTitleSteering': 'Steering / Attitude',
-    'driveViz.chartTitleThrottle': 'Throttle / Acceleration',
     'driveViz.waitingData': '(Waiting for data)',
     'driveViz.fullscreen': 'Fullscreen',
     'driveViz.exitFullscreen': 'Exit Fullscreen',

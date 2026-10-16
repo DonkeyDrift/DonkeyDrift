@@ -74,6 +74,9 @@ const colorOf = (key: string): string => {
   return c.color;
 };
 
+/** 默认显示的曲线（合并单图后为核心驾驶信号，gyro/accel 默认关）。 */
+const defaultOnCurves = CURVES.filter((c) => c.defaultOn);
+
 /** 最近一次绘制中该曲线的路径（每次绘制按曲线顺序各追加一条）。 */
 const lastPathOf = (key: string) => {
   const path = recorder.paths.filter((p) => p.color === colorOf(key)).at(-1);
@@ -151,7 +154,7 @@ describe('TelemetryChart', () => {
     expect(screen.getByText('（等待数据）')).toBeInTheDocument();
   });
 
-  it('收到遥测后默认绘制全部曲线', async () => {
+  it('收到遥测后按默认开关绘制曲线（核心信号开、gyro/accel 关）', async () => {
     useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5 }));
     render(<TelemetryChart />);
 
@@ -160,7 +163,7 @@ describe('TelemetryChart', () => {
     });
     const colors = new Set(drawnColors());
     for (const c of CURVES) {
-      expect(colors.has(c.color)).toBe(true);
+      expect(colors.has(c.color)).toBe(c.defaultOn);
     }
   });
 
@@ -176,8 +179,9 @@ describe('TelemetryChart', () => {
   });
 
   it('gyro/accel 曲线按 scale 缩放后写入缓冲', async () => {
+    // gyro/accel 默认关：受控打开后验证写入与缩放
     useTelemetryStore.getState().push(sampleTelemetry({ gz: 0.5, ax: 4.9 }));
-    render(<TelemetryChart />);
+    render(<TelemetryChart visibleKeys={new Set(['gz', 'ax'])} />);
 
     // gz scale=0.2 → 0.1；ax scale=1/9.8 → 0.5
     await waitFor(() => {
@@ -191,7 +195,7 @@ describe('TelemetryChart', () => {
     render(<TelemetryChart />);
     // 等挂载绘制就绪后再推帧（订阅前 push 只保留最后一帧，是 store 既有语义）
     await waitFor(() => {
-      expect(recorder.paths.length).toBeGreaterThanOrEqual(CURVES.length);
+      expect(recorder.paths.length).toBeGreaterThanOrEqual(defaultOnCurves.length);
     });
     recorder.reset();
     useTelemetryStore.getState().push(sampleTelemetry({ steering: 0.1 }));
@@ -212,21 +216,21 @@ describe('TelemetryChart', () => {
   });
 
   it('取消勾选默认显示的曲线后停止绘制对应曲线', async () => {
-    useTelemetryStore.getState().push(sampleTelemetry({ gx: 0.5 }));
+    useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5 }));
     render(<TelemetryChart />);
 
     await waitFor(() => {
-      expect(lastPathOf('gx').points.length).toBeGreaterThan(0);
+      expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
     });
 
     // 清空历史绘制，只看点击后的重绘结果
     recorder.reset();
-    fireEvent.click(findCheckbox('陀螺仪 X'));
+    fireEvent.click(findCheckbox('RC 转向'));
 
     await waitFor(() => {
-      expect(drawnColors()).toHaveLength(CURVES.length - 1);
+      expect(drawnColors()).toHaveLength(defaultOnCurves.length - 1);
     });
-    expect(drawnColors()).not.toContain(colorOf('gx'));
+    expect(drawnColors()).not.toContain(colorOf('rc_steering'));
   });
 
   it('缺失字段的曲线该点断开（不画线段）', async () => {
@@ -244,17 +248,20 @@ describe('TelemetryChart', () => {
     useTelemetryStore.getState().push(sampleTelemetry({ rc_steering: -0.5, rc_throttle: 0.8 }));
     render(
       <TelemetryChart
-        title="driveViz.chartTitleSteering"
+        title="driveViz.chartTitle"
         group="steering"
       />,
     );
 
-    expect(screen.getByText('转向 / 姿态')).toBeInTheDocument();
+    expect(screen.getByText('遥测曲线')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
     });
-    expect(new Set(drawnColors())).toEqual(new Set(curvesByGroup('steering').map((c) => c.color)));
+    // 默认只画本组 defaultOn 曲线（转向/RC 转向/Pilot 角度），不含油门组任何曲线
+    expect(new Set(drawnColors())).toEqual(
+      new Set(curvesByGroup('steering').filter((c) => c.defaultOn).map((c) => c.color)),
+    );
 
     const legendLabels = screen
       .getAllByRole('checkbox')
@@ -274,9 +281,9 @@ describe('TelemetryChart', () => {
   });
 
   it('面板标题渲染在曲线画布下方', () => {
-    render(<TelemetryChart title="driveViz.chartTitleSteering" group="steering" />);
+    render(<TelemetryChart title="driveViz.chartTitle" group="steering" />);
 
-    const title = screen.getByText('转向 / 姿态');
+    const title = screen.getByText('遥测曲线');
     const canvas = document.querySelector('canvas');
     expect(canvas).toBeTruthy();
     // title 在 DOM 顺序上位于 canvas 之后（即渲染在画布下方）
@@ -288,23 +295,14 @@ describe('TelemetryChart', () => {
     render(<TelemetryChart group="steering" />);
 
     await waitFor(() => {
-      expect(recorder.paths.length).toBeGreaterThanOrEqual(6);
+      expect(recorder.paths.length).toBeGreaterThanOrEqual(3);
     });
-    // steering 组 6 条曲线全部 defaultOn=true，初始全选
+    // steering 组默认开 3 条（转向/RC 转向/Pilot 角度）→ 初始为半选
     const selectAll = findCheckbox('全选');
-    expect(selectAll.checked).toBe(true);
-
-    // 取消一条曲线 → 半选：全选框 indeterminate、unchecked，重绘只剩 5 条
-    recorder.reset();
-    fireEvent.click(findCheckbox('陀螺仪 X'));
-    await waitFor(() => {
-      expect(drawnColors()).toHaveLength(5);
-    });
-    expect(drawnColors()).not.toContain(colorOf('gx'));
-    expect(selectAll.indeterminate).toBe(true);
     expect(selectAll.checked).toBe(false);
+    expect(selectAll.indeterminate).toBe(true);
 
-    // 半选时点击全选 → 全选（6 条），全选框 checked
+    // 半选时点击全选 → 全组 6 条，全选框 checked
     recorder.reset();
     fireEvent.click(selectAll);
     await waitFor(() => {
@@ -355,6 +353,27 @@ describe('TelemetryChart', () => {
     await waitFor(() => {
       expect(lastPathOf('rc_steering').points.length).toBeGreaterThan(0);
     });
+  });
+
+  it('受控模式透传 onToggleAllCurves：内置图例渲染「全选」并回调', async () => {
+    const onToggleAll = vi.fn();
+    useTelemetryStore.getState().push(sampleTelemetry());
+    render(
+      <TelemetryChart
+        visibleKeys={new Set(['steering'])}
+        onToggleCurve={() => {}}
+        onToggleAllCurves={onToggleAll}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(lastPathOf('steering').points.length).toBeGreaterThan(0);
+    });
+    // 1/12 选中 → 半选；点击「全选」透传 select=true（不传该 prop 时受控模式不渲染全选）
+    const selectAll = findCheckbox('全选');
+    expect(selectAll.indeterminate).toBe(true);
+    fireEvent.click(selectAll);
+    expect(onToggleAll).toHaveBeenCalledWith(true);
   });
 
   it('active=false 时不订阅遥测（缓冲保持空）', async () => {
