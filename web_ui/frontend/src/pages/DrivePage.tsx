@@ -574,32 +574,42 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
               !fullscreen && 'rounded-lg overflow-hidden',
             )}
           >
-            {active ? (
-              <VideoStream objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
-            ) : (
-              <div className="w-full h-full min-h-[240px] bg-zinc-950 border border-zinc-800 rounded-lg" />
-            )}
-            {curveOverlay && (
-              <div className="absolute inset-x-3 bottom-3 z-20">
-                <TelemetryChart
-                  active={active}
-                  overlay
-                  visibleKeys={curveVisibleKeys}
-                  onToggleCurve={toggleCurve}
-                  chartHeightClassName={fullscreen ? 'h-44' : undefined}
-                />
-              </div>
-            )}
-            {/* 全屏/放大：整个视频画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+            {/* 画面尺寸包装（≤640、与钳制后的画面同宽）：圆角/曲线浮层/全屏按钮锚定在这层
+                跟随画面而非整块黑底容器——宽屏有黑边时圆角不落黑边、按钮不飞出画面外；
+                全屏时该层撑满整屏，浮层与按钮行为与原先一致 */}
+            <div
+              className={cn(
+                'relative flex w-full items-center justify-center',
+                fullscreen ? 'h-full' : 'max-w-[640px] rounded-lg overflow-hidden',
+              )}
             >
-              {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-            </button>
+              {active ? (
+                <VideoStream objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+              ) : (
+                <div className="w-full h-full min-h-[240px] bg-zinc-950 border border-zinc-800 rounded-lg" />
+              )}
+              {curveOverlay && (
+                <div className="absolute inset-x-3 bottom-3 z-20">
+                  <TelemetryChart
+                    active={active}
+                    overlay
+                    visibleKeys={curveVisibleKeys}
+                    onToggleCurve={toggleCurve}
+                    chartHeightClassName={fullscreen ? 'h-44' : undefined}
+                  />
+                </div>
+              )}
+              {/* 全屏/放大：画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+                aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+                className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+              >
+                {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
+            </div>
           </div>
           {/* 曲线（合并单图）：宽屏为视频下方面板（内置图例 + 全选，宽度与钳制后的画面对齐）；
               窄屏叠加在画面上，合并后的图例放视频下方保持可操作；全屏时无外部内容 */}
