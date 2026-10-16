@@ -71,9 +71,18 @@ class DonkeyGymEnv(object):
         self._watchdog_sec = float(self._conf.get("watchdog_sec", 5.0))
         self._last_frame_ts = time.time()
 
-        # 重连互斥锁：update() 线程与主循环侧（run_threaded 的强制重连/看门狗）
+        # 重连互斥锁：update() 线程与重建线程（后台 worker/看门狗请求）
         # 都可能触发重建，避免两个线程各建一个 env 互相踩踏
         self._reconnect_lock = threading.Lock()
+
+        # 重建请求通道：主循环侧（run_threaded）只投递请求，由专用线程执行。
+        # close+gym.make+reset 要数秒（模拟器 load_scene），在主循环同步执行会
+        # 卡住 60Hz 车辆循环、转向/油门断供；worker 化后主循环零阻塞，重建期间
+        # 遥测继续（sim_connected=False 如实上报）、控制消息照常消费。
+        self._rebuild_cond = threading.Condition()
+        self._rebuild_mode = None  # None | 'force'（重连命令）| 'watchdog'（看门狗）
+        self._rebuild_thread = threading.Thread(
+            target=self._rebuild_worker, name='dgym-reconnect', daemon=True)
 
         # 强制重连合并窗口：后端重连命令基于滞后遥测盲发，距上次重建完成
         # 不足此窗口且连接健康时视为陈旧请求合并掉（0=从未重建过）
@@ -99,6 +108,38 @@ class DonkeyGymEnv(object):
         self.record_lidar = record_lidar
 
         self.buffer = []
+
+        self._rebuild_thread.start()
+
+    def _rebuild_worker(self):
+        """重建线程：串行消费主循环投递的重建请求，直到进程退出。
+
+        语义（coalesce 合并、only_if_stale 双检新鲜度）在执行时刻评估，
+        挂起期间的重复请求已被 _post_rebuild 合并。
+        """
+        while True:
+            with self._rebuild_cond:
+                while self.running and self._rebuild_mode is None:
+                    self._rebuild_cond.wait(timeout=0.5)
+                if not self.running:
+                    return
+                mode = self._rebuild_mode
+                self._rebuild_mode = None
+            try:
+                self._rebuild_connection(
+                    coalesce=(mode == 'force'),
+                    only_if_stale=(mode == 'watchdog'))
+            except Exception as e:
+                print(f"[DonkeyGymEnv] 后台重建模拟器连接异常: {e}")
+
+    def _post_rebuild(self, mode):
+        """向重建线程投递一次重建请求；挂起中的同类请求合并，force 升级 watchdog。"""
+        with self._rebuild_cond:
+            if self._rebuild_mode == 'force' or (
+                    self._rebuild_mode == 'watchdog' and mode == 'watchdog'):
+                return
+            self._rebuild_mode = mode
+            self._rebuild_cond.notify_all()
 
     def _try_connect(self):
         """尝试连接模拟器。成功则设置 self.env，失败则保持 None。"""
@@ -370,10 +411,9 @@ class DonkeyGymEnv(object):
     def _rebuild_connection(self, only_if_stale=False, coalesce=False):
         """同步重建模拟器连接：关旧 env 后立刻重连。
 
-        必须在主循环侧（run_threaded）同步执行：模拟器断连后 update()
-        线程往往卡死在 observe() 的无限自旋里，永远不会回到 update()
-        循环顶部执行重连——只关不断会让车端永久掉线。锁保证与 update()
-        线程的重连路径互斥，不产生双 env。
+        由后台重建线程（_rebuild_worker）执行；update() 线程自身卡死在
+        observe() 无限自旋里时它也照常工作，不会出现「只关不断、车端
+        永久掉线」。锁保证与 update() 线程的重连路径互斥，不产生双 env。
 
         only_if_stale=True（看门狗路径）：持锁后双检遥测新鲜度，别的路径
         刚重建完就跳过，避免把健康的新连接毫无意义地关掉再建。
@@ -405,16 +445,18 @@ class DonkeyGymEnv(object):
     def _request_reconnect(self):
         """强制重建模拟器连接（Web UI reconnect_simulator 命令的入口）。
 
-        env 已为 None（此前重连失败）时也要尝试：update() 线程可能已
-        卡死，主循环是唯一还活着能重连的执行流。
+        只向后台重建线程投递请求、立即返回：重建（close+load_scene）耗时
+        数秒，同步执行会把车辆主循环卡住、转向/油门断供。env 已为 None
+        （此前重连失败）时也要尝试：update() 线程可能已卡死，本路径是
+        唯一还活着能重连的执行流。
 
-        coalesce=True 只合并「陈旧请求」：后端基于滞后遥测盲发的重连
-        命令，其生成时刻早于上一次重建的完成时刻（含重建进行中才送达
+        worker 内的 coalesce 只合并「陈旧请求」：后端基于滞后遥测盲发的
+        重连命令，其生成时刻早于上一次重建的完成时刻（含重建进行中才送达
         的情形）——那次重建已经代劳，再拆再建就是实测过的重建风暴，
         而且模拟器侧每条新连接都会多一次 load_scene。其余情形一律真重建。
         """
-        print("[DonkeyGymEnv] 收到强制重连请求，重建模拟器连接")
-        self._rebuild_connection(coalesce=True)
+        print("[DonkeyGymEnv] 收到强制重连请求，交由后台线程重建模拟器连接")
+        self._post_rebuild('force')
 
     def request_reset_to_nearest(self):
         """就近复位模拟器小车（Web UI 复位按钮的模拟器侧入口）。
@@ -531,17 +573,17 @@ class DonkeyGymEnv(object):
             # 恢复门控会被假 True 挡住、永远不发重连命令
             self.connected = self._is_env_connected()
 
-        # 看门狗：出现「遥测停止」即重建连接——覆盖三种死法：
+        # 看门狗：出现「遥测停止」即请求后台重建连接——覆盖三种死法：
         # a) TCP 被对端复位（update 侧健康检查也会重建，双保险）；
         # b) 连接活着但模拟器哑巴（observe 自旋/陈旧帧，帧时间戳会假前进，
         #    所以以遥测时间戳为准）；
         # c) update 线程已彻底卡死/死亡（连健康检查都没人跑）。
-        # 只 _close_env 不够：必须主循环同步「关闭+重连」，否则车端永久掉线。
+        # 重建由专用线程执行（含关闭+重连），主循环只投递请求不等待。
         if self.env is not None and not self._telemetry_is_fresh():
-            print(f"[DonkeyGymEnv] 看门狗：超过 {self._watchdog_sec:.1f}s 无新遥测，重建连接")
-            # only_if_stale：持锁双检，避免和 update 侧的重建赛跑后
+            print(f"[DonkeyGymEnv] 看门狗：超过 {self._watchdog_sec:.1f}s 无新遥测，请求后台重建连接")
+            # worker 执行时 only_if_stale 双检，避免和 update 侧的重建赛跑后
             # 把刚建好的健康连接再拆一遍
-            self._rebuild_connection(only_if_stale=True)
+            self._post_rebuild('watchdog')
 
         if steering is None or throttle is None:
             steering = 0.0
@@ -570,5 +612,10 @@ class DonkeyGymEnv(object):
 
     def shutdown(self):
         self.running = False
+        # 唤醒重建线程退出；有挂起请求也不执行（模拟器生命周期已结束）
+        with self._rebuild_cond:
+            self._rebuild_cond.notify_all()
+        if self._rebuild_thread.is_alive():
+            self._rebuild_thread.join(timeout=2.0)
         time.sleep(0.2)
         self._close_env()
