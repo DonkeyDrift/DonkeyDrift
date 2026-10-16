@@ -476,8 +476,10 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       {/* 视频 + 遥测 | 右侧抽屉：任何屏宽保持左右并排，抽屉右缘常驻、随宽度连续缩放（008）；
           窄屏抽屉转悬浮半透明浮层，不再折叠到视频下方 */}
       <div ref={dockRowRef} className="relative flex flex-row items-start gap-3">
-        {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
-        <div className="flex-1 min-w-0 flex flex-col lg:h-[calc(100vh-9rem)]">
+        {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐）。
+            lg 用 min-h 而非固定 h：曲线下置面板比原图例行高，固定高度下 flex 会压缩
+            视频容器、裁掉画面上下（VideoStream 高度由宽度按 4:3 推导，不随容器高走） */}
+        <div className="flex-1 min-w-0 flex flex-col lg:min-h-[calc(100vh-9rem)]">
           <div ref={driveToolbarRef} className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
             {/* 左：Park 状态 + 驾驶模式 + 模型 */}
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
@@ -568,7 +570,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           <div
             ref={videoContainerRef}
             className={cn(
-              'relative bg-black flex items-center justify-center',
+              'relative shrink-0 bg-black flex items-center justify-center',
               !fullscreen && 'rounded-lg overflow-hidden',
             )}
           >
