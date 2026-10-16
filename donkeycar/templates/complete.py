@@ -671,7 +671,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
                   'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park'],
           outputs=['user/angle', 'user/throttle'])
 
-    tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta)
+    tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta,
+                           async_write=getattr(cfg, 'TUB_ASYNC_WRITE', True))
     # 每次开始录制（recording 上升沿）自动切换到新 tub，样本计数从 0 开始，
     # 不再向旧 tub 追加；须注册在 TubWriter 之前，保证同一循环内先轮换再写首帧。
     V.add(TubRotator(tub_writer, cfg.DATA_PATH),
