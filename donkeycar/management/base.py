@@ -8,6 +8,7 @@ import sys
 import logging
 import subprocess
 import time
+from datetime import datetime
 import signal
 import webbrowser
 
@@ -164,6 +165,25 @@ class CreateCar(BaseCommand):
         args = self.parse_args(args)
         self.create_car(path=args.path, template=args.template, overwrite=args.overwrite)
 
+    @staticmethod
+    def _backup_existing(file_path):
+        """overwrite 前把将被覆盖的文件备份到 <car>/backups/，返回备份路径。
+
+        createcar 是无版本跟踪的一次性覆盖（manage.py/config.py 常被用户深度
+        定制），没有这层备份，`donkey update` 一次就能抹掉全部本地改动。
+        """
+        if not os.path.exists(file_path):
+            return None
+        backup_dir = os.path.join(os.path.dirname(file_path), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        backup_path = os.path.join(
+            backup_dir, '%s.%s' % (os.path.basename(file_path), stamp))
+        shutil.copy2(file_path, backup_path)
+        print("Backed up existing %s to %s" % (os.path.basename(file_path),
+                                               backup_path))
+        return backup_path
+
     def create_car(self, path, template='complete', overwrite=False):
         """
         This script sets up the folder structure for donkey to work.
@@ -196,6 +216,7 @@ class CreateCar(BaseCommand):
         if os.path.exists(car_app_path) and not overwrite:
             print('Car app already exists. Delete it and rerun createcar to replace.')
         else:
+            self._backup_existing(car_app_path)
             print(f"Copying car application template: {template}")
             shutil.copyfile(app_template_path, car_app_path)
             os.chmod(car_app_path, stat.S_IRWXU)
@@ -203,12 +224,15 @@ class CreateCar(BaseCommand):
         if os.path.exists(car_config_path) and not overwrite:
             print('Car config already exists. Delete it and rerun createcar to replace.')
         else:
-            print("Copying car config defaults. Adjust these before starting your car.")
+            self._backup_existing(car_config_path)
+            print("Copying car config defaults. Adjust these before starting your car. "
+                  "Put personal overrides in myconfig.py so updates don't clobber them.")
             shutil.copyfile(config_template_path, car_config_path)
 
         if os.path.exists(train_app_path) and not overwrite:
             print('Train already exists. Delete it and rerun createcar to replace.')
         else:
+            self._backup_existing(train_app_path)
             print("Copying train script. Adjust these before starting your car.")
             shutil.copyfile(train_template_path, train_app_path)
             os.chmod(train_app_path, stat.S_IRWXU)
