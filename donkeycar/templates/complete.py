@@ -5,7 +5,6 @@ Scripts to drive a donkey 2 car
 Usage:
     manage.py [drive] [--model=<model>] [--js] [--type=(linear|categorical)] [--camera=(single|stereo)] [--meta=<key:value> ...] [--myconfig=<filename>]
     manage.py train [--tubs=tubs] (--model=<model>) [--type=(linear|inferred|tensorrt_linear|tflite_linear)]
-    manage.py dashboard
 
 Options:
     -h --help               Show this screen.
@@ -30,11 +29,6 @@ except:
 import sys
 import os
 import json
-import subprocess
-import threading
-import webbrowser
-import tornado.ioloop
-import tornado.web
 import donkeydrifter as dk
 from donkeydrifter.parts.behavior import BehaviorPart
 from donkeydrifter.parts.controller import JoystickController
@@ -54,7 +48,7 @@ from donkeydrifter.parts.launch import AiLaunch
 from donkeydrifter.parts.pipe import Pipe
 from donkeydrifter.parts.throttle_filter import ThrottleFilter
 from donkeydrifter.parts.steering_smoother import EmaSmoother, SteeringSmoother
-from donkeydrifter.parts.transform import DelayedTrigger, Lambda, TriggeredCallback
+from donkeydrifter.parts.transform import DelayedTrigger, TriggeredCallback
 from donkeydrifter.parts.tub_v2 import TubWriter, TubRotator
 from donkeydrifter.utils import *
 
@@ -165,7 +159,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     #
     # if we are using the simulator, set it up
     #
-    add_simulator(V, cfg)
+    sim_cam = add_simulator(V, cfg)
 
 
     #
@@ -223,6 +217,12 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             cfg, output_count=3 if cfg.TRAIN_LOCALIZER else 2)
 
     ctr = add_user_controller(V, cfg, use_joystick, model_loader=pilot_holder)
+    # 模拟器帧事件驱动直推 WebRTC 帧缓冲:车辆循环轮询喂帧会被循环负载欠采样
+    # (60Hz 源经轮询只采样到 ~52Hz 进编码器),直推后编码器吃满源帧率,
+    # 「出帧→被拾取」的轮询等待同时归零。run_threaded 里的 update 保留作兜底
+    # (帧缓冲按到达时刻去重,双写不会重复进编码器)。
+    if sim_cam is not None and hasattr(sim_cam, "set_frame_sink"):
+        sim_cam.set_frame_sink(ctr.frame_buffer.update)
 
     #
     # convert 'user/steering' to 'user/angle' to be backward compatible with deep learning data
@@ -230,19 +230,10 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     V.add(Pipe(), inputs=['user/steering'], outputs=['user/angle'])
 
     #
-    # explode the buttons input map into individual output key/values in memory
+    # explode the buttons input map into individual output key/values in memory.
+    # Parts can consume a single button via inputs=['web/w1'], run_condition='web/w1'.
     #
     V.add(ExplodeDict(V.mem, "web/"), inputs=['web/buttons'])
-
-    #
-    # For example: adding a button handler is just adding a part with a run_condition
-    # set to the button's name, so it runs when button is pressed.
-    #
-    V.add(Lambda(lambda v: print(f"web/w1 clicked")), inputs=["web/w1"], run_condition="web/w1")
-    V.add(Lambda(lambda v: print(f"web/w2 clicked")), inputs=["web/w2"], run_condition="web/w2")
-    V.add(Lambda(lambda v: print(f"web/w3 clicked")), inputs=["web/w3"], run_condition="web/w3")
-    V.add(Lambda(lambda v: print(f"web/w4 clicked")), inputs=["web/w4"], run_condition="web/w4")
-    V.add(Lambda(lambda v: print(f"web/w5 clicked")), inputs=["web/w5"], run_condition="web/w5")
 
     # ESC「先点一下刹车才能倒车」确认协议，仅真车执行器需要。
     # 模拟器无 ESC：该过滤器的负向过零首帧钳 0 会让画圈每次过零都产生一次
@@ -883,16 +874,21 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array',
     # inputs 顺序必须与 DriveApiBridge.run_threaded 签名严格一致（Vehicle 按位置解包）：
     # (img_arr, num_records, mode, recording, imu_gz, imu_gx, imu_gy,
     #  imu_ax, imu_ay, imu_az, steering, throttle, pilot_angle, pilot_throttle,
-    #  rc_steering, rc_throttle, rc_mode, rc_park)
+    #  rc_steering, rc_throttle, rc_mode, rc_park,
+    #  drift_yaw_error, drift_steering_correction, drift_throttle_mode, sim_connected)
     # 非 HAVE_IMU 或 ARDUINO_CONTROLLER 模式下 imu/* key 可能不存在，Memory.get 返回 None，
     # run_threaded 收到 None 后不写入遥测消息（见 RFC 降级说明），无需条件分支。
     # rc/* 来自 ArdRc（固件 T..S.. / M:P 帧上行）：接通 Drive 页 rc 油门/转向曲线、
     # 驾驶模式跟随与 Park 锁定徽标；非 ARDUINO 模式下键不存在，同样走 None 跳过。
+    # 尾部 sim/connected 由 add_simulator 的 SimConnectionState 提供（模拟器模式），
+    # 真车模式下该 key 不存在、遥测自动省略 sim_connected 字段。
     ctr_inputs = [input_image, 'tub/num_records', 'user/mode', 'recording',
                   'imu/gyr_z', 'imu/gyr_x', 'imu/gyr_y',
                   'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
                   'steering', 'throttle', 'pilot/angle', 'pilot/throttle',
-                  'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park']
+                  'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park',
+                  'drift/yaw_error', 'drift/steering_correction', 'drift/throttle_mode',
+                  'sim/connected']
     V.add(ctr,
           inputs=ctr_inputs,
           outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd', 'reset_car'],
@@ -993,6 +989,18 @@ def add_simulator(V, cfg):
         #     outputs += ['roll', 'pitch', 'yaw']
 
         V.add(gym, inputs=inputs, outputs=outputs, threaded=threaded)
+
+        class SimConnectionState:
+            """把 DonkeyGymEnv 的 TCP 连接状态发布为 sim/connected，供遥测透传到前端。"""
+
+            def __init__(self, cam):
+                self._cam = cam
+
+            def run(self):
+                return bool(getattr(self._cam, "connected", False))
+
+        V.add(SimConnectionState(gym), outputs=['sim/connected'])
+        return gym
 
 
 def get_camera(cfg):
@@ -1401,9 +1409,6 @@ def add_drivetrain(V, cfg):
                 ], threaded=True)
 
 
-# -----------------------------------------------------------------------------
-# Interactive & Dashboard Features
-# -----------------------------------------------------------------------------
 
 def start_drive(cfg, args):
     """Wrapper to start drive mode"""
@@ -1413,159 +1418,6 @@ def start_drive(cfg, args):
           model_type=model_type, camera_type=camera_type,
           meta=args['--meta'])
 
-def interactive_mode():
-    """CLI Interactive Menu"""
-    while True:
-        print("\n" + "="*40)
-        print("   Donkey Car 交互式管理终端 (Mysim)")
-        print("="*40)
-        print(" 1. 启动驾驶模式 (Drive Mode)")
-        print(" 2. 训练自动驾驶模型 (Train Model)")
-        print(" 3. 启动网页仪表盘 (Web Dashboard)")
-        print(" 4. 查看 Tub 数据 (View Data)")
-        print(" q. 退出 (Quit)")
-        print("-" * 40)
-        
-        choice = input("请选择功能 [1-4/q]: ").strip().lower()
-        
-        if choice == '1':
-            print("\n>> 正在启动驾驶模式...")
-            # Simulate arguments for drive mode
-            args = docopt(__doc__, argv=['drive'])
-            cfg = dk.load_config(myconfig=args['--myconfig'])
-            start_drive(cfg, args)
-            break 
-            
-        elif choice == '2':
-            print("\n>> 训练模型向导")
-            tub_path = input("请输入数据目录 (默认: data): ").strip() or "data"
-            model_name = input("请输入模型名称 (默认: mypilot.h5): ").strip() or "mypilot.h5"
-            cmd = [sys.executable, "train.py", "--tubs", tub_path, "--model", f"models/{model_name}"]
-            print(f"执行命令: {' '.join(cmd)}")
-            try:
-                subprocess.run(cmd)
-            except KeyboardInterrupt:
-                print("\n训练已中断")
-            
-        elif choice == '3':
-            start_web_dashboard()
-            
-        elif choice == '4':
-            print("\n>> 启动数据浏览器...")
-            tub_path = input("请输入数据目录 (默认: data): ").strip() or "data"
-            model_path = input("请输入模型路径 (可选，直接回车跳过): ").strip()
-            
-            cmd = ["donkey", "tubplot", "--tub", tub_path]
-            if model_path:
-                cmd.extend(["--model", model_path])
-
-            print(f"执行命令: {' '.join(cmd)}")
-            try:
-                subprocess.run(cmd)
-            except Exception as e:
-                print(f"无法启动数据浏览器: {e}")
-                
-        elif choice == 'q':
-            print("再见!")
-            sys.exit(0)
-        else:
-            print("无效选项，请重试。")
-
-class DashboardHandler(tornado.web.RequestHandler):
-    def get(self):
-        self.write("""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Donkey Car Dashboard</title>
-            <style>
-                body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; text-align: center; background-color: #f4f4f9; }
-                h1 { color: #333; }
-                .btn { display: inline-block; padding: 15px 30px; margin: 15px; font-size: 18px; 
-                       cursor: pointer; text-decoration: none; color: white; border-radius: 8px; border: none; transition: opacity 0.3s; }
-                .btn:hover { opacity: 0.9; }
-                .btn-drive { background-color: #28a745; box-shadow: 0 4px 6px rgba(40,167,69,0.2); }
-                .btn-data { background-color: #007bff; box-shadow: 0 4px 6px rgba(0,123,255,0.2); }
-                .status { margin: 20px auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                #message { margin-top: 20px; color: #555; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <h1>Donkey Car 控制台</h1>
-            <div class="status">
-                <p>欢迎使用 Mysim 交互式仪表盘</p>
-                <p>点击下方按钮启动相应服务。启动后将自动跳转。</p>
-            </div>
-            
-            <div>
-                <button class="btn btn-drive" onclick="startService('drive')">🏎️ 启动驾驶模式</button>
-                <button class="btn btn-data" onclick="startService('data')">📊 浏览 Tub 数据</button>
-            </div>
-
-            <div id="message"></div>
-
-            <script>
-                function startService(type) {
-                    document.getElementById('message').innerText = "正在启动服务，请稍候...";
-                    fetch('/api/start/' + type, {method: 'POST'})
-                        .then(response => response.json())
-                        .then(data => {
-                            document.getElementById('message').innerText = data.message;
-                            if(data.url) {
-                                setTimeout(() => { window.open(data.url, '_blank'); }, 1500);
-                            }
-                        })
-                        .catch(err => {
-                            document.getElementById('message').innerText = "启动失败: " + err;
-                        });
-                }
-            </script>
-        </body>
-        </html>
-        """)
-
-class ActionHandler(tornado.web.RequestHandler):
-    def initialize(self, cfg):
-        self.cfg = cfg
-
-    def post(self, action):
-        response = {"status": "ok", "message": "", "url": ""}
-        cwd = os.path.dirname(os.path.abspath(__file__))
-        
-        if action == "drive":
-            # Start drive in a separate process
-            cmd = [sys.executable, "manage.py", "drive"]
-            subprocess.Popen(cmd, cwd=cwd)
-            response["message"] = "驾驶模式已在后台启动，即将打开控制页..."
-            # 新 Web UI 后端端口（donkey web / donkey drive 默认 8000）
-            response["url"] = f"http://{self.request.host_name}:8000/#/drive"
-            
-        elif action == "data":
-            # Start tubplot
-            cmd = ["donkey", "tubplot", "--tub", "data"]
-            subprocess.Popen(cmd, cwd=cwd)
-            response["message"] = "数据浏览器已启动，即将打开..."
-            response["url"] = f"http://{self.request.host_name}:8886" 
-            
-        self.write(response)
-
-def start_web_dashboard():
-    port = 8885
-    args = docopt(__doc__, argv=['drive']) # Dummy args to load config
-    cfg = dk.load_config(myconfig=args['--myconfig'])
-    
-    app = tornado.web.Application([
-        (r"/", DashboardHandler),
-        (r"/api/start/([^/]+)", ActionHandler, dict(cfg=cfg)),
-    ])
-    print(f"\n>> 网页仪表盘已启动: http://localhost:{port}")
-    print(">> 请在浏览器中访问该地址。按 Ctrl+C 停止服务。")
-    app.listen(port)
-    try:
-        tornado.ioloop.IOLoop.current().start()
-    except KeyboardInterrupt:
-        print("\n仪表盘服务已停止")
 
 if __name__ == '__main__':
     args = docopt(__doc__)
@@ -1573,14 +1425,8 @@ if __name__ == '__main__':
 
     if args['train']:
         print('Use python train.py instead.\n')
-    elif args['dashboard']:
-        start_web_dashboard()
     elif args['drive']:
-        model_type = args['--type']
-        camera_type = args['--camera']
-        drive(cfg, model_path=args['--model'], use_joystick=args['--js'],
-              model_type=model_type, camera_type=camera_type,
-              meta=args['--meta'])
+        start_drive(cfg, args)
     else:
-        # Default to interactive mode if no args
-        interactive_mode()
+        print('No command given. Run `donkey drive` (or `python manage.py drive`) '
+              'to start driving.')
