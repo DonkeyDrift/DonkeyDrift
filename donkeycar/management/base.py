@@ -1,4 +1,5 @@
 import argparse
+import importlib.util
 import os
 import shutil
 import socket
@@ -1127,11 +1128,18 @@ class Web(BaseCommand):
         # 均以 frontend_port 为准，保持复用链路兼容）。
         frontend_port = backend_port
         frontend_proc = None
-        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+        # 对外监听（非回环）时生成带令牌的局域网入口，--open 直接打开它实现自动登录
+        lan_entry = None
+        if str(args.backend_host) not in ('127.0.0.1', 'localhost', '::1'):
+            lan_entry = self._lan_entry_url(web_ui_path, backend_port, args.route)
+        frontend_url = lan_entry or self._build_frontend_url(frontend_port, args.route if args.open else None)
 
         print(f'Web UI 路径: {web_ui_path}')
         print(f'Web UI:  http://localhost:{backend_port}/')
         print(f'API 文档: http://localhost:{backend_port}/docs')
+        if lan_entry:
+            print(f'局域网入口: {lan_entry}')
+            print('（令牌已自动带入，浏览器打开即完成登录并种下 Cookie）')
         if args.open:
             print(f'将打开: {frontend_url}')
         print('按 Ctrl+C 停止')
@@ -1190,6 +1198,44 @@ class Web(BaseCommand):
             return f'http://localhost:{frontend_port}/'
         normalized_route = route if str(route).startswith('/') else f'/{route}'
         return f'http://localhost:{frontend_port}/#{normalized_route}'
+
+    @staticmethod
+    def _lan_ip():
+        """取本机局域网 IP：UDP connect 不发包，仅用于选路由接口；失败返回 None。"""
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        except OSError:
+            return None
+        finally:
+            s.close()
+
+    def _lan_entry_url(self, web_ui_path, backend_port, route=None):
+        """对外监听时的局域网入口 URL：自动带 auth 令牌，打开即登录。
+
+        令牌来源与后端鉴权完全同一套（web_ui/backend/auth.py 的
+        DRIVE_API_TOKEN 环境变量 > ~/.donkeycar/drive_api.token），
+        后端 302 种 Cookie 后后续访问无需再带令牌。本机监听返回 None。
+        """
+        ip = self._lan_ip()
+        if not ip:
+            return None
+        try:
+            auth_path = os.path.join(web_ui_path, 'backend', 'auth.py')
+            spec = importlib.util.spec_from_file_location('dd_web_auth', auth_path)
+            web_auth = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(web_auth)
+            token = web_auth.load_or_create_token()
+        except Exception as e:
+            print(f'读取访问令牌失败，未生成局域网入口: {e}')
+            return None
+        if not token:
+            return None
+        route_part = ''
+        if route and route != '/':
+            route_part = '#' + (route if str(route).startswith('/') else f'/{route}')
+        return f'http://{ip}:{backend_port}/?token={token}{route_part}'
 
     def _wait_for_port_ready(self, port, timeout=30.0):
         """轮询本机端口直至可连接或超时。返回是否就绪。"""
