@@ -125,7 +125,7 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
 
     outputs = bridge.run_threaded(img_arr="rgb-image", num_records=7, mode="user", recording=False)
 
-    assert outputs == (0.0, 0.0, "user", False, {}, False, None)
+    assert outputs == (0.0, 0.0, "user", False, {}, False, None, False)
     assert encoded_images == ["converted-rgb-image-4"]
     assert encoded_params == [[cv2.IMWRITE_JPEG_QUALITY, 95]]
     assert [p for p in sent_payloads if p.get("type") == "frame"] == [{
@@ -926,15 +926,19 @@ def test_drive_api_bridge_stops_mjpeg_fallback_after_aiortc_track_sends(monkeypa
 def test_drive_api_bridge_handles_reconnect_simulator():
     bridge = DriveApiBridge(server_url="ws://localhost:8000/api/drive/ws", auto_start=False)
     bridge._handle_message({"type": "reconnect_simulator"})
+    bridge._handle_message({"type": "reset_car"})
 
     assert bridge.reconnect_simulator is True
+    assert bridge.reset_car is True
 
     outputs = bridge.run_threaded(img_arr=None, num_records=0, mode="user", recording=False)
-    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator, car_mode_cmd
-    assert len(outputs) == 7, f"expected 7 outputs, got {len(outputs)}: {outputs}"
+    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator, car_mode_cmd, reset_car
+    assert len(outputs) == 8, f"expected 8 outputs, got {len(outputs)}: {outputs}"
     assert outputs[5] is True
     assert outputs[6] is None
+    assert outputs[7] is True
     assert bridge.reconnect_simulator is False
+    assert bridge.reset_car is False
 
 
 def test_drive_api_bridge_caches_last_num_records():

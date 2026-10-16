@@ -541,6 +541,22 @@ async def load_model(request: LoadModelRequest):
     }
 
 
+@router.post("/reset_car")
+async def reset_car():
+    """就近复位模拟器小车：转发 reset_car 命令给车端（dgym 发 reset_to_nearest）。
+
+    复位是人工兜底指令，fire-and-forget 下发（与自动恢复的重连命令同级，
+    无需 ACK）。车端离线返回 503，前端据此置灰按钮并提示。
+    """
+    if not drive_state.car_online():
+        raise HTTPException(status_code=503, detail="车端未连接")
+
+    sent = await drive_state.send_to_car({"type": "reset_car"})
+    if not sent:
+        raise HTTPException(status_code=502, detail="指令下发失败")
+    return {"success": True}
+
+
 # ------------------------------------------------------------------
 # WebRTC 信令接口
 # ------------------------------------------------------------------

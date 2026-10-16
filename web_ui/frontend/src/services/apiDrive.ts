@@ -143,3 +143,9 @@ export const getConnectorDriveStatus = async () => {
   return response.data as { pid: number | null };
 };
 
+/** 就近复位模拟器小车（后端转发 reset_car 命令给车端）。 */
+export const sendResetCar = async () => {
+  const response = await api.post('/drive/reset_car');
+  return response.data as { success: boolean };
+};
+

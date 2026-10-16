@@ -18,6 +18,9 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.expandJoystick': '展开虚拟摇杆',
     'drive.collapseSimCollect': '收起模拟器采集',
     'drive.expandSimCollect': '展开模拟器采集',
+    'drive.resetCar': '复位小车',
+    'drive.resetCarHint': '就近复位到赛道中央并摆正（需新版模拟器支持）',
+    'drive.resetCarFailed': '复位失败',
     'drive.hotkeysLine1': '键盘快捷键: I 前进 · K 倒车 · J 左转 · L 右转',
     'drive.hotkeysLine2': 'R 切换录制 · M 切换模式',
     // DriveModeSelector
@@ -232,6 +235,9 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.expandJoystick': 'Expand virtual joystick',
     'drive.collapseSimCollect': 'Collapse sim collector',
     'drive.expandSimCollect': 'Expand sim collector',
+    'drive.resetCar': 'Reset Car',
+    'drive.resetCarHint': 'Reset to nearest track center, upright (requires a recent simulator)',
+    'drive.resetCarFailed': 'Reset failed',
     'drive.hotkeysLine1': 'Keyboard shortcuts: I forward · K reverse · J left · L right',
     'drive.hotkeysLine2': 'R toggle recording · M cycle mode',
     // DriveModeSelector

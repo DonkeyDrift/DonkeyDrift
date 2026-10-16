@@ -416,6 +416,26 @@ class DonkeyGymEnv(object):
         print("[DonkeyGymEnv] 收到强制重连请求，重建模拟器连接")
         self._rebuild_connection(coalesce=True)
 
+    def request_reset_to_nearest(self):
+        """就近复位模拟器小车（Web UI 复位按钮的模拟器侧入口）。
+
+        发 sdsim 的 reset_to_nearest 消息：模拟器把该车瞬移到最近赛道
+        中央并按赛道切线朝向摆正（与模拟器本地 R 键同一套逻辑）。经
+        _env_client() 穿透 wrapper 拿到底层 SDClient 直发，不依赖
+        gym_donkeycar 提供封装；旧版模拟器未注册该消息时仅打一行日志
+        忽略，不报错、不影响驾驶。
+        """
+        client = self._env_client()
+        send_now = getattr(client, "send_now", None)
+        if not callable(send_now):
+            print("[DonkeyGymEnv] 就近复位失败：底层模拟器客户端不可用")
+            return
+        try:
+            send_now({"msg_type": "reset_to_nearest"})
+            print("[DonkeyGymEnv] 已发送就近复位指令 (reset_to_nearest)")
+        except Exception as e:
+            print(f"[DonkeyGymEnv] 发送就近复位指令失败: {e}")
+
     def update(self):
         while self.running:
             # 如果未连接，检查配置是否有更新并尝试重连
@@ -468,7 +488,7 @@ class DonkeyGymEnv(object):
                     self._close_env()
                 time.sleep(1.0)
 
-    def run_threaded(self, steering, throttle, brake=None, reconnect=False):
+    def run_threaded(self, steering, throttle, brake=None, reconnect=False, reset_car=False):
         # 采集链路分段耗时诊断:DRIVE_DGYM_TIMING=1 时每 5s 把 gym 客户端
         # recv/parse/telemetry 累计耗时打到 drive 日志(排查源帧率问题用,默认关)。
         now_diag = time.time()
@@ -501,6 +521,9 @@ class DonkeyGymEnv(object):
 
         if reconnect:
             self._request_reconnect()
+
+        if reset_car:
+            self.request_reset_to_nearest()
 
         if self.env is not None:
             # 保持 connected 与真实 TCP 健康一致：SimConnectionState（遥测

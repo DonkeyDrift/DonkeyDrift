@@ -1,14 +1,14 @@
-"""验证 simulator.py 模板正确连接了重连标志与模拟器连接状态。
+"""验证 simulator.py 模板正确连接了重连标志、复位标志与模拟器连接状态。
 
-DriveApiBridge.run_threaded 返回 7 元组
-(angle, throttle, mode, recording, buttons, reconnect, car_mode_cmd)，
+DriveApiBridge.run_threaded 返回 8 元组
+(angle, throttle, mode, recording, buttons, reconnect, car_mode_cmd, reset_car)，
 Vehicle/Memory 按位置把 ctr 的 outputs 键与返回值一一配对。
 若 outputs 数量不足或键名与 cam(DonkeyGymEnv) 的 inputs 不匹配，
-重连请求会被静默丢弃（issue 004 根因 C）。
+重连/复位请求会被静默丢弃（issue 004 根因 C）。
 
 不要只做字符串存在性检查（那样形同虚设），而是用 AST 解析每个
 `V.add(...)` 的 inputs/outputs 列表，逐一核对键名与数量，确保
-DriveApiBridge 的 7 元组返回值、DonkeyGymEnv 的重连输入、以及
+DriveApiBridge 的 8 元组返回值、DonkeyGymEnv 的重连/复位输入、以及
 SimConnectionState -> bridge 的 sim/connected 链路真正对上。
 """
 import ast
@@ -93,7 +93,7 @@ def _bridge_call(calls, assigns):
 
 
 def test_bridge_outputs_align_with_seven_tuple():
-    """DriveApiBridge.run_threaded 返回 7 元组，模板 outputs 必须一一对应。"""
+    """DriveApiBridge.run_threaded 返回 8 元组，模板 outputs 必须一一对应。"""
     calls, assigns = _parse()
     ctr = _bridge_call(calls, assigns)
     outputs = _kw(ctr, "outputs", assigns)
@@ -105,7 +105,8 @@ def test_bridge_outputs_align_with_seven_tuple():
         "web/buttons",
         "reconnect_simulator",
         "car/mode_cmd",
-    ], f"ctr outputs 未与 7 元组返回值对齐: {outputs}"
+        "reset_car",
+    ], f"ctr outputs 未与 8 元组返回值对齐: {outputs}"
 
 
 def test_bridge_inputs_include_sim_connected():
@@ -124,6 +125,14 @@ def test_cam_inputs_include_reconnect_simulator():
     assert "reconnect_simulator" in inputs, f"cam inputs 缺少 reconnect_simulator: {inputs}"
 
 
+def test_cam_inputs_include_reset_car():
+    """DonkeyGymEnv 需接收 reset_car 以响应就近复位请求。"""
+    calls, assigns = _parse()
+    cam = next(c for c in calls if _first_arg_name(c) == "cam")
+    inputs = _kw(cam, "inputs", assigns)
+    assert "reset_car" in inputs, f"cam inputs 缺少 reset_car: {inputs}"
+
+
 def test_sim_connection_state_publishes_sim_connected():
     """SimConnectionState 发布 sim/connected，供遥测透传到前端。"""
     calls, assigns = _parse()
@@ -137,7 +146,7 @@ _BRIDGE = Path(__file__).resolve().parents[2] / "donkeycar" / "parts" / "drive_a
 
 EXPECTED_CTR_OUTPUTS = [
     'user/angle', 'user/throttle', 'user/mode', 'recording',
-    'web/buttons', 'reconnect_simulator', 'car/mode_cmd',
+    'web/buttons', 'reconnect_simulator', 'car/mode_cmd', 'reset_car',
 ]
 
 
@@ -213,7 +222,7 @@ def _bridge_return_arity() -> int:
 
 
 def test_ctr_outputs_match_bridge_return_tuple():
-    """ctr outputs 必须与 7 元组返回值一一对应，第 6 位是重连标志。"""
+    """ctr outputs 必须与 8 元组返回值一一对应，第 6 位是重连标志、末位是复位标志。"""
     outputs = _v_add_kwargs(_SOURCE, "ctr", after_lineno=_CTR_LINE).get("outputs")
 
     assert outputs == EXPECTED_CTR_OUTPUTS, (
@@ -224,13 +233,16 @@ def test_ctr_outputs_match_bridge_return_tuple():
 
 
 def test_reconnect_signal_reaches_gym_env():
-    """重连输出键必须与 DonkeyGymEnv(cam) 的输入键完全一致。"""
+    """重连/复位输出键必须与 DonkeyGymEnv(cam) 的输入键完全一致。"""
     ctr_outputs = _v_add_kwargs(_SOURCE, "ctr", after_lineno=_CTR_LINE).get("outputs") or []
     cam_inputs = _v_add_kwargs(_SOURCE, "cam").get("inputs") or []
 
     assert 'reconnect_simulator' in ctr_outputs
     assert 'reconnect_simulator' in cam_inputs, \
         "cam(DonkeyGymEnv) 的 inputs 必须包含 reconnect_simulator"
+    assert 'reset_car' in ctr_outputs
+    assert 'reset_car' in cam_inputs, \
+        "cam(DonkeyGymEnv) 的 inputs 必须包含 reset_car"
 
 
 def test_sim_connected_state_wired_to_telemetry():
