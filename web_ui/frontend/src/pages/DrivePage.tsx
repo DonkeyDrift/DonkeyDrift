@@ -23,12 +23,13 @@ import { useGamepadStore } from '../store/useGamepadStore';
 import { useStore } from '../store/useStore';
 import { useTelemetryStore } from '../store/useTelemetryStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
+import { sendResetCar } from '../services/apiDrive';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useElementWidth, useElementHeight } from '../hooks/useElementWidth';
 import { useTranslation } from '@/i18n';
 import { cn } from '../lib/utils';
-import { AlertTriangle, Circle, ChevronLeft, ChevronRight, Info, Joystick, Loader2, Lock, Maximize2, Minimize2, WifiOff } from 'lucide-react';
+import { AlertTriangle, Circle, ChevronLeft, ChevronRight, Info, Joystick, Loader2, Lock, Maximize2, Minimize2, RotateCcw, WifiOff } from 'lucide-react';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
 type DrivePageProps = {
@@ -147,6 +148,11 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [recordDuration, setRecordDuration] = useState(0);
   const [recordingLock, setRecordingLock] = useState(false);
   const recordingLockRef = useRef(false);
+  // 模拟器复位按钮：800ms 防连点锁 + 结果提示（4s 自动消失）
+  const [resetCarLock, setResetCarLock] = useState(false);
+  const resetCarLockRef = useRef(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
+  const resetNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentModel, setCurrentModel] = useState<string>('');
   const [modelLoading, setModelLoading] = useState(false);
   const [modelNotice, setModelNotice] = useState<string | null>(null);
@@ -434,6 +440,28 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     }
   }, [recording, send]);
 
+  // 就近复位模拟器小车：后端转发 reset_car 给车端，dgym 发 reset_to_nearest。
+  // 旧版模拟器会静默忽略该消息；失败（车端离线等）在按钮下方提示。
+  const handleResetCar = useCallback(() => {
+    if (resetCarLockRef.current) return;
+    resetCarLockRef.current = true;
+    setResetCarLock(true);
+    window.setTimeout(() => {
+      resetCarLockRef.current = false;
+      setResetCarLock(false);
+    }, 800);
+
+    sendResetCar()
+      .then(() => setResetNotice(t('drive.resetCar')))
+      .catch((err) => {
+        setResetNotice(`${t('drive.resetCarFailed')}: ${getApiErrorMessage(err)}`);
+      })
+      .finally(() => {
+        if (resetNoticeTimerRef.current) clearTimeout(resetNoticeTimerRef.current);
+        resetNoticeTimerRef.current = setTimeout(() => setResetNotice(null), 4000);
+      });
+  }, [t]);
+
   // 快捷键（仅在 drive section 可见时启用，避免流程页其它区域误触 #178）
   useDriveHotkeys({
     enabled: active,
@@ -686,6 +714,22 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                         </div>
                       </div>
                       <ProgrammableButtons className="w-full max-w-[240px]" />
+                      {driveTarget === 'sim' && (
+                        <div className="w-full max-w-[240px] flex flex-col items-center gap-1">
+                          <button
+                            onClick={handleResetCar}
+                            disabled={resetCarLock || !carState.online}
+                            title={t('drive.resetCarHint')}
+                            className="w-full flex items-center justify-center gap-2 rounded-lg border bg-zinc-900 px-3 py-2 text-sm text-zinc-200 border-zinc-800 transition-colors hover:bg-zinc-800 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                          >
+                            <RotateCcw className={cn('w-4 h-4', resetCarLock && 'animate-spin')} />
+                            {t('drive.resetCar')}
+                          </button>
+                          {resetNotice && (
+                            <div className="text-xs text-zinc-400 text-center">{resetNotice}</div>
+                          )}
+                        </div>
+                      )}
                       <GamepadConfigPanel
                         axes={gamepadAxes}
                         padId={gamepadPadId}

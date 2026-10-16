@@ -668,6 +668,7 @@ class DriveApiBridge:
         self.car_mode = None
         self.buttons: Dict[str, bool] = {}
         self.reconnect_simulator = False
+        self.reset_car = False
 
         self.connected = False
         self.ws = None
@@ -867,6 +868,9 @@ class DriveApiBridge:
             return
         if msg.get("type") == "reconnect_simulator":
             self.reconnect_simulator = True
+            return
+        if msg.get("type") == "reset_car":
+            self.reset_car = True
             return
         if msg.get("type") in ("load_model", "restart_with_model"):
             # issue #003 热加载：运行时原子替换推理模型，无需重启车端进程。
@@ -1403,7 +1407,9 @@ class DriveApiBridge:
         self.buttons = {}
         reconnect = self.reconnect_simulator
         self.reconnect_simulator = False
-        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect, car_mode_cmd
+        reset_car = self.reset_car
+        self.reset_car = False
+        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect, car_mode_cmd, reset_car
 
     def run(self, img_arr=None, num_records=0, mode=None, recording=None,
             imu_gz=None, imu_gx=None, imu_gy=None,

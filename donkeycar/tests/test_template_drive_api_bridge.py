@@ -18,16 +18,16 @@ def test_complete_template_uses_drive_api_bridge_when_server_url_is_set():
 
 
 def test_complete_template_drive_api_bridge_outputs_include_car_mode_cmd():
-    """complete 模板的 DriveApiBridge 输出须按 7 元组顺序对齐，car/mode_cmd 落到第 7 位。
+    """complete 模板的 DriveApiBridge 输出须按 8 元组顺序对齐，car/mode_cmd 落到第 7 位、reset_car 第 8 位。
 
     run_threaded 返回 (angle, throttle, mode, recording, buttons,
-    reconnect_simulator, car_mode_cmd)。outputs 若少写 reconnect_simulator，
+    reconnect_simulator, car_mode_cmd, reset_car)。outputs 若少写 reconnect_simulator，
     car/mode_cmd 会错接到 reconnect_simulator 布尔值，导致车控模式命令失效。
     """
     source = (_TEMPLATES_DIR / "complete.py").read_text(encoding="utf-8")
     expected = (
         "outputs=['user/steering', 'user/throttle', 'user/mode', "
-        "'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd']"
+        "'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd', 'reset_car']"
     )
     assert expected in source
 

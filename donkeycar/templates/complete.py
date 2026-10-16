@@ -876,7 +876,7 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array',
                   'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park']
     V.add(ctr,
           inputs=ctr_inputs,
-          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
+          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd', 'reset_car'],
           threaded=True)
 
     #
@@ -957,7 +957,7 @@ def add_simulator(V, cfg):
                         #    record_distance=cfg.SIM_RECORD_DISTANCE, record_orientation=cfg.SIM_RECORD_ORIENTATION,
                            delay=cfg.SIM_ARTIFICIAL_LATENCY)
         threaded = True
-        inputs = ['steering', 'throttle']
+        inputs = ['steering', 'throttle', 'reconnect_simulator', 'reset_car']
         outputs = ['cam/image_array']
 
         if cfg.SIM_RECORD_LOCATION:
