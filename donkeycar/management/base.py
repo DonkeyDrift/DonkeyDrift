@@ -923,9 +923,17 @@ class ModelDatabase(BaseCommand):
 
 
 class Tui(BaseCommand):
+    def parse_args(self, args):
+        parser = argparse.ArgumentParser(prog='tui', usage='%(prog)s [options]')
+        parser.add_argument('-v', '--verbose', action="store_true",
+                            default=False,
+                            help='Drive 启动前显示命令预览并确认（默认一键直接启动）')
+        parsed_args = parser.parse_args(args)
+        return parsed_args
+
     def run(self, args):
         from donkeycar.management.tui import main
-        main()
+        main(verbose=self.parse_args(args).verbose)
 
 
 def resolve_backend_host(host=None):
@@ -1738,10 +1746,10 @@ def execute_from_command_line():
         command = commands[args[1]]
         c = command()
         c.run(args[2:])
-    elif len(args) == 1:
-        # Default to TUI
+    elif len(args) == 1 or (len(args) == 2 and args[1] in ('-v', '--verbose')):
+        # Default to TUI；裸命令也允许 -v/--verbose 进入详细模式
         c = Tui()
-        c.run([])
+        c.run(args[1:])
     else:
         dk.utils.eprint('DonkeyDrift CLI')
         dk.utils.eprint('Usage: The available commands are:')

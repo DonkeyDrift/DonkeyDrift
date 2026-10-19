@@ -49,9 +49,16 @@ DRIVE_WEBRTC_LATENCY_PROBE=1 donkey drive \
 
 ### 方式 A'：TUI 入口（`donkey tui` 或直接 `donkey`）
 
-菜单选 `6 · Drive`，确认页会询问「开启 WebRTC 时延探针？」，选 `y` 等价于
-方式 A 带 `DRIVE_WEBRTC_LATENCY_PROBE=1`（选择显式覆盖 shell 残留 env），
-启动后直接给出针对本次端口的探针命令；正常驾驶选 `n`（默认）。
+TUI 不再询问探针开关，Drive 启动前在 shell 里设好 env 即可：
+
+```bash
+DRIVE_WEBRTC_LATENCY_PROBE=1 donkey tui
+```
+
+菜单选 `6 · Drive` 一键直接启动（默认无命令预览/确认），等价于方式 A 带
+`DRIVE_WEBRTC_LATENCY_PROBE=1`（env 由 TUI 探测后显式归一化传给车端进程），
+启动后直接给出针对本次端口的探针命令；正常驾驶不带该 env 启动（默认关闭）。
+需要命令预览与执行确认时，以 `donkey tui -v`（或 `donkey -v`）启动。
 
 ### 方式 B：分开启动（调试用）
 

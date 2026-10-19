@@ -228,7 +228,7 @@ def _patch_no_sleep(monkeypatch):
 
 
 def _patch_confirm_off(monkeypatch):
-    """WebRTC 时延探针等 Confirm 询问一律答否：去读 pytest 捕获的 stdin 会抛
+    """Confirm 询问一律答否：去读 pytest 捕获的 stdin 会抛
     OSError: reading from stdin while output is captured（同 test_tui_drive.py 的做法）。"""
     monkeypatch.setattr(tui.Confirm, "ask", lambda *args, **kwargs: False)
 
@@ -256,11 +256,12 @@ def test_drive_command_auto_enters_single_project(monkeypatch, tmp_path):
     monkeypatch.chdir(start_dir)
     _patch_projects_root(monkeypatch, projects_dir)
     _patch_no_sleep(monkeypatch)
-    # 进入项目后 has_car_process 为真，会先问 WebRTC 探针再问执行确认
+    # 进入项目后 has_car_process 为真；默认模式一键启动会真的拉起进程，
+    # 这里用 -v 模式让执行确认页（答 n 取消）作为流程终点，不触达 Popen
     _patch_confirm_off(monkeypatch)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: "n")
 
-    tui.DriveCommand().execute()
+    tui.DriveCommand(verbose=True).execute()
 
     assert Path.cwd() == project
     assert rc_handler.data["last_project_path"] == str(project)
@@ -280,10 +281,10 @@ def test_drive_command_opens_without_any_project(monkeypatch, tmp_path):
     asks = []
     monkeypatch.setattr(tui.Prompt, "ask", _drive_ask(asks))
 
-    tui.DriveCommand().execute()
+    tui.DriveCommand(verbose=True).execute()
 
     # 未被环境检查拦截：先走手动输入项目路径的兜底（答 0 取消），
-    # 再到达执行确认提示，且目录未切换
+    # 再到达执行确认提示（-v 模式，确认页为终点），且目录未切换
     assert asks == ["请输入项目路径", "请选择操作"]
     assert Path.cwd() == start_dir
     assert "last_project_path" not in rc_handler.data
@@ -304,7 +305,7 @@ def test_drive_command_does_not_auto_enter_when_multiple_projects(monkeypatch, t
     asks = []
     monkeypatch.setattr(tui.Prompt, "ask", _drive_ask(asks))
 
-    tui.DriveCommand().execute()
+    tui.DriveCommand(verbose=True).execute()
 
     # 多项目选择（答 0 取消）→ 手动输入路径兜底（答 0 取消）→ 执行确认
     assert asks == ["请输入编号或项目路径", "请输入项目路径", "请选择操作"]

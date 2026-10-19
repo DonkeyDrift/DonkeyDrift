@@ -1229,9 +1229,11 @@ class TrainOnlineCommand(DonkeyCommand):
         return [] # Not used
 
 class DriveCommand(DonkeyCommand):
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         super().__init__("Drive", "打开 Web Console 驾驶控制台", "驾驶", is_favorite=True)
         self.options = []
+        # -v/--verbose 启动 TUI 时保留命令预览与执行确认；默认跳过、一键直接启动
+        self.verbose = verbose
 
     def execute(self):
         console.clear()
@@ -1290,43 +1292,44 @@ class DriveCommand(DonkeyCommand):
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
         # WebRTC 时延探针（docs/guide/real-car-webrtc-camera-test.md）：
         # 帧上烧入捕获时间戳，供 scripts/webrtc_loop_probe.py 闭环实测；
-        # 画面左上角会出现可见时间戳，正常驾驶默认关闭
-        probe = False
-        if has_car_process:
-            probe = Confirm.ask(
-                "开启 WebRTC 时延探针？（实测端到端时延用，画面会带时间戳印章）",
-                default=False,
-            )
+        # 画面左上角会出现可见时间戳，正常驾驶默认关闭。
+        # 不再交互提问，需要实测时在启动 TUI 前设 DRIVE_WEBRTC_LATENCY_PROBE=1
+        #（取值口径与 DriveApiBridge 的 env 解析一致）
+        probe = has_car_process and os.environ.get(
+            "DRIVE_WEBRTC_LATENCY_PROBE", "").strip() in ("1", "true", "True")
         current_params["latency_probe"] = probe
         cmd_str = self.get_preview_command(
             web_cmd, car_cmd, drive_api_server_url, probe=probe)
 
-        console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
-        console.print("\n[bold yellow]命令预览:[/bold yellow]")
-        console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
+        # 默认一键直接启动（菜单选中即执行，仅保留必要交互）；
+        # -v/--verbose 才展示命令预览并要求确认，供排查/复用命令时使用
+        if self.verbose:
+            console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
+            console.print("\n[bold yellow]命令预览:[/bold yellow]")
+            console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
 
-        console.print("([green]y[/green]:执行 [red]n[/red]:取消 [orange1]c[/orange1]:复制命令)")
-        action = Prompt.ask(
-            "请选择操作",
-            choices=["y", "n", "c", "copy"],
-            default="y",
-            show_choices=False
-        )
+            console.print("([green]y[/green]:执行 [red]n[/red]:取消 [orange1]c[/orange1]:复制命令)")
+            action = Prompt.ask(
+                "请选择操作",
+                choices=["y", "n", "c", "copy"],
+                default="y",
+                show_choices=False
+            )
 
-        if action == "copy":
-            import pyperclip
-            try:
-                pyperclip.copy(cmd_str)
-                console.print("[green]✓ 命令已复制到剪贴板[/green]")
-            except ImportError:
-                console.print("[red]✗ 未安装 pyperclip，无法复制。请手动复制上方命令。[/red]")
-            Prompt.ask("按回车键返回...")
-            return
+            if action == "copy":
+                import pyperclip
+                try:
+                    pyperclip.copy(cmd_str)
+                    console.print("[green]✓ 命令已复制到剪贴板[/green]")
+                except ImportError:
+                    console.print("[red]✗ 未安装 pyperclip，无法复制。请手动复制上方命令。[/red]")
+                Prompt.ask("按回车键返回...")
+                return
 
-        if action != "y":
-            console.print("[yellow]操作已取消[/yellow]")
-            time.sleep(1)
-            return
+            if action != "y":
+                console.print("[yellow]操作已取消[/yellow]")
+                time.sleep(1)
+                return
 
         self.history_mgr.update_last_params(self.name, current_params)
         self.history_mgr.add_command_log(cmd_str)
@@ -1367,7 +1370,8 @@ class DriveCommand(DonkeyCommand):
                 car_env = os.environ.copy()
                 car_env["DRIVE_API_SERVER_URL"] = \
                     self.get_drive_api_server_url(backend_port=backend_port)
-                # 探针开关以本次 TUI 选择为准（显式置 0/1，不残留 shell env）
+                # 探针开关由启动 TUI 前的 shell env 决定（见上方 probe 探测）；
+                # 显式归一化置 0/1，让车端子进程拿到的取值确定
                 car_env["DRIVE_WEBRTC_LATENCY_PROBE"] = "1" if probe else "0"
                 # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口；
                 # 用局域网 IP，远程终端（DC/SSH）用户可直接点击（用户已显式设置时尊重其值）
@@ -1621,11 +1625,12 @@ class WebUICommand(DonkeyCommand):
 # 菜单系统
 # -----------------------------------------------------------------------------
 class MenuSystem:
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
         self.commands: Dict[str, List[DonkeyCommand]] = {
             "管理": [CreateCarCommand(), OpenProjectCommand()],
             "数据": [ClearDataCommand(), BackupDataCommand(), RestoreDataCommand()],
-            "驾驶": [DriveCommand(), DrifterConsoleCommand()],
+            "驾驶": [DriveCommand(verbose=verbose), DrifterConsoleCommand()],
             "筛选": [WebUICommand(), DonkeyUICommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
@@ -1664,6 +1669,9 @@ class MenuSystem:
 
             console.print(table)
             console.print("[dim]提示: 输入编号选择功能，输入 '?' 显示帮助，输入 '0' 退出[/dim]")
+            if self.verbose:
+                console.print(
+                    "[dim]详细模式(-v)：Drive 启动前显示命令预览并需确认[/dim]")
 
             choice = Prompt.ask("\n请选择", default="0")
 
@@ -1701,10 +1709,12 @@ class MenuSystem:
 - **参数输入**: 进入功能后，根据提示输入参数。[]内为默认值，直接回车即可使用。
 - **常用功能**: 带 `*` 标记的为常用功能。
 - **历史记录**: 您的输入会被自动记录，下次使用时作为默认值。
+- **一键启动**: Drive 默认选中即直接启动；以 `donkey tui -v` 启动可恢复
+  命令预览与执行确认。
 
 ## 常见问题
 - 如果 `donkey` 命令未找到，请确保已激活 conda 环境。
-- 只有在确认页面输入 `y` 才会真正执行命令。
+- 除 Drive 一键启动外，只有在确认页面输入 `y` 才会真正执行命令。
         """)
         console.print(Panel(md, title="帮助说明", border_style="green"))
         Prompt.ask("按回车键返回...")
@@ -1712,10 +1722,10 @@ class MenuSystem:
 # -----------------------------------------------------------------------------
 # 入口
 # -----------------------------------------------------------------------------
-def main():
+def main(verbose: bool = False):
     try:
         _auto_open_project()
-        app = MenuSystem()
+        app = MenuSystem(verbose=verbose)
         app.show_main_menu()
     except KeyboardInterrupt:
         _restore_terminal()
