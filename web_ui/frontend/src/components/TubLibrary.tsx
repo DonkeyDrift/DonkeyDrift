@@ -9,10 +9,10 @@ import {
   getApiErrorMessage,
   getImageUrl,
   getSessionRecords,
-  listTubSessions,
+  listFamilyTubSessions,
   loadTub,
   type ChildTubInfo,
-  type TubSession,
+  type FamilyTubSession,
   type TubRecord,
 } from '../services/api';
 import { useTranslation } from '@/i18n';
@@ -109,6 +109,11 @@ const formatStatValue = (value: unknown, notAvailable: string) => {
 
 const pinnedKey = (tubPath: string) => `tubLibrary.pinned.${tubPath}`;
 
+// 家族聚合视图（方案 B）：_session_id 跨 tub 会撞名（如 tub_6/tub_7 都有
+// 26-10-20_0），列表选中/置顶/下载态一律用 (tub_path, session_id) 复合键
+const sessionKey = (session: Pick<FamilyTubSession, 'tub_path' | 'session_id'>) =>
+  `${session.tub_path}::${session.session_id}`;
+
 const loadPinned = (tubPath: string): string[] => {
   try {
     const raw = localStorage.getItem(pinnedKey(tubPath));
@@ -163,17 +168,19 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   const setActiveSession = useStore((state) => state.setActiveSession);
   const driveLoopHz = Number(config?.DRIVE_LOOP_HZ) || 60;
 
-  const [sessions, setSessions] = useState<TubSession[]>([]);
-  // 录制为空（如全部被软删）时由 /tub/sessions 附带的子 tub 列表，用于引导切换
+  const [sessions, setSessions] = useState<FamilyTubSession[]>([]);
+  // 录制为空（如全部被软删）时由 /tub/family_sessions 附带的子 tub 列表，用于引导切换
   const [childTubs, setChildTubs] = useState<ChildTubInfo[]>([]);
   const [switchingChildPath, setSwitchingChildPath] = useState<string | null>(null);
-  const [selected, setSelected] = useState<TubSession | null>(null);
+  // 异 tub 会话切换中（目标行的复合键，该行转圈/禁用）
+  const [switchingSessionKey, setSwitchingSessionKey] = useState<string | null>(null);
+  const [selected, setSelected] = useState<FamilyTubSession | null>(null);
   const [records, setRecords] = useState<TubRecord[]>([]);
   const [frame, setFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<TubSession | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<FamilyTubSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
   const [frameAspect, setFrameAspect] = useState<number | null>(null);
@@ -196,6 +203,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   const frameRef = useRef(0);
   const isPlayingRef = useRef(false);
   const recordsRef = useRef(records);
+  const selectedRef = useRef<FamilyTubSession | null>(null);
+  // 异 tub 选中的目标复合键：loadTub+setTub 触发 tubPath 变化 → 列表重拉后
+  // 按此键匹配并选中（而非回落到「选最新」）
+  const pendingSelectKeyRef = useRef<string | null>(null);
   const fpsStartRef = useRef<number>(0);
   const fpsFramesRef = useRef<number>(0);
   const lastIndexSyncRef = useRef<number>(0);
@@ -256,30 +267,86 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     pump();
   }, [touchImageCache]);
 
-  const refreshSessions = useCallback(async (path: string): Promise<TubSession[]> => {
+  // 统一选中入口（家族视图核心语义）：同 tub 会话直接选中；异 tub 会话先切
+  // 全局工作 tub（loadTub + setTub）再选中——编辑器删除/恢复只作用于全局
+  // current_tub，选中即切换避免打错 tub。切换期间目标行转圈；失败保持原选中。
+  // 不直接 setSelected：setTub 触发 tubPath 变化 → refreshSessions 重拉家族列表，
+  // 按 pendingSelectKeyRef 匹配后选中（家族列表与 tub 无关，目标必然命中）。
+  const applySelection = useCallback((session: FamilyTubSession | null) => {
+    if (!session) {
+      setSelected(null);
+      return;
+    }
+    if (session.tub_path === tubPath) {
+      setSelected(session);
+      return;
+    }
+    pendingSelectKeyRef.current = sessionKey(session);
+    setSwitchingSessionKey(sessionKey(session));
+    setError(null);
+    loadTub(session.tub_path)
+      .then((data) => {
+        setTub(
+          data.path,
+          data.records || [],
+          data.fields || [],
+          data.total_physical_records,
+          data.deleted_indexes,
+        );
+      })
+      .catch((err) => {
+        pendingSelectKeyRef.current = null;
+        setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
+      })
+      .finally(() => setSwitchingSessionKey(null));
+  }, [tubPath, setTub, t]);
+
+  const refreshSessions = useCallback(async (path: string): Promise<{
+    items: FamilyTubSession[];
+    target: FamilyTubSession | null;
+  }> => {
     setError(null);
     try {
-      const data = await listTubSessions(path);
+      const data = await listFamilyTubSessions(path);
       const items = data.sessions || [];
       lastRefreshRef.current = Date.now();
       setSessions(items);
       // 录制为空（如全部被软删）时后端附带子 tub 列表，供「切换目录」引导；
       // 录制非空时清空，避免残留旧目录的引导数据
       setChildTubs(items.length === 0 ? data.child_tubs || [] : []);
-      // Auto-select the newest recording when nothing (valid) is selected
-      setSelected((prev) =>
-        prev && items.some((s) => s.session_id === prev.session_id)
-          ? prev
-          : items[0] ?? null,
-      );
-      return items;
+      // 自动选择：异 tub 切换的 pending 目标 > 维持当前选中 > 最新一条。
+      // 选中一律经 applySelection——最新一条可能属于其它家族成员 tub，
+      // 按核心语义先切全局工作 tub 再选中。
+      const pendingKey = pendingSelectKeyRef.current;
+      if (pendingKey) {
+        const match = items.find((s) => sessionKey(s) === pendingKey);
+        if (match && match.tub_path === path) {
+          pendingSelectKeyRef.current = null;
+          setSelected(match);
+          return { items, target: match };
+        }
+        pendingSelectKeyRef.current = null;
+        if (match) {
+          // 列表已含目标但当前工作 tub 还不是它（切换被中途刷新打断）：重走切换
+          applySelection(match);
+          return { items, target: match };
+        }
+        // 目标会话已不在家族列表里（切换期间被删）：落到常规逻辑
+      }
+      const prev = selectedRef.current;
+      if (prev && items.some((s) => sessionKey(s) === sessionKey(prev))) {
+        return { items, target: prev };
+      }
+      const target = items[0] ?? null;
+      applySelection(target);
+      return { items, target };
     } catch (err) {
       setSessions([]);
       setChildTubs([]);
       setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
-      return [];
+      return { items: [], target: null };
     }
-  }, [t]);
+  }, [applySelection, t]);
 
   // 子 tub 引导面板点击：加载该子 tub 并切换全局 tubPath，
   // 后续列表/帧重拉由 tubPath 变化的 effect 自动完成
@@ -305,6 +372,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   useEffect(() => {
     recordsRef.current = records;
   }, [records]);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
 
   // 手动刷新纪元：刷新后帧图片 URL 追加 &r=<epoch>。后端 /tub/image 带
   // max-age=86400，同一 tub 路径重建后同名帧文件会命中浏览器旧图——
@@ -338,6 +409,9 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
 
   useEffect(() => {
     setSelected(null);
+    // 同步清 ref：refreshSessions 在本 effect 内立即执行，异步 setSelected(null)
+    // 还没提交，不清的话自动选择会把旧 tub 的选中当成「维持当前」
+    selectedRef.current = null;
     setRecords([]);
     setFrame(0);
     frameRef.current = 0;
@@ -368,6 +442,13 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
 
     let cancelled = false;
     (async () => {
+      // 守卫：选中会话必须属于当前全局工作 tub。异 tub 选中会触发切换，
+      // 切换提交前 selected 还是旧 tub 的会话，此时拉帧会拿新 tub 路径配旧
+      // 会话 id（撞名时还会拉到错画面），直接跳过等自动选择落定
+      if (selected.tub_path !== tubPath) {
+        if (!cancelled) setActiveSession(null, []);
+        return;
+      }
       try {
         const data = await getSessionRecords(tubPath, selected.session_id);
         if (cancelled) return;
@@ -608,33 +689,34 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     setFrame(idx);
   }, []);
 
-  const handleDownload = useCallback((session: TubSession) => {
-    if (!tubPath) return;
-    setDownloadingId(session.session_id);
+  const handleDownload = useCallback((session: FamilyTubSession) => {
+    const key = sessionKey(session);
+    setDownloadingId(key);
     setError(null);
     try {
-      downloadTubSession(tubPath, session.session_id, session.start_time_ms);
+      downloadTubSession(session.tub_path, session.session_id, session.start_time_ms);
     } catch (err) {
       setError(getApiErrorMessage(err, t('tubLibrary.downloadFailed')));
     }
     // The browser handles the actual download natively (progress bar etc.)
-    setTimeout(() => setDownloadingId(null), 1000);
-  }, [tubPath, t]);
+    setTimeout(() => setDownloadingId((prev) => (prev === key ? null : prev)), 1000);
+  }, [t]);
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete || !tubPath) return;
     setDeleting(true);
     setError(null);
     try {
-      await deleteTubSession(tubPath, pendingDelete.session_id);
+      await deleteTubSession(pendingDelete.tub_path, pendingDelete.session_id);
       setPendingDelete(null);
-      if (selected?.session_id === pendingDelete.session_id) {
+      if (selected && sessionKey(selected) === sessionKey(pendingDelete)) {
         setSelected(null);
       }
       // Drop the deleted clip from the pinned set too
+      const deletedKey = sessionKey(pendingDelete);
       setPinned((prev) => {
-        if (!prev.includes(pendingDelete.session_id)) return prev;
-        const next = prev.filter((id) => id !== pendingDelete.session_id);
+        if (!prev.includes(deletedKey)) return prev;
+        const next = prev.filter((id) => id !== deletedKey);
         savePinned(tubPath, next);
         return next;
       });
@@ -694,7 +776,9 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   // 手动「刷新」（用户报障：常驻挂载下录制列表与选中帧长期停留在旧快照，
   // 新老数据混在一起）：清空浏览器内暂存的数据后全量重拉——录制列表、当前
   // 选中录制的帧、全局 tub（编辑器等面板同步），并递增图片 URL 纪元绕过
-  // 浏览器 HTTP 缓存（/tub/image 带 max-age=86400）。
+  // 浏览器 HTTP 缓存（/tub/image 带 max-age=86400）。选中目标由
+  // refreshSessions 的自动选择落定（同 tub 直接选中；异 tub 触发切换，
+  // 帧随后由选中 effect 重拉），这里只同步选中帧与全局 tub。
   const hardRefresh = useCallback(async () => {
     if (!tubPath || refreshingRef.current) return;
     refreshingRef.current = true;
@@ -706,17 +790,13 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     setRefreshEpoch((e) => e + 1);
     setError(null);
     try {
-      const items = await refreshSessions(tubPath);
-      const nextSelected =
-        selected && items.some((s) => s.session_id === selected.session_id)
-          ? selected
-          : items[0] ?? null;
-      setSelected(nextSelected);
+      const { target } = await refreshSessions(tubPath);
 
-      let nextRecords: TubRecord[] = [];
-      if (nextSelected) {
+      // 目标属于当前 tub 才预拉帧；异 tub 目标的帧由切换后的选中 effect 拉取
+      let nextRecords: TubRecord[] | null = null;
+      if (target && target.tub_path === tubPath) {
         try {
-          const data = await getSessionRecords(tubPath, nextSelected.session_id);
+          const data = await getSessionRecords(target.tub_path, target.session_id);
           nextRecords = data.records || [];
         } catch {
           // 会话级刷新尽力而为：列表已更新，下方全局 tub 仍会刷新
@@ -736,8 +816,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
       } catch {
         // Refreshing the global tub is best-effort; the library list is already updated
       }
-      setRecords(nextRecords);
-      setActiveSession(nextSelected?.session_id ?? null, nextRecords as StoreTubRecord[]);
+      if (nextRecords !== null) {
+        setRecords(nextRecords);
+        setActiveSession(target?.session_id ?? null, nextRecords as StoreTubRecord[]);
+      }
       setFrame(0);
       frameRef.current = 0;
       setImageError(false);
@@ -747,23 +829,24 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
       refreshingRef.current = false;
       setRefreshing(false);
     }
-  }, [tubPath, selected, refreshSessions, setTub, setActiveSession, t]);
+  }, [tubPath, refreshSessions, setTub, setActiveSession, t]);
 
   // 自动刷新（静默）：只重拉录制列表；当前选中录制有新增帧且未在播放时，
   // 一并静默重拉其帧并保持当前帧位置。不动图片缓存、不递增纪元，
   // 避免周期性全量重载拖慢页面。
   const softRefresh = useCallback(async () => {
     if (!tubPath || refreshingRef.current || isPlayingRef.current) return;
+    if (switchingSessionKey) return; // 异 tub 切换中，避免旧 tub 轮询打断
     try {
-      const items = await refreshSessions(tubPath);
+      const { items } = await refreshSessions(tubPath);
       if (
         selected &&
         !isPlayingRef.current &&
-        items.some((s) => s.session_id === selected.session_id)
+        items.some((s) => sessionKey(s) === sessionKey(selected))
       ) {
-        const current = items.find((s) => s.session_id === selected.session_id);
+        const current = items.find((s) => sessionKey(s) === sessionKey(selected));
         if (current && current.record_count !== selected.record_count) {
-          const data = await getSessionRecords(tubPath, selected.session_id);
+          const data = await getSessionRecords(selected.tub_path, selected.session_id);
           const next = data.records || [];
           setRecords(next);
           setActiveSession(selected.session_id, next as StoreTubRecord[]);
@@ -774,7 +857,7 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     } catch {
       // refreshSessions 内部已 setError；轮询失败不打断用户操作
     }
-  }, [tubPath, selected, refreshSessions, setActiveSession]);
+  }, [tubPath, selected, switchingSessionKey, refreshSessions, setActiveSession]);
 
   // 自动刷新调度：TM section 激活期间每 30s 检查一次；播放中与浏览器后台
   // 标签页暂停；激活（滚回视口/切回标签页）时数据已过期则立即补一次。
@@ -800,20 +883,23 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     [sessions],
   );
 
-  // Pinned clips float to the top; both groups keep the API's newest-first order
+  // Pinned clips float to the top; both groups keep the API's newest-first order.
+  // 置顶集合同步换成复合键（tub_path::session_id），旧的裸 session_id 条目
+  // 自然失效（可接受：点击一次即重新置顶）
   const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
   const sortedSessions = useMemo(() => {
-    const pinnedItems = sessions.filter((s) => pinnedSet.has(s.session_id));
-    const rest = sessions.filter((s) => !pinnedSet.has(s.session_id));
+    const pinnedItems = sessions.filter((s) => pinnedSet.has(sessionKey(s)));
+    const rest = sessions.filter((s) => !pinnedSet.has(sessionKey(s)));
     return [...pinnedItems, ...rest];
   }, [sessions, pinnedSet]);
 
-  const togglePin = (session: TubSession) => {
+  const togglePin = (session: FamilyTubSession) => {
     if (!tubPath) return;
+    const key = sessionKey(session);
     setPinned((prev) => {
-      const next = prev.includes(session.session_id)
-        ? prev.filter((id) => id !== session.session_id)
-        : [...prev, session.session_id];
+      const next = prev.includes(key)
+        ? prev.filter((id) => id !== key)
+        : [...prev, key];
       savePinned(tubPath, next);
       return next;
     });
@@ -919,13 +1005,16 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                   </div>
                 )}
                 {sortedSessions.map((session) => {
-                  const isSelected = selected?.session_id === session.session_id;
-                  const isPinned = pinnedSet.has(session.session_id);
+                  const key = sessionKey(session);
+                  const isSelected = selected ? sessionKey(selected) === key : false;
+                  const isPinned = pinnedSet.has(key);
+                  const isSwitching = switchingSessionKey === key;
                   return (
                     <button
-                      key={session.session_id}
+                      key={key}
                       type="button"
-                      onClick={() => setSelected(session)}
+                      onClick={() => applySelection(session)}
+                      disabled={isSwitching}
                       className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-2 transition-colors ${
                         isSelected
                           ? 'bg-cyan-500/10 border-l-2 border-cyan-400'
@@ -936,6 +1025,10 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                         <div className="text-sm font-medium truncate">
                           {formatDateTime(session.start_time_ms)
                             ?? session.session_id}
+                          {/* 家族视图：不同 tub 的会话可能同一天录制，标注来源 tub */}
+                          <span className="ml-1.5 align-middle text-[10px] font-normal px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                            {session.tub_name}
+                          </span>
                         </div>
                         <div className="text-xs text-zinc-500">
                           {t('tubLibrary.frames', { count: session.record_count })}
@@ -945,6 +1038,9 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
+                        {isSwitching && (
+                          <Loader2 className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
+                        )}
                         <span
                           role="button"
                           tabIndex={0}
@@ -986,12 +1082,12 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
                             }
                           }}
                           className={`p-1.5 rounded-md shrink-0 cursor-pointer transition-colors ${
-                            downloadingId === session.session_id
+                            downloadingId === key
                               ? 'text-cyan-400'
                               : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800/60'
                           }`}
                         >
-                          {downloadingId === session.session_id ? (
+                          {downloadingId === key ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : (
                             <Download className="w-4 h-4" />

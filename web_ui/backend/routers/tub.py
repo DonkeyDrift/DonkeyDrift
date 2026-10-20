@@ -304,6 +304,42 @@ async def list_child_tubs(tubPath: str):
     return {"status": True, "path": path, "child_tubs": _list_child_tubs(path)}
 
 
+def _collect_sessions(tub_path: str) -> List[Dict[str, Any]]:
+    """迭代单个 tub 的记录，按 ``_session_id`` 分组为录制会话。
+
+    每个会话带 session_id/record_count/first_index/last_index/
+    start_time_ms/end_time_ms；按首个记录的 ``_index`` 降序（新录制在前）。
+    供 /tub/sessions 与 /tub/family_sessions 共用。
+    """
+    sessions: Dict[str, Dict[str, Any]] = {}
+    tub = Tub(tub_path, read_only=True)
+    try:
+        for record in tub:
+            session_id = str(record.get('_session_id', ''))
+            first_index = record.get('_index', 0)
+            timestamp_ms = record.get('_timestamp_ms')
+            entry = sessions.get(session_id)
+            if entry is None:
+                sessions[session_id] = {
+                    'session_id': session_id,
+                    'record_count': 1,
+                    'first_index': first_index,
+                    'last_index': first_index,
+                    'start_time_ms': timestamp_ms,
+                    'end_time_ms': timestamp_ms,
+                }
+            else:
+                entry['record_count'] += 1
+                entry['last_index'] = max(entry['last_index'], first_index)
+                if entry['start_time_ms'] is None:
+                    entry['start_time_ms'] = timestamp_ms
+                entry['end_time_ms'] = timestamp_ms
+    finally:
+        tub.close()
+
+    return sorted(sessions.values(), key=lambda s: s['first_index'], reverse=True)
+
+
 @router.get("/sessions")
 async def list_sessions(tubPath: str):
     """List recording sessions (videos) inside a tub.
@@ -321,33 +357,7 @@ async def list_sessions(tubPath: str):
         raise HTTPException(status_code=400, detail="Path is not a valid tub (manifest.json missing)")
 
     try:
-        tub = Tub(path, read_only=True)
-        try:
-            sessions: Dict[str, Dict[str, Any]] = {}
-            for record in tub:
-                session_id = str(record.get('_session_id', ''))
-                first_index = record.get('_index', 0)
-                timestamp_ms = record.get('_timestamp_ms')
-                entry = sessions.get(session_id)
-                if entry is None:
-                    sessions[session_id] = {
-                        'session_id': session_id,
-                        'record_count': 1,
-                        'first_index': first_index,
-                        'last_index': first_index,
-                        'start_time_ms': timestamp_ms,
-                        'end_time_ms': timestamp_ms,
-                    }
-                else:
-                    entry['record_count'] += 1
-                    entry['last_index'] = max(entry['last_index'], first_index)
-                    if entry['start_time_ms'] is None:
-                        entry['start_time_ms'] = timestamp_ms
-                    entry['end_time_ms'] = timestamp_ms
-        finally:
-            tub.close()
-
-        items = sorted(sessions.values(), key=lambda s: s['first_index'], reverse=True)
+        items = _collect_sessions(path)
         response: Dict[str, Any] = {"status": True, "path": path, "sessions": items}
         if not items:
             # 录制全部软删/为空时，附带子目录里的子 tub（真实录制常在
@@ -357,6 +367,138 @@ async def list_sessions(tubPath: str):
     except Exception as e:
         logger.error(f"Failed to list sessions for tub {path}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _is_tub_dir(path: str) -> bool:
+    return os.path.isfile(os.path.join(path, 'manifest.json'))
+
+
+def _discover_family_tubs(path: str) -> List[str]:
+    """按家族规则发现 tubPath 的全部成员 tub（绝对路径去重）。
+
+    - path 本身是 tub：成员 = 自身 + 父目录的直接子 tub（兄弟）+ 父目录本身（若也是 tub）。
+    - path 不是 tub：成员 = 其深度 ≤ 2 的子 tub（隐藏目录跳过）。
+    - 单个候选失败仅告警跳过，不拖垮整体。
+    """
+    abs_path = os.path.abspath(path)
+    members: List[str] = []
+    seen = set()
+
+    def _add(candidate: str) -> None:
+        if candidate in seen:
+            return
+        seen.add(candidate)
+        members.append(candidate)
+
+    if _is_tub_dir(abs_path):
+        _add(abs_path)
+        parent = os.path.dirname(abs_path.rstrip(os.sep)) or os.sep
+        try:
+            for name in sorted(os.listdir(parent)):
+                if name.startswith('.'):
+                    continue
+                child = os.path.join(parent, name)
+                if not os.path.isdir(child):
+                    continue
+                if _is_tub_dir(child):
+                    _add(os.path.abspath(child))
+        except OSError as e:
+            logger.warning(f"Failed to list sibling tubs of {abs_path}: {e}")
+        if _is_tub_dir(parent):
+            _add(parent)
+        return members
+
+    # 非 tub 目录：深度 ≤ 2 扫描子 tub（与 _list_child_tubs 同思路，但
+    # 这里只需要 tub 路径列表，不读 manifest 元数据）
+    try:
+        names = sorted(os.listdir(abs_path))
+    except OSError as e:
+        logger.warning(f"Failed to list directory {abs_path} for family tubs: {e}")
+        return members
+
+    candidates: List[str] = []
+    for name in names:
+        if name.startswith('.'):
+            continue
+        child = os.path.join(abs_path, name)
+        if not os.path.isdir(child):
+            continue
+        candidates.append(child)
+        try:
+            sub_names = sorted(os.listdir(child))
+        except OSError:
+            continue
+        for sub_name in sub_names:
+            if sub_name.startswith('.'):
+                continue
+            sub = os.path.join(child, sub_name)
+            if os.path.isdir(sub):
+                candidates.append(sub)
+
+    for candidate in candidates:
+        if _is_tub_dir(candidate):
+            _add(os.path.abspath(candidate))
+    return members
+
+
+@router.get("/family_sessions")
+async def list_family_sessions(tubPath: str):
+    """聚合「当前工作 tub 所属家族」的全部录制会话。
+
+    家族成员发现规则见 _discover_family_tubs。聚合列表按 start_time_ms 降序
+    （None 排最后），并列时 first_index 降序；每条会话额外带 tub_path/
+    tub_name，前端用 (tub_path, session_id) 复合键区分跨 tub 撞名的会话。
+    """
+    import time
+    started = time.monotonic()
+
+    path = os.path.expanduser(tubPath)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    family_root = os.path.dirname(path.rstrip(os.sep)) if _is_tub_dir(path) else path
+    members = _discover_family_tubs(path)
+
+    sessions: List[Dict[str, Any]] = []
+    for member in members:
+        try:
+            tub_sessions = _collect_sessions(member)
+        except Exception as e:
+            logger.warning(f"Skipping family tub {member}: {e}")
+            continue
+        tub_name = os.path.basename(member.rstrip(os.sep)) or member
+        for entry in tub_sessions:
+            item = dict(entry)
+            item['tub_path'] = member
+            item['tub_name'] = tub_name
+            sessions.append(item)
+
+    sessions.sort(
+        key=lambda s: (
+            s['start_time_ms'] is not None,
+            s['start_time_ms'] or 0,
+            s['first_index'],
+        ),
+        reverse=True,
+    )
+
+    response: Dict[str, Any] = {
+        "status": True,
+        "path": path,
+        "family_root": family_root,
+        "sessions": sessions,
+    }
+    if not sessions:
+        # 家族聚合为空（成员全删/无成员）时，附带子 tub 列表，前端沿用
+        # 方案 A 的切换引导
+        response["child_tubs"] = _list_child_tubs(path)
+
+    elapsed_ms = (time.monotonic() - started) * 1000
+    logger.info(
+        f"Family sessions for {path}: {len(members)} member tub(s), "
+        f"{len(sessions)} session(s) in {elapsed_ms:.1f}ms"
+    )
+    return response
 
 @router.get("/session_records")
 async def get_session_records(tubPath: str, sessionId: str):

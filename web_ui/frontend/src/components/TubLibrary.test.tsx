@@ -5,7 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 import { TubLibrary } from './TubLibrary';
 import { useStore } from '../store/useStore';
-import { getSessionRecords, listTubSessions, downloadTubSession, loadTub } from '../services/api';
+import { getSessionRecords, listFamilyTubSessions, downloadTubSession, loadTub } from '../services/api';
 
 // 回归测试：进入录制视频库后自动选中最新一条录制（sessions[0]，API 已按
 // 最新在前排序），无需手动点击列表。
@@ -13,13 +13,14 @@ import { getSessionRecords, listTubSessions, downloadTubSession, loadTub } from 
 vi.mock('../services/api', () => ({
   getImageUrl: (path: string) => `http://localhost/img/${encodeURIComponent(path)}`,
   getApiErrorMessage: (_err: unknown, fallback: string) => fallback,
-  listTubSessions: vi.fn(),
+  listFamilyTubSessions: vi.fn(),
   getSessionRecords: vi.fn(),
   deleteTubSession: vi.fn(),
   downloadTubSession: vi.fn(),
   loadTub: vi.fn(),
 }));
 
+// 家族聚合视图（方案 B）：会话带 tub_path/tub_name，默认全部在当前工作 tub
 const sessions = [
   {
     session_id: '26-08-16_1',
@@ -28,6 +29,8 @@ const sessions = [
     last_index: 4,
     start_time_ms: Date.parse('2026-08-16T11:00:00Z'),
     end_time_ms: Date.parse('2026-08-16T11:00:02Z'),
+    tub_path: '/tmp/tub',
+    tub_name: 'tub',
   },
   {
     session_id: '26-08-16_0',
@@ -36,8 +39,26 @@ const sessions = [
     last_index: 2,
     start_time_ms: Date.parse('2026-08-16T10:00:00Z'),
     end_time_ms: Date.parse('2026-08-16T10:00:03Z'),
+    tub_path: '/tmp/tub',
+    tub_name: 'tub',
   },
 ];
+
+const familyResponse = {
+  status: true,
+  path: '/tmp/tub',
+  family_root: '/tmp',
+  sessions,
+};
+
+const familyRecords = {
+  status: true,
+  path: '/tmp/tub',
+  records: [
+    { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
+    { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
+  ],
+};
 
 // Same formatting as the component (local timezone), so expectations are TZ-agnostic
 const fmt = (ms: number) => {
@@ -51,15 +72,8 @@ const oldestLabel = fmt(sessions[1].start_time_ms);
 describe('TubLibrary auto-select newest recording', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
-    vi.mocked(getSessionRecords).mockResolvedValue({
-      status: true,
-      path: '/tmp/tub',
-      records: [
-        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
-        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
-      ],
-    });
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
+    vi.mocked(getSessionRecords).mockResolvedValue(familyRecords);
     useStore.setState({
       tubPath: '/tmp/tub',
       fields: ['cam/image_array', 'user/angle'],
@@ -97,7 +111,7 @@ describe('TubLibrary auto-select newest recording', () => {
     useStore.setState({ tubPath: null });
     render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
-    expect(listTubSessions).not.toHaveBeenCalled();
+    expect(listFamilyTubSessions).not.toHaveBeenCalled();
   });
 });
 
@@ -105,15 +119,8 @@ describe('TubLibrary pin to top', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
-    vi.mocked(getSessionRecords).mockResolvedValue({
-      status: true,
-      path: '/tmp/tub',
-      records: [
-        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
-        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
-      ],
-    });
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
+    vi.mocked(getSessionRecords).mockResolvedValue(familyRecords);
     useStore.setState({
       tubPath: '/tmp/tub',
       fields: ['cam/image_array', 'user/angle'],
@@ -145,8 +152,8 @@ describe('TubLibrary pin to top', () => {
     // Pinned (older) recording now renders first
     let order = await listOrder();
     expect(order).toEqual([oldestLabel, newestLabel]);
-    // Persisted per tub path
-    expect(localStorage.getItem('tubLibrary.pinned./tmp/tub')).toBe(JSON.stringify(['26-08-16_0']));
+    // Persisted per tub path（家族视图置顶存复合键 tub_path::session_id）
+    expect(localStorage.getItem('tubLibrary.pinned./tmp/tub')).toBe(JSON.stringify(['/tmp/tub::26-08-16_0']));
 
     // Unpin restores the newest-first order
     const unpinButton = await screen.findByRole('button', { name: '取消置顶' });
@@ -160,15 +167,8 @@ describe('TubLibrary pin to top', () => {
 describe('TubLibrary download button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
-    vi.mocked(getSessionRecords).mockResolvedValue({
-      status: true,
-      path: '/tmp/tub',
-      records: [
-        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
-        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
-      ],
-    });
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
+    vi.mocked(getSessionRecords).mockResolvedValue(familyRecords);
     useStore.setState({
       tubPath: '/tmp/tub',
       fields: ['cam/image_array', 'user/angle'],
@@ -226,9 +226,10 @@ describe('TubLibrary child tub guidance', () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     localStorage.clear();
-    vi.mocked(listTubSessions).mockResolvedValue({
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
+      family_root: '/tmp',
       sessions: [],
       child_tubs: childTubs,
     });
@@ -270,9 +271,10 @@ describe('TubLibrary child tub guidance', () => {
   });
 
   it('keeps the plain empty hint when there are no child tubs either', async () => {
-    vi.mocked(listTubSessions).mockResolvedValue({
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
+      family_root: '/tmp',
       sessions: [],
     });
     render(<MemoryRouter><TubLibrary /></MemoryRouter>);
@@ -289,22 +291,16 @@ describe('TubLibrary recordings summary total frames', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    vi.mocked(listTubSessions).mockResolvedValue({
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
+      family_root: '/tmp',
       sessions: [
         { ...sessions[0], record_count: 7 },
         { ...sessions[1], record_count: 4 },
       ],
     });
-    vi.mocked(getSessionRecords).mockResolvedValue({
-      status: true,
-      path: '/tmp/tub',
-      records: [
-        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
-        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
-      ],
-    });
+    vi.mocked(getSessionRecords).mockResolvedValue(familyRecords);
     useStore.setState({
       tubPath: '/tmp/tub',
       fields: ['cam/image_array', 'user/angle'],
@@ -387,9 +383,10 @@ describe('TubLibrary wall-clock playback scheduling', () => {
       _session_id: '26-08-16_1',
       'cam/image_array': `cam_${i}.jpg`,
     }));
-    vi.mocked(listTubSessions).mockResolvedValue({
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
+      family_root: '/tmp',
       sessions: [{ ...sessions[0], record_count: FRAME_COUNT }],
     });
     vi.mocked(getSessionRecords).mockResolvedValue({ status: true, path: '/tmp/tub', records });
@@ -471,15 +468,8 @@ describe('TubLibrary spacebar playback control', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
-    vi.mocked(getSessionRecords).mockResolvedValue({
-      status: true,
-      path: '/tmp/tub',
-      records: [
-        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
-        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
-      ],
-    });
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
+    vi.mocked(getSessionRecords).mockResolvedValue(familyRecords);
     useStore.setState({
       tubPath: '/tmp/tub',
       fields: ['cam/image_array', 'user/angle'],
@@ -543,6 +533,8 @@ const extraSession = {
   last_index: 9,
   start_time_ms: Date.parse('2026-08-16T12:00:00Z'),
   end_time_ms: Date.parse('2026-08-16T12:00:05Z'),
+  tub_path: '/tmp/tub',
+  tub_name: 'tub',
 };
 
 describe('TubLibrary manual refresh', () => {
@@ -551,15 +543,8 @@ describe('TubLibrary manual refresh', () => {
     // 墙钟播放 describe 泄漏的 Image/rAF stub 会改变本组用例的绘制行为，先恢复
     vi.unstubAllGlobals();
     localStorage.clear();
-    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
-    vi.mocked(getSessionRecords).mockResolvedValue({
-      status: true,
-      path: '/tmp/tub',
-      records: [
-        { _index: 3, _timestamp_ms: 1, _session_id: '26-08-16_1', 'cam/image_array': 'cam_3.jpg' },
-        { _index: 4, _timestamp_ms: 2, _session_id: '26-08-16_1', 'cam/image_array': 'cam_4.jpg' },
-      ],
-    });
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
+    vi.mocked(getSessionRecords).mockResolvedValue(familyRecords);
     vi.mocked(loadTub).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
@@ -588,19 +573,20 @@ describe('TubLibrary manual refresh', () => {
     await waitFor(() => {
       expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
     });
-    expect(listTubSessions).toHaveBeenCalledTimes(1);
+    expect(listFamilyTubSessions).toHaveBeenCalledTimes(1);
     expect(getSessionRecords).toHaveBeenCalledTimes(1);
 
     // 新录制出现后点「刷新」：列表、选中帧与全局 tub 全部重拉
-    vi.mocked(listTubSessions).mockResolvedValue({
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
+      family_root: '/tmp',
       sessions: [...sessions, extraSession],
     });
     fireEvent.click(screen.getByRole('button', { name: '刷新录制库（清空浏览器暂存的数据）' }));
 
     await waitFor(() => {
-      expect(listTubSessions).toHaveBeenCalledTimes(2);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(2);
     });
     await waitFor(() => {
       expect(getSessionRecords).toHaveBeenCalledTimes(2);
@@ -631,9 +617,10 @@ describe('TubLibrary manual refresh', () => {
     });
 
     // 原选中录制被删，只剩新录制 → 刷新后自动选中新的最新一条
-    vi.mocked(listTubSessions).mockResolvedValue({
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
+      family_root: '/tmp',
       sessions: [extraSession],
     });
     vi.mocked(getSessionRecords).mockResolvedValue({
@@ -662,7 +649,7 @@ describe('TubLibrary auto refresh', () => {
     // 墙钟播放 describe 泄漏的 Image/rAF stub 会改变本组用例的绘制行为，先恢复
     vi.unstubAllGlobals();
     localStorage.clear();
-    vi.mocked(listTubSessions).mockResolvedValue({ status: true, path: '/tmp/tub', sessions });
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
     vi.mocked(getSessionRecords).mockResolvedValue({
       status: true,
       path: '/tmp/tub',
@@ -688,17 +675,18 @@ describe('TubLibrary auto refresh', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(listTubSessions).toHaveBeenCalledTimes(1);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(1);
 
-      vi.mocked(listTubSessions).mockResolvedValue({
+      vi.mocked(listFamilyTubSessions).mockResolvedValue({
         status: true,
         path: '/tmp/tub',
+        family_root: '/tmp',
         sessions: [...sessions, extraSession],
       });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
-      expect(listTubSessions).toHaveBeenCalledTimes(2);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(2);
       // 新录制出现在列表头合计里（2+3+5 = 10 帧）；选中录制帧数未变，不重拉帧
       expect(screen.getByText('共 3 条录制 · 10 帧')).toBeInTheDocument();
       expect(getSessionRecords).toHaveBeenCalledTimes(1);
@@ -718,12 +706,12 @@ describe('TubLibrary auto refresh', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(listTubSessions).toHaveBeenCalledTimes(1);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(1);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(120_000);
       });
-      expect(listTubSessions).toHaveBeenCalledTimes(1);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -740,20 +728,21 @@ describe('TubLibrary auto refresh', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(listTubSessions).toHaveBeenCalledTimes(1);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(1);
 
       fireEvent.click(screen.getByRole('button', { name: '开始播放' }));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(90_000);
       });
       // 播放中不轮询，避免打断回放
-      expect(listTubSessions).toHaveBeenCalledTimes(1);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(1);
 
       fireEvent.click(screen.getByRole('button', { name: '停止播放' }));
       // 选中录制新增了帧 → 播放结束后 30s 内的轮询静默重拉其帧
-      vi.mocked(listTubSessions).mockResolvedValue({
+      vi.mocked(listFamilyTubSessions).mockResolvedValue({
         status: true,
         path: '/tmp/tub',
+        family_root: '/tmp',
         sessions: [{ ...sessions[0], record_count: 4 }, sessions[1]],
       });
       vi.mocked(getSessionRecords).mockResolvedValue({
@@ -768,11 +757,156 @@ describe('TubLibrary auto refresh', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
-      expect(listTubSessions).toHaveBeenCalledTimes(2);
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(2);
       // 帧重拉后帧计数与量程更新（1 / 4）
       expect(screen.getByText(/1 \/ 4/)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 家族聚合视图（方案 B）：录制库列出「当前工作 tub 所属家族」的全部录制会话，
+// 每条带 tub_path/tub_name。_session_id 跨 tub 会撞名（如 tub_6/tub_7 都是
+// 26-10-20_0），选中/置顶用 (tub_path, session_id) 复合键；选中异 tub 会话
+// 先 loadTub+setTub 切全局工作 tub，列表重拉后选中目标（而非家族最新）。
+// ---------------------------------------------------------------------------
+describe('TubLibrary family aggregation', () => {
+  const sessionA = {
+    session_id: '26-10-20_1',
+    record_count: 2,
+    first_index: 0,
+    last_index: 1,
+    start_time_ms: Date.parse('2026-10-20T12:00:00Z'),
+    end_time_ms: Date.parse('2026-10-20T12:00:02Z'),
+    tub_path: '/tmp/tub',
+    tub_name: 'tub',
+  };
+  // 异 tub 会话：_session_id 与真实场景一样可能撞名，时间更早（排在后面）
+  const sessionB = {
+    session_id: '26-10-20_0',
+    record_count: 3,
+    first_index: 0,
+    last_index: 2,
+    start_time_ms: Date.parse('2026-10-20T10:00:00Z'),
+    end_time_ms: Date.parse('2026-10-20T10:00:03Z'),
+    tub_path: '/tmp/tub_2',
+    tub_name: 'tub_2',
+  };
+  const mixedFamily = {
+    status: true,
+    path: '/tmp/tub',
+    family_root: '/tmp',
+    sessions: [sessionA, sessionB],
+  };
+  const labelA = fmt(sessionA.start_time_ms);
+  const labelB = fmt(sessionB.start_time_ms);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(mixedFamily);
+    vi.mocked(getSessionRecords).mockImplementation(async (tubPath: string, sessionId: string) => ({
+      status: true,
+      path: tubPath,
+      records: tubPath === '/tmp/tub_2'
+        ? [0, 1, 2].map((i) => ({ _index: i, _timestamp_ms: i + 1, _session_id: sessionId, 'cam/image_array': `cam_b${i}.jpg` }))
+        : familyRecords.records,
+    }));
+    vi.mocked(loadTub).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub_2',
+      record_count: 0,
+      total_physical_records: 0,
+      records: [],
+      fields: [],
+      deleted_indexes: [],
+    } as never);
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('renders a tub_name badge on rows so same-day cross-tub sessions are distinguishable', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByText(labelA)).toBeInTheDocument();
+    });
+    expect(screen.getByText(labelB)).toBeInTheDocument();
+    expect(screen.getByText('tub')).toBeInTheDocument();
+    expect(screen.getByText('tub_2')).toBeInTheDocument();
+  });
+
+  it('selecting another family tub session switches the working tub, then selects the target', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    // 挂载自动选中家族最新（同 tub 会话 A）
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-20_1');
+    });
+
+    const rowB = screen.getByText(labelB).closest('button');
+    expect(rowB).not.toBeNull();
+    fireEvent.click(rowB as HTMLButtonElement);
+
+    // 异 tub 选中：先 loadTub + setTub 切全局工作 tub
+    await waitFor(() => {
+      expect(loadTub).toHaveBeenCalledWith('/tmp/tub_2');
+    });
+    await waitFor(() => {
+      expect(useStore.getState().tubPath).toBe('/tmp/tub_2');
+    });
+    // 列表按新 tub 重拉后选中的是点击的目标 B，而不是家族最新 A；
+    // 切换只发生一次（refreshSessions 的 pending 命中后直接选中，不再重复 loadTub）
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub_2', '26-10-20_0');
+    });
+    expect(loadTub).toHaveBeenCalledTimes(1);
+    // 切换瞬间旧选中 A 配新 tub 路径的错拉被守卫挡住
+    expect(getSessionRecords).not.toHaveBeenCalledWith('/tmp/tub_2', '26-10-20_1');
+    // 目标会话的帧已加载（1 / 3）
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 3/)).toBeInTheDocument();
+    });
+  });
+
+  it('selecting a same-tub session does not touch the global working tub', async () => {
+    // 同 tub 的另一条会话 C（更早）
+    const sessionC = {
+      ...sessionB,
+      session_id: '26-10-20_2',
+      start_time_ms: Date.parse('2026-10-20T11:00:00Z'),
+      end_time_ms: Date.parse('2026-10-20T11:00:01Z'),
+      tub_path: '/tmp/tub',
+      tub_name: 'tub',
+    };
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [sessionA, sessionC],
+    });
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-20_1');
+    });
+
+    const rowC = screen.getByText(fmt(sessionC.start_time_ms)).closest('button');
+    fireEvent.click(rowC as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-20_2');
+    });
+    // 同 tub 选中：不触发 loadTub/setTub，全局工作 tub 不变
+    expect(loadTub).not.toHaveBeenCalled();
+    expect(useStore.getState().tubPath).toBe('/tmp/tub');
   });
 });

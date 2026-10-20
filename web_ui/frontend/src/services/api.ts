@@ -183,6 +183,25 @@ export const listTubSessions = async (tubPath: string) => {
   };
 };
 
+// 家族聚合视图：一个录制家族的跨 tub 会话（_session_id 跨 tub 会撞名，
+// 必须按 (tub_path, session_id) 复合键区分，见 issue 方案 B）
+export interface FamilyTubSession extends TubSession {
+  tub_path: string;
+  tub_name: string;
+}
+
+export const listFamilyTubSessions = async (tubPath: string) => {
+  const response = await api.get('/tub/family_sessions', { params: { tubPath } });
+  return response.data as {
+    status: boolean;
+    path: string;
+    family_root: string;
+    sessions: FamilyTubSession[];
+    // 家族聚合为空（成员全删/无成员）时后端附带，供「子 tub」切换引导
+    child_tubs?: ChildTubInfo[];
+  };
+};
+
 export const listChildTubs = async (tubPath: string) => {
   const response = await api.get('/tub/child_tubs', { params: { tubPath } });
   return response.data as { status: boolean; path: string; child_tubs: ChildTubInfo[] };
