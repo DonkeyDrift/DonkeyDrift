@@ -215,6 +215,95 @@ def get_image(path: str, tubPath: Optional[str] = None, request: Request = None)
         headers={"ETag": etag, "Cache-Control": "private, max-age=86400"},
     )
 
+def _list_child_tubs(path: str) -> List[Dict[str, Any]]:
+    """扫描 path 的直接子目录及其子目录（深度 ≤ 2），找出其中的子 tub。
+
+    新版滚动录制会按 tub_序号_日期 建子目录写入真实数据，而父目录 manifest
+    的 deleted_indexes 可能已覆盖全部记录（软删）。只读 manifest 元数据、
+    不迭代记录；单个子 tub 读取失败仅告警跳过，不拖垮整体。
+    """
+    results: List[Dict[str, Any]] = []
+    try:
+        names = sorted(os.listdir(path))
+    except OSError as e:
+        logger.warning(f"Failed to list directory {path} for child tubs: {e}")
+        return results
+
+    candidates: List[str] = []
+    for name in names:
+        if name.startswith('.'):
+            continue
+        child = os.path.join(path, name)
+        if not os.path.isdir(child):
+            continue
+        candidates.append(child)
+        try:
+            sub_names = sorted(os.listdir(child))
+        except OSError:
+            continue
+        for sub_name in sub_names:
+            if sub_name.startswith('.'):
+                continue
+            sub = os.path.join(child, sub_name)
+            if os.path.isdir(sub):
+                candidates.append(sub)
+
+    for candidate in candidates:
+        if not os.path.isfile(os.path.join(candidate, 'manifest.json')):
+            continue
+        try:
+            tub = Tub(candidate, read_only=True)
+            try:
+                manifest = tub.manifest
+                total_physical = manifest.current_index
+                deleted_count = len(manifest.deleted_indexes)
+                catalog_names = list(getattr(manifest, 'catalog_paths', []) or [])
+            finally:
+                tub.close()
+
+            # last_modified 取 manifest.json 与全部 catalog 文件的 mtime 最大值，
+            # 文件不存在就跳过（滚动录制中间态可能有缺失）
+            mtimes = []
+            try:
+                mtimes.append(os.stat(os.path.join(candidate, 'manifest.json')).st_mtime)
+            except OSError:
+                pass
+            for catalog_name in catalog_names:
+                try:
+                    mtimes.append(os.stat(os.path.join(candidate, catalog_name)).st_mtime)
+                except OSError:
+                    continue
+            last_modified_ms = int(max(mtimes) * 1000) if mtimes else 0
+
+            results.append({
+                "name": os.path.basename(candidate),
+                "path": os.path.abspath(candidate),
+                "record_count": total_physical - deleted_count,
+                "total_physical": total_physical,
+                "deleted_count": deleted_count,
+                "last_modified_ms": last_modified_ms,
+            })
+        except Exception as e:
+            logger.warning(f"Skipping child tub {candidate}: {e}")
+            continue
+
+    results.sort(key=lambda item: item["last_modified_ms"], reverse=True)
+    return results
+
+
+@router.get("/child_tubs")
+async def list_child_tubs(tubPath: str):
+    """列出 path 下（深度 ≤ 2）的子 tub，供「录制视频库」空列表时引导切换。
+
+    path 自身是否含 manifest.json 不影响扫描（父目录可能是「全删 tub」）。
+    """
+    path = os.path.expanduser(tubPath)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    return {"status": True, "path": path, "child_tubs": _list_child_tubs(path)}
+
+
 @router.get("/sessions")
 async def list_sessions(tubPath: str):
     """List recording sessions (videos) inside a tub.
@@ -259,7 +348,12 @@ async def list_sessions(tubPath: str):
             tub.close()
 
         items = sorted(sessions.values(), key=lambda s: s['first_index'], reverse=True)
-        return {"status": True, "path": path, "sessions": items}
+        response: Dict[str, Any] = {"status": True, "path": path, "sessions": items}
+        if not items:
+            # 录制全部软删/为空时，附带子目录里的子 tub（真实录制常在
+            # tub_序号_日期 子目录），前端据此给出切换引导
+            response["child_tubs"] = _list_child_tubs(path)
+        return response
     except Exception as e:
         logger.error(f"Failed to list sessions for tub {path}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

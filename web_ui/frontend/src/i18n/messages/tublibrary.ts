@@ -31,6 +31,8 @@ export const tublibrary: { zh: Record<string, string>; en: Record<string, string
     'tubLibrary.refreshing': '刷新中…',
     'tubLibrary.refreshAria': '刷新录制库（清空浏览器暂存的数据）',
     'tubLibrary.refreshTitle': '清空浏览器内暂存的录制列表、帧缓存并重新加载最新数据（编辑器同步刷新）；本板块激活期间每 30 秒自动检查新录制，播放中暂停',
+    'tubLibrary.childTubsHint': '当前 Tub 没有有效录制（可能已被全部软删），发现以下子 Tub，点击进入：',
+    'tubLibrary.openChildAria': '切换到子 Tub {name}',
   },
   en: {
     'tubLibrary.title': 'Video Library',
@@ -62,5 +64,7 @@ export const tublibrary: { zh: Record<string, string>; en: Record<string, string
     'tubLibrary.refreshing': 'Refreshing…',
     'tubLibrary.refreshAria': 'Refresh the video library (clears browser-cached data)',
     'tubLibrary.refreshTitle': 'Clear browser-cached recordings and frames, then reload the latest data (the editor refreshes too); auto-checks for new recordings every 30s while this section is active, paused during playback',
+    'tubLibrary.childTubsHint': 'This tub has no live recordings (all may be soft-deleted). Child tubs found — click to open:',
+    'tubLibrary.openChildAria': 'Open child tub {name}',
   },
 };

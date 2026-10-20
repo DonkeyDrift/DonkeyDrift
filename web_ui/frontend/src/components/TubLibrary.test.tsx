@@ -197,6 +197,91 @@ describe('TubLibrary download button', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 子 tub 发现（方案 A）：tubPath 已加载但 sessions 为空（如 509 条记录全部被
+// 软删）时，/tub/sessions 附带 child_tubs 字段，列表区渲染引导面板；
+// 点击条目 loadTub 子 tub 并 setTub 切换全局 tubPath。
+// ---------------------------------------------------------------------------
+describe('TubLibrary child tub guidance', () => {
+  const childTubs = [
+    {
+      name: 'tub_7_26-10-20',
+      path: '/tmp/tub/tub_7_26-10-20',
+      record_count: 5930,
+      total_physical: 5930,
+      deleted_count: 0,
+      last_modified_ms: Date.parse('2026-10-20T12:00:00Z'),
+    },
+    {
+      name: 'tub_6_26-10-20',
+      path: '/tmp/tub/tub_6_26-10-20',
+      record_count: 1793,
+      total_physical: 1793,
+      deleted_count: 0,
+      last_modified_ms: Date.parse('2026-10-20T11:00:00Z'),
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    vi.mocked(listTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      sessions: [],
+      child_tubs: childTubs,
+    });
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+    });
+  });
+
+  it('renders the guidance panel and switches to the child tub on click', async () => {
+    vi.mocked(loadTub).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub/tub_7_26-10-20',
+      record_count: 5930,
+      total_physical_records: 5930,
+      records: [],
+      fields: [],
+      deleted_indexes: [],
+    } as never);
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    // 引导标题 + 两个子 tub 条目（目录名 + 有效帧数）
+    expect(await screen.findByText(/当前 Tub 没有有效录制/)).toBeInTheDocument();
+    const entry = screen.getByRole('button', { name: '切换到子 Tub tub_7_26-10-20' });
+    expect(entry).toHaveTextContent('5930 帧');
+    expect(screen.getByRole('button', { name: '切换到子 Tub tub_6_26-10-20' })).toBeInTheDocument();
+
+    fireEvent.click(entry);
+    await waitFor(() => {
+      expect(loadTub).toHaveBeenCalledWith('/tmp/tub/tub_7_26-10-20');
+    });
+    // setTub 切换全局 tubPath → 录制库按新目录重拉
+    await waitFor(() => {
+      expect(useStore.getState().tubPath).toBe('/tmp/tub/tub_7_26-10-20');
+    });
+  });
+
+  it('keeps the plain empty hint when there are no child tubs either', async () => {
+    vi.mocked(listTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      sessions: [],
+    });
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    expect(await screen.findByText('暂无录制')).toBeInTheDocument();
+    expect(screen.queryByText(/当前 Tub 没有有效录制/)).not.toBeInTheDocument();
+  });
+});
+
 // 回归测试（总帧数口径统一）：左侧录制列表头展示「共 N 条录制 · 合计有效帧数」，
 // 合计为所有 sessions 的 record_count 之和（有效帧，迭代跳过软删除），
 // 与 Tub 编辑器的有效帧数口径对齐。

@@ -33,6 +33,9 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.selectTubDir': '选择 Tub 目录',
     'tub.loadFailed': '加载 Tub 失败',
     'tub.loadFailedFromDir': '从所选目录加载 Tub 失败',
+    // 子 tub 发现（目录本身不是有效 tub 或全删时，引导加载子目录里的真实录制）
+    'tub.childTubsFound': '该目录下发现以下子 Tub，点击直接加载：',
+    'tub.childTubFrames': '{count} 帧',
     // SimulatorConfig
     'tub.simTitle': '模拟器配置',
     'tub.simHoverSubtitle': '配置模拟器连接',
@@ -90,6 +93,10 @@ export const tubnav: { zh: Record<string, string>; en: Record<string, string> } 
     'tub.selectTubDir': 'Select Tub Directory',
     'tub.loadFailed': 'Failed to load tub',
     'tub.loadFailedFromDir': 'Failed to load tub from selected directory',
+    // Child tub discovery (guide to real recordings in sub-directories when the
+    // picked directory is not a valid tub or has all records soft-deleted)
+    'tub.childTubsFound': 'Child tubs found in this directory — click to load:',
+    'tub.childTubFrames': '{count} frames',
     // SimulatorConfig
     'tub.simTitle': 'Simulator Configuration',
     'tub.simHoverSubtitle': 'Configure simulator connection',

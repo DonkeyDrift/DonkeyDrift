@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { loadConfig, loadTub, discoverProjects, getApiErrorMessage } from '../services/api';
+import { loadConfig, loadTub, discoverProjects, listChildTubs, getApiErrorMessage } from '../services/api';
 import { useTranslation } from '@/i18n';
 
 /**
@@ -18,6 +18,33 @@ async function autoLoadTubFor(carPath: string) {
     carPath.endsWith('/') || carPath.endsWith('\\') ? `${carPath}data` : `${carPath}/data`;
   try {
     const data = await loadTub(tubPath);
+    if (data.records && data.records.length === 0) {
+      // <car>/data 是合法 tub 但记录全空（常见：deleted_indexes 覆盖全部索引）
+      // 时，真实录制在子目录的子 tub 里（新版滚动录制按 tub_序号_日期 建子
+      // 目录）：自动切到最新的子 tub，避免录制视频库显示「暂无录制」
+      try {
+        const childData = await listChildTubs(tubPath);
+        const newest = childData.child_tubs?.[0];
+        if (newest) {
+          console.warn(
+            `Tub ${tubPath} has no live records; falling back to newest child tub: ${newest.path}`,
+          );
+          const childTubData = await loadTub(newest.path);
+          useStore
+            .getState()
+            .setTub(
+              childTubData.path,
+              childTubData.records || [],
+              childTubData.fields || [],
+              childTubData.total_physical_records,
+              childTubData.deleted_indexes,
+            );
+          return;
+        }
+      } catch {
+        // 子 tub 发现/加载失败维持现状：按原空 data 正常 setTub
+      }
+    }
     useStore
       .getState()
       .setTub(
@@ -25,7 +52,7 @@ async function autoLoadTubFor(carPath: string) {
         data.records || [],
         data.fields || [],
         data.total_physical_records,
-        data.deleted_indexes
+        data.deleted_indexes,
       );
   } catch {
     console.warn('Auto-loading tub from ./data failed, user might need to select manually.');
