@@ -973,7 +973,7 @@ def add_simulator(V, cfg):
                         #    record_distance=cfg.SIM_RECORD_DISTANCE, record_orientation=cfg.SIM_RECORD_ORIENTATION,
                            delay=cfg.SIM_ARTIFICIAL_LATENCY)
         threaded = True
-        inputs = ['steering', 'throttle', 'reconnect_simulator', 'reset_car']
+        inputs = ['steering', 'throttle', 'brake', 'reconnect_simulator', 'reset_car']
         outputs = ['cam/image_array']
 
         if cfg.SIM_RECORD_LOCATION:
