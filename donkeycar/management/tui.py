@@ -67,6 +67,31 @@ def _lan_host():
         pass
     return "localhost"
 
+def _drive_api_token():
+    """读取 Web 后端访问令牌：DRIVE_API_TOKEN 环境变量 > ~/.donkeycar/drive_api.token。
+
+    与车端 DriveApiBridge.load_api_token、后端 auth.load_or_create_token 同源。
+    后端绑 0.0.0.0 时非回环访问必须带令牌（main.py auth_middleware），
+    局域网 Drive 页 URL 需要拼上 ?token= 才能过鉴权门；取不到返回 ""——
+    仅回环/未配令牌时保持原样即可。
+    """
+    token = os.environ.get("DRIVE_API_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        return (Path.home() / ".donkeycar" / "drive_api.token").read_text(
+            encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+def _drive_page_url(host, frontend_port):
+    """拼 Drive 页面 URL：有令牌时 ?token= 放 # 之前（查询串发给服务器过鉴权门，
+    后端种 Cookie 后 302 回干净 URL，HashRouter 深链不丢）；无令牌保持原样。"""
+    token = _drive_api_token()
+    if token:
+        return f"http://{host}:{frontend_port}/?token={token}#/drive"
+    return f"http://{host}:{frontend_port}/#/drive"
+
 # 初始化 Console
 console = Console()
 
@@ -1391,8 +1416,9 @@ class DriveCommand(DonkeyCommand):
             # 记录本次启动的进程 PID，供下次启动时清理
             write_drive_pids([p.pid for p in processes])
 
-            # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开
-            drive_url = f"http://{_lan_host()}:{frontend_port}/#/drive"
+            # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开；
+            # 带 ?token= 过 P0 鉴权门（非回环来源一律要令牌，本机用 LAN IP 亦然）
+            drive_url = _drive_page_url(_lan_host(), frontend_port)
             if inst is not None:
                 # 复用实例不经过 `donkey web --open`，由 TUI 直接打开 Drive 页；
                 # 实例刚通过 find_live_instance() 探测，前端端口已在监听
