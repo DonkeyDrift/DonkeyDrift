@@ -58,6 +58,7 @@ vi.mock('../services/api', () => ({
 
 import { TubEditor } from './TubEditor';
 import { useStore } from '../store/useStore';
+import { deleteRecords, getRecords, getSessionRecords } from '../services/api';
 
 const makeRecords = () =>
   Array.from({ length: 10 }, (_, i) => ({
@@ -190,6 +191,71 @@ describe('TubEditor 帧计数口径标签', () => {
     mountEditor();
 
     expect(screen.getByText('tubEditor.framesSessionScope {"count":10}')).toBeInTheDocument();
+  });
+
+  it('多选会话（activeSessionIds 多值）渲染「已选 S 段 · M 帧」', () => {
+    const records = [...makeRecords(), ...makeRecords()];
+    useStore.getState().setActiveSession('s1', records, ['s1', 's2']);
+    mountEditor();
+
+    expect(
+      screen.getByText('tubEditor.framesSessionScopeMulti {"segments":2,"count":20}')
+    ).toBeInTheDocument();
+  });
+});
+
+describe('TubEditor 多选会话删除后刷新', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
+  });
+
+  beforeEach(() => {
+    const records = makeRecords();
+    useStore.setState({
+      records,
+      tubPath: '/tmp/tub',
+      fields: ['user/angle', 'user/throttle'],
+      activeSessionId: null,
+      activeSessionRecords: [],
+      activeSessionIds: [],
+      totalPhysicalRecords: records.length,
+      deletedIndexes: [],
+      selectionStartIndex: null,
+      selectionEndIndex: null,
+    });
+    vi.mocked(getRecords).mockResolvedValue({ records: [] } as never);
+    vi.mocked(deleteRecords).mockResolvedValue({ total_physical_records: 10, deleted_indexes: [] } as never);
+  });
+
+  it('activeSessionIds 多值时逐会话拉取并按 ids 顺序合并写回', async () => {
+    const s1Records = makeRecords();
+    const s2Records = makeRecords().map((r) => ({ ...r, _index: r._index + 100 }));
+    useStore.getState().setActiveSession('s1', [...s1Records, ...s2Records], ['s1', 's2']);
+    const getSessionRecordsMock = vi.mocked(getSessionRecords);
+    getSessionRecordsMock.mockImplementation(async (_path: string, sid: string) => ({
+      status: true,
+      path: '/tmp/tub',
+      records: sid === 's1' ? s1Records : s2Records,
+    }));
+
+    mountEditor();
+    // 提交选区 [2, 5)：删除 → 触发删除后刷新
+    useStore.getState().setSelectionRange(2, 5);
+    await waitFor(() => {
+      expect(useStore.getState().selectionEndIndex).toBe(5);
+    });
+    fireEvent.click(screen.getByText('tubEditor.delete'));
+
+    await waitFor(() => {
+      expect(deleteRecords).toHaveBeenCalledWith([2, 3, 4]);
+      expect(getSessionRecordsMock).toHaveBeenCalledWith('/tmp/tub', 's1');
+      expect(getSessionRecordsMock).toHaveBeenCalledWith('/tmp/tub', 's2');
+    });
+    const state = useStore.getState();
+    expect(state.activeSessionIds).toEqual(['s1', 's2']);
+    expect(state.activeSessionId).toBe('s1');
+    // 合并 records 按 activeSessionIds 顺序
+    expect(state.activeSessionRecords).toEqual([...s1Records, ...s2Records]);
   });
 });
 

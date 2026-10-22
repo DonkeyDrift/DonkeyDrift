@@ -154,4 +154,67 @@ describe('TubEditor AI 一键筛选 (issue #402)', () => {
       expect(screen.queryByText('tubEditor.aiFilterTitle')).not.toBeInTheDocument();
     });
   });
+
+  it('多选会话时逐会话扫描，segments 合并后进入确认层并跨会话去重', async () => {
+    useStore.getState().setActiveSession('s1', makeRecords(), ['s1', 's2']);
+    api.scanAiClean.mockImplementation(async (_paths: string[], sid: string | null) => ({
+      status: true,
+      tubs: [
+        {
+          tub_path: '/tmp/tub',
+          record_count: 10,
+          segment_count: sid === 's1' ? 1 : 2,
+          frame_count: 0,
+          segments:
+            sid === 's1'
+              ? [
+                  {
+                    start_index: 1,
+                    end_index: 2,
+                    frame_count: 2,
+                    indexes: [1, 2],
+                    reason_code: 'stop_then_reverse',
+                    detail: {},
+                  },
+                ]
+              : [
+                  {
+                    start_index: 4,
+                    end_index: 5,
+                    frame_count: 2,
+                    indexes: [4, 5],
+                    reason_code: 'stop_then_reverse',
+                    detail: {},
+                  },
+                  {
+                    start_index: 1,
+                    end_index: 1,
+                    frame_count: 1,
+                    indexes: [1],
+                    reason_code: 'stop_then_reverse',
+                    detail: {},
+                  },
+                ],
+        },
+      ],
+      total_segments: 0,
+      total_frames: 0,
+    }));
+    render(<TubEditor />);
+
+    fireEvent.click(screen.getByLabelText('tubEditor.aiFilterEntryAria'));
+
+    // 逐会话扫描（带 session_id 过滤），合并片段后弹确认层
+    await waitFor(() => {
+      expect(api.scanAiClean).toHaveBeenCalledWith(['/tmp/tub'], 's1');
+      expect(api.scanAiClean).toHaveBeenCalledWith(['/tmp/tub'], 's2');
+      expect(screen.getByText('tubEditor.aiFilterTitle')).toBeInTheDocument();
+    });
+
+    // 确认删除：跨会话 indexes 去重排序（[1,2] ∪ [4,5,1]）后一次性提交
+    fireEvent.click(screen.getByText('tubEditor.aiFilterConfirm'));
+    await waitFor(() => {
+      expect(api.deleteRecords).toHaveBeenCalledWith([1, 2, 4, 5]);
+    });
+  });
 });

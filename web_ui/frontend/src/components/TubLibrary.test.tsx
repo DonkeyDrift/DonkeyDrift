@@ -5,13 +5,13 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 import { TubLibrary } from './TubLibrary';
 import { useStore } from '../store/useStore';
-import { getSessionRecords, listFamilyTubSessions, downloadTubSession, loadTub } from '../services/api';
+import { getSessionRecords, listFamilyTubSessions, downloadTubSession, deleteTubSession, getImageUrl, loadTub } from '../services/api';
 
 // 回归测试：进入录制视频库后自动选中最新一条录制（sessions[0]，API 已按
 // 最新在前排序），无需手动点击列表。
 
 vi.mock('../services/api', () => ({
-  getImageUrl: (path: string) => `http://localhost/img/${encodeURIComponent(path)}`,
+  getImageUrl: vi.fn((path: string) => `http://localhost/img/${encodeURIComponent(path)}`),
   getApiErrorMessage: (_err: unknown, fallback: string) => fallback,
   listFamilyTubSessions: vi.fn(),
   getSessionRecords: vi.fn(),
@@ -908,5 +908,451 @@ describe('TubLibrary family aggregation', () => {
     // 同 tub 选中：不触发 loadTub/setTub，全局工作 tub 不变
     expect(loadTub).not.toHaveBeenCalled();
     expect(useStore.getState().tubPath).toBe('/tmp/tub');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 多选会话筛选（家族视图，跨 tub 版）：ctrl/⌘ 切换、shift 范围选、行首
+// checkbox（等价 ctrl+点击）——多选手势一律不切换全局 tub；集合按 tub 去重
+// 判定编辑器挂接（单 tub=全局 → 挂会话作用域，必要时先切 tub；跨 tub → 回退
+// 整 tub 视图）；合并/批量删除按 start_time_ms 升序；合并帧带 __tubPath 标按
+// 各会话自己的 tub 取图。
+// ---------------------------------------------------------------------------
+describe('TubLibrary multi-select session filter', () => {
+  // 每条会话的可区分帧（合并顺序断言用）
+  const recordsFor: Record<string, { _index: number; _timestamp_ms: number; _session_id: string; 'cam/image_array': string }[]> = {
+    '26-08-16_1': [0, 1].map((i) => ({ _index: i + 3, _timestamp_ms: i + 1, _session_id: '26-08-16_1', 'cam/image_array': `cam_a${i}.jpg` })),
+    '26-08-16_0': [0, 1, 2].map((i) => ({ _index: i, _timestamp_ms: i + 3, _session_id: '26-08-16_0', 'cam/image_array': `cam_b${i}.jpg` })),
+    '26-08-16_2': [0, 1, 2, 3, 4].map((i) => ({ _index: i + 5, _timestamp_ms: i + 6, _session_id: '26-08-16_2', 'cam/image_array': `cam_c${i}.jpg` })),
+    '26-10-20_1': [0, 1].map((i) => ({ _index: i, _timestamp_ms: i + 1, _session_id: '26-10-20_1', 'cam/image_array': `cam_x${i}.jpg` })),
+    '26-10-20_0': [0, 1, 2].map((i) => ({ _index: i, _timestamp_ms: i + 2, _session_id: '26-10-20_0', 'cam/image_array': `cam_d${i}.jpg` })),
+    '26-10-21_2': [0, 1].map((i) => ({ _index: i, _timestamp_ms: i + 1, _session_id: '26-10-21_2', 'cam/image_array': `cam_g${i}.jpg` })),
+    '26-10-21_1': [0, 1].map((i) => ({ _index: i, _timestamp_ms: i + 2, _session_id: '26-10-21_1', 'cam/image_array': `cam_f${i}.jpg` })),
+    '26-10-21_0': [0, 1].map((i) => ({ _index: i, _timestamp_ms: i + 3, _session_id: '26-10-21_0', 'cam/image_array': `cam_e${i}.jpg` })),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    vi.mocked(listFamilyTubSessions).mockResolvedValue(familyResponse);
+    vi.mocked(getSessionRecords).mockImplementation(async (_tubPath: string, sessionId: string) => ({
+      status: true,
+      path: '/tmp/tub',
+      records: recordsFor[sessionId] ?? [],
+    }));
+    vi.mocked(deleteTubSession).mockResolvedValue({
+      status: true,
+      message: 'ok',
+      deleted_count: 2,
+      record_count: 0,
+      deleted_indexes: [],
+    } as never);
+    vi.mocked(loadTub).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      record_count: 0,
+      total_physical_records: 0,
+      records: [],
+      fields: [],
+      deleted_indexes: [],
+    } as never);
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      fields: ['cam/image_array', 'user/angle'],
+      config: { DRIVE_LOOP_HZ: '60' } as never,
+      activeSessionId: null,
+      activeSessionRecords: [],
+      activeSessionIds: [],
+    });
+  });
+
+  const rowButton = (label: string) => screen.getByText(label).closest('button') as HTMLButtonElement;
+
+  it('ctrl+click adds a session to the multi-selection and merges records in start_time order', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    // 挂载自动选中最新一条（锚点 = 26-08-16_1，单选）
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
+    });
+
+    fireEvent.click(rowButton(oldestLabel), { ctrlKey: true });
+
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_0', '26-08-16_1']);
+    });
+    const state = useStore.getState();
+    // 锚点 = 最后点击行；同 tub 多选挂接编辑器作用域
+    expect(state.activeSessionId).toBe('26-08-16_0');
+    // 合并 records 按 start_time_ms 升序（10:00 在前），与点击先后无关
+    expect(state.activeSessionRecords.map((r) => r['cam/image_array'])).toEqual([
+      'cam_b0.jpg', 'cam_b1.jpg', 'cam_b2.jpg', 'cam_a0.jpg', 'cam_a1.jpg',
+    ]);
+    // 两行均多选态：行首 checkbox aria-checked；锚点行主高亮、成员行次高亮
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]).toHaveAttribute('aria-checked', 'true');
+    expect(checkboxes[1]).toHaveAttribute('aria-checked', 'true');
+    expect(rowButton(newestLabel).className).toContain('border-cyan-500/40');
+    expect(rowButton(oldestLabel).className).toContain('border-cyan-400');
+    // 操作条显示段数与合计帧数（2 + 3 = 5）
+    expect(screen.getByText('已选 2 段 · 共 5 帧')).toBeInTheDocument();
+  });
+
+  it('shift+click selects the closed range from the anchor row in list order', async () => {
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [sessions[0], extraSession, sessions[1]],
+    });
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
+    });
+
+    // 锚点（最新）shift+点击最旧 → 闭区间全选（3 段，time-asc：_0 < _1 < _2）
+    fireEvent.click(rowButton(oldestLabel), { shiftKey: true });
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_0', '26-08-16_1', '26-08-16_2']);
+    });
+    expect(useStore.getState().activeSessionId).toBe('26-08-16_0');
+    let checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes.map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'true', 'true']);
+
+    // 反向范围：普通点击中间行（锚点重置），shift+点击最新 → 仅 {最新, 中间}
+    fireEvent.click(rowButton(fmt(extraSession.start_time_ms)));
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_2']);
+    });
+    fireEvent.click(rowButton(newestLabel), { shiftKey: true });
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_1', '26-08-16_2']);
+    });
+    checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes.map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'true', 'false']);
+  });
+
+  it('row checkbox toggles like ctrl+click and removes the session on second click', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
+    });
+
+    // 勾选旧行 → 加入集合，锚点移到旧行
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_0', '26-08-16_1']);
+      expect(useStore.getState().activeSessionId).toBe('26-08-16_0');
+    });
+
+    // 再次勾选 → 移出集合；移出的是锚点行，锚点回最近添加的剩余成员（新行）
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_1']);
+      expect(useStore.getState().activeSessionId).toBe('26-08-16_1');
+    });
+  });
+
+  it('ctrl+clicking the only selected row clears to empty and suppresses auto re-select', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<MemoryRouter><TubLibrary active /></MemoryRouter>);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(getSessionRecords).toHaveBeenCalledTimes(1);
+
+      // ctrl+点击唯一选中行 → 取消到空集合：编辑器回退整 tub 视图
+      fireEvent.click(rowButton(newestLabel), { ctrlKey: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(useStore.getState().activeSessionId).toBeNull();
+      expect(useStore.getState().activeSessionRecords).toEqual([]);
+
+      // 30s 轮询仍会重拉列表，但不再自动选中（getSessionRecords 不新增调用）
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(2);
+      expect(getSessionRecords).toHaveBeenCalledTimes(1);
+      expect(useStore.getState().activeSessionId).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ctrl+clicking a cross-tub row joins the set without switching the working tub', async () => {
+    const sessionA = {
+      session_id: '26-10-20_1',
+      record_count: 2,
+      first_index: 0,
+      last_index: 1,
+      start_time_ms: Date.parse('2026-10-20T12:00:00Z'),
+      end_time_ms: Date.parse('2026-10-20T12:00:02Z'),
+      tub_path: '/tmp/tub',
+      tub_name: 'tub',
+    };
+    // 更早的异 tub 会话（10:00 < 12:00，合并后排前面）
+    const sessionB = {
+      session_id: '26-10-20_0',
+      record_count: 3,
+      first_index: 0,
+      last_index: 2,
+      start_time_ms: Date.parse('2026-10-20T10:00:00Z'),
+      end_time_ms: Date.parse('2026-10-20T10:00:03Z'),
+      tub_path: '/tmp/tub_2',
+      tub_name: 'tub_2',
+    };
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [sessionA, sessionB],
+    });
+    vi.mocked(getSessionRecords).mockImplementation(async (tubPath: string, sessionId: string) => ({
+      status: true,
+      path: tubPath,
+      records: recordsFor[sessionId] ?? [],
+    }));
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-20_1');
+    });
+
+    fireEvent.click(rowButton(fmt(sessionB.start_time_ms)), { ctrlKey: true });
+
+    // 跨 tub 勾选：正常加入集合（UI 态：两行 checkbox 勾选 + 操作条），
+    // 多选手势不切换全局 tub、不调 loadTub
+    await waitFor(() => {
+      expect(screen.getByText('已选 2 段 · 共 5 帧')).toBeInTheDocument();
+    });
+    expect(loadTub).not.toHaveBeenCalled();
+    expect(useStore.getState().tubPath).toBe('/tmp/tub');
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes.map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'true']);
+    // 跨 tub 选择：编辑器回退整 tub 视图（store 作用域清空，组件集合保留），操作条提示
+    expect(useStore.getState().activeSessionId).toBeNull();
+    expect(useStore.getState().activeSessionRecords).toEqual([]);
+    expect(screen.getByText('跨 Tub 选择：编辑器请逐 Tub 编辑')).toBeInTheDocument();
+    // 播放器仍播合并序列（time-asc：B 3 帧 + A 2 帧 = 5 帧）
+    await waitFor(() => {
+      expect(screen.getByText(/1 \/ 5/)).toBeInTheDocument();
+    });
+    // 合并帧按各自 tub 取图：__tubPath 标传到 getImageUrl（缓存 key=URL，URL 含 tubPath 不串图）
+    await waitFor(() => {
+      expect(getImageUrl).toHaveBeenCalledWith('cam_d0.jpg', '/tmp/tub_2');
+      expect(getImageUrl).toHaveBeenCalledWith('cam_x0.jpg', '/tmp/tub');
+    });
+  });
+
+  it('single-tub multi-selection on another tub switches the working tub and keeps the set', async () => {
+    const sessionF = {
+      session_id: '26-10-21_2',
+      record_count: 2,
+      first_index: 0,
+      last_index: 1,
+      start_time_ms: Date.parse('2026-10-21T12:00:00Z'),
+      end_time_ms: Date.parse('2026-10-21T12:00:02Z'),
+      tub_path: '/tmp/tub',
+      tub_name: 'tub',
+    };
+    const sessionG = {
+      session_id: '26-10-21_1',
+      record_count: 2,
+      first_index: 0,
+      last_index: 1,
+      start_time_ms: Date.parse('2026-10-21T11:00:00Z'),
+      end_time_ms: Date.parse('2026-10-21T11:00:01Z'),
+      tub_path: '/tmp/tub_2',
+      tub_name: 'tub_2',
+    };
+    const sessionH = {
+      session_id: '26-10-21_0',
+      record_count: 2,
+      first_index: 0,
+      last_index: 1,
+      start_time_ms: Date.parse('2026-10-21T10:00:00Z'),
+      end_time_ms: Date.parse('2026-10-21T10:00:01Z'),
+      tub_path: '/tmp/tub_2',
+      tub_name: 'tub_2',
+    };
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [sessionF, sessionG, sessionH],
+    });
+    vi.mocked(getSessionRecords).mockImplementation(async (tubPath: string, sessionId: string) => ({
+      status: true,
+      path: tubPath,
+      records: recordsFor[sessionId] ?? [],
+    }));
+    vi.mocked(loadTub).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub_2',
+      record_count: 0,
+      total_physical_records: 0,
+      records: [],
+      fields: [],
+      deleted_indexes: [],
+    } as never);
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-21_2');
+    });
+
+    // 先取消自动选中的 F，再勾选同属 /tmp/tub_2 的 G、H → 收敛单 tub 非全局 tub
+    fireEvent.click(rowButton(fmt(sessionF.start_time_ms)), { ctrlKey: true });
+    await act(async () => {});
+    expect(useStore.getState().activeSessionId).toBeNull();
+    fireEvent.click(rowButton(fmt(sessionG.start_time_ms)), { ctrlKey: true });
+    fireEvent.click(rowButton(fmt(sessionH.start_time_ms)), { ctrlKey: true });
+
+    // 复用 pending 切换机制：切全局 tub 到 /tmp/tub_2，且集合被保留
+    await waitFor(() => {
+      expect(loadTub).toHaveBeenCalledWith('/tmp/tub_2');
+    });
+    await waitFor(() => {
+      expect(useStore.getState().tubPath).toBe('/tmp/tub_2');
+    });
+    // 只切一次（切换落定后 effect 重跑挂接，不重复 loadTub）
+    expect(loadTub).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-10-21_0', '26-10-21_1']);
+    });
+    const state = useStore.getState();
+    expect(state.activeSessionId).toBe('26-10-21_0');
+    expect(state.activeSessionRecords.map((r) => r['cam/image_array'])).toEqual([
+      'cam_e0.jpg', 'cam_e1.jpg', 'cam_f0.jpg', 'cam_f1.jpg',
+    ]);
+  });
+
+  it('batch delete removes every selected session in start_time order after confirmation', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
+    });
+
+    fireEvent.click(rowButton(oldestLabel), { ctrlKey: true });
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toHaveLength(2);
+    });
+
+    // 删除所选 → 批量确认弹窗（段数 + 总帧数）
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }));
+    expect(screen.getByText('删除所选 2 段录制？')).toBeInTheDocument();
+    expect(screen.getByText(/将删除所选 2 段共 5 帧/)).toBeInTheDocument();
+
+    // 确认后列表已无这些录制：刷新返回空 → 集合清空、不再自动选中
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+
+    await waitFor(() => {
+      expect(deleteTubSession).toHaveBeenCalledTimes(2);
+    });
+    // 按 start_time_ms 升序（旧 → 新）逐条删除，避免 manifest 并发写
+    expect(deleteTubSession).toHaveBeenNthCalledWith(1, '/tmp/tub', '26-08-16_0');
+    expect(deleteTubSession).toHaveBeenNthCalledWith(2, '/tmp/tub', '26-08-16_1');
+    await waitFor(() => {
+      expect(listFamilyTubSessions).toHaveBeenCalledTimes(2);
+    });
+    // 全局 tub 在被删集合里：单次 loadTub 同步；集合清空且无自动重选
+    expect(loadTub).toHaveBeenCalledWith('/tmp/tub');
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual([]);
+    });
+    expect(useStore.getState().activeSessionId).toBeNull();
+    expect(screen.queryByText(/已选 \d+ 段/)).not.toBeInTheDocument();
+  });
+
+  it('batch delete passes each session its own tub_path for cross-tub selections', async () => {
+    const sessionA = {
+      session_id: '26-10-20_1',
+      record_count: 2,
+      first_index: 0,
+      last_index: 1,
+      start_time_ms: Date.parse('2026-10-20T12:00:00Z'),
+      end_time_ms: Date.parse('2026-10-20T12:00:02Z'),
+      tub_path: '/tmp/tub',
+      tub_name: 'tub',
+    };
+    const sessionB = {
+      session_id: '26-10-20_0',
+      record_count: 3,
+      first_index: 0,
+      last_index: 2,
+      start_time_ms: Date.parse('2026-10-20T10:00:00Z'),
+      end_time_ms: Date.parse('2026-10-20T10:00:03Z'),
+      tub_path: '/tmp/tub_2',
+      tub_name: 'tub_2',
+    };
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [sessionA, sessionB],
+    });
+    vi.mocked(getSessionRecords).mockImplementation(async (tubPath: string, sessionId: string) => ({
+      status: true,
+      path: tubPath,
+      records: recordsFor[sessionId] ?? [],
+    }));
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-20_1');
+    });
+
+    // 跨 tub 多选（time-asc：B 先 A 后）→ 批量删除各带各的 tub_path
+    fireEvent.click(rowButton(fmt(sessionB.start_time_ms)), { ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByText('已选 2 段 · 共 5 帧')).toBeInTheDocument();
+    });
+    expect(useStore.getState().activeSessionId).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }));
+    expect(screen.getByText('删除所选 2 段录制？')).toBeInTheDocument();
+
+    vi.mocked(listFamilyTubSessions).mockResolvedValue({
+      status: true,
+      path: '/tmp/tub',
+      family_root: '/tmp',
+      sessions: [],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+
+    await waitFor(() => {
+      expect(deleteTubSession).toHaveBeenCalledTimes(2);
+    });
+    expect(deleteTubSession).toHaveBeenNthCalledWith(1, '/tmp/tub_2', '26-10-20_0');
+    expect(deleteTubSession).toHaveBeenNthCalledWith(2, '/tmp/tub', '26-10-20_1');
+  });
+
+  it('plain click collapses a multi-selection back to single selection', async () => {
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-08-16_1');
+    });
+
+    fireEvent.click(rowButton(oldestLabel), { ctrlKey: true });
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toHaveLength(2);
+    });
+
+    // 普通点击（无修饰键）→ 折叠回单选：集合仅该行、records 单会话
+    fireEvent.click(rowButton(newestLabel));
+    await waitFor(() => {
+      expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_1']);
+    });
+    expect(useStore.getState().activeSessionId).toBe('26-08-16_1');
+    expect(useStore.getState().activeSessionRecords.map((r) => r['cam/image_array'])).toEqual([
+      'cam_a0.jpg', 'cam_a1.jpg',
+    ]);
+    expect(screen.queryByText(/已选 \d+ 段/)).not.toBeInTheDocument();
   });
 });

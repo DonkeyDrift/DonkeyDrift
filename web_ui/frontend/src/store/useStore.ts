@@ -79,6 +79,9 @@ interface AppState {
   currentIndex: number;
   activeSessionId: string | null;
   activeSessionRecords: TubRecord[];
+  // 录制视频库多选会话筛选：集合内全部会话 id（单选时即 [sessionId]），
+  // 编辑器删除/恢复刷新与 AI 筛选按此聚合；空数组表示整 tub 视图
+  activeSessionIds: string[];
   fields: string[];
   isLoading: boolean;
   loadedTubPath: string | null;
@@ -110,7 +113,7 @@ interface AppState {
   requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
-  setActiveSession: (sessionId: string | null, records: TubRecord[]) => void;
+  setActiveSession: (sessionId: string | null, records: TubRecord[], sessionIds?: string[]) => void;
   setDeletedIndexes: (deletedIndexes: number[], totalPhysicalRecords?: number) => void;
   setCurrentIndex: (index: number | ((prev: number) => number)) => void;
   setIsDragging: (isDragging: boolean) => void;
@@ -156,6 +159,7 @@ export const useStore = create<AppState>()(
       currentIndex: 0,
       activeSessionId: null,
       activeSessionRecords: [],
+      activeSessionIds: [],
       fields: [],
       isLoading: false,
       loadedTubPath: null,
@@ -229,6 +233,7 @@ export const useStore = create<AppState>()(
           currentIndex: records.length > 0 ? 0 : 0,
           activeSessionId: null,
           activeSessionRecords: [],
+          activeSessionIds: [],
           error: null,
           activeDrawer: null,
           isPlaying: false,
@@ -250,8 +255,13 @@ export const useStore = create<AppState>()(
               : 0,
           isPlaying: false,
         })),
-      setActiveSession: (sessionId, records) =>
-        set({ activeSessionId: sessionId, activeSessionRecords: records }),
+      setActiveSession: (sessionId, records, sessionIds) =>
+        set({
+          activeSessionId: sessionId,
+          activeSessionRecords: records,
+          // 第三参缺省时从 sessionId 派生：所有既有调用点（单会话/清空）行为不变
+          activeSessionIds: sessionIds ?? (sessionId != null ? [sessionId] : []),
+        }),
       setCurrentIndex: (index) =>
         set((state) => ({
           currentIndex: typeof index === 'function' ? index(state.currentIndex) : index,

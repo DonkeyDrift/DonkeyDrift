@@ -74,3 +74,34 @@ describe('useStore activeTraining（刷新后恢复训练进度）', () => {
     expect(useStore.getState().activeTraining).toBeNull();
   });
 });
+
+// 多选会话筛选（家族视图）：setActiveSession 第三参 sessionIds 缺省时从
+// sessionId 派生（向后兼容，所有既有调用点行为不变）；显式传入则保留集合。
+describe('useStore setActiveSession 多选集合派生', () => {
+  beforeEach(() => {
+    useStore.setState({ activeSessionId: null, activeSessionRecords: [], activeSessionIds: [] });
+  });
+
+  it('第三参缺省时，sessionId 非空派生为单元素数组', () => {
+    useStore.getState().setActiveSession('s1', []);
+    expect(useStore.getState().activeSessionIds).toEqual(['s1']);
+  });
+
+  it('第三参缺省时，sessionId 为 null 派生为空数组', () => {
+    useStore.getState().setActiveSession(null, []);
+    expect(useStore.getState().activeSessionIds).toEqual([]);
+  });
+
+  it('显式传入 sessionIds 时原样保留（多选聚合写回）', () => {
+    useStore.getState().setActiveSession('s2', [], ['s1', 's2']);
+    expect(useStore.getState().activeSessionId).toBe('s2');
+    expect(useStore.getState().activeSessionIds).toEqual(['s1', 's2']);
+  });
+
+  it('setTub 切换 tub 时清空多选集合', () => {
+    useStore.getState().setActiveSession('s2', [], ['s1', 's2']);
+    useStore.getState().setTub('/tmp/tub2', [], ['cam/image_array']);
+    expect(useStore.getState().activeSessionIds).toEqual([]);
+    expect(useStore.getState().activeSessionId).toBeNull();
+  });
+});

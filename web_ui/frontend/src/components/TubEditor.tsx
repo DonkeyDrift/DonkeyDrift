@@ -66,6 +66,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const tubPath = useStore((state) => state.tubPath);
   const activeSessionId = useStore((state) => state.activeSessionId);
   const activeSessionRecords = useStore((state) => state.activeSessionRecords);
+  // 录制视频库多选会话集合：>1 时删除/恢复刷新按集合逐会话拉取合并，
+  // AI 一键筛选按集合逐会话扫描后合并片段
+  const activeSessionIds = useStore((state) => state.activeSessionIds);
   const setActiveSession = useStore((state) => state.setActiveSession);
   // 录制视频库选中某条录制时，编辑器只显示/编辑该条录制的记录；未选中时回退到整个 tub
   const records = activeSessionId != null ? activeSessionRecords : globalRecords;
@@ -435,8 +438,17 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         );
         if (activeSessionId && tubPath) {
           try {
-            const sessionData = await getSessionRecords(tubPath, activeSessionId);
-            setActiveSession(activeSessionId, (sessionData.records || []) as TubRecord[]);
+            if (activeSessionIds.length > 1) {
+              // 多选会话：逐会话并发拉取后按 ids 顺序合并写回（与录制库合并视图口径一致）
+              const results = await Promise.all(
+                activeSessionIds.map((sid) => getSessionRecords(tubPath, sid))
+              );
+              const merged = results.flatMap((d) => d.records || []);
+              setActiveSession(activeSessionId, merged as TubRecord[], activeSessionIds);
+            } else {
+              const sessionData = await getSessionRecords(tubPath, activeSessionId);
+              setActiveSession(activeSessionId, (sessionData.records || []) as TubRecord[]);
+            }
           } catch {
             // 会话级刷新尽力而为：全局 records 已更新，图表会在下次切换会话时重建
           }
@@ -458,7 +470,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         setProcessingMode(null);
       }
     },
-    [setAllRecords, activeSessionId, tubPath, setActiveSession, t]
+    [setAllRecords, activeSessionId, activeSessionIds, tubPath, setActiveSession, t]
   );
 
   const handleAction = useCallback(async (mode: 'delete' | 'restore') => {
@@ -557,17 +569,34 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     setAiCleanError(null);
     setAiCleanInfo(null);
     try {
-      const data = await scanAiClean([tubPath], activeSessionId);
-      const tub = data.tubs?.[0];
-      if (tub?.error) {
-        setAiCleanError(tub.error);
-        return;
+      let segments: AiCleanSegment[];
+      if (activeSessionIds.length > 1) {
+        // 多选会话：逐会话扫描后合并片段；indexes 去重排序在确认层统一处理
+        const results = await Promise.all(
+          activeSessionIds.map((sid) => scanAiClean([tubPath], sid))
+        );
+        const failed = results
+          .map((r) => r.tubs?.[0]?.error)
+          .find((error) => Boolean(error));
+        if (failed) {
+          setAiCleanError(failed);
+          return;
+        }
+        segments = results.flatMap((r) => r.tubs?.[0]?.segments ?? []);
+      } else {
+        const data = await scanAiClean([tubPath], activeSessionId);
+        const tub = data.tubs?.[0];
+        if (tub?.error) {
+          setAiCleanError(tub.error);
+          return;
+        }
+        segments = tub?.segments ?? [];
       }
-      const segments = (tub?.segments ?? []).filter(
+      const validSegments = segments.filter(
         (seg) => (seg.indexes?.length ?? 0) > 0
       );
-      setAiCleanSegments(segments);
-      if (segments.length === 0) {
+      setAiCleanSegments(validSegments);
+      if (validSegments.length === 0) {
         setAiCleanInfo(t('tubEditor.aiFilterNoSegments'));
       } else {
         setAiCleanModalOpen(true);
@@ -577,7 +606,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     } finally {
       setAiCleanBusy(false);
     }
-  }, [tubPath, activeSessionId, aiCleanBusy, t]);
+  }, [tubPath, activeSessionId, activeSessionIds, aiCleanBusy, t]);
 
   const handleAiCleanConfirm = useCallback(async () => {
     if (aiCleanSegments.length === 0) return;
@@ -2088,7 +2117,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             <div className="flex h-[30px] box-content items-center rounded-md bg-zinc-800 px-3 text-left">
               <span className="whitespace-nowrap text-xs font-mono text-cyan-400">
                 {isSessionScoped
-                  ? t('tubEditor.framesSessionScope', { count: records.length })
+                  ? activeSessionIds.length > 1
+                    ? t('tubEditor.framesSessionScopeMulti', {
+                        segments: activeSessionIds.length,
+                        count: records.length,
+                      })
+                    : t('tubEditor.framesSessionScope', { count: records.length })
                   : t('tubEditor.framesGlobalScope', {
                       count: records.length,
                       physical: totalPhysicalRecords,
