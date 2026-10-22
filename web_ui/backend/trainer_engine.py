@@ -3,6 +3,7 @@ Training Job Engine - manages local and online training jobs with SSE streaming.
 """
 import asyncio
 import json
+import logging
 import os
 import queue
 import re
@@ -18,6 +19,9 @@ from fastapi import HTTPException
 
 from web_online_trainer import WebOnlineTrainer
 from trainer_session import load_session
+
+
+logger = logging.getLogger(__name__)
 
 
 # Regex to strip ANSI escape codes (colour, cursor movement, etc.)
@@ -136,7 +140,8 @@ class TrainingJobManager:
     # ------------------------------------------------------------------
     async def run_local(self, job: TrainingJob, tub: str, model: str,
                         model_type: str, transfer: Optional[str] = None,
-                        working_dir: Optional[str] = None):
+                        working_dir: Optional[str] = None,
+                        session_ids: Optional[list] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
         # 用后端自身解释器经模块入口拉起训练（不依赖 PATH 里的 donkey 指向哪个
@@ -146,7 +151,18 @@ class TrainingJobManager:
         if transfer:
             cmd.extend(["--transfer", transfer])
 
+        # 会话筛选：把选中的 _session_id 平坦列表落盘为临时 JSON，经 CLI 的
+        # --session-filter 转成 cfg.TRAIN_FILTER（None/空列表 = 不筛选）
+        session_filter_path = None
         try:
+            if session_ids:
+                session_filter_path = os.path.join(
+                    cwd, f'.train_session_filter_{job.id}.json')
+                with open(session_filter_path, 'w', encoding='utf-8') as f:
+                    json.dump([str(s) for s in session_ids], f,
+                              ensure_ascii=False)
+                cmd.extend(["--session-filter", session_filter_path])
+
             job.process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -225,6 +241,13 @@ class TrainingJobManager:
                 job.status = 'failed'
                 job.error_message = str(e)
         finally:
+            # 会话筛选临时文件随 job 结束/停止/异常统一清理；清理失败不影响任务状态
+            if session_filter_path and os.path.exists(session_filter_path):
+                try:
+                    os.remove(session_filter_path)
+                except OSError as e:
+                    logger.warning('清理会话筛选文件失败 %s: %s',
+                                   session_filter_path, e)
             job.finished_at = datetime.now().isoformat()
             await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
 

@@ -15,6 +15,7 @@ import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
 import { MyPcProbePanel } from '../components/trainer/MyPcProbePanel';
 import { TubSelector } from '../components/trainer/TubSelector';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
+import { SessionFilterPicker, type SessionFilterState } from '../components/trainer/SessionFilterPicker';
 import { ProgressPanel } from '../components/trainer/ProgressPanel';
 import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
@@ -52,6 +53,15 @@ export const TrainerPage = React.memo(function TrainerPage() {
   // Tub candidates for local training (fetched from /trainer/tubs)
   const [tubCandidates, setTubCandidates] = React.useState<TrainerTub[]>([]);
   const [currentTubPath, setCurrentTubPath] = React.useState('');
+  // 录制会话筛选（仅本地训练）：默认不启用 = 训练全部记录
+  const [sessionFilter, setSessionFilter] = React.useState<SessionFilterState>({
+    enabled: false,
+    selected: [],
+    isFullSelection: false,
+  });
+  const resetSessionFilter = useCallback(() => {
+    setSessionFilter({ enabled: false, selected: [], isFullSelection: false });
+  }, []);
   // Don't re-autofill after the user has manually edited the tub path
   const tubManuallyEdited = useRef(false);
   // Don't overwrite mypc host/user/password once the user has typed anything
@@ -190,6 +200,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
         if (next !== null && next !== trainerLocalConfig.tub) {
           setTrainerLocalConfig({ tub: next });
+          // tub 由自动填充切换时同样重置会话筛选，避免残留旧 tub 的勾选
+          resetSessionFilter();
         }
         if (next !== null && !myPcTubEditedRef.current) {
           setMyPcForm((f) => {
@@ -275,8 +287,13 @@ export const TrainerPage = React.memo(function TrainerPage() {
       model: `./models/${modelName}`,
       model_type: trainerLocalConfig.modelType,
       transfer: trainerLocalConfig.transfer.trim() || undefined,
+      // 勾选子集且启用筛选时才带 session_ids；全量/未启用省略（与旧请求体一致）
+      session_ids:
+        sessionFilter.enabled && !sessionFilter.isFullSelection
+          ? sessionFilter.selected
+          : undefined,
     });
-  }, [trainerLocalConfig, configPath, startLocal]);
+  }, [trainerLocalConfig, configPath, startLocal, sessionFilter]);
 
   const handleOnlineStart = useCallback(() => {
     setTrainerOnlineConfig(onlineForm);
@@ -336,17 +353,28 @@ export const TrainerPage = React.memo(function TrainerPage() {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="space-y-6">
           {mode === 'local' ? (
-            <LocalConfigForm
-              config={trainerLocalConfig}
-              onConfigChange={(patch) => {
-                if (patch.tub !== undefined) {
-                  tubManuallyEdited.current = true;
-                }
-                setTrainerLocalConfig(patch);
-              }}
-              tubCandidates={tubCandidates}
-              currentTubPath={currentTubPath}
-            />
+            <>
+              <LocalConfigForm
+                config={trainerLocalConfig}
+                onConfigChange={(patch) => {
+                  if (patch.tub !== undefined) {
+                    tubManuallyEdited.current = true;
+                    // 切换 tub 后旧 tub 的会话勾选不再有意义，重置筛选状态
+                    resetSessionFilter();
+                  }
+                  setTrainerLocalConfig(patch);
+                }}
+                tubCandidates={tubCandidates}
+                currentTubPath={currentTubPath}
+              />
+              <SessionFilterPicker
+                tub={trainerLocalConfig.tub}
+                tubCandidates={tubCandidates}
+                enabled={sessionFilter.enabled}
+                selected={sessionFilter.selected}
+                onChange={setSessionFilter}
+              />
+            </>
           ) : mode === 'mypc' ? (
             <>
               <RemoteConfigForm
@@ -443,7 +471,14 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
           <button
             onClick={handleAction}
-            disabled={mode === 'mypc' && !isRunning && myPcProbe.loading}
+            disabled={
+              (mode === 'mypc' && !isRunning && myPcProbe.loading) ||
+              // 已启用会话筛选但一段都没勾选：禁止开始，提示文案在筛选面板里
+              (mode === 'local' &&
+                !isRunning &&
+                sessionFilter.enabled &&
+                sessionFilter.selected.length === 0)
+            }
             className={`w-full px-4 py-2 rounded-md font-medium transition-colors text-white disabled:opacity-60 disabled:cursor-not-allowed ${
               isRunning
                 ? 'bg-red-600 hover:bg-red-700'

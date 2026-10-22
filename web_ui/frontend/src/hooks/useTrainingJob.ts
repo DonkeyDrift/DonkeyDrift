@@ -122,6 +122,7 @@ export function useTrainingJob() {
     model: string;
     model_type: string;
     transfer?: string;
+    session_ids?: string[];
   }) => {
     if (trainingJob && trainingJob.status === 'running') {
       return;

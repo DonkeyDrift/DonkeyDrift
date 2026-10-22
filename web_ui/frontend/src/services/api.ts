@@ -610,6 +610,8 @@ export const startLocalTrain = async (params: {
   model_type: string;
   transfer?: string;
   working_dir?: string;
+  // 只训练选中的录制会话；undefined/空 = 不筛选（请求体与旧版一致）
+  session_ids?: string[];
 }) => {
   const response = await api.post('/trainer/train/local', params);
   return response.data;

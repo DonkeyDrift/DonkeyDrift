@@ -207,11 +207,17 @@ class TubDataset(object):
     def get_records(self):
         if not self.records:
             logger.info(f'Loading tubs from paths {self.tub_paths}')
+            total = 0
+            kept = 0
             for tub in self.tubs:
                 for underlying in tub:
+                    total += 1
                     record = TubRecord(self.config, tub.base_path, underlying)
                     if not self.train_filter or self.train_filter(record):
                         self.records.append(record)
+                        kept += 1
+            if self.train_filter:
+                logger.info(f'TRAIN_FILTER active: kept {kept}/{total} records')
             if self.seq_size > 0:
                 seq = Collator(self.seq_size, self.records)
                 self.records = list(seq)

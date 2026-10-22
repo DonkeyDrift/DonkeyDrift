@@ -838,6 +838,11 @@ class Train(BaseCommand):
         parser.add_argument('--comment', type=str,
                             help='comment added to model database - use '
                                  'double quotes for multiple words')
+        parser.add_argument('--session-filter', type=str, default=None,
+                            help='只训练选中的录制会话：JSON 文件路径。支持平坦列表 '
+                                 '["26-10-20_0", ...]（对所有 tub 生效）或按 tub 分组 '
+                                 '{"<tub路径>": ["26-10-20_0", ...]}（不在映射中的 tub '
+                                 '整体排除）')
         parser.add_argument('--convert-npu', action='store_true',
                             help='训练后自动将导出的 onnx 经 AIMO 云转为 '
                                  '.aidem 上 NPU（需 API Key 与网络）')
@@ -849,6 +854,8 @@ class Train(BaseCommand):
         args.tub = ','.join(args.tub)
         my_cfg = args.myconfig
         cfg = load_config(args.config, my_cfg)
+        if args.session_filter:
+            cfg.TRAIN_FILTER = self._load_session_filter(args.session_filter)
         framework = args.framework if args.framework \
             else getattr(cfg, 'DEFAULT_AI_FRAMEWORK', 'tensorflow')
 
@@ -885,6 +892,64 @@ class Train(BaseCommand):
 
         if args.convert_npu:
             self._convert_npu_after_train(args)
+
+    def _load_session_filter(self, filter_path):
+        """读取 --session-filter 指定的 JSON，构造 cfg.TRAIN_FILTER 闭包。
+
+        两种合法形态：
+          1. 平坦列表 ["26-10-20_0", ...]：对所有加载的 tub 生效；
+          2. 按 tub 分组 {"<tub路径>": ["26-10-20_0", ...]}：record 通过当且仅当
+             (归一化 tub 路径, session_id) 命中映射；不在映射里的 tub 整体排除。
+             键与 record.base_path 两侧都用 normpath+abspath 对齐。
+
+        JSON 侧统一 str() 化，容忍数字型 session id。读取失败或形态非法时
+        报错并以非零码退出，绝不静默退化为训练全量。
+        """
+        import json
+        expanded = os.path.expanduser(filter_path)
+        try:
+            with open(expanded, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except OSError as e:
+            logger.error('无法读取 --session-filter 文件 %s: %s', expanded, e)
+            sys.exit(1)
+        except json.JSONDecodeError as e:
+            logger.error('--session-filter 文件 %s 不是合法 JSON: %s', expanded, e)
+            sys.exit(1)
+
+        def _to_id_set(value, ctx):
+            if not isinstance(value, list):
+                logger.error('--session-filter %s 应为会话 id 列表，实际: %r',
+                             ctx, value)
+                sys.exit(1)
+            return {str(item) for item in value}
+
+        if isinstance(data, list):
+            allowed = _to_id_set(data, '顶层列表')
+
+            def _flat_filter(record):
+                return str(record.underlying.get('_session_id', '')) in allowed
+
+            return _flat_filter
+
+        if isinstance(data, dict):
+            mapping = {}
+            for tub_key, ids in data.items():
+                key = os.path.normpath(os.path.abspath(
+                    os.path.expanduser(tub_key)))
+                mapping[key] = _to_id_set(ids, f'tub {tub_key!r}')
+
+            def _grouped_filter(record):
+                tub_allowed = mapping.get(
+                    os.path.normpath(os.path.abspath(record.base_path)))
+                return tub_allowed is not None \
+                    and str(record.underlying.get('_session_id', '')) in tub_allowed
+
+            return _grouped_filter
+
+        logger.error('--session-filter 文件 %s 顶层应为列表或对象，实际: %r',
+                     expanded, data)
+        sys.exit(1)
 
     def _convert_npu_after_train(self, args):
         """训练产物 <stem>.onnx → AIMO 云转 .aidem（校准图取自 tub 前若干张）。"""

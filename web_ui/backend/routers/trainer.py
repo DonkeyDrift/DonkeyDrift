@@ -51,6 +51,8 @@ class LocalTrainRequest(BaseModel):
     model_type: str = "linear"
     transfer: Optional[str] = None
     working_dir: Optional[str] = None
+    # 只训练选中的录制会话（_session_id 列表）；None/空列表 = 不筛选（向后兼容）
+    session_ids: Optional[List[str]] = None
 
 
 class OnlineTrainRequest(BaseModel):
@@ -1022,6 +1024,7 @@ async def start_local_train(request: LocalTrainRequest):
             model_type=request.model_type,
             transfer=request.transfer,
             working_dir=request.working_dir,
+            session_ids=request.session_ids,
         )
     )
     return {"job_id": job.id, "status": job.status}

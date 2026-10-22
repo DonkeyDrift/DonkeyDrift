@@ -17,21 +17,28 @@ vi.mock('../services/api', () => ({
   getTrainerConfig: vi.fn(() => Promise.reject(new Error('no conf'))),
   getMyPcKnownHosts: vi.fn(() => Promise.resolve([])),
   listTrainerTubs: vi.fn(() => Promise.resolve({ tubs: [], current_tub_path: '' })),
+  listTubSessions: vi.fn(() =>
+    Promise.resolve({ status: true, path: '/abs/data', sessions: [] })
+  ),
   loadConfig: vi.fn(),
   loadMyconfig: vi.fn(),
   saveTrainingConfig: vi.fn(),
   probeMyPc: vi.fn(),
 }));
 
-const { mockStartMyPc, mockResumeMyPc, mockJobState } = vi.hoisted(() => ({
+const { mockStartMyPc, mockResumeMyPc, mockJobState, mockStartLocal } = vi.hoisted(() => ({
   mockStartMyPc: vi.fn(() => Promise.resolve()),
   mockResumeMyPc: vi.fn(() => Promise.resolve()),
+  mockStartLocal: vi.fn(
+    (_params: { tub: string; model: string; model_type: string; transfer?: string; session_ids?: string[] }) =>
+      Promise.resolve()
+  ),
   mockJobState: { job: null as { status: string } | null },
 }));
 vi.mock('../hooks/useTrainingJob', () => ({
   useTrainingJob: () => ({
     job: mockJobState.job,
-    startLocal: vi.fn(),
+    startLocal: mockStartLocal,
     startOnline: vi.fn(),
     startMyPc: mockStartMyPc,
     resumeMyPc: mockResumeMyPc,
@@ -61,9 +68,30 @@ vi.mock('../components/trainer/ProgressPanel', () => ({ ProgressPanel: () => nul
 vi.mock('../components/trainer/LogPanel', () => ({ LogPanel: () => null }));
 vi.mock('../components/trainer/ModelsList', () => ({ ModelsList: () => null }));
 
-import { probeMyPc } from '../services/api';
+import { probeMyPc, listTubSessions, listTrainerTubs } from '../services/api';
 
 const mockProbe = vi.mocked(probeMyPc);
+const mockListTubSessions = vi.mocked(listTubSessions);
+const mockListTrainerTubs = vi.mocked(listTrainerTubs);
+
+const LOCAL_SESSIONS = [
+  {
+    session_id: '26-10-20_0',
+    record_count: 120,
+    first_index: 0,
+    last_index: 119,
+    start_time_ms: 1729380000000,
+    end_time_ms: 1729380060000,
+  },
+  {
+    session_id: '26-10-21_0',
+    record_count: 80,
+    first_index: 120,
+    last_index: 199,
+    start_time_ms: 1729466400000,
+    end_time_ms: 1729466460000,
+  },
+];
 
 const probeResult = (over: Partial<MyPcProbeResult> = {}): MyPcProbeResult => ({
   ok: false,
@@ -83,6 +111,22 @@ beforeEach(() => {
   mockJobState.job = null;
   useStore.setState({
     trainerMode: 'mypc',
+    trainerLocalConfig: {
+      tub: './data',
+      model: '',
+      modelType: 'linear',
+      transfer: '',
+      advancedEnabled: false,
+      batchSize: 128,
+      trainTestSplit: 0.8,
+      maxEpochs: 100,
+      showPlot: true,
+      useEarlyStop: true,
+      earlyStopPatience: 5,
+      learningRate: 0.001,
+      createTfLite: true,
+      pruneValLossDegradationLimit: 0.2,
+    },
     trainerMyPcConfig: {
       host: '192.0.2.10',
       user: 'tester',
@@ -209,6 +253,110 @@ describe('TrainerPage mypc 断点续训', () => {
     // 用检测到的正确 python 路径续训
     expect(mockResumeMyPc).toHaveBeenCalledWith(
       expect.objectContaining({ pythonPath: '/detected/python' })
+    );
+  });
+});
+
+describe('TrainerPage 本地训练会话筛选', () => {
+  it('默认不启用筛选：开始训练的请求不带 session_ids（与旧行为一致）', async () => {
+    useStore.setState({ trainerMode: 'local' });
+    render(<TrainerPage />);
+
+    fireEvent.click(startButton());
+
+    await waitFor(() => expect(mockStartLocal).toHaveBeenCalledTimes(1));
+    const arg = mockStartLocal.mock.calls[0]?.[0];
+    expect(arg?.session_ids).toBeUndefined();
+  });
+
+  it('勾选会话子集后开始训练：startLocal 带选中的 session_ids', async () => {
+    useStore.setState({ trainerMode: 'local' });
+    mockListTubSessions.mockResolvedValue({
+      status: true,
+      path: '/abs/data',
+      sessions: LOCAL_SESSIONS,
+    });
+    render(<TrainerPage />);
+
+    fireEvent.click(screen.getByTestId('session-filter-enable'));
+    fireEvent.click(await screen.findByLabelText(/26-10-20_0/));
+
+    fireEvent.click(startButton());
+    await waitFor(() => expect(mockStartLocal).toHaveBeenCalledTimes(1));
+    expect(mockStartLocal).toHaveBeenCalledWith(
+      expect.objectContaining({ session_ids: ['26-10-20_0'] })
+    );
+  });
+
+  it('全选时省略 session_ids（等价于训练全部记录）', async () => {
+    useStore.setState({ trainerMode: 'local' });
+    mockListTubSessions.mockResolvedValue({
+      status: true,
+      path: '/abs/data',
+      sessions: LOCAL_SESSIONS,
+    });
+    render(<TrainerPage />);
+
+    fireEvent.click(screen.getByTestId('session-filter-enable'));
+    await screen.findByLabelText(/26-10-20_0/);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'trainer.sessionFilterSelectAll' })
+    );
+
+    fireEvent.click(startButton());
+    await waitFor(() => expect(mockStartLocal).toHaveBeenCalledTimes(1));
+    expect(mockStartLocal.mock.calls[0]?.[0]?.session_ids).toBeUndefined();
+  });
+
+  it('启用筛选但一段都不勾：禁用开始按钮并提示', async () => {
+    useStore.setState({ trainerMode: 'local' });
+    mockListTubSessions.mockResolvedValue({
+      status: true,
+      path: '/abs/data',
+      sessions: LOCAL_SESSIONS,
+    });
+    render(<TrainerPage />);
+
+    fireEvent.click(screen.getByTestId('session-filter-enable'));
+
+    expect(startButton()).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByText('trainer.sessionFilterNoneSelected')).toBeInTheDocument()
+    );
+  });
+
+  it('自动填充切换 tub 后重置会话筛选状态', async () => {
+    mockListTrainerTubs
+      .mockResolvedValueOnce({
+        tubs: [
+          { name: 'data', relative_path: './data', absolute_path: '/abs/data' },
+        ],
+        current_tub_path: '',
+      })
+      .mockResolvedValue({
+        tubs: [
+          { name: 'data2', relative_path: './data2', absolute_path: '/abs/data2' },
+        ],
+        current_tub_path: '',
+      });
+    mockListTubSessions.mockResolvedValue({
+      status: true,
+      path: '/abs/data',
+      sessions: LOCAL_SESSIONS,
+    });
+    useStore.setState({ trainerMode: 'local', tubPath: '/abs/data' });
+    render(<TrainerPage />);
+
+    // 初始 tub ./data（默认）：启用并勾选一段
+    fireEvent.click(screen.getByTestId('session-filter-enable'));
+    fireEvent.click(await screen.findByLabelText(/26-10-20_0/));
+
+    // 车端加载 tub 变化触发自动填充 → tub 切成 ./data2 → 筛选状态重置
+    await act(async () => {
+      useStore.setState({ tubPath: '/abs/data2' });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('session-filter-enable')).not.toBeChecked()
     );
   });
 });
