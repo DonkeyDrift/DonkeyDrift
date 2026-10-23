@@ -39,7 +39,7 @@ export const tublibrary: { zh: Record<string, string>; en: Record<string, string
     'tubLibrary.confirmBatchTitle': '删除所选 {segments} 段录制？',
     'tubLibrary.confirmBatchBody': '将删除所选 {segments} 段共 {count} 帧画面与数据，删除后其它板块也不再显示。确定删除吗？',
     'tubLibrary.multiSelectHint': '按住 Ctrl/⌘ 或 Shift 可多选',
-    'tubLibrary.crossTubHint': '跨 Tub 选择：编辑器请逐 Tub 编辑',
+    'tubLibrary.crossTubHint': '跨 Tub 选择：编辑器为只读合并视图，编辑帧请切回单个 Tub',
   },
   en: {
     'tubLibrary.title': 'Video Library',
@@ -79,6 +79,6 @@ export const tublibrary: { zh: Record<string, string>; en: Record<string, string
     'tubLibrary.confirmBatchTitle': 'Delete {segments} selected clips?',
     'tubLibrary.confirmBatchBody': 'This will delete all {count} frames across the {segments} selected clips. They will disappear from other panels too. Continue?',
     'tubLibrary.multiSelectHint': 'Ctrl/⌘ or Shift-click to multi-select',
-    'tubLibrary.crossTubHint': 'Cross-tub selection: the editor works one tub at a time',
+    'tubLibrary.crossTubHint': 'Cross-tub selection: the editor shows a read-only merged view; switch back to one tub to edit frames',
   },
 };

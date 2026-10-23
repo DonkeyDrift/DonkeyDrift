@@ -289,3 +289,53 @@ describe('TubEditor 缩放区域不可选中（与旧版一致）', () => {
     expect(zoomLabel.parentElement?.className).toContain('select-none');
   });
 });
+
+describe('TubEditor 跨 Tub 只读合并视图', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
+  });
+
+  beforeEach(() => {
+    // 前组用例（多选会话删除后刷新）实际调用过 deleteRecords，清掉调用记录
+    vi.clearAllMocks();
+    const records = makeRecords();
+    // 跨 tub 多选挂接：setActiveSession 第 4 参 crossTub=true
+    useStore.getState().setActiveSession('s1', records, ['s1', 's2'], true);
+    useStore.setState({
+      tubPath: '/tmp/tub',
+      totalPhysicalRecords: records.length,
+      deletedIndexes: [],
+      selectionStartIndex: null,
+      selectionEndIndex: null,
+    });
+  });
+
+  it('写操作入口全部禁用，且头部出现只读徽标', () => {
+    mountEditor();
+    expect(screen.getByTestId('cross-tub-readonly-badge')).toBeInTheDocument();
+    expect(screen.getByText('tubEditor.crossTubReadOnlyBadge')).toBeInTheDocument();
+    expect(screen.getByText('tubEditor.delete')).toBeDisabled();
+    expect(screen.getByText('tubEditor.restore')).toBeDisabled();
+    expect(screen.getByLabelText('tubEditor.aiFilterEntryAria')).toBeDisabled();
+  });
+
+  it('框选了有效范围时删除/恢复按钮仍禁用，title 换成只读提示', () => {
+    mountEditor();
+    useStore.getState().setSelectionRange(2, 5);
+    const deleteBtn = screen.getByText('tubEditor.delete');
+    const restoreBtn = screen.getByText('tubEditor.restore');
+    expect(deleteBtn).toBeDisabled();
+    expect(restoreBtn).toBeDisabled();
+    expect(deleteBtn).toHaveAttribute('title', 'tubEditor.crossTubReadOnlyTitle');
+    expect(restoreBtn).toHaveAttribute('title', 'tubEditor.crossTubReadOnlyTitle');
+  });
+
+  it('Delete 快捷键不触发删除请求（runRecordAction 前置拦截）', () => {
+    mountEditor();
+    useStore.getState().setSelectionRange(2, 5);
+    fireEvent.keyDown(window, { key: 'Delete' });
+    expect(vi.mocked(deleteRecords)).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    expect(vi.mocked(deleteRecords)).not.toHaveBeenCalled();
+  });
+});

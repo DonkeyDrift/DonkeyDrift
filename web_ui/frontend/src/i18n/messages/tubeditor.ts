@@ -66,6 +66,8 @@ export const tubeditor: { zh: Record<string, string>; en: Record<string, string>
     'tubEditor.aiFilterCancel': '取消',
     'tubEditor.aiFilterClose': '关闭',
     'tubEditor.aiFilterDeleteFailed': '删除失败',
+    'tubEditor.crossTubReadOnlyBadge': '跨 Tub 只读',
+    'tubEditor.crossTubReadOnlyTitle': '跨 Tub 合并视图为只读：删除/恢复/AI 筛选只作用于单个 Tub，编辑帧请切回单个 Tub',
   },
   en: {
     'tubEditor.title': 'Tub Editor',
@@ -132,5 +134,7 @@ export const tubeditor: { zh: Record<string, string>; en: Record<string, string>
     'tubEditor.aiFilterCancel': 'Cancel',
     'tubEditor.aiFilterClose': 'Close',
     'tubEditor.aiFilterDeleteFailed': 'Delete failed',
+    'tubEditor.crossTubReadOnlyBadge': 'Cross-tub (read-only)',
+    'tubEditor.crossTubReadOnlyTitle': 'Merged cross-tub view is read-only: delete/restore/AI filter only work within a single tub. Switch back to one tub to edit frames.',
   },
 };

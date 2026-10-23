@@ -69,12 +69,16 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   // 录制视频库多选会话集合：>1 时删除/恢复刷新按集合逐会话拉取合并，
   // AI 一键筛选按集合逐会话扫描后合并片段
   const activeSessionIds = useStore((state) => state.activeSessionIds);
+  const activeSessionCrossTub = useStore((state) => state.activeSessionCrossTub);
   const setActiveSession = useStore((state) => state.setActiveSession);
   // 录制视频库选中某条录制时，编辑器只显示/编辑该条录制的记录；未选中时回退到整个 tub
   const records = activeSessionId != null ? activeSessionRecords : globalRecords;
   // 会话作用域下图表 x 轴用「会话内数组下标」(0..N-1)，与录制库「N 帧」、范围输入框、悬停提示一致；
   // 未选中会话时沿用整个 tub 的全局物理 _index（保留删除空洞）。
   const isSessionScoped = activeSessionId != null;
+  // 跨 tub 合并视图为只读：帧级写操作（删除/恢复/撤销/重做/AI 筛选）一律禁用——
+  // 后端删除/恢复只收 _index 且作用于后端当前 tub，跨 tub _index 撞号会删错数据
+  const isCrossTubReadOnly = activeSessionCrossTub;
   const isDragging = useStore((state) => state.isDragging);
   const isPlaying = useStore((state) => state.isPlaying);
   // 注意：不要组件级订阅 currentIndex——播放期它高频变化，订阅会让整棵编辑器树
@@ -420,6 +424,12 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         return false;
       }
 
+      // 跨 tub 合并视图只读：任何写路径（按钮/快捷键/AI 确认/撤销重做）统一在此拦截
+      if (isCrossTubReadOnly) {
+        setActionError(t('tubEditor.crossTubReadOnlyTitle'));
+        return false;
+      }
+
       setIsProcessing(true);
       setProcessingMode(mode);
       try {
@@ -470,7 +480,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
         setProcessingMode(null);
       }
     },
-    [setAllRecords, activeSessionId, activeSessionIds, tubPath, setActiveSession, t]
+    [setAllRecords, activeSessionId, activeSessionIds, tubPath, setActiveSession, t, isCrossTubReadOnly]
   );
 
   const handleAction = useCallback(async (mode: 'delete' | 'restore') => {
@@ -564,7 +574,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   // 片段 → 高亮 + 弹确认层；确认后复用 runRecordAction，与框选删除走同一套
   // manifest 级软删除 + 撤销栈，保证体验一致。
   const handleAiCleanScan = useCallback(async () => {
-    if (!tubPath || aiCleanBusy) return;
+    // 跨 tub 合并视图只读：AI 筛选的删除确认复用 runRecordAction（同样被拦），
+    // 扫描入口直接禁用，避免扫出一堆没法确认的片段
+    if (!tubPath || aiCleanBusy || isCrossTubReadOnly) return;
     setAiCleanBusy(true);
     setAiCleanError(null);
     setAiCleanInfo(null);
@@ -606,7 +618,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
     } finally {
       setAiCleanBusy(false);
     }
-  }, [tubPath, activeSessionId, activeSessionIds, aiCleanBusy, t]);
+  }, [tubPath, activeSessionId, activeSessionIds, aiCleanBusy, isCrossTubReadOnly, t]);
 
   const handleAiCleanConfirm = useCallback(async () => {
     if (aiCleanSegments.length === 0) return;
@@ -1220,7 +1232,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
-        if (!isProcessing && hasValidRange) {
+        if (!isProcessing && hasValidRange && !isCrossTubReadOnly) {
           void handleAction('delete');
         }
         return;
@@ -1228,7 +1240,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       if (event.key === '\\') {
         event.preventDefault();
-        if (!isProcessing && hasValidRange) {
+        if (!isProcessing && hasValidRange && !isCrossTubReadOnly) {
           void handleAction('restore');
         }
         return;
@@ -1285,6 +1297,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       isProcessing,
       hasValidRange,
       handleAction,
+      isCrossTubReadOnly,
       queueSelectionRangeUpdate,
       handleZoomIn,
       handleZoomOut,
@@ -1976,6 +1989,15 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
               {t('tubEditor.liveUpdate')}
             </span>
           )}
+          {isCrossTubReadOnly && (
+            <span
+              data-testid="cross-tub-readonly-badge"
+              className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-400"
+              title={t('tubEditor.crossTubReadOnlyTitle')}
+            >
+              {t('tubEditor.crossTubReadOnlyBadge')}
+            </span>
+          )}
         </SectionCardTitle>
         <div className="flex w-full max-w-full flex-wrap items-start justify-between gap-2">
           <div className="ml-auto flex flex-col items-end gap-1">
@@ -2043,9 +2065,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 size="sm"
                 variant="danger"
                 onClick={() => void handleAction('delete')}
-                disabled={isProcessing || !hasValidRange}
+                disabled={isProcessing || !hasValidRange || isCrossTubReadOnly}
                 className="h-full text-xs"
-                title={t('tubEditor.deleteTitle')}
+                title={isCrossTubReadOnly ? t('tubEditor.crossTubReadOnlyTitle') : t('tubEditor.deleteTitle')}
               >
                 {isProcessing && processingMode === 'delete' ? t('tubEditor.deleting') : t('tubEditor.delete')}
               </Button>
@@ -2053,9 +2075,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 size="sm"
                 variant="secondary"
                 onClick={() => void handleAction('restore')}
-                disabled={isProcessing || !hasValidRange}
+                disabled={isProcessing || !hasValidRange || isCrossTubReadOnly}
                 className="h-full text-xs"
-                title={t('tubEditor.restoreTitle')}
+                title={isCrossTubReadOnly ? t('tubEditor.crossTubReadOnlyTitle') : t('tubEditor.restoreTitle')}
               >
                 {isProcessing && processingMode === 'restore' ? t('tubEditor.restoring') : t('tubEditor.restore')}
               </Button>
@@ -2074,10 +2096,10 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 size="sm"
                 variant="secondary"
                 onClick={() => void handleUndoLastAction()}
-                disabled={isProcessing || actionHistory.length === 0}
+                disabled={isProcessing || actionHistory.length === 0 || isCrossTubReadOnly}
                 className="ml-auto h-full px-2"
                 aria-label={t('tubEditor.undoAria')}
-                title={t('tubEditor.undoTitle', { max: MAX_UNDO_HISTORY })}
+                title={isCrossTubReadOnly ? t('tubEditor.crossTubReadOnlyTitle') : t('tubEditor.undoTitle', { max: MAX_UNDO_HISTORY })}
               >
                 <Undo2 className="h-4 w-4" />
               </Button>
@@ -2085,10 +2107,10 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
                 size="sm"
                 variant="secondary"
                 onClick={() => void handleRedoLastAction()}
-                disabled={isProcessing || redoHistory.length === 0}
+                disabled={isProcessing || redoHistory.length === 0 || isCrossTubReadOnly}
                 className="h-full px-2"
                 aria-label={t('tubEditor.redoAria')}
-                title={t('tubEditor.redoTitle', { max: MAX_UNDO_HISTORY })}
+                title={isCrossTubReadOnly ? t('tubEditor.crossTubReadOnlyTitle') : t('tubEditor.redoTitle', { max: MAX_UNDO_HISTORY })}
               >
                 <Redo2 className="h-4 w-4" />
               </Button>
@@ -2099,9 +2121,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
               size="sm"
               variant="secondary"
               onClick={() => void handleAiCleanScan()}
-              disabled={aiCleanBusy || isProcessing || !tubPath}
+              disabled={aiCleanBusy || isProcessing || !tubPath || isCrossTubReadOnly}
               aria-label={t('tubEditor.aiFilterEntryAria')}
-              title={t('tubEditor.aiFilterEntryAria')}
+              title={isCrossTubReadOnly ? t('tubEditor.crossTubReadOnlyTitle') : t('tubEditor.aiFilterEntryAria')}
               className="h-full text-xs"
             >
               <Sparkles className="h-4 w-4 text-cyan-400" />

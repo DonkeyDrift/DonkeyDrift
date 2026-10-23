@@ -982,8 +982,9 @@ describe('TubLibrary multi-select session filter', () => {
       expect(useStore.getState().activeSessionIds).toEqual(['26-08-16_0', '26-08-16_1']);
     });
     const state = useStore.getState();
-    // 锚点 = 最后点击行；同 tub 多选挂接编辑器作用域
+    // 锚点 = 最后点击行；同 tub 多选挂接编辑器作用域（非跨 tub，可编辑）
     expect(state.activeSessionId).toBe('26-08-16_0');
+    expect(state.activeSessionCrossTub).toBe(false);
     // 合并 records 按 start_time_ms 升序（10:00 在前），与点击先后无关
     expect(state.activeSessionRecords.map((r) => r['cam/image_array'])).toEqual([
       'cam_b0.jpg', 'cam_b1.jpg', 'cam_b2.jpg', 'cam_a0.jpg', 'cam_a1.jpg',
@@ -1132,10 +1133,16 @@ describe('TubLibrary multi-select session filter', () => {
     expect(useStore.getState().tubPath).toBe('/tmp/tub');
     const checkboxes = screen.getAllByRole('checkbox');
     expect(checkboxes.map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'true']);
-    // 跨 tub 选择：编辑器回退整 tub 视图（store 作用域清空，组件集合保留），操作条提示
-    expect(useStore.getState().activeSessionId).toBeNull();
-    expect(useStore.getState().activeSessionRecords).toEqual([]);
-    expect(screen.getByText('跨 Tub 选择：编辑器请逐 Tub 编辑')).toBeInTheDocument();
+    // 跨 tub 选择：挂接编辑器只读合并视图（锚点=最后点击行 B；ids 按 time-asc），操作条提示
+    const state = useStore.getState();
+    expect(state.activeSessionId).toBe('26-10-20_0');
+    expect(state.activeSessionCrossTub).toBe(true);
+    expect(state.activeSessionIds).toEqual(['26-10-20_0', '26-10-20_1']);
+    // 合并 records 为两 tub 之和（B 3 帧 + A 2 帧 = 5 帧，time-asc）
+    expect(state.activeSessionRecords.map((r) => r['cam/image_array'])).toEqual([
+      'cam_d0.jpg', 'cam_d1.jpg', 'cam_d2.jpg', 'cam_x0.jpg', 'cam_x1.jpg',
+    ]);
+    expect(screen.getByText('跨 Tub 选择：编辑器为只读合并视图，编辑帧请切回单个 Tub')).toBeInTheDocument();
     // 播放器仍播合并序列（time-asc：B 3 帧 + A 2 帧 = 5 帧）
     await waitFor(() => {
       expect(screen.getByText(/1 \/ 5/)).toBeInTheDocument();
@@ -1309,12 +1316,14 @@ describe('TubLibrary multi-select session filter', () => {
       expect(getSessionRecords).toHaveBeenCalledWith('/tmp/tub', '26-10-20_1');
     });
 
-    // 跨 tub 多选（time-asc：B 先 A 后）→ 批量删除各带各的 tub_path
+    // 跨 tub 多选（time-asc：B 先 A 后）→ 批量删除各带各的 tub_path；
+    // 编辑器挂接为只读合并视图（锚点=B）
     fireEvent.click(rowButton(fmt(sessionB.start_time_ms)), { ctrlKey: true });
     await waitFor(() => {
       expect(screen.getByText('已选 2 段 · 共 5 帧')).toBeInTheDocument();
     });
-    expect(useStore.getState().activeSessionId).toBeNull();
+    expect(useStore.getState().activeSessionId).toBe('26-10-20_0');
+    expect(useStore.getState().activeSessionCrossTub).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '删除所选' }));
     expect(screen.getByText('删除所选 2 段录制？')).toBeInTheDocument();
 

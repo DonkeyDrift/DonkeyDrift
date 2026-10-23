@@ -315,8 +315,11 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   }, [sortedSessions]);
 
   // 多选合并结果的编辑器挂接（按 tub 去重判定）：集合收敛单 tub 且即当前全局
-  // tub → 挂会话作用域（锚点 sid + 合并 records + ids）；跨 tub（编辑器逐 tub
-  // 编辑）或单 tub 非当前全局 → 回退整 tub 视图。各刷新路径写回都走这里
+  // tub → 挂会话作用域（锚点 sid + 合并 records + ids）；跨 tub → 也挂接合并
+  // records，但置 crossTub 标记让编辑器进入只读合并视图（帧级写操作禁用，
+  // 删除/恢复后端 API 只收 _index 且作用于后端当前 tub，跨 tub _index 撞号
+  // 会删错数据）；单 tub 非当前全局 → 回退整 tub 视图（由选中 effect 先发起
+  // switchWorkingTub，落定后重跑挂接）。各刷新路径写回都走这里
   const commitMergedSelection = useCallback(
     (anchorSessionId: string | null, ordered: FamilyTubSession[], merged: TubRecord[]) => {
       const uniqueTubs = [...new Set(ordered.map((s) => s.tub_path))];
@@ -325,6 +328,13 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
           anchorSessionId,
           merged as StoreTubRecord[],
           ordered.map((s) => s.session_id),
+        );
+      } else if (uniqueTubs.length > 1) {
+        setActiveSession(
+          anchorSessionId,
+          merged as StoreTubRecord[],
+          ordered.map((s) => s.session_id),
+          true,
         );
       } else {
         setActiveSession(null, []);
@@ -1125,7 +1135,8 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
 
   // ---- 多选会话筛选（家族视图）----
   // 集合允许跨 tub（真实数据一段会话一个兄弟 tub，「一整套连续录制」天然跨 tub）；
-  // 多选手势不切换全局 tub，编辑器作用域只在集合收敛单 tub 且即当前全局 tub 时挂接。
+  // 多选手势不切换全局 tub，挂接规则见 commitMergedSelection：收敛单 tub 且即当前
+  // 全局 tub → 可编辑会话作用域；跨 tub → 只读合并视图。
   // 锚点语义：selected 即「最后点击行」，shift 范围选也以此为起点。
 
   // ctrl/⌘/checkbox 切换：加入/移出集合（允许跨 tub，手势不切换全局 tub）；
