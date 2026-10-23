@@ -376,7 +376,9 @@ def _is_tub_dir(path: str) -> bool:
 def _discover_family_tubs(path: str) -> List[str]:
     """按家族规则发现 tubPath 的全部成员 tub（绝对路径去重）。
 
-    - path 本身是 tub：成员 = 自身 + 父目录的直接子 tub（兄弟）+ 父目录本身（若也是 tub）。
+    - path 本身是 tub：成员 = 自身 + 自身的直接子 tub + 父目录的直接子 tub（兄弟）
+      + 父目录本身（若也是 tub）。自身子 tub 必须纳入：data/ 这类目录常同时
+      持有自己的记录与 tub_序号_日期 子目录，漏掉会导致多次录制只显示第一段。
     - path 不是 tub：成员 = 其深度 ≤ 2 的子 tub（隐藏目录跳过）。
     - 单个候选失败仅告警跳过，不拖垮整体。
     """
@@ -392,6 +394,18 @@ def _discover_family_tubs(path: str) -> List[str]:
 
     if _is_tub_dir(abs_path):
         _add(abs_path)
+        # 自身的直接子 tub（如 data/ 同时是 tub 且内含 tub_序号_日期 子目录）
+        try:
+            for name in sorted(os.listdir(abs_path)):
+                if name.startswith('.'):
+                    continue
+                child = os.path.join(abs_path, name)
+                if not os.path.isdir(child):
+                    continue
+                if _is_tub_dir(child):
+                    _add(os.path.abspath(child))
+        except OSError as e:
+            logger.warning(f"Failed to list child tubs of {abs_path}: {e}")
         parent = os.path.dirname(abs_path.rstrip(os.sep)) or os.sep
         try:
             for name in sorted(os.listdir(parent)):

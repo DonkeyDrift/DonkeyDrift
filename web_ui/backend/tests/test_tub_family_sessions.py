@@ -167,8 +167,8 @@ def test_family_sessions_sorted_by_start_time_desc(tmp_path, monkeypatch):
 def test_family_sessions_empty_includes_child_tubs(tmp_path):
     """家族聚合为空（成员 tub 记录全软删）时，响应附带子 tub 引导（方案 A 兜底）。
 
-    与 /tub/sessions 一致：child_tubs 扫描的是 path 的子目录（子 tub 不属于
-    「path 是 tub」时的家族成员，但可作为引导目标列出）。
+    path 是 tub 时，其直接子 tub 也是家族成员，因此本用例需把 root 与子 tub
+    的记录全部软删才能走到 child_tubs 兜底分支。
 
     用例放在 tmp_path 下一层沙盒目录里：path 是 tub 时家族会扫描其父目录的
     兄弟 tub，而 tmp_path 的父目录是 pytest 共享根目录，同轮其他用例的 tub
@@ -177,14 +177,15 @@ def test_family_sessions_empty_includes_child_tubs(tmp_path):
     root = tmp_path / 'sandbox'
     root.mkdir()
     _make_tub(root, record_count=2)
+    _make_tub(root / 'tub_7_26-10-20', record_count=4)
     from donkeycar.parts.tub_v2 import Tub
 
-    tub = Tub(str(root))
-    try:
-        tub.delete_records([0, 1])
-    finally:
-        tub.close()
-    _make_tub(root / 'tub_7_26-10-20', record_count=4)
+    for tub_path, indexes in ((root, [0, 1]), (root / 'tub_7_26-10-20', [0, 1, 2, 3])):
+        tub = Tub(str(tub_path))
+        try:
+            tub.delete_records(indexes)
+        finally:
+            tub.close()
 
     client = _build_client()
     response = client.get('/api/tub/family_sessions', params={'tubPath': str(root)})
@@ -195,6 +196,33 @@ def test_family_sessions_empty_includes_child_tubs(tmp_path):
     child_tubs = payload['child_tubs']
     assert len(child_tubs) == 1
     assert child_tubs[0]['name'] == 'tub_7_26-10-20'
+
+
+def test_family_sessions_parent_tub_includes_child_tubs(tmp_path, monkeypatch):
+    """path 本身是 tub 且内含子 tub（data/ 布局）时，子 tub 必须纳入家族。
+
+    回归：data/ 同时持有自身记录与 tub_序号_日期 子目录时，多次录制只显示
+    第一段（子 tub 会话丢失）。root 置于 tmp_path/'data'：父目录扫描只触及
+    tmp_path 本身，不会被 pytest 共享根目录里其他用例的 tub 污染。
+    """
+    _use_fake_clock(monkeypatch)
+    root = tmp_path / 'data'
+    root.mkdir()
+    _make_tub(root, record_count=2)
+    _make_tub(root / 'tub_1_26-10-23', record_count=3)
+    _make_tub(root / 'tub_2_26-10-23', record_count=4)
+
+    client = _build_client()
+    response = client.get('/api/tub/family_sessions', params={'tubPath': str(root)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_tub = {s['tub_name']: s for s in payload['sessions']}
+    assert set(by_tub) == {'data', 'tub_1_26-10-23', 'tub_2_26-10-23'}
+    assert by_tub['data']['record_count'] == 2
+    assert by_tub['tub_1_26-10-23']['record_count'] == 3
+    assert by_tub['tub_2_26-10-23']['record_count'] == 4
+    assert 'child_tubs' not in payload
 
 
 def test_family_sessions_skips_corrupt_member(tmp_path, monkeypatch):
