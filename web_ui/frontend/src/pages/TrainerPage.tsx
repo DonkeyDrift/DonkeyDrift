@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import {
   getTrainerConfig,
@@ -7,6 +7,7 @@ import {
   loadMyconfig,
   saveTrainingConfig,
   listTrainerTubs,
+  type FamilyTubSession,
   type TrainerTub,
 } from '../services/api';
 import { AdvancedOptions } from '../components/trainer/AdvancedOptions';
@@ -62,6 +63,28 @@ export const TrainerPage = React.memo(function TrainerPage() {
   const resetSessionFilter = useCallback(() => {
     setSessionFilter({ enabled: false, selected: [], isFullSelection: false });
   }, []);
+  // 家族会话列表（SessionFilterPicker 上报）：渲染「训练数据范围」摘要用，
+  // 与 Picker 共享同一份拉取结果，避免重复请求
+  const [sessionFilterList, setSessionFilterList] = useState<{
+    path: string;
+    sessions: FamilyTubSession[];
+  } | null>(null);
+  const handleFilterSessionsChange = useCallback(
+    (path: string, sessions: FamilyTubSession[]) => {
+      setSessionFilterList({ path, sessions });
+    },
+    []
+  );
+  // Picker 的拉取路径（与 SessionFilterPicker 内同一规则）：摘要只在
+  // 上报路径与当前路径一致时渲染，避免 tub 切换瞬间残留旧家族数据
+  const sessionFilterFetchPath = useMemo(() => {
+    const candidate = tubCandidates.find(
+      (c) =>
+        c.relative_path === trainerLocalConfig.tub ||
+        c.absolute_path === trainerLocalConfig.tub
+    );
+    return candidate ? candidate.absolute_path : trainerLocalConfig.tub;
+  }, [tubCandidates, trainerLocalConfig.tub]);
   // Don't re-autofill after the user has manually edited the tub path
   const tubManuallyEdited = useRef(false);
   // Don't overwrite mypc host/user/password once the user has typed anything
@@ -282,16 +305,31 @@ export const TrainerPage = React.memo(function TrainerPage() {
       config: trainingConfig,
     });
 
+    // 勾选子集且启用筛选时按 tub 分组（复合键拆回 {tub绝对路径: [session_id]}）：
+    // _session_id 跨 tub 撞名，平坦列表会让 CLI 对每个 tub 都放行同名会话；
+    // 全选/未启用不传（家族全量，由后端展开家族 tub 后训练）
+    const filterSubset =
+      sessionFilter.enabled &&
+      !sessionFilter.isFullSelection &&
+      sessionFilter.selected.length > 0;
+    const sessionFilterPayload = filterSubset
+      ? sessionFilter.selected.reduce<Record<string, string[]>>((acc, key) => {
+          const sep = key.indexOf('::');
+          const tubPath = key.slice(0, sep);
+          const sid = key.slice(sep + 2);
+          if (tubPath && sid) {
+            (acc[tubPath] ??= []).push(sid);
+          }
+          return acc;
+        }, {})
+      : undefined;
+
     startLocal({
       tub: trainerLocalConfig.tub,
       model: `./models/${modelName}`,
       model_type: trainerLocalConfig.modelType,
       transfer: trainerLocalConfig.transfer.trim() || undefined,
-      // 勾选子集且启用筛选时才带 session_ids；全量/未启用省略（与旧请求体一致）
-      session_ids:
-        sessionFilter.enabled && !sessionFilter.isFullSelection
-          ? sessionFilter.selected
-          : undefined,
+      session_filter: sessionFilterPayload,
     });
   }, [trainerLocalConfig, configPath, startLocal, sessionFilter]);
 
@@ -373,7 +411,68 @@ export const TrainerPage = React.memo(function TrainerPage() {
                 enabled={sessionFilter.enabled}
                 selected={sessionFilter.selected}
                 onChange={setSessionFilter}
+                onSessionsChange={handleFilterSessionsChange}
               />
+              {/* 训练数据范围摘要：家族布局下「默认全部训练」实际覆盖整个
+                  家族（后端展开），此处列出将参与训练的 Tub 段数/帧数，
+                  避免只训根 tub 的静默漏训 */}
+              {sessionFilterList &&
+                sessionFilterList.path === sessionFilterFetchPath &&
+                sessionFilterList.sessions.length > 0 &&
+                (() => {
+                  const filterActive =
+                    sessionFilter.enabled && !sessionFilter.isFullSelection;
+                  const scoped = filterActive
+                    ? sessionFilterList.sessions.filter((s) =>
+                        sessionFilter.selected.includes(
+                          `${s.tub_path}::${s.session_id}`
+                        )
+                      )
+                    : sessionFilterList.sessions;
+                  const scopedTubs = new Set(scoped.map((s) => s.tub_path)).size;
+                  const scopedFrames = scoped.reduce(
+                    (sum, s) => sum + s.record_count,
+                    0
+                  );
+                  return (
+                    <div
+                      className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-2"
+                      data-testid="training-scope-summary"
+                    >
+                      <div className="text-sm text-zinc-300">
+                        {t('trainer.trainingScopeTitle')}
+                      </div>
+                      <div className="text-xs text-zinc-400">
+                        {filterActive
+                          ? t('trainer.trainingScopeFiltered', {
+                              segments: scoped.length,
+                              tubs: scopedTubs,
+                              frames: scopedFrames,
+                            })
+                          : t('trainer.trainingScopeAll', {
+                              tubs: scopedTubs,
+                              frames: scopedFrames,
+                            })}
+                      </div>
+                      {filterActive && scoped.length > 0 && (
+                        <ul className="max-h-24 overflow-y-auto space-y-1 border-t border-zinc-800 pt-2">
+                          {scoped.map((s) => (
+                            <li
+                              key={`${s.tub_path}::${s.session_id}`}
+                              className="text-xs text-zinc-500 font-mono"
+                            >
+                              {s.tub_name}/{s.session_id}
+                              <span className="text-zinc-600">
+                                {' '}
+                                · {t('trainer.sessionFilterFrames', { count: s.record_count })}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })()}
             </>
           ) : mode === 'mypc' ? (
             <>

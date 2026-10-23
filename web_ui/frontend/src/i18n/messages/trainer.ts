@@ -28,6 +28,9 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.sessionFilterLoadFailed': '会话列表加载失败，仍可训练全部记录。',
     'trainer.sessionFilterEmpty': '此 tub 中没有可筛选的录制会话。',
     'trainer.sessionFilterNoneSelected': '已启用会话筛选，请至少勾选一段录制。',
+    'trainer.trainingScopeTitle': '训练数据范围',
+    'trainer.trainingScopeAll': '全部录制：{tubs} 个 Tub / 共 {frames} 帧',
+    'trainer.trainingScopeFiltered': '已选 {segments} 段，涉及 {tubs} 个 Tub / 共 {frames} 帧',
     'trainer.trainingData': '训练数据',
     'trainer.workingDir': '工作目录: {path}',
     'trainer.modelName': '模型名称',
@@ -195,6 +198,10 @@ export const trainer: { zh: Record<string, string>; en: Record<string, string> }
     'trainer.sessionFilterEmpty': 'No recording sessions found in this tub.',
     'trainer.sessionFilterNoneSelected':
       'Session filter is enabled — select at least one recording session.',
+    'trainer.trainingScopeTitle': 'Training Data Scope',
+    'trainer.trainingScopeAll': 'All recordings: {tubs} tub(s) / {frames} frames total',
+    'trainer.trainingScopeFiltered':
+      'Selected {segments} session(s) across {tubs} tub(s) / {frames} frames total',
     'trainer.trainingData': 'Training Data',
     'trainer.workingDir': 'Working dir: {path}',
     'trainer.modelName': 'Model Name',

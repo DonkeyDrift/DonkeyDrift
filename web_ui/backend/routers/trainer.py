@@ -14,7 +14,7 @@ import threading
 import zipfile
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -53,6 +53,9 @@ class LocalTrainRequest(BaseModel):
     working_dir: Optional[str] = None
     # 只训练选中的录制会话（_session_id 列表）；None/空列表 = 不筛选（向后兼容）
     session_ids: Optional[List[str]] = None
+    # 按 tub 分组的会话筛选 {tub绝对路径: [session_id, ...]}：跨 tub 撞名的
+    # session_id 必须带 tub 维度；不在映射中的 tub 整体排除。优先于 session_ids
+    session_filter: Optional[Dict[str, List[str]]] = None
 
 
 class OnlineTrainRequest(BaseModel):
@@ -1013,18 +1016,41 @@ async def list_backups(working_dir: Optional[str] = None):
 # ------------------------------------------------------------------
 # Job management
 # ------------------------------------------------------------------
+def _expand_family_tub_paths(tub: str, base_dir: Optional[str] = None) -> str:
+    """训练前把 tub 路径展开为「家族成员 tub」逗号分隔绝对路径。
+
+    donkeycar train --tub 对逗号分隔路径逐个加载（pipeline/training.py），
+    不做子 tub 展开：家族布局（data/ 自身是 tub 且含 tub_序号_日期 子目录）下
+    只训根 tub，漏掉全部子 tub，「默认全部训练」名不副实。相对路径按训练
+    子进程的工作目录（working_dir，缺省后端 cwd）取绝对，保证展开结果与
+    CLI 解析 tub 的基准一致。发现异常或成员为空时回退原样透传，绝不因
+    展开失败让训练挂掉。
+    """
+    try:
+        from routers.tub import _discover_family_tubs
+        base = base_dir or os.getcwd()
+        anchor = os.path.abspath(os.path.join(base, os.path.expanduser(tub)))
+        members = _discover_family_tubs(anchor)
+        if members:
+            return ",".join(members)
+    except Exception:
+        pass
+    return tub
+
+
 @router.post("/train/local")
 async def start_local_train(request: LocalTrainRequest):
     job = job_manager.create_job("local")
     asyncio.create_task(
         job_manager.run_local(
             job,
-            tub=request.tub,
+            tub=_expand_family_tub_paths(request.tub, request.working_dir),
             model=request.model,
             model_type=request.model_type,
             transfer=request.transfer,
             working_dir=request.working_dir,
             session_ids=request.session_ids,
+            session_filter=request.session_filter,
         )
     )
     return {"job_id": job.id, "status": job.status}

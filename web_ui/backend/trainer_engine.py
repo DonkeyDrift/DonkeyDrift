@@ -141,7 +141,8 @@ class TrainingJobManager:
     async def run_local(self, job: TrainingJob, tub: str, model: str,
                         model_type: str, transfer: Optional[str] = None,
                         working_dir: Optional[str] = None,
-                        session_ids: Optional[list] = None):
+                        session_ids: Optional[list] = None,
+                        session_filter: Optional[dict] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
         # 用后端自身解释器经模块入口拉起训练（不依赖 PATH 里的 donkey 指向哪个
@@ -151,16 +152,25 @@ class TrainingJobManager:
         if transfer:
             cmd.extend(["--transfer", transfer])
 
-        # 会话筛选：把选中的 _session_id 平坦列表落盘为临时 JSON，经 CLI 的
-        # --session-filter 转成 cfg.TRAIN_FILTER（None/空列表 = 不筛选）
+        # 会话筛选：把选中的会话落盘为临时 JSON，经 CLI 的 --session-filter
+        # 转成 cfg.TRAIN_FILTER（两者都缺省 = 不筛选）。grouped dict
+        # {tub绝对路径: [session_id,...]} 原样写入（CLI 原生支持：不在映射中的
+        # tub 整体排除），优先于平坦 session_ids 列表
         session_filter_path = None
         try:
-            if session_ids:
+            filter_payload = session_filter if session_filter else session_ids
+            if filter_payload:
                 session_filter_path = os.path.join(
                     cwd, f'.train_session_filter_{job.id}.json')
                 with open(session_filter_path, 'w', encoding='utf-8') as f:
-                    json.dump([str(s) for s in session_ids], f,
-                              ensure_ascii=False)
+                    if isinstance(filter_payload, dict):
+                        json.dump(
+                            {str(k): [str(s) for s in v]
+                             for k, v in filter_payload.items()},
+                            f, ensure_ascii=False)
+                    else:
+                        json.dump([str(s) for s in filter_payload], f,
+                                  ensure_ascii=False)
                 cmd.extend(["--session-filter", session_filter_path])
 
             job.process = await asyncio.create_subprocess_exec(

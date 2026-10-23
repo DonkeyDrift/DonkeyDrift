@@ -612,6 +612,9 @@ export const startLocalTrain = async (params: {
   working_dir?: string;
   // 只训练选中的录制会话；undefined/空 = 不筛选（请求体与旧版一致）
   session_ids?: string[];
+  // 按 tub 分组的会话筛选 {tub绝对路径: [session_id,...]}（跨 tub 撞名必须带
+  // tub 维度）；优先于平坦 session_ids，两者都缺省 = 家族全量
+  session_filter?: Record<string, string[]>;
 }) => {
   const response = await api.post('/trainer/train/local', params);
   return response.data;
