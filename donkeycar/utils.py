@@ -528,6 +528,38 @@ def _tf_available() -> bool:
     return _TF_AVAILABLE
 
 
+def disable_metal_gpu_on_macos() -> bool:
+    """macOS (Apple Silicon) 上隐藏 Metal GPU，让 TF 训练回退 CPU float32。
+
+    tensorflow-metal 在 Apple Silicon 上即使 float32 也有已知数值问题
+    （train loss 尖峰、val loss 钉在"预测均值"退化水平、模型塌缩成恒定
+    输出——上游 keras-team/tf-keras#140）。所有本地 TF 训练入口统一走这里
+    （pipeline/training.py 模块级调用；createcar 模板 train.py 亦调用本函数）。
+
+    必须在 TF 运行时初始化之前调用（import tensorflow 本身不会初始化设备
+    运行时，但创建模型/执行算子之后再来就晚了，此时 set_visible_devices
+    抛 RuntimeError，这里按失败返回 False 并告警）。非 macOS 或无 GPU 时
+    为空操作。返回 True 表示 Metal GPU 已被隐藏。
+    """
+    if sys.platform != 'darwin':
+        return False
+    try:
+        import tensorflow as tf
+    except Exception:
+        return False
+    try:
+        if not tf.config.list_physical_devices('GPU'):
+            return False
+        tf.config.set_visible_devices([], 'GPU')
+    except RuntimeError as e:
+        logger.warning('无法禁用 Metal GPU（TF 运行时可能已初始化）: %s', e)
+        return False
+    logger.info('Disabled Metal GPU on macOS (tensorflow-metal numerical '
+                'instability, keras-team/tf-keras#140); training on CPU '
+                '(float32)')
+    return True
+
+
 def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'FastAiPilot']:
     '''
     given the string model_type and the configuration settings in cfg

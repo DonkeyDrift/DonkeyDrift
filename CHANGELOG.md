@@ -1,3 +1,13 @@
+## 2026-10-24 (276)
+
+- fix(training): 本地训练路径补 macOS Metal GPU 防护——web UI「本地训练」/`python -m donkeycar.management train` 训出的模型塌缩成恒定输出
+  - **根因(主)**:Metal 防护(禁 GPU 回退 CPU float32)此前只存在于模板 `templates/train.py`(Darwin 分支)和 `train_online.py` 的远程 sed 补丁里;真正的本地训练入口(web UI 训练器 → `donkeycar.management train` → `pipeline/training.py`)完全没有防护。Metal + mixed FP16 数值不稳(keras-team/tf-keras#140)→ loss 尖峰(4.0/7.85)后塌缩,模型输出恒定(坏模型 pilot_1792739150191 angle 输出峰峰值仅 0.03)。
+  - **修复**:`utils.py` 新增公共助手 `disable_metal_gpu_on_macos()`(非 darwin/无 GPU/无 TF 返回 False;TF 运行时已初始化则告警返回 False,不炸);`pipeline/training.py` 模块级调用,覆盖一切走该模块的本地训练;模板 `train.py` Darwin 分支改调公共助手(保留 `mixed_precision.set_global_policy(policy)` 文本——远程 sed 补丁 `_patch_remote_train_py_if_macos` 依赖它)。
+  - **验证**:新增 `tests/test_disable_metal_gpu.py`(6 例,fake TF 覆盖 5 分支+pipeline 守卫断言)+ 更新 `test_train_template_fp16.py`,10 项全过;回归 `test_online_trainer_workspace.py`+`test_train.py` 44 passed(`test_train[data9]` 间歇性收敛断言失败为已知 flaky——测试自带注释,单独重跑 2/2 通过,与本改动无关)。mycar 实数据(7884 条,240x320)重训:守卫日志正常触发,loss 平滑无尖峰;30 epoch 模型 **angle 相关 0.959 / MSE 0.0102**(预测均值对照 0.1263),throttle 相关 0.867;keras 与 tflite 输出最大差 3.6e-7(转换无损)。
+  - **次要发现(训练动力学,非代码 bug)**:CPU 下该漂移数据 val_loss 可能先在「预测均值」平台期停 5+ epoch——一次 10 epoch+patience 5 的试训在 ep8 早停于平台期,模型近恒定(pred_var=0.0000);同数据 30 epoch 关早停则顺利走出平台(val 0.207→0.028,结束时仍在降)。**若重训后模型仍恒定:加大 `EARLY_STOP_PATIENCE`(如 15)或 `MAX_EPOCHS`,确认 val_loss 走出平台期再停。**
+  - 评测踩坑:`KerasPilot.run(img_arr)` 入参是 **uint8 [0,255]**(内部自行 `normalize_image`),喂 [0,1] 会因二次归一化得到假「恒定输出」;评测 tflite 用 `tf.lite.Interpreter` 直喂 float32/255 或与 keras 模型对拍。
+  - mycar 里的坏模型 pilot_1792739150191 / pilot_1792764613701 应废弃,用修复后代码重训。
+
 ## 2026-10-13 (275)
 
 - fix(webui): 连接器便签页「保存后重开显示未配置」——自动加载逻辑从「加载器」抽屉的 ConfigLoader 上移到 App 级 `useConfigAutoLoad`(随应用常驻):持久化 configPath 恢复 + 无路径时自动发现 mycar 不再依赖抽屉挂载(刷新后直接打开连接器时 ConfigLoader 未挂载,config 恒 null,表单显示未配置;实际保存一直成功,可抓帧验证)。ConfigLoader 移除重复逻辑,8 项回归测试迁移至 hook 测试(394 全过)。

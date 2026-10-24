@@ -32,9 +32,16 @@ from donkeycar.pipeline.sequence import TubRecord, TubSequence, TfmIterator
 from donkeycar.pipeline.types import TubDataset
 from donkeycar.pipeline.augmentations import ImageAugmentation
 from donkeycar.parts.image_transformations import ImageTransformations
-from donkeycar.utils import get_model_by_type, normalize_image, train_test_split
+from donkeycar.utils import disable_metal_gpu_on_macos, get_model_by_type, \
+    normalize_image, train_test_split
 import tensorflow as tf
 import numpy as np
+
+# 本地 TF 训练统一入口（management train / TUI / 模板 train.py 最终都走到
+# 本模块）：tensorflow-metal 在 Apple Silicon 上数值不稳定，会让模型塌缩成
+# 恒定输出（keras-team/tf-keras#140），macOS 上一律隐藏 Metal GPU 回退 CPU。
+# 模块级执行是为了抢在任何模型创建/算子执行（即 TF 运行时初始化）之前。
+disable_metal_gpu_on_macos()
 
 logger = logging.getLogger(__name__)
 
