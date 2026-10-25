@@ -164,6 +164,9 @@ def test_build_remote_drive_start_command_injects_bridge_url_safely():
     remote_command = command[-1]
     assert command[:3] == ["ssh", "-p", "22"]
     assert "DRIVE_API_SERVER_URL=ws://192.168.1.2:8000/api/drive/ws" in remote_command
+    # 环境变量必须经 env 注入：nohup 之后直接写 VAR=value 会被当程序名（#483）
+    assert "nohup env DRIVE_API_SERVER_URL=" in remote_command
+    assert "nohup DRIVE_API_SERVER_URL=" not in remote_command
     assert "--type tflite_linear" in remote_command
     assert "--model '~/mycar/models/pilot.tflite'" in remote_command
     assert ".donkeycar_drive.pid" in remote_command

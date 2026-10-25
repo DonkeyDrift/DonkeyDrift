@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-10-25 (267)
+
+- fix(connector): 远程启动驾驶命令 nohup 环境变量前缀错误（#483）+ 品牌测试断言随 #476/#479 改名同步（#484）——2026-10-25 全项目审计 5 项修复之 DD 侧 2 项（Firmware 侧 3 项见 Firmware v1.10.13）
+  - 背景：用户要求全面检查项目找出 bug 并全部修复。本会话审计（固件 371 + 后端 581 + 前端 365 + 主包 1026/1 共 4 套测试，外加双槽位切换新代码、漂移模块、launcher、find-car、连接器等约 20 个热点文件人工精读）共发现 5 项缺陷，按第 22 条流程先发 Issue（#483/#484/#181/#182/#183）、认领后修复。
+  - fix #483（`web_ui/backend/remote_car_client.py`）：`build_remote_drive_start_command` 带 `bridge_server_url` 时生成的远端命令 `nohup DRIVE_API_SERVER_URL=... python manage.py drive` 中，POSIX shell 只把命令名**之前**的 `VAR=value` 词当环境赋值——写在 `nohup` 之后会被 nohup 当成要执行的程序名（本机实测 `nohup FOO=bar true` → exit 127），远程 drive 必然启动失败且 `.donkeycar_drive.pid` 登记的是已死进程。修复：改 `nohup env DRIVE_API_SERVER_URL=<url> python ...`（env 注入）。该接口当前无前端调用方（`startConnectorDrive` 已定义未接线），属潜伏 bug 主动修复。
+  - fix #484（`donkeycar/tests/test_web_ui_branding.py`）：PR #476/#479（10-02）把 `index.html` 标题改为 `<title>DonkeyDrifter</title>` 但测试断言仍停留在旧文案 `<title>DonkeyDrift Web UI</title>`，主套件全量 1 failed（实测 1026 过 1 败 564s）；断言同步后转绿。#441→#444 同型教训（改被断言引用的内容必须同 commit 改断言）的再次重演。
+  - 测试同步：`web_ui/backend/tests/test_connector.py::test_build_remote_drive_start_command_injects_bridge_url_safely` 强化——断言 `nohup env DRIVE_API_SERVER_URL=` 在位、裸 `nohup DRIVE_API_SERVER_URL=` 形式不得回归。
+  - 验证：`test_web_ui_branding.py` 3 过、`test_connector.py` 33 过；主套件全量在会话 worktree 复跑全绿；前端无改动无需重建 dist；Firmware 无关。
+
 ## 2026-10-02 (266)
 
 - feat(drive): 驾驶页新增「手柄桥模式」卡片——车固件 ↔ RC_BLE_Bridge 蓝牙手柄桥一键切换（配套 Firmware v1.10.12 双启动槽位）
