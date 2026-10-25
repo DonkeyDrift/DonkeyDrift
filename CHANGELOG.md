@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-10-25 (269)
+
+- fix(drift/arena/simcollect): 三轮审计 5 项修复——漂移安全双缺口（遥测缺失看门狗短路 + 下发失败不可见）+ Arena 缓存串台 + 采集任务 GC 卡死 + stop 竞态（#492–#496）
+  - **#492（安全）drift_engine 遥测缺失看门狗**：`_check_engaged_watchdogs` 的 `is not None` 前置条件使"遥测从未到达"（车端 ws 从未连上）时停滞看门狗永不触发——ENGAGED 期 yaw_rate 恒 0 无陀螺负反馈、前馈直接 saturate 转向，三重看门狗全失效。修复：`_last_telemetry_t is None` 单列触发"遥测缺失"（比停滞更陈旧，更危险）；两个既有看门狗用例（检测丢失/下发失败）同步改为喂一次遥测构造，并新增"无遥测 ENGAGED 必须触发"用例。
+  - **#493（安全）routers/drift 生产 send_sink**：fire-and-forget（run_coroutine_threadsafe 不取结果恒 None）使 `_SEND_FAILURE_LIMIT` 连续失败看门狗在生产接线是死代码，车端掉线时交还人工指令失败也不可见。修复：sink 内 `fut.result(timeout=2.0)` 回传布尔（异常/超时按 False），失败计数真正生效。
+  - **#494 routers/arena 预测缓存串台**：缓存键只含 `(pilot_id, record_index, 图像参数)`，而 record_index 是全局 `current_records` 的位置下标——换 tub / 删记录重载后同一下标指向不同帧，直接命中旧 tub 缓存（user 取新记录、pilot 取旧图像，mae/rmse 全错）。修复：键加入 `current_tub_path` + 记录物理 `_index`。
+  - **#495 routers/simcollect 任务 GC 卡死**：`asyncio.create_task` 返回值被丢弃（事件循环只持弱引用），任务被 GC 静默取消时 run() 从未执行、job 永远 pending，`get_running()` 把 pending 算占用 → 后续 /start 全部 409 直到重启。修复：`_spawn_run` 模块级集合持强引用 + done 回调释放，并对没走完 run() finally 的孤儿 job 兜底收尾（置 error、清 active_job_id）。
+  - **#496 drift_engine.stop() 竞态**：读态→迁移两步不原子，相机线程看门狗在窗口内先迁走状态时 `stop_auto()` 抛 RuntimeError → 路由 409 无意义报错。修复：AUTO 分支捕获 RuntimeError 幂等返回（目标态本就是停止）。
+  - 测试同步：watchdog +1 新用例（另 2 用例改构造方式）、test_drift_router +2（sink 离线 False/在线 True、stop 竞态复现不抛）、test_arena +2（换 tub/删记录重载均不命中旧缓存）、test_simcollect +2（强引用持有与释放、孤儿 job 兜底收尾）；后端全量 **596 过 1 跳**。
+
+# 变更日志
+
 ## 2026-10-25 (268)
 
 - fix(security): 全项目二轮审计 5 项修复——两处局域网可达的路径穿越/任意文件外传（#486/#487）+ WS 数值防护（#489）+ 训练进度回零（#490）+ SSE 连接泄漏（#488）

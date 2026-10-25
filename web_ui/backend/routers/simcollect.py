@@ -23,6 +23,32 @@ class SimCollectStartRequest(BaseModel):
     keep_sim: bool = False
 
 
+# 事件循环对 task 仅持弱引用：必须自持强引用，否则任务可能被 GC 静默
+# 取消——run() 从未执行、job 永远 pending，后续 /start 全部 409（#495）
+_run_tasks: set = set()
+
+
+def _spawn_run(job, **kwargs) -> None:
+    task = asyncio.create_task(simcollect_job_manager.run(job, **kwargs))
+
+    def _release(t: asyncio.Task) -> None:
+        _run_tasks.discard(t)
+        # 任务没走完 run() 的 finally（如启动前被取消）时兜底收尾，
+        # 不让 pending/running 的 job 永久占坑
+        if job.status in ("pending", "running"):
+            job.status = "error"
+            try:
+                exc = None if t.cancelled() else t.exception()
+            except Exception:
+                exc = None
+            job.error = f"采集任务异常终止（{'被取消' if t.cancelled() else exc or '未知原因'}）"
+            if simcollect_job_manager.active_job_id == job.id:
+                simcollect_job_manager.active_job_id = None
+
+    _run_tasks.add(task)
+    task.add_done_callback(_release)
+
+
 @router.post("/start")
 async def start_sim_collect(request: SimCollectStartRequest):
     try:
@@ -36,16 +62,14 @@ async def start_sim_collect(request: SimCollectStartRequest):
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    asyncio.create_task(
-        simcollect_job_manager.run(
-            job,
-            steps=request.steps,
-            kp=request.kp,
-            kd=request.kd,
-            throttle=request.throttle,
-            min_throttle=request.min_throttle,
-            keep_sim=request.keep_sim,
-        )
+    _spawn_run(
+        job,
+        steps=request.steps,
+        kp=request.kp,
+        kd=request.kd,
+        throttle=request.throttle,
+        min_throttle=request.min_throttle,
+        keep_sim=request.keep_sim,
     )
     return {"job_id": job.id, "status": job.status}
 
