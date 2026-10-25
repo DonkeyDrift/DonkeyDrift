@@ -178,22 +178,28 @@ def get_image(path: str, tubPath: Optional[str] = None, request: Request = None)
     if not target_tub_path:
         raise HTTPException(status_code=400, detail="No tub loaded")
 
-    # Security check: ensure path doesn't go outside
-    # For a local tool, less critical, but good practice.
+    # Security check: ensure path doesn't go outside the tub directory.
+    # 本接口无鉴权暴露在局域网，".." 穿越会读出 tub 外的任意文件（#487）。
+    def _confined(base: str, rel: str) -> Optional[str]:
+        candidate = os.path.realpath(os.path.join(base, rel))
+        root = os.path.realpath(base)
+        if candidate == root or candidate.startswith(root + os.sep):
+            return candidate
+        return None
 
     # If the path comes from the record, it's just the filename usually
     # But sometimes it might include 'images/' prefix if coming from different sources
     clean_path = path.replace('images/', '').replace('images\\', '')
 
-    image_full_path = os.path.join(target_tub_path, 'images', clean_path)
+    image_full_path = _confined(os.path.join(target_tub_path, 'images'), clean_path)
 
-    if not os.path.exists(image_full_path):
+    if image_full_path is None or not os.path.exists(image_full_path):
          # Try without 'images' subdir just in case structure is different
-         image_full_path_alt = os.path.join(target_tub_path, clean_path)
-         if os.path.exists(image_full_path_alt):
+         image_full_path_alt = _confined(target_tub_path, clean_path)
+         if image_full_path_alt is not None and os.path.exists(image_full_path_alt):
              image_full_path = image_full_path_alt
          else:
-             logger.error(f"Image not found: {image_full_path}")
+             logger.error(f"Image not found or outside tub: {path}")
              raise HTTPException(status_code=404, detail=f"Image not found: {clean_path}")
 
     stat = os.stat(image_full_path)

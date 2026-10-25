@@ -102,3 +102,24 @@ describe('useTrainingJob 刷新后恢复训练进度', () => {
     expect(mockCreateLogStream).not.toHaveBeenCalled();
   });
 });
+
+describe('useTrainingJob SSE 连接生命周期（#488）', () => {
+  it('训练中卸载组件：EventSource 被关闭（不随页面离开泄漏）', async () => {
+    useStore.setState({ activeTraining: { id: 'job1', mode: 'local' } });
+    mockGetJobStatus.mockResolvedValue(runningStatus);
+    const es = fakeEventSource();
+    mockCreateLogStream.mockReturnValue(es as never);
+
+    const { unmount } = renderHook(() => useTrainingJob());
+    await waitFor(() => expect(mockCreateLogStream).toHaveBeenCalledWith('job1'));
+
+    unmount();
+    expect(es.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('非训练态卸载组件：不误关（无连接可关）', () => {
+    const { unmount } = renderHook(() => useTrainingJob());
+    unmount();
+    expect(mockCreateLogStream).not.toHaveBeenCalled();
+  });
+});

@@ -146,3 +146,51 @@ def test_delete_session_unknown_session_returns_404(tmp_path):
     )
 
     assert response.status_code == 404
+
+
+def test_get_image_rejects_path_traversal(tmp_path):
+    """#487：path 穿越出 tub 目录必须拒绝，杜绝任意文件读取。"""
+    _make_tub(tmp_path)
+    client = _build_client()
+
+    for evil in (
+        "../../etc/passwd",
+        "../../../home/user/.ssh/id_rsa",
+        "images/../../../secret.txt",
+    ):
+        response = client.get(
+            "/api/tub/image",
+            params={"tubPath": str(tmp_path), "path": evil},
+        )
+        assert response.status_code in (400, 404), evil
+        assert response.status_code != 200 or b"root:" not in response.content
+
+
+def test_get_image_serves_frame_inside_tub(tmp_path):
+    """#487 修复不回归：tub 内合法图片（images/ 前缀与裸文件名两种形态）正常返回。"""
+    from donkeycar.parts.tub_v2 import Tub
+    import numpy as np
+
+    run = Tub(
+        str(tmp_path),
+        inputs=['cam/image_array', 'user/angle'],
+        types=['image_array', 'float'],
+    )
+    run.write_record({
+        'user/angle': 0.0,
+        'cam/image_array': np.zeros((8, 8, 3), dtype=np.uint8),
+    })
+    run.close()
+
+    images_dir = tmp_path / "images"
+    frame_name = sorted(p.name for p in images_dir.glob("*.jpg"))[0]
+    frame_bytes = (images_dir / frame_name).read_bytes()
+
+    client = _build_client()
+    for path_form in (frame_name, f"images/{frame_name}"):
+        response = client.get(
+            "/api/tub/image",
+            params={"tubPath": str(tmp_path), "path": path_form},
+        )
+        assert response.status_code == 200, path_form
+        assert response.content == frame_bytes

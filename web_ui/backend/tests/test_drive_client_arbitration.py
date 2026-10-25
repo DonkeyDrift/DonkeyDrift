@@ -189,3 +189,24 @@ def test_rejected_notice_rate_limited(rig):
     assert '"not_driver"' in rejections[0].args[0]
     # 3 条 ghost 控制全部未到达车端
     assert sent_to_car == []
+
+
+def test_malformed_numeric_field_does_not_kill_connection(rig):
+    """#489：畸形 angle/throttle 只忽略该字段，连接存活、状态与清理不受影响。"""
+    drive, client, sent_to_car = rig
+    with client.websocket_connect("/api/drive/ws?role=client&client_id=bad") as ws:
+        _drain_initial(ws)
+        # 畸形数值：字符串 / 嵌套对象 —— 不得抛异常断连
+        ws.send_json({"angle": "not-a-number", "throttle": 0.1})
+        ws.send_json({"angle": {"nested": True}})
+        # 连接仍存活：后续合法消息照常生效
+        ws.send_json({"angle": 0.25, "throttle": 0.0, "drive_mode": "user"})
+        ws.receive_json()
+        assert drive.drive_state.angle == 0.25
+        assert any(m.get("angle") == 0.25 for m in sent_to_car)
+        # 畸形值不得进入缓存或转发
+        assert all(m.get("angle") != "not-a-number" for m in sent_to_car)
+        assert drive.drive_state.driver_client_id == "bad"
+    # 断开后清理正常执行（client_ws 释放、驾驶权释放）
+    assert drive.drive_state.driver_client_id is None
+    assert "bad" not in drive.drive_state.client_ws
