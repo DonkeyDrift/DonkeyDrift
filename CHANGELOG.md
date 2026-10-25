@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-10-25 (271)
+
+- fix(drive): 第五轮审计（驾驶控制安全链）4 项前端修复——本地输入源停摆/断连时旧控制值残留（#508；FW 侧 pilot 失效保护见 Firmware #185 / v1.10.14）
+  - **#508-Bug2（安全）手柄断连旧油门残留**（`src/hooks/useGamepadDrive.ts`）：pad 变 null 只 `setConnected(false)`、lastValueRef 不清零，电池耗尽/蓝牙断连瞬间油门非零时 60Hz 控制循环继续发送旧油门。修复：断连时清零 lastValueRef 并 `onChange(0,0)` 上报一次兜底。
+  - **#508-Bug4（与 Bug2 同根，统一方案）本地输入源停摆 ref 冻结**：`getCurrentControl`（`src/pages/DrivePage.tsx`）对本地源无新鲜度检查——section 滚出视口后输入 hook 停摆（#178 停表机制），冻结的 ref 只要 WS 连着就继续发值。统一方案：新增 `src/lib/inputFreshness.ts`（`LOCAL_INPUT_STALE_MS=300` + `freshControl()`），四个本地源 ref（joystick/keyboard/gamepad/gyro）全部扩展 `updatedAt` 时间戳，mux 与 esp32 源（`ESP32_RC_STALE_MS`）同款过期检查，超时即输出 0。配套把各源改为「源活着就连续上报」：gamepad/gyro 去掉值变化门控改为每帧上报（keyboard 本就每帧），`VirtualJoystick` 拖拽期间新增 rAF 心跳重发当前值（指针静止不触发 pointermove，防稳持被 300ms 过期误杀）。
+  - **#508-Bug3（安全）键盘无 blur 清零**（`src/hooks/useKeyboardDrive.ts`）：按住 I 时 alt-tab/点击其它窗口（分屏下页面仍可见）→ keyup 永不触发 → rAF 油门爬到 1.0 保持。修复：`window` blur 时四键全清，既有回中逻辑自动收回 0。
+  - **#508-Bug5 useDriveWebsocket catch 重连不查卸载**（`src/hooks/useDriveWebsocket.ts`）：`new WebSocket(url)` 构造抛异常时 catch 直接 `setTimeout(connect)` 不查 `mountedRef`——卸载清理先跑、重连定时器后排时，已卸载组件会被无限拉起重连。修复：catch 分支加 `mountedRef.current` 检查（与 onclose/onerror 对齐）。
+  - 测试：新增 `src/lib/inputFreshness.test.ts`（新鲜透传/过期发 0/压线/自定义阈值）、`src/hooks/useKeyboardDrive.test.tsx`（按住爬升+松开回中、blur 全清收回 0）、`src/components/drive/VirtualJoystick.test.tsx`（按下拖动上报、松开回中、稳持心跳持续重发）；`useGamepadDrive.test.tsx` +2（断连清零上报 0、值不变每帧连续上报）；`useDriveWebsocket.test.tsx` +1（构造抛异常：挂载中按间隔重连、卸载后不复活）。前端全量 **vitest 377 全绿**（56 文件）+ `tsc -b --noEmit` 通过。
+
+# 变更日志
+
 ## 2026-10-25 (270)
 
 - fix(audit): 四轮审计 11 项修复（#498–#506，含三轮旧账清偿）——模拟器遥测/输入契约、AI 配置自愈、zcode 判定、SSE 多订阅 fan-out、相机路由阻塞、录制竞态、findcar 写盘反馈、probe 断连诊断
