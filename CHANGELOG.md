@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-25 (271)
+
+- fix(bridge): 车端 WS 桥控制数值转换补防护——畸形 angle/throttle 不再断开车端连接（#509）
+  - `donkeycar/parts/drive_api_bridge.py` `_handle_message` 的 `float(msg["angle"/"throttle"])` 裸奔：畸形值 ValueError 穿透 `async for`（只捕获 JSONDecodeError）→ `_connect_loop` except → 车端 WS 断开，一个重连周期（3s）内控制停更。后端 routers/drive.py 已于 #489 修过转发前过滤，本处补齐车端侧纵深防御（旧版后端/直连场景仍可触发）。
+  - 修复：转换包 try/except (TypeError, ValueError)，畸形值忽略该字段并打 warning（与后端 #489 同款防护）。
+  - 测试：`test_drive_api_bridge.py` +1 用例（字符串/嵌套对象/None 不抛异常、已生效控制值不被改动、后续合法消息正常生效），52 过。
+  - 六轮审计区域①③④同步排查：pilot_holder/npu_pilot/throttle_filter/kinematics/keras、WebConsoleServer 全部端点（中央命令鉴权/STA 凭据脱敏/参数校验）、TubEditor/TubLibrary/TrainerPage/PilotArena/AiCleanModal（索引映射/删除确认/防重复/空值/清理）均无问题。
+
+# 变更日志
+
 ## 2026-10-25 (270)
 
 - fix(audit): 四轮审计 11 项修复（#498–#506，含三轮旧账清偿）——模拟器遥测/输入契约、AI 配置自愈、zcode 判定、SSE 多订阅 fan-out、相机路由阻塞、录制竞态、findcar 写盘反馈、probe 断连诊断
