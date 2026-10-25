@@ -1092,21 +1092,27 @@ async def _sse_event_generator(job_id: str):
         yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
         return
 
-    # Yield initial status
-    yield f"data: {json.dumps({'type': 'status', 'status': job.status})}\n\n"
+    # 每条 SSE 连接独立订阅（#502）：两个页签同看一个 job 各收全量日志，
+    # 不再从共享队列互偷消息
+    sub = job.subscribe()
+    try:
+        # Yield initial status
+        yield f"data: {json.dumps({'type': 'status', 'status': job.status})}\n\n"
 
-    while True:
-        try:
-            msg = await asyncio.wait_for(job.log_queue.get(), timeout=1.0)
-            yield f"data: {json.dumps(msg)}\n\n"
-            if msg.get("type") == "status" and msg.get("status") in ("completed", "failed", "stopped"):
-                break
-        except asyncio.TimeoutError:
-            # Send keep-alive heartbeat
-            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-            # If job finished while we were waiting, exit
-            if job.status in ("completed", "failed", "stopped"):
-                break
+        while True:
+            try:
+                msg = await asyncio.wait_for(sub.get(), timeout=1.0)
+                yield f"data: {json.dumps(msg)}\n\n"
+                if msg.get("type") == "status" and msg.get("status") in ("completed", "failed", "stopped"):
+                    break
+            except asyncio.TimeoutError:
+                # Send keep-alive heartbeat
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                # If job finished while we were waiting, exit
+                if job.status in ("completed", "failed", "stopped"):
+                    break
+    finally:
+        job.unsubscribe(sub)
 
 
 @router.get("/train/{job_id}/logs")

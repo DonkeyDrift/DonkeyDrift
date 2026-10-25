@@ -323,9 +323,29 @@ def probe_mypc_environment(
     return result
 
 
+def _transport_alive(ssh) -> bool:
+    """SSH 传输层是否仍存活（探测中掉线判定用，#506）。"""
+    try:
+        transport = ssh.get_transport()
+        return bool(transport and transport.is_active())
+    except Exception:
+        return False
+
+
 def _detect_platform(ssh, result: ProbeResult):
     code, out, _ = _run_remote(ssh, "uname -s")
     system = out.strip().lower()
+    if not (code == 0 and system) and not _transport_alive(ssh):
+        # 命令失败且传输层已死：是连接中断，不能猜成 Windows 目标机（#506）
+        result.platform = "unknown"
+        result.shell = "unknown"
+        result.checks.append(ProbeCheck(
+            name="platform",
+            status="error",
+            message="SSH 连接在平台探测期间中断，无法判定目标系统。",
+            hint="请检查网络后重试；确认目标机 SSH 服务仍在运行。",
+        ))
+        return
     if code == 0 and system:
         if "darwin" in system:
             result.platform = "macos"
