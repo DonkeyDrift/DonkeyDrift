@@ -652,3 +652,65 @@ def test_predict_does_not_reload_config_per_frame(monkeypatch, tmp_path):
 
     # load 时编译 1 次；三次 predict 全部命中 mtime 缓存，不得重复编译
     assert calls["count"] == 1, f"config 被重复编译 {calls['count']} 次"
+
+
+def test_predict_cache_misses_after_tub_switch(monkeypatch, tmp_path):
+    """#494：缓存键含 tub 身份与物理 _index——换 tub / 删记录后同一下标不得命中旧缓存。"""
+    client, arena = make_client(monkeypatch)
+    model_path = tmp_path / "pilot.tflite"
+    model_path.write_text("model")
+
+    pilot_id = client.post(
+        "/api/arena/pilots/load",
+        json={"model_path": str(model_path), "model_type": "tflite_linear",
+              "config_path": str(tmp_path)},
+    ).json()["pilot"]["id"]
+    payload = {"record_index": 0, "config_path": str(tmp_path)}
+
+    # tub A 上预测一次（进缓存）
+    assert client.post(f"/api/arena/pilots/{pilot_id}/predict", json=payload).status_code == 200
+    assert FakePilot.run_count == 1
+
+    # 换 tub B：同 record_index=0 但 tub 路径与物理 _index 都不同 → 必须重新推理
+    monkeypatch.setattr(arena.tub_router, "current_tub_path", "/tmp/tub_b")
+    monkeypatch.setattr(arena.tub_router, "current_records", [
+        {
+            "_index": 7,
+            "cam/image_array": "7_cam_image_array_.jpg",
+            "user/angle": -0.3,
+            "user/throttle": 0.4,
+        }
+    ])
+    resp = client.post(f"/api/arena/pilots/{pilot_id}/predict", json=payload)
+    assert resp.status_code == 200
+    assert FakePilot.run_count == 2, "换 tub 后同一下标不得命中旧缓存"
+
+
+def test_predict_cache_misses_after_record_deletion_reload(monkeypatch, tmp_path):
+    """#494：同 tub 删除记录后重载，record_index 前移指向不同物理 _index → 不命中旧缓存。"""
+    client, arena = make_client(monkeypatch)
+    model_path = tmp_path / "pilot.tflite"
+    model_path.write_text("model")
+
+    pilot_id = client.post(
+        "/api/arena/pilots/load",
+        json={"model_path": str(model_path), "model_type": "tflite_linear",
+              "config_path": str(tmp_path)},
+    ).json()["pilot"]["id"]
+    payload = {"record_index": 0, "config_path": str(tmp_path)}
+
+    assert client.post(f"/api/arena/pilots/{pilot_id}/predict", json=payload).status_code == 200
+    assert FakePilot.run_count == 1
+
+    # 同一 tub，删除首条后重载：position 0 现在指向 _index=1
+    monkeypatch.setattr(arena.tub_router, "current_records", [
+        {
+            "_index": 1,
+            "cam/image_array": "1_cam_image_array_.jpg",
+            "user/angle": 0.0,
+            "user/throttle": 0.1,
+        }
+    ])
+    resp = client.post(f"/api/arena/pilots/{pilot_id}/predict", json=payload)
+    assert resp.status_code == 200
+    assert FakePilot.run_count == 2, "删除重载后同一下标指向不同物理记录，不得命中旧缓存"

@@ -180,8 +180,14 @@ class DriftEngine:
             self._close_recorder()
             self.recorder = None
         elif state in (DriftSessionState.AUTO_OBSERVE, DriftSessionState.AUTO_ENGAGED):
-            self.session.stop_auto()
-            self._send({"car_mode": 0, "throttle": 0.0})
+            try:
+                self.session.stop_auto()
+            except RuntimeError:
+                # check-then-act 竞态（#496）：读态与迁移之间相机线程看门狗
+                # 可已迁到 IDLE——目标态本就是停止，幂等返回而不是 409
+                logger.debug("stop() 时看门狗已先行交还人工，幂等跳过")
+            else:
+                self._send({"car_mode": 0, "throttle": 0.0})
 
     def _default_tub_path(self) -> str:
         base = Path(self._tub_base_dir or "data/drift_tubs")
@@ -400,16 +406,19 @@ class DriftEngine:
                                  detection_gap_since: Optional[float]) -> None:
         """ENGAGED 期逐帧安全巡检（相机循环每帧调用，帧时基）。
 
-        任一条件触发看门狗交还人工：检测丢失超时 / 遥测停滞 /
+        任一条件触发看门狗交还人工：检测丢失超时 / 遥测停滞或缺失 /
         控制下发连续失败。非 ENGAGED 直接返回（观察期车在人手里）。
+        遥测从未到达（_last_telemetry_t is None）比停滞更陈旧，同样触发
+        （#492：否则车端链路从未建立时 yaw_rate 恒 0，三重看门狗全失效）。
         """
         if self.session.state != DriftSessionState.AUTO_ENGAGED:
             return
         if detection_gap_since is not None \
                 and t_s - detection_gap_since > _DETECTION_LOSS_TIMEOUT_S:
             self.trigger_watchdog("检测丢失超时")
-        elif self._last_telemetry_t is not None \
-                and t_s - self._last_telemetry_t > _TELEMETRY_STALE_TIMEOUT_S:
+        elif self._last_telemetry_t is None:
+            self.trigger_watchdog("遥测缺失")
+        elif t_s - self._last_telemetry_t > _TELEMETRY_STALE_TIMEOUT_S:
             self.trigger_watchdog("遥测停滞超时")
         elif self._consecutive_send_failures >= _SEND_FAILURE_LIMIT:
             self.trigger_watchdog("控制下发连续失败")
