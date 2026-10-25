@@ -57,7 +57,9 @@ class TrainingJob:
     # (config train_online.conf).
     mode: Literal['local', 'mypc', 'mypc_install', 'online']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
-    log_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue())
+    # SSE 订阅者队列集合（#502）：多条连接同看一个 job 时各收全量副本；
+    # 旧单 log_queue 会让两个页签互偷日志行（每条只被其中一个拿到）
+    subscribers: list = field(default_factory=list)
     progress: TrainingProgress = field(default_factory=TrainingProgress)
     logs: list = field(default_factory=list)
     loss_history: list = field(default_factory=list)
@@ -70,6 +72,23 @@ class TrainingJob:
     trainer: Optional[object] = None
     stop_event: Optional[threading.Event] = None
     error_message: Optional[str] = None
+
+    def subscribe(self) -> asyncio.Queue:
+        """注册一个 SSE 订阅者，返回其专属队列（#502）。"""
+        sub: asyncio.Queue = asyncio.Queue()
+        self.subscribers.append(sub)
+        return sub
+
+    def unsubscribe(self, sub: asyncio.Queue) -> None:
+        try:
+            self.subscribers.remove(sub)
+        except ValueError:
+            pass
+
+    def publish(self, message: dict) -> None:
+        """把一条事件广播到所有活跃订阅者（同步 put_nowait，队列无界）。"""
+        for sub in list(self.subscribers):
+            sub.put_nowait(message)
 
 
 class TrainingJobManager:
@@ -165,7 +184,7 @@ class TrainingJobManager:
                             "is_stderr": is_stderr,
                             "timestamp": datetime.now().isoformat()
                         }
-                        await job.log_queue.put(payload)
+                        job.publish(payload)
                         job.logs.append(cleaned)
                         # Try to parse progress from stdout
                         if not is_stderr:
@@ -189,7 +208,7 @@ class TrainingJobManager:
                             if new_progress != old_progress:
                                 if job.progress.loss is not None:
                                     job.loss_history.append(job.progress.loss)
-                                await job.log_queue.put({
+                                job.publish({
                                     "type": "progress",
                                     "data": {
                                         "currentEpoch": job.progress.current_epoch,
@@ -221,7 +240,7 @@ class TrainingJobManager:
                 job.error_message = str(e)
         finally:
             job.finished_at = datetime.now().isoformat()
-            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+            job.publish({"type": "status", "status": job.status, "error": job.error_message})
 
     # ------------------------------------------------------------------
     # Online training
@@ -261,7 +280,7 @@ class TrainingJobManager:
         await self._pump_thread_queue(job, thread_queue)
 
     async def _pump_thread_queue(self, job: TrainingJob, thread_queue: "queue.Queue"):
-        """Bridge a worker-thread queue into the async job.log_queue.
+        """Bridge a worker-thread queue into the job subscriber fan-out.
 
         Shared by online/mypc training and mypc dependency install: relays
         log / progress / error events until the worker thread exits.
@@ -288,7 +307,7 @@ class TrainingJobManager:
                     elif msg_type == "log":
                         job.logs.append(msg.get("line", ""))
 
-                    await job.log_queue.put(msg)
+                    job.publish(msg)
                 except queue.Empty:
                     await asyncio.sleep(0.05)
         except Exception as e:
@@ -302,7 +321,7 @@ class TrainingJobManager:
                 job.status = 'completed'
 
         job.finished_at = datetime.now().isoformat()
-        await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+        job.publish({"type": "status", "status": job.status, "error": job.error_message})
 
     # ------------------------------------------------------------------
     # My-PC training (SSH callback to the user's own computer)
@@ -330,7 +349,7 @@ class TrainingJobManager:
         if not session or session.get("tub") != tub:
             fallback_log = "没有可续训的历史训练（或训练数据已变化），改为全新训练"
             job.logs.append(fallback_log)
-            await job.log_queue.put({
+            job.publish({
                 "type": "log",
                 "line": fallback_log,
                 "level": "info",

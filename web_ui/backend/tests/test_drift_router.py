@@ -392,3 +392,37 @@ class TestStopIdempotentAfterWatchdogRace:
         engine.session.stop_auto = racing_stop_auto  # type: ignore[method-assign]
         engine.stop()  # 不得抛异常（#496）
         assert engine.session.state == DriftSessionState.IDLE
+
+
+class TestCameraStartOffLoop:
+    """#503：start_camera_loop 必须在工作线程执行（重入守卫的阻塞 join
+    不得卡住事件循环——相机重启时全 API 卡最多 4s）。"""
+
+    def test_start_camera_loop_runs_in_worker_thread(self, client, monkeypatch):
+        import threading
+
+        import drift_engine as engine_mod
+        import drift_vision
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(drift_vision, "USBCamera",
+                            lambda **kw: SimpleNamespace(close=lambda: None))
+        monkeypatch.setattr(drift_vision, "FieldHomography",
+                            SimpleNamespace(from_file=lambda p: object()))
+        monkeypatch.setattr(drift_vision, "AprilTagDetector",
+                            lambda downscale: object())
+
+        worker_idents = []
+
+        def fake_start(*args, **kwargs):
+            worker_idents.append(threading.get_ident())
+
+        monkeypatch.setattr(engine_mod.drift_engine, "start_camera_loop", fake_start)
+
+        handler_thread = threading.get_ident()  # TestClient 跑路由协程的线程
+        r = client.post("/api/drift/camera/start", json={
+            "camera_index": 0, "tag_id": 0, "calibration_file": "x.npz"})
+        assert r.status_code == 200
+        assert worker_idents, "start_camera_loop 必须被调用"
+        assert worker_idents[0] != handler_thread, \
+            "start_camera_loop 必须在工作线程执行（#503），不得阻塞事件循环"

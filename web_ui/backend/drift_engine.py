@@ -177,8 +177,14 @@ class DriftEngine:
             self.session.finish_calibration(ok=True)
         elif state == DriftSessionState.RECORD:
             self.session.stop_recording()
-            self._close_recorder()
-            self.recorder = None
+            # 先断生产者引用再关资源（#504）：close 与相机线程 write_record 之间
+            # 的窗口里，相机线程看到 recorder=None 即跳过（配合 closed 防护双保险）
+            recorder, self.recorder = self.recorder, None
+            if recorder is not None:
+                try:
+                    recorder.close()
+                except Exception:
+                    pass
         elif state in (DriftSessionState.AUTO_OBSERVE, DriftSessionState.AUTO_ENGAGED):
             try:
                 self.session.stop_auto()

@@ -33,5 +33,5 @@ async def set_config(payload: FindCarConfigUpdate):
         enabled=payload.enabled,
         interval_seconds=interval,
     )
-    findcar.save_config(cfg)
-    return {"config": cfg.model_dump()}
+    saved = findcar.save_config(cfg)
+    return {"config": cfg.model_dump(), "saved": saved}

@@ -13,6 +13,12 @@ class FakeSsh:
     def close(self):
         pass
 
+    def get_transport(self):
+        class _LiveTransport:
+            def is_active(self):
+                return True
+        return _LiveTransport()
+
 
 def _echo_executable(command):
     """Pretend the invoked interpreter resolves sys.executable to itself."""
@@ -324,3 +330,26 @@ def test_probe_uses_configured_python_first():
 
     assert result.ok is True
     assert result.python_path == "/custom/python"
+
+
+class _DeadTransportSsh(FakeSsh):
+    """exec 抛异常 + transport 已死：模拟探测中途 SSH 断连（#506）。"""
+    def get_transport(self):
+        class _T:
+            def is_active(self):
+                return False
+        return _T()
+
+    def exec_command(self, command, timeout=None):
+        raise OSError("SSH channel closed")
+
+
+def test_probe_reports_connection_loss_not_windows():
+    """#506：通道中断时按连接错误上报，不得误判 Windows 目标机。"""
+    ssh = _DeadTransportSsh()
+    result = mypc_probe.ProbeResult(ok=False)
+    mypc_probe._detect_platform(ssh, result)
+    assert result.platform == "unknown"
+    assert result.shell == "unknown"
+    assert any(c.status == "error" and "中断" in c.message for c in result.checks), \
+        "必须是连接中断诊断，而不是 Windows 建议"

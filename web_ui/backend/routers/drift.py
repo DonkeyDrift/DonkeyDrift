@@ -136,9 +136,12 @@ async def camera_start(request: CameraStartRequest):
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     drift_engine._calibration_file = request.calibration_file
-    # 相机由 start_camera_loop 显式持有，stop_camera_loop 时释放（不靠 GC）
-    drift_engine.start_camera_loop(camera, detector, homography, request.tag_id,
-                                   heading_offset_deg=request.heading_offset_deg)
+    # 相机由 start_camera_loop 显式持有，stop_camera_loop 时释放（不靠 GC）。
+    # 放工作线程执行（#503）：其重入守卫会先 stop_camera_loop（两级 join 各
+    # 2s + close），直接在事件循环跑会在相机重启时卡住全部 API/WS 最多 4s
+    await asyncio.to_thread(
+        drift_engine.start_camera_loop, camera, detector, homography,
+        request.tag_id, heading_offset_deg=request.heading_offset_deg)
     return {"ok": True}
 
 

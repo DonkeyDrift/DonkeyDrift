@@ -203,13 +203,14 @@ class DonkeyGymEnv(object):
             self.preview_frame = raw_frame
             return
         self.preview_frame = raw_frame
-        if cv2 is not None:
-            try:
-                self.frame = cv2.resize(raw_frame, (self._img_w, self._img_h))
-            except Exception:
-                self.frame = raw_frame
-        else:
-            self.frame = raw_frame
+        # NN 输入契约：frame 必须恒为 img_w×img_h——resize 失败/cv2 缺失时
+        # 退回占位空帧，绝不能把渲染分辨率原始帧当 NN 输入放行（#498）
+        try:
+            if cv2 is None:
+                raise RuntimeError("cv2 不可用")
+            self.frame = cv2.resize(raw_frame, (self._img_w, self._img_h))
+        except Exception:
+            self.frame = self._empty_frame.copy()
 
     def delay_buffer(self, frame, info):
         now = time.time()
@@ -221,7 +222,10 @@ class DonkeyGymEnv(object):
         for buf in self.buffer:
             if now - buf[0] >= self.delay:
                 num_to_remove += 1
+                # 帧与遥测同步回放（#498）：延迟模式下 pos/speed/cte 等
+                # info 若不随帧恢复，将永久停在初始值，录制数据全错
                 self._set_frame(buf[1])
+                self.info = buf[2]
             else:
                 break
 

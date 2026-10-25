@@ -1,5 +1,21 @@
 # 变更日志
 
+## 2026-10-25 (270)
+
+- fix(audit): 四轮审计 11 项修复（#498–#506，含三轮旧账清偿）——模拟器遥测/输入契约、AI 配置自愈、zcode 判定、SSE 多订阅 fan-out、相机路由阻塞、录制竞态、findcar 写盘反馈、probe 断连诊断
+  - **#498 dgym 两项**：`delay_buffer` 只回放帧不回放 info——SIM_ARTIFICIAL_LATENCY>0 时 pos/speed/cte/gyro 全冻结（非延迟路径有 `self.info = current_info`，延迟路径漏了）；`_set_frame` 在 cv2 缺失/resize 异常时把渲染分辨率原始帧直接当 NN 输入放行。修复：回放帧同步恢复 info；fallback 改为 img_w×img_h 占位空帧（契约：NN 输入恒为 img_w×img_h）。
+  - **#499 ai-config 自愈 + 原子写**：配置 JSON 损坏时 `_load_state` 抛 400 令全部端点瘫痪（只能手删文件）；`_save_state` 非原子写。修复：损坏回退默认态 + 告警；保存改 tmp+rename。
+  - **#500 zcode-remote 两项**：`pgrep -f` 子串宽匹配把 tail/vim 误判为桌面端在跑（/link 空转 25s）→ 改 /proc cmdline 首参精确匹配（非 Linux 回退锚定 pgrep）；`_cdp_eval` recv 无超时（渲染进程冻结时按钮转 40s）→ eval 加 5s 超时走兜底。
+  - **#501 ManifestIterator 关句柄**：迭代换 catalog/终止时不 close（每个 Catalog 持 2 组句柄，全 tub 迭代累计 2N 个靠 GC 兜底）→ 换 catalog 与 StopIteration 前显式 close。
+  - **#502 SSE 单队列多订阅者互偷（trainer + connector 同款）**：`_sse_event_generator`/connector event_stream 直接消费共享 `job.log_queue`，两个页签同看一个任务各缺一半日志。修复：TrainingJob/ConnectorJob 增加 `subscribers + subscribe()/unsubscribe()/publish()` fan-out，两处 SSE 消费端改为独立订阅、连接断开自动退订；旧 `log_queue` 字段移除。
+  - **#503 camera_start 阻塞事件循环**：`start_camera_loop`（重入守卫含两级 join 2s+close）直接在事件循环线程跑，相机重启时全 API/WS 卡最多 4s → 放 `asyncio.to_thread`（与 camera_stop 同款）。
+  - **#504 停录制竞态**：`stop()` 先 close 再置 None，与相机线程 write_record 存在 check-then-use 窗口（close 后写入抛异常可杀相机循环）。修复：stop 先断生产者引用再关资源 + SyncRecorder 加 `_closed` 防护（close 后 on_camera_frame/on_telemetry no-op）。
+  - **#505 findcar 写盘反馈**：写失败（磁盘满/权限）仍返回 200 伪装成功 → `save_config` 返回 bool、响应加 `saved` 字段，顺手改原子写（tmp+rename）。
+  - **#506 mypc_probe 断连误判**：SSH 通道探测中途死掉时把"命令失败"判为 Windows 目标机给出错误建议 → uname 失败先复查 `transport.is_active()`，已死按"连接中断"上报。
+  - 测试：dgym +2、ai_config +2、zcode +3、datastore +1（迭代器关闭 spy）、新增 test_job_event_fanout.py 3 例（publish fan-out / 双 SSE 流各收全量 / connector 同款）、drift_router +1（工作线程断言）、sync_recorder +1（closed 防护）、findcar +2、probe +1（FakeSsh 补活 transport）；后端全量 **609 过 1 跳**、donkeycar 核心 **608 过 16 跳**。
+
+# 变更日志
+
 ## 2026-10-25 (269)
 
 - fix(drift/arena/simcollect): 三轮审计 5 项修复——漂移安全双缺口（遥测缺失看门狗短路 + 下发失败不可见）+ Arena 缓存串台 + 采集任务 GC 卡死 + stop 竞态（#492–#496）
