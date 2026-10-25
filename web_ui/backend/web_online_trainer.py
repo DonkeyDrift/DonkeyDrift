@@ -38,6 +38,8 @@ class WebOnlineTrainer(OnlineTrainer):
         self._log_queue = log_queue
         self._working_dir = working_dir or os.getcwd()
         self._ssh_credentials = ssh_credentials
+        # 最近一次发出的训练进度百分比（#490：loss-only 行沿用而非归零）
+        self._last_global_percent = 0.0
         # 最近一条失败日志（_log(success=False) 的 message），run() 据此还原真实失败原因
         self._last_error: Optional[str] = None
         # 用户点「停止」时由 abort_remote() 置位：尚未进入训练命令的执行点
@@ -238,6 +240,9 @@ class WebOnlineTrainer(OnlineTrainer):
         # 重置进度状态，供 _parse_training_output_web 使用
         self.current_epoch = 0
         self.total_epochs = 0
+        # 最近一次计算的百分比：仅含 loss 的行没有步数信息，
+        # 沿用该值而不是发 0 把前端进度条打回零（#490）
+        self._last_global_percent = 0.0
 
         stdin, stdout, stderr = self.ssh_client.exec_command(cmd, get_pty=True)
 
@@ -371,6 +376,7 @@ class WebOnlineTrainer(OnlineTrainer):
                 completed_epochs_progress = (self.current_epoch - 1) / self.total_epochs
                 current_epoch_progress = (current_step / total_steps) / self.total_epochs
                 total_progress = (completed_epochs_progress + current_epoch_progress) * 100
+                self._last_global_percent = total_progress
                 self._emit_progress(
                     percent=total_progress,
                     current_epoch=self.current_epoch,
@@ -382,7 +388,7 @@ class WebOnlineTrainer(OnlineTrainer):
             elif loss is not None:
                 # Emit loss-only update preserving last known step state
                 self._emit_progress(
-                    percent=0,  # unchanged if no step info
+                    percent=self._last_global_percent,  # 无步数信息，沿用最近百分比
                     current_epoch=self.current_epoch,
                     total_epochs=self.total_epochs,
                     current_step=current_step or 0,

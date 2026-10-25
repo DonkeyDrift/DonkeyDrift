@@ -862,10 +862,18 @@ async def drive_ws(
                     drive_state.driver_client_id = client_id
                     drive_state.driver_last_seen = now
 
-                    if "angle" in msg:
-                        drive_state.angle = float(msg["angle"])
-                    if "throttle" in msg:
-                        drive_state.throttle = float(msg["throttle"])
+                    # 数值字段转换带防护：畸形值只忽略该字段，不能让异常
+                    # 穿透处理循环导致连接清理被跳过（#489）
+                    try:
+                        if "angle" in msg:
+                            drive_state.angle = float(msg["angle"])
+                        if "throttle" in msg:
+                            drive_state.throttle = float(msg["throttle"])
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            f"客户端 {client_id} 发来畸形数值字段，忽略: "
+                            f"angle={msg.get('angle')!r} throttle={msg.get('throttle')!r}")
+                        continue
                     if "drive_mode" in msg:
                         drive_state.drive_mode = msg["drive_mode"]
                     if "recording" in msg and drive_state.car_ws is not None:

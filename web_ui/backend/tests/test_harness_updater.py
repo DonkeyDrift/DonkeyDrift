@@ -346,3 +346,56 @@ def test_ota_flash_rejects_public_ip(hu):
     result = hu.ota_flash("8.8.8.8")
     assert result["status"] == "error"
     assert "非法" in result["message"]
+
+
+def test_ota_flash_rejects_asset_path_outside_downloads(hu, monkeypatch, tmp_path):
+    """#486：asset_path 必须位于本地-only 下载目录内，杜绝任意文件读取外传。"""
+    # 确保拦截在上传之前：伪造 urlopen，若被调用即失败
+    monkeypatch.setattr(
+        hu.urllib.request, "urlopen",
+        lambda *a, **k: pytest.fail("非法路径不应发起上传"),
+    )
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"SECRET")
+
+    for bad in ("/etc/passwd", str(secret), str(tmp_path / "downloads" / ".." / "evil.bin")):
+        result = hu.ota_flash("192.168.3.46", asset_path=bad)
+        assert result["status"] == "error", bad
+        assert "下载目录" in result["message"] or "内" in result["message"], bad
+
+
+def test_ota_flash_accepts_asset_path_inside_downloads(hu, monkeypatch, tmp_path):
+    """#486：下载目录内的合法固件路径正常放行（含 .. 归一化后仍在目录内的形式）。"""
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = req.data
+        return _FakeResp(b"ACK:UPDATE_OK")
+
+    monkeypatch.setattr(hu.urllib.request, "urlopen", fake_urlopen)
+    fw = tmp_path / "downloads" / "fw.ino.bin"
+    fw.parent.mkdir(parents=True, exist_ok=True)
+    fw.write_bytes(b"BINFIRMWARE")
+
+    result = hu.ota_flash("192.168.3.46", asset_path=str(fw))
+    assert result["status"] == "ok"
+    assert b"BINFIRMWARE" in captured["body"]
+
+    # .. 形式但归一化后仍在目录内：放行（resolve 后 == 目录内路径）
+    result2 = hu.ota_flash(
+        "192.168.3.46",
+        asset_path=str(tmp_path / "downloads" / "." / "fw.ino.bin"),
+    )
+    assert result2["status"] == "ok"
+
+
+def test_filename_from_url_strips_directory_components(hu):
+    """#486：URL/Content-Disposition 文件名只留 basename，防穿越写出下载目录。"""
+    assert hu._filename_from_url(
+        "https://x/y", 'attachment; filename="../../evil.deb"'
+    ) == "evil.deb"
+    assert hu._filename_from_url(
+        "https://x/a/b/c/pkg.deb", ""
+    ) == "pkg.deb"
+    # 纯目录成分被剥离后为空 → installer 兜底
+    assert hu._filename_from_url("https://x/", 'attachment; filename="../.."') == "installer"

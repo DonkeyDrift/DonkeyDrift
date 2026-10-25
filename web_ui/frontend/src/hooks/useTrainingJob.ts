@@ -72,6 +72,16 @@ export function useTrainingJob() {
     };
   }, [appendTrainingLog, updateTrainingProgress, finishTrainingJob]);
 
+  // 卸载时关闭 SSE 连接：训练是全局 store 状态、跨页面存活，但连接
+  // 本身随页面走——不关会泄漏到训练结束为止（#488；同 useSimCollectJob
+  // 的卸载清理模式）。
+  useEffect(() => () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+  }, []);
+
   // 刷新页面后恢复训练进度：activeTraining 已持久化（id + 模式），
   // 据此从 /status 拉回进度快照并重连 SSE 继续收实时事件。
   const rehydratedRef = useRef(false);

@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-10-25 (268)
+
+- fix(security): 全项目二轮审计 5 项修复——两处局域网可达的路径穿越/任意文件外传（#486/#487）+ WS 数值防护（#489）+ 训练进度回零（#490）+ SSE 连接泄漏（#488）
+  - **#487 tub 图片接口路径穿越**：`routers/tub.py` 的 `get_image` 注释声称"ensure path doesn't go outside"但校验从未实现——`path=../../...` 经 OS 归一化逃出 tub 目录，无鉴权后端可被局域网任意调用者读出本机任意文件。修复：images/ 与 tub 根两个候选位置均 `realpath` 后限制在 tub 目录内（`_confined`），逃逸即 404；ETag/缓存沿用归一化路径。
+  - **#486 harness OTA 任意路径外传**：`routers/harness_updater.py` 的 `ota_flash` 对请求体 `asset_path` 无限制，`path.read_bytes()` 后 multipart 上传到调用者指定的私网 IP——任意本地文件外泄通道。修复：`asset_path` 必须 resolve 后位于 `~/.donkeycar/downloads` 内否则拒绝；伴随修 `_filename_from_url` 文件名消毒（basename + 纯点号兜底），堵住恶意响应头穿越写出下载目录。
+  - **#489 drive WS 数值防护**：`routers/drive.py` 客户端主路径 `float(msg["angle"])` 裸奔（挑战者判定同文件却有防护），畸形值抛 ValueError 穿透 except 导致连接清理被跳过（client_ws 残留、驾驶权靠 2s 超时兜底）。修复：try/except 忽略该条消息并打警告。
+  - **#490 训练进度回零**：`web_online_trainer.py` 的 `_parse_training_output_web` 仅含 loss 的行走 elif 分支发 `percent=0`（注释却写 unchanged），前端进度条周期性闪零。修复：新增 `_last_global_percent`（__init__ 与每轮 `_stream_remote_training` 重置），loss-only 行沿用最近百分比。
+  - **#488 SSE 连接泄漏**：`web_ui/frontend/src/hooks/useTrainingJob.ts` 的 EventSource 无卸载清理（同库 useSimCollectJob/useConnectorJob 均有），训练中离开 Trainer 页连接泄漏、remount 后 ref 与活跃连接失联。修复：补 `useEffect` 卸载关闭。
+  - 测试同步：`test_harness_updater.py` +3（越界路径拒/目录内放行/文件名消毒）、`test_tub_sessions.py` +2（穿越拒/合法帧两形态不回归）、`test_drive_client_arbitration.py` +1（畸形值不断连且不穿透状态）、新增 `test_web_online_trainer_progress.py` 2 例（loss-only 保持百分比/新一轮重置归零）、`useTrainingJob.test.ts` +2（卸载关闭/无连接不误关）。
+
+# 变更日志
+
 ## 2026-10-25 (267)
 
 - fix(connector): 远程启动驾驶命令 nohup 环境变量前缀错误（#483）+ 品牌测试断言随 #476/#479 改名同步（#484）——2026-10-25 全项目审计 5 项修复之 DD 侧 2 项（Firmware 侧 3 项见 Firmware v1.10.13）
