@@ -975,3 +975,24 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
     # 无退避的热重连两次间隔都趋近 0
     assert gap2 >= 0.04, f"第 2 次重连间隔 {gap2:.4f}s，缺少退避"
     assert gap3 >= 0.04, f"第 3 次重连间隔 {gap3:.4f}s，缺少退避"
+
+
+def test_drive_api_bridge_ignores_malformed_numeric_fields():
+    """#509：畸形 angle/throttle 只忽略该字段，异常不得穿透断开连接。"""
+    bridge = DriveApiBridge(auto_start=False)
+    bridge.angle = 0.25
+    bridge.throttle = -0.1
+
+    # 字符串 / 嵌套对象 / None 一律不得抛异常
+    bridge._handle_message({"angle": "not-a-number"})
+    bridge._handle_message({"throttle": {"nested": True}})
+    bridge._handle_message({"angle": None, "throttle": None})
+
+    # 畸形消息不得改动已生效的控制值
+    assert bridge.angle == 0.25
+    assert bridge.throttle == -0.1
+
+    # 后续合法消息正常生效
+    bridge._handle_message({"angle": -0.5, "throttle": 0.3})
+    assert bridge.angle == -0.5
+    assert bridge.throttle == 0.3

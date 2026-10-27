@@ -1,13 +1,23 @@
 # 变更日志
 
-## 2026-10-25 (271)
+## 2026-10-25 (272)
 
-- fix(drive): 第五轮审计（驾驶控制安全链）4 项前端修复——本地输入源停摆/断连时旧控制值残留（#508；FW 侧 pilot 失效保护见 Firmware #185 / v1.10.14）
+- fix(drive): 第五轮审计（驾驶控制安全链）4 项前端修复——本地输入源停摆/断连时旧控制值残留（#508；FW 侧 pilot 失效保护见 Firmware #185 / v1.10.15；CHANGELOG 编号让号：与 #509 并行撞号 (271)，后到者让号为 (272)）
   - **#508-Bug2（安全）手柄断连旧油门残留**（`src/hooks/useGamepadDrive.ts`）：pad 变 null 只 `setConnected(false)`、lastValueRef 不清零，电池耗尽/蓝牙断连瞬间油门非零时 60Hz 控制循环继续发送旧油门。修复：断连时清零 lastValueRef 并 `onChange(0,0)` 上报一次兜底。
   - **#508-Bug4（与 Bug2 同根，统一方案）本地输入源停摆 ref 冻结**：`getCurrentControl`（`src/pages/DrivePage.tsx`）对本地源无新鲜度检查——section 滚出视口后输入 hook 停摆（#178 停表机制），冻结的 ref 只要 WS 连着就继续发值。统一方案：新增 `src/lib/inputFreshness.ts`（`LOCAL_INPUT_STALE_MS=300` + `freshControl()`），四个本地源 ref（joystick/keyboard/gamepad/gyro）全部扩展 `updatedAt` 时间戳，mux 与 esp32 源（`ESP32_RC_STALE_MS`）同款过期检查，超时即输出 0。配套把各源改为「源活着就连续上报」：gamepad/gyro 去掉值变化门控改为每帧上报（keyboard 本就每帧），`VirtualJoystick` 拖拽期间新增 rAF 心跳重发当前值（指针静止不触发 pointermove，防稳持被 300ms 过期误杀）。
   - **#508-Bug3（安全）键盘无 blur 清零**（`src/hooks/useKeyboardDrive.ts`）：按住 I 时 alt-tab/点击其它窗口（分屏下页面仍可见）→ keyup 永不触发 → rAF 油门爬到 1.0 保持。修复：`window` blur 时四键全清，既有回中逻辑自动收回 0。
   - **#508-Bug5 useDriveWebsocket catch 重连不查卸载**（`src/hooks/useDriveWebsocket.ts`）：`new WebSocket(url)` 构造抛异常时 catch 直接 `setTimeout(connect)` 不查 `mountedRef`——卸载清理先跑、重连定时器后排时，已卸载组件会被无限拉起重连。修复：catch 分支加 `mountedRef.current` 检查（与 onclose/onerror 对齐）。
   - 测试：新增 `src/lib/inputFreshness.test.ts`（新鲜透传/过期发 0/压线/自定义阈值）、`src/hooks/useKeyboardDrive.test.tsx`（按住爬升+松开回中、blur 全清收回 0）、`src/components/drive/VirtualJoystick.test.tsx`（按下拖动上报、松开回中、稳持心跳持续重发）；`useGamepadDrive.test.tsx` +2（断连清零上报 0、值不变每帧连续上报）；`useDriveWebsocket.test.tsx` +1（构造抛异常：挂载中按间隔重连、卸载后不复活）。前端全量 **vitest 377 全绿**（56 文件）+ `tsc -b --noEmit` 通过。
+
+# 变更日志
+
+## 2026-10-25 (271)
+
+- fix(bridge): 车端 WS 桥控制数值转换补防护——畸形 angle/throttle 不再断开车端连接（#509）
+  - `donkeycar/parts/drive_api_bridge.py` `_handle_message` 的 `float(msg["angle"/"throttle"])` 裸奔：畸形值 ValueError 穿透 `async for`（只捕获 JSONDecodeError）→ `_connect_loop` except → 车端 WS 断开，一个重连周期（3s）内控制停更。后端 routers/drive.py 已于 #489 修过转发前过滤，本处补齐车端侧纵深防御（旧版后端/直连场景仍可触发）。
+  - 修复：转换包 try/except (TypeError, ValueError)，畸形值忽略该字段并打 warning（与后端 #489 同款防护）。
+  - 测试：`test_drive_api_bridge.py` +1 用例（字符串/嵌套对象/None 不抛异常、已生效控制值不被改动、后续合法消息正常生效），52 过。
+  - 六轮审计区域①③④同步排查：pilot_holder/npu_pilot/throttle_filter/kinematics/keras、WebConsoleServer 全部端点（中央命令鉴权/STA 凭据脱敏/参数校验）、TubEditor/TubLibrary/TrainerPage/PilotArena/AiCleanModal（索引映射/删除确认/防重复/空值/清理）均无问题。
 
 # 变更日志
 

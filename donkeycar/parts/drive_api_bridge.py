@@ -472,10 +472,17 @@ class DriveApiBridge:
         if msg.get("type") == "request_car_state":
             self._send_car_state(self.last_num_records)
             return
-        if "angle" in msg:
-            self.angle = float(msg["angle"])
-        if "throttle" in msg:
-            self.throttle = float(msg["throttle"])
+        # 数值字段转换带防护（#509）：畸形值只忽略该字段并告警，异常
+        # 穿透会断开车端 WS 连接（3s 重连周期内控制停更）——与后端
+        # routers/drive.py #489 同款纵深防御
+        try:
+            if "angle" in msg:
+                self.angle = float(msg["angle"])
+            if "throttle" in msg:
+                self.throttle = float(msg["throttle"])
+        except (TypeError, ValueError):
+            logger.warning("忽略畸形控制数值: angle=%r throttle=%r",
+                           msg.get("angle"), msg.get("throttle"))
         if "drive_mode" in msg:
             self.mode_latch = msg["drive_mode"]
         if "recording" in msg:
