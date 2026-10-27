@@ -28,6 +28,7 @@ import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useElementWidth, useElementHeight } from '../hooks/useElementWidth';
 import { useTranslation } from '@/i18n';
 import { cn } from '../lib/utils';
+import { freshControl } from '../lib/inputFreshness';
 import { AlertTriangle, Circle, ChevronLeft, ChevronRight, Info, Joystick, Loader2, Lock, Maximize2, Minimize2, WifiOff } from 'lucide-react';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
@@ -129,9 +130,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     clientId: clientIdRef.current,
   });
 
-  // 输入合并：摇杆 + 键盘，后发生效
-  const joystickRef = useRef({ angle: 0, throttle: 0 });
-  const keyboardRef = useRef({ angle: 0, throttle: 0 });
+  // 输入合并：摇杆 + 键盘，后发生效；updatedAt 供 mux 新鲜度检查（#508）
+  const joystickRef = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
+  const keyboardRef = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
   const lastInputType = useRef<'joystick' | 'keyboard' | 'gamepad' | 'gyro'>('joystick');
 
   const [angle, setAngle] = useState(0);
@@ -174,8 +175,8 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [throttleVisibleKeys, setThrottleVisibleKeys] = useState<Set<string>>(
     () => new Set(curvesByGroup('throttle').filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
-  const gamepadRef = useRef({ angle: 0, throttle: 0 });
-  const gyroRef = useRef({ angle: 0, throttle: 0 });
+  const gamepadRef = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
+  const gyroRef = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
 
   const toggleSteeringCurve = useCallback((key: string) => {
     setSteeringVisibleKeys((prev) => {
@@ -256,7 +257,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     enabled: active && inputSource === 'keyboard',
     params,
     onChange: (a, t) => {
-      keyboardRef.current = { angle: a, throttle: t };
+      keyboardRef.current = { angle: a, throttle: t, updatedAt: Date.now() };
       lastInputType.current = 'keyboard';
     },
   });
@@ -273,7 +274,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     monitor: active && joystickOpen,
     config: gamepadConfig,
     onChange: (a, t) => {
-      gamepadRef.current = { angle: a, throttle: t };
+      gamepadRef.current = { angle: a, throttle: t, updatedAt: Date.now() };
       lastInputType.current = 'gamepad';
     },
   });
@@ -281,7 +282,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const { permissionState, requestPermission } = useGyroDrive({
     enabled: active && inputSource === 'gyro',
     onChange: (a, t) => {
-      gyroRef.current = { angle: a, throttle: t };
+      gyroRef.current = { angle: a, throttle: t, updatedAt: Date.now() };
       lastInputType.current = 'gyro';
     },
   });
@@ -295,33 +296,23 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
 
   const getCurrentControl = useCallback(() => {
     let a = 0, t = 0;
+    const now = Date.now();
     // ESP32 手柄：选中即由车端 rc 通道唯一驱动（不与其它输入合并），
     // 透传回控制/录制链路；遥测断流超 ESP32_RC_STALE_MS 时输出 0，不沿用旧油门。
     if (inputSourceRef.current === 'esp32') {
-      if (Date.now() - esp32Ref.current.updatedAt <= ESP32_RC_STALE_MS) {
-        a = esp32Ref.current.angle;
-        t = esp32Ref.current.throttle;
-      }
-      return { angle: a, throttle: t, drive_mode: mode };
+      const c = freshControl(esp32Ref.current, now, ESP32_RC_STALE_MS);
+      return { angle: c.angle, throttle: c.throttle, drive_mode: mode };
     }
-    switch (lastInputType.current) {
-      case 'joystick':
-        a = joystickRef.current.angle;
-        t = joystickRef.current.throttle;
-        break;
-      case 'keyboard':
-        a = keyboardRef.current.angle;
-        t = keyboardRef.current.throttle;
-        break;
-      case 'gamepad':
-        a = gamepadRef.current.angle;
-        t = gamepadRef.current.throttle;
-        break;
-      case 'gyro':
-        a = gyroRef.current.angle;
-        t = gyroRef.current.throttle;
-        break;
-    }
+    // 本地输入源与 esp32 源同款新鲜度检查（#508）：输入 hook 停摆（section
+    // 滚出视口后停表 #178）、手柄断连、键盘 blur 后 ref 冻结，超过
+    // LOCAL_INPUT_STALE_MS 未更新即输出 0，不沿用冻结的旧油门/转向。
+    const ref =
+      lastInputType.current === 'keyboard' ? keyboardRef :
+      lastInputType.current === 'gamepad' ? gamepadRef :
+      lastInputType.current === 'gyro' ? gyroRef : joystickRef;
+    const c = freshControl(ref.current, now);
+    a = c.angle;
+    t = c.throttle;
     return { angle: a, throttle: t, drive_mode: mode };
   }, [mode]);
 
@@ -658,7 +649,7 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
                       <VirtualJoystick
                         scale={dockScale}
                         onChange={(a, t) => {
-                          joystickRef.current = { angle: a, throttle: t };
+                          joystickRef.current = { angle: a, throttle: t, updatedAt: Date.now() };
                           lastInputType.current = 'joystick';
                         }}
                         size={220}

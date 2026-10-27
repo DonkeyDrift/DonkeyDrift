@@ -146,4 +146,59 @@ describe('useGamepadDrive', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('手柄断连（电池耗尽/蓝牙断开）时清零最后值并上报 0，不残留旧油门（#508）', async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal('navigator', {
+      // 油门默认轴 axes[1]、前推为负（invert）
+      getGamepads: () => [makePad([0, -0.8, 0, 0])],
+    });
+
+    const Probe: React.FC = () => {
+      useGamepadDrive({ enabled: true, config: DEFAULT_GAMEPAD_CONFIG, onChange });
+      return null;
+    };
+    render(<Probe />);
+
+    // 先建立非零油门（throttle 轴 0.8）
+    await waitFor(() => {
+      const [, throttle] = onChange.mock.calls.at(-1) as [number, number];
+      expect(throttle).toBeGreaterThan(0.5);
+    });
+
+    // 手柄消失：断连兜底必须上报一次 0
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [null],
+    });
+    await waitFor(() => {
+      const [angle, throttle] = onChange.mock.calls.at(-1) as [number, number];
+      expect(angle).toBe(0);
+      expect(throttle).toBe(0);
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('值不变时也每帧连续上报（稳持心跳），供 mux 新鲜度判断源仍活着（#508）', async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal('navigator', {
+      getGamepads: () => [makePad([0, -0.5, 0, 0])],
+    });
+
+    const Probe: React.FC = () => {
+      useGamepadDrive({ enabled: true, config: DEFAULT_GAMEPAD_CONFIG, onChange });
+      return null;
+    };
+    render(<Probe />);
+
+    await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThan(2));
+    // 轴值恒定、无任何变化：上报仍持续增长（不按值变化门控）
+    const count = onChange.mock.calls.length;
+    await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThan(count));
+    const [angle, throttle] = onChange.mock.calls.at(-1) as [number, number];
+    expect(throttle).toBeGreaterThan(0.3);
+    expect(angle).toBe(0);
+
+    vi.unstubAllGlobals();
+  });
 });

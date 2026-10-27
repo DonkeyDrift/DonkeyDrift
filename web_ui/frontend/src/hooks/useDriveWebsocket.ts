@@ -167,7 +167,9 @@ export const useDriveWebsocket = (options: UseDriveWebsocketOptions = {}) => {
       };
     } catch {
       setConnected(false);
-      if (autoReconnect) {
+      // 构造 WebSocket 本身抛异常（URL 非法/环境限制）：仅组件仍挂载时才安排
+      // 重连，避免已卸载组件被重连定时器拉起（#508）
+      if (autoReconnect && mountedRef.current) {
         reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
       }
     }
