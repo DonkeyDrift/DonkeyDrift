@@ -5,7 +5,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // 后端按 JSON 解析 multipart 体，找不到 file 字段即 422。修复：FormData 请求
 // 显式置空 Content-Type，交给浏览器生成带 boundary 的 multipart/form-data。
 
-const mockPost = vi.fn((..._args: unknown[]) => Promise.resolve({ data: { status: true } }));
+const mockPost = vi.fn<(...args: unknown[]) => Promise<{ data: { status: boolean } }>>(
+  () => Promise.resolve({ data: { status: true } }),
+);
 const mockGet = vi.fn();
 const mockDelete = vi.fn();
 

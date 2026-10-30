@@ -254,7 +254,6 @@ const HarnessGroup: React.FC<{
   onDownload: (harnessId: string, componentId: string) => void;
   onInstall: (harnessId: string, componentId: string) => void;
 }> = ({ harness, busy, onDownload, onInstall }) => {
-  const { t } = useTranslation();
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="flex items-center gap-2">
