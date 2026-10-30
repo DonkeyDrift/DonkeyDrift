@@ -278,7 +278,7 @@ async def save_training_config(request: TrainingConfigSaveRequest):
 
     lines = []
     if os.path.exists(myconfig_path):
-        with open(myconfig_path, 'r') as f:
+        with open(myconfig_path, 'r', encoding='utf-8') as f:
             lines = f.read().splitlines()
 
     if request.enabled:
@@ -310,7 +310,7 @@ async def save_training_config(request: TrainingConfigSaveRequest):
             )
         ]
 
-    with open(myconfig_path, 'w') as f:
+    with open(myconfig_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
         if lines and not lines[-1].endswith('\n'):
             f.write('\n')
@@ -349,7 +349,7 @@ async def save_simulator_config(request: SimulatorSaveRequest):
 
     lines = []
     if os.path.exists(myconfig_path):
-        with open(myconfig_path, 'r') as f:
+        with open(myconfig_path, 'r', encoding='utf-8') as f:
             lines = f.read().splitlines()
 
     for key in SIMULATOR_CONFIG_KEYS:
@@ -372,7 +372,7 @@ async def save_simulator_config(request: SimulatorSaveRequest):
         if not found:
             lines.append(new_line)
 
-    with open(myconfig_path, 'w') as f:
+    with open(myconfig_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
         if lines and not lines[-1].endswith('\n'):
             f.write('\n')

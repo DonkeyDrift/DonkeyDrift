@@ -394,7 +394,7 @@ async def get_params():
     if not path.exists():
         return {"success": True, "params": DEFAULT_PARAMS, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return {"success": True, "params": data.get("params", DEFAULT_PARAMS), "timestamp": data.get("timestamp")}
     except Exception as e:
@@ -412,7 +412,7 @@ async def save_params(request: SaveParamsRequest):
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "params": request.params.dict(),
         }
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return {"success": True, "message": "Parameters saved", "timestamp": data["timestamp"]}
     except Exception as e:
