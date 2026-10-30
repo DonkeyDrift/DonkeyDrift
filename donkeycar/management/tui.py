@@ -1559,13 +1559,20 @@ class DriveCommand(DonkeyCommand):
         for process in reversed(processes):
             if process and process.poll() is None:
                 if sys.platform == "win32":
-                    os.kill(process.pid, signal.CTRL_C_EVENT)
+                    # Windows: uv shim 是 re-exec 结构，CTRL_C_EVENT 与 process.kill()
+                    # 都只触及直接子进程，真正的 python/uvicorn 孙子会变孤儿继续占用
+                    # 端口（drive 后端残留的根因）；且 uvicorn 优雅退出常拖满 10s
+                    # 超时。直接 taskkill /T /F 强杀整棵进程树：毫秒级、不留孤儿。
+                    subprocess.run(
+                        ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                        capture_output=True,
+                    )
                 else:
                     process.send_signal(signal.SIGINT)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
 
     def monitor_processes(self, web_process, car_process):
         import select
