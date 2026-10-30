@@ -107,6 +107,7 @@ interface AppState {
 
   setConfig: (config: Record<string, unknown>, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
+  clearTub: () => void;
   requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
@@ -232,6 +233,27 @@ export const useStore = create<AppState>()(
           error: null,
           activeDrawer: null,
           isPlaying: false,
+        }),
+      clearTub: () =>
+        set({
+          tubPath: '',
+          loadedTubPath: null,
+          records: [],
+          originalRecords: [],
+          totalRecords: 0,
+          tubTotalRecords: 0,
+          totalPhysicalRecords: 0,
+          deletedIndexes: [],
+          fields: [],
+          currentIndex: 0,
+          activeSessionId: null,
+          activeSessionRecords: [],
+          isPlaying: false,
+          isDragging: false,
+          selectionStartIndex: null,
+          selectionEndIndex: null,
+          selectionHistory: [],
+          selectionHistoryIndex: -1,
         }),
       // 手动刷新 Tub：清空已加载标记并递增令牌，让 TubManagerPage 重新全量拉取
       requestTubRefresh: () =>

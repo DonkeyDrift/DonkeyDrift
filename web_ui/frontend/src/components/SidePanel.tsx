@@ -1,6 +1,5 @@
 import React from 'react';
 import { ConfigLoader } from './ConfigLoader';
-import { TubLoader } from './TubLoader';
 import { SimulatorConfig } from './SimulatorConfig';
 import { FolderOpen, Plug } from 'lucide-react';
 
@@ -82,7 +81,6 @@ export const SidePanel: React.FC = () => {
                 </div>
                 <div className="space-y-6">
                   <ConfigLoader />
-                  <TubLoader />
                 </div>
               </>
             )}

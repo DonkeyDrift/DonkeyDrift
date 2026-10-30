@@ -1,17 +1,18 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from './ui/Card';
 import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, loadTub, getApiErrorMessage, discoverProjects } from '../services/api';
+import { loadConfig, getApiErrorMessage } from '../services/api';
+import { autoLoadTubFor } from '../hooks/useConfigAutoLoad';
 import { FolderCog, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
 import { useTranslation } from '@/i18n';
 
 export const ConfigLoader: React.FC = () => {
   const { t } = useTranslation();
-  const { configPath, setConfig, setError, setLoading, config, setTub } = useStore();
+  const { configPath, setConfig, setError, setLoading, config } = useStore();
   const [path, setPath] = useState(configPath);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
@@ -20,40 +21,13 @@ export const ConfigLoader: React.FC = () => {
     setPath(configPath);
   }, [configPath]);
 
-  const autoLoadTub = useCallback(async (carPath: string) => {
-    try {
-      // Normalize path and append /data
-      const tubPath = carPath.endsWith('/') || carPath.endsWith('\\') 
-        ? `${carPath}data` 
-        : `${carPath}/data`;
-      
-      const data = await loadTub(tubPath);
-      setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
-    } catch {
-      console.warn('Auto-loading tub from ./data failed, user might need to select manually.');
-    }
-  }, [setTub]);
-
   const handleManualLoad = useCallback(async () => {
     if (!path.trim()) return;
     setLoading(true);
     try {
       const data = await loadConfig(path);
       setConfig(data.config, path);
-      
-      const currentTubPath = useStore.getState().tubPath;
-      if (currentTubPath && currentTubPath !== path + '/data'
-          && currentTubPath !== path.replace(/\/$/, '') + '/data') {
-        try {
-          const tubData = await loadTub(currentTubPath);
-          setTub(tubData.path, tubData.records || [], tubData.fields || [], tubData.total_physical_records, tubData.deleted_indexes);
-        } catch (err) {
-          console.warn('Failed to load persisted tub path, falling back to auto-load', err);
-          await autoLoadTub(path);
-        }
-      } else {
-        await autoLoadTub(path);
-      }
+      await autoLoadTubFor(path);
     } catch (err: unknown) {
       // 任何加载失败（包括目录不存在、缺少 config.py）都要反馈给用户，
       // 否则路径错误时界面毫无提示，只剩控制台里的 404。
@@ -61,7 +35,7 @@ export const ConfigLoader: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [path, autoLoadTub, setConfig, setError, setLoading, setTub, t]);
+  }, [path, setConfig, setError, setLoading, t]);
 
   const handleBrowserSelect = async (selectedPath: string) => {
     setPath(selectedPath);
@@ -72,7 +46,7 @@ export const ConfigLoader: React.FC = () => {
     try {
       const data = await loadConfig(selectedPath);
       setConfig(data.config, selectedPath);
-      await autoLoadTub(selectedPath);
+      await autoLoadTubFor(selectedPath);
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, t('common.configLoader.failedToLoadFromDir')));
     } finally {
@@ -80,45 +54,9 @@ export const ConfigLoader: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!config && configPath && !useStore.getState().configAutoLoadTried) {
-      // 页面刚加载时服务器可能尚未就绪，先清除旧错误状态
-      setError(null);
-      // 延迟 500ms 再加载，给后端启动留出时间
-      const timer = setTimeout(() => {
-        // 标记在定时器真正触发时落地：若在 500ms 内抽屉被关上导致组件卸载，
-        // 本次不算已尝试，下次打开抽屉仍会安排自动加载；加载失败后重开抽屉
-        // 不再自动重试，避免错误联动又把抽屉关上（点击「加载器」无反应回归）
-        useStore.setState({ configAutoLoadTried: true });
-        handleManualLoad();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [config, configPath, handleManualLoad, setError]);
-
-  // 没有 remembered configPath 时自动发现 mycar 项目（issue #129）：
-  // 恰好一个项目→自动加载；多个项目→自动选中上次 Browse/加载过的项目；
-  // 上次项目不在发现列表或扫描失败时回退手动 Browse。
-  const autoDiscoverTried = useRef(false);
-  useEffect(() => {
-    if (config || configPath || autoDiscoverTried.current) return;
-    autoDiscoverTried.current = true;
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await discoverProjects();
-        if (cancelled) return;
-        if (data.count === 1 && data.projects[0]) {
-          await handleBrowserSelect(data.projects[0]);
-        } else if (data.last_project && data.projects.includes(data.last_project)) {
-          await handleBrowserSelect(data.last_project);
-        }
-      } catch {
-        // 自动发现失败时保持现状，用户手动 Browse 选择
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [config, configPath, handleBrowserSelect]);
+  // 自动加载逻辑已上移至 App 级 useConfigAutoLoad(见 hooks/):
+  // 修复「刷新后直接打开连接器便签页时 ConfigLoader 未挂载、配置显示未配置」——
+  // 自动恢复持久化 configPath / 自动发现 mycar 现在随应用常驻,不再依赖抽屉挂载。
 
   return (
     <Card>
