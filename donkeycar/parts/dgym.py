@@ -21,7 +21,7 @@ def is_exe(fpath):
 
 class DonkeyGymEnv(object):
 
-    def __init__(self, sim_path, host="127.0.0.1", port=9091, headless=0, env_name="donkey-generated-track-v0", sync="asynchronous", conf={}, record_location=False, record_gyroaccel=False, record_velocity=False, record_lidar=False, delay=0, output_preview=False):
+    def __init__(self, sim_path, host="127.0.0.1", port=9091, headless=0, env_name="donkey-generated-track-v0", sync="asynchronous", conf={}, record_location=False, record_gyroaccel=False, record_velocity=False, record_lidar=False, delay=0, output_preview=False, vflip=False, hflip=False):
 
         # 保存原始配置，以便运行时重连复用
         self._sim_path = sim_path
@@ -36,6 +36,13 @@ class DonkeyGymEnv(object):
         self._record_velocity = record_velocity
         self._record_lidar = record_lidar
         self._delay_ms = delay
+
+        # 图像翻转：模拟器相机倒装（画面上下颠倒/镜像）时用，语义与真机相机
+        # part 的 CAMERA_VFLIP/CAMERA_HFLIP 一致。必须在帧进入管线最前端应用
+        # （_set_frame 入参），否则 frame sink 直推的 Web 预览帧会绕过翻转，
+        # 出现「NN/录制已正、预览仍倒」的不一致。
+        self._vflip = bool(vflip)
+        self._hflip = bool(hflip)
 
         # 监控 myconfig.py 的变化
         self._myconfig_path = os.path.join(os.getcwd(), 'myconfig.py')
@@ -283,6 +290,12 @@ class DonkeyGymEnv(object):
         """
         if raw_frame is None:
             return
+        if self._vflip or self._hflip:
+            # 180° = vflip + hflip；ascontiguousarray 还原负步长视图，避免下游
+            # cv2.resize 对非连续内存报错。
+            raw_frame = raw_frame[::(-1 if self._vflip else 1),
+                                  ::(-1 if self._hflip else 1)]
+            raw_frame = np.ascontiguousarray(raw_frame)
         h, w = raw_frame.shape[:2]
         if h == self._img_h and w == self._img_w:
             self.frame = raw_frame

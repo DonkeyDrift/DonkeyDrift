@@ -971,7 +971,9 @@ def add_simulator(V, cfg):
                            record_location=cfg.SIM_RECORD_LOCATION, record_gyroaccel=cfg.SIM_RECORD_GYROACCEL,
                            record_velocity=cfg.SIM_RECORD_VELOCITY, record_lidar=cfg.SIM_RECORD_LIDAR,
                         #    record_distance=cfg.SIM_RECORD_DISTANCE, record_orientation=cfg.SIM_RECORD_ORIENTATION,
-                           delay=cfg.SIM_ARTIFICIAL_LATENCY)
+                           delay=cfg.SIM_ARTIFICIAL_LATENCY,
+                           vflip=getattr(cfg, 'CAMERA_VFLIP', False),
+                           hflip=getattr(cfg, 'CAMERA_HFLIP', False))
         threaded = True
         inputs = ['steering', 'throttle', 'brake', 'reconnect_simulator', 'reset_car']
         outputs = ['cam/image_array']

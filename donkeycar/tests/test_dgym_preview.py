@@ -110,3 +110,30 @@ def test_run_threaded_without_preview_keeps_scalar_return():
     result = env.run_threaded(0.0, 0.0)
     assert not isinstance(result, list)  # 保持旧的标量返回（向后兼容）
     assert result.shape == (120, 160, 3)
+
+
+def test_image_flip_applies_to_nn_input_preview_and_sink():
+    """模拟器相机倒装：vflip+hflip = 旋转 180°。
+
+    翻转必须在帧进入管线最前端生效，否则 frame sink 直推的 Web 预览帧会
+    绕过翻转，出现「NN/录制已正、预览仍倒」的不一致。
+    """
+    frame = np.arange(120 * 160 * 3, dtype=np.uint8).reshape(120, 160, 3)
+    cases = (
+        (True, True, frame[::-1, ::-1]),   # 180°
+        (True, False, frame[::-1, :]),
+        (False, True, frame[:, ::-1]),
+    )
+    for vflip, hflip, expected in cases:
+        with patch("donkeycar.parts.dgym.gym.make", return_value=FakeLowResEnv()):
+            env = DonkeyGymEnv(sim_path="remote", conf={"img_h": 120, "img_w": 160},
+                               vflip=vflip, hflip=hflip)
+
+        pushed = []
+        env.set_frame_sink(pushed.append)
+        env._set_frame(frame)
+
+        assert np.array_equal(env.frame, expected)           # NN 输入（cam/image_array）
+        assert np.array_equal(env.preview_frame, expected)   # 预览帧
+        assert np.array_equal(pushed[-1], expected)          # frame sink 直推帧
+

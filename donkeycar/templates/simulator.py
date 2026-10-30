@@ -72,7 +72,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
     sim_conf["img_w"] = cfg.IMAGE_W
     sim_conf["img_h"] = cfg.IMAGE_H
 
-    cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=sim_conf, delay=cfg.SIM_ARTIFICIAL_LATENCY, output_preview=True)
+    cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=sim_conf, delay=cfg.SIM_ARTIFICIAL_LATENCY, output_preview=True,
+                       vflip=getattr(cfg, 'CAMERA_VFLIP', False), hflip=getattr(cfg, 'CAMERA_HFLIP', False))
     threaded = True
     inputs = ['angle', 'throttle', 'brake', 'reconnect_simulator', 'reset_car']
 
