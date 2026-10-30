@@ -30,7 +30,19 @@ export const useKeyboardDrive = ({
   useEffect(() => {
     if (!enabled) return;
 
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return (
+        !!el &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      );
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 输入框中的按键不驱动（与 useDriveHotkeys 守卫一致）；keyup 不过滤——
+      // 先按住驾驶键再聚焦输入框后松开时，过滤 keyup 会让按键残留、油门回不来（#512）
+      if (isEditableTarget(e.target)) return;
+
       const key = e.key.toLowerCase();
       if (key in keysRef.current) {
         (keysRef.current as Record<string, boolean>)[key] = true;

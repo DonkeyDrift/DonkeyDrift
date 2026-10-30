@@ -1920,7 +1920,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   );
 
   const handleTouchEnd = useCallback(
-    (event: React.TouchEvent<HTMLDivElement>) => {
+    () => {
       isSelectingRef.current = false;
       // 触摸轻触（tap）等效于点击——选择逻辑由 touchstart 中 preventDefault 后的 click 事件处理
       // 这里只清理预览状态
