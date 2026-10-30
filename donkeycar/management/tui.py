@@ -160,13 +160,40 @@ class HistoryManager:
 # 辅助函数
 # -----------------------------------------------------------------------------
 def is_valid_mycar_folder():
-    """检查当前目录是否为有效的 mycar 项目"""
-    return _is_valid_project_dir(Path.cwd())
+    """检查当前目录是否为可用的 mycar 项目（缺 myconfig.py 时现场补齐）"""
+    cwd = Path.cwd()
+    return _is_valid_project_dir(cwd) and _ensure_myconfig(cwd)
 
 
 def _is_valid_project_dir(project_path: Path) -> bool:
-    """检查目录是否为有效的 mycar 项目。"""
-    return (project_path / "manage.py").exists() and (project_path / "myconfig.py").exists()
+    """目录是否像 mycar 项目：有 manage.py + （config.py 或 myconfig.py）。
+
+    myconfig.py 只是用户覆盖项，缺失不再直接判整个目录无效——交给
+    _ensure_myconfig() 现场从模板补齐（曾因误删 myconfig.py 把 Drive 卡在
+    「请输入项目路径」流程）。
+    """
+    if not (project_path / "manage.py").exists():
+        return False
+    return ((project_path / "config.py").exists()
+            or (project_path / "myconfig.py").exists())
+
+
+def _ensure_myconfig(project_path: Path) -> bool:
+    """确保项目里有 myconfig.py；缺则按 createcar 口径从模板生成。"""
+    if (project_path / "myconfig.py").exists():
+        return True
+    if not (project_path / "manage.py").exists():
+        return False
+    try:
+        from donkeycar.management.base import write_myconfig_from_template
+        write_myconfig_from_template(str(project_path))
+        console.print(
+            f"[yellow]未找到 myconfig.py，已从模板生成: "
+            f"{project_path / 'myconfig.py'}[/yellow]")
+        return True
+    except Exception as e:
+        console.print(f"[red]生成 myconfig.py 失败: {e}[/red]")
+        return False
 
 
 def _find_valid_projects(base_dir: Optional[Path] = None) -> List[Path]:
@@ -210,6 +237,7 @@ def _save_last_project_path(project_path: Path):
 def _change_to_project(project_path: Path, title: str) -> bool:
     try:
         os.chdir(project_path)
+        _ensure_myconfig(project_path)  # 缺 myconfig.py 时补模板，避免后续命令判无效
         _save_last_project_path(project_path)
         console.print(Panel(f"[bold green]✓ 已切换工作目录至: {project_path}[/bold green]", title=title))
         return True
@@ -1413,8 +1441,13 @@ class DriveCommand(DonkeyCommand):
                 )
                 processes.append(car_process)
 
-            # 记录本次启动的进程 PID，供下次启动时清理
-            write_drive_pids([p.pid for p in processes])
+            # 只记车进程：kill_previous_car_processes() 在无 /proc 的平台（Windows）
+            # 会按 PID 文件全杀，写进 web 进程会让下次启动杀掉 Web UI（uvicorn 变
+            # 孤儿 + 登记陈旧 → 双后端、页面连不到车端），见 base.py donkey drive。
+            if car_process is not None:
+                write_drive_pids([car_process.pid])
+            else:
+                remove_drive_pid_file()
 
             # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开；
             # 带 ?token= 过 P0 鉴权门（非回环来源一律要令牌，本机用 LAN IP 亦然）

@@ -187,14 +187,14 @@ def _iter_instances(instances_dir=INSTANCES_DIR):
 
 
 def _pid_alive(pid: int) -> bool:
-    """pid 是否有存活进程（无权限视为存活，交给后续探测裁决）。"""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    """pid 是否有存活进程（无权限视为存活，交给后续探测裁决）。
+
+    复用 ``webui_instance._pid_alive``：**不能**用 ``os.kill(pid, 0)`` 探活
+    ——Windows 上 os.kill 对 CTRL_*_EVENT 之外的 sig（含 0）走 TerminateProcess，
+    探活会直接把目标进程杀掉（曾因此每次复用探测都杀掉在跑的实例）。
+    """
+    from donkeycar.webui_instance import _pid_alive as safe_pid_alive
+    return safe_pid_alive(pid)
 
 
 def _probe_server(host: str, port: int, token, timeout=PROBE_TIMEOUT_S) -> bool:

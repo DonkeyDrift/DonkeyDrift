@@ -340,11 +340,9 @@ def _launch_drive():
                 "error": f"启动进程失败: {e}",
             }
 
-        # 写入 PID 文件（复用实例时 web 进程不归本链路管，只记车进程）
-        if web_proc is not None:
-            write_drive_pids([web_proc.pid, car_proc.pid])
-        else:
-            write_drive_pids([car_proc.pid])
+        # 只记车进程（web 前后端不归 kill_previous_car_processes 管；无 /proc 的
+        # 平台会按文件全杀，写进 web PID 会让下次启动杀掉 Web UI，见 base.py donkey drive）
+        write_drive_pids([car_proc.pid])
 
         # 记录进程信息
         _processes["web"] = web_proc

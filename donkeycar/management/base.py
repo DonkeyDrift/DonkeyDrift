@@ -35,6 +35,35 @@ PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
 
 
+def write_myconfig_from_template(car_path):
+    """按 createcar 的口径在 car_path 下生成 myconfig.py（已存在则不动）。
+
+    先复制模板 myconfig.py，再把 config.py 自 ``import os`` 起的全部内容以
+    注释形式追加——myconfig.py 是用户覆盖项，缺失时用它兜底重建，而不是让
+    调用方（如 TUI）把整个车目录判为无效。
+
+    createcar / `donkey update` / TUI 共用本函数；读写一律显式 utf-8（模板
+    含中文注释，Windows 默认 GBK 会解码失败）。
+    """
+    myconfig_path = os.path.join(car_path, 'myconfig.py')
+    if os.path.exists(myconfig_path):
+        return myconfig_path
+
+    shutil.copyfile(os.path.join(TEMPLATES_PATH, 'myconfig.py'), myconfig_path)
+    car_config_path = os.path.join(car_path, 'config.py')
+    if os.path.exists(car_config_path):
+        # 把 config.py 内容全部注释后追加，作为 myconfig 的可编辑覆盖清单
+        with open(car_config_path, 'rt', encoding='utf-8') as cfg, \
+                open(myconfig_path, 'at', encoding='utf-8') as mcfg:
+            copy = False
+            for line in cfg:
+                if "import os" in line:
+                    copy = True
+                if copy:
+                    mcfg.write("# " + line)
+    return myconfig_path
+
+
 def _ensure_display_and_backend():
     """确保 matplotlib 能在 GUI 窗口中显示图表。
 
@@ -206,7 +235,6 @@ class CreateCar(BaseCommand):
         # add car application and config files if they don't exist
         app_template_path = os.path.join(TEMPLATES_PATH, template+'.py')
         config_template_path = os.path.join(TEMPLATES_PATH, 'cfg_' + template + '.py')
-        myconfig_template_path = os.path.join(TEMPLATES_PATH, 'myconfig.py')
         train_template_path = os.path.join(TEMPLATES_PATH, 'train.py')
         car_app_path = os.path.join(path, 'manage.py')
         car_config_path = os.path.join(path, 'config.py')
@@ -239,19 +267,7 @@ class CreateCar(BaseCommand):
 
         if not os.path.exists(mycar_config_path):
             print("Copying my car config overrides")
-            shutil.copyfile(myconfig_template_path, mycar_config_path)
-            # now copy file contents from config to myconfig, with all lines
-            # commented out.
-            cfg = open(car_config_path, "rt")
-            mcfg = open(mycar_config_path, "at")
-            copy = False
-            for line in cfg:
-                if "import os" in line:
-                    copy = True
-                if copy:
-                    mcfg.write("# " + line)
-            cfg.close()
-            mcfg.close()
+            write_myconfig_from_template(path)
 
         print("Donkey setup complete.")
 
@@ -1554,11 +1570,11 @@ class Drive(Web):
             stdin=subprocess.DEVNULL, **popen_kwargs,
         )
 
-        # 记录进程 PID，供下次启动时清理；复用实例时 web 进程不属于本进程管
-        if frontend_proc is not None:
-            write_drive_pids([frontend_proc.pid, backend_proc.pid, car_proc.pid])
-        else:
-            write_drive_pids([car_proc.pid])
+        # 只记车进程：kill_previous_car_processes() 在没有 /proc 的平台（Windows）
+        # 无法按 cmdline 区分角色，会把 PID 文件里的进程全杀——若把 web 前后端的
+        # PID 也写进来，下次启动就会杀掉 Web UI：uvicorn 变孤儿、实例登记陈旧，
+        # TUI 于是再新起一个后端 → 双后端并存、页面连不到车端（表现为「没有画面」）。
+        write_drive_pids([car_proc.pid])
 
         if args.open:
             frontend_url = self._build_frontend_url(frontend_port, args.route)

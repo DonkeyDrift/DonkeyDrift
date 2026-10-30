@@ -198,15 +198,20 @@ def test_kill_unreadable_cmdline_falls_back_to_kill_all(instance_file):
     pid_file = webui_instance.DRIVE_PID_FILE
     write_drive_pids([101, 202], pid_file=pid_file)
     killed = []
+    tree_killed = []
 
     with mock.patch.object(webui_instance, "_process_cmdline",
                            return_value=None), \
          mock.patch.object(os, "kill",
                            side_effect=lambda pid, sig: killed.append(pid)), \
+         mock.patch.object(webui_instance, "_kill_process_tree",
+                           side_effect=tree_killed.append), \
          mock.patch.object(webui_instance, "threading"):
         kill_previous_car_processes(pid_file=pid_file)
 
-    assert sorted(set(killed)) == [101, 202]
+    # Windows 走 taskkill /T（连带 uv shim re-exec 出的子进程），
+    # POSIX 走 os.kill(SIGTERM/SIGKILL)——两条路径合计应覆盖全部目标 pid
+    assert sorted(set(killed + tree_killed)) == [101, 202]
 
 
 # ===========================================================================
@@ -243,6 +248,9 @@ def test_find_car_processes_missing_proc_dir(tmp_path):
     assert find_car_processes(proc_dir=str(tmp_path / "nope")) == []
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows 无 SIGKILL：os.kill 的 SIGTERM 已是 TerminateProcess（强杀），"
+                           "没有「先 SIGTERM 再升级 SIGKILL」两阶段语义")
 def test_takeover_car_processes_term_then_kill():
     """接管：对所有扫描到的车进程先 SIGTERM、再兜底 SIGKILL。"""
     killed = []

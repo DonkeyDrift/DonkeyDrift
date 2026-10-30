@@ -22,6 +22,7 @@ import atexit
 import json
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -37,6 +38,11 @@ DRIVE_MODEL_FILE = Path.home() / ".donkeycar" / "drive_model.json"
 
 # 探测超时（秒）：仅本机回环探测，快速失败
 PROBE_TIMEOUT_S = 2.0
+
+# 硬杀信号：Windows 没有 SIGKILL（且 os.kill 对非 CTRL_*_EVENT 的任意 sig 都是
+# TerminateProcess，SIGTERM 本身即强杀），故为 None 时跳过「SIGTERM 后再升级
+# SIGKILL」的第二阶段——否则 signal.SIGKILL 取属性就 AttributeError。
+_SIGKILL = getattr(signal, "SIGKILL", None)
 
 
 # ── 实例登记读写 ────────────────────────────────────────────────────
@@ -100,14 +106,78 @@ def remove_instance(only_pid=None, instance_file=None):
 
 # ── 存活探测与复用 ──────────────────────────────────────────────────
 
+def _pid_gone_error(exc):
+    """异常是否表示「pid 已不存在」（Windows ``winerror=87``）。
+
+    Windows 上 ``os.kill`` 面对不存在、或正处于退出过程中的 pid 会失败：
+    前者抛原生 ``OSError``（``winerror=87`` ERROR_INVALID_PARAMETER），
+    后者 CPython 偶发把它包成 ``SystemError``（``__cause__`` 才是那个
+    ``OSError``），此时 ``except OSError`` 抓不住、会冒泡崩掉 TUI。
+    """
+    if isinstance(exc, SystemError):
+        exc = exc.__cause__
+    return isinstance(exc, OSError) and getattr(exc, "winerror", None) == 87
+
+
+def _pid_alive_windows(pid):
+    """Windows 探活：OpenProcess + GetExitCodeProcess，安全且无副作用。
+
+    **绝不能**用 ``os.kill(pid, 0)``：Python 文档明示，Windows 上 os.kill 对
+    CTRL_C_EVENT/CTRL_BREAK_EVENT 之外的任意 sig（含 0）都会走
+    ``TerminateProcess``——即「探活」会把目标进程杀掉。曾因此在 TUI/launcher
+    每次复用探测时杀掉正在跑的 Web UI（uvicorn 变孤儿、实例登记被判陈旧），
+    于是又新起一个后端 → 双后端并存、页面连不到车端（表现为「没有画面」）。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+    STILL_ACTIVE = 259
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE,
+                                            ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False,
+                                  int(pid))
+    if not handle:
+        # 打不开：进程不存在 -> ERROR_INVALID_PARAMETER(87) 判死；
+        # 拒绝访问(5) 说明进程在、只是没权限 -> 视为存活交端口探测裁决。
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _pid_alive(pid):
-    """pid 是否有存活进程（无权限视为存活，交给端口探测裁决）。"""
+    """pid 是否有存活进程（无权限视为存活，交给端口探测裁决）。
+
+    Windows 走 ``_pid_alive_windows``（OpenProcess），**不得**用
+    ``os.kill(pid, 0)``——Windows 上那是 TerminateProcess，会把目标进程杀掉
+    （见 ``_pid_alive_windows`` docstring）。POSIX 才用 ``os.kill(pid, 0)``，
+    其中不存在抛 ``ProcessLookupError``、无权限抛 ``PermissionError``。
+    """
+    if os.name == "nt":
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
+    except OSError as exc:
+        return not _pid_gone_error(exc)
+    except SystemError as exc:
+        return not _pid_gone_error(exc)
     return True
 
 
@@ -366,6 +436,48 @@ def find_car_processes(exclude_pids=None, proc_dir="/proc"):
     return pids
 
 
+def _kill_process_tree(pid):
+    """Windows：``taskkill /T /F`` 终止 pid 及其所有子进程。
+
+    **只按 pid 杀不够**：uv 建的 venv ``python.exe`` 只是 shim，真正跑
+    ``manage.py`` 的是它 re-exec 出来的子进程（Popen 拿到的 pid 是 shim 的）。
+    旧实现只杀 shim → 留下孤儿车进程，随后被 drive 单实例守护判为「已在运行」
+    而拒绝新进程（表现为车端离线、报「检测到已运行的 drive 进程（pid=...）」）。
+    """
+    try:
+        subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+                       capture_output=True, check=False)
+    except Exception:
+        pass
+
+
+def _terminate_processes(pids, grace_s):
+    """尽力终止 pids（吞掉「已不存在/无权限」类错误）。
+
+    Windows：``taskkill /T /F`` 一次连带子进程杀净（无 SIGKILL，os.kill 的
+    SIGTERM 本身即 TerminateProcess）；POSIX：先 SIGTERM，宽限 ``grace_s``
+    秒后对尚存者补 SIGKILL（Windows 无 ``signal.SIGKILL``）。
+    """
+    if not pids:
+        return
+    if os.name == "nt":
+        for pid in pids:
+            _kill_process_tree(pid)
+        return
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (OSError, SystemError):
+            pass
+    if _SIGKILL is not None:
+        threading.Event().wait(grace_s)
+        for pid in pids:
+            try:
+                os.kill(pid, _SIGKILL)
+            except (OSError, SystemError):
+                pass
+
+
 def takeover_car_processes(exclude_pids=None):
     """接管模式：杀掉所有在跑的车进程（含非本链路启动的），供新 drive 启动。
 
@@ -375,20 +487,9 @@ def takeover_car_processes(exclude_pids=None):
     不在清理之列。返回本次杀掉的 pid 列表。
     """
     pids = find_car_processes(exclude_pids=exclude_pids)
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-    if pids:
-        # 给被杀进程的父进程（TUI monitor 循环）留出回收时间，避免僵尸 pid
-        # 被 drive 实例登记误判为存活
-        threading.Event().wait(1.0)
-        for pid in pids:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+    # 给被杀进程的父进程（TUI monitor 循环）留出回收时间，避免僵尸 pid
+    # 被 drive 实例登记误判为存活
+    _terminate_processes(pids, grace_s=1.0)
     return pids
 
 
@@ -411,17 +512,7 @@ def kill_previous_car_processes(pid_file=None):
             if is_car is False:
                 continue  # web 进程，保留
         targets.append(pid)
-    for pid in targets:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-    threading.Event().wait(0.5)
-    for pid in targets:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+    _terminate_processes(targets, grace_s=0.5)
     remove_drive_pid_file(pid_file)
 
 
