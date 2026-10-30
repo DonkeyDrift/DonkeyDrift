@@ -163,9 +163,23 @@ export interface TubRecord {
   _timestamp_ms?: number;
 }
 
+export interface ChildTubInfo {
+  name: string;
+  path: string;
+  record_count: number;
+  total_physical: number;
+  deleted_count: number;
+  last_modified_ms: number;
+}
+
 export const listTubSessions = async (tubPath: string) => {
   const response = await api.get('/tub/sessions', { params: { tubPath } });
   return response.data as { status: boolean; path: string; sessions: TubSession[] };
+};
+
+export const listChildTubs = async (tubPath: string) => {
+  const response = await api.get('/tub/child_tubs', { params: { tubPath } });
+  return response.data as { status: boolean; path: string; child_tubs: ChildTubInfo[] };
 };
 
 export const getSessionRecords = async (tubPath: string, sessionId: string) => {
