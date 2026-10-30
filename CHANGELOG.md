@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-30 (273)
+
+- fix(drive/camera): 审计批次 2 项修复——键盘驾驶输入框 keydown 误触（#512）+ Webcam 灰度分支双根因（#513）；另按标准 lint 验证清理 6 个既存未使用绑定/参数（无行为变化）
+  - **#512 键盘驾驶输入框 keydown 误触**（`src/hooks/useKeyboardDrive.ts`）：keydown 此前不判断事件来源，在 Drive 页输入框（INPUT/TEXTAREA/contenteditable）中打字会误触 I/J/K/L 驾驶键，推动油门/转向。修复：按 `useDriveHotkeys` 同款 editable target 守卫在 keydown 一侧忽略；keyup 不做过滤、blur 全清（#508）保持不变——先按住驾驶键再聚焦输入框后松开仍能释放，不产生 #508 式油门残留。测试：`useKeyboardDrive.test.tsx` +2（输入框内 keydown 忽略回归、keyup 跨焦点释放）。
+  - **#513 Webcam 灰度分支双根因**（`donkeycar/parts/camera.py` + `donkeycar/utils.py`）：其一是 `image_d=1` 分支调用 `rgb2gray(frame)` 而 `frame` 未定义，构造期 warmup 抓帧即抛 NameError 并被包装成 CameraError；其二是 `rgb2gray()` 的 uint8 回转用内置 `round(grey)` 对 ndarray 抛 TypeError。修复：改 `rgb2gray(self.frame)`（与 PiCamera.run() 既有写法一致）+ `np.round(grey).astype(np.uint8)`。测试：`test_webcam_framerate.py` 新增 mock pygame 用例——uint8 (160,120,3) 抓帧下断言 image_d=1 构造 warmup 与 run() 返回 (160,120) 单通道 uint8 灰度图，附 image_d=3 RGB 守护；未改动既有用例。
+  - **lint 清理（无行为变化，不单独编号）**：标准 lint 验证要求 0 error，清理 6 个既存未使用绑定/参数——`HarnessPanel.tsx` HarnessGroup 未使用的 `t` 解构、`TubEditor.tsx` handleTouchEnd 未读取的 event 参数、测试 mock 未使用参数 4 处（TubEditorAiCleanModal 的 `t` 去 `_vars`、SimCollectCard 的 `start` 去 `_params`、ModelsList/apiFormData 的 mock 去 `..._args` 后以 vi.fn 显式泛型保持调用签名）；SimCollectCard 读取 mock.calls 处补 unknown[][] 断言语义不变。生产代码仅移除真正未使用的绑定/参数。
+  - 最终验证（含合并最新 origin/Tony #514/#515 后复验）：Python 全量 **1033 过 16 跳**（558.93s）、后端全量 **614 过 1 跳**（14.87s）、前端 vitest **58 文件 395 全过**、`npm run check`（tsc -b --noEmit）通过、lint **0 error / 12 warning**（均为既有 react-refresh/exhaustive-deps 类）、build 通过（6.07s）。PR/部署/OTA 由收尾主流程执行，落盘时尚未完成，此处不作声明。
+
+# 变更日志
+
 ## 2026-10-25 (272)
 
 - fix(drive): 第五轮审计（驾驶控制安全链）4 项前端修复——本地输入源停摆/断连时旧控制值残留（#508；FW 侧 pilot 失效保护见 Firmware #185 / v1.10.15；CHANGELOG 编号让号：与 #509 并行撞号 (271)，后到者让号为 (272)）
