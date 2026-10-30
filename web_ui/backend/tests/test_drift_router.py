@@ -309,3 +309,120 @@ class TestAppLifecycle:
         with TestClient(main_mod.app):
             pass
         assert calls, "shutdown 钩子必须调用 drift_engine.stop_camera_loop"
+
+
+class TestSendSinkPropagatesResult:
+    """#493：生产 send_sink 必须把 send_to_car 的布尔结果同步回传，
+    引擎的下发失败计数与看门狗才能在生产链路生效。"""
+
+    def test_sink_returns_false_when_car_offline_and_true_when_online(self, monkeypatch):
+        import threading
+
+        import routers.drive as drive_mod
+        import routers.drift as drift_mod
+
+        monkeypatch.setattr(drift_mod, "_drive_hooks_installed", False)
+        monkeypatch.setattr(drive_mod.drive_state, "telemetry_hooks", [])
+
+        async def main():
+            drift_mod.install_drive_hooks()
+            sink = drift_mod.drift_engine.send_sink
+            assert sink is not None
+
+            async def call_from_thread(key):
+                # 调用线程里执行 sink（模拟相机线程）；事件循环侧让出等待结果
+                result = {}
+
+                def _call():
+                    result[key] = sink({"car_mode": 0})
+
+                t = threading.Thread(target=_call)
+                t.start()
+                for _ in range(200):
+                    if key in result:
+                        break
+                    await asyncio.sleep(0.02)  # 让出循环，send_to_car 才能执行
+                t.join(5.0)
+                return result[key]
+
+            try:
+                # 车端不在线：send_to_car 显式 False → sink 必须回传 False
+                drive_mod.drive_state.car_ws = None
+                assert await call_from_thread("offline") is False, \
+                    "车端离线时 sink 必须计为失败"
+
+                # 车端在线且发送成功 → True
+                class _OkWs:
+                    async def send_text(self, s):
+                        pass
+
+                drive_mod.drive_state.car_ws = _OkWs()
+                assert await call_from_thread("online") is True
+            finally:
+                drive_mod.drive_state.car_ws = None
+                drift_mod.drift_engine.send_sink = None
+
+        asyncio.run(main())
+
+
+class TestStopIdempotentAfterWatchdogRace:
+    """#496：stop() 与相机看门狗并发时不得向用户抛 RuntimeError（409）。"""
+
+    def test_stop_swallows_state_moved_by_watchdog(self, tmp_path):
+        import drift_engine as de
+        from drift_session import DriftSessionState
+
+        engine = de.DriftEngine(tub_base_dir=str(tmp_path))
+        (tmp_path / "calib.npz").write_bytes(b"")
+        engine._calibration_file = str(tmp_path / "calib.npz")
+        engine.start("auto")
+        engine.process_fake_frame(beta_deg=20.0, t_s=0.0)
+        engine.process_fake_frame(beta_deg=20.0, t_s=0.6)
+        assert engine.session.state == DriftSessionState.AUTO_ENGAGED
+
+        sent = []
+        engine.send_sink = sent.append
+        orig_stop_auto = engine.session.stop_auto
+
+        def racing_stop_auto():
+            # 复现竞态：stop() 读态之后、迁移之前，看门狗把状态迁到 IDLE
+            engine.session.watchdog_trigger("检测丢失超时")
+            return orig_stop_auto()  # 此时再迁移 → RuntimeError
+
+        engine.session.stop_auto = racing_stop_auto  # type: ignore[method-assign]
+        engine.stop()  # 不得抛异常（#496）
+        assert engine.session.state == DriftSessionState.IDLE
+
+
+class TestCameraStartOffLoop:
+    """#503：start_camera_loop 必须在工作线程执行（重入守卫的阻塞 join
+    不得卡住事件循环——相机重启时全 API 卡最多 4s）。"""
+
+    def test_start_camera_loop_runs_in_worker_thread(self, client, monkeypatch):
+        import threading
+
+        import drift_engine as engine_mod
+        import drift_vision
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(drift_vision, "USBCamera",
+                            lambda **kw: SimpleNamespace(close=lambda: None))
+        monkeypatch.setattr(drift_vision, "FieldHomography",
+                            SimpleNamespace(from_file=lambda p: object()))
+        monkeypatch.setattr(drift_vision, "AprilTagDetector",
+                            lambda downscale: object())
+
+        worker_idents = []
+
+        def fake_start(*args, **kwargs):
+            worker_idents.append(threading.get_ident())
+
+        monkeypatch.setattr(engine_mod.drift_engine, "start_camera_loop", fake_start)
+
+        handler_thread = threading.get_ident()  # TestClient 跑路由协程的线程
+        r = client.post("/api/drift/camera/start", json={
+            "camera_index": 0, "tag_id": 0, "calibration_file": "x.npz"})
+        assert r.status_code == 200
+        assert worker_idents, "start_camera_loop 必须被调用"
+        assert worker_idents[0] != handler_thread, \
+            "start_camera_loop 必须在工作线程执行（#503），不得阻塞事件循环"

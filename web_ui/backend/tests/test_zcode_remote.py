@@ -329,3 +329,76 @@ def test_cdp_returns_none_when_status_not_dict(zcode_store, monkeypatch):
     zr, ws = _fake_cdp_env(monkeypatch, [None])
     assert asyncio.run(zr._cdp_remote_url()) is None
     assert len(ws.sent) == 1
+
+
+class TestAppRunningExactMatch:
+    """#500：只认 cmdline 首参数等于桌面端可执行文件的进程。"""
+
+    def test_tail_like_cmdline_not_counted_as_running(self, monkeypatch):
+        import routers.zcode_remote as zr
+
+        fake_procs = {
+            "1": f"tail\0-f\0{zr.ZCODE_APP_BIN}/logs/x.log\0",
+            "2": f"vim\0{zr.ZCODE_APP_BIN}/config.json\0",
+        }
+
+        def fake_listdir(path):
+            return list(fake_procs) if path == "/proc" else []
+
+        def fake_open(pid_path, mode="r", **kw):
+            pid = pid_path.split("/")[2]
+            class F:
+                def read(self):
+                    return fake_procs[pid].encode()
+                def __enter__(self):
+                    return self
+                def __exit__(self, *a):
+                    return False
+            return F()
+
+        monkeypatch.setattr(zr.os.path, "isdir", lambda p: p == "/proc")
+        monkeypatch.setattr(zr.os, "listdir", fake_listdir)
+        monkeypatch.setattr("builtins.open", fake_open)
+        assert zr._app_running() is False, "tail/vim 含该子串不得算桌面端在跑"
+
+    def test_real_app_argv0_counted(self, monkeypatch):
+        import routers.zcode_remote as zr
+
+        bin_bytes = str(zr.ZCODE_APP_BIN).encode() + b"\0--type=renderer\0"
+        captured = {}
+
+        def fake_listdir(path):
+            return ["42"] if path == "/proc" else []
+
+        import io
+        def fake_open(pid_path, mode="r", **kw):
+            captured["argv0"] = pid_path
+            return io.BytesIO(bin_bytes)
+
+        monkeypatch.setattr(zr.os.path, "isdir", lambda p: p == "/proc")
+        monkeypatch.setattr(zr.os, "listdir", fake_listdir)
+        monkeypatch.setattr("builtins.open", fake_open)
+        assert zr._app_running() is True
+
+
+def test_cdp_eval_times_out_on_frozen_render():
+    """#500：渲染进程冻结（recv 永不返回）时 eval 超时抛 TimeoutError。"""
+    import asyncio
+
+    import routers.zcode_remote as zr
+
+    class FrozenWs:
+        async def send(self, data):
+            pass
+
+        async def recv(self):
+            await asyncio.sleep(60)  # 冻结：永不响应
+
+    async def main():
+        await zr._cdp_eval(FrozenWs(), "1+1", timeout_s=0.2)
+
+    try:
+        asyncio.run(asyncio.wait_for(main(), timeout=3.0))
+        raise AssertionError("应当超时抛出")
+    except (TimeoutError, asyncio.TimeoutError):
+        pass

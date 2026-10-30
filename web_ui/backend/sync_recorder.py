@@ -173,8 +173,14 @@ class SyncRecorder:
         self._telemetry = TelemetryBuffer()
         self._pulse = ThrottlePulseAnalyzer()
         self.frames_written = 0
+        # 关闭防护（#504）：相机线程的 check-then-use 与 stop() 的 close 之间存在
+        # 极窄竞态——close 后到达的 on_camera_frame/on_telemetry 一律 no-op，
+        # 不让异常上抛杀死相机循环
+        self._closed = False
 
     def on_telemetry(self, t_s: float, fields: Dict[str, float]) -> None:
+        if self._closed:
+            return
         self._telemetry.push(t_s, fields)
         if "rc/throttle" in fields:
             self._pulse.push(t_s, fields["rc/throttle"])
@@ -182,6 +188,8 @@ class SyncRecorder:
     def on_camera_frame(self, t_s: float, image: np.ndarray,
                         pose: Dict[str, float], beta_deg: float,
                         yaw_rate_dps: float) -> None:
+        if self._closed:
+            return
         tel = self._telemetry.interpolate(t_s)
         if not tel:
             return  # 遥测未到，不写残缺记录
@@ -204,6 +212,7 @@ class SyncRecorder:
         self.frames_written += 1
 
     def close(self) -> None:
+        self._closed = True  # 先置位再关：与相机线程的写入彻底互斥（#504）
         try:
             self._tub.close()
         except AttributeError:

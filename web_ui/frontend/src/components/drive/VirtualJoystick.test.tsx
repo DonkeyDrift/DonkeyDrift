@@ -124,4 +124,20 @@ describe('VirtualJoystick 回中行为', () => {
     stepRaf(performance.now() + 500);
     expectLastCallNear(onChange, 0, 0);
   });
+
+  it('拖拽期间指针静止也按帧持续重发当前值（稳持心跳 #508）', () => {
+    const onChange = vi.fn();
+    const { container } = render(<VirtualJoystick onChange={onChange} size={220} />);
+    const el = container.firstChild as HTMLElement;
+    pressAt(el, 0, -60);
+
+    // 不再触发 pointermove，连续两帧仍应重发当前值
+    const countAfterPress = onChange.mock.calls.length;
+    stepRaf(performance.now() + 16);
+    expect(onChange.mock.calls.length).toBeGreaterThan(countAfterPress);
+    const countAfterFirstFrame = onChange.mock.calls.length;
+    stepRaf(performance.now() + 32);
+    expect(onChange.mock.calls.length).toBeGreaterThan(countAfterFirstFrame);
+    expectLastCallNear(onChange, 0, 60 / 82);
+  });
 });

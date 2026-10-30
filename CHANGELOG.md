@@ -220,6 +220,76 @@
 
 # 变更日志
 
+## 2026-10-25 (272)
+
+- fix(drive): 第五轮审计（驾驶控制安全链）4 项前端修复——本地输入源停摆/断连时旧控制值残留（#508；FW 侧 pilot 失效保护见 Firmware #185 / v1.10.15；CHANGELOG 编号让号：与 #509 并行撞号 (271)，后到者让号为 (272)）
+  - **#508-Bug2（安全）手柄断连旧油门残留**（`src/hooks/useGamepadDrive.ts`）：pad 变 null 只 `setConnected(false)`、lastValueRef 不清零，电池耗尽/蓝牙断连瞬间油门非零时 60Hz 控制循环继续发送旧油门。修复：断连时清零 lastValueRef 并 `onChange(0,0)` 上报一次兜底。
+  - **#508-Bug4（与 Bug2 同根，统一方案）本地输入源停摆 ref 冻结**：`getCurrentControl`（`src/pages/DrivePage.tsx`）对本地源无新鲜度检查——section 滚出视口后输入 hook 停摆（#178 停表机制），冻结的 ref 只要 WS 连着就继续发值。统一方案：新增 `src/lib/inputFreshness.ts`（`LOCAL_INPUT_STALE_MS=300` + `freshControl()`），四个本地源 ref（joystick/keyboard/gamepad/gyro）全部扩展 `updatedAt` 时间戳，mux 与 esp32 源（`ESP32_RC_STALE_MS`）同款过期检查，超时即输出 0。配套把各源改为「源活着就连续上报」：gamepad/gyro 去掉值变化门控改为每帧上报（keyboard 本就每帧），`VirtualJoystick` 拖拽期间新增 rAF 心跳重发当前值（指针静止不触发 pointermove，防稳持被 300ms 过期误杀）。
+  - **#508-Bug3（安全）键盘无 blur 清零**（`src/hooks/useKeyboardDrive.ts`）：按住 I 时 alt-tab/点击其它窗口（分屏下页面仍可见）→ keyup 永不触发 → rAF 油门爬到 1.0 保持。修复：`window` blur 时四键全清，既有回中逻辑自动收回 0。
+  - **#508-Bug5 useDriveWebsocket catch 重连不查卸载**（`src/hooks/useDriveWebsocket.ts`）：`new WebSocket(url)` 构造抛异常时 catch 直接 `setTimeout(connect)` 不查 `mountedRef`——卸载清理先跑、重连定时器后排时，已卸载组件会被无限拉起重连。修复：catch 分支加 `mountedRef.current` 检查（与 onclose/onerror 对齐）。
+  - 测试：新增 `src/lib/inputFreshness.test.ts`（新鲜透传/过期发 0/压线/自定义阈值）、`src/hooks/useKeyboardDrive.test.tsx`（按住爬升+松开回中、blur 全清收回 0）、`src/components/drive/VirtualJoystick.test.tsx`（按下拖动上报、松开回中、稳持心跳持续重发）；`useGamepadDrive.test.tsx` +2（断连清零上报 0、值不变每帧连续上报）；`useDriveWebsocket.test.tsx` +1（构造抛异常：挂载中按间隔重连、卸载后不复活）。前端全量 **vitest 377 全绿**（56 文件）+ `tsc -b --noEmit` 通过。
+
+# 变更日志
+
+## 2026-10-25 (271)
+
+- fix(bridge): 车端 WS 桥控制数值转换补防护——畸形 angle/throttle 不再断开车端连接（#509）
+  - `donkeycar/parts/drive_api_bridge.py` `_handle_message` 的 `float(msg["angle"/"throttle"])` 裸奔：畸形值 ValueError 穿透 `async for`（只捕获 JSONDecodeError）→ `_connect_loop` except → 车端 WS 断开，一个重连周期（3s）内控制停更。后端 routers/drive.py 已于 #489 修过转发前过滤，本处补齐车端侧纵深防御（旧版后端/直连场景仍可触发）。
+  - 修复：转换包 try/except (TypeError, ValueError)，畸形值忽略该字段并打 warning（与后端 #489 同款防护）。
+  - 测试：`test_drive_api_bridge.py` +1 用例（字符串/嵌套对象/None 不抛异常、已生效控制值不被改动、后续合法消息正常生效），52 过。
+  - 六轮审计区域①③④同步排查：pilot_holder/npu_pilot/throttle_filter/kinematics/keras、WebConsoleServer 全部端点（中央命令鉴权/STA 凭据脱敏/参数校验）、TubEditor/TubLibrary/TrainerPage/PilotArena/AiCleanModal（索引映射/删除确认/防重复/空值/清理）均无问题。
+
+# 变更日志
+
+## 2026-10-25 (270)
+
+- fix(audit): 四轮审计 11 项修复（#498–#506，含三轮旧账清偿）——模拟器遥测/输入契约、AI 配置自愈、zcode 判定、SSE 多订阅 fan-out、相机路由阻塞、录制竞态、findcar 写盘反馈、probe 断连诊断
+  - **#498 dgym 两项**：`delay_buffer` 只回放帧不回放 info——SIM_ARTIFICIAL_LATENCY>0 时 pos/speed/cte/gyro 全冻结（非延迟路径有 `self.info = current_info`，延迟路径漏了）；`_set_frame` 在 cv2 缺失/resize 异常时把渲染分辨率原始帧直接当 NN 输入放行。修复：回放帧同步恢复 info；fallback 改为 img_w×img_h 占位空帧（契约：NN 输入恒为 img_w×img_h）。
+  - **#499 ai-config 自愈 + 原子写**：配置 JSON 损坏时 `_load_state` 抛 400 令全部端点瘫痪（只能手删文件）；`_save_state` 非原子写。修复：损坏回退默认态 + 告警；保存改 tmp+rename。
+  - **#500 zcode-remote 两项**：`pgrep -f` 子串宽匹配把 tail/vim 误判为桌面端在跑（/link 空转 25s）→ 改 /proc cmdline 首参精确匹配（非 Linux 回退锚定 pgrep）；`_cdp_eval` recv 无超时（渲染进程冻结时按钮转 40s）→ eval 加 5s 超时走兜底。
+  - **#501 ManifestIterator 关句柄**：迭代换 catalog/终止时不 close（每个 Catalog 持 2 组句柄，全 tub 迭代累计 2N 个靠 GC 兜底）→ 换 catalog 与 StopIteration 前显式 close。
+  - **#502 SSE 单队列多订阅者互偷（trainer + connector 同款）**：`_sse_event_generator`/connector event_stream 直接消费共享 `job.log_queue`，两个页签同看一个任务各缺一半日志。修复：TrainingJob/ConnectorJob 增加 `subscribers + subscribe()/unsubscribe()/publish()` fan-out，两处 SSE 消费端改为独立订阅、连接断开自动退订；旧 `log_queue` 字段移除。
+  - **#503 camera_start 阻塞事件循环**：`start_camera_loop`（重入守卫含两级 join 2s+close）直接在事件循环线程跑，相机重启时全 API/WS 卡最多 4s → 放 `asyncio.to_thread`（与 camera_stop 同款）。
+  - **#504 停录制竞态**：`stop()` 先 close 再置 None，与相机线程 write_record 存在 check-then-use 窗口（close 后写入抛异常可杀相机循环）。修复：stop 先断生产者引用再关资源 + SyncRecorder 加 `_closed` 防护（close 后 on_camera_frame/on_telemetry no-op）。
+  - **#505 findcar 写盘反馈**：写失败（磁盘满/权限）仍返回 200 伪装成功 → `save_config` 返回 bool、响应加 `saved` 字段，顺手改原子写（tmp+rename）。
+  - **#506 mypc_probe 断连误判**：SSH 通道探测中途死掉时把"命令失败"判为 Windows 目标机给出错误建议 → uname 失败先复查 `transport.is_active()`，已死按"连接中断"上报。
+  - 测试：dgym +2、ai_config +2、zcode +3、datastore +1（迭代器关闭 spy）、新增 test_job_event_fanout.py 3 例（publish fan-out / 双 SSE 流各收全量 / connector 同款）、drift_router +1（工作线程断言）、sync_recorder +1（closed 防护）、findcar +2、probe +1（FakeSsh 补活 transport）；后端全量 **609 过 1 跳**、donkeycar 核心 **608 过 16 跳**。
+
+# 变更日志
+
+## 2026-10-25 (269)
+
+- fix(drift/arena/simcollect): 三轮审计 5 项修复——漂移安全双缺口（遥测缺失看门狗短路 + 下发失败不可见）+ Arena 缓存串台 + 采集任务 GC 卡死 + stop 竞态（#492–#496）
+  - **#492（安全）drift_engine 遥测缺失看门狗**：`_check_engaged_watchdogs` 的 `is not None` 前置条件使"遥测从未到达"（车端 ws 从未连上）时停滞看门狗永不触发——ENGAGED 期 yaw_rate 恒 0 无陀螺负反馈、前馈直接 saturate 转向，三重看门狗全失效。修复：`_last_telemetry_t is None` 单列触发"遥测缺失"（比停滞更陈旧，更危险）；两个既有看门狗用例（检测丢失/下发失败）同步改为喂一次遥测构造，并新增"无遥测 ENGAGED 必须触发"用例。
+  - **#493（安全）routers/drift 生产 send_sink**：fire-and-forget（run_coroutine_threadsafe 不取结果恒 None）使 `_SEND_FAILURE_LIMIT` 连续失败看门狗在生产接线是死代码，车端掉线时交还人工指令失败也不可见。修复：sink 内 `fut.result(timeout=2.0)` 回传布尔（异常/超时按 False），失败计数真正生效。
+  - **#494 routers/arena 预测缓存串台**：缓存键只含 `(pilot_id, record_index, 图像参数)`，而 record_index 是全局 `current_records` 的位置下标——换 tub / 删记录重载后同一下标指向不同帧，直接命中旧 tub 缓存（user 取新记录、pilot 取旧图像，mae/rmse 全错）。修复：键加入 `current_tub_path` + 记录物理 `_index`。
+  - **#495 routers/simcollect 任务 GC 卡死**：`asyncio.create_task` 返回值被丢弃（事件循环只持弱引用），任务被 GC 静默取消时 run() 从未执行、job 永远 pending，`get_running()` 把 pending 算占用 → 后续 /start 全部 409 直到重启。修复：`_spawn_run` 模块级集合持强引用 + done 回调释放，并对没走完 run() finally 的孤儿 job 兜底收尾（置 error、清 active_job_id）。
+  - **#496 drift_engine.stop() 竞态**：读态→迁移两步不原子，相机线程看门狗在窗口内先迁走状态时 `stop_auto()` 抛 RuntimeError → 路由 409 无意义报错。修复：AUTO 分支捕获 RuntimeError 幂等返回（目标态本就是停止）。
+  - 测试同步：watchdog +1 新用例（另 2 用例改构造方式）、test_drift_router +2（sink 离线 False/在线 True、stop 竞态复现不抛）、test_arena +2（换 tub/删记录重载均不命中旧缓存）、test_simcollect +2（强引用持有与释放、孤儿 job 兜底收尾）；后端全量 **596 过 1 跳**。
+
+# 变更日志
+
+## 2026-10-25 (268)
+
+- fix(security): 全项目二轮审计 5 项修复——两处局域网可达的路径穿越/任意文件外传（#486/#487）+ WS 数值防护（#489）+ 训练进度回零（#490）+ SSE 连接泄漏（#488）
+  - **#487 tub 图片接口路径穿越**：`routers/tub.py` 的 `get_image` 注释声称"ensure path doesn't go outside"但校验从未实现——`path=../../...` 经 OS 归一化逃出 tub 目录，无鉴权后端可被局域网任意调用者读出本机任意文件。修复：images/ 与 tub 根两个候选位置均 `realpath` 后限制在 tub 目录内（`_confined`），逃逸即 404；ETag/缓存沿用归一化路径。
+  - **#486 harness OTA 任意路径外传**：`routers/harness_updater.py` 的 `ota_flash` 对请求体 `asset_path` 无限制，`path.read_bytes()` 后 multipart 上传到调用者指定的私网 IP——任意本地文件外泄通道。修复：`asset_path` 必须 resolve 后位于 `~/.donkeycar/downloads` 内否则拒绝；伴随修 `_filename_from_url` 文件名消毒（basename + 纯点号兜底），堵住恶意响应头穿越写出下载目录。
+  - **#489 drive WS 数值防护**：`routers/drive.py` 客户端主路径 `float(msg["angle"])` 裸奔（挑战者判定同文件却有防护），畸形值抛 ValueError 穿透 except 导致连接清理被跳过（client_ws 残留、驾驶权靠 2s 超时兜底）。修复：try/except 忽略该条消息并打警告。
+  - **#490 训练进度回零**：`web_online_trainer.py` 的 `_parse_training_output_web` 仅含 loss 的行走 elif 分支发 `percent=0`（注释却写 unchanged），前端进度条周期性闪零。修复：新增 `_last_global_percent`（__init__ 与每轮 `_stream_remote_training` 重置），loss-only 行沿用最近百分比。
+  - **#488 SSE 连接泄漏**：`web_ui/frontend/src/hooks/useTrainingJob.ts` 的 EventSource 无卸载清理（同库 useSimCollectJob/useConnectorJob 均有），训练中离开 Trainer 页连接泄漏、remount 后 ref 与活跃连接失联。修复：补 `useEffect` 卸载关闭。
+  - 测试同步：`test_harness_updater.py` +3（越界路径拒/目录内放行/文件名消毒）、`test_tub_sessions.py` +2（穿越拒/合法帧两形态不回归）、`test_drive_client_arbitration.py` +1（畸形值不断连且不穿透状态）、新增 `test_web_online_trainer_progress.py` 2 例（loss-only 保持百分比/新一轮重置归零）、`useTrainingJob.test.ts` +2（卸载关闭/无连接不误关）。
+
+# 变更日志
+
+## 2026-10-25 (267)
+
+- fix(connector): 远程启动驾驶命令 nohup 环境变量前缀错误（#483）+ 品牌测试断言随 #476/#479 改名同步（#484）——2026-10-25 全项目审计 5 项修复之 DD 侧 2 项（Firmware 侧 3 项见 Firmware v1.10.13）
+  - 背景：用户要求全面检查项目找出 bug 并全部修复。本会话审计（固件 371 + 后端 581 + 前端 365 + 主包 1026/1 共 4 套测试，外加双槽位切换新代码、漂移模块、launcher、find-car、连接器等约 20 个热点文件人工精读）共发现 5 项缺陷，按第 22 条流程先发 Issue（#483/#484/#181/#182/#183）、认领后修复。
+  - fix #483（`web_ui/backend/remote_car_client.py`）：`build_remote_drive_start_command` 带 `bridge_server_url` 时生成的远端命令 `nohup DRIVE_API_SERVER_URL=... python manage.py drive` 中，POSIX shell 只把命令名**之前**的 `VAR=value` 词当环境赋值——写在 `nohup` 之后会被 nohup 当成要执行的程序名（本机实测 `nohup FOO=bar true` → exit 127），远程 drive 必然启动失败且 `.donkeycar_drive.pid` 登记的是已死进程。修复：改 `nohup env DRIVE_API_SERVER_URL=<url> python ...`（env 注入）。该接口当前无前端调用方（`startConnectorDrive` 已定义未接线），属潜伏 bug 主动修复。
+  - fix #484（`donkeycar/tests/test_web_ui_branding.py`）：PR #476/#479（10-02）把 `index.html` 标题改为 `<title>DonkeyDrifter</title>` 但测试断言仍停留在旧文案 `<title>DonkeyDrift Web UI</title>`，主套件全量 1 failed（实测 1026 过 1 败 564s）；断言同步后转绿。#441→#444 同型教训（改被断言引用的内容必须同 commit 改断言）的再次重演。
+  - 测试同步：`web_ui/backend/tests/test_connector.py::test_build_remote_drive_start_command_injects_bridge_url_safely` 强化——断言 `nohup env DRIVE_API_SERVER_URL=` 在位、裸 `nohup DRIVE_API_SERVER_URL=` 形式不得回归。
+  - 验证：`test_web_ui_branding.py` 3 过、`test_connector.py` 33 过；主套件全量在会话 worktree 复跑全绿；前端无改动无需重建 dist；Firmware 无关。
+
 ## 2026-10-02 (266)
 
 - feat(drive): 驾驶页新增「手柄桥模式」卡片——车固件 ↔ RC_BLE_Bridge 蓝牙手柄桥一键切换（配套 Firmware v1.10.12 双启动槽位）

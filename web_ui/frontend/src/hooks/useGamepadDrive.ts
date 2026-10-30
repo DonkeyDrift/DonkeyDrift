@@ -90,11 +90,10 @@ export const useGamepadDrive = ({
           const current = configRef.current;
           const angle = mapAxis(pad.axes[current.steering.axis], current.steering);
           const throttle = mapAxis(pad.axes[current.throttle.axis], current.throttle);
-          const last = lastValueRef.current;
-          if (Math.abs(angle - last.angle) > 0.01 || Math.abs(throttle - last.throttle) > 0.01) {
-            lastValueRef.current = { angle, throttle };
-            onChangeRef.current?.(angle, throttle);
-          }
+          // 每帧上报（不按值变化门控）：mux 侧新鲜度检查（LOCAL_INPUT_STALE_MS）
+          // 以「手柄轮询仍在跑」为活判据，稳持不动不会被误杀（#508）
+          lastValueRef.current = { angle, throttle };
+          onChangeRef.current?.(angle, throttle);
         }
         const now = Date.now();
         if (monitor && now - lastSnapshotAt >= 50) {
@@ -103,6 +102,12 @@ export const useGamepadDrive = ({
         }
       } else {
         setConnected(false);
+        // 手柄断连兜底：清零最后值并上报一次 0，防止 60Hz 控制循环继续发送
+        // 断连瞬间（电池耗尽/蓝牙断开）的旧油门（#508）
+        if (lastValueRef.current.angle !== 0 || lastValueRef.current.throttle !== 0) {
+          lastValueRef.current = { angle: 0, throttle: 0 };
+          onChangeRef.current?.(0, 0);
+        }
       }
 
       rafRef.current = requestAnimationFrame(poll);

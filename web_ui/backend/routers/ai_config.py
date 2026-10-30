@@ -137,7 +137,10 @@ def _load_state() -> Dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"AI 配置文件无效: {exc}") from exc
+        # 配置损坏（如写盘一半崩溃）：回退默认态自愈而不是抛 400——
+        # 否则 /providers 等全部端点瘫痪，设置页都打不开，只能手删文件（#499）
+        logger.warning("AI 配置文件无效，回退默认配置: %s", exc)
+        return _default_state()
     state = _default_state()
     if isinstance(data, dict):
         for key in state:
@@ -153,8 +156,12 @@ def _load_state() -> Dict[str, Any]:
 def _save_state(state: Dict[str, Any]) -> None:
     path = _config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    # 原子替换（tmp + rename）：直接 open(w) 写一半崩溃会留下损坏文件，
+    # 而损坏文件曾让全部端点 400（#499）
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
 def _mask_secret(value: Optional[str]) -> Optional[str]:

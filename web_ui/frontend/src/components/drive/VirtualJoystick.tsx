@@ -34,6 +34,9 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
   const centerRef = useRef({ x: 0, y: 0 });
   const graceTimerRef = useRef<number | null>(null);
   const rampAnimRef = useRef<number | null>(null);
+  // 当前偏移的 ref 镜像：拖拽心跳直接读，不依赖 state 渲染节奏
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const rafRef = useRef<number | null>(null);
 
   const maxRadius = size / 2 - 28;
 
@@ -96,6 +99,23 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     rampAnimRef.current = requestAnimationFrame(tick);
   }, [emitChange]);
 
+  const emitChangeRef = useRef(emitChange);
+  emitChangeRef.current = emitChange;
+
+  // 拖拽保持心跳（#508）：指针静止不触发 pointermove，稳持时按帧重发当前值，
+  // 让 mux 侧的新鲜度检查（LOCAL_INPUT_STALE_MS）以「拖拽仍在进行」为活判据
+  useEffect(() => {
+    if (!dragging) return;
+    const beat = () => {
+      emitChangeRef.current(offsetRef.current.x, offsetRef.current.y);
+      rafRef.current = requestAnimationFrame(beat);
+    };
+    rafRef.current = requestAnimationFrame(beat);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [dragging]);
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (activePointerId.current !== null) return;
     // 宽限期/回中动画内重新按下：取消回中，视为继续拖拽
@@ -109,6 +129,7 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     const dy = (e.clientY - centerRef.current.y) / scale;
     const clamped = clampToRadius(dx, dy);
     setOffset(clamped);
+    offsetRef.current = clamped;
     emitChange(clamped.x, clamped.y);
   };
 
@@ -118,6 +139,7 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
     const dy = (e.clientY - centerRef.current.y) / scale;
     const clamped = clampToRadius(dx, dy);
     setOffset(clamped);
+    offsetRef.current = clamped;
     emitChange(clamped.x, clamped.y);
   };
 

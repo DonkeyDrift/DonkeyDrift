@@ -44,11 +44,16 @@ def load_config() -> FindCarConfig:
     return FindCarConfig()
 
 
-def save_config(cfg: FindCarConfig) -> None:
-    """写回配置；写入失败仅记日志，绝不抛异常。"""
+def save_config(cfg: FindCarConfig) -> bool:
+    """写回配置；写入失败仅记日志、返回 False，绝不抛异常（#505：
+    调用方需把写盘结果带回响应，否则磁盘满/权限问题被当成改配成功）。"""
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as file:
+        tmp = CONFIG_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as file:
             json.dump(cfg.model_dump(), file, indent=2, ensure_ascii=False)
+        tmp.replace(CONFIG_PATH)
+        return True
     except OSError:
         logger.warning("findcar 配置文件写入失败", exc_info=True)
+        return False

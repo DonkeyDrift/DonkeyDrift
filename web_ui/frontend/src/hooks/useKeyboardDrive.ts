@@ -44,6 +44,13 @@ export const useKeyboardDrive = ({
       }
     };
 
+    // 窗口失焦（alt-tab / 点击其它窗口，分屏下页面仍可见）时 keyup 永不触发，
+    // 按住的键会残留导致油门爬到 1.0 并保持——blur 时四键全清，由上方回中
+    // 逻辑在后续帧把油门/转向收回 0（#508）
+    const handleBlur = () => {
+      keysRef.current = { i: false, k: false, j: false, l: false };
+    };
+
     // 60fps 平滑更新
     const tick = () => {
       const keys = keysRef.current;
@@ -88,11 +95,13 @@ export const useKeyboardDrive = ({
     rafRef.current = requestAnimationFrame(tick);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [enabled]);
 

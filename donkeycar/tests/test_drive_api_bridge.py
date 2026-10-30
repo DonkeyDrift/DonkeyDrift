@@ -1282,3 +1282,24 @@ def test_bridge_preview_max_resolution_precedence(monkeypatch):
     monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "abc")
     bridge = DriveApiBridge(auto_start=False)
     assert bridge.frame_buffer.max_width == 640
+
+
+def test_drive_api_bridge_ignores_malformed_numeric_fields():
+    """#509：畸形 angle/throttle 只忽略该字段，异常不得穿透断开连接。"""
+    bridge = DriveApiBridge(auto_start=False)
+    bridge.angle = 0.25
+    bridge.throttle = -0.1
+
+    # 字符串 / 嵌套对象 / None 一律不得抛异常
+    bridge._handle_message({"angle": "not-a-number"})
+    bridge._handle_message({"throttle": {"nested": True}})
+    bridge._handle_message({"angle": None, "throttle": None})
+
+    # 畸形消息不得改动已生效的控制值
+    assert bridge.angle == 0.25
+    assert bridge.throttle == -0.1
+
+    # 后续合法消息正常生效
+    bridge._handle_message({"angle": -0.5, "throttle": 0.3})
+    assert bridge.angle == -0.5
+    assert bridge.throttle == 0.3

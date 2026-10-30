@@ -190,10 +190,15 @@ def load_record_image(record: dict[str, Any]) -> np.ndarray:
     return np.asarray(Image.open(image_path).convert("RGB"))
 
 
-def _prediction_cache_key(pilot_id: str, request: PredictRequest) -> tuple[Any, ...]:
+def _prediction_cache_key(pilot_id: str, request: PredictRequest,
+                          record: dict[str, Any]) -> tuple[Any, ...]:
+    # 键含 tub 身份与记录物理 _index（#494）：record_index 只是全局
+    # current_records 的位置下标，换 tub / 删记录后同一下标指向完全
+    # 不同的帧——不含身份会命中旧 tub 的缓存，评估统计张冠李戴
     return (
         pilot_id,
-        request.record_index,
+        tub_router.current_tub_path,
+        record.get("_index", request.record_index),
         request.config_path,
         request.user_angle_field,
         request.user_throttle_field,
@@ -327,7 +332,7 @@ def _predict_loaded_pilot(pilot_id: str, request: PredictRequest) -> tuple[dict[
         "angle": _get_number(record, request.user_angle_field),
         "throttle": _get_number(record, request.user_throttle_field),
     }
-    cache_key = _prediction_cache_key(pilot_id, request)
+    cache_key = _prediction_cache_key(pilot_id, request, record)
     with _prediction_cache_lock:
         cached_pilot = prediction_cache.get(cache_key)
         if cached_pilot is not None:

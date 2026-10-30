@@ -146,3 +146,36 @@ def test_legacy_token_field_is_ignored_on_load(monkeypatch, tmp_path):
     response = client.get("/api/findcar/config")
     assert response.status_code == 200
     assert "token" not in response.json()["config"]
+
+
+def test_post_config_reports_saved_false_on_write_failure(monkeypatch, tmp_path):
+    """#505：写盘失败（磁盘满/权限）时响应 saved=false，不再伪装成功。"""
+    import findcar as findcar_mod
+    from routers import findcar as findcar_router
+
+    monkeypatch.setattr(findcar_mod, "CONFIG_PATH", tmp_path / "findcar.json")
+
+    def fail_save(cfg):
+        return False
+
+    monkeypatch.setattr(findcar_mod, "save_config", fail_save)
+    app = FastAPI()
+    app.include_router(findcar_router.router, prefix="/api/findcar")
+    client = TestClient(app)
+    resp = client.post("/api/findcar/config", json={"url": "http://x", "enabled": True})
+    assert resp.status_code == 200
+    assert resp.json()["saved"] is False
+
+
+def test_post_config_reports_saved_true_on_success(monkeypatch, tmp_path):
+    import findcar as findcar_mod
+    from routers import findcar as findcar_router
+
+    monkeypatch.setattr(findcar_mod, "CONFIG_PATH", tmp_path / "findcar.json")
+    app = FastAPI()
+    app.include_router(findcar_router.router, prefix="/api/findcar")
+    client = TestClient(app)
+    resp = client.post("/api/findcar/config", json={"url": "http://x", "enabled": True})
+    assert resp.status_code == 200
+    assert resp.json()["saved"] is True
+    assert not (tmp_path / "findcar.json.tmp").exists()  # 原子写无残留
