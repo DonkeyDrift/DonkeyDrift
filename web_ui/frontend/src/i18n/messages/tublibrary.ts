@@ -4,7 +4,7 @@ export const tublibrary: { zh: Record<string, string>; en: Record<string, string
   zh: {
     'tubLibrary.title': '录制视频库',
     'tubLibrary.subtitle': '浏览 mycar 录制的每条视频，预览并可整条删除',
-    'tubLibrary.noTubLoaded': '请先加载 Tub（Tub Loader）',
+    'tubLibrary.noTubLoaded': '暂无可用 Tub 数据',
     'tubLibrary.recordingsSummary': '共 {recordings} 条录制 · {count} 帧',
     'tubLibrary.noRecordings': '暂无录制',
     'tubLibrary.frames': '{count} 帧',
@@ -35,7 +35,7 @@ export const tublibrary: { zh: Record<string, string>; en: Record<string, string
   en: {
     'tubLibrary.title': 'Video Library',
     'tubLibrary.subtitle': 'Browse every recording of this mycar project, preview and delete whole clips',
-    'tubLibrary.noTubLoaded': 'Load a tub first (Tub Loader)',
+    'tubLibrary.noTubLoaded': 'No tub data available',
     'tubLibrary.recordingsSummary': '{recordings} recording(s) · {count} frames',
     'tubLibrary.noRecordings': 'No recordings',
     'tubLibrary.frames': '{count} frames',

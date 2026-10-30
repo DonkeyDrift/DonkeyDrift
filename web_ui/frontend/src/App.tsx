@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useConfigAutoLoad } from './hooks/useConfigAutoLoad';
 import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { SidePanel } from './components/SidePanel';
@@ -70,6 +71,7 @@ function PageLoading() {
 
 function AppShell() {
   useIdlePrefetch();
+  useConfigAutoLoad();
   const { pathname } = useLocation();
   // Drifter Console（/console）与 Donkey 菜单（/donkey）都是全屏 iframe，
   // 左侧 Loaders/Connectors 浮动抽屉会遮挡内容，仅在这两个路由下隐藏 SidePanel。
