@@ -535,7 +535,7 @@ export interface DriveWebRtcStats {
   e2e_display_p95_ms?: number;
   callback_late_p95_ms?: number;
   vsync_quantum_p95_ms?: number;
-  /** 真实新帧 pts 被顶号次数（呈现晚一拍的帧数，e2e 尾部来源） */
+  /** 真实新帧触发 PTS 单调保护的次数，最小增量为一个 90kHz tick */
   pts_bumps?: number;
   /** 车端↔后端时钟偏移（后端钟 − 车端钟，ms）：像素印章 e2e 的车钟域校正项 */
   clock_offset_ms?: number;

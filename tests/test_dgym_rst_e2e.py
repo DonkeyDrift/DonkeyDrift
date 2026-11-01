@@ -17,6 +17,7 @@
 import base64
 import io
 import json
+import os
 import socket
 import struct
 import threading
@@ -49,6 +50,10 @@ class _FakeSim:
         self._stop = False
         self._lock = threading.Lock()
         self._cur = None
+        self._silent = set()
+        self.silence_next = False
+        self.silent_client = None
+        self.silent_ready = threading.Event()
         self._srv = socket.socket()
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._srv.bind(("127.0.0.1", 0))
@@ -65,6 +70,11 @@ class _FakeSim:
             self.sessions += 1
             with self._lock:
                 self._cur = conn
+                if self.silence_next:
+                    self.silence_next = False
+                    self._silent.add(conn)
+                    self.silent_client = conn
+                    self.silent_ready.set()
             threading.Thread(target=self._session, args=(conn,), daemon=True).start()
 
     def _session(self, conn):
@@ -80,9 +90,20 @@ class _FakeSim:
                     pass
                 except OSError:
                     return
-                conn.sendall(self._telemetry)
+                with self._lock:
+                    silent = conn in self._silent
+                if not silent:
+                    conn.sendall(self._telemetry)
         except OSError:
             pass
+        finally:
+            conn.close()
+
+    def silence_current(self):
+        """Stop telemetry without closing TCP or refusing control commands."""
+        with self._lock:
+            assert self._cur is not None
+            self._silent.add(self._cur)
 
     def rst_current(self):
         """对当前会话发 RST（SO_LINGER 关闭），模拟模拟器侧强制复位。"""
@@ -92,7 +113,7 @@ class _FakeSim:
             raise AssertionError("假模拟器当前没有会话")
         try:
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
-                            struct.pack("ii", 1, 0))
+                            struct.pack("HH" if os.name == "nt" else "ii", 1, 0))
         except OSError:
             pass
         try:
@@ -130,13 +151,15 @@ def fake_sim():
 
 def test_rst_self_heals_end_to_end(fake_sim):
     conf = {"img_w": 32, "img_h": 24, "render_img_w": 32, "render_img_h": 24,
-            "watchdog_sec": 1.0}
+            "watchdog_sec": 1.0, "start_delay": 0}
     env = dgym.DonkeyGymEnv("remote", host="127.0.0.1", port=fake_sim.port,
                             env_name="donkey-generated-track-v0", conf=conf)
     # update 线程 = 车端步进线程；run_threaded 线程 = 车辆主循环（看门狗所在）
     update_th = threading.Thread(target=env.update, daemon=True)
     update_th.start()
     stop_loop = threading.Event()
+    sink_frames = []
+    env.set_frame_sink(lambda frame: sink_frames.append(frame))
 
     def vehicle_loop():
         while not stop_loop.is_set():
@@ -161,7 +184,7 @@ def test_rst_self_heals_end_to_end(fake_sim):
         assert _wait_until(lambda: (env._telemetry_ts() or 0.0) > ts1), \
             "遥测应持续前进"
 
-        for round_no in (1, 2):
+        for round_no in (1, 2, 3):
             old_client = env._env_client()
             assert old_client is not None
             sessions_before = fake_sim.sessions
@@ -190,9 +213,63 @@ def test_rst_self_heals_end_to_end(fake_sim):
             # 旧 client 的 socket 必须被 aborted 通知 → stop() 真正关闭
             assert _wait_until(lambda: old_client.s.fileno() == -1, timeout=5.0), \
                 f"第 {round_no} 次 RST 后旧 client socket FD 应关闭（曾泄漏悬挂 FD）"
+            assert update_th.is_alive()
+            frames_before = len(sink_frames)
+            assert _wait_until(lambda: len(sink_frames) >= frames_before + 5), \
+                "replacement must continue delivering frames, not just connect"
     finally:
         stop_loop.set()
-        env.running = False
+        env.shutdown()
         update_th.join(timeout=3)
         loop_th.join(timeout=3)
+        assert not update_th.is_alive()
+
+
+@pytest.mark.parametrize("silent_replacement", [False, True])
+def test_silent_stream_recovers_real_frames(fake_sim, silent_replacement):
+    env = dgym.DonkeyGymEnv(
+        "remote", host="127.0.0.1", port=fake_sim.port,
+        conf={"img_w": 32, "img_h": 24, "render_img_w": 32, "render_img_h": 24,
+              "watchdog_sec": 0.3, "observe_timeout": 0.3, "start_delay": 0})
+    update_th = threading.Thread(target=env.update, daemon=True)
+    update_th.start()
+    stop_loop = threading.Event()
+    sink_frames = []
+    env.set_frame_sink(lambda frame: sink_frames.append(frame))
+
+    def vehicle_loop():
+        while not stop_loop.is_set():
+            env.run_threaded(0, 0)
+            time.sleep(0.02)
+
+    loop_th = threading.Thread(target=vehicle_loop, daemon=True)
+    loop_th.start()
+    try:
+        assert _wait_until(lambda: len(sink_frames) > 5)
+        for _ in range(3):
+            old_client = env._env_client()
+            sessions_before = fake_sim.sessions
+            timestamp_before = env._telemetry_ts()
+            if silent_replacement:
+                fake_sim.silent_ready.clear()
+                fake_sim.silence_next = True
+            fake_sim.silence_current()
+            if silent_replacement:
+                assert fake_sim.silent_ready.wait(4)
+                assert not env.connected, "handshake without telemetry is not recovery"
+            expected = sessions_before + (2 if silent_replacement else 1)
+            assert _wait_until(lambda: fake_sim.sessions >= expected)
+            assert _wait_until(lambda: env.connected and
+                               (env._telemetry_ts() or 0) > timestamp_before)
+            assert old_client.s.fileno() == -1
+            assert not old_client.th.is_alive()
+            assert update_th.is_alive()
+            frames_before = len(sink_frames)
+            assert _wait_until(lambda: len(sink_frames) >= frames_before + 8)
+            assert fake_sim.sessions == expected, "must not churn healthy replacements"
+    finally:
+        stop_loop.set()
         env.shutdown()
+        update_th.join(3)
+        loop_th.join(3)
+        assert not update_th.is_alive()
