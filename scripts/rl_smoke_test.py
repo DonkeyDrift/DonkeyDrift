@@ -132,11 +132,20 @@ def item1_connect_fields(env) -> dict:
     keys = sorted(k for k in info.keys() if not k.startswith("rl/"))
     missing = [f for f in CORE_FIELDS if f not in keys]
     known_hit = [f for f in KNOWN_FIELDS if f in keys]
-    if missing:
+    # M2 D0:node 字段经 viewer 提升后必须在 info 中存在(值本身记录判别
+    # sim 是否真发:total_nodes ∈ {None,0,1} 视为未发,progress 自动退位移法)
+    node_missing = [k for k in ("active_node", "total_nodes") if k not in keys]
+    lift = {"active_node": info.get("active_node"),
+            "total_nodes": info.get("total_nodes")}
+    node_fed = info.get("total_nodes") not in (None, 0, 1)
+    if missing or node_missing:
         return {"status": "fail", "info_keys": keys, "missing_core": missing,
-                "known_hit": known_hit, "obs_shape": list(obs.shape)}
+                "node_keys_missing": node_missing, "known_hit": known_hit,
+                "node_lift": lift, "obs_shape": list(obs.shape)}
     return {"status": "pass", "info_keys": keys, "known_hit": known_hit,
-            "missing_core": [], "obs_shape": list(obs.shape),
+            "missing_core": [], "node_keys_missing": [],
+            "node_lift": lift, "node_fields_sim_fed": bool(node_fed),
+            "obs_shape": list(obs.shape),
             "reset_elapsed_s": info.get("rl/reset_elapsed_s"),
             "reset_mode": info.get("rl/reset_mode")}
 

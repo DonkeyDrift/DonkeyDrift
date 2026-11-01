@@ -405,8 +405,19 @@ class DonkeyDriftEnv(gym.Env):
         return obs, raw_reward, terminated, truncated, info
 
     def _build_info(self) -> Dict[str, Any]:
-        """sim 遥测原样透传 + rl/ 前缀扩展键(键名不与 sim 字段冲突)。"""
+        """sim 遥测原样透传 + rl/ 前缀扩展键(键名不与 sim 字段冲突)。
+
+        active_node/total_nodes 从底层 viewer 属性**提升**进 info(M2 D0):
+        fork 在 on_telemetry 里解析(donkey_sim.py:797-799)但 observe() 组装
+        info 时不含这两个键——M1 期间 node 法 progress 因此是死代码。提升时
+        None 兜底、不伪造:viewer 初始值 active_node=0/total_nodes=1,若 sim
+        根本不发 activeNode/totalNodes,提升出来就是初始值,reward 侧以
+        total_nodes>=2 守卫退回位移法(smoke item1 记录提升值以判别 sim 是否真发)。
+        """
         info = dict(getattr(self._cam, "info", {}) or {})
+        viewer = self._sim_viewer()
+        info["active_node"] = getattr(viewer, "active_node", None)
+        info["total_nodes"] = getattr(viewer, "total_nodes", None)
         info["rl/sim_connected"] = self.sim_connected
         info["rl/step_index"] = self._step_count
         info["rl/obs_mode"] = self.obs_mode
