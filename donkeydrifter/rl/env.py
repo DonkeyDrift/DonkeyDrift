@@ -107,6 +107,10 @@ class DonkeyDriftEnv(gym.Env):
             cam_conf = dict(sim_conf.get("cam_config") or {})
             cam_conf["img_enc"] = effective_enc
             sim_conf["cam_config"] = cam_conf
+            # 零图像/低分辨率用途下渲染分辨率对齐 NN 输入:dgym 默认渲染
+            # 640×480,纯状态量训练用不到,多开实例时白烧 sim CPU
+            sim_conf.setdefault("render_img_w", sim_conf["img_w"])
+            sim_conf.setdefault("render_img_h", sim_conf["img_h"])
         sim_conf.setdefault("watchdog_sec", 5.0)
 
         self._cam = DonkeyGymEnv(
@@ -312,16 +316,19 @@ class DonkeyDriftEnv(gym.Env):
             mode = "reset_to_nearest" if sent else "send_failed"
 
         # 等命令被 sim 消费(≥1 新遥测帧),再等位姿跳变(就近复位是瞬移;
-        # 车本来就在赛道中央时无跳变,按 2s 上限收口并如实标记)
+        # 车本来就在赛道中央时无跳变,按上限收口并如实标记,此时耗时口径
+        # 退回「命令回执」时间,不把无跳变罚成满超时)
         self._wait_new_frame(token, min(2.0, self.connect_timeout_s))
-        detected = self._wait_pose_jump(pre_pos, timeout_s=2.0)
+        t_cmd = time.perf_counter() - t0
+        detected = self._wait_pose_jump(pre_pos, timeout_s=1.5)
         elapsed = time.perf_counter() - t0
 
         self._step_count = 0
         self._prev_action = (0.0, 0.0)
         obs, defects = self._build_obs()
         info = self._build_info()
-        info["rl/reset_elapsed_s"] = elapsed
+        info["rl/reset_cmd_s"] = t_cmd
+        info["rl/reset_elapsed_s"] = elapsed if detected else t_cmd
         info["rl/reset_mode"] = mode
         info["rl/reset_detected_move"] = bool(detected)
         if defects:
