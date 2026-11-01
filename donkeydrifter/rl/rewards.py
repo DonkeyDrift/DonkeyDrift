@@ -79,9 +79,11 @@ def _num(value: Any, default: Optional[float] = None) -> Optional[float]:
     return x
 
 
-def wrap_deg(angle_deg: float) -> float:
-    """wrap 到 (-180, 180]。"""
-    return (float(angle_deg) + 180.0) % 360.0 - 180.0
+def wrap_deg(angle_deg):
+    """wrap 到 (-180, 180]。标量或 ndarray 均可(离线分析按帧数组调用)。"""
+    arr = np.asarray(angle_deg, dtype=float)
+    out = (arr + 180.0) % 360.0 - 180.0
+    return float(out) if out.ndim == 0 else out
 
 
 # ---------------------------------------------------------------------------
@@ -100,21 +102,25 @@ def compute_beta_deg(
 ) -> Optional[float]:
     """计算滑移角 β = wrap(heading - course),单位度;无法计算返回 None。
 
-    - course:速度向量方向(info['vel'],车体系?世界系?)——⚠ 遥测 vel 的坐标系
-      由 sim 决定,sdsim 家族遥测为世界系(与 pos 同系),course=atan2(vel_y, vel_x)。
-      speed 低于 ``0.2 m/s`` 时航向无定义,返回 None(调用方按无 β 处理)。
-    - heading:
-      * method='yaw':info['car'][2] 直读(度)。
-      * method='gyro':需要 info_prev['rl/heading_deg'](积分链状态)+ info_cur
-        的 gyro_z/dt_s;调用方(teleop 录制端)负责沿帧维护积分链。
+    坐标系声明(2026-11-02 由 sanity 闸实测标定,sdsim 遥测):
+      - Unity 系 **Y 轴向上**,地面平面是 **X-Z**(vel_y≈0 为竖直分量);
+      - course = atan2(vel_x, vel_z)(零向 +Z、朝 +X 为正,度);
+      - yaw 直读带 **180° 常数偏移**:直线段实测 yaw=180° 而车速沿 +Z,
+        heading = wrap(yaw + 180)(常数偏移在 wrap 下全局安全,直线段
+        β 中位数 0.16° 验证,见 scripts/rl_beta_analyze.py sanity 闸)。
+    speed 低于 ``0.2 m/s`` 时航向无定义,返回 None(调用方按无 β 处理)。
+    heading:
+      * method='yaw':info['car'][2] 直读 + 180° 偏移校正。
+      * method='gyro':需要 info_prev['rl/heading_deg'](积分链状态,已是
+        校正后口径)+ info_cur 的 gyro_z/dt_s;调用方负责沿帧维护积分链。
       * method='auto':有 yaw 用 yaw,否则退 gyro 链,再不行返回 None。
     """
     speed = _num(info_cur.get("speed"), 0.0) or 0.0
     vel = info_cur.get("vel") or (None, None, None)
-    vx, vy = _num(vel[0]), _num(vel[1])
-    if vx is None or vy is None or speed < 0.2:
+    vx, vz = _num(vel[0]), _num(vel[2])
+    if vx is None or vz is None or speed < 0.2:
         return None
-    course = math.degrees(math.atan2(vy, vx))
+    course = math.degrees(math.atan2(vx, vz))
 
     heading: Optional[float] = None
     if method in ("yaw", "auto"):
@@ -122,7 +128,7 @@ def compute_beta_deg(
         if car is not None and len(car) >= 3:
             yaw = _num(car[2])
             if yaw is not None:
-                heading = yaw
+                heading = wrap_deg(yaw + 180.0)  # 180° 偏移校正(见 docstring)
     if heading is None and method in ("gyro", "auto"):
         if info_prev is not None:
             prev_h = info_prev.get("rl/heading_deg")
@@ -251,17 +257,17 @@ def reward(
             progress = d * cfg.node_spacing_m
             progress_method = "node"
         else:
-            # 位移法回退:位移在速度方向上的前向投影(米)。弱于 node 法
-            # (绕圈也产生投影),仅当 sim 不发 activeNode 时使用。
+            # 位移法回退:位移在速度方向上的前向投影(米,X-Z 地面平面)。
+            # 弱于 node 法(绕圈也产生投影),仅当 sim 不发 activeNode 时使用。
             pos_prev, pos_cur = info_prev.get("pos"), info_cur.get("pos")
             vel = info_cur.get("vel") or (None, None, None)
             if pos_prev is not None and pos_cur is not None and vel[0] is not None:
                 try:
                     dx = float(pos_cur[0]) - float(pos_prev[0])
-                    dy = float(pos_cur[1]) - float(pos_prev[1])
-                    vnorm = math.hypot(*[_num(v, 0.0) or 0.0 for v in vel[:2]])
+                    dz = float(pos_cur[2]) - float(pos_prev[2])
+                    vnorm = math.hypot(_num(vel[0], 0.0) or 0.0, _num(vel[2], 0.0) or 0.0)
                     if vnorm > 1e-6:
-                        progress = (dx * float(vel[0]) + dy * float(vel[1])) / vnorm
+                        progress = (dx * float(vel[0]) + dz * float(vel[2])) / vnorm
                         progress_method = "displacement"
                 except (TypeError, ValueError, IndexError):
                     defects.append("pos/vel")
@@ -360,8 +366,9 @@ try:  # gymnasium 在纯离线单测环境可用;缺它时纯函数部分照常�
         def _stash(self, info: Dict[str, Any]) -> None:
             """维护 gyro 积分链(下一帧的 method='gyro' 起点)。
 
-            info 为浅拷贝语义:reward() 只读,这里写入前先浅拷贝,避免
-            env 侧下一轮整体替换 info 时把扩展键带进 sim 透传流。
+            链状态与 β 同口径(wrap(yaw+180) 校正后);info 为浅拷贝语义:
+            reward() 只读,这里写入前先浅拷贝,避免 env 侧下一轮整体替换
+            info 时把扩展键带进 sim 透传流。
             """
             carried = {k: v for k, v in info.items() if k.startswith("rl/")}
             yaw = None
@@ -369,7 +376,7 @@ try:  # gymnasium 在纯离线单测环境可用;缺它时纯函数部分照常�
             if car is not None and len(car) >= 3:
                 yaw = _num(car[2])
             if yaw is not None:
-                carried["rl/heading_deg"] = yaw  # yaw 可用时链重置为直读值
+                carried["rl/heading_deg"] = wrap_deg(yaw + 180.0)  # 链重置为校正直读
             elif self._prev_info is not None:
                 prev_h = self._prev_info.get("rl/heading_deg")
                 gz = _num(info.get("gyro", (None, None, None))[2])

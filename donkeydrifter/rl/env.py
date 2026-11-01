@@ -54,7 +54,7 @@ _STATE_SCALES = {
     "vel": 5.0,
     "gyro": 90.0,      # deg/s
     "accel": 10.0,     # m/s²
-    "pos_xy": 50.0,    # m
+    "pos_xz": 50.0,    # m(X-Z 地面平面;Unity 系 y 轴向上为高度,不入平面分量)
 }
 STATE_OBS_DIM = 16  # 3+3+3+3+2+2
 
@@ -255,7 +255,7 @@ class DonkeyDriftEnv(gym.Env):
         vec = [
             num("cte"), num("speed"), num("forward_vel"),
             *vel, *gyro, *accel,
-            num("pos", 0), num("pos", 1),
+            num("pos", 0), num("pos", 2),  # X-Z 地面平面(y=高度不入)
             self._prev_action[0], self._prev_action[1],
         ]
         out = np.zeros(STATE_OBS_DIM, dtype=np.float32)
@@ -271,7 +271,7 @@ class DonkeyDriftEnv(gym.Env):
         out[3:6] /= _STATE_SCALES["vel"]
         out[6:9] /= _STATE_SCALES["gyro"]
         out[9:12] /= _STATE_SCALES["accel"]
-        out[12:14] /= _STATE_SCALES["pos_xy"]
+        out[12:14] /= _STATE_SCALES["pos_xz"]
         return out, defects
 
     # ------------------------------------------------------------------

@@ -235,21 +235,22 @@ def test_wrap_deg():
 
 
 def test_beta_yaw_method():
-    # 车头朝北(yaw=90),速度向东 → β = 90-0 = +90(纯侧滑)
-    info = _info(speed=3.0, vel=(3.0, 0.0, 0.0), car=(0.0, 0.0, 90.0))
-    beta = compute_beta_deg(None, info, method="yaw")
-    assert beta == pytest.approx(90.0)
-    # 同向 → 0
-    info2 = _info(speed=3.0, vel=(0.0, 3.0, 0.0), car=(0.0, 0.0, 90.0))
-    assert compute_beta_deg(None, info2, method="yaw") == pytest.approx(0.0)
+    # 口径(2026-11-02 实测标定):course=atan2(vx,vz),heading=wrap(yaw+180)。
+    # 车头与速度同向 → β=0:sim yaw=180(直线标定值)且速度沿 +Z。
+    info = _info(speed=3.0, vel=(0.0, 0.0, 3.0), car=(0.0, 0.0, 180.0))
+    assert compute_beta_deg(None, info, method="yaw") == pytest.approx(0.0, abs=1e-9)
+    # 纯侧滑 90°:速度沿 +Z(course=0),车头朝 +X 侧(heading=90 → yaw=-90)
+    info2 = _info(speed=3.0, vel=(0.0, 0.0, 3.0), car=(0.0, 0.0, -90.0))
+    assert compute_beta_deg(None, info2, method="yaw") == pytest.approx(90.0)
 
 
 def test_beta_gyro_chain():
-    # 积分链:heading 90°,gyro_z=+10°/s,dt=0.05 → heading 90.5;速度向东
+    # 积分链(校正口径):链状态 90°,gyro_z=+10°/s,dt=0.05 → 90.5;
+    # 速度沿 +X(course=90°)→ β=0.5
     prev = {"rl/heading_deg": 90.0}
     cur = _info(speed=3.0, vel=(3.0, 0.0, 0.0), gyro=(0.0, 0.0, 10.0), dt_s=0.05)
     beta = compute_beta_deg(prev, cur, method="gyro")
-    assert beta == pytest.approx(wrap_deg(90.5 - 0.0))
+    assert beta == pytest.approx(0.5)
 
 
 def test_beta_undefined_at_rest():
