@@ -80,6 +80,8 @@ class DonkeyDriftEnv(gym.Env):
         max_episode_steps: Optional[int] = None,
         connect_timeout_s: float = 30.0,
         frame_wait_timeout_s: float = 1.0,
+        sync_mode: bool = False,
+        sync_time_step: float = 0.05,
         name: str = "rl-car-0",
     ):
         if obs_mode not in ("state", "pixel"):
@@ -92,6 +94,16 @@ class DonkeyDriftEnv(gym.Env):
         self.frame_wait_timeout_s = float(frame_wait_timeout_s)
         self.sim_host = sim_host
         self.sim_port = int(sim_port)
+        # M2 D1:同步步进。sync_time_step 必须是物理 tick 0.01 的整数倍
+        # (sdsim 协议约束;0.05/0.02 合法,1/60 不合法)
+        self.sync_mode = bool(sync_mode)
+        self.sync_time_step = float(sync_time_step)
+        if self.sync_mode:
+            ticks = self.sync_time_step / 0.01
+            if abs(round(ticks) - ticks) > 1e-6 or ticks < 1:
+                raise ValueError(
+                    f"sync_time_step {self.sync_time_step} 必须是物理 tick 0.01 "
+                    f"的整数倍(0.05/0.02 合法,1/60 不合法)")
 
         sim_conf = dict(conf or {})
         sim_conf.setdefault("img_w", 160)
@@ -112,6 +124,12 @@ class DonkeyDriftEnv(gym.Env):
             sim_conf.setdefault("render_img_w", sim_conf["img_w"])
             sim_conf.setdefault("render_img_h", sim_conf["img_h"])
         sim_conf.setdefault("watchdog_sec", 5.0)
+        if self.sync_mode:
+            # fork supply_defaults 已登记的 sync 键:init 时向 sim 发
+            # step_mode synchronous,此后每条 control 推进 sync_time_step
+            # 物理时长并回一帧(一控制一帧,sim 不再自由前进)
+            sim_conf["sync_mode"] = True
+            sim_conf["sync_time_step"] = self.sync_time_step
 
         self._cam = DonkeyGymEnv(
             sim_path,
@@ -129,10 +147,15 @@ class DonkeyDriftEnv(gym.Env):
         self._cam_name = name
 
         # 模板里 Vehicle 承担的步进线程:update() 内部循环 step sim、推帧、
-        # 跑健康检查;断线时自动按 1s 周期重连(dgym 既有逻辑,零重写)
-        self._update_thread = threading.Thread(
-            target=self._cam.update, name="ddrl-sim-update", daemon=True)
-        self._update_thread.start()
+        # 跑健康检查;断线时自动按 1s 周期重连(dgym 既有逻辑,零重写)。
+        # **仅异步模式启动**:sync 模式下自由跑线程会把 held action 反复
+        # 步进,sim 在策略决策之间继续前进——sync 的正确形态是「一策略步 =
+        # 一条 control = 一帧步进遥测」,step() 直连 DonkeyEnv.step(M2 D1)。
+        self._update_thread = None
+        if not self.sync_mode:
+            self._update_thread = threading.Thread(
+                target=self._cam.update, name="ddrl-sim-update", daemon=True)
+            self._update_thread.start()
 
         self._step_count = 0
         self._prev_action = (0.0, 0.0)
@@ -186,6 +209,59 @@ class DonkeyDriftEnv(gym.Env):
         except Exception as e:  # socket 已死等:交给看门狗重建
             logger.warning("sim 消息发送失败(%s): %s", msg.get("msg_type"), e)
             return False
+
+    # ------------------------------------------------------------------
+    # sync 直连步进(M2 D1)
+    # ------------------------------------------------------------------
+
+    def _sync_ensure_connected(self, timeout_s: float) -> None:
+        """sync 模式连接保障:无自由跑 update 线程,重连由本路径驱动。
+
+        复用 dgym part 的重建设施:env 为 None 时按 update 线程同款
+        (锁内 _check_config_reload + _try_connect)重试;连接存在但 TCP
+        不健康时投递看门狗重建(only_if_stale 双检)并等待重建产物。
+        """
+        deadline = time.perf_counter() + timeout_s
+        while time.perf_counter() < deadline:
+            if self._cam.env is None:
+                with self._cam._reconnect_lock:
+                    if self._cam.env is None:
+                        self._cam._check_config_reload()
+                        self._cam._try_connect()
+                if self._cam.env is None:
+                    time.sleep(1.0)
+                    continue
+            if self._cam._is_env_connected():
+                return
+            before = id(self._cam.env)
+            self._cam._post_rebuild("watchdog")
+            while time.perf_counter() < deadline:
+                if (self._cam.env is not None and id(self._cam.env) != before
+                        and self._cam._is_env_connected()):
+                    break
+                time.sleep(0.2)
+            if self._cam._is_env_connected():
+                return
+        raise ConnectionError(
+            f"sim {self.sim_host}:{self.sim_port} 在 {timeout_s:.0f}s 内未建立"
+            "健康连接(同步模式)")
+
+    def _step_sync_once(self, steer: float, throttle: float):
+        """一控制一帧:直连 fork DonkeyEnv.step(take_action+observe)。
+
+        observe() 自旋等新步进帧(fork 15s 陈旧守卫),返回即为本控制
+        推进 sync_time_step 后的遥测;terminated/raw_reward 用 sim 直出值
+        (不再经 viewer.is_game_over/calc_reward 间接读)。
+        """
+        raw = self._cam._raw_env()
+        out = raw.step(np.array([steer, throttle], dtype=np.float32))
+        obs_raw, raw_reward, terminated, _trunc, info = out
+        if self.obs_mode == "pixel":
+            # part 的帧缓存由 update 线程维护,sync 下无线程——用 part 自带
+            # 的拆帧变换(_set_frame:翻转/下采样/到达时间戳)落缓存
+            self._cam._set_frame(obs_raw)
+        self._cam.info = info  # 保持 part 缓存一致(_frame_token/_build_obs 读它)
+        return float(raw_reward), bool(terminated), info
 
     @property
     def sim_connected(self) -> bool:
@@ -293,12 +369,43 @@ class DonkeyDriftEnv(gym.Env):
         super().reset(seed=seed)
         if self._closed:
             raise RuntimeError("env 已关闭,不能 reset")
-        self._wait_connected(self.connect_timeout_s)
 
         options = dict(options or {})
         spawn_cfg = options.get("spawn_cfg")
         want_spawn = bool(spawn_cfg) or bool(options.get("spawn"))
         t0 = time.perf_counter()
+
+        if self.sync_mode:
+            # sync 应答路径(fork 规范):viewer.reset 发 reset_car(+seed/
+            # spawn_cfg)并自旋等应答帧、清 episode 状态。⚠ 与异步模式语义
+            # 差异:sync 下默认 reset = reset_car(回出生点),不再走
+            # reset_to_nearest(就近复位)——双路径会互相覆盖复位结果;
+            # 训练 reset 一律走出生课程(spawn_cfg),语义差异仅影响裸 reset。
+            self._sync_ensure_connected(self.connect_timeout_s)
+            raw = self._cam._raw_env()
+            viewer = getattr(raw, "viewer", None)
+            if viewer is None:
+                raise ConnectionError("sync reset:底层 viewer 不可达")
+            # fork viewer.reset 从自身属性读 spawn_cfg(构造期来自 conf);
+            # 训练侧按 episode 动态生成 → 每次 reset 前写入(有意的接线点)
+            viewer.spawn_cfg = dict(spawn_cfg) if (want_spawn and isinstance(spawn_cfg, dict)) else None
+            _obs_raw, info_raw = raw.reset(seed=seed)
+            if self.obs_mode == "pixel":
+                self._cam._set_frame(_obs_raw)
+            self._cam.info = info_raw
+            elapsed = time.perf_counter() - t0
+            self._step_count = 0
+            self._prev_action = (0.0, 0.0)
+            obs, defects = self._build_obs()
+            info = self._build_info()
+            info["rl/reset_elapsed_s"] = elapsed
+            info["rl/reset_mode"] = "reset_car+spawn" if want_spawn else "reset_car"
+            info["rl/reset_detected_move"] = None  # 应答路径无位姿跳变检测语义
+            if defects:
+                info["rl/obs_defects"] = defects
+            return obs, info
+
+        self._wait_connected(self.connect_timeout_s)
 
         pre_pos = tuple(getattr(self._cam, "info", {}).get("pos", (0.0, 0.0, 0.0))[:2])
         token = self._frame_token()
@@ -364,20 +471,27 @@ class DonkeyDriftEnv(gym.Env):
         steer, throttle = float(a[0]), float(a[1])
         self._prev_action = (steer, throttle)
 
-        stale = False
         t0 = time.perf_counter()
-        for _ in range(self.frame_skip):
-            token = self._frame_token()
-            # run_threaded:喂动作 + 触发看门狗/重连 + 返回最新帧(dgym 既有)
-            self._cam.run_threaded(steer, throttle, 0.0)
-            if not self._wait_new_frame(token, self.frame_wait_timeout_s):
-                stale = True
+        stale = False
+        if self.sync_mode:
+            # 一控制一帧;frame_skip=N = 同一动作连续 N 个步进帧(wrapper 级
+            # repeat,与异步口径一致)
+            raw_reward = 0.0
+            terminated = False
+            for _ in range(self.frame_skip):
+                raw_reward, terminated, _info = self._step_sync_once(steer, throttle)
+        else:
+            for _ in range(self.frame_skip):
+                token = self._frame_token()
+                # run_threaded:喂动作 + 触发看门狗/重连 + 返回最新帧(dgym 既有)
+                self._cam.run_threaded(steer, throttle, 0.0)
+                if not self._wait_new_frame(token, self.frame_wait_timeout_s):
+                    stale = True
+            viewer = self._sim_viewer()
+            terminated = bool(viewer.is_game_over()) if viewer is not None else False
+            raw_reward = float(viewer.calc_reward(terminated)) if viewer is not None else 0.0
         step_elapsed = time.perf_counter() - t0
         self._step_count += 1
-
-        viewer = self._sim_viewer()
-        terminated = bool(viewer.is_game_over()) if viewer is not None else False
-        raw_reward = float(viewer.calc_reward(terminated)) if viewer is not None else 0.0
 
         obs, defects = self._build_obs()
         info = self._build_info()
@@ -436,7 +550,7 @@ class DonkeyDriftEnv(gym.Env):
             return
         self._closed = True
         self._cam.running = False
-        if self._update_thread.is_alive():
+        if self._update_thread is not None and self._update_thread.is_alive():
             self._update_thread.join(timeout=3.0)
             if self._update_thread.is_alive():
                 logger.warning("sim 步进线程 3s 未退出(疑似 observe 自旋),"
