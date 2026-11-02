@@ -87,8 +87,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 高级入口（Donkey / Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
                 见 EnterButtons.tsx（Issue #175） */}
             <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14 ml-4">
-              {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单 */}
-              <div className="hidden xl:contents">
+              {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单。
+                  space-x-6 补上二者间距：nav 的 space-x-6 只作用于直接子元素，
+                  display:contents 包装层不产生盒模型，内部链接需自己继承同等 24px 间距 */}
+              <div className="hidden xl:contents space-x-6">
                 <DonkeyEntryLink />
                 <DrifterConsoleEntryLink />
               </div>
