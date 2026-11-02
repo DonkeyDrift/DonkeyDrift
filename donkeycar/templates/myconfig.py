@@ -55,12 +55,20 @@ DRIVE_WEBRTC_ICE_SERVERS = []  # 示例: [{"urls": ["turn:192.168.1.10:3478?tran
 # DonkeySim 驴车模拟器相关配置
 DONKEY_GYM = False           # 是否使用DonkeySim模拟器（默认：False）
 DONKEY_SIM_PATH = "remote"  # DonkeySim模拟器的安装路基（默认："remote"，需要先运行DonkeySim模拟器）
-GYM_CONF = { 
+GYM_CONF = {
     "body_style" : "car01",        # 车子模型（"donkey" | "bare" | "car01" | "f1" | "cybertruck")
     "body_rgb" : (128, 12, 12),   # 车子颜色(红, 绿, 蓝)，数值范围（0-255）
     "car_name" : "DKC",             # 小车名称
     "font_size" : 50                # 车名字体大小
-    } 
+    }
+
+#--------------------------M3 网页驾驶 BC 采样（2026-11-03）
+# 非空 = drive 管线内嵌 BC 录制器（simulator.py 接线）：网页驾驶时自动记录
+# (image, state_vec, 动作) 三元组到该目录（相对 CWD，请在仓库根目录启动 drive）；
+# 停驾（Ctrl-C / web 停车）自动落 data_card.json + 蒙太奇并打印门判定。
+# 需与 DONKEY_GYM = True 搭配（sim 驾驶）。不想录时改回 None。
+BC_RECORD_OUT = "outputs/bc_data_web1"
+BC_RECORD_EP_FRAMES = 400   # 自动切段帧数（~20s@20Hz，整局分层 val 用）
 
 def get_wsl_host_ip():
     # 尝试 1: 使用 ipconfig.exe 优先获取 Windows 真实局域网 IP (192.168.x.x)

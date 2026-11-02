@@ -61,6 +61,58 @@ STATE_OBS_DIM = 16  # 3+3+3+3+2+2
 _DEFAULT_SIM_FPS = 20.0  # sdsim 家族遥测节拍(见 dgym.py 分辨率解耦注释)
 
 
+def build_state_vector(info: Dict[str, Any],
+                       prev_action: Tuple[float, float]) -> Tuple[np.ndarray, list]:
+    """16 维 state 向量(声明式缩放,下标见 vec 列表);坏字段记 defects 补零。
+
+    模块级纯函数(M3 D0 补丁,2026-11-03):训练 obs(``_build_state_vec``)、
+    终端采样器(``state_vector()``)与**网页驾驶录制器**(bc_drive_recorder)
+    三方共用的唯一实现——数据集口径与策略观测口径由此强制一致。
+    """
+    info = dict(info or {})
+    defects: list = []
+
+    def num(key, idx=None):
+        v = info.get(key)
+        if idx is not None:
+            try:
+                v = v[idx]
+            except (TypeError, IndexError, KeyError):
+                return None
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(x) or math.isinf(x):
+            return None
+        return x
+
+    vel = [num("vel", i) for i in range(3)]
+    gyro = [num("gyro", i) for i in range(3)]
+    accel = [num("accel", i) for i in range(3)]
+    vec = [
+        num("cte"), num("speed"), num("forward_vel"),
+        *vel, *gyro, *accel,
+        num("pos", 0), num("pos", 2),  # X-Z 地面平面(y=高度不入)
+        prev_action[0], prev_action[1],
+    ]
+    out = np.zeros(STATE_OBS_DIM, dtype=np.float32)
+    for i, x in enumerate(vec):
+        if x is None:
+            defects.append(f"idx{i}")
+        else:
+            out[i] = x
+    # 缩放(下标对齐 vec;动作两项不缩放)
+    out[0] /= _STATE_SCALES["cte"]
+    out[1] /= _STATE_SCALES["speed"]
+    out[2] /= _STATE_SCALES["forward_vel"]
+    out[3:6] /= _STATE_SCALES["vel"]
+    out[6:9] /= _STATE_SCALES["gyro"]
+    out[9:12] /= _STATE_SCALES["accel"]
+    out[12:14] /= _STATE_SCALES["pos_xz"]
+    return out, defects
+
+
 class DonkeyDriftEnv(gym.Env):
     """DonkeyDrift 模拟器的 gymnasium 封装(state / pixel 双 obs 模式)。"""
 
@@ -345,49 +397,9 @@ class DonkeyDriftEnv(gym.Env):
         return self._build_state_vec(pa)[0]
 
     def _build_state_vec(self, prev_action: Tuple[float, float]) -> Tuple[np.ndarray, list]:
-        """16 维 state 向量(声明式缩放,下标见 vec 列表);坏字段记 defects 补零。"""
+        """16 维 state 向量(委托模块级纯函数 :func:`build_state_vector`)。"""
         info = getattr(self._cam, "info", {}) or {}
-        defects: list = []
-
-        def num(key, idx=None):
-            v = info.get(key)
-            if idx is not None:
-                try:
-                    v = v[idx]
-                except (TypeError, IndexError, KeyError):
-                    return None
-            try:
-                x = float(v)
-            except (TypeError, ValueError):
-                return None
-            if math.isnan(x) or math.isinf(x):
-                return None
-            return x
-
-        vel = [num("vel", i) for i in range(3)]
-        gyro = [num("gyro", i) for i in range(3)]
-        accel = [num("accel", i) for i in range(3)]
-        vec = [
-            num("cte"), num("speed"), num("forward_vel"),
-            *vel, *gyro, *accel,
-            num("pos", 0), num("pos", 2),  # X-Z 地面平面(y=高度不入)
-            prev_action[0], prev_action[1],
-        ]
-        out = np.zeros(STATE_OBS_DIM, dtype=np.float32)
-        for i, x in enumerate(vec):
-            if x is None:
-                defects.append(f"idx{i}")
-            else:
-                out[i] = x
-        # 缩放(下标对齐 vec;动作两项不缩放)
-        out[0] /= _STATE_SCALES["cte"]
-        out[1] /= _STATE_SCALES["speed"]
-        out[2] /= _STATE_SCALES["forward_vel"]
-        out[3:6] /= _STATE_SCALES["vel"]
-        out[6:9] /= _STATE_SCALES["gyro"]
-        out[9:12] /= _STATE_SCALES["accel"]
-        out[12:14] /= _STATE_SCALES["pos_xz"]
-        return out, defects
+        return build_state_vector(info, prev_action)
 
     # ------------------------------------------------------------------
     # gymnasium API

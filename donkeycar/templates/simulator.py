@@ -462,6 +462,19 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
                            async_write=getattr(cfg, 'TUB_ASYNC_WRITE', True))
     V.add(tub_writer, inputs=inputs, outputs=["tub/num_records"], run_condition='recording')
 
+    # M3 网页驾驶 BC 采样(2026-11-03):cfg.BC_RECORD_OUT 非空时内嵌录制器——
+    # 直读 dgym part 的 info/frame(与 RL env 同源),按 (obs_k, u_k) 训练配对
+    # 口径落 bc npz(image+state_vec+动作);停驾(Vehicle.stop→shutdown)自动
+    # 写 data card + 蒙太奇。用户网页驾驶流零改动;输出目录相对 CWD(请在
+    # 仓库根目录启动 drive)。格式与门判定见 donkeydrifter/rl/bc_data.py。
+    bc_record_out = getattr(cfg, 'BC_RECORD_OUT', None)
+    if cfg.DONKEY_GYM and bc_record_out:
+        from donkeydrifter.rl.bc_drive_recorder import DriveBcRecorder
+        bc_rec = DriveBcRecorder(cam, out_dir=bc_record_out,
+                                 auto_episode_frames=int(getattr(cfg, 'BC_RECORD_EP_FRAMES', 400)))
+        V.add(bc_rec, inputs=['user/angle', 'user/throttle'], outputs=[])
+        print(f"[bc-recorder] 网页驾驶 BC 采样已开启 → {bc_record_out}")
+
     if cfg.PUB_CAMERA_IMAGES:
         from donkeydrifter.parts.network import TCPServeValue
         from donkeydrifter.parts.image import ImgArrToJpg
