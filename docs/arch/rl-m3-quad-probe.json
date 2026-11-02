@@ -1,0 +1,42 @@
+{
+  "ports": [
+    9101,
+    9104,
+    9107,
+    9110
+  ],
+  "steps_each": 500,
+  "started": "2026-11-02 22:38:59",
+  "four_env_two_phase": {
+    "per_env": [
+      {
+        "port": 9104,
+        "steps_per_s": 359.79,
+        "step_ms_p50": 2.57,
+        "stale": 0
+      },
+      {
+        "port": 9107,
+        "steps_per_s": 356.29,
+        "step_ms_p50": 2.57,
+        "stale": 0
+      },
+      {
+        "port": 9101,
+        "steps_per_s": 349.71,
+        "step_ms_p50": 2.57,
+        "stale": 0
+      },
+      {
+        "port": 9110,
+        "steps_per_s": 352.22,
+        "step_ms_p50": 2.57,
+        "stale": 0
+      }
+    ],
+    "combined_steps_per_s": 1418.01,
+    "wall_elapsed_s": 8.3,
+    "sim_cpu_pct_during": [],
+    "note": "墙钟含 4×sim 启动(~40s);吞吐为各进程独立测量之和(保守下界)"
+  }
+}
