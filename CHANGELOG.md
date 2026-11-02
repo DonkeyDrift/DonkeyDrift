@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-11-02 (275)
+
+- fix(layout): 顶栏 Donkey 与 Drifter Console 入口间距对齐其余导航项
+  - 背景：两个入口包在 `display:contents` 包装层里，nav 的 `space-x-6` 只作用于直接子元素，包装层不产生盒模型，导致二者之间几乎无间距（截图逐列像素实测约 2px），其余导航项（Drive/Tub Manager/Trainer/Pilot Arena）间距均为 24px。
+  - 修复：包装层补 `space-x-6`（display:contents 不影响其子元素 margin 在 nav flex 布局中生效）；Playwright 1440px 顶栏截图逐列像素实测 Donkey→Drifter Console 间距 24px，与其余导航项一致；`tsc -b --noEmit` 通过，vitest 61 文件 / 474 项全过。
+
 ## 2026-11-02 (274)
 
 - feat(webui): 删除左侧「连接器」抽屉，模拟器选择并入 Drive「驾驶目标」卡片——切到模拟器目标后自动发现局域网模拟器，点选 IP 即自动保存
