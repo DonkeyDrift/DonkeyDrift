@@ -261,7 +261,11 @@ class DonkeyDriftEnv(gym.Env):
         observe() 自旋等新步进帧(fork 15s 陈旧守卫),返回即为本控制
         推进 sync_time_step 后的遥测;terminated/raw_reward 用 sim 直出值
         (不再经 viewer.is_game_over/calc_reward 间接读)。
+        ⚠ 每控制前必须过连接保障:断连后 observe 的陈旧守卫会瞬间返回
+        旧帧,连接级恢复(重建/重连)只能由 _sync_ensure_connected 驱动
+        ——sync 无自由跑线程,这里是唯一的自愈入口(M2 item5 实测教训)。
         """
+        self._sync_ensure_connected(self.connect_timeout_s)
         raw = self._cam._raw_env()
         out = raw.step(np.array([steer, throttle], dtype=np.float32))
         obs_raw, raw_reward, terminated, _trunc, info = out
@@ -274,7 +278,13 @@ class DonkeyDriftEnv(gym.Env):
 
     @property
     def sim_connected(self) -> bool:
-        """当前 TCP 健康状态(与 dgym 看门狗口径一致)。"""
+        """当前 TCP 健康状态(与 dgym 看门狗口径一致)。
+
+        sync 模式无缓存 flag(connected 只由 run_threaded/update 线程刷新,
+        sync 下都不跑)——直接查底层连接健康,保证断连检测不依赖步进。
+        """
+        if self.sync_mode:
+            return bool(self._cam.env is not None and self._cam._is_env_connected())
         return bool(getattr(self._cam, "connected", False))
 
     # ------------------------------------------------------------------
@@ -554,8 +564,11 @@ class DonkeyDriftEnv(gym.Env):
         """
         info = dict(getattr(self._cam, "info", {}) or {})
         viewer = self._sim_viewer()
-        info["active_node"] = getattr(viewer, "active_node", None)
-        info["total_nodes"] = getattr(viewer, "total_nodes", None)
+        # fork 结构:壳类 DonkeyUnitySimContoller 无状态,active_node/total_nodes
+        # 在 handler(DonkeyUnitySimHandler)上——提升必须落到 handler
+        handler = getattr(viewer, "handler", None) or viewer
+        info["active_node"] = getattr(handler, "active_node", None)
+        info["total_nodes"] = getattr(handler, "total_nodes", None)
         info["rl/sim_connected"] = self.sim_connected
         info["rl/step_index"] = self._step_count
         info["rl/obs_mode"] = self.obs_mode

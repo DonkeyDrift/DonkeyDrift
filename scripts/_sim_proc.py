@@ -51,6 +51,7 @@ def launch_sim(
     keep_graphics: bool = False,
     log_path: Optional[str] = None,
     wait_s: float = 60.0,
+    extra_args: Optional[list] = None,
 ) -> subprocess.Popen:
     """拉起一个 sim 实例并等到端口就绪(超时抛 TimeoutError,不残留进程)。"""
     exe = resolve_sim_exe(app_path)
@@ -62,6 +63,8 @@ def launch_sim(
     if log_path:
         os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
         args += ["-logFile", log_path]
+    if extra_args:
+        args += list(extra_args)
     proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         if not wait_for_port(port, wait_s):
@@ -72,12 +75,34 @@ def launch_sim(
     return proc
 
 
+def _is_sim_pid(pid: int) -> bool:
+    """该 pid 是否为 sim 二进制进程。
+
+    lsof 按端口会匹配到持有连接的客户端 socket——python 自己——必须过滤,
+    否则 stop_sim 的端口释放循环(在 sim 收到 SIGTERM 但端口仍在接受的
+    窗口期触发)会把自己杀掉。实测症状:脚本莫名 exit 143(2026-11-02)。
+    """
+    try:
+        out = subprocess.run(["ps", "-p", str(pid), "-o", "comm="],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+    except (subprocess.SubprocessError, ValueError):
+        return False
+    base = os.path.basename(out).lower()
+    return "donkey_sim" in base or "donkeysim" in base
+
+
 def _pids_listening_on(port: int) -> list:
     try:
         out = subprocess.run(
             ["lsof", "-ti", f"tcp:{port}"],
             capture_output=True, text=True, timeout=10).stdout
-        return [int(x) for x in out.split() if x.strip().isdigit()]
+        pids = []
+        for x in out.split():
+            if x.strip().isdigit():
+                pid = int(x)
+                if pid != os.getpid() and _is_sim_pid(pid):
+                    pids.append(pid)
+        return pids
     except (subprocess.SubprocessError, ValueError):
         return []
 

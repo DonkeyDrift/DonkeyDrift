@@ -1,0 +1,252 @@
+{
+  "meta": {
+    "sim_app": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app",
+    "mode": "auto",
+    "host": "127.0.0.1",
+    "port": 9091,
+    "started": "2026-11-02 08:37:25",
+    "sim_exe": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app/Contents/MacOS/donkey_sim"
+  },
+  "items": [
+    {
+      "id": 1,
+      "name": "连接+info字段齐全性",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "info_keys": [
+          "accel",
+          "active_node",
+          "car",
+          "collision_impulse",
+          "cte",
+          "flipped",
+          "forward_vel",
+          "frame_id",
+          "gyro",
+          "hit",
+          "lap",
+          "lap_count",
+          "last_lap_time",
+          "lidar",
+          "pos",
+          "speed",
+          "state_obs",
+          "stuck_time",
+          "total_nodes",
+          "vel"
+        ],
+        "known_hit": [
+          "forward_vel",
+          "hit",
+          "car",
+          "lidar",
+          "frame_id",
+          "collision_impulse",
+          "flipped",
+          "stuck_time",
+          "lap",
+          "active_node",
+          "total_nodes",
+          "last_lap_time",
+          "lap_count"
+        ],
+        "missing_core": [],
+        "node_keys_missing": [],
+        "node_lift": {
+          "active_node": 0,
+          "total_nodes": 250
+        },
+        "node_fields_sim_fed": true,
+        "obs_shape": [
+          16
+        ],
+        "reset_elapsed_s": 0.03262791599991033,
+        "reset_mode": "reset_car"
+      },
+      "elapsed_s": 0.03
+    },
+    {
+      "id": 2,
+      "name": "reset_car 耗时 p50/p95<2s",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "trials": 5,
+        "p50_s": 0.035,
+        "p95_s": 0.035,
+        "max_s": 0.035,
+        "raw": [
+          0.035,
+          0.034,
+          0.035,
+          0.034,
+          0.035
+        ],
+        "pose_jump_detected": 0
+      },
+      "elapsed_s": 14.79
+    },
+    {
+      "id": 3,
+      "name": "边界动作含 brake 不炸连接",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "actions_sent": 24,
+        "new_frames_seen": 24,
+        "connected_after": true
+      },
+      "elapsed_s": 1.87
+    },
+    {
+      "id": 4,
+      "name": "frame_skip=1 n control↔n 帧",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "controls": 60,
+        "new_frames_received": 60,
+        "sim_frame_id_span_vs_pre_control": 60,
+        "fid_step_deltas": {
+          "monotonic": true,
+          "dups": 0,
+          "distribution": {
+            "1": 59
+          }
+        },
+        "note": "每步等待新遥测帧返回,n control ↔ n 新帧由构造保证;fid 停走=该拍 sim 未消费新 control 的自由帧(非丢帧)"
+      },
+      "elapsed_s": 4.5
+    },
+    {
+      "id": 7,
+      "name": "同seed复现+spawn字段探针(记录)",
+      "mandatory": false,
+      "status": "record",
+      "detail": {
+        "same_seed42_poses": [
+          [
+            -7.404,
+            0.804
+          ],
+          [
+            -7.404,
+            0.804
+          ],
+          [
+            -7.404,
+            0.804
+          ]
+        ],
+        "same_seed7_poses": [
+          [
+            -0.215,
+            0.724
+          ],
+          [
+            -0.215,
+            0.724
+          ],
+          [
+            -0.215,
+            0.724
+          ]
+        ],
+        "plain_reset_poses": [
+          [
+            6.265,
+            0.728
+          ],
+          [
+            6.265,
+            0.728
+          ],
+          [
+            6.265,
+            0.728
+          ]
+        ],
+        "lateral1_poses": [
+          [
+            6.612,
+            0.683
+          ],
+          [
+            6.608,
+            0.682
+          ],
+          [
+            1.972,
+            0.672
+          ]
+        ],
+        "intra_seed42_spread_m": 0.0,
+        "intra_seed7_spread_m": 0.0,
+        "inter_seed_max_diff_m": 7.189,
+        "plain_spread_m": 0.0,
+        "verdict": "sim 支持 reset_car 扩展字段(同 seed 可复现、异 seed 位置不同)——订单事实2的判死结论对本 sim 不成立"
+      },
+      "elapsed_s": 0.4
+    },
+    {
+      "id": 8,
+      "name": "sync 语义自检(headless:一控制一帧/停发冻结/应答)",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "frame_id_delta_per_step": {
+          "1": 19
+        },
+        "idle_1s_frame_id_delta": 0,
+        "reset_answered": true,
+        "step_ms_p50": 2.5,
+        "note": "headless(训练形态):一控制一帧 + sim 不在策略步间前进"
+      },
+      "elapsed_s": 10.3
+    },
+    {
+      "id": 6,
+      "name": "帧率实测(sync 单配置量级检查)",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "n_steps": 300,
+        "wall_elapsed_s": 0.77,
+        "steps_per_s": 390.45,
+        "stale_steps": 0,
+        "step_ms_p50": 2.5,
+        "step_ms_p95": 3.6,
+        "sim_frame_id_delta": 300,
+        "note": "sync 吞吐量级检查(≥30 步/s);完整矩阵见 rl_sync_bench.py"
+      },
+      "elapsed_s": 7.52
+    },
+    {
+      "id": 5,
+      "name": "断连恢复(杀→拉起→重建)",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "stop": {
+          "mode": "child_pid",
+          "pids": [
+            95423
+          ]
+        },
+        "detect_death_s": 0.0,
+        "recovery_s": 7.69,
+        "post_recovery_reset_s": 0.028,
+        "post_recovery_reset_move": null
+      },
+      "elapsed_s": 8.33
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "record": 1,
+    "failed": 0,
+    "blockers": 0,
+    "mandatory_failed": []
+  }
+}

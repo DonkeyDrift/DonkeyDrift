@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from _sim_proc import launch_sim, resolve_sim_exe, stop_sim, wait_for_port  # noqa: E402
+import _sim_proc  # noqa: E402
 
 from donkeydrifter.rl import DonkeyDriftEnv  # noqa: E402
 
@@ -120,7 +121,9 @@ def _make_env(args, img_enc=None):
     return DonkeyDriftEnv(
         sim_host=args.host, sim_port=args.port, sim_path="remote",
         obs_mode="state", img_enc=img_enc,
-        connect_timeout_s=90.0, frame_wait_timeout_s=2.0)
+        connect_timeout_s=90.0, frame_wait_timeout_s=2.0,
+        sync_mode=getattr(args, "sync", False),
+        sync_time_step=getattr(args, "sync_time_step", 0.05))
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +164,7 @@ def item2_reset_timing(env, trials=5) -> dict:
             env.step((0.4, 0.5))
         _, info = env.reset()
         lat.append(info["rl/reset_elapsed_s"])
-        moved += 1 if info.get("rl/reset_detected_move") else 0
+        moved += 1 if info.get("rl/reset_detected_move") else 0  # sync=None 不计
         info2 = env.step((0.0, 0.0))[4]
         assert info2.get("rl/sim_connected"), "复位后连接失活"
     p50 = statistics.median(lat)
@@ -176,11 +179,21 @@ def item3_boundary_actions(env) -> dict:
     seq = [(1.0, 1.0, 0.0), (-1.0, 1.0, 0.0), (0.0, 1.0, 1.0), (0.0, 0.0, 1.0),
            (-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (0.0, 0.0, 0.0), (0.5, 0.5, 0.5)]
     frames = 0
-    for s, t, b in seq * 3:
-        tok = env._frame_token()
-        env._cam.run_threaded(s, t, b)  # 边界动作走 part 原生 3 参通道(含 brake)
-        if env._wait_new_frame(tok, 2.0):
-            frames += 1
+    if env.sync_mode:
+        handler = getattr(env._sim_viewer(), "handler", None)
+        for s, t, b in seq * 3:
+            tok = env._frame_token()
+            handler.send_control(s, t, b)  # sync:控制即步进(含 brake)
+            _o, _r, _d, info4 = handler.observe()  # 拉帧进 cam.info(否则 token 永不变)
+            env._cam.info = info4
+            if env._frame_token() != tok:
+                frames += 1
+    else:
+        for s, t, b in seq * 3:
+            tok = env._frame_token()
+            env._cam.run_threaded(s, t, b)  # 异步:part 原生 3 参通道(含 brake)
+            if env._wait_new_frame(tok, 2.0):
+                frames += 1
     ok = env.sim_connected and frames >= len(seq) * 3 - 1
     env.step((0.0, 0.3))  # 收尾恢复直行,确认遥测继续推进
     return {"status": "pass" if ok else "fail",
@@ -199,17 +212,22 @@ def item4_frame_correspondence(env, n=60) -> dict:
         t = env._frame_token()
         if t[0] == "fid":
             fids.append(t[1])
-    fid_delta = (fids[-1] - fids[0]) if len(fids) >= 2 else None
+    # 跨度 = 末帧相对「控制前」fid0 的推进:60 次相邻 +1 时 fids[-1]-fids[0]
+    # 恒为 n-1(首帧已含第 1 个控制的增量)——必须相对 fid0 才是 n 的口径。
+    span = (fids[-1] - fid0) if (fid0 is not None and fids) else None
     # 真实契约:① 每条 control 都等到一帧新遥测(构造保证,硬断言);
-    # ② sim 侧 frame_id 推进 ≥ n-1——async 模式 sim 以 20fps 自由跑,
-    # 某拍没有新 control 可消费时发出的自由帧不递增 frame_id(2026-11-01
-    # 首跑实测 60 control/60 新帧/fid 推进 59),允许至多这一类 1 帧差。
-    exact = got_new == n and (fid_delta is None or fid_delta >= n - 1)
-    steps = [int(b - a) for a, b in zip(fids, fids[1:])] if fid_delta is not None else []
+    # ② sync 一控制一帧 → 跨度恰为 n(无自由帧);
+    #    async sim 20fps 自由跑,无新 control 的自由帧不递增 frame_id
+    #    (2026-11-01 实测 60/60/59),允许 ≤1 帧差。
+    if env.sync_mode:
+        exact = got_new == n and span == n
+    else:
+        exact = got_new == n and (span is None or span >= n - 1)
+    steps = [int(b - a) for a, b in zip(fids, fids[1:])] if len(fids) >= 2 else []
     dup_frames = steps.count(0)
     return {"status": "pass" if exact else "fail",
             "controls": n, "new_frames_received": got_new,
-            "sim_frame_id_delta": fid_delta,
+            "sim_frame_id_span_vs_pre_control": span,
             "fid_step_deltas": {"monotonic": all(s >= 0 for s in steps),
                                 "dups": dup_frames,
                                 "distribution": {str(v): steps.count(v)
@@ -254,6 +272,51 @@ def item7_seed_probe(env) -> dict:
             "plain_spread_m": s_p, "verdict": verdict}
 
 
+
+def item8_sync_semantics(args) -> dict:
+    """D1 语义自检(专用 headless sim = 训练形态):一控制一帧;停发控制
+    sim 不前进;reset 走应答路径。
+
+    ⚠ 窗口 sim 不作此检查口径:实测其渲染循环在 sync 下仍偶发背景帧
+    (idle 1s 出现 +1),且步耗时 75ms vs headless 3ms(每步渲染相机)——
+    sync 训练必须 -nographics/keep-gfx。
+    """
+    port = args.port + 1
+    proc = launch_sim(args.sim_app, port=port, headless=True,
+                      log_path=os.path.join(OUT_DIR, "sim_smoke_sync_sem.log"))
+    env = DonkeyDriftEnv(sim_host=args.host, sim_port=port, sim_path="remote",
+                         obs_mode="state", img_enc="none", sync_mode=True,
+                         sync_time_step=args.sync_time_step,
+                         connect_timeout_s=90.0, name="smoke-sync-sem")
+    try:
+        env.reset()
+        fids, durs = [], []
+        for _ in range(20):
+            _, _, _, _, sinfo = env.step((0.0, 0.4))
+            t = env._frame_token()
+            assert t[0] == "fid", "sync 下 frame_id 缺失"
+            fids.append(t[1])
+            durs.append(sinfo["rl/step_elapsed_s"])
+        deltas = [b - a for a, b in zip(fids, fids[1:])]
+        one_per_step = all(d == 1 for d in deltas)
+        fid0 = env._frame_token()[1]
+        time.sleep(1.0)
+        idle_delta = env._frame_token()[1] - fid0
+        frozen = idle_delta == 0
+        _, rinfo = env.reset(options={"spawn": True}, seed=5)
+        answered = bool(rinfo.get("rl/reset_answered"))
+        ok = one_per_step and frozen and answered
+        return {"status": "pass" if ok else "fail",
+                "frame_id_delta_per_step": {v: deltas.count(v) for v in set(deltas)},
+                "idle_1s_frame_id_delta": idle_delta,
+                "reset_answered": answered,
+                "step_ms_p50": round(statistics.median(durs) * 1000, 1),
+                "note": "headless(训练形态):一控制一帧 + sim 不在策略步间前进"}
+    finally:
+        env.close()
+        stop_sim(proc=proc)
+
+
 def item5_disconnect_recovery(env, args, launched) -> dict:
     """杀 sim → 等 connected 翻假 → 重拉 → 看门狗重建 → 遥测恢复。"""
     proc = launched.get("proc")
@@ -261,11 +324,19 @@ def item5_disconnect_recovery(env, args, launched) -> dict:
     launched["proc"] = None
     t_kill = time.time()
     died_at = None
-    while time.time() - t_kill < 30:
-        env.step((0.0, 0.0))
-        if not env.sim_connected:
-            died_at = time.time()
-            break
+    if env.sync_mode:
+        # sync:无自由跑线程,sim_connected 即时查健康,无需步进喂看门狗
+        while time.time() - t_kill < 30:
+            if not env.sim_connected:
+                died_at = time.time()
+                break
+            time.sleep(0.2)
+    else:
+        while time.time() - t_kill < 30:
+            env.step((0.0, 0.0))
+            if not env.sim_connected:
+                died_at = time.time()
+                break
     if died_at is None:
         return {"status": "fail", "stop": stop_rec,
                 "error": "杀 sim 后 30s 内 connected 未翻假(看门狗失明)"}
@@ -276,6 +347,7 @@ def item5_disconnect_recovery(env, args, launched) -> dict:
     recovered_at = None
     last_tok = env._frame_token()
     while time.time() - t_relaunch < 90:
+        # sync:step 内部 _sync_ensure_connected 会等重连(阻塞至多 connect_timeout)
         env.step((0.0, 0.0))
         tok = env._frame_token()
         if env.sim_connected and tok != last_tok and tok[0] == "fid":
@@ -323,6 +395,11 @@ def main():
     ap.add_argument("--port", type=int, default=9091)
     ap.add_argument("--mode", choices=["auto", "remote"], default="auto",
                     help="auto=自拉 sim 全流程;remote=只连已运行的 sim(5/6 标 BLOCKER)")
+    ap.add_argument("--sync", action="store_true",
+                    help="M2:sync 模式全套重跑(一控制一帧;item6 换 sync 吞吐量级检查)")
+    ap.add_argument("--sync-time-step", type=float, default=0.05)
+    ap.add_argument("--telemetry-fps", type=int, default=None,
+                    help="M2 可选探针(仅异步):sim 加 --telemetry_fps N 后实测步率,记录性")
     ap.add_argument("--out", default=os.path.join(OUT_DIR, "rl_smoke_result.json"))
     args = ap.parse_args()
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -360,13 +437,21 @@ def main():
         runner.item(3, "边界动作含 brake 不炸连接", True, lambda: item3_boundary_actions(env))
         runner.item(4, "frame_skip=1 n control↔n 帧", True, lambda: item4_frame_correspondence(env))
         runner.item(7, "同seed复现+spawn字段探针(记录)", False, lambda: item7_seed_probe(env))
+        if args.sync:
+            runner.item(8, "sync 语义自检(headless:一控制一帧/停发冻结/应答)", True,
+                        lambda: item8_sync_semantics(args))
 
         if not can_launch:
             blocker(6, "帧率实测", "P2 未拿到 sim 启动方式,无法控制 sim 生命周期(订单预案)")
             blocker(5, "断连恢复", "P2 未拿到 sim 启动方式,无法杀/拉 sim(订单预案)")
+        elif args.sync:
+            runner.item(6, "帧率实测(sync 单配置量级检查)", True,
+                        lambda: item6_sync_throughput(args))
+            runner.item(5, "断连恢复(杀→拉起→重建)", True,
+                        lambda: item5_disconnect_recovery(env, args, launched))
         else:
-            # item6:窗口段直接复用会话 A 的 sim(env 先测 none,换 jpg 再测);
-            # 随后两段 headless 会话各自拉起/停止。
+            # 异步 item6:窗口段复用会话 A 的 sim(env 换 img_enc 各测一轮),
+            # 随后两段 headless 会话各自拉起/停止;再重拉窗口 sim 做 item5
             env.close()
             env = None
             win = _fps_pair_on_running_sim(args)
@@ -398,6 +483,10 @@ def main():
             env.reset()
             runner.item(5, "断连恢复(杀→拉起→看门狗重建)", True,
                         lambda: item5_disconnect_recovery(env, args, launched))
+
+        if args.telemetry_fps and not args.sync and can_launch:
+            runner.item(9, f"telemetry_fps={args.telemetry_fps} 探针(记录)", False,
+                        lambda: item9_telemetry_fps_probe(args))
     finally:
         if env is not None:
             try:
@@ -414,6 +503,49 @@ def main():
         json.dump(result, f, ensure_ascii=False, indent=2)
     print(f"\n=== smoke 完成:{runner.summary} → {args.out}")
     return 1 if runner.summary["mandatory_failed"] else 0
+
+
+def item6_sync_throughput(args) -> dict:
+    """sync 模式 item6:单配置吞吐量级检查(完整矩阵归 D2 bench)。
+
+    用独立端口(args.port+2)拉 headless sim,不干扰窗口会话。
+    """
+    port = args.port + 2
+    proc = launch_sim(args.sim_app, port=port, headless=True,
+                      log_path=os.path.join(OUT_DIR, "sim_smoke_sync_fps.log"))
+    e = DonkeyDriftEnv(sim_host=args.host, sim_port=port, sim_path="remote",
+                       obs_mode="state", img_enc="none", sync_mode=True,
+                       sync_time_step=args.sync_time_step,
+                       connect_timeout_s=90.0, name="smoke-sync-fps")
+    try:
+        e.reset(options={"spawn": True}, seed=1)
+        d = _fps_probe(e, 300)
+    finally:
+        e.close()
+        stop_sim(proc=proc)
+    ok = d.get("steps_per_s", 0) >= 30
+    return {"status": "pass" if ok else "fail", **d,
+            "note": "sync 吞吐量级检查(≥30 步/s);完整矩阵见 rl_sync_bench.py"}
+
+
+def item9_telemetry_fps_probe(args) -> dict:
+    """可选举证:sim --telemetry_fps N 下异步步率(CLI > cam fps > 默认 20)。"""
+    n = args.telemetry_fps
+    proc = launch_sim(args.sim_app, port=args.port + 3, headless=True,
+                      extra_args=["--telemetry_fps", str(n)],
+                      log_path=os.path.join(OUT_DIR, "sim_smoke_tfps.log"))
+    e = DonkeyDriftEnv(sim_host=args.host, sim_port=args.port + 3, sim_path="remote",
+                       obs_mode="state", img_enc="none", sync_mode=False,
+                       connect_timeout_s=90.0, name="smoke-tfps")
+    try:
+        e.reset()
+        d = _fps_probe(e, 300)
+    finally:
+        e.close()
+        stop_sim(proc=proc)
+    return {"status": "record", **d,
+            "expected_steps_per_s": n,
+            "note": "记录性:CLI --telemetry_fps 优先级探针,非阻断"}
 
 
 def _fps_session(args, headless: bool, keep_graphics: bool, log_name: str) -> dict:
