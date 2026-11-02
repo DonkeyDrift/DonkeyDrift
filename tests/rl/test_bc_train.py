@@ -74,7 +74,7 @@ def test_state_bc_architecture_matches_sb3():
 
 def test_export_and_predict_consistency_state(bc_data_dir, tmp_path):
     """验收重点:导出 zip 后 PPO.load deterministic 前向 == BC torch 前向(atol 1e-5)。"""
-    X, Y = bc_train.load_arrays([bc_data_dir], "state", filter_brake=True)
+    X, Y, _meta = bc_train.load_arrays([bc_data_dir], "state", filter_brake=True)
     meta = bc_train._metas([bc_data_dir])
     tr, va = bc_train.split_by_episode(meta, 0.1, seed=0)
     model = bc_train.StateBC(obs_dim=16)
@@ -94,7 +94,7 @@ def test_export_and_predict_consistency_state(bc_data_dir, tmp_path):
 
 
 def test_export_and_predict_consistency_pixel(bc_data_dir, tmp_path):
-    X, Y = bc_train.load_arrays([bc_data_dir], "pixel", filter_brake=True)
+    X, Y, _meta = bc_train.load_arrays([bc_data_dir], "pixel", filter_brake=True)
     meta = bc_train._metas([bc_data_dir])
     tr, _ = bc_train.split_by_episode(meta, 0.1, seed=0)
     model = bc_train.PixelBC()

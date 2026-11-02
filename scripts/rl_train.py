@@ -183,6 +183,43 @@ class LivenessMonitor:
             raise RuntimeError("liveness: " + "; ".join(problems))
 
 
+class KLToBCMonitor:
+    """policy‖BC 的高斯 KL 只监控不进损失(prereg:默认 off,判定不用 KL,
+    只做事后解读)。每 --kl-every 步对当前 rollout obs 采一条:
+    KL(current DiagGaussian ‖ BC DiagGaussian) → jsonl + 周期打印。"""
+
+    def __init__(self, ref_zip: str, log_path: str, every: int = 1000):
+        from stable_baselines3 import PPO
+        self.ref = PPO.load(ref_zip, device="cpu").policy
+        self.ref.eval()
+        self.every = max(1, int(every))
+        self._fh = open(log_path, "w", encoding="utf-8")
+        self._n = 0
+        self._buf: list = []
+
+    def feed(self, model, obs) -> None:
+        self._n += 1
+        if self._n % self.every:
+            return
+        import torch
+        with torch.no_grad():
+            ot, _ = model.policy.obs_to_tensor(np.asarray(obs)[None])
+            kl = float(model.policy.get_distribution(ot).kl_loss(
+                self.ref.get_distribution(ot)).item())
+        self._buf.append(kl)
+        self._fh.write(json.dumps({"step": self._n, "kl": round(kl, 6)}) + "\n")
+        if len(self._buf) % 5 == 0:
+            mean = statistics.mean(self._buf[-10:])
+            print(f"[kl] step~{self._n} KL(policy‖BC) recent-mean={mean:.4f}", flush=True)
+
+    def close(self):
+        try:
+            self._fh.flush()
+            self._fh.close()
+        except Exception:
+            pass
+
+
 class EvalGate:
     """定期评测过门;过门 → 立即独立命名快照(禁止同路径覆盖)。
 
@@ -318,6 +355,9 @@ def main():
     ap.add_argument("--curriculum-heading", type=float, default=8.0,
                     help="出生朝向噪声上限(度,占位超参非标定)")
     ap.add_argument("--skip-gate", action="store_true", help="跳过收尾校准闸")
+    ap.add_argument("--kl-monitor", action="store_true",
+                    help="M3 D3:KL(policy‖BC) 只监控不进损失(默认 off;参照 = --resume)")
+    ap.add_argument("--kl-every", type=int, default=1000)
     args = ap.parse_args()
 
     from stable_baselines3 import PPO
@@ -350,6 +390,15 @@ def main():
     liveness = LivenessMonitor(env_ref=lambda: vec.envs[0].unwrapped,
                                check_interval_s=5.0)
 
+    kl_mon = None
+    if args.kl_monitor:
+        ref = args.resume or (args.run_name and None)
+        if not ref:
+            raise SystemExit("--kl-monitor 需要 --resume <bc.zip> 作为 KL 参照")
+        kl_mon = KLToBCMonitor(ref, os.path.join(run_dir, "kl_monitor.jsonl"),
+                               every=args.kl_every)
+        print(f"[kl] 监控开启(参照 {ref};只记录不进损失)", flush=True)
+
     class _Adapter(BaseCallback):
         """把 SB3 每步喂给监控与过门(本文件逻辑不直接继承 SB3,便于离线测)。"""
 
@@ -360,6 +409,10 @@ def main():
         def _on_step(self) -> bool:
             liveness.feed(self.num_timesteps, self.locals.get("dones"),
                           self.locals.get("infos"))
+            if kl_mon is not None:
+                new_obs = self.locals.get("new_obs")
+                if new_obs is not None and len(new_obs):
+                    kl_mon.feed(self.model, new_obs[0])
             if self.num_timesteps >= self._gate_at:
                 self._gate_at += args.eval_every
                 eval_gate.run(self.model, self.num_timesteps)
@@ -430,6 +483,8 @@ def main():
             vec.close()
         except Exception as e:
             print(f"[train] vec.close 异常(忽略): {e}", flush=True)
+        if kl_mon is not None:
+            kl_mon.close()
         stop_sim(proc=sim_proc, port=args.port)
     sys.exit(exit_code)
 
