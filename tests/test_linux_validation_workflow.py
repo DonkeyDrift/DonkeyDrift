@@ -72,5 +72,6 @@ def test_workflow_installs_tony007_model_and_vision_dependencies():
     assert "matplotlib" in run
     assert "plotly" in run
     assert "albumentations" in run
+    assert '"pandas==3.0.3"' in run
     assert '"tensorflow==2.15.1"' in run
     assert "tf-keras" not in run
