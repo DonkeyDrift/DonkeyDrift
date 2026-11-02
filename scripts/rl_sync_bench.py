@@ -134,7 +134,7 @@ def bench_two_env(args) -> dict:
     procs = []
     envs = []
     try:
-        for port in (9091, 9092):
+        for port in (9091, 9094):  # sim 实例占 port/port+1,双实例须隔 ≥2(实测教训)
             procs.append(launch_sim(DEFAULT_SIM_APP, port=port, headless=True,
                                     log_path=os.path.join(REPO_ROOT, "outputs",
                                                           f"sim_bench_2env_{port}.log")))
@@ -181,6 +181,7 @@ def bench_two_env(args) -> dict:
 
 
 def _mp_worker(port: int, n: int, q) -> None:
+    # 注意:sim 实例监听 port 与 port+1(lsof LISTEN 实测),多实例端口须隔 ≥2
     """模块级(可 pickle):子进程独占 env+sim 跑吞吐。"""
     try:
         q.put(_run_env(port, n, log_name=f"sim_bench_mp_{port}"))
@@ -194,7 +195,7 @@ def bench_two_env_multiproc(args) -> dict:
 
     q = mp.Queue()
     n_each = args.steps // 2
-    ps = [mp.Process(target=_mp_worker, args=(port, n_each, q)) for port in (9091, 9092)]
+    ps = [mp.Process(target=_mp_worker, args=(port, n_each, q)) for port in (9091, 9094)]
     t0 = time.perf_counter()
     for p in ps:
         p.start()

@@ -281,7 +281,7 @@ def item8_sync_semantics(args) -> dict:
     (idle 1s 出现 +1),且步耗时 75ms vs headless 3ms(每步渲染相机)——
     sync 训练必须 -nographics/keep-gfx。
     """
-    port = args.port + 1
+    port = args.port + 10  # sim 实例占 port 与 port+1(见 _sim_proc 文档),+10 段隔离
     proc = launch_sim(args.sim_app, port=port, headless=True,
                       log_path=os.path.join(OUT_DIR, "sim_smoke_sync_sem.log"))
     env = DonkeyDriftEnv(sim_host=args.host, sim_port=port, sim_path="remote",
@@ -510,7 +510,7 @@ def item6_sync_throughput(args) -> dict:
 
     用独立端口(args.port+2)拉 headless sim,不干扰窗口会话。
     """
-    port = args.port + 2
+    port = args.port + 11  # +10 段隔离(sim 占 port/port+1)
     proc = launch_sim(args.sim_app, port=port, headless=True,
                       log_path=os.path.join(OUT_DIR, "sim_smoke_sync_fps.log"))
     e = DonkeyDriftEnv(sim_host=args.host, sim_port=port, sim_path="remote",
@@ -531,10 +531,10 @@ def item6_sync_throughput(args) -> dict:
 def item9_telemetry_fps_probe(args) -> dict:
     """可选举证:sim --telemetry_fps N 下异步步率(CLI > cam fps > 默认 20)。"""
     n = args.telemetry_fps
-    proc = launch_sim(args.sim_app, port=args.port + 3, headless=True,
+    proc = launch_sim(args.sim_app, port=args.port + 12, headless=True,
                       extra_args=["--telemetry_fps", str(n)],
                       log_path=os.path.join(OUT_DIR, "sim_smoke_tfps.log"))
-    e = DonkeyDriftEnv(sim_host=args.host, sim_port=args.port + 3, sim_path="remote",
+    e = DonkeyDriftEnv(sim_host=args.host, sim_port=args.port + 12, sim_path="remote",
                        obs_mode="state", img_enc="none", sync_mode=False,
                        connect_timeout_s=90.0, name="smoke-tfps")
     try:

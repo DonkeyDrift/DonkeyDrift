@@ -82,6 +82,7 @@ class DonkeyDriftEnv(gym.Env):
         frame_wait_timeout_s: float = 1.0,
         sync_mode: bool = False,
         sync_time_step: float = 0.05,
+        spawn_curriculum=None,
         name: str = "rl-car-0",
     ):
         if obs_mode not in ("state", "pixel"):
@@ -98,6 +99,9 @@ class DonkeyDriftEnv(gym.Env):
         # (sdsim 协议约束;0.05/0.02 合法,1/60 不合法)
         self.sync_mode = bool(sync_mode)
         self.sync_time_step = float(sync_time_step)
+        # M2 D3:出生课程(SpawnCurriculum)。SB3 裸调 reset() 时不带 options,
+        # 有课程则每 episode 内部采样 spawn_cfg(带符号 lateral 在训练侧生成)
+        self._curriculum = spawn_curriculum
         if self.sync_mode:
             ticks = self.sync_time_step / 0.01
             if abs(round(ticks) - ticks) > 1e-6 or ticks < 1:
@@ -392,6 +396,9 @@ class DonkeyDriftEnv(gym.Env):
         options = dict(options or {})
         spawn_cfg = options.get("spawn_cfg")
         want_spawn = bool(spawn_cfg) or bool(options.get("spawn"))
+        if not want_spawn and not options and self._curriculum is not None:
+            spawn_cfg = self._curriculum.sample()  # 课程驱动(每 episode 一次)
+            want_spawn = True
         t0 = time.perf_counter()
 
         if self.sync_mode:
