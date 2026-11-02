@@ -396,7 +396,9 @@ export const installMyPc = async (cfg: {
   user: string;
   password: string;
   port?: number;
-  python_path: string;
+  repo_path: string;
+  gym_path: string;
+  python_path?: string;
   key_path?: string;
 }) => {
   const response = await api.post('/trainer/mypc/install', cfg);

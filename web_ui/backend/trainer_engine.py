@@ -52,9 +52,8 @@ class TrainingJob:
     id: str
     # 'local' = on the machine running this backend; 'mypc' = on the user's
     # own computer (SSH callback, config train_my_pc.conf); 'mypc_install' =
-    # dependency install job on the user's computer (pip install
-    # "donkeydrifter[pc]"); 'online' = on the configured cloud server
-    # (config train_online.conf).
+    # shared uv environment setup on the user's computer; 'online' = on the
+    # configured cloud server (config train_online.conf).
     mode: Literal['local', 'mypc', 'mypc_install', 'online']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
     # SSE 订阅者队列集合（#502）：多条连接同看一个 job 时各收全量副本；
@@ -389,17 +388,13 @@ class TrainingJobManager:
         await self._pump_thread_queue(job, thread_queue)
 
     # ------------------------------------------------------------------
-    # My-PC dependency install (pip install "donkeydrifter[pc]")
+    # My-PC shared uv environment install
     # ------------------------------------------------------------------
     async def run_mypc_install(self, job: TrainingJob, host: str, user: str,
-                               password: str, python_path: str, port: int = 22,
+                               password: str, repo_path: str, gym_path: str,
+                               python_path: str = "", port: int = 22,
                                key_path: str = ""):
-        """Install training dependencies on the user's own computer.
-
-        Runs ``mypc_installer.install_mypc_environment`` in a worker thread
-        (Paramiko is blocking) and streams its log events into the job queue,
-        so the install job reuses the training job status / SSE endpoints.
-        """
+        """Run the phase-based installer and bridge its logs into the job queue."""
         job.status = 'running'
 
         thread_queue: queue.Queue = queue.Queue()
@@ -412,16 +407,20 @@ class TrainingJobManager:
                     host=host,
                     user=user,
                     password=password,
+                    repo_path=repo_path,
+                    gym_path=gym_path,
                     python_path=python_path,
                     port=port,
                     log_queue=thread_queue,
                     stop_event=job.stop_event,
                     key_path=key_path,
                 )
-                if code != 0 and not job.stop_event.is_set():
+                if code == -1 and job.stop_event.is_set():
+                    job.status = 'stopped'
+                elif code != 0:
                     thread_queue.put({
                         "type": "error",
-                        "message": f"pip install 失败，退出码: {code}",
+                        "message": f"环境配置失败，退出码: {code}",
                     })
             except Exception as e:
                 thread_queue.put({"type": "error", "message": str(e)})

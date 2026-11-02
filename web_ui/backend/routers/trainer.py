@@ -78,12 +78,14 @@ class MyPcProbeRequest(BaseModel):
 
 
 class MyPcInstallRequest(BaseModel):
-    """一键安装训练依赖：需要 probe 探测到的 python 路径。"""
+    """一键配置共享 uv 环境；python_path 仅用于兼容旧客户端。"""
     host: str
     user: str
     password: str = ""
     port: int = 22
-    python_path: str
+    repo_path: str
+    gym_path: str
+    python_path: str = ""
     key_path: str = ""
 
 
@@ -200,17 +202,11 @@ async def probe_mypc(request: MyPcProbeRequest):
 
 @router.post("/mypc/install")
 async def install_mypc(request: MyPcInstallRequest):
-    """One-click dependency install for 'This Computer' (mypc) training.
-
-    Requires a python path discovered by a prior /mypc/probe call; runs
-    ``<python> -m pip install --upgrade "donkeydrifter[pc]"`` over SSH as a
-    job whose logs stream through the shared /train/{job_id}/logs SSE
-    endpoint (the job mode is 'mypc_install').
-    """
-    if not request.python_path or not request.python_path.strip():
+    """Create a mypc_install job; logs keep using the shared SSE endpoint."""
+    if not request.repo_path.strip() or not request.gym_path.strip():
         raise HTTPException(
             status_code=400,
-            detail="缺少 Python 解释器路径，请先运行环境检测。",
+            detail="DonkeyDrift 和 GymDonkeyCar 仓库路径不能为空。",
         )
 
     job = job_manager.create_job("mypc_install")
@@ -220,6 +216,8 @@ async def install_mypc(request: MyPcInstallRequest):
             host=request.host,
             user=request.user,
             password=request.password,
+            repo_path=request.repo_path,
+            gym_path=request.gym_path,
             python_path=request.python_path,
             port=request.port,
             key_path=request.key_path,
