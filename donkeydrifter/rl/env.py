@@ -328,10 +328,26 @@ class DonkeyDriftEnv(gym.Env):
 
     def _build_obs(self) -> Tuple[np.ndarray, list]:
         """按 obs_mode 组观测;返回 (obs, defects)。坏字段记 defects 补零。"""
+        if self.obs_mode == "pixel":
+            return np.asarray(self._cam.frame, dtype=np.uint8), []
+        return self._build_state_vec(self._prev_action)
+
+    def state_vector(self, prev_action: Optional[Tuple[float, float]] = None) -> np.ndarray:
+        """公开访问器(M3 D0):训练 state obs 的**同一函数**产出,供采样器落
+        state_vec——数据集口径与策略观测口径由此强制一致(两处各写一份是
+        数据集级 bug 的温床)。pixel 模式的 env 也可调用。
+
+        prev_action:观测里「产生该观测的那条动作」[steer, throttle](训练时
+        = step() 的 clip 后动作;采样时 = 上一帧人驾动作,brake 不入)。
+        None → 用 env 内部 _prev_action(step 路径语义)。
+        """
+        pa = self._prev_action if prev_action is None else (float(prev_action[0]), float(prev_action[1]))
+        return self._build_state_vec(pa)[0]
+
+    def _build_state_vec(self, prev_action: Tuple[float, float]) -> Tuple[np.ndarray, list]:
+        """16 维 state 向量(声明式缩放,下标见 vec 列表);坏字段记 defects 补零。"""
         info = getattr(self._cam, "info", {}) or {}
         defects: list = []
-        if self.obs_mode == "pixel":
-            return np.asarray(self._cam.frame, dtype=np.uint8), defects
 
         def num(key, idx=None):
             v = info.get(key)
@@ -355,7 +371,7 @@ class DonkeyDriftEnv(gym.Env):
             num("cte"), num("speed"), num("forward_vel"),
             *vel, *gyro, *accel,
             num("pos", 0), num("pos", 2),  # X-Z 地面平面(y=高度不入)
-            self._prev_action[0], self._prev_action[1],
+            prev_action[0], prev_action[1],
         ]
         out = np.zeros(STATE_OBS_DIM, dtype=np.float32)
         for i, x in enumerate(vec):
