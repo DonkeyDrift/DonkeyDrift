@@ -363,7 +363,7 @@ WebSocket `/api/drive/ws` 是**双角色桥**：
 | 漂移标定/分析 | `generate_apriltag.py`、`calibrate_field_homography.py`、`calibrate_overhead_camera.py`、`simulate_drift_controller.py`、`analyze_throttle_pulses.py`、`build_drift_clip.py`、`measure_loop_latency.py` |
 | 模型转换/优化 | `convert_to_tflite.py`、`tflite_convert.py`、`freeze_model.py`、`tflite_profile.py`、`migrate_model_names.py` |
 | 训练辅助 | `multi_train.py`（多配置并行）、`preview_augumentations.py` |
-| 性能/调试 | `profile.py`、`profile_coral.py`、`remote_cam_view.py`、`remote_cam_view_tcp.py`、`graph_listener.py`、`salient_vis_listener.py`、`hsv_picker.py`、`pigpio_donkey.py` |
+| 性能/调试 | `tf_profile_demo.py`(原 profile.py,2026-11-02 改名:与 stdlib profile 撞名遮蔽 torch 导入链)、`profile_coral.py`、`remote_cam_view.py`、`remote_cam_view_tcp.py`、`graph_listener.py`、`salient_vis_listener.py`、`hsv_picker.py`、`pigpio_donkey.py` |
 | 数据迁移 | `convert_to_tub_v2.py` |
 
 ---

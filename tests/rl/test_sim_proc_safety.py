@@ -12,6 +12,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 import _sim_proc  # noqa: E402
+sys.path[:] = [p for p in sys.path
+               if not p.endswith(os.path.join("DonkeyDrift", "scripts"))]  # 防 stdlib 遮蔽残留
 
 
 class _DeadProc:
