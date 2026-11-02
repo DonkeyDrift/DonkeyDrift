@@ -14,12 +14,21 @@ from donkeydrifter.rl.env import DonkeyDriftEnv
 from donkeydrifter.rl.rewards import DecomposedRewardWrapper, RewardConfig, reward
 
 
-class _FakeViewer:
+class _FakeHandler:
+    """镜像真实结构:状态在 handler(DonkeyUnitySimHandler)上。"""
+
     def __init__(self, active_node=0, total_nodes=1):
         self.active_node = active_node
         self.total_nodes = total_nodes
         self.is_game_over = lambda: False
         self.calc_reward = lambda done: 0.0
+
+
+class _FakeViewer:
+    """壳类 DonkeyUnitySimContoller:仅 handler 委托,无状态。"""
+
+    def __init__(self, active_node=0, total_nodes=1):
+        self.handler = _FakeHandler(active_node, total_nodes)
 
 
 def _make_env(monkeypatch, active_node=None, total_nodes=None):
