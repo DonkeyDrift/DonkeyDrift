@@ -305,7 +305,7 @@ class DonkeyGymEnv(object):
         """
         if raw_frame is None:
             return
-        if self._vflip or self._hflip:
+        if getattr(self, "_vflip", False) or getattr(self, "_hflip", False):
             # 180° = vflip + hflip；ascontiguousarray 还原负步长视图，避免下游
             # cv2.resize 对非连续内存报错。
             raw_frame = raw_frame[::(-1 if self._vflip else 1),

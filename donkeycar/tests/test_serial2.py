@@ -13,7 +13,7 @@
 
 import time
 import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------

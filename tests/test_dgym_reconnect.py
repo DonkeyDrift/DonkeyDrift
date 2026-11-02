@@ -5,8 +5,17 @@ update() 线程回到循环顶后自行 _try_connect——但模拟器断连后 
 线程往往卡死在 gym_donkeycar observe() 的无限自旋里，永远回不到循环
 顶部，车端从此永久掉线（Web UI 表现为「车端在线但模拟器始终离线」）。
 
-修复后：重连在主循环侧（run_threaded 调用方线程）同步完成「关闭+
-重连」，且与 update() 线程的重连路径互斥（_reconnect_lock）。
+现行契约（59b1b6cf 起）：close+gym.make+reset（含模拟器 load_scene）
+耗时数秒，在 run_threaded 里同步执行会卡住 60Hz 车辆循环、转向/油门
+断供，故重建下放给专用后台线程（dgym-reconnect）。主循环侧
+（run_threaded/_request_reconnect）只投递请求（_post_rebuild）立即
+返回、零阻塞；worker 串行消费请求执行 _rebuild_connection（关闭+
+重连），与 update() 线程的重连路径以 _reconnect_lock 互斥；
+coalesce/only_if_stale 双检语义在 worker 执行时刻评估，挂起期重复
+请求合并、force 可升级 watchdog。
+
+因此触发重建的用例必须等后台线程完成调用后再断言（确定性条件轮询，
+见 _wait_until），不能在投递后立刻按同步调用断言。
 """
 import threading
 import time
@@ -17,9 +26,27 @@ import pytest
 from donkeycar.parts import dgym
 
 
+def _wait_until(predicate, timeout=5.0, interval=0.005, what="后台条件成立"):
+    """确定性等待：轮询 predicate 直到成立或超时（超时即 fail）。
+
+    后台重建线程被唤醒的时刻不受调用方控制，固定长度 sleep 既拖慢
+    测试、在慢机上又仍可能不足；轮询谓词到成立为止才可靠。
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    pytest.fail(f"等待超时（{timeout}s）：{what}")
+
+
 @pytest.fixture
 def env():
-    """构造不真正连接模拟器的 DonkeyGymEnv（_try_connect 全程 mock）。"""
+    """构造不真正连接模拟器的 DonkeyGymEnv（_try_connect 全程 mock）。
+
+    每个用例结束后停掉后台重建线程（dgym-reconnect），避免 worker
+    存活到下一个用例、在 mock 撤销后调用真实 _close_env/_try_connect。
+    """
     conf = {"img_w": 16, "img_h": 12, "render_img_w": 32, "render_img_h": 24,
             "watchdog_sec": 0.2}
     with mock.patch.object(dgym.DonkeyGymEnv, "_try_connect", return_value=None), \
@@ -29,7 +56,12 @@ def env():
     # _try_connect 被 mock，成功/失败路径设置的属性需手动补齐
     e.env = None
     e.connected = False
-    return e
+    yield e
+    # 停止后台重建线程：置 running=False 并唤醒条件变量，等其退出
+    e.running = False
+    with e._rebuild_cond:
+        e._rebuild_cond.notify_all()
+    e._rebuild_thread.join(timeout=2.0)
 
 
 class TestForcedReconnectRebuilds:
@@ -39,6 +71,10 @@ class TestForcedReconnectRebuilds:
         with mock.patch.object(env, "_close_env") as close, \
              mock.patch.object(env, "_try_connect") as connect:
             env._request_reconnect()
+            # 请求只是投递给后台线程，须等 worker 真正执行关闭+重连
+            _wait_until(
+                lambda: close.call_count >= 1 and connect.call_count >= 1,
+                what="后台线程执行 _close_env 与 _try_connect")
         close.assert_called_once()
         connect.assert_called_once()
 
@@ -50,6 +86,8 @@ class TestForcedReconnectRebuilds:
              mock.patch.object(env, "_try_connect",
                                side_effect=lambda: order.append("connect")):
             env._request_reconnect()
+            _wait_until(lambda: len(order) >= 2,
+                        what="后台线程完成 close→connect 两次调用")
         assert order == ["close", "connect"]
 
     def test_rebuild_reports_success(self, env):
@@ -198,6 +236,9 @@ class TestWatchdogUsesTelemetryTs:
         with mock.patch.object(env, "_rebuild_connection",
                                return_value=True) as rebuild:
             env.run_threaded(0.0, 0.0)
+            # 看门狗只投递请求，重建由后台线程异步执行
+            _wait_until(lambda: rebuild.call_count >= 1,
+                        what="看门狗投递的后台重建被执行")
         rebuild.assert_called_once()
 
     def test_connected_refreshed_from_health(self, env):
@@ -222,6 +263,8 @@ class TestWatchdogRebuilds:
         with mock.patch.object(env, "_rebuild_connection",
                                return_value=True) as rebuild:
             env.run_threaded(0.0, 0.0)
+            _wait_until(lambda: rebuild.call_count >= 1,
+                        what="看门狗投递的后台重建被执行")
         rebuild.assert_called_once()
 
     def test_watchdog_quiet_when_frames_flow(self, env):
@@ -237,6 +280,8 @@ class TestWatchdogRebuilds:
         env.env = None
         with mock.patch.object(env, "_rebuild_connection", return_value=True) as r:
             env.run_threaded(0.0, 0.0, reconnect=True)
+            _wait_until(lambda: r.call_count >= 1,
+                        what="强制重连请求被后台线程执行")
         r.assert_called_once()
 
 
