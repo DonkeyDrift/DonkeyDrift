@@ -51,9 +51,13 @@
 ## 绝对门(补充锁定,D4 定标后填写;同样先于评测提交)
 
 - 定标数据源:M2 `snap_100000` + 对照臂 C 最优种子在 held-out 口径的实测分布;
-- 门值(填入后锁定):
-  - `ABS_MEW_REW_MIN = <待 D4 填写>`
-  - `ABS_OFFTRACK_MAX = <待 D4 填写>`
+- 门值(2026-11-02 定标锁定;定标数据 = M2 snap_100000 held-out12 mean 34.75 /
+  对照臂 300k 三种子 held-out12 mean 48.25/42.97/59.00,均值 50.07,offtrack 全 1.0):
+  - `ABS_MEAN_REW_MIN = 40.0`(对照臂均值 −20%:落在 M2 模型 34.7 之下、
+    对照最低种子 42.97 之上——M2 模型不过门,对照全过,区分度合理)
+  - `ABS_OFFTRACK_MAX = 1.0`(不约束:300k 预算内所有模型 offtrack=1.0,
+    完赛不是本预算的现实目标,如实记录;后续预算增长再收紧)
+- 定标评测 json:outputs/rl_eval/eval_{m2snap100,ctrl_s7,ctrl_s8,ctrl_s9}_heldout12.json
 - A/B 评测时两臂分别过门;「BC 臂未达绝对门而对照达标」按 H2 处理。
 
 ## 公平性声明
