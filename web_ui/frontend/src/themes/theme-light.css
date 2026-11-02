@@ -717,12 +717,6 @@ html.theme-light button.inline-flex.rounded-lg.bg-zinc-800:not(.border) {
   outline-offset: -1px;
 }
 
-/* ---------- Toggle switch: ESP32 .toggleSwitch colors ---------- */
-/* component: src/components/SimulatorConfig.tsx (DONKEY_GYM toggle) */
-html.theme-light button[aria-label="Toggle simulator mode"].bg-zinc-700 {
-  background-color: var(--off);
-}
-
 /* ---------- Dialogs: ESP32 .dialog amber frame (after generic panel rules) ---------- */
 html.theme-light .rounded-xl.bg-zinc-900\/70 {
   outline: 1px solid var(--warn-a60);

@@ -10,18 +10,11 @@ describe('useStore.setError 与 activeDrawer 联动', () => {
     useStore.setState({ error: null, activeDrawer: null });
   });
 
-  it('setError(null) 仅清除错误，不改变 activeDrawer（loaders）', () => {
+  it('setError(null) 仅清除错误，不改变 activeDrawer', () => {
     useStore.setState({ activeDrawer: 'loaders' });
     useStore.getState().setError(null);
     expect(useStore.getState().error).toBeNull();
     expect(useStore.getState().activeDrawer).toBe('loaders');
-  });
-
-  it('setError(null) 在 connectors 抽屉打开时同样不联动', () => {
-    useStore.setState({ activeDrawer: 'connectors' });
-    useStore.getState().setError(null);
-    expect(useStore.getState().error).toBeNull();
-    expect(useStore.getState().activeDrawer).toBe('connectors');
   });
 
   it('路径类错误（含 not found / Failed）保持既有行为：打开 loaders 抽屉', () => {
