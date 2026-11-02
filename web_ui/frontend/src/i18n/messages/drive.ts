@@ -189,8 +189,15 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.targetRestartFailed': '重启驾驶失败',
     'drive.targetRestartFallbackLink': '打开 Donkey 菜单手动启动驾驶',
     'drive.targetLoadConfigFirst': '请先在左侧 Loaders 抽屉载入配置目录',
-    'drive.targetSimNotFound': '未发现模拟器：请先启动 DonkeySim，或到 Connectors 抽屉手动配置',
+    'drive.targetSimNotFound': '未发现模拟器：请先启动 DonkeySim 后重试',
     'drive.targetSaveFailed': '保存驾驶目标失败',
+    // DriveTargetCard 模拟器选择区（target=sim 展开）
+    'drive.simScanning': '正在扫描局域网模拟器…',
+    'drive.simFoundTitle': '发现模拟器，点选即保存',
+    'drive.simNotFoundHint': '未发现模拟器：请先启动 DonkeySim，或在下方手动输入地址',
+    'drive.simHostLabel': '模拟器地址',
+    'drive.simHostPlaceholder': '如 192.168.3.55',
+    'drive.simHostSelected': '已选择 {ip}',
     // GamepadBridgeCard
     'drive.bridgeTitle': '手柄桥模式',
     'drive.bridgeSubtitle': '把车上 ESP32 切成 BLE 手柄桥，CT-8B 遥控器当蓝牙手柄玩模拟器',
@@ -401,8 +408,15 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     'drive.targetRestartFailed': 'Failed to restart driving',
     'drive.targetRestartFallbackLink': 'Open the Donkey menu to start driving manually',
     'drive.targetLoadConfigFirst': 'Load a config directory from the Loaders drawer on the left first',
-    'drive.targetSimNotFound': 'No simulator found: start DonkeySim first, or configure it manually in the Connectors drawer',
+    'drive.targetSimNotFound': 'No simulator found: start DonkeySim first, then retry',
     'drive.targetSaveFailed': 'Failed to save drive target',
+    // DriveTargetCard simulator picker (shown when target=sim)
+    'drive.simScanning': 'Scanning the LAN for simulators…',
+    'drive.simFoundTitle': 'Discovered simulators — click to save',
+    'drive.simNotFoundHint': 'No simulator found: start DonkeySim first, or type the address below',
+    'drive.simHostLabel': 'Simulator address',
+    'drive.simHostPlaceholder': 'e.g. 192.168.3.55',
+    'drive.simHostSelected': 'Selected {ip}',
     // GamepadBridgeCard
     'drive.bridgeTitle': 'Gamepad Bridge',
     'drive.bridgeSubtitle': 'Reboot the car ESP32 into a BLE gamepad bridge so the CT-8B radio works as a Bluetooth gamepad for the simulator',

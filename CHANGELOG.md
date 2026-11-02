@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-11-02 (274)
+
+- feat(webui): 删除左侧「连接器」抽屉，模拟器选择并入 Drive「驾驶目标」卡片——切到模拟器目标后自动发现局域网模拟器，点选 IP 即自动保存
+  - **背景**：模拟器选择原先藏在左缘「连接器(Connectors)」抽屉的 SimulatorConfig 卡（SIM_HOST 输入 +「启用模拟器模式」开关 +「自动发现模拟器」按钮 + IP 列表 +「保存配置」按钮），与 Drive 页「驾驶目标」卡的真车/模拟器切换功能重复且互不可见；按用户要求删除抽屉入口，只保留驾驶目标一处入口。
+  - **删除**：`SidePanel.tsx` 连接器抽屉与触发按钮（Loaders 抽屉的 ConfigLoader 保留）；`SimulatorConfig.tsx` 组件删除；`useStore.ts` `activeDrawer` 类型收窄为 `'loaders' | null`；`tubnav.ts` 删除 SimulatorConfig 专用 22 个 i18n 键（`tub.notAvailable` 因 TubLibrary 在用以新注释保留）；`common.ts` 删 `common.sidePanel.connectors`；两个主题 css 删 `Toggle simulator mode` 死规则；App.tsx 注释同步。
+  - **迁入**（`DriveTargetCard.tsx`）：`target === 'sim'` 时卡片内以 border-t 展开模拟器选择区——进入即自动扫描局域网（无「自动发现」按钮，同次停留不重扫、切走再切回重扫），IP 列表样式对齐原 SimulatorConfig（Wifi + `ip:port` + 延迟，当前 SIM_HOST 高亮）；点选 IP 立即自动保存 `{SIM_HOST, DONKEY_GYM: true}` 并进入既有「已保存待重启」+ 重启驾驶流程（无「保存配置」按钮，点当前已选 IP 不重复保存）；保留 SIM_HOST 手动输入兜底（失焦/回车自动保存）。「启用模拟器模式」开关由既有真车/模拟器分段切换替代。
+  - **i18n**：`drive.ts` 新增 6 键（simScanning/simFoundTitle/simNotFoundHint/simHostLabel/simHostPlaceholder/simHostSelected，zh/en 成对）；`drive.targetSimNotFound` 文案去掉已删除的 Connectors 抽屉指引。
+  - **测试**：`DriveTargetCard.test.tsx` +4（进入 sim 自动发现并渲染列表、点选自动保存+待重启、点当前已选不重复保存、未发现提示+手动输入自动保存）；`useStore.test.ts` 删 connectors 抽屉回归用例（loaders 姊妹用例覆盖）。前端 58 文件 398 测试全绿、tsc/eslint 通过。
+
 ## 2026-10-30 (273)
 
 - fix(drive/camera): 审计批次 2 项修复——键盘驾驶输入框 keydown 误触（#512）+ Webcam 灰度分支双根因（#513）；另按标准 lint 验证清理 6 个既存未使用绑定/参数（无行为变化）

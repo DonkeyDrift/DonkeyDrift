@@ -87,7 +87,7 @@ interface AppState {
   isPlaying: boolean;
   isLooping: boolean;
   error: string | null;
-  activeDrawer: 'loaders' | 'connectors' | null;
+  activeDrawer: 'loaders' | null;
   // 配置自动加载每页面生命周期只尝试一次（ConfigLoader 随抽屉开关反复挂载，
   // 不能用组件内 ref 记忆）；不持久化，刷新页面后重新尝试
   configAutoLoadTried: boolean;
@@ -119,7 +119,7 @@ interface AppState {
   setIsLooping: (isLooping: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  setActiveDrawer: (drawer: 'loaders' | 'connectors' | null) => void;
+  setActiveDrawer: (drawer: 'loaders' | null) => void;
   setSelectionRange: (startIndex: number, endIndex: number) => void;
   clearSelectionRange: () => void;
   undoSelectionRange: () => void;
@@ -165,7 +165,7 @@ export const useStore = create<AppState>()(
       isPlaying: false,
       isLooping: false,
       error: null,
-      activeDrawer: 'loaders' as 'loaders' | 'connectors' | null,
+      activeDrawer: 'loaders',
       configAutoLoadTried: false,
       selectionStartIndex: null,
       selectionEndIndex: null,
