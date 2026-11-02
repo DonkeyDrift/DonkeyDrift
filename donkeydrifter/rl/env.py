@@ -246,6 +246,15 @@ class DonkeyDriftEnv(gym.Env):
             f"sim {self.sim_host}:{self.sim_port} 在 {timeout_s:.0f}s 内未建立"
             "健康连接(同步模式)")
 
+    def _wait_sync_answer(self, viewer, ts0: float, timeout_s: float) -> bool:
+        """等 sync reset 应答帧(viewer.time_received 前进);超时 False。"""
+        deadline = time.perf_counter() + timeout_s
+        while time.perf_counter() < deadline:
+            if viewer.time_received != ts0:
+                return True
+            time.sleep(0.002)
+        return False
+
     def _step_sync_once(self, steer: float, throttle: float):
         """一控制一帧:直连 fork DonkeyEnv.step(take_action+observe)。
 
@@ -376,22 +385,36 @@ class DonkeyDriftEnv(gym.Env):
         t0 = time.perf_counter()
 
         if self.sync_mode:
-            # sync 应答路径(fork 规范):viewer.reset 发 reset_car(+seed/
-            # spawn_cfg)并自旋等应答帧、清 episode 状态。⚠ 与异步模式语义
-            # 差异:sync 下默认 reset = reset_car(回出生点),不再走
-            # reset_to_nearest(就近复位)——双路径会互相覆盖复位结果;
-            # 训练 reset 一律走出生课程(spawn_cfg),语义差异仅影响裸 reset。
+            # sync 应答路径:复刻 fork viewer.reset 的序列(清 episode 状态 →
+            # 发 reset_car → 等应答帧 → 手刹步进一帧取复位后遥测),但消息
+            # **自建字面透传**——不经 send_reset_car,它会在 seed 存在时对
+            # lateral_offset 再做一次隐藏 ±随机(违反「带符号随机在训练侧」
+            # 且使 spawn 语义随模式漂移,订单已核事实 4)。⚠ 语义声明:sync
+            # 裸 reset = reset_car(回出生点),与异步的 reset_to_nearest 是
+            # 两条互斥通道(双发会互相覆盖);训练 reset 一律走出生课程。
             self._sync_ensure_connected(self.connect_timeout_s)
             raw = self._cam._raw_env()
             viewer = getattr(raw, "viewer", None)
-            if viewer is None:
-                raise ConnectionError("sync reset:底层 viewer 不可达")
-            # fork viewer.reset 从自身属性读 spawn_cfg(构造期来自 conf);
-            # 训练侧按 episode 动态生成 → 每次 reset 前写入(有意的接线点)
-            viewer.spawn_cfg = dict(spawn_cfg) if (want_spawn and isinstance(spawn_cfg, dict)) else None
-            _obs_raw, info_raw = raw.reset(seed=seed)
+            # fork 结构:壳类 DonkeyUnitySimContoller 全部委托给
+            # self.handler(DonkeyUnitySimHandler,状态承载者:
+            # _clear_episode_state/time_received/send_control/observe 都在它上)
+            handler = getattr(viewer, "handler", None) or viewer
+            if handler is None or not hasattr(handler, "_clear_episode_state"):
+                raise ConnectionError("sync reset:底层 viewer.handler 不可达")
+            msg: Dict[str, Any] = {"msg_type": "reset_car"}
+            if want_spawn and isinstance(spawn_cfg, dict):
+                msg.update(spawn_cfg)  # 字面透传(含已带符号的 lateral_offset)
+            if seed is not None:
+                msg["seed"] = int(seed)
+            handler._clear_episode_state()
+            ts0 = handler.time_received
+            sent = self._send_sim_message(msg)
+            answered = self._wait_sync_answer(handler, ts0, 10.0)
+            # 手刹步进一帧:取复位后遥测(sim 静止,不引入位移)
+            handler.send_control(0.0, 0.0, 1.0)
+            _o, _r, _d, info_raw = handler.observe()
             if self.obs_mode == "pixel":
-                self._cam._set_frame(_obs_raw)
+                self._cam._set_frame(_o)
             self._cam.info = info_raw
             elapsed = time.perf_counter() - t0
             self._step_count = 0
@@ -399,7 +422,8 @@ class DonkeyDriftEnv(gym.Env):
             obs, defects = self._build_obs()
             info = self._build_info()
             info["rl/reset_elapsed_s"] = elapsed
-            info["rl/reset_mode"] = "reset_car+spawn" if want_spawn else "reset_car"
+            info["rl/reset_mode"] = ("reset_car+spawn" if want_spawn else "reset_car")
+            info["rl/reset_answered"] = bool(answered and sent)
             info["rl/reset_detected_move"] = None  # 应答路径无位姿跳变检测语义
             if defects:
                 info["rl/obs_defects"] = defects
