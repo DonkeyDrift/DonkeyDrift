@@ -1,0 +1,196 @@
+{
+  "meta": {
+    "sim_app": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app",
+    "started": "2026-11-02 08:08:06",
+    "sb3": "2.9.2",
+    "torch": "2.15.0"
+  },
+  "throughput": [
+    {
+      "config": {
+        "port": 9091,
+        "mode": "sync",
+        "sync_time_step": 0.05,
+        "obs": "state"
+      },
+      "n_steps": 1000,
+      "steps_per_s": 335.4,
+      "step_ms_p50": 3.03,
+      "step_ms_p95": 4.1,
+      "stale": 0,
+      "sim_cpu_pct_samples": [
+        27.8,
+        65.9
+      ],
+      "label": "sync_0.05_state"
+    },
+    {
+      "config": {
+        "port": 9091,
+        "mode": "sync",
+        "sync_time_step": 0.02,
+        "obs": "state"
+      },
+      "n_steps": 1000,
+      "steps_per_s": 333.64,
+      "step_ms_p50": 3.03,
+      "step_ms_p95": 4.11,
+      "stale": 0,
+      "sim_cpu_pct_samples": [
+        27.1,
+        49.3
+      ],
+      "label": "sync_0.02_state"
+    },
+    {
+      "config": {
+        "port": 9091,
+        "mode": "async",
+        "sync_time_step": 0.05,
+        "obs": "state"
+      },
+      "n_steps": 1000,
+      "steps_per_s": 20.0,
+      "step_ms_p50": 49.98,
+      "step_ms_p95": 52.44,
+      "stale": 0,
+      "sim_cpu_pct_samples": [
+        26.9,
+        27.8,
+        27.3,
+        28.4,
+        27.8,
+        27.2,
+        27.3,
+        27.1,
+        27.4,
+        27.2,
+        27.6,
+        28.0,
+        27.5,
+        27.5,
+        27.3,
+        27.2,
+        27.5,
+        27.2,
+        28.1,
+        27.6,
+        27.5,
+        27.6,
+        27.3,
+        27.7,
+        27.0
+      ],
+      "label": "async_state_ref"
+    },
+    {
+      "config": {
+        "port": 9091,
+        "mode": "sync",
+        "sync_time_step": 0.05,
+        "obs": "pixel"
+      },
+      "n_steps": 200,
+      "steps_per_s": 204.33,
+      "step_ms_p50": 4.57,
+      "step_ms_p95": 6.06,
+      "stale": 0,
+      "sim_cpu_pct_samples": [
+        28.8
+      ],
+      "label": "sync_0.05_pixel"
+    }
+  ],
+  "two_env_single_proc": {
+    "mode": "single_process_interleaved",
+    "total_steps": 1000,
+    "wall_elapsed_s": 2.98,
+    "combined_steps_per_s": 335.62,
+    "per_step_ms_p50": 3.01,
+    "sim_cpu_pct": [
+      46.6,
+      46.4
+    ],
+    "note": "单进程轮转受 GIL 约束;combined ≈ 单 env 吞吐即 GIL 顶死,M3 多开须进程隔离(--multi 变体给参照)"
+  },
+  "two_env_two_proc": {
+    "mode": "two_process_isolated",
+    "wall_elapsed_s": 8.57,
+    "combined_steps_per_s": 683.63,
+    "per_env": [
+      {
+        "config": {
+          "port": 9091,
+          "mode": "sync",
+          "sync_time_step": 0.05,
+          "obs": "state"
+        },
+        "n_steps": 500,
+        "steps_per_s": 341.66,
+        "step_ms_p50": 2.89,
+        "step_ms_p95": 4.13,
+        "stale": 0,
+        "sim_cpu_pct_samples": [
+          26.8
+        ]
+      },
+      {
+        "config": {
+          "port": 9092,
+          "mode": "sync",
+          "sync_time_step": 0.05,
+          "obs": "state"
+        },
+        "n_steps": 500,
+        "steps_per_s": 341.97,
+        "step_ms_p50": 2.88,
+        "step_ms_p95": 4.12,
+        "stale": 0,
+        "sim_cpu_pct_samples": [
+          27.6
+        ]
+      }
+    ],
+    "note": "双进程各自启停 sim,墙钟含两次 sim 启动(~20s),combined 为保守下界"
+  },
+  "determinism": {
+    "same_instance": {
+      "pos": {
+        "max": 0.026537895202599415,
+        "mean": 0.01935804752340775
+      },
+      "cte": {
+        "max": 0.12567615509032937,
+        "mean": 0.02243660964499053
+      },
+      "speed": {
+        "max": 0.259453058242798,
+        "mean": 0.0033365274886043936
+      },
+      "yaw": {
+        "max": 5.188064575195995,
+        "mean": 0.07691857582910032
+      },
+      "note": "同 sim 实例两次 reset(seed=42)+ 同动作序列"
+    },
+    "fresh_instance": {
+      "pos": {
+        "max": 0.0,
+        "mean": 0.0
+      },
+      "cte": {
+        "max": 0.0,
+        "mean": 0.0
+      },
+      "speed": {
+        "max": 0.0,
+        "mean": 0.0
+      },
+      "yaw": {
+        "max": 0.0,
+        "mean": 0.0
+      },
+      "note": "重拉 sim 实例后同 seed 同序列(跨实例参考)"
+    }
+  }
+}
