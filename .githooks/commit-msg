@@ -1,0 +1,17 @@
+#!/bin/sh
+
+message_file=$1
+IFS= read -r subject < "$message_file"
+
+if ! printf '%s\n' "$subject" | grep -Eq '^feat(\([^()]+\))?!?:'; then
+    exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+cd "$repo_root" || exit 1
+
+if ! python3 scripts/linux_validation.py check --staged; then
+    echo "commit-msg: feature commit has no current Linux validation credential." >&2
+    echo "Run: python3 scripts/linux_validation.py run --staged" >&2
+    exit 1
+fi
