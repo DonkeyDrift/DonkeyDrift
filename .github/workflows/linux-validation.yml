@@ -45,7 +45,7 @@ jobs:
           patch -p1 -d "$SITE_PACKAGES" \
             < scripts/patches/gym-donkeycar-linux-resilience.patch
       - name: Run root tests
-        run: python -m pytest -q
+        run: python -m pytest -vv --maxfail=1
       - name: Run backend tests
         working-directory: web_ui/backend
         run: python -m pytest tests -q
