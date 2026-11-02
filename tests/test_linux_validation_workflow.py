@@ -56,3 +56,14 @@ def test_patch_step_applies_gym_resilience_patch_to_installed_package():
     run = patch_steps[0]["run"]
     assert "scripts/patches/gym-donkeycar-linux-resilience.patch" in run
     assert "gym_donkeycar" in run
+
+
+def test_workflow_installs_opencv_for_root_test_collection():
+    _, data, _ = _load_workflow()
+    install_steps = [
+        step for step in data["jobs"]["linux-validation"]["steps"]
+        if step.get("name") == "Install dependencies"
+    ]
+
+    assert len(install_steps) == 1
+    assert "opencv-python-headless" in install_steps[0]["run"]

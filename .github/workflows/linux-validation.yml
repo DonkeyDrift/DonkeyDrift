@@ -28,6 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
           python -m pip install -r web_ui/backend/requirements.txt
+          python -m pip install opencv-python-headless
           # PyPI 上的 gym-donkeycar 只发布到 1.0.13；1.3.1 只存在于 upstream
           # git 仓库（其 gym_donkeycar/version.txt 为 1.3.1）。锁定 commit
           # a1f4ca6 与 TONY007 本地 editable 安装同源，随后用下一步的补丁
@@ -45,7 +46,7 @@ jobs:
           patch -p1 -d "$SITE_PACKAGES" \
             < scripts/patches/gym-donkeycar-linux-resilience.patch
       - name: Run root tests
-        run: python -m pytest -vv --maxfail=1
+        run: python -m pytest -q
       - name: Run backend tests
         working-directory: web_ui/backend
         run: python -m pytest tests -q
