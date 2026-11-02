@@ -50,7 +50,12 @@ jobs:
           set -e
           for f in $(find donkeycar/tests tests -name 'test_*.py' | sort); do
             echo "COLLECT $f"
-            timeout 10s python -m pytest --collect-only -q "$f"
+            status=0
+            timeout 10s python -m pytest --collect-only -q "$f" || status=$?
+            # 5 = 该文件没有可收集测试；继续处理后续文件。
+            if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then
+              exit "$status"
+            fi
           done
       - name: Run backend tests
         working-directory: web_ui/backend
