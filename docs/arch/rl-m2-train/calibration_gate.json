@@ -1,0 +1,22 @@
+{
+  "status": "pass",
+  "steps": 120,
+  "cumulative_reward": 11.682,
+  "component_sums": {
+    "cte": -5.318,
+    "progress": 17.0,
+    "drift": 0.0,
+    "overspeed": 0.0,
+    "done": 0.0
+  },
+  "progress_methods": [
+    "node",
+    "none"
+  ],
+  "checks": {
+    "total_positive": true,
+    "progress_nonneg": true,
+    "drift_off_phaseA": true,
+    "overspeed_nonpos": true
+  }
+}

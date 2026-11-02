@@ -1,7 +1,7 @@
 {
   "meta": {
     "sim_app": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app",
-    "started": "2026-11-02 08:08:06",
+    "started": "2026-11-02 10:16:29",
     "sb3": "2.9.2",
     "torch": "2.15.0"
   },
@@ -14,13 +14,13 @@
         "obs": "state"
       },
       "n_steps": 1000,
-      "steps_per_s": 335.4,
-      "step_ms_p50": 3.03,
-      "step_ms_p95": 4.1,
+      "steps_per_s": 383.89,
+      "step_ms_p50": 2.55,
+      "step_ms_p95": 3.58,
       "stale": 0,
       "sim_cpu_pct_samples": [
-        27.8,
-        65.9
+        29.7,
+        76.5
       ],
       "label": "sync_0.05_state"
     },
@@ -32,13 +32,13 @@
         "obs": "state"
       },
       "n_steps": 1000,
-      "steps_per_s": 333.64,
-      "step_ms_p50": 3.03,
-      "step_ms_p95": 4.11,
+      "steps_per_s": 389.01,
+      "step_ms_p50": 2.54,
+      "step_ms_p95": 3.54,
       "stale": 0,
       "sim_cpu_pct_samples": [
-        27.1,
-        49.3
+        30.2,
+        60.2
       ],
       "label": "sync_0.02_state"
     },
@@ -52,34 +52,34 @@
       "n_steps": 1000,
       "steps_per_s": 20.0,
       "step_ms_p50": 49.98,
-      "step_ms_p95": 52.44,
+      "step_ms_p95": 52.05,
       "stale": 0,
       "sim_cpu_pct_samples": [
-        26.9,
-        27.8,
-        27.3,
-        28.4,
-        27.8,
-        27.2,
-        27.3,
-        27.1,
-        27.4,
-        27.2,
-        27.6,
-        28.0,
-        27.5,
-        27.5,
-        27.3,
-        27.2,
-        27.5,
-        27.2,
-        28.1,
-        27.6,
-        27.5,
-        27.6,
-        27.3,
-        27.7,
-        27.0
+        30.8,
+        31.1,
+        31.8,
+        31.7,
+        31.6,
+        30.7,
+        29.9,
+        30.4,
+        30.8,
+        32.6,
+        31.2,
+        30.7,
+        31.0,
+        30.2,
+        31.0,
+        31.4,
+        30.9,
+        31.9,
+        30.5,
+        31.5,
+        32.5,
+        30.2,
+        32.5,
+        32.1,
+        32.0
       ],
       "label": "async_state_ref"
     },
@@ -91,12 +91,12 @@
         "obs": "pixel"
       },
       "n_steps": 200,
-      "steps_per_s": 204.33,
-      "step_ms_p50": 4.57,
-      "step_ms_p95": 6.06,
+      "steps_per_s": 188.99,
+      "step_ms_p50": 5.12,
+      "step_ms_p95": 6.37,
       "stale": 0,
       "sim_cpu_pct_samples": [
-        28.8
+        33.2
       ],
       "label": "sync_0.05_pixel"
     }
@@ -104,20 +104,36 @@
   "two_env_single_proc": {
     "mode": "single_process_interleaved",
     "total_steps": 1000,
-    "wall_elapsed_s": 2.98,
-    "combined_steps_per_s": 335.62,
-    "per_step_ms_p50": 3.01,
+    "wall_elapsed_s": 2.67,
+    "combined_steps_per_s": 375.02,
+    "per_step_ms_p50": 2.54,
     "sim_cpu_pct": [
-      46.6,
-      46.4
+      54.7,
+      53.6
     ],
     "note": "单进程轮转受 GIL 约束;combined ≈ 单 env 吞吐即 GIL 顶死,M3 多开须进程隔离(--multi 变体给参照)"
   },
   "two_env_two_proc": {
     "mode": "two_process_isolated",
-    "wall_elapsed_s": 8.57,
-    "combined_steps_per_s": 683.63,
+    "wall_elapsed_s": 8.39,
+    "combined_steps_per_s": 772.4,
     "per_env": [
+      {
+        "config": {
+          "port": 9094,
+          "mode": "sync",
+          "sync_time_step": 0.05,
+          "obs": "state"
+        },
+        "n_steps": 500,
+        "steps_per_s": 385.35,
+        "step_ms_p50": 2.54,
+        "step_ms_p95": 3.6,
+        "stale": 0,
+        "sim_cpu_pct_samples": [
+          31.0
+        ]
+      },
       {
         "config": {
           "port": 9091,
@@ -126,28 +142,12 @@
           "obs": "state"
         },
         "n_steps": 500,
-        "steps_per_s": 341.66,
-        "step_ms_p50": 2.89,
-        "step_ms_p95": 4.13,
+        "steps_per_s": 387.05,
+        "step_ms_p50": 2.53,
+        "step_ms_p95": 3.62,
         "stale": 0,
         "sim_cpu_pct_samples": [
-          26.8
-        ]
-      },
-      {
-        "config": {
-          "port": 9092,
-          "mode": "sync",
-          "sync_time_step": 0.05,
-          "obs": "state"
-        },
-        "n_steps": 500,
-        "steps_per_s": 341.97,
-        "step_ms_p50": 2.88,
-        "step_ms_p95": 4.12,
-        "stale": 0,
-        "sim_cpu_pct_samples": [
-          27.6
+          30.6
         ]
       }
     ],
