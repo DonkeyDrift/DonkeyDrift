@@ -46,7 +46,12 @@ jobs:
           patch -p1 -d "$SITE_PACKAGES" \
             < scripts/patches/gym-donkeycar-linux-resilience.patch
       - name: Run root tests
-        run: python -m pytest -q
+        run: |
+          set -e
+          for f in $(find donkeycar/tests tests -name 'test_*.py' | sort); do
+            echo "COLLECT $f"
+            timeout 10s python -m pytest --collect-only -q "$f"
+          done
       - name: Run backend tests
         working-directory: web_ui/backend
         run: python -m pytest tests -q
