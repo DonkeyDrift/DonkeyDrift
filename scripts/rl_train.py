@@ -202,10 +202,13 @@ class KLToBCMonitor:
         if self._n % self.every:
             return
         import torch
+        from torch.distributions import kl_divergence as _torch_kl
         with torch.no_grad():
             ot, _ = model.policy.obs_to_tensor(np.asarray(obs)[None])
-            kl = float(model.policy.get_distribution(ot).kl_loss(
-                self.ref.get_distribution(ot)).item())
+            # SB3 2.9 的 Distribution 无 kl 方法;底层是 torch.distributions.Normal,
+            # 用 torch 泛型 kl_divergence(cur ‖ ref) 实测可用
+            kl = float(_torch_kl(model.policy.get_distribution(ot).distribution,
+                                 self.ref.get_distribution(ot).distribution).mean().item())
         self._buf.append(kl)
         self._fh.write(json.dumps({"step": self._n, "kl": round(kl, 6)}) + "\n")
         if len(self._buf) % 5 == 0:
