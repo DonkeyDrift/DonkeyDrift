@@ -1,0 +1,29 @@
+{
+  "pairs_total": 12583,
+  "episodes": 35,
+  "transform": {
+    "rule": "cte_m = cte_sim/gain − offset[node];state[:,0]=cte_m/2",
+    "cte_unit_gain": -8.1136,
+    "driveline": "docs/arch/rl-m4-driveline.json",
+    "node_mapping": "nearest centerline node, window ±32, ep-reset"
+  },
+  "cte_before_m": {
+    "over2_frac": 0.0,
+    "mean_abs": 0.38078370690345764
+  },
+  "cte_after_m": {
+    "over2_frac": 0.0,
+    "mean_abs": 0.3531480332137149
+  },
+  "gate": {
+    "over2_frac": 0.0,
+    "over2_lt_010": true,
+    "mean_abs_cte": 0.3531,
+    "mean_lt_10": true,
+    "pass": true,
+    "n": 12583
+  },
+  "steer_hard_frac": 0.3521417785901613,
+  "img_std_last": 49.48043655005254,
+  "recorded_at": "2026-11-03 11:33:04"
+}
