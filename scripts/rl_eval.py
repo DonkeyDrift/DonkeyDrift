@@ -46,9 +46,15 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def evaluate(model_path: str, sim_app: str, port: int, episodes: int,
              spawn_seed_base: int, max_steps: int, time_step: float,
-             cte_limit: float, label: str) -> dict:
+             cte_limit: float, label: str, anchor_path=None) -> dict:
     from stable_baselines3 import PPO
 
+    anchor_cfg = None
+    if anchor_path:
+        with open(anchor_path, encoding="utf-8") as f:
+            doc = json.load(f)
+        anchor_cfg = {"mode": "line", "offsets": doc["offsets"],
+                      "cte_unit_gain": doc["cte_unit_gain"]}
     model = PPO.load(model_path, device="cpu")
     proc = launch_sim(sim_app, port=port, headless=True,
                       log_path=os.path.join(REPO_ROOT, "outputs",
@@ -57,7 +63,7 @@ def evaluate(model_path: str, sim_app: str, port: int, episodes: int,
                          img_enc="none", sync_mode=True, sync_time_step=time_step,
                          cte_limit=cte_limit, max_episode_steps=max_steps,
                          spawn_curriculum=SpawnCurriculum(CurriculumConfig(
-                             seed=spawn_seed_base)),
+                             seed=spawn_seed_base)), cte_anchor=anchor_cfg,
                          connect_timeout_s=90.0, name=f"eval-{label}")
     episodes_out = []
     try:
@@ -114,6 +120,10 @@ def evaluate(model_path: str, sim_app: str, port: int, episodes: int,
         if episodes else None,
     }
     return {"label": label, "model": os.path.abspath(model_path),
+            "anchor": {"mode": "line" if anchor_cfg else "center",
+                       "source": anchor_path,
+                       "cte_unit_gain": (anchor_cfg or {}).get("cte_unit_gain"),
+                       "cte_limit": cte_limit},
             "port": port, "episodes_detail": episodes_out, "summary": summary}
 
 
@@ -129,14 +139,17 @@ def main():
     ap.add_argument("--max-steps", type=int, default=2000)
     ap.add_argument("--time-step", type=float, default=0.05)
     ap.add_argument("--cte-limit", type=float, default=2.0)
+    ap.add_argument("--cte-anchor", default=None,
+                    help="M4:行车线锚 json;缺省=center。口径红线:必须与被评模型的训练 anchor 一致")
     ap.add_argument("--out-dir", default=os.path.join(REPO_ROOT, "outputs", "rl_eval"))
     args = ap.parse_args()
 
     t0 = time.time()
     result = evaluate(args.model, args.sim_app, args.port, args.episodes,
                       args.spawn_seed_base, args.max_steps, args.time_step,
-                      args.cte_limit, args.tag)
-    result["meta"] = {"sim_app": resolve_sim_exe(args.sim_app),
+                      args.cte_limit, args.tag, anchor_path=args.cte_anchor)
+    result["meta"] = {"anchor_cli": args.cte_anchor or "center(未显式指定)",
+                      "sim_app": resolve_sim_exe(args.sim_app),
                       "spawn_seed_base": args.spawn_seed_base,
                       "max_steps": args.max_steps, "time_step": args.time_step,
                       "cte_limit": args.cte_limit,

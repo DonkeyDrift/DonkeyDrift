@@ -358,6 +358,9 @@ def main():
     ap.add_argument("--curriculum-heading", type=float, default=8.0,
                     help="出生朝向噪声上限(度,占位超参非标定)")
     ap.add_argument("--skip-gate", action="store_true", help="跳过收尾校准闸")
+    ap.add_argument("--cte-anchor", default=None,
+                    help="M4:行车线锚 json(rl-m4-driveline.json);缺省=center(M3 口径)。"
+                         "口径红线:训练与评测的 anchor 必须一致且显式记录")
     ap.add_argument("--kl-monitor", action="store_true",
                     help="M3 D3:KL(policy‖BC) 只监控不进损失(默认 off;参照 = --resume)")
     ap.add_argument("--kl-every", type=int, default=1000)
@@ -377,13 +380,20 @@ def main():
     sim_proc = launch_sim(args.sim_app, port=args.port, headless=True,
                           log_path=os.path.join(OUT_ROOT, f"sim_train_{args.port}.log"))
 
+    anchor_cfg = None
+    if args.cte_anchor:
+        with open(args.cte_anchor, encoding="utf-8") as f:
+            doc = json.load(f)
+        anchor_cfg = {"mode": "line", "offsets": doc["offsets"],
+                      "cte_unit_gain": doc["cte_unit_gain"]}
+
     def _make_env():
         env = DonkeyDriftEnv(
             sim_port=args.port, sim_path="remote", obs_mode="state", img_enc="none",
             sync_mode=True, sync_time_step=args.time_step,
             cte_limit=2.0, max_episode_steps=args.max_episode_steps,
-            spawn_curriculum=curriculum, connect_timeout_s=90.0,
-            frame_wait_timeout_s=2.0, name=f"rl-{args.run_name}")
+            spawn_curriculum=curriculum, cte_anchor=anchor_cfg,
+            connect_timeout_s=90.0, frame_wait_timeout_s=2.0, name=f"rl-{args.run_name}")
         return ComponentLogger(DecomposedRewardWrapper(env, cfg=_reward_cfg()),
                                log_path=os.path.join(run_dir, "components.jsonl"))
 
@@ -470,6 +480,10 @@ def main():
                 "sb3": __import__("stable_baselines3").__version__,
                 "torch": __import__("torch").__version__,
                 "reward_cfg": str(_reward_cfg()),
+                "anchor": {"mode": "line" if anchor_cfg else "center",
+                           "source": args.cte_anchor,
+                           "cte_unit_gain": (anchor_cfg or {}).get("cte_unit_gain"),
+                           "cte_limit_m": 2.0},
                 "curriculum": {"lateral": args.curriculum_lateral,
                                "heading": args.curriculum_heading, "seed": args.seed},
                 "finished_at": time.strftime("%F %T")}
