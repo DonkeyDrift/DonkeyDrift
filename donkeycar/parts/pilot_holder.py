@@ -32,6 +32,7 @@ class PilotHolder:
         self._pilot = None
         self._model_path: Optional[str] = None
         self._model_type: Optional[str] = None
+        self._target_hw: Optional[tuple[int, int]] = None
 
     # ------------------------------------------------------------------
     # 构建 / 加载
@@ -43,50 +44,53 @@ class PilotHolder:
         resolved_type = model_type or getattr(self.cfg, "DEFAULT_MODEL_TYPE", "linear")
         pilot = dk_utils.get_model_by_type(resolved_type, self.cfg)
         pilot.load(model_path)
-        self._validate_input_shape(pilot, model_path)
-        return pilot, resolved_type
+        target_hw = self._validate_input_shape(pilot, model_path)
+        return pilot, resolved_type, target_hw
 
-    def _validate_input_shape(self, pilot, model_path: str):
-        """校验模型输入 HxWxD 与 cfg 相机分辨率一致，不一致直接拒绝加载。
+    def _validate_input_shape(self, pilot, model_path: str) -> Optional[tuple[int, int]]:
+        """校验模型输入通道数与 cfg 一致，并记录模型期望的 (H, W)。
 
-        分辨率调整后（如 160x120 → 320x240）旧模型形状不匹配：推理首帧
-        必然抛异常，而 drive 主循环对部件异常的策略是整体退出（vehicle.py
-        只捕获 KeyboardInterrupt 后 stop()），若发生在自动模式下会带停循环。
-        在加载期拦截，错误经桥接层回传 Web UI，旧模型保持不变。
+        若模型输入 (H, W) 与当前相机分辨率不一致（例如云端训练的 160x120 模型
+        运行在 320x240 相机配置下），run() 会在推理前自动执行等比缩放 + 加白框
+        填充（不直接拉伸）。若颜色通道数 D 不一致则拒绝加载。
         """
         expected = (getattr(self.cfg, "IMAGE_H", None),
                     getattr(self.cfg, "IMAGE_W", None),
                     getattr(self.cfg, "IMAGE_DEPTH", None))
-        if not all(isinstance(v, int) and v > 0 for v in expected):
-            return
         try:
             shape = tuple(pilot.get_input_shape('img_in'))
         except Exception:  # pragma: no cover - 拿不到输入形状的模型类型不拦截
-            return
+            return None
         try:
             # TfLite/Keras 返回的可能是 np.integer，统一转 Python int 再比较
             actual = tuple(int(d) for d in shape[-3:])
         except (TypeError, ValueError):  # pragma: no cover - 动态/未知维度不拦截
-            return
-        if len(actual) != 3:
-            return
-        if actual != expected:
+            return None
+        if len(actual) != 3 or actual[0] <= 0 or actual[1] <= 0:
+            return None
+        if isinstance(expected[2], int) and expected[2] > 0 and actual[2] != expected[2]:
             raise ValueError(
-                f"模型输入 {actual[1]}x{actual[0]}x{actual[2]} 与当前相机分辨率 "
-                f"{expected[1]}x{expected[0]}x{expected[2]} 不一致（{model_path}）；"
-                f"请用当前分辨率数据重新训练，或将 myconfig.py 改回模型对应的分辨率")
+                f"模型输入通道数 {actual[2]} 与当前相机配置 {expected[2]} 不一致（{model_path}）")
+        if (isinstance(expected[0], int) and isinstance(expected[1], int)
+                and (actual[0], actual[1]) != (expected[0], expected[1])):
+            logger.info(
+                "模型输入 %dx%d 与相机分辨率 %dx%d 不同，推理时将自动等比缩放/加白框适配（%s）",
+                actual[1], actual[0], expected[1], expected[0], model_path,
+            )
+        return (actual[0], actual[1])
 
     def load(self, model_path: str, model_type: Optional[str] = None):
         """构建并原子替换当前模型；构建失败时保留旧模型并把异常抛给调用方。"""
         if not model_path or not isinstance(model_path, str):
             raise ValueError("model_path 无效")
         # 构建在锁外完成：热加载可能耗时数百毫秒到数秒，不能阻塞推理线程。
-        pilot, resolved_type = self._build(model_path, model_type)
+        pilot, resolved_type, target_hw = self._build(model_path, model_type)
         with self._lock:
             old = self._pilot
             self._pilot = pilot
             self._model_path = model_path
             self._model_type = resolved_type
+            self._target_hw = target_hw
         if old is not None:
             try:
                 old.shutdown()
@@ -101,9 +105,15 @@ class PilotHolder:
     def run(self, img_arr, *other_arr):
         with self._lock:
             pilot = self._pilot
+            target_hw = self._target_hw
         if pilot is None:
             # 与「启动时未注册 pilot」等价：DriveMode 收到 None 按 0 处理。
             return tuple(None for _ in range(self.output_count))
+        if target_hw is not None and img_arr is not None and hasattr(img_arr, "shape"):
+            from donkeycar.utils import fit_image_array
+            target_h, target_w = target_hw
+            if img_arr.shape[0] != target_h or img_arr.shape[1] != target_w:
+                img_arr = fit_image_array(img_arr, target_w, target_h)
         return pilot.run(img_arr, *other_arr)
 
     def shutdown(self):

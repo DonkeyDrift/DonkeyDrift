@@ -185,3 +185,31 @@ def test_train_test_split():
     print(val_set)
     assert(len(train_set)==8)
     assert(len(val_set)==2)
+
+
+def test_fit_pil_image_and_array_preserves_aspect_with_white_border():
+    from PIL import Image
+    import numpy as np
+
+    # 1. Same aspect ratio (320x240 -> 160x120): proportional resize without borders
+    im_43 = Image.new("RGB", (320, 240), (30, 60, 90))
+    out_43 = np.asarray(fit_pil_image(im_43, 160, 120))
+    assert out_43.shape == (120, 160, 3)
+    assert np.all(out_43 == [30, 60, 90])
+
+    # 2. Wider 16:9 (320x180 -> 160x120): 160x90 centered with 15px top/bottom white border
+    arr_169 = np.full((180, 320, 3), 50, dtype=np.uint8)
+    out_169 = fit_image_array(arr_169, 160, 120)
+    assert out_169.shape == (120, 160, 3)
+    assert np.all(out_169[:15, :, :] == 255)
+    assert np.all(out_169[105:, :, :] == 255)
+    assert np.all(out_169[15:105, :, :] == 50)
+
+    # 3. Square 1:1 (96x96 -> 160x120): 120x120 centered with 20px left/right white border
+    arr_sq = np.full((96, 96, 3), 80, dtype=np.uint8)
+    out_sq = fit_image_array(arr_sq, 160, 120)
+    assert out_sq.shape == (120, 160, 3)
+    assert np.all(out_sq[:, :20, :] == 255)
+    assert np.all(out_sq[:, 140:, :] == 255)
+    assert np.all(out_sq[:, 20:140, :] == 80)
+
