@@ -95,6 +95,8 @@ def evaluate(model_path: str, sim_app: str, port: int, episodes: int,
             episodes_out.append({
                 "ep": ep, "ep_rew": round(total, 3), "ep_len": steps,
                 "end_reason": end_reason,
+                "lap_count": sinfo.get("lap_count"),
+                "last_lap_time": sinfo.get("last_lap_time"),
                 "mean_abs_cte": round(float(np.mean(np.abs(ctes))), 3) if ctes else None,
                 "max_abs_cte": round(float(np.max(np.abs(ctes))), 3) if ctes else None,
                 "components": {k: round(v, 3) for k, v in comp_sum.items()},

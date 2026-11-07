@@ -370,7 +370,16 @@ class DonkeyDriftEnv(gym.Env):
         if self._cte_offsets is None:
             return
         raw = info.get("cte")
+        # node 来源与 _build_info 提升同源:handler.active_node(sim 组装的 info
+        # dict 无此键——M2 D0 教训的时序版;直接从 info 取会全程 None → 锚定
+        # 失效回退 raw sim 单位,M4 首轮 held-out 全挂的直接原因,已修)
         node = info.get("active_node")
+        if node is None:
+            viewer = getattr(getattr(self._cam, "env", None), "unwrapped", None) \
+                if self._cam.env is not None else None
+            handler = getattr(getattr(viewer, "viewer", None), "handler", None)
+            node = getattr(handler, "active_node", None)
+        info["active_node"] = node  # 回写:让 _build_info 的提升与本处一致
         info["cte_raw"] = raw
         if raw is None or node is None:
             self._anchor_defects += 1
