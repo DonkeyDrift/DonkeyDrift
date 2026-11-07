@@ -101,6 +101,71 @@ def test_job_status_includes_result_path():
     assert resp.json()["result_path"] == "/tmp/models/pilot.aidem"
 
 
+def test_run_aimo_convert_streams_log_line_to_subscriber(monkeypatch, tmp_path):
+    """run_aimo_convert 日志流（#502 fan-out）：假子进程的一行 stdout 经
+    read_stream 原样广播到订阅者，job 以 completed 收尾。
+
+    旧实现 read_stream 里 await job.log_queue.put(...) 会抛
+    AttributeError('TrainingJob' object has no attribute 'log_queue')，
+    日志行到不了订阅者、job 被误标 failed。"""
+    import asyncio
+
+    from trainer_engine import TrainingJob, job_manager
+
+    line = "[5/5] 已下载到: /tmp/models/pilot.aidem"
+
+    class _FakeStream:
+        def __init__(self, lines):
+            self._chunks = [f"{ln}\n".encode("utf-8") for ln in lines]
+
+        async def readline(self):
+            return self._chunks.pop(0) if self._chunks else b""
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = _FakeStream([line])
+            self.stderr = _FakeStream([])
+            self.returncode = None
+
+        async def wait(self):
+            self.returncode = 0
+
+        def terminate(self):
+            pass
+
+    async def fake_exec(*cmd, **kw):
+        return _FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    job = TrainingJob(id="aimo-log", mode="aimo")
+    sub = job.subscribe()
+    try:
+        asyncio.run(job_manager.run_aimo_convert(
+            job, model_path="./models/pilot.tflite", out_dir="./models",
+            working_dir=str(tmp_path)))
+
+        msgs = []
+        while True:
+            try:
+                msgs.append(sub.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
+        log_events = [m for m in msgs if m.get("type") == "log"]
+        assert [m["line"] for m in log_events] == [line], (
+            f"订阅者应收子进程同一条日志行, got {log_events}; "
+            f"job.error_message={job.error_message!r}")
+        assert msgs[-1] == {
+            "type": "status", "status": "completed", "error": None}, (
+            f"收尾事件应为 completed, got {msgs[-1]}; "
+            f"job.error_message={job.error_message!r}")
+        assert job.status == "completed"
+        assert job.result_path == "/tmp/models/pilot.aidem"
+    finally:
+        job.unsubscribe(sub)
+
+
 def test_parse_aimo_line_stages_and_result():
     from trainer_engine import TrainingJob, job_manager
 

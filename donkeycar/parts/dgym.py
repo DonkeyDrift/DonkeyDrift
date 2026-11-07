@@ -71,12 +71,11 @@ class DonkeyGymEnv(object):
         # 不经过车辆主循环轮询。None = 保持轮询喂帧的旧行为。
         self._frame_sink = None
 
-        # 看门狗：记录最近一次 env.step() 成功返回的时间戳。底层 gym_donkeycar 的
-        # observe() 在模拟器断连后会无限自旋（无超时），update() 线程会被卡死在
-        # step() 内部。主循环侧 run_threaded() 据此检测「长时间无新帧」并强制重连，
-        # 不依赖 gym_donkeycar 内部状态。
+        # 看门狗与客户端有限观测等待配合，断流时重建且允许旧 step 退出。
         self._watchdog_sec = float(self._conf.get("watchdog_sec", 5.0))
         self._last_frame_ts = time.time()
+        self.env = None
+        self.connected = False
 
         # 重连互斥锁：update() 线程与重建线程（后台 worker/看门狗请求）
         # 都可能触发重建，避免两个线程各建一个 env 互相踩踏
@@ -173,6 +172,7 @@ class DonkeyGymEnv(object):
         conf["port"] = self._port
         conf["guid"] = 0
         conf["frame_skip"] = 1
+        conf.setdefault("observe_timeout", self._watchdog_sec)
         # 渲染分辨率与 NN 输入解耦：渲染分辨率（缺省 1920×1080 全高清）与 NN 输入
         # 不一致时，覆盖发给模拟器的 img_w/img_h 与 cam_resolution，
         # 让模拟器按渲染分辨率出图（NN 输入帧在 _set_frame 内下采样回 img_w×img_h）。
@@ -181,9 +181,18 @@ class DonkeyGymEnv(object):
             conf["img_h"] = self._render_img_h
             conf["cam_resolution"] = (self._render_img_h, self._render_img_w, 3)
 
+        candidate = None
         try:
-            self.env = gym.make(self._env_name, conf=conf)
-            raw_frame, _ = self.env.reset()
+            candidate = gym.make(self._env_name, conf=conf)
+            raw_frame, _ = candidate.reset()
+            raw = candidate.unwrapped if isinstance(candidate, gym.Wrapper) else candidate
+            handler = getattr(getattr(raw, "viewer", None), "handler", None)
+            received = getattr(handler, "last_telemetry_ts", None)
+            if isinstance(received, (int, float)) and (
+                    received <= 0 or time.time() - received > self._watchdog_sec):
+                raise TimeoutError("模拟器尚未返回真实的新遥测")
+            # 不发布正在 reset 的环境，避免 update 与 reset 同时消费首帧。
+            self.env = candidate
             self._set_frame(raw_frame)
             self.connected = True
             self._last_frame_ts = time.time()
@@ -191,6 +200,11 @@ class DonkeyGymEnv(object):
                   f"（cam/image_array {self._img_w}x{self._img_h}，"
                   f"渲染 {self._render_img_w}x{self._render_img_h}）")
         except Exception as e:
+            if candidate is not None:
+                try:
+                    candidate.close()
+                except Exception:
+                    pass
             self.env = None
             self.frame = self._empty_frame.copy()
             self.preview_frame = self._empty_preview_frame.copy()
@@ -244,15 +258,16 @@ class DonkeyGymEnv(object):
 
     def _close_env(self):
         """安全关闭当前模拟器环境。"""
-        if self.env is not None:
-            try:
-                self.env.close()
-            except Exception:
-                pass
-            self.env = None
+        old_env = self.env
+        self.env = None
+        self.connected = False
+        if old_env is not None:
             self.frame = self._empty_frame.copy()
             self.preview_frame = self._empty_preview_frame.copy()
-            self.connected = False
+            try:
+                old_env.close()
+            except Exception:
+                pass
 
     def set_frame_sink(self, sink):
         """注册预览帧直推回调(如 DriveApiBridge.frame_buffer.update)。
@@ -290,7 +305,7 @@ class DonkeyGymEnv(object):
         """
         if raw_frame is None:
             return
-        if self._vflip or self._hflip:
+        if getattr(self, "_vflip", False) or getattr(self, "_hflip", False):
             # 180° = vflip + hflip；ascontiguousarray 还原负步长视图，避免下游
             # cv2.resize 对非连续内存报错。
             raw_frame = raw_frame[::(-1 if self._vflip else 1),
@@ -409,6 +424,9 @@ class DonkeyGymEnv(object):
         try:
             raw = self._raw_env()
             handler = getattr(getattr(raw, "viewer", None), "handler", None)
+            ts = getattr(handler, "last_telemetry_ts", None)
+            if isinstance(ts, (int, float)):
+                return float(ts)
             ts = getattr(handler, "time_received", None)
             if isinstance(ts, (int, float)):
                 return float(ts)
@@ -418,7 +436,9 @@ class DonkeyGymEnv(object):
 
     def _telemetry_is_fresh(self):
         """最近一次遥测/帧是否在看门狗窗口内（连接尚算活着）。"""
-        ts = self._telemetry_ts() or self._last_frame_ts
+        ts = self._telemetry_ts()
+        if ts is None:
+            ts = self._last_frame_ts
         return (time.time() - ts) <= self._watchdog_sec
 
     def _rebuild_connection(self, only_if_stale=False, coalesce=False):
@@ -439,10 +459,10 @@ class DonkeyGymEnv(object):
         重连命令必须真重建）。
         """
         with self._reconnect_lock:
-            if only_if_stale and self._telemetry_is_fresh():
+            if only_if_stale and self._is_env_connected() and self._telemetry_is_fresh():
                 print("[DonkeyGymEnv] 连接仍健康（遥测新鲜），跳过本次重建")
                 return self.env is not None
-            if (coalesce and self._telemetry_is_fresh()
+            if (coalesce and self._is_env_connected() and self._telemetry_is_fresh()
                     and time.time() - self._last_rebuild_done_ts
                     <= self._coalesce_sec):
                 print("[DonkeyGymEnv] 刚重建过且连接健康，合并本次重连请求")
@@ -522,15 +542,22 @@ class DonkeyGymEnv(object):
                 if self.delay > 0.0:
                     step_result = env.step(self.action)
                     current_frame, _, _, _, current_info = step_result
-                    self.delay_buffer(current_frame, current_info)
+                    with self._reconnect_lock:
+                        if self.env is not env:
+                            continue
+                        self.delay_buffer(current_frame, current_info)
                 else:
                     _t0 = time.perf_counter()
                     step_result = env.step(self.action)
                     _t1 = time.perf_counter()
                     current_frame, _, _, _, current_info = step_result
-                    self._set_frame(current_frame)
+                    with self._reconnect_lock:
+                        if self.env is not env:
+                            continue
+                        self._set_frame(current_frame)
+                        self.info = current_info
+                        self._last_frame_ts = time.time()
                     _t2 = time.perf_counter()
-                    self.info = current_info
                     # 采集循环诊断:step 等待+返回 vs 本帧处理的分段耗时
                     self._upd_step_s = getattr(self, "_upd_step_s", 0.0) + (_t1 - _t0)
                     self._upd_frame_s = getattr(self, "_upd_frame_s", 0.0) + (_t2 - _t1)
@@ -539,8 +566,9 @@ class DonkeyGymEnv(object):
                     self._last_frame_ts = time.time()
             except Exception as e:
                 print(f"[DonkeyGymEnv] 模拟器连接异常: {e}")
-                if self.env is env:
-                    self._close_env()
+                with self._reconnect_lock:
+                    if self.env is env:
+                        self._close_env()
                 time.sleep(1.0)
 
     def run_threaded(self, steering, throttle, brake=None, reconnect=False, reset_car=False):
@@ -584,7 +612,7 @@ class DonkeyGymEnv(object):
             # 保持 connected 与真实 TCP 健康一致：SimConnectionState（遥测
             # sim_connected）取的就是它，连接死后必须及时翻假，否则后端的
             # 恢复门控会被假 True 挡住、永远不发重连命令
-            self.connected = self._is_env_connected()
+            self.connected = self._is_env_connected() and self._telemetry_is_fresh()
 
         # 看门狗：出现「遥测停止」即请求后台重建连接——覆盖三种死法：
         # a) TCP 被对端复位（update 侧健康检查也会重建，双保险）；

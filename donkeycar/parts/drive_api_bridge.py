@@ -385,10 +385,8 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
     # 随后重连），不能把冻结帧以 60fps 持续呈现成「活着」的假象。
     REPEAT_MAX_AGE_S = 1.0
 
-    # 预期新帧槽位持有：重复帧若抢在新帧前占掉它的 pts 槽，新帧被 +1 顶到
-    # 下一槽，接收端按 pts 调度会把新内容晚一个帧周期呈现（实测 p50 +8ms/
-    # p95 +15ms）。按到达周期 EMA 预测新帧时刻，临近时短持有本槽让新帧赢下
-    # 竞速；持有上限封顶，源停摆时重复帧照常出。
+    # 按到达周期 EMA 预测新帧时刻，临近时短持有补帧槽让新帧优先。
+    # 持有上限封顶，源停摆时重复帧照常出；90kHz PTS 不再按整帧槽量化。
     FRESH_RACE_WINDOW_S = 0.005
     FRESH_HOLD_MAX_S = 0.012
 
@@ -430,18 +428,17 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         self.last_frame_id = 0
         self.pts = 0
         # pts 墙钟锚点：RTP 时间戳 = pts * time_base，必须跟随帧的真实
-        # 采集时刻推进。若改成「每帧 +1」，实际发送速率低于声明 fps 时
-        # （编码/负载波动，实测 48~57fps vs 60fps）媒体时钟会持续慢于
-        # 墙钟，接收端缓冲时序随运行时长失真。
+        # 采集时刻推进，而非按帧号累加；90kHz 时基保留不均匀到帧间隔。
         self._pts_anchor_t: Optional[float] = None
         self._pts_anchor_pts = 0
         self._pts_next = 0
-        self.time_base = Fraction(1, fps)
+        self._fresh_pts = 0
+        self._fresh_pts_at: Optional[float] = None
+        self.time_base = Fraction(1, 90000)
         self.sent_timestamps = deque(maxlen=120)
         self.sent_frames = 0
         self.stale_frames = 0
-        # 真实新帧被顶号次数（目标 pts ≤ _pts_next 被迫 +1）：每顶一号该帧
-        # 呈现晚一个帧周期，是 e2e 尾部 +16.7ms 样本的直接来源，须可观测
+        # 真实新帧触发单调保护的次数；+1 仅为一个 90kHz tick，不是一整帧。
         self.pts_bumps = 0
 
     def _refill_tokens(self, now: float):
@@ -496,6 +493,7 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         """出一帧（真实新帧或重复帧），推进 pts/计数并构造编码输入帧。"""
         self.sent_frames += 1
         self.sent_timestamps.append(self.clock())
+        emitted_at = self.pacing_clock()
         if self._pts_anchor_t is None:
             # 首帧：以首帧时间戳为墙钟锚点，pts 从 0 起算。
             # 早期版本这里只设锚点、下面的 target 未赋值，
@@ -504,23 +502,27 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
             self._pts_anchor_t = latest.timestamp
             self._pts_anchor_pts = self._pts_next
             self.pts = self._pts_next
+            self._fresh_pts = self.pts
+            self._fresh_pts_at = emitted_at
         else:
-            target = self._pts_anchor_pts + int(round(
-                (latest.timestamp - self._pts_anchor_t) * self.fps))
-            # 单调保护：
-            # - target > _pts_next：按墙钟差值推进（真实新帧正常路径）。
-            # - target <= _pts_next（墙钟回拨/重复帧——重复帧沿用原帧采集
-            #   时刻，target 不再增长）：退化为 +1，保证 pts 严格递增不回退。
-            #   节拍重复帧正走这条：媒体钟随出帧节拍继续走 60Hz，接收端
-            #   呈现帧率即声明 fps。
+            if fresh:
+                target = self._pts_anchor_pts + int(round(
+                    (latest.timestamp - self._pts_anchor_t) * 90000))
+            else:
+                # 重复帧保留采集印章，但媒体时钟须随实际经过时间推进。
+                target = self._fresh_pts + int(round(
+                    (emitted_at - self._fresh_pts_at) * 90000))
+            # 最小单调增量为 11.1us，避免整帧量化导致超频源累计漂移。
             if target > self._pts_next:
                 self._pts_next = target
             else:
                 if fresh:
-                    # 真实新帧被顶号（pts 竞速/墙钟回拨）：呈现晚一拍，计数观测
                     self.pts_bumps += 1
                 self._pts_next += 1
             self.pts = self._pts_next
+            if fresh:
+                self._fresh_pts = self.pts
+                self._fresh_pts_at = emitted_at
         if self.frame_stamp:
             # 印章画在副本上：latest.frame 由缓冲共享（编码重试/多消费方），
             # 相机数组可能复用内存，原地画会污染自动驾驶管线输入。
@@ -558,8 +560,7 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
                     self._next_repeat_at = now + self.interval
                 wait = self._next_repeat_at - now
                 if wait <= 0:
-                    # 预期新帧将至：短持有本槽让新帧赢下 pts 竞速（重复帧
-                    # 抢先会把新帧的 pts 顶到下一槽，呈现晚一个帧周期）
+                    # 预期新帧将至：短持有本槽，避免紧邻新帧发送冗余重复帧。
                     hold = self._expected_fresh_hold(now)
                     if hold > 0:
                         woke = await self.frame_buffer.wait_for_new_frame(

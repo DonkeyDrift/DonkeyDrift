@@ -1,7 +1,13 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getDriveWebRtcIceServers, useDriveWebRtcVideo } from './useDriveWebRtcVideo';
+import {
+  calculatePresentationMetrics,
+  calculateVideoMetrics,
+  getDriveWebRtcIceServers,
+  recordPresentedFrame,
+  useDriveWebRtcVideo,
+} from './useDriveWebRtcVideo';
 import type { WebRtcSignal } from './useDriveWebsocket';
 // 印章夹具由 Python 参考实现生成：ts = 车端捕获时刻（秒），rgba = 240×24 采样区
 import fixture from '../utils/__fixtures__/frameStamp.json';
@@ -108,6 +114,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('getDriveWebRtcIceServers', () => {
@@ -135,6 +142,55 @@ describe('getDriveWebRtcIceServers', () => {
     vi.stubEnv('VITE_DRIVE_WEBRTC_ICE_SERVERS', '{"urls":"turn:host"}');
 
     expect(getDriveWebRtcIceServers()).toEqual([]);
+  });
+});
+
+describe('呈现计数与回调对照', () => {
+  it('每秒 60 次合成提交但 30 次回调时独立计算两种 FPS', () => {
+    let window: Parameters<typeof calculatePresentationMetrics>[0] = [];
+    const times: number[] = [];
+    for (let i = 0; i <= 30; i += 1) {
+      const time = i * 1000 / 30;
+      times.push(time);
+      window = recordPresentedFrame(window, time, i * 2 + 1);
+    }
+    expect(calculatePresentationMetrics(window)).toEqual({ presentedFps: 60, missedCallbacks: 30 });
+    expect(calculateVideoMetrics(times).browserFps).toBe(30);
+  });
+
+  it.each([undefined, NaN, Infinity, -1, 1.5])('无效计数 %s 清空对照窗口', (count) => {
+    const window = recordPresentedFrame([], 0, 10);
+    expect(recordPresentedFrame(window, 10, count)).toEqual([]);
+  });
+
+  it.each([NaN, Infinity, -1])('无效时间 %s 清空对照窗口', (time) => {
+    expect(recordPresentedFrame([{ time: 0, count: 1 }], time, 2)).toEqual([]);
+  });
+
+  it.each([
+    { time: 101, count: 9 },
+    { time: 101, count: 10 },
+    { time: 99, count: 11 },
+    { time: 100, count: 11 },
+  ])('计数或时间未递增时重新建窗：$time/$count', ({ time, count }) => {
+    const window = recordPresentedFrame([{ time: 100, count: 10 }], time, count);
+    expect(window).toEqual([{ time, count }]);
+    expect(calculatePresentationMetrics(window)).toEqual({});
+    expect(calculatePresentationMetrics(recordPresentedFrame(window, time + 1000, count + 60)))
+      .toEqual({ presentedFps: 60, missedCallbacks: 59 });
+  });
+
+  it('窗口只保留最后 120 次观测，缺失后下一次有效计数重新建窗', () => {
+    let window: Parameters<typeof calculatePresentationMetrics>[0] = [];
+    for (let i = 0; i < 250; i += 1) {
+      window = recordPresentedFrame(window, i * 20, i * 2);
+    }
+    expect(window).toHaveLength(120);
+    expect(window[0]).toEqual({ time: 2600, count: 260 });
+    expect(calculatePresentationMetrics(window)).toEqual({ presentedFps: 100, missedCallbacks: 119 });
+    window = recordPresentedFrame(window, 5000, undefined);
+    expect(calculatePresentationMetrics(window)).toEqual({});
+    expect(recordPresentedFrame(window, 5020, 502)).toEqual([{ time: 5020, count: 502 }]);
   });
 });
 
@@ -236,7 +292,7 @@ describe('useDriveWebRtcVideo', () => {
     await waitFor(() => expect(api.createDriveWebRtcSession).toHaveBeenCalledTimes(2));
   });
 
-  it('回传浏览器端真实 FPS 和 P95 指标', async () => {
+  it('上报优先使用呈现计数 FPS，P95 保留回调间隔', async () => {
     const api = await import('../services/api');
     const callbacks: VideoFrameRequestCallback[] = [];
     Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
@@ -271,12 +327,12 @@ describe('useDriveWebRtcVideo', () => {
       pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver } as unknown as RTCTrackEvent);
     });
     await act(async () => {
-      callbacks.shift()?.(0, { presentationTime: 0 } as VideoFrameCallbackMetadata);
-      callbacks.shift()?.(1000, { presentationTime: 1000 } as VideoFrameCallbackMetadata);
+      callbacks.shift()?.(0, { presentationTime: 0, presentedFrames: 1 } as VideoFrameCallbackMetadata);
+      callbacks.shift()?.(1000, { presentationTime: 1000, presentedFrames: 61 } as VideoFrameCallbackMetadata);
     });
 
     await waitFor(() => expect(api.sendDriveWebRtcBrowserStats).toHaveBeenCalledWith('session-1', {
-      browser_fps: 1,
+      browser_fps: 60,
       browser_p95_frame_interval_ms: 1000,
       e2e_latency_p50_ms: undefined,
       e2e_latency_p95_ms: undefined,
@@ -348,6 +404,7 @@ describe('useDriveWebRtcVideo', () => {
   });
 
   it('无 captureTime 时用像素印章采样真实端到端时延', async () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_DIAGNOSTIC', '1');
     const api = await import('../services/api');
     // 冻结本机钟：syncClock 的 NTP 中点与读帧时刻同源 → e2e 精确等于
     // (server_time − stamp)·1000（server_time 由测试钉在 fixture.ts+42ms）
@@ -430,6 +487,7 @@ describe('useDriveWebRtcVideo', () => {
   });
 
   it('同印章节拍重复帧只取首现，e2e 不掺补帧间隔', async () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_DIAGNOSTIC', '1');
     const api = await import('../services/api');
     // 60Hz 节拍给同一内容帧补重复帧（同印章）：时延口径=「采集→首现」，
     // 重复帧再采样会把补帧间隔（16.7ms）掺进真实时延，必须去重
@@ -496,6 +554,119 @@ describe('useDriveWebRtcVideo', () => {
       expect(payload.e2e_latency_p95_ms).toBeCloseTo(42, 0);
     } finally {
       nowSpy.mockRestore();
+      ctxSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    { diagnostic: '0', hasStamp: true, reads: 16 },
+    { diagnostic: '1', hasStamp: true, reads: 61 },
+    { diagnostic: '0', hasStamp: false, reads: 16 },
+  ])('采样限频且保留每帧 FPS（诊断=$diagnostic，印章=$hasStamp）', async ({ diagnostic, hasStamp, reads }) => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_DIAGNOSTIC', diagnostic);
+    const api = await import('../services/api');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const perfSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ server_time: fixture.ts + 0.042 }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const fakeCtx = {
+      drawImage: vi.fn(() => {
+        expect(callbacks).toHaveLength(1);
+      }),
+      getImageData: vi.fn(() => ({
+        data: hasStamp ? new Uint8ClampedArray(fixture.rgba)
+          : new Uint8ClampedArray(fixture.rgba.length),
+      })),
+    };
+    const ctxSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(fakeCtx as unknown as CanvasRenderingContext2D);
+    const callbacks: VideoFrameRequestCallback[] = [];
+    let nextHandle = 0;
+    const cancelCallback = vi.fn();
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: VideoFrameRequestCallback) => {
+        callbacks.push(callback);
+        return ++nextHandle;
+      }),
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: cancelCallback,
+    });
+    const pc = new FakePeerConnection();
+    const onState = vi.fn();
+    try {
+      const view = render(<HookProbe onState={onState} factory={() => pc as unknown as RTCPeerConnection} />);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(pc.localDescription?.sdp).toBe('offer-sdp'));
+      await act(async () => {
+        pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver: {} as RTCRtpReceiver } as unknown as RTCTrackEvent);
+      });
+      const video = view.container.querySelector('video')!;
+      Object.defineProperties(video, {
+        readyState: { configurable: true, value: 4 },
+        videoWidth: { configurable: true, value: 640 },
+        videoHeight: { configurable: true, value: 480 },
+      });
+      await act(async () => {
+        callbacks.shift()?.(0, {
+          presentationTime: 0, presentedFrames: hasStamp ? 1 : undefined,
+          expectedDisplayTime: 20, captureTime: -5,
+        } as VideoFrameCallbackMetadata);
+      });
+      expect(fakeCtx.getImageData).toHaveBeenCalledTimes(1);
+      // 激活后的像素读回也限频，不混入未抽样帧的 captureTime。
+      await act(async () => {
+        for (let i = 1; i <= 60; i += 1) {
+          const time = i * 17;
+          perfSpy.mockReturnValue(time);
+          callbacks.shift()?.(time, {
+            presentationTime: time, presentedFrames: hasStamp ? i + 1 : undefined,
+            expectedDisplayTime: time + 20, captureTime: time - 5,
+          } as VideoFrameCallbackMetadata);
+        }
+      });
+      expect(fakeCtx.getImageData).toHaveBeenCalledTimes(reads);
+      const payload = vi.mocked(api.sendDriveWebRtcBrowserStats).mock.calls.at(-1)?.[1];
+      expect(payload?.browser_fps).toBeCloseTo(1000 / 17);
+      expect(payload?.browser_p95_frame_interval_ms).toBe(17);
+      // 第 60 个回调（1003ms）触发上报，最后一个回调尚未到下一上报周期。
+      expect(payload?.e2e_samples).toBe(hasStamp ? 1 : 60);
+      expect(payload?.e2e_latency_p95_ms).toBeCloseTo(hasStamp ? 42 : 25, 0);
+      expect(lastCallValue(onState).metrics.browserFps).toBeCloseTo(1000 / 17);
+      expect(lastCallValue(onState).metrics.callbackFps).toBeCloseTo(1000 / 17);
+      if (hasStamp) {
+        expect(lastCallValue(onState).metrics.presentedFps).toBeCloseTo(1000 / 17);
+      } else {
+        expect(lastCallValue(onState).metrics.presentedFps).toBeUndefined();
+      }
+
+      if (hasStamp) {
+        // 同一时刻重连：限频和印章去重均重置，首帧立即再次采样。
+        await act(async () => { await lastCallValue(onState).reconnect(); });
+        callbacks.length = 0;
+        await act(async () => {
+          pc.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack, receiver: {} as RTCRtpReceiver } as unknown as RTCTrackEvent);
+          callbacks.shift()?.(1020, { presentationTime: 1020, presentedFrames: 1000 } as VideoFrameCallbackMetadata);
+        });
+        expect(fakeCtx.getImageData).toHaveBeenCalledTimes(reads + 1);
+        expect(lastCallValue(onState).metrics.e2eSamples).toBe(1);
+        expect(lastCallValue(onState).metrics.browserFps).toBe(0);
+        expect(lastCallValue(onState).metrics.presentedFps).toBeUndefined();
+      }
+      const queuedCallback = callbacks[0];
+      const lastHandle = nextHandle;
+      view.unmount();
+      expect(cancelCallback).toHaveBeenLastCalledWith(lastHandle);
+      queuedCallback?.(1040, { presentationTime: 1040 } as VideoFrameCallbackMetadata);
+      expect(nextHandle).toBe(lastHandle);
+    } finally {
+      nowSpy.mockRestore();
+      perfSpy.mockRestore();
       ctxSpy.mockRestore();
     }
   });

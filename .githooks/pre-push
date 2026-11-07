@@ -1,0 +1,65 @@
+#!/bin/sh
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+cd "$repo_root" || exit 1
+
+remote_name=$1
+checked_commits=" "
+
+is_zero_sha() {
+    case "$1" in
+        ''|*[!0]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+is_feature_commit() {
+    git show -s --format=%s "$1" | grep -Eq '^feat(\([^()]+\))?!?:'
+}
+
+while read -r local_ref local_sha remote_ref remote_sha
+do
+    if is_zero_sha "$local_sha"; then
+        continue
+    fi
+
+    if is_zero_sha "$remote_sha"; then
+        commits=$(git rev-list "$local_sha" --not "--remotes=$remote_name") || {
+            echo "pre-push: could not determine new commits for $local_ref." >&2
+            exit 1
+        }
+    else
+        commits=$(git rev-list "$remote_sha..$local_sha") || {
+            echo "pre-push: could not determine update range for $local_ref." >&2
+            exit 1
+        }
+    fi
+
+    feature_in_update=0
+    for commit in $commits
+    do
+        if ! is_feature_commit "$commit"; then
+            continue
+        fi
+        feature_in_update=1
+
+        case "$checked_commits" in
+            *" $commit "*) continue ;;
+        esac
+        checked_commits="$checked_commits$commit "
+
+        if ! python3 scripts/linux_validation.py check --commit "$commit" < /dev/null; then
+            echo "pre-push: feature commit $commit has no Linux validation credential." >&2
+            echo "Run: python3 scripts/linux_validation.py run --commit $commit" >&2
+            exit 1
+        fi
+    done
+
+    if [ "$feature_in_update" -eq 1 ] && ! is_feature_commit "$local_sha"; then
+        if ! python3 scripts/linux_validation.py check --commit "$local_sha" < /dev/null; then
+            echo "pre-push: feature update tip $local_sha has no Linux validation credential." >&2
+            echo "Run: python3 scripts/linux_validation.py run --commit $local_sha" >&2
+            exit 1
+        fi
+    fi
+done
