@@ -77,11 +77,26 @@ def main():
     ap.add_argument("--spawn-seed", type=int, default=1000,
                     help="spawn 种子基数;每局 seed = 基数 + ep 序号")
     ap.add_argument("--car-name", default="bc-teleop")
+    ap.add_argument("--eval-mode", action="store_true",
+                    help="M4 D3:人驾基线模式——自动 12 局(spawn 序列与 RL held-out "
+                         "完全同源:SpawnCurriculum(seed=50000) 默认档),局终判定与 "
+                         "RL 相同(|锚定cte|>2 或 2000 帧),录全遥测供离线打分")
+    ap.add_argument("--eval-episodes", type=int, default=12)
+    ap.add_argument("--eval-seed-base", type=int, default=50000)
+    ap.add_argument("--cte-anchor", default="docs/arch/rl-m4-driveline.json",
+                    help="eval 模式的锚(与 RL 一致;设为空串=center)")
     args = ap.parse_args()
 
     out_dir = args.out or os.path.join(REPO_ROOT, "outputs",
                                        f"bc_data_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(out_dir, exist_ok=True)
+
+    anchor_cfg = None
+    if args.eval_mode and args.cte_anchor:
+        with open(args.cte_anchor, encoding="utf-8") as f:
+            doc = json.load(f)
+        anchor_cfg = {"mode": "line", "offsets": doc["offsets"],
+                      "cte_unit_gain": doc["cte_unit_gain"]}
 
     spawn_base = {}
     if args.spawn_node is not None:
@@ -98,11 +113,20 @@ def main():
                           log_path=os.path.join(REPO_ROOT, "outputs",
                                                 f"sim_bc_{int(time.time())}.log"))
     # async + pixel:人驾自然节拍;图像经 sim JPEG → cam.frame(160×120 uint8)
+    from donkeydrifter.rl.curriculum import CurriculumConfig, SpawnCurriculum
+    eval_curr = (SpawnCurriculum(CurriculumConfig(seed=args.eval_seed_base))
+                 if args.eval_mode else None)
     env = DonkeyDriftEnv(sim_host=args.host, sim_port=args.port, sim_path="remote",
                          obs_mode="pixel", img_enc=args.img_enc,
                          sync_mode=False, connect_timeout_s=90.0,
-                         frame_wait_timeout_s=2.0, name=args.car_name)
+                         frame_wait_timeout_s=2.0, cte_anchor=anchor_cfg,
+                         name=args.car_name)
     meta_path = os.path.join(out_dir, "meta.json")
+    eval_fh = None
+    if args.eval_mode:
+        eval_fh = open(os.path.join(out_dir, "eval_frames.jsonl"), "w", encoding="utf-8")
+        print(f"[bc][eval] 人驾基线模式:{args.eval_episodes} 局,锚="
+              f"{args.cte_anchor or 'center'},局终=|锚定cte|>2 或 2000 帧")
     print(f"[bc] 输出目录:{out_dir}")
     print(f"[bc] spawn:{'node/lateral/heading + seed' if has_spawn else '未指定→就近复位'}"
           f" | 键控:w/s 油门 a/d 转向 space 刹车 x 归零 r 新局 q 退出")
@@ -128,6 +152,13 @@ def main():
         return img, svec, tele
 
     def do_reset(ep_i: int) -> dict:
+        if args.eval_mode:
+            # 与 RL held-out 同源:SpawnCurriculum(seed=50000) 逐局 sample
+            cfg = eval_curr.sample()
+            _, info = env.reset(options={"spawn_cfg": cfg}, seed=None)
+            spawn_points.append({"ep": ep_i, "cfg": cfg,
+                                 "pos": [round(float(x), 3) for x in info["pos"][:2]]})
+            return info
         if has_spawn:
             cfg = dict(spawn_base)
             opts = {"spawn_cfg": cfg}
@@ -184,8 +215,55 @@ def main():
                         kt.last_keys = ""
                         continue
 
-                # 记录 obs_k → a_k(观测→动作配对;label 为本循环读到的动作)
                 tele = dict(getattr(env._cam, "info", {}) or {})
+                if args.eval_mode:
+                    # D3:录全遥测(锚定 cte 在 tele["cte"],raw 在 cte_raw)
+                    row = {"ep": ep_index, "t": round(time.perf_counter() - t_start, 4),
+                           "frame_id": tele.get("frame_id"),
+                           "pos": list(tele.get("pos", ())), "speed": tele.get("speed"),
+                           "forward_vel": tele.get("forward_vel"),
+                           "cte": tele.get("cte"), "cte_raw": tele.get("cte_raw"),
+                           "active_node": tele.get("active_node"),
+                           "vel": list(tele.get("vel", ())),
+                           "gyro": list(tele.get("gyro", ())),
+                           "accel": list(tele.get("accel", ())),
+                           "rpy": list(tele.get("car", ())),
+                           "action": [steer, throttle, brake]}
+                    eval_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    steps_ep += 1
+                    end = None
+                    try:
+                        if tele.get("cte") is not None and abs(float(tele["cte"])) > 2.0:
+                            end = "cte_limit"
+                    except (TypeError, ValueError):
+                        pass
+                    if end is None and steps_ep >= 2000:
+                        end = "step_budget"
+                    prev_a = (steer, throttle)
+                    obs_image, _, _ = snap_obs()
+                    if end is not None:
+                        ep_records.append({"ep": ep_index, "frames": steps_ep,
+                                           "end_reason": end})
+                        print(f"[bc][eval] ep{ep_index} 终止({end}) {steps_ep} 帧")
+                        ep_index += 1
+                        steps_ep = 0
+                        prev_a = (0.0, 0.0)
+                        if ep_index >= args.eval_episodes:
+                            break
+                        info = do_reset(ep_index)
+                        obs_image, _, _ = snap_obs()
+                        print(f"[bc][eval] ep{ep_index} 复位完成")
+                    else:
+                        tok = env._frame_token()
+                        env._cam.run_threaded(steer, throttle, brake)
+                        if not env._wait_new_frame(tok, 2.0):
+                            dropped += 1
+                        if int(steps_ep * 2) != int((steps_ep - 1) * 2):
+                            print(f"[bc][eval] ep{ep_index} {steps_ep} 帧 "
+                                  f"cte'={tele.get('cte')}")
+                    continue
+
+                # 记录 obs_k → a_k(观测→动作配对;label 为本循环读到的动作)
                 fid = tele.get("frame_id")
                 svec = env.state_vector(prev_action=prev_a)
                 buf.add(obs_image if obs_image is not None else np.zeros((120, 160, 3), np.uint8),
@@ -209,7 +287,9 @@ def main():
                 prev_a = (steer, throttle)
                 obs_image, _, _ = snap_obs()  # 下一循环的 obs_k(含 prev=本次动作)
 
-                if args.auto_episode_frames and frames_ep >= args.auto_episode_frames:
+                if args.eval_mode:
+                    pass
+                elif args.auto_episode_frames and frames_ep >= args.auto_episode_frames:
                     write_episode_npz(out_dir, buf)
                     if len(buf):
                         ep_files.append(f"bc_{buf.ep_id:05d}.npz")
@@ -232,6 +312,17 @@ def main():
             stop_sim(proc=proc)
 
     n = len(all_steer)
+    if args.eval_mode:
+        if eval_fh is not None:
+            eval_fh.flush(); eval_fh.close()
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump({"mode": "eval", "args": vars(args), "episodes": ep_records,
+                       "anchor": args.cte_anchor,
+                       "eval_seed_base": args.eval_seed_base,
+                       "wall_s": round(time.perf_counter() - t_start, 1)},
+                      f, ensure_ascii=False, indent=2)
+        print(f"[bc][eval] 完成 {len(ep_records)} 局 → {meta_path}")
+        return
     if n == 0:
         print("[bc] 无数据,不落盘")
         return

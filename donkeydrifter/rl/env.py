@@ -135,6 +135,7 @@ class DonkeyDriftEnv(gym.Env):
         sync_mode: bool = False,
         sync_time_step: float = 0.05,
         spawn_curriculum=None,
+        cte_anchor: Optional[Dict[str, Any]] = None,
         name: str = "rl-car-0",
     ):
         if obs_mode not in ("state", "pixel"):
@@ -151,6 +152,20 @@ class DonkeyDriftEnv(gym.Env):
         # (sdsim 协议约束;0.05/0.02 合法,1/60 不合法)
         self.sync_mode = bool(sync_mode)
         self.sync_time_step = float(sync_time_step)
+        # M4 D1.4:cte 锚定(口径红线:三处统一 = reward cte 项 / cte_limit 截断 /
+        # state obs cte 分量;实现为单点 in-place 替换 cam.info["cte"],下游全部
+        # 自动统一)。格式:{"mode":"line","offsets":[米], "cte_unit_gain":g}
+        # (rl-m4-driveline.json);None = "center"(M3 语义,cte 原样)。
+        # sim cte 为增益单位(实测 gain≈-8.114,见 rl-m4-driveline.json),line 锚
+        # 下所有 cte 量先换算米制:cte_m = cte_raw / gain,再减行车线 offset。
+        self._cte_offsets: Optional[np.ndarray] = None
+        self._cte_gain: float = 1.0
+        self._anchor_defects = 0
+        if cte_anchor is not None and cte_anchor.get("mode") == "line":
+            self._cte_offsets = np.asarray(cte_anchor["offsets"], dtype=float)
+            self._cte_gain = float(cte_anchor.get("cte_unit_gain", 1.0))
+            if self._cte_gain == 0:
+                raise ValueError("cte_anchor.cte_unit_gain 为 0(除法无意义)")
         # M2 D3:出生课程(SpawnCurriculum)。SB3 裸调 reset() 时不带 options,
         # 有课程则每 episode 内部采样 spawn_cfg(带符号 lateral 在训练侧生成)
         self._curriculum = spawn_curriculum
@@ -344,6 +359,41 @@ class DonkeyDriftEnv(gym.Env):
         return bool(getattr(self._cam, "connected", False))
 
     # ------------------------------------------------------------------
+    # cte 锚定(M4 D1.4,单点)
+    # ------------------------------------------------------------------
+
+    def _apply_cte_anchor(self, info: Dict[str, Any]) -> None:
+        """in-place 锚定 info["cte"](cam.info 当前帧 dict;dgym 每轮整体替换,
+        无跨帧累积)。line 锚:cte_m = cte_raw/gain − offsets[active_node];
+        缺 active_node 时保持原值并计缺陷(训练链路 active_node 恒在,
+        出现即口径事故,计数供 Liveness/报告显式暴露)。center 模式 no-op。"""
+        if self._cte_offsets is None:
+            return
+        raw = info.get("cte")
+        # node 来源与 _build_info 提升同源:handler.active_node(sim 组装的 info
+        # dict 无此键——M2 D0 教训的时序版;直接从 info 取会全程 None → 锚定
+        # 失效回退 raw sim 单位,M4 首轮 held-out 全挂的直接原因,已修)
+        node = info.get("active_node")
+        if node is None:
+            viewer = getattr(getattr(self._cam, "env", None), "unwrapped", None) \
+                if self._cam.env is not None else None
+            handler = getattr(getattr(viewer, "viewer", None), "handler", None)
+            node = getattr(handler, "active_node", None)
+        info["active_node"] = node  # 回写:让 _build_info 的提升与本处一致
+        info["cte_raw"] = raw
+        if raw is None or node is None:
+            self._anchor_defects += 1
+            return
+        try:
+            cte_m = float(raw) / self._cte_gain
+            anchored = cte_m - float(self._cte_offsets[int(node) % len(self._cte_offsets)])
+        except (TypeError, ValueError, IndexError):
+            self._anchor_defects += 1
+            return
+        info["cte"] = anchored
+        info["cte_anchor_node"] = int(node)
+
+    # ------------------------------------------------------------------
     # 帧同步
     # ------------------------------------------------------------------
 
@@ -462,6 +512,7 @@ class DonkeyDriftEnv(gym.Env):
                 self._cam._set_frame(_o)
             self._cam.info = info_raw
             elapsed = time.perf_counter() - t0
+            self._apply_cte_anchor(getattr(self._cam, "info", {}) or {})
             self._step_count = 0
             self._prev_action = (0.0, 0.0)
             obs, defects = self._build_obs()
@@ -499,6 +550,7 @@ class DonkeyDriftEnv(gym.Env):
         detected = self._wait_pose_jump(pre_pos, timeout_s=1.5)
         elapsed = time.perf_counter() - t0
 
+        self._apply_cte_anchor(getattr(self._cam, "info", {}) or {})
         self._step_count = 0
         self._prev_action = (0.0, 0.0)
         obs, defects = self._build_obs()
@@ -562,16 +614,22 @@ class DonkeyDriftEnv(gym.Env):
         step_elapsed = time.perf_counter() - t0
         self._step_count += 1
 
+        # M4 D1.4:锚定单点——先 in-place 替换 cam.info["cte"],此后截断判定、
+        # _build_obs/_build_info、DecomposedRewardWrapper 读到的全是锚定米制 cte'
+        self._apply_cte_anchor(getattr(self._cam, "info", {}) or {})
+
         obs, defects = self._build_obs()
         info = self._build_info()
         info["raw_reward"] = raw_reward
         info["rl/stale"] = stale
         info["dt_s"] = step_elapsed
         info["rl/step_elapsed_s"] = step_elapsed
+        if self._cte_offsets is not None:
+            info["rl/anchor_defects"] = self._anchor_defects
         if defects:
             info["rl/obs_defects"] = defects
 
-        # 客户端侧终止(与 sim terminated 分开的第二个 flag)
+        # 客户端侧终止(与 sim terminated 分开的第二个 flag);读锚定后 cte'
         truncated = False
         reason = None
         cte = getattr(self._cam, "info", {}).get("cte")
