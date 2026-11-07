@@ -57,15 +57,18 @@ logging.basicConfig(level=logging.INFO)
 
 
 def _selected_model_from_disk():
-    """无 --model 启动时回退读取 Web UI 持久化的所选模型（selected_model.json）。
+    """无 --model 启动时回退读取 Web UI 持久化的所选模型（selected_model.json）
+    或云端同步下发的默认模型（models/deployed.tflite / models/deployed.h5）。
 
-    Web UI 侧（routers/drive.py）在用户选择模型后写入该文件；本函数仅读取，
-    使「选模型后要求带模型重启」在重启车端进程时真正生效。读取失败静默回退 None。
+    Web UI 侧（routers/drive.py）或云端同步（model_sync.py）会写入该文件；
+    若文件不存在，则继续检查 models/deployed.tflite 与 models/deployed.h5。
     """
     candidates = []
     car_dir = os.environ.get("DONKEY_CAR_DIR", "").strip()
     if car_dir:
         candidates.append(os.path.join(os.path.expanduser(car_dir), "selected_model.json"))
+    local_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(local_dir, "selected_model.json"))
     candidates.append(os.path.expanduser("~/mycar/selected_model.json"))
 
     for path in candidates:
@@ -74,11 +77,23 @@ def _selected_model_from_disk():
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 model_path = data.get("model_path")
-                if model_path:
+                if model_path and os.path.exists(os.path.expanduser(model_path)):
                     logger.info("从 %s 读取所选模型：%s", path, model_path)
                     return model_path
         except Exception as e:
             logger.warning("读取所选模型失败 %s: %s", path, e)
+
+    model_dirs = [os.path.join(local_dir, "models")]
+    if car_dir:
+        model_dirs.append(os.path.join(os.path.expanduser(car_dir), "models"))
+    model_dirs.append(os.path.expanduser("~/projects/mycar/models"))
+    model_dirs.append(os.path.expanduser("~/mycar/models"))
+    for mdir in model_dirs:
+        for name in ("deployed.tflite", "deployed.h5"):
+            cand = os.path.join(mdir, name)
+            if os.path.isfile(cand):
+                logger.info("使用云端同步的默认部署模型：%s", cand)
+                return cand
     return None
 
 

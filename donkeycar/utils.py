@@ -159,6 +159,49 @@ def denormalize_image(img_arr_float):
     return (img_arr_float * 255.0).astype(np.uint8)
 
 
+def fit_pil_image(img, image_width, image_height, pad_color=(255, 255, 255)):
+    """Resize a PIL image to (image_width, image_height) without stretching.
+
+    - If already (image_width, image_height), return as-is.
+    - Scale uniformly to fit inside (image_width, image_height).
+    - If aspect ratio differs, paste centered onto a white canvas (letterbox/pillarbox).
+    """
+    src_w, src_h = img.size
+    target_w, target_h = int(image_width), int(image_height)
+    if (src_w, src_h) == (target_w, target_h):
+        return img
+    scale = min(float(target_w) / max(1, src_w), float(target_h) / max(1, src_h))
+    new_w = min(target_w, max(1, int(round(src_w * scale))))
+    new_h = min(target_h, max(1, int(round(src_h * scale))))
+    resample = getattr(getattr(Image, "Resampling", Image), "BILINEAR")
+    resized = img.resize((new_w, new_h), resample)
+    if (new_w, new_h) == (target_w, target_h):
+        return resized
+    fill = 255 if resized.mode == 'L' else pad_color
+    canvas = Image.new(resized.mode, (target_w, target_h), fill)
+    canvas.paste(resized, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+    return canvas
+
+
+def fit_image_array(img_arr, image_width, image_height, pad_color=(255, 255, 255)):
+    """Resize a numpy image array (H, W[, C]) to (image_height, image_width[, C])
+    using proportional scaling + white border padding (never stretching)."""
+    if img_arr is None:
+        return None
+    a = np.asarray(img_arr)
+    target_w, target_h = int(image_width), int(image_height)
+    if a.ndim < 2 or (a.shape[0] == target_h and a.shape[1] == target_w):
+        return img_arr
+    squeezed = a.ndim == 3 and a.shape[2] == 1
+    pil_in = a[:, :, 0] if squeezed else a
+    im = Image.fromarray(pil_in.astype(np.uint8))
+    fitted = fit_pil_image(im, target_w, target_h, pad_color=pad_color)
+    out = np.asarray(fitted, dtype=a.dtype)
+    if squeezed and out.ndim == 2:
+        out = out.reshape(target_h, target_w, 1)
+    return out
+
+
 def load_pil_image(filename, cfg):
     """Loads an image from a file path as a PIL image. Also handles resizing.
 
@@ -170,16 +213,17 @@ def load_pil_image(filename, cfg):
     """
     try:
         img = Image.open(filename)
-        if img.height != cfg.IMAGE_H or img.width != cfg.IMAGE_W:
-            img = img.resize((cfg.IMAGE_W, cfg.IMAGE_H))
-
         if cfg.IMAGE_DEPTH == 1:
             img = img.convert('L')
+        else:
+            img = img.convert('RGB')
+        if img.height != cfg.IMAGE_H or img.width != cfg.IMAGE_W:
+            img = fit_pil_image(img, cfg.IMAGE_W, cfg.IMAGE_H)
         
         return img
 
     except Exception as e:
-        logger.error(f'failed to load image from {filename}: {e.message}')
+        logger.error(f'failed to load image from {filename}: {getattr(e, "message", e)}')
         return None
 
 
@@ -208,11 +252,12 @@ def load_image_sized(filename, image_width, image_height, image_depth):
     """
     try:
         img = Image.open(filename)
-        if img.height != image_height or img.width != image_width:
-            img = img.resize((image_width, image_height))
-
         if image_depth == 1:
             img = img.convert('L')
+        else:
+            img = img.convert('RGB')
+        if img.height != image_height or img.width != image_width:
+            img = fit_pil_image(img, image_width, image_height)
 
         img_arr = np.asarray(img)
 
@@ -225,7 +270,7 @@ def load_image_sized(filename, image_width, image_height, image_depth):
         return img_arr
 
     except Exception as e:
-        logger.error(f'failed to load image from {filename}: {e.message}')
+        logger.error(f'failed to load image from {filename}: {getattr(e, "message", e)}')
         return None
 
 

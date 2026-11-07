@@ -51,7 +51,7 @@ except Exception:  # pragma: no cover - 与 drive_api_bridge 同策略：缺依�
     aiortc = None
 
 
-class TunedVp8Encoder(Vp8Encoder):
+class TunedVp8Encoder(Vp8Encoder if Vp8Encoder is not None else object):
     """上游 Vp8Encoder 的低时延替换：仅改编码器创建参数，收发/打包全兼容。
 
     encode() 复制自 aiortc 1.15 ``codecs/vpx.py``（该库在 codec context
