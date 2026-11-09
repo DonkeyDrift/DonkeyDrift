@@ -59,6 +59,10 @@ CAMERA_INDEX = 0  # used for 'WEBCAM' and 'CVCAM' when there is more than one ca
 CSIC_CAM_GSTREAMER_FLIP_PARM = 0 # (0 => none , 4 => Flip horizontally, 6 => Flip vertically)
 BGR2RGB = False  # true to convert from BRG format to RGB format; requires opencv
 SHOW_PILOT_IMAGE = False  # show the image used to do the inference when in autopilot mode
+# Pilot 周期观测日志间隔（秒）：>0 时每 N 秒记一条「pilot 观测」（推理输入
+# 统计 + 输出 + 新帧数，排查全自动异常用）；0=关闭（默认，安静）。
+# 帧冻结告警（输入 >2s 不更新）不受此键影响，始终开启。
+PILOT_OBSERVE_INTERVAL = 0
 
 # For IMAGE_LIST camera
 # PATH_MASK = "~/mycar/data/tub_1_20-03-12/*.jpg"

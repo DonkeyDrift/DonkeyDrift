@@ -24,8 +24,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# 推理可观测性参数：周期日志间隔 / 帧冻结告警阈值 / 内容哈希兜底采样间隔（秒）
-_OBS_LOG_INTERVAL = 5.0
+# 推理可观测性参数：帧冻结告警阈值 / 内容哈希兜底采样间隔（秒）。
+# 周期观测日志的间隔由配置键 PILOT_OBSERVE_INTERVAL 控制（默认 0=关闭，
+# 见 __init__），帧冻结告警不受该开关键影响、始终开启（低噪声安全网）。
 _OBS_FREEZE_WARN_S = 2.0
 _OBS_HASH_INTERVAL = 1.0
 
@@ -43,6 +44,14 @@ class PilotHolder:
         self._target_hw: Optional[tuple[int, int]] = None
         # 推理可观测性状态（issue：全自动 pilot 恒定输出排查）
         self._obs_debug = os.environ.get('DK_PILOT_DEBUG', '').strip() not in ('', '0')
+        # 周期观测日志间隔（秒）：myconfig 键 PILOT_OBSERVE_INTERVAL，
+        # 0/缺省=关闭（默认不打观测日志）；帧冻结告警与 DK_PILOT_DEBUG
+        # 逐帧日志不受此键控制。
+        try:
+            self._obs_log_interval = float(
+                getattr(cfg, 'PILOT_OBSERVE_INTERVAL', 0) or 0)
+        except (TypeError, ValueError):
+            self._obs_log_interval = 0.0
         self._obs_reset(now=time.time())
 
     def _obs_reset(self, now: float) -> None:
@@ -144,13 +153,14 @@ class PilotHolder:
         return outputs
 
     def _observe(self, img_arr, outputs) -> None:
-        """周期记录推理输入/输出统计，并检测输入帧长时间不变（疑似相机冻结）。
+        """推理输入/输出观测：可选的周期统计日志 + 帧冻结检测（常开）。
 
         排查「全自动时 pilot 输出恒定」这类问题的首要线索是模型到底看到了
         什么：输入帧若持续不变，输出恒定就是必然。开销控制：对象 id 每帧
-        比较（O(1)），内容哈希最多每秒一次兜底（防原地改写的相机实现），
-        周期日志每 5s 一条。观测自身绝不抛异常、绝不影响主链路。
-        DK_PILOT_DEBUG=1 时逐帧打印输入输出（调试用）。
+        比较（O(1)），内容哈希最多每秒一次兜底（防原地改写的相机实现）。
+        周期统计日志由 myconfig 键 PILOT_OBSERVE_INTERVAL 控制（秒，
+        默认 0=关闭），帧冻结告警始终开启，DK_PILOT_DEBUG=1 时逐帧打印。
+        观测自身绝不抛异常、绝不影响主链路。
         """
         try:
             now = time.time()
@@ -182,7 +192,8 @@ class PilotHolder:
                         "pilot 输入帧已 %.1fs 未更新（疑似相机/管道冻结），"
                         "当前输出[%s]——输出恒定先查输入！", frozen_s, outs_desc)
 
-            if now - self._obs_last_log >= _OBS_LOG_INTERVAL:
+            if (self._obs_log_interval > 0
+                    and now - self._obs_last_log >= self._obs_log_interval):
                 interval = now - self._obs_last_log
                 in_desc = '无图像输入'
                 if img_arr is not None and hasattr(img_arr, 'shape'):
