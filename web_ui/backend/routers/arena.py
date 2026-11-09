@@ -10,14 +10,13 @@ from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, List, Optional
 
-import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from donkeycar import load_config
-from donkeycar.utils import get_model_by_type
+from donkeycar.utils import fit_image_array, get_model_by_type
 
 from routers import tub as tub_router
 
@@ -266,11 +265,13 @@ def apply_image_processing(image: np.ndarray, base_cfg: Any, request: PredictReq
 
 
 def fit_model_input_shape(pilot: Any, image: np.ndarray) -> np.ndarray:
-    """把图像缩放到模型期望的输入尺寸。
+    """把图像适配到模型期望的输入尺寸。
 
     tub 原图分辨率（如 320x240）常与模型固定输入（如 120x160）不一致，
     直接推理会让 TFLite XNNPack delegate 在 prepare 阶段报
-    "failed to reshape runtime" 错误。
+    "failed to reshape runtime" 错误。此处与训练管道/车端 PilotHolder 统一
+    用 fit_image_array（等比缩放+白框，非拉伸），保证离线预览与实车推理
+    同口径；输出严格为 (height, width)，不影响上述 XNNPack 约束。
     """
     try:
         input_name = pilot.interpreter.input_keys[0]
@@ -280,7 +281,7 @@ def fit_model_input_shape(pilot: Any, image: np.ndarray) -> np.ndarray:
         return image
     if image.shape[0] == height and image.shape[1] == width:
         return image
-    return cv2.resize(image, (width, height))
+    return fit_image_array(image, width, height)
 
 
 def draw_control_line(angle: float, throttle: float, image: np.ndarray, color: tuple[int, int, int]) -> None:
