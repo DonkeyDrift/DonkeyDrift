@@ -641,7 +641,7 @@ class DriveApiBridge:
         self.jpeg_quality = jpeg_quality
         self.preserve_source_resolution = preserve_source_resolution
         # issue #003 热加载：车端常驻的可原子替换模型容器（PilotHolder）。
-        # 为 None 表示当前车端不支持热加载（legacy json / 漂移回放占用 pilot 输出）。
+        # 为 None 表示当前车端模板尚未接入热加载。
         self.model_loader = model_loader
         # P2 预览编码分辨率上限：preserve_source_resolution（模拟器）路径的
         # 高分辨率帧直接进软编会把帧率拖垮（1080p 实测 fps 3.9/时延 447ms）。
@@ -916,7 +916,7 @@ class DriveApiBridge:
             })
 
         if self.model_loader is None:
-            _fail("车端未启用模型热加载（legacy json 或漂移回放占用 pilot 输出）")
+            _fail("当前车端模板未接入模型热加载，请更新车端 manage.py 后重启")
             return
         if not model_path or not isinstance(model_path, str):
             _fail("model_path 无效")

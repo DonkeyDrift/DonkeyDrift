@@ -216,20 +216,29 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     #
     has_input_controller = hasattr(cfg, "CONTROLLER_TYPE") and cfg.CONTROLLER_TYPE != "mock"
 
-    # issue #003 热加载：常驻一个可在运行期原子替换模型的容器。有 --model 时启动
-    # 即载入；无 --model 且未启用漂移回放时注册空容器，等待 Web 端选模型后直接
-    # 热加载，无需重启车端进程。legacy .json（模型结构+权重分离）不支持热切换，
-    # 保持原有静态注册路径。
+    # issue #003 热加载：PilotHolder 始终独占 pilot 输出。漂移回放作为初始
+    # pilot 放进同一个容器，Web 热加载会原子替换它；legacy .json 也由容器加载。
     _full_model_exts = ('.h5', '.trt', '.tflite', '.savedmodel', '.pth',
-                        '.aidem', '.ckpt')
-    _is_legacy_json = bool(model_path) and ('.json' in model_path) \
-        and not any(ext in model_path for ext in _full_model_exts)
+                        '.aidem', '.ckpt', '.json')
     _replay_no_model = bool(getattr(cfg, 'DRIFT_REPLAY_ENABLED', False)) and not model_path
-    if _is_legacy_json or _replay_no_model:
-        pilot_holder = None
-    else:
-        pilot_holder = PilotHolder(
-            cfg, output_count=3 if cfg.TRAIN_LOCALIZER else 2)
+    replay_part = None
+    if _replay_no_model:
+        from donkeydrifter.parts.drift_replay import DriftReplayPart
+        replay_part = DriftReplayPart(
+            clip_path=cfg.DRIFT_REPLAY_CLIP,
+            speed=getattr(cfg, 'DRIFT_REPLAY_SPEED', 1.0),
+            loop=getattr(cfg, 'DRIFT_REPLAY_LOOP', 1),
+            max_throttle=getattr(cfg, 'DRIFT_REPLAY_MAX_THROTTLE', 0.6),
+            max_steering=getattr(cfg, 'DRIFT_REPLAY_MAX_STEERING', 1.0),
+            max_delta_throttle=getattr(cfg, 'DRIFT_REPLAY_MAX_DELTA_THROTTLE', 0.2),
+            max_delta_steering=getattr(cfg, 'DRIFT_REPLAY_MAX_DELTA_STEERING', 0.3),
+            warmup_frames=getattr(cfg, 'DRIFT_REPLAY_WARMUP_FRAMES', 10),
+        )
+        logger.info("Drift replay part enabled until a model is loaded (clip=%s)",
+                    cfg.DRIFT_REPLAY_CLIP)
+    pilot_holder = PilotHolder(
+        cfg, output_count=3 if cfg.TRAIN_LOCALIZER else 2,
+        initial_pilot=replay_part)
 
     ctr = add_user_controller(V, cfg, use_joystick, model_loader=pilot_holder)
     # 模拟器帧事件驱动直推 WebRTC 帧缓冲:车辆循环轮询喂帧会被循环负载欠采样
@@ -377,62 +386,25 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         kl.load(model_path)
         print('finished loading in %s sec.' % (str(time.time() - start)) )
 
-    def load_weights(kl, weights_path):
-        start = time.time()
-        try:
-            print('loading model weights', weights_path)
-            kl.model.load_weights(weights_path)
-            print('finished loading in %s sec.' % (str(time.time() - start)) )
-        except Exception as e:
-            print(e)
-            print('ERR>> problems loading weights', weights_path)
-
-    def load_model_json(kl, json_fnm):
-        start = time.time()
-        print('loading model json', json_fnm)
-        from tensorflow.python import keras
-        try:
-            with open(json_fnm, 'r') as handle:
-                contents = handle.read()
-                kl.model = keras.models.model_from_json(contents)
-            print('finished loading json in %s sec.' % (str(time.time() - start)) )
-        except Exception as e:
-            print(e)
-            print("ERR>> problems loading model json", json_fnm)
-
     #
     # load and configure model for inference
     #
     if model_path or pilot_holder is not None:
-        # legacy .json：模型结构 + 权重分离，走静态注册，不支持热切换
-        if model_path and _is_legacy_json:
-            kl = dk.utils.get_model_by_type(model_type, cfg)
-            load_model_json(kl, model_path)
-            weights_path = model_path.replace('.json', '.weights')
-            load_weights(kl, weights_path)
+        # 所有格式（含 legacy .json）都由常驻 PilotHolder 持有，支持原子替换。
+        # 无 --model 时不预载模型；漂移回放若已配置则作为 initial_pilot。
+        if model_path:
+            if not any(ext in model_path for ext in _full_model_exts):
+                print("ERR>> Unknown extension type on model file!!")
+                return
+            pilot_holder.load(model_path, model_type)
 
-            def reload_weights(filename):
-                weights_path = filename.replace('.json', '.weights')
-                load_weights(kl, weights_path)
+            def reload_model(filename):
+                pilot_holder.load(filename, model_type)
 
-            model_reload_cb = reload_weights
-            pilot_part = kl
+            model_reload_cb = reload_model
         else:
-            # 常规格式：由常驻 PilotHolder 持有模型，支持运行期原子替换。
-            # 无 --model 时不预载，等待 Web 端 load_model 热加载。
-            if model_path:
-                if not any(ext in model_path for ext in _full_model_exts):
-                    print("ERR>> Unknown extension type on model file!!")
-                    return
-                pilot_holder.load(model_path, model_type)
-
-                def reload_model(filename):
-                    pilot_holder.load(filename, model_type)
-
-                model_reload_cb = reload_model
-            else:
-                model_reload_cb = None
-            pilot_part = pilot_holder
+            model_reload_cb = None
+        pilot_part = pilot_holder
 
         if model_path:
             # this part will signal visual LED, if connected
@@ -508,30 +480,6 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             inputs = ['cam/image_array_trans'] + inputs[1:]
 
         V.add(pilot_part, inputs=inputs, outputs=outputs, run_condition='run_pilot')
-
-    #
-    # 漂移操作回放：用录制的转向/油门时间序列替代模型推理。
-    # 与 KerasPilot 互斥（仅在未加载模型且启用回放时注册）。
-    # DriftReplayPart 输出 pilot/angle、pilot/throttle（-1~1），
-    # 接口与 KerasPilot 同构，下游 DriveMode/ArdPWM 链路不变。
-    # 安全：run_condition='run_pilot'（user/mode != 'user' 才生效），
-    # 固件侧需 RC CH4 拨到 FULL_AUTO 才接受；Park/mode 随时可接管。
-    #
-    if getattr(cfg, 'DRIFT_REPLAY_ENABLED', False) and not model_path:
-        from donkeydrifter.parts.drift_replay import DriftReplayPart
-        replay_part = DriftReplayPart(
-            clip_path=cfg.DRIFT_REPLAY_CLIP,
-            speed=getattr(cfg, 'DRIFT_REPLAY_SPEED', 1.0),
-            loop=getattr(cfg, 'DRIFT_REPLAY_LOOP', 1),
-            max_throttle=getattr(cfg, 'DRIFT_REPLAY_MAX_THROTTLE', 0.6),
-            max_steering=getattr(cfg, 'DRIFT_REPLAY_MAX_STEERING', 1.0),
-            max_delta_throttle=getattr(cfg, 'DRIFT_REPLAY_MAX_DELTA_THROTTLE', 0.2),
-            max_delta_steering=getattr(cfg, 'DRIFT_REPLAY_MAX_DELTA_STEERING', 0.3),
-            warmup_frames=getattr(cfg, 'DRIFT_REPLAY_WARMUP_FRAMES', 10),
-        )
-        V.add(replay_part, outputs=['pilot/angle', 'pilot/throttle'],
-              run_condition='run_pilot')
-        logger.info("Drift replay part enabled (clip=%s)", cfg.DRIFT_REPLAY_CLIP)
 
     #
     # stop at a stop sign

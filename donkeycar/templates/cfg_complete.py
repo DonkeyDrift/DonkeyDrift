@@ -260,7 +260,7 @@ VESC_STEERING_OFFSET = 0.5 # VESC accepts steering inputs from 0 to 1. Coupled w
 # 漂移操作回放（Drift Replay）
 # - 用人工录制的 Tub v2 转向/油门时间序列替代模型推理
 # - 用 scripts/build_drift_clip.py 从 Tub 生成 replay clip JSON
-# - 与 KerasPilot 互斥：仅在未加载 --model 且 DRIFT_REPLAY_ENABLED=True 时生效
+# - 仅在未加载 --model 且 DRIFT_REPLAY_ENABLED=True 时作为初始 pilot；Web 热加载后切换为模型
 # - 安全：固件侧需 RC CH4 拨到 FULL_AUTO 才接受 pilot 数据；Park/mode 随时可接管
 # - 固件无 slew rate，max_delta_* 是上位机必须承担的变化率限制
 #

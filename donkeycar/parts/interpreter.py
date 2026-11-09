@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from abc import ABC, abstractmethod
 import logging
 import numpy as np
@@ -130,7 +132,10 @@ class KerasInterpreter(Interpreter):
         self.model: tf.keras.Model = None
 
     def set_model(self, pilot: 'KerasPilot') -> None:
-        self.model = pilot.create_model()
+        self._set_model(pilot.create_model())
+
+    def _set_model(self, model: tf.keras.Model) -> None:
+        self.model = model
         # input_shape and output_shape in keras are unfortunately not a list
         # if there is only a single input / output. So pack them into a list
         # if they are single:
@@ -141,7 +146,12 @@ class KerasInterpreter(Interpreter):
         if type(output_shape) is not list:
             output_shape = [output_shape]
 
-        self.input_keys = self.model.input_names
+        self.input_keys = getattr(self.model, 'input_names', None)
+        if self.input_keys is None:
+            self.input_keys = [
+                (getattr(value._keras_history, 'layer', None)
+                 or value._keras_history.operation).name
+                for value in self.model.inputs]
         self.output_keys = self.model.output_names
         self.shapes = (dict(zip(self.input_keys, input_shape)),
                        dict(zip(self.output_keys, output_shape)))
@@ -173,7 +183,24 @@ class KerasInterpreter(Interpreter):
 
     def load(self, model_path: str) -> None:
         logger.info(f'Loading model {model_path}')
-        self.model = keras.models.load_model(model_path, compile=False)
+        self._set_model(keras.models.load_model(model_path, compile=False))
+
+    def load_json(self, model_path: str) -> None:
+        """加载 legacy 模型结构 JSON 及同名 .weights 权重。"""
+        logger.info(f'Loading legacy model {model_path}')
+        with open(model_path, 'r', encoding='utf-8') as handle:
+            model = keras.models.model_from_json(handle.read())
+        self._set_model(model)
+        weights_path = os.path.splitext(model_path)[0] + '.weights'
+        try:
+            self.model.load_weights(weights_path)
+        except ValueError as exc:
+            if 'File format not supported' not in str(exc):
+                raise
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                compatible_path = os.path.join(tmp_dir, 'model.weights.h5')
+                shutil.copyfile(weights_path, compatible_path)
+                self.model.load_weights(compatible_path)
 
     def load_weights(self, model_path: str, by_name: bool = True) -> \
             None:

@@ -17,6 +17,16 @@ def test_complete_template_uses_drive_api_bridge_when_server_url_is_set():
     assert "WebFpv" not in source
 
 
+def test_complete_template_always_uses_hot_loadable_pilot_holder():
+    source = (_TEMPLATES_DIR / "complete.py").read_text(encoding="utf-8")
+
+    assert "initial_pilot=replay_part" in source
+    assert "model_loader=pilot_holder" in source
+    assert "pilot_holder = None" not in source
+    assert "V.add(replay_part" not in source
+    assert source.count("outputs=outputs, run_condition='run_pilot'") == 1
+
+
 def test_complete_template_drive_api_bridge_outputs_include_car_mode_cmd():
     """complete 模板的 DriveApiBridge 输出须按 8 元组顺序对齐，car/mode_cmd 落到第 7 位、reset_car 第 8 位。
 

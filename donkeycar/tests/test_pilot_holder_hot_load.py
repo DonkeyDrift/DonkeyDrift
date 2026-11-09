@@ -98,6 +98,42 @@ def test_failed_load_keeps_previous_pilot(monkeypatch):
     assert holder.model_path == "/tmp/good.h5"
 
 
+def test_initial_pilot_is_replaced_by_hot_load(monkeypatch):
+    created = []
+    _patch_models(monkeypatch, created)
+    replay = FakePilot("replay")
+    holder = PilotHolder(FakeCfg(), initial_pilot=replay)
+
+    assert holder.current() is replay
+    holder.load("/tmp/model.tflite", "tflite_linear")
+
+    assert replay.shutdown_called is True
+    assert holder.current() is created[0]
+    assert holder.run("img") == (0.1, 0.2)
+
+
+def test_legacy_json_uses_json_interpreter(monkeypatch):
+    class FakeInterpreter:
+        def __init__(self):
+            self.loaded_path = None
+
+        def load_json(self, model_path):
+            self.loaded_path = model_path
+
+    pilot = FakePilot("linear")
+    pilot.interpreter = FakeInterpreter()
+
+    import donkeycar.utils as dk_utils
+    monkeypatch.setattr(dk_utils, "get_model_by_type", lambda *_: pilot)
+    holder = PilotHolder(FakeCfg())
+
+    holder.load("/tmp/legacy.json", "linear")
+
+    assert pilot.interpreter.loaded_path == "/tmp/legacy.json"
+    assert pilot.loaded_path is None
+    assert holder.model_path == "/tmp/legacy.json"
+
+
 class FakeLoader:
     def __init__(self, fail=False):
         self.fail = fail

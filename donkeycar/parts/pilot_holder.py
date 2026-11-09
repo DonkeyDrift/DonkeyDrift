@@ -3,8 +3,8 @@
 """运行时可热切换的推理模型容器（issue #003 热加载）。
 
 车端模型过去只在 `manage.py drive` 启动时按 `--model` 加载，运行中换模型
-只能重启车端进程。本 Part 在启动时无条件注册，内部持有一个 KerasPilot，
-允许在车端进程运行期间原子替换：
+只能重启车端进程。本 Part 在启动时无条件注册，内部持有当前 pilot（模型或
+漂移回放），允许在车端进程运行期间原子替换：
 
 - Web 端选模型 → 后端经 WebSocket 下发 `load_model` → DriveApiBridge 调用
   `PilotHolder.load(path, type)`，构建新模型后原子替换当前实例；
@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 class PilotHolder:
     """可原子替换内部 KerasPilot 的常驻 Part。"""
 
-    def __init__(self, cfg, output_count: int = 2):
+    def __init__(self, cfg, output_count: int = 2, initial_pilot=None):
         self.cfg = cfg
         self.output_count = int(output_count)
         self._lock = threading.Lock()
-        self._pilot = None
+        self._pilot = initial_pilot
         self._model_path: Optional[str] = None
         self._model_type: Optional[str] = None
         self._target_hw: Optional[tuple[int, int]] = None
@@ -43,7 +43,10 @@ class PilotHolder:
 
         resolved_type = model_type or getattr(self.cfg, "DEFAULT_MODEL_TYPE", "linear")
         pilot = dk_utils.get_model_by_type(resolved_type, self.cfg)
-        pilot.load(model_path)
+        if model_path.lower().endswith('.json'):
+            pilot.interpreter.load_json(model_path)
+        else:
+            pilot.load(model_path)
         target_hw = self._validate_input_shape(pilot, model_path)
         return pilot, resolved_type, target_hw
 
