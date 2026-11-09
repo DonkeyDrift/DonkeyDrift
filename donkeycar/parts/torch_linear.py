@@ -13,6 +13,8 @@
 产物（同一 stem，兼容 web 训练器传 .tflite/.h5 等任意扩展名，取其 stem）：
   <stem>.ckpt        torch 权重+元数据；`torch_linear` 模型类型可热加载上车（CPU 推理）
   <stem>.onnx        NHWC [1,H,W,3] float32 /255 输入，供 AIMO 云转 .aidem 上 NPU
+  <stem>.tflite      权重镜像到同构 Keras 网络后经 TFLite Converter 导出
+                     （需 TensorFlow，无 TF 环境自动跳过；车端 tflite_linear 可加载）
   <stem>.png         train/val loss 曲线（Web Trainer 页展示）
   <stem>_meta.json   final/best loss（Web Trainer 页展示）
 
@@ -161,6 +163,75 @@ class _TubDataset(Dataset):
         return torch.from_numpy(img), torch.from_numpy(y)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 4) tflite 导出：torch 权重镜像到同构 Keras 网络（default_n_linear）
+# ─────────────────────────────────────────────────────────────────────────────
+# TorchLinear 与 default_n_linear 逐层同构（conv2d_1..5 / dense_1 / dense_2 /
+# n_outputs0..1，见模块 docstring），直接按层名拷贝权重后走既有的
+# keras_to_tflite，产物与 TF 训练路径的 .tflite 完全同构（NHWC /255 输入），
+# 无需引入 onnx2tf 等额外依赖。
+_CONV_LAYERS = [('conv2d_1', 'features.0'), ('conv2d_2', 'features.3'),
+                ('conv2d_3', 'features.6'), ('conv2d_4', 'features.9'),
+                ('conv2d_5', 'features.12')]
+_DENSE_LAYERS = [('dense_1', 'head.0'), ('dense_2', 'head.3'),
+                 ('n_outputs0', 'angle_out'), ('n_outputs1', 'throttle_out')]
+
+
+def export_tflite_from_torch(ckpt_path: str, tflite_path: str) -> bool:
+    """把 .ckpt（TorchLinear 权重）镜像为同构 Keras 网络并导出 .tflite。
+
+    需要 TensorFlow（构建 default_n_linear 并跑 TFLite Converter）；无 TF
+    环境（如 py3.12 NPU venv）跳过并返回 False，不影响训练产物其余部分。
+    导出前用随机输入对比 torch 与 Keras 前向输出，不一致时告警并放弃导出，
+    避免静默产出坏模型。
+    """
+    try:
+        import tensorflow as tf  # noqa: F401  仅探测可用性
+        from donkeycar.parts.interpreter import keras_to_tflite
+        from donkeycar.parts.keras import default_n_linear
+    except Exception as ex:
+        logger.warning('TensorFlow 不可用，跳过 .tflite 导出: %s', ex)
+        return False
+
+    blob = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+    shape = tuple(blob.get('input_shape'))
+    net = TorchLinear(shape)
+    with torch.no_grad():
+        net(torch.zeros(1, *shape))            # 先物化 LazyLinear 再载入权重
+    net.load_state_dict(blob['state_dict'])
+    net.eval()
+    sd = net.state_dict()
+
+    keras_model = default_n_linear(2, shape)
+    # conv：torch [out,in,kh,kw] → keras kernel [kh,kw,in,out]
+    for kname, prefix in _CONV_LAYERS:
+        keras_model.get_layer(kname).set_weights([
+            sd[f'{prefix}.weight'].numpy().transpose(2, 3, 1, 0),
+            sd[f'{prefix}.bias'].numpy()])
+    # dense：torch [out,in] → keras kernel [in,out]
+    for kname, prefix in _DENSE_LAYERS:
+        keras_model.get_layer(kname).set_weights([
+            sd[f'{prefix}.weight'].numpy().T,
+            sd[f'{prefix}.bias'].numpy()])
+
+    # 数值对齐校验：镜像错误（层序错/转置错）会在这里暴露
+    x = np.random.default_rng(0).random((1, *shape)).astype(np.float32)
+    with torch.no_grad():
+        a_torch, th_torch = net(torch.from_numpy(x))
+    a_k, th_k = keras_model.predict(x, verbose=0)
+    diff = max(float(np.max(np.abs(a_torch.numpy() - a_k))),
+               float(np.max(np.abs(th_torch.numpy() - th_k))))
+    if diff > 1e-3:
+        logger.error('torch↔keras 权重镜像输出偏差 %.2e 过大，放弃 .tflite '
+                     '导出（产物以 .ckpt/.onnx 为准）', diff)
+        return False
+
+    keras_to_tflite(keras_model, tflite_path)
+    logger.info('已导出 %s（torch↔keras 输出偏差 %.2e）',
+                os.path.basename(tflite_path), diff)
+    return True
+
+
 def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
                        comment: Optional[str] = None,
                        max_epochs: Optional[int] = None) -> dict:
@@ -187,16 +258,25 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
     logger.info("训练记录 %d / 验证 %d（tub: %s）",
                 len(train_records), len(val_records), tubs)
 
-    device = torch.device('cpu')
+    # GPU 探测：有 CUDA 构建的 torch 且驱动可用时自动走 GPU，否则回退 CPU
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if device.type == 'cuda':
+        # 输入尺寸固定，启用 cudnn 自动调优
+        torch.backends.cudnn.benchmark = True
+    logger.info("训练设备: %s%s", device,
+                f" ({torch.cuda.get_device_name(0)})"
+                if device.type == 'cuda' else "")
     image_hw = get_training_image_size(cfg)
     net = TorchLinear((image_hw[0], image_hw[1],
                        getattr(cfg, 'IMAGE_DEPTH', 3))).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     mse = nn.MSELoss()
     train_loader = DataLoader(_TubDataset(train_records, image_hw),
-                              batch_size=batch, shuffle=True, num_workers=0)
+                              batch_size=batch, shuffle=True, num_workers=0,
+                              pin_memory=(device.type == 'cuda'))
     val_loader = DataLoader(_TubDataset(val_records, image_hw),
-                            batch_size=batch, shuffle=False, num_workers=0)
+                            batch_size=batch, shuffle=False, num_workers=0,
+                            pin_memory=(device.type == 'cuda'))
 
     history = {'loss': [], 'val_loss': []}
     best_val, best_state = float('inf'), None
@@ -245,12 +325,16 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
         'train_records': len(train_records),
         'val_records': len(val_records),
         'framework': 'pytorch',
+        'device': str(device),
         'comment': comment or '',
     }
 
     # .ckpt（最优权重）
     torch.save({'state_dict': net.state_dict(),
                 'input_shape': net.input_shape, 'meta': meta}, stem + '.ckpt')
+
+    # .tflite（权重镜像 default_n_linear 后导出；无 TF 环境自动跳过）
+    export_tflite_from_torch(stem + '.ckpt', stem + '.tflite')
 
     # .onnx（NHWC /255 输入；先跑一次 dummy 让 LazyLinear 物化）
     h, w, d = net.input_shape
@@ -281,7 +365,10 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
     with open(stem + '_meta.json', 'w') as f:
         json.dump(meta, f, indent=2)
     print(f"////////// Finished training in: {elapsed:.1f} sec //////////")
-    print(f"saved: {stem}.ckpt / {stem}.onnx / {stem}.png / {stem}_meta.json")
+    saved = f"{stem}.ckpt / {stem}.onnx"
+    if os.path.exists(stem + '.tflite'):
+        saved += f" / {stem}.tflite"
+    print(f"saved: {saved} / {stem}.png / {stem}_meta.json")
     return meta
 
 

@@ -584,6 +584,7 @@ def eprint(*args, **kwargs):
 
 
 _TF_AVAILABLE = None
+_TORCH_CUDA_AVAILABLE = None
 
 
 def _tf_available() -> bool:
@@ -596,6 +597,31 @@ def _tf_available() -> bool:
         except Exception:
             _TF_AVAILABLE = False
     return _TF_AVAILABLE
+
+
+def _tf_gpu_available() -> bool:
+    """TF 运行时是否真正看到 GPU 设备。
+
+    Windows 原生 TF ≥2.11 官方 wheel 不含 CUDA 内核（is_cuda_build=False），
+    此处返回 False；macOS + tensorflow-metal 或 Linux CUDA 构建返回 True。
+    """
+    try:
+        import tensorflow as tf
+        return bool(tf.config.list_physical_devices('GPU'))
+    except Exception:
+        return False
+
+
+def _torch_cuda_available() -> bool:
+    """当前 python 是否装了 CUDA 构建的 PyTorch 且 GPU 可用（结果缓存）。"""
+    global _TORCH_CUDA_AVAILABLE
+    if _TORCH_CUDA_AVAILABLE is None:
+        try:
+            import torch
+            _TORCH_CUDA_AVAILABLE = bool(torch.cuda.is_available())
+        except Exception:
+            _TORCH_CUDA_AVAILABLE = False
+    return _TORCH_CUDA_AVAILABLE
 
 
 def disable_metal_gpu_on_macos() -> bool:

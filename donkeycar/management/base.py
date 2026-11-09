@@ -876,8 +876,23 @@ class Train(BaseCommand):
             else getattr(cfg, 'DEFAULT_AI_FRAMEWORK', 'tensorflow')
 
         if framework == 'tensorflow':
-            from donkeycar.utils import _tf_available
-            if _tf_available():
+            from donkeycar.utils import _tf_available, _tf_gpu_available, \
+                _torch_cuda_available
+            if _tf_available() and args.type in (None, 'linear') \
+                    and not args.transfer and _torch_cuda_available() \
+                    and not _tf_gpu_available():
+                # 主动 GPU 探测：Windows 原生 TF ≥2.11 官方 wheel 不含 CUDA
+                # 内核（TF 只能 CPU），检测到 torch CUDA 可用时 linear 训练
+                # 自动切换 PyTorch GPU（同构网络，收敛行为等价；产物
+                # .ckpt/.onnx/.tflite，车端 torch_linear/tflite_linear 均可
+                # 加载）。--transfer 仅 TF 路径支持，此时保持 TF 不切换
+                logger.warning('TF 无可用 GPU 而 torch CUDA 可用，linear '
+                               '训练自动切换 PyTorch GPU'
+                               '（donkeycar.parts.torch_linear）')
+                from donkeycar.parts.torch_linear import train_torch_linear
+                train_torch_linear(cfg, args.tub, args.model,
+                                   comment=args.comment)
+            elif _tf_available():
                 from donkeycar.pipeline.training import train
                 train(cfg, args.tub, args.model, args.type, args.transfer,
                       args.comment)
