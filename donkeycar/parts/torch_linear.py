@@ -173,8 +173,9 @@ class _TubDataset(Dataset):
 _CONV_LAYERS = [('conv2d_1', 'features.0'), ('conv2d_2', 'features.3'),
                 ('conv2d_3', 'features.6'), ('conv2d_4', 'features.9'),
                 ('conv2d_5', 'features.12')]
-_DENSE_LAYERS = [('dense_1', 'head.0'), ('dense_2', 'head.3'),
-                 ('n_outputs0', 'angle_out'), ('n_outputs1', 'throttle_out')]
+# dense→dense 层序不变，kernel 直接转置
+_DENSE_LAYERS = [('dense_2', 'head.3'), ('n_outputs0', 'angle_out'),
+                 ('n_outputs1', 'throttle_out')]
 
 
 def export_tflite_from_torch(ckpt_path: str, tflite_path: str) -> bool:
@@ -208,20 +209,37 @@ def export_tflite_from_torch(ckpt_path: str, tflite_path: str) -> bool:
         keras_model.get_layer(kname).set_weights([
             sd[f'{prefix}.weight'].numpy().transpose(2, 3, 1, 0),
             sd[f'{prefix}.bias'].numpy()])
+    # dense_1 紧跟 Flatten：torch 按 NCHW 展平（C,H,W 列序），keras 按 NHWC
+    # 展平（H,W,C 列序），kernel 列必须先重排再转置。注意：随机初始化时
+    # conv 激活极小，列序错误仅贡献 ~1e-3 偏差会被漏检；真实训练后激活
+    # 放大，偏差达 O(0.1~1)——以下面的数值对齐校验兜底
+    with torch.no_grad():
+        # features[:15] = 5 组 conv+ReLU+Dropout（Flatten 之前），取特征图 C,H,W
+        feat = net.features[:15](
+            torch.zeros(1, *shape).permute(0, 3, 1, 2).contiguous())
+    c_dim, hh, ww = feat.shape[1:]
+    w_flat = sd['head.0.weight'].numpy()                  # (100, C*H*W)
+    w_keras = (w_flat.reshape(-1, c_dim, hh, ww)          # (100, C, H, W)
+               .transpose(0, 2, 3, 1)                     # (100, H, W, C)
+               .reshape(100, -1).T)                       # (C*H*W, 100)
+    keras_model.get_layer('dense_1').set_weights(
+        [w_keras, sd['head.0.bias'].numpy()])
     # dense：torch [out,in] → keras kernel [in,out]
     for kname, prefix in _DENSE_LAYERS:
         keras_model.get_layer(kname).set_weights([
             sd[f'{prefix}.weight'].numpy().T,
             sd[f'{prefix}.bias'].numpy()])
 
-    # 数值对齐校验：镜像错误（层序错/转置错）会在这里暴露
+    # 数值对齐校验：镜像错误（层序错/转置错）会在这里暴露（误差 O(1) 量级）；
+    # 阈值 5e-3 为容忍 TF(oneDNN) 与 torch 卷积实现的浮点舍入差异
+    # （实测随机初始化即达 ~1e-3）
     x = np.random.default_rng(0).random((1, *shape)).astype(np.float32)
     with torch.no_grad():
         a_torch, th_torch = net(torch.from_numpy(x))
     a_k, th_k = keras_model.predict(x, verbose=0)
     diff = max(float(np.max(np.abs(a_torch.numpy() - a_k))),
                float(np.max(np.abs(th_torch.numpy() - th_k))))
-    if diff > 1e-3:
+    if diff > 5e-3:
         logger.error('torch↔keras 权重镜像输出偏差 %.2e 过大，放弃 .tflite '
                      '导出（产物以 .ckpt/.onnx 为准）', diff)
         return False
@@ -285,8 +303,10 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
         net.train()
         running, n = 0.0, 0
         for x, y in train_loader:
+            # 输入与 label 同搬到训练设备（label 留在 CPU 会在 CUDA 下报设备不一致）
+            x, y = x.to(device), y.to(device)
             opt.zero_grad()
-            a, th = net(x.to(device))
+            a, th = net(x)
             # Keras 多输出 loss = 各输出 loss 之和（loss_weights 默认 1）
             loss = mse(a, y[:, :1]) + mse(th, y[:, 1:])
             loss.backward()
@@ -299,7 +319,8 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
         vrunning, vn = 0.0, 0
         with torch.no_grad():
             for x, y in val_loader:
-                a, th = net(x.to(device))
+                x, y = x.to(device), y.to(device)
+                a, th = net(x)
                 vloss = mse(a, y[:, :1]) + mse(th, y[:, 1:])
                 vrunning += vloss.item() * x.size(0)
                 vn += x.size(0)
@@ -316,6 +337,10 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
     if best_state is not None:
         net.load_state_dict(best_state)
     net.eval()
+    if device.type != 'cpu':
+        # 产物（ckpt/onnx/tflite）统一为 CPU 权重：ckpt 可移植（车端 CPU
+        # 推理），onnx/tflite 导出也不再依赖 GPU 张量
+        net = net.to('cpu')
 
     meta = {
         'final_loss': history['val_loss'][-1],
@@ -336,14 +361,17 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
     # .tflite（权重镜像 default_n_linear 后导出；无 TF 环境自动跳过）
     export_tflite_from_torch(stem + '.ckpt', stem + '.tflite')
 
-    # .onnx（NHWC /255 输入；先跑一次 dummy 让 LazyLinear 物化）
+    # .onnx（NHWC /255 输入；先跑一次 dummy 让 LazyLinear 物化）。
+    # dynamo=False 走 legacy TorchScript 导出器：保持 opset 13 与单文件
+    # 权重内嵌（AIMO 云转上传单个 .onnx；新导出器会拆出 .onnx.data 外部
+    # 权重文件且 opset 降级缺 adapter）
     h, w, d = net.input_shape
     with torch.no_grad():
         net(torch.zeros(1, h, w, d))
     torch.onnx.export(
         net, torch.zeros(1, h, w, d), stem + '.onnx',
         input_names=['img_in'], output_names=['n_outputs0', 'n_outputs1'],
-        opset_version=13, do_constant_folding=True)
+        opset_version=13, do_constant_folding=True, dynamo=False)
 
     # .png + _meta.json（Web Trainer 页的 loss 图与指标）
     try:
