@@ -159,6 +159,35 @@ def train(cfg: Config, tub_paths: str, model: str = None,
     if ext not in ('.keras', '.h5'):
         ext = '.keras'
         model_path = base_path + ext
+
+    # GPU 状态通报：缺 CUDA 运行库/驱动时 TF 静默回退 CPU，只在内部告警里
+    # 提一句；这里把最终训练设备明明白白写进日志（Web UI 训练页 SSE 可见），
+    # 避免「为什么训练这么慢」要翻 TF 噪声告警才能定位。
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        names = []
+        for gpu in gpus:
+            try:
+                name = tf.config.experimental.get_device_details(gpu).get(
+                    'device_name') or gpu.name
+            except Exception:
+                name = gpu.name
+            names.append(name)
+        logger.info('Training on GPU: ' + ', '.join(names))
+    else:
+        logger.warning('No GPU visible to TensorFlow - training on CPU. '
+                       'On Linux: pip install "tensorflow[and-cuda]"; '
+                       'on macOS CPU is intentional (Metal disabled).')
+
+    # 显存按需增长：TF 默认初始化即预占整卡显存，Web UI 再并发第二个
+    # 训练/推理进程时会因显存被占光而初始化失败。需在任何算子执行
+    # （GPU 设备实例化）之前设置，已在运行则静默跳过。
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except Exception:
+            pass
+
     kl = get_model_by_type(model_type, cfg)
     if transfer:
         kl.load(transfer)
