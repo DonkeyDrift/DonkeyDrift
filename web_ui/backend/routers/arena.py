@@ -10,6 +10,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, List, Optional
 
+import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -264,6 +265,24 @@ def apply_image_processing(image: np.ndarray, base_cfg: Any, request: PredictReq
     return image
 
 
+def fit_model_input_shape(pilot: Any, image: np.ndarray) -> np.ndarray:
+    """把图像缩放到模型期望的输入尺寸。
+
+    tub 原图分辨率（如 320x240）常与模型固定输入（如 120x160）不一致，
+    直接推理会让 TFLite XNNPack delegate 在 prepare 阶段报
+    "failed to reshape runtime" 错误。
+    """
+    try:
+        input_name = pilot.interpreter.input_keys[0]
+        shape = pilot.get_input_shape(input_name)
+        height, width = int(shape[-3]), int(shape[-2])
+    except Exception:
+        return image
+    if image.shape[0] == height and image.shape[1] == width:
+        return image
+    return cv2.resize(image, (width, height))
+
+
 def draw_control_line(angle: float, throttle: float, image: np.ndarray, color: tuple[int, int, int]) -> None:
     height, width = image.shape[:2]
     start_x = width // 2
@@ -337,6 +356,7 @@ def _predict_loaded_pilot(pilot_id: str, request: PredictRequest) -> tuple[dict[
 
     base_cfg = load_car_config(request.config_path) if request.config_path else None
     image = apply_image_processing(load_record_image(record), base_cfg, request)
+    image = fit_model_input_shape(loaded.pilot, image)
 
     try:
         angle, throttle = loaded.pilot.run(image)
