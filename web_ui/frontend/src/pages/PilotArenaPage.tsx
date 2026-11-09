@@ -862,6 +862,8 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         data: plotPoints.map((point) => point.pilot_angle),
         borderColor: seriesColors.pilot,
         backgroundColor: seriesColors.pilot,
+        // user/pilot 同色系重叠时靠线型再区分一层：pilot 一律虚线
+        borderDash: [6, 4],
         tension: 0.2,
       },
       {
@@ -876,6 +878,7 @@ export const PilotArenaPage = React.memo(function PilotArenaPage({ active = true
         data: plotPoints.map((point) => point.pilot_throttle),
         borderColor: seriesColors.pilotThrottle,
         backgroundColor: seriesColors.pilotThrottle,
+        borderDash: [6, 4],
         tension: 0.2,
       },
     ],

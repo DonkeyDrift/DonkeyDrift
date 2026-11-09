@@ -81,26 +81,28 @@ export const ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS = 1000;
 export const ARENA_INFERENCE_CONCURRENCY_DEFAULT = 2;
 
 /**
- * canvas 绘制线 / chart.js 数据系列的 JS 配色（回退值表，深色值即现状；
- * 浅色值对标 theme-light.css 色板:同色相、保饱和、适度降明度）。
+ * canvas 绘制线 / chart.js 数据系列的 JS 配色（回退值表）。
+ * 四条曲线必须色相明显分离：绿(user angle)、蓝(pilot angle)、
+ * 橙(user throttle)、紫(pilot throttle)，避免此前 绿≈黄绿、蓝≈天蓝 的近似配对。
  * 语义角色（user=--ok、pilot=--accent、legend=--ink2、ticks=--ink3）实际取色走
  * CSS 变量，随主题（深/浅）切换自动变化；userThrottle/pilotThrottle
  * 为数据可视化专用色相，保持固定。
+ * user/pilot 除颜色外还叠加线型区分（pilot 虚线，见 PilotArenaPage plotData）。
  */
 export const ARENA_SERIES_COLORS = {
   dark: {
     user: '#22c55e',
     pilot: '#3b82f6',
-    userThrottle: '#a3e635',
-    pilotThrottle: '#38bdf8',
+    userThrottle: '#f59e0b',
+    pilotThrottle: '#a855f7',
     legend: '#d4d4d8',
     ticks: '#a1a1aa',
   },
   light: {
     user: '#1fae6b',
     pilot: '#0c9bd6',
-    userThrottle: '#d99a17',
-    pilotThrottle: '#0a6f9e',
+    userThrottle: '#d97706',
+    pilotThrottle: '#9333ea',
     legend: '#42546a',
     ticks: '#5b6b7d',
   },

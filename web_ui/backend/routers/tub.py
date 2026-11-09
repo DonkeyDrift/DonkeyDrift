@@ -5,10 +5,14 @@ import hashlib
 import os
 import io
 import json
+import shutil
 import tarfile
+import tempfile
 import threading
+import time
 from collections import OrderedDict
 from donkeycar.parts.tub_v2 import Tub
+from donkeycar.parts.datastore_v2 import Manifest
 from donkeycar.pipeline.types import TubRecord
 from ai_clean_engine import CollisionReverseHeuristic
 import logging
@@ -536,21 +540,130 @@ async def get_session_records(tubPath: str, sessionId: str):
         logger.error(f"Failed to read session {sessionId} of tub {path}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def _record_image_name(record: Dict[str, Any]) -> Optional[str]:
+    """取记录中的图像文件名（去掉可能的 images/ 前缀）。"""
+    for key, value in record.items():
+        if isinstance(value, str) and key.endswith('image_array'):
+            return value.replace('images/', '').replace('images\\', '')
+    return None
+
+
+def _collect_export_payload(tub_path: str, session_id: str) -> Dict[str, Any]:
+    """收集导出单个会话为独立 tub 所需的记录与 manifest 元数据。
+
+    ``Tub`` 迭代时 ManifestIterator 已跳过 manifest 中软删除的帧，因此
+    这里拿到的都是「活」记录，导出的图片与数据严格一一对应。
+    """
+    tub = Tub(tub_path, read_only=True)
+    try:
+        manifest = tub.manifest
+        inputs = list(manifest.inputs)
+        types = list(manifest.types)
+        metadata = dict(manifest.metadata)
+        max_len = manifest.max_len or 1000
+        created_at = manifest.manifest_metadata.get('created_at')
+        records = [
+            record for record in tub
+            if str(record.get('_session_id', '')) == session_id
+        ]
+    finally:
+        tub.close()
+
+    # _session_id 形如 "26-11-07_0"，末段数字用于还原 manifest 的会话信息
+    try:
+        session_number = int(str(session_id).rsplit('_', 1)[1])
+    except (IndexError, ValueError):
+        session_number = 0
+
+    return {
+        'inputs': inputs,
+        'types': types,
+        'metadata': metadata,
+        'max_len': max_len,
+        'created_at': created_at,
+        'session_number': session_number,
+        'session_id': session_id,
+        'records': records,
+    }
+
+
+def _build_export_tub(tmp_dir: str, export: Dict[str, Any]) -> None:
+    """在 tmp_dir 里写出一个合法的 tub（manifest.json + catalog 文件）。
+
+    只落元数据/记录，不落图片——图片由打包阶段直接从源 tub 流式加入，
+    避免二次拷贝。记录会按新 tub 的位置重新编号 ``_index``，保证与
+    manifest 的 current_index 一致。
+    """
+    manifest = Manifest(
+        tmp_dir,
+        inputs=export['inputs'],
+        types=export['types'],
+        metadata=[],
+        max_len=export['max_len'],
+    )
+    # 还原原始用户元数据与创建时间；会话信息在 close() 时按单个会话重建
+    manifest.metadata = dict(export['metadata'])
+    manifest.manifest_metadata = {'created_at': export['created_at'] or time.time()}
+    manifest.session_id = (export['session_number'], export['session_id'])
+    for position, record in enumerate(export['records']):
+        record = dict(record)
+        record['_index'] = position
+        manifest.write_record(record)
+    manifest.close()
+
+
+def _write_session_tar(fileobj, source_path: str, export: Dict[str, Any]) -> None:
+    """把会话导出为 tar.gz：根目录即 tub 结构（manifest.json/catalog_*/
+    images/），解压后可当作 data 目录直接加载或用于训练。"""
+    images_dir = os.path.join(source_path, 'images')
+    tmp_dir = tempfile.mkdtemp(prefix='donkey_tub_export_')
+    try:
+        _build_export_tub(tmp_dir, export)
+        with tarfile.open(fileobj=fileobj, mode='w:gz') as tar:
+            for name in sorted(os.listdir(tmp_dir)):
+                full = os.path.join(tmp_dir, name)
+                if os.path.isfile(full):
+                    tar.add(full, arcname=name)
+            # 图片沿用原始文件名（记录里的字段直接引用它），仅加入该会话的帧
+            seen = set()
+            for record in export['records']:
+                img_name = _record_image_name(record)
+                if not img_name or img_name in seen:
+                    continue
+                seen.add(img_name)
+                img_path = os.path.join(images_dir, img_name)
+                if os.path.exists(img_path):
+                    tar.add(img_path, arcname=os.path.join('images', img_name))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @router.get("/download_session")
 async def download_session(tubPath: str, sessionId: str, startTimeMs: int | None = None):
-    """Download a recording session's frames as a tar.gz archive.
+    """Download a recording session as a self-contained tub archive (tar.gz).
+
+    解压后得到与 ``mycar/data`` 一致的目录结构：manifest.json、
+    catalog_*.catalog、catalog_*.catalog_manifest 与 images/，可直接作为
+    tub 加载 / 用于训练。仅包含该会话且未被软删除的帧（软删除只在 manifest
+    里标记，导出时自动排除），因此图片与数据严格对应。
 
     Streams the archive to the browser via a pipe so that the browser
-    receives data immediately. All tub I/O (opening, iterating, reading
-    images, gzip compression) happens in a background thread; the HTTP
-    response starts instantly so Safari shows its download prompt
-    without delay.
+    receives data immediately. Tub I/O (building the tub, reading images,
+    gzip compression) happens in a background thread; the HTTP response
+    starts instantly so Safari shows its download prompt without delay.
     """
     path = os.path.expanduser(tubPath)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Directory not found")
 
-    images_dir = os.path.join(path, 'images')
+    # 先同步收集导出内容（需要据此校验会话是否存在、计算文件名），
+    # 建 tub + 打包在线程里做，避免阻塞事件循环。
+    export = _collect_export_payload(path, sessionId)
+    if not export['records']:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session '{sessionId}' has no live records to export",
+        )
 
     # Compute filename from startTimeMs (provided by the frontend) so we
     # don't need to open the tub just to read the start timestamp.
@@ -567,37 +680,7 @@ async def download_session(tubPath: str, sessionId: str, startTimeMs: int | None
     def _build_tar():
         try:
             with os.fdopen(write_fd, 'wb') as f:
-                with tarfile.open(fileobj=f, mode='w:gz') as tar:
-                    tub = Tub(path, read_only=True)
-                    try:
-                        image_key = None
-                        for record in tub:
-                            sid = str(record.get('_session_id', ''))
-                            if sid != sessionId:
-                                continue
-                            if image_key is None:
-                                for k in record:
-                                    if k.endswith('image_array') and isinstance(record[k], str):
-                                        image_key = k
-                                        break
-                            img_name = record.get(image_key) if image_key else None
-                            if not isinstance(img_name, str):
-                                continue
-                            clean = img_name.replace('images/', '').replace('images\\', '')
-                            img_path = os.path.join(images_dir, clean)
-                            if not os.path.exists(img_path):
-                                img_path_alt = os.path.join(path, clean)
-                                if os.path.exists(img_path_alt):
-                                    img_path = img_path_alt
-                                else:
-                                    continue
-                            with open(img_path, 'rb') as f_img:
-                                data = f_img.read()
-                            info = tarfile.TarInfo(name=clean)
-                            info.size = len(data)
-                            tar.addfile(info, io.BytesIO(data))
-                    finally:
-                        tub.close()
+                _write_session_tar(f, path, export)
         except Exception as e:
             logger.error(f"Failed to build tar for session {sessionId} of tub {path}: {e}")
 
