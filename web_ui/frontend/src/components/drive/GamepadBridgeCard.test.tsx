@@ -33,12 +33,16 @@ const CAR_WITH_BRIDGE = { app: 'car', running: 'ota_0', other: 'ota_1', other_ki
 const CAR_NO_BRIDGE = { app: 'car', running: 'ota_0', other: 'ota_1', other_kind: 'empty' };
 const BRIDGE = { app: 'bridge', running: 'ota_1', other: 'ota_0', other_kind: 'car' };
 
-const renderCard = () =>
-  render(
+const renderCard = () => {
+  const view = render(
     <LanguageProvider>
       <GamepadBridgeCard />
     </LanguageProvider>,
   );
+  // 卡片默认折叠：展开后再断言主体内容
+  fireEvent.click(screen.getByRole('button', { expanded: false }));
+  return view;
+};
 
 describe('GamepadBridgeCard', () => {
   beforeEach(() => {
@@ -46,6 +50,17 @@ describe('GamepadBridgeCard', () => {
     setBrowserLanguage('zh-CN');
     vi.clearAllMocks();
     mockUseConsoleDevice.mockReturnValue({ ip: '192.168.1.10', resolving: false, refresh: mockRefresh });
+  });
+
+  it('默认折叠：主体不渲染且不发起槽位轮询', () => {
+    render(
+      <LanguageProvider>
+        <GamepadBridgeCard />
+      </LanguageProvider>,
+    );
+    expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument();
+    expect(screen.queryByText('切换到手柄桥')).not.toBeInTheDocument();
+    expect(mockGetJson).not.toHaveBeenCalled();
   });
 
   it('桥已就绪（app=car, other_kind=bridge）时显示「手柄桥已就绪」与可用主按钮', async () => {

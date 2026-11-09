@@ -88,12 +88,16 @@ const setBrowserLanguage = (lang: string) => {
   Object.defineProperty(window.navigator, 'language', { value: lang, configurable: true });
 };
 
-const renderCard = () =>
-  render(
+const renderCard = () => {
+  const view = render(
     <LanguageProvider>
       <DriftCard />
     </LanguageProvider>,
   );
+  // 卡片默认折叠：展开后再断言主体内容（按 aria-expanded 定位，语言无关）
+  fireEvent.click(screen.getByRole('button', { expanded: false }));
+  return view;
+};
 
 const postCallsTo = (url: string) => mockPost.mock.calls.filter((c) => c[0] === url);
 
@@ -114,6 +118,17 @@ afterEach(() => {
 });
 
 describe('DriftCard 轮询', () => {
+  it('默认折叠：主体不渲染且不轮询状态', () => {
+    render(
+      <LanguageProvider>
+        <DriftCard />
+      </LanguageProvider>,
+    );
+    expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument();
+    expect(screen.queryByText('启动相机')).not.toBeInTheDocument();
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
   it('轮询 /drift/state（带超时配置）并在卸载后停止', async () => {
     const { unmount } = renderCard();
     await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThanOrEqual(2));

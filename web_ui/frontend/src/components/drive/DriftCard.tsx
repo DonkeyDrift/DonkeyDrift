@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, CircleDot, Loader2, Octagon, Video } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Camera, ChevronDown, ChevronUp, CircleDot, Loader2, Octagon, Video } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { Button } from '../ui/Button';
@@ -83,6 +83,9 @@ type CameraField = 'cameraIndex' | 'tagId' | 'headingOffset' | 'exposure';
  */
 export const DriftCard: React.FC = () => {
   const { t } = useTranslation();
+  // 默认折叠：未展开时不渲染主体、不轮询状态、不做 WebRTC 协商
+  const [open, setOpen] = useState(false);
+  const contentId = useId();
   const [state, setState] = useState<DriftState | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -121,8 +124,9 @@ export const DriftCard: React.FC = () => {
     }
   }, []);
 
-  // 串行轮询：上一次请求 settle 后才排下一次，后端慢也不堆积
+  // 串行轮询：上一次请求 settle 后才排下一次，后端慢也不堆积。折叠时暂停。
   useEffect(() => {
+    if (!open) return;
     let cancelled = false;
     let timer: number | null = null;
     const loop = async () => {
@@ -137,13 +141,14 @@ export const DriftCard: React.FC = () => {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [refresh]);
+  }, [refresh, open]);
 
   // WebRTC 60fps 预览：相机开启即协商；失败自动回退 MJPEG 流。
   // drift 后端是 aiortc（无 trickle ICE 端点）：必须等 ICE gathering 完成、
   // 候选全部并入 SDP 后再 POST localDescription，否则协商必败。
   useEffect(() => {
-    if (!cameraOn) {
+    // 折叠时不保持预览连接：关闭 PeerConnection，展开后再按相机状态重新协商
+    if (!open || !cameraOn) {
       pcRef.current?.close();
       pcRef.current = null;
       return;
@@ -213,7 +218,7 @@ export const DriftCard: React.FC = () => {
       pcRef.current?.close();
       pcRef.current = null;
     };
-  }, [cameraOn]);
+  }, [cameraOn, open]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -307,10 +312,21 @@ export const DriftCard: React.FC = () => {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 p-6">
         <SectionCardTitle icon={<CircleDot className="h-4 w-4" />} title={t('drive.driftTitle')} subtitle={t('drive.driftSubtitle')} />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls={contentId}
+          aria-label={open ? t('drive.driftCollapse') : t('drive.driftExpand')}
+          className="shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+        >
+          {open ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </button>
       </CardHeader>
-      <CardContent className="space-y-3">
+      {open && (
+      <CardContent id={contentId} className="space-y-3">
         {/* 相机接入 */}
         <div className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr_auto] gap-2 items-end">
           <div>
@@ -456,6 +472,7 @@ export const DriftCard: React.FC = () => {
           <div className="text-xs text-amber-400">{t('drive.driftCalibrationNotReady')}</div>
         )}
       </CardContent>
+      )}
     </Card>
   );
 };

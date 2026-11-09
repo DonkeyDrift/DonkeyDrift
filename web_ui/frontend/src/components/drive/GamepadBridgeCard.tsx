@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Gamepad2, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useState } from 'react';
+import { ChevronDown, ChevronUp, Gamepad2, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { Button } from '../ui/Button';
@@ -40,6 +40,10 @@ export const GamepadBridgeCard: React.FC = () => {
   const { t } = useTranslation();
   const { ip, resolving, refresh } = useConsoleDevice();
 
+  // 默认折叠：未展开时不渲染主体、也不发起槽位轮询，避免无谓的探活请求
+  const [open, setOpen] = useState(false);
+  const contentId = useId();
+
   const [slotInfo, setSlotInfo] = useState<BridgeSlotInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -63,8 +67,9 @@ export const GamepadBridgeCard: React.FC = () => {
   }, [ip, refresh]);
 
   // 初次 / IP 变化时读取槽位信息。ip 为空（未发现设备）时 useConsoleDevice 会慢速
-  // 重扫，扫到后 ip 更新、本 effect 自动重跑，无需手动兜底。
+  // 重扫，扫到后 ip 更新、本 effect 自动重跑，无需手动兜底。折叠时跳过，展开后再取。
   useEffect(() => {
+    if (!open) return;
     let cancelled = false;
     setLoading(true);
     setSlotInfo(null);
@@ -78,11 +83,11 @@ export const GamepadBridgeCard: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [fetchSlotInfo]);
+  }, [fetchSlotInfo, open]);
 
   // 切换中轮询：POST 成功后设备立刻重启，期间请求全断；每 2s 探一次直到 app 翻转。
   useEffect(() => {
-    if (!awaitingApp || !ip) return;
+    if (!open || !awaitingApp || !ip) return;
     let cancelled = false;
     const started = Date.now();
     const poll = async () => {
@@ -112,7 +117,7 @@ export const GamepadBridgeCard: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [awaitingApp, ip]);
+  }, [open, awaitingApp, ip]);
 
   const app = slotInfo?.app === 'bridge' ? 'bridge' : slotInfo?.app === 'car' ? 'car' : null;
   const bridgeSeeded = app === 'car' && slotInfo?.other_kind === 'bridge';
@@ -153,14 +158,25 @@ export const GamepadBridgeCard: React.FC = () => {
   return (
     <>
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 p-6">
           <SectionCardTitle
             icon={<Gamepad2 className="w-5 h-5" />}
             title={t('drive.bridgeTitle')}
             subtitle={t('drive.bridgeSubtitle')}
           />
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls={contentId}
+            aria-label={open ? t('drive.bridgeCollapse') : t('drive.bridgeExpand')}
+            className="shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+          >
+            {open ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </button>
         </CardHeader>
-        <CardContent className="space-y-3">
+        {open && (
+        <CardContent id={contentId} className="space-y-3">
           {/* 状态行：当前槽位模式（加载中 / 桥运行绿 / 车模式 / 不可达兜底） */}
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-zinc-400">{t('drive.bridgeStatus')}</span>
@@ -241,6 +257,7 @@ export const GamepadBridgeCard: React.FC = () => {
             </div>
           )}
         </CardContent>
+        )}
       </Card>
 
       {/* 切换确认框（模式同 ConsoleDevToggle）：说明重启约 10 秒、期间离线 */}

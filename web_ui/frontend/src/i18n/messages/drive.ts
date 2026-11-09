@@ -115,6 +115,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // DriftCard
     'drive.driftTitle': '第三视角漂移',
     'drive.driftSubtitle': '俯拍相机 AprilTag 定位与漂移控制',
+    'drive.driftExpand': '展开第三视角漂移',
+    'drive.driftCollapse': '收起第三视角漂移',
     'drive.driftCameraIndex': '相机 index',
     'drive.driftTagId': 'AprilTag ID',
     'drive.driftHeadingOffset': '朝向偏移 (°)',
@@ -199,6 +201,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // GamepadBridgeCard
     'drive.bridgeTitle': '手柄桥模式',
     'drive.bridgeSubtitle': '把车上 ESP32 切成 BLE 手柄桥，CT-8B 遥控器当蓝牙手柄玩模拟器',
+    'drive.bridgeExpand': '展开手柄桥模式',
+    'drive.bridgeCollapse': '收起手柄桥模式',
     'drive.bridgeStatus': '当前状态',
     'drive.bridgeChecking': '正在读取槽位信息…',
     'drive.bridgeUnreachable': '无法读取槽位信息（车辆离线或接口不可用）',
@@ -332,6 +336,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // DriftCard
     'drive.driftTitle': 'Overhead Drift',
     'drive.driftSubtitle': 'Overhead-camera AprilTag positioning & drift control',
+    'drive.driftExpand': 'Expand overhead drift',
+    'drive.driftCollapse': 'Collapse overhead drift',
     'drive.driftCameraIndex': 'Camera index',
     'drive.driftTagId': 'AprilTag ID',
     'drive.driftHeadingOffset': 'Heading offset (°)',
@@ -416,6 +422,8 @@ export const drive: { zh: Record<string, string>; en: Record<string, string> } =
     // GamepadBridgeCard
     'drive.bridgeTitle': 'Gamepad Bridge',
     'drive.bridgeSubtitle': 'Reboot the car ESP32 into a BLE gamepad bridge so the CT-8B radio works as a Bluetooth gamepad for the simulator',
+    'drive.bridgeExpand': 'Expand gamepad bridge',
+    'drive.bridgeCollapse': 'Collapse gamepad bridge',
     'drive.bridgeStatus': 'Status',
     'drive.bridgeChecking': 'Reading slot info…',
     'drive.bridgeUnreachable': 'Cannot read slot info (car offline or API unavailable)',
