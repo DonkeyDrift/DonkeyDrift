@@ -80,6 +80,14 @@ if not DEBUG:
     logging.getLogger("aiortc").setLevel(logging.WARNING)
     # 抑制后端业务路由日志（连接/断连统计等）
     logging.getLogger("routers.drive").setLevel(logging.WARNING)
+    # 抑制 tub 库层日志（Found datastore / Using last catalog / Closing tub /
+    # Closing manifest）：轮询类接口（family_sessions 每 30s 一轮）每次开合
+    # tub 都会打一串 INFO，多标签页各自轮询时命令行被刷屏；异常仍以
+    # WARNING 及以上级别输出
+    logging.getLogger("donkeycar.parts.datastore_v2").setLevel(logging.WARNING)
+    logging.getLogger("donkeycar.parts.tub_v2").setLevel(logging.WARNING)
+    # 抑制 tub 路由的轮询诊断行（Family sessions ... in XXms）
+    logging.getLogger("routers.tub").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
