@@ -3,7 +3,6 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 import hashlib
 import os
-import io
 import json
 import shutil
 import tarfile
