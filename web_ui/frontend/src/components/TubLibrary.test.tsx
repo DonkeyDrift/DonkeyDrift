@@ -10,7 +10,10 @@ import { getSessionRecords, listFamilyTubSessions, downloadTubSession, deleteTub
 // 回归测试：进入录制视频库后自动选中最新一条录制（sessions[0]，API 已按
 // 最新在前排序），无需手动点击列表。
 
-vi.mock('../services/api', () => ({
+// 局部 mock：isTubMissingError 用真实实现（refreshSessions 靠它把「data 文件
+// 夹还没有」识别为正常空状态），其余按需覆盖
+vi.mock('../services/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/api')>()),
   getImageUrl: vi.fn((path: string) => `http://localhost/img/${encodeURIComponent(path)}`),
   getApiErrorMessage: (_err: unknown, fallback: string) => fallback,
   listFamilyTubSessions: vi.fn(),
@@ -112,6 +115,70 @@ describe('TubLibrary auto-select newest recording', () => {
     render(<MemoryRouter><TubLibrary /></MemoryRouter>);
 
     expect(listFamilyTubSessions).not.toHaveBeenCalled();
+  });
+
+  // 默认连接 <car>/data：data 文件夹还没有（未录制过）时显示空状态，
+  // 不弹红色错误横幅
+  it('shows the empty state instead of an error when the data folder is missing', async () => {
+    vi.mocked(listFamilyTubSessions).mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: { detail: 'Directory not found' } },
+    } as never);
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(listFamilyTubSessions).toHaveBeenCalledWith('/tmp/tub');
+    });
+    expect(await screen.findByText('暂无录制')).toBeInTheDocument();
+    expect(screen.queryByText('Directory not found')).not.toBeInTheDocument();
+  });
+
+  // 竞态回归（配置加载器与 Tub 加载器分家）：family 请求在途时全局工作 tub
+  // 被切走（配置加载器换项目），旧项目的响应迟到必须作废——否则其会话经
+  // 选中效应把 tubPath 切回旧项目，出现「配置在 mycar、Tub 却连着 mycar-2」
+  it('discards a stale family response after the working tub is switched', async () => {
+    const bSession = {
+      session_id: 'b1', record_count: 5, first_index: 0, last_index: 4,
+      start_time_ms: Date.parse('2026-11-09T10:00:00Z'),
+      end_time_ms: Date.parse('2026-11-09T10:00:05Z'),
+      tub_path: '/home/x/mycar-2/data', tub_name: 'data',
+    };
+    const aSession = {
+      session_id: 'a1', record_count: 3, first_index: 0, last_index: 2,
+      start_time_ms: Date.parse('2026-11-09T11:00:00Z'),
+      end_time_ms: Date.parse('2026-11-09T11:00:03Z'),
+      tub_path: '/home/x/mycar/data', tub_name: 'data',
+    };
+    const familyB = { status: true, path: '/home/x/mycar-2/data', sessions: [bSession] };
+    const familyA = { status: true, path: '/home/x/mycar/data', sessions: [aSession] };
+    let resolveB!: (value: unknown) => void;
+    const pendingB = new Promise((resolve) => { resolveB = resolve; });
+    vi.mocked(listFamilyTubSessions).mockImplementation(((p: string) =>
+      p === '/home/x/mycar-2/data' ? pendingB : Promise.resolve(familyA)) as never);
+    vi.mocked(getSessionRecords).mockResolvedValue({
+      status: true, path: '/home/x/mycar/data', records: [],
+    } as never);
+
+    useStore.setState({ tubPath: '/home/x/mycar-2/data' });
+    render(<MemoryRouter><TubLibrary /></MemoryRouter>);
+
+    // mycar-2 的 family 请求挂起在途
+    await waitFor(() => {
+      expect(listFamilyTubSessions).toHaveBeenCalledWith('/home/x/mycar-2/data');
+    });
+
+    // 切到 mycar 项目：新的 family(A) 立即返回并自动选中 a1
+    act(() => {
+      useStore.getState().setTub('/home/x/mycar/data', [], [], 0, []);
+    });
+    await waitFor(() => {
+      expect(getSessionRecords).toHaveBeenCalledWith('/home/x/mycar/data', 'a1');
+    });
+
+    // 此刻 mycar-2 的响应才回来：必须作废，不得触发切回旧项目
+    await act(async () => { resolveB(familyB); });
+    expect(loadTub).not.toHaveBeenCalledWith('/home/x/mycar-2/data');
+    expect(useStore.getState().tubPath).toBe('/home/x/mycar/data');
   });
 });
 

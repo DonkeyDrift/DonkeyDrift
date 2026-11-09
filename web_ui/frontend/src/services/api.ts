@@ -82,6 +82,19 @@ export const getApiErrorMessage = (error: unknown, fallback = t('common.unknownE
   return fallback;
 };
 
+// 「data 文件夹还没有」的两种后端响应：目录不存在（404 Directory not
+// found）与目录存在但尚无录制（400 manifest.json missing）。自动连接 /
+// 刷新恢复场景把它们当正常空状态静默处理，不作为错误弹给用户。
+export const isTubMissingError = (error: unknown): boolean => {
+  if (!axios.isAxiosError(error)) return false;
+  const status = error.response?.status;
+  const detail = error.response?.data?.detail;
+  if (typeof detail !== 'string') return false;
+  if (status === 404) return detail.includes('Directory not found');
+  if (status === 400) return detail.includes('manifest.json missing');
+  return false;
+};
+
 export const getVersion = async (): Promise<string> => {
   const response = await api.get('/config/version');
   return response.data.version as string;

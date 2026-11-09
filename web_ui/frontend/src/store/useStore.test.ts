@@ -75,6 +75,48 @@ describe('useStore activeTraining（刷新后恢复训练进度）', () => {
   });
 });
 
+// 默认连接（配置加载后指向 <car>/data）：只落输入框路径并标记「已处理」，
+// 同时清掉旧 tub 的残留记录，data 缺失时保持默认路径等待首次录制。
+describe('useStore setDefaultTubPath 默认连接', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tubPath: '/old/data',
+      loadedTubPath: '/old/data',
+      records: [{ _index: 0, _timestamp_ms: 0 }],
+      originalRecords: [{ _index: 0, _timestamp_ms: 0 }],
+      totalRecords: 1,
+      tubTotalRecords: 1,
+      totalPhysicalRecords: 1,
+      deletedIndexes: [2],
+      fields: ['cam/image_array'],
+      activeSessionId: 's1',
+      activeSessionRecords: [{ _index: 0, _timestamp_ms: 0 }],
+      activeSessionIds: ['s1'],
+      activeSessionCrossTub: true,
+      isPlaying: true,
+    });
+  });
+
+  it('落默认路径并清空旧 tub 残留，loadedTubPath 同步标记已处理', () => {
+    useStore.getState().setDefaultTubPath('/new/data');
+    const state = useStore.getState();
+    expect(state.tubPath).toBe('/new/data');
+    expect(state.loadedTubPath).toBe('/new/data');
+    expect(state.records).toEqual([]);
+    expect(state.originalRecords).toEqual([]);
+    expect(state.totalRecords).toBe(0);
+    expect(state.tubTotalRecords).toBe(0);
+    expect(state.totalPhysicalRecords).toBe(0);
+    expect(state.deletedIndexes).toEqual([]);
+    expect(state.fields).toEqual([]);
+    expect(state.activeSessionId).toBeNull();
+    expect(state.activeSessionRecords).toEqual([]);
+    expect(state.activeSessionIds).toEqual([]);
+    expect(state.activeSessionCrossTub).toBe(false);
+    expect(state.isPlaying).toBe(false);
+  });
+});
+
 // 多选会话筛选（家族视图）：setActiveSession 第三参 sessionIds 缺省时从
 // sessionId 派生（向后兼容，所有既有调用点行为不变）；显式传入则保留集合。
 describe('useStore setActiveSession 多选集合派生', () => {

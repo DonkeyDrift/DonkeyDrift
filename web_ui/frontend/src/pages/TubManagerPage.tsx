@@ -2,7 +2,7 @@ import { memo, useEffect } from 'react';
 import { TubEditor } from '../components/TubEditor';
 import { TubLibrary } from '../components/TubLibrary';
 import { useStore } from '../store/useStore';
-import { getApiErrorMessage, loadTub } from '../services/api';
+import { getApiErrorMessage, isTubMissingError, loadTub } from '../services/api';
 import { useTranslation } from '@/i18n';
 
 /** Tub Manager 页面本体（TubLibrary + TubEditor），从 App.tsx 迁出（#178） */
@@ -32,7 +32,13 @@ export const TubManagerPage = memo(function TubManagerPage({ active }: { active:
         );
       } catch (err: unknown) {
         if (!cancelled) {
-          setError(getApiErrorMessage(err, t('common.app.failedToRefreshTub')));
+          if (isTubMissingError(err)) {
+            // data 文件夹还没有（未录制过）属正常空状态：不弹错误横幅，
+            // 标记该路径已处理，避免页面重挂载时反复请求同一个缺失目录
+            useStore.getState().setDefaultTubPath(tubPath);
+          } else {
+            setError(getApiErrorMessage(err, t('common.app.failedToRefreshTub')));
+          }
         }
       } finally {
         if (!cancelled) {

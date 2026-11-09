@@ -9,6 +9,7 @@ import {
   getApiErrorMessage,
   getImageUrl,
   getSessionRecords,
+  isTubMissingError,
   listFamilyTubSessions,
   loadTub,
   type ChildTubInfo,
@@ -352,8 +353,12 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
       pendingSelectKeyRef.current = sessionKey(anchor);
       setSwitchingSessionKey(sessionKey(anchor));
       setError(null);
+      // 切换发起时的全局 tub：loadTub 在途期间被换项目/加载新 tub 打断时，
+      // 放弃本次切换，不把旧目标写回全局
+      const fromTubPath = useStore.getState().tubPath;
       loadTub(targetTubPath)
         .then((data) => {
+          if (useStore.getState().tubPath !== fromTubPath) return;
           setTub(
             data.path,
             data.records || [],
@@ -401,6 +406,13 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     setError(null);
     try {
       const data = await listFamilyTubSessions(path);
+      // 请求期间全局工作 tub 已被切走（配置加载器换项目 / 加载了新 tub）：
+      // 本次结果整体作废——不回写列表、不触发自动选中。否则旧项目的会话
+      // 会经选中效应把 tubPath 又切回去，出现「配置加载器在 A 项目、Tub
+      // 加载器却连着 B 项目」的冲突态（轮询在途时切换项目必现）。
+      if (useStore.getState().tubPath !== path) {
+        return { items: [], target: null };
+      }
       const items = data.sessions || [];
       lastRefreshRef.current = Date.now();
       setSessions(items);
@@ -445,7 +457,11 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
     } catch (err) {
       setSessions([]);
       setChildTubs([]);
-      setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
+      // data 文件夹还没有（未录制过）属正常空状态：保持空列表静默返回，
+      // 不弹错误；其余失败（网络/后端异常）照旧提示
+      if (!isTubMissingError(err)) {
+        setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
+      }
       return { items: [], target: null };
     }
   }, [applySelection, t]);
@@ -455,15 +471,19 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
   const switchToChildTub = useCallback(async (child: ChildTubInfo) => {
     setSwitchingChildPath(child.path);
     setError(null);
+    // 同 switchWorkingTub：在途期间全局 tub 被切走则放弃，不写回旧目标
+    const fromTubPath = useStore.getState().tubPath;
     try {
       const data = await loadTub(child.path);
-      setTub(
-        data.path,
-        data.records || [],
-        data.fields || [],
-        data.total_physical_records,
-        data.deleted_indexes,
-      );
+      if (useStore.getState().tubPath === fromTubPath) {
+        setTub(
+          data.path,
+          data.records || [],
+          data.fields || [],
+          data.total_physical_records,
+          data.deleted_indexes,
+        );
+      }
     } catch (err) {
       setError(getApiErrorMessage(err, t('tubLibrary.loadFailed')));
     } finally {
@@ -1011,8 +1031,16 @@ export const TubLibrary: React.FC<{ active?: boolean }> = ({ active = false }) =
       }
       // 全局 tub 同步（与整条删除后的逻辑一致）；setTub 会清空 activeSession，
       // 因此必须在 setTub 之后重新写入 activeSession
+      // 刷新期间工作 tub 已被切走（换项目/加载新 tub）：丢弃本次结果，
+      // 不把旧 tub 写回全局
+      if (useStore.getState().tubPath !== tubPath) {
+        return;
+      }
       try {
         const data = await loadTub(tubPath);
+        if (useStore.getState().tubPath !== tubPath) {
+          return;
+        }
         setTub(
           data.path,
           data.records || [],

@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
-import { useConfigAutoLoad } from './useConfigAutoLoad';
+import { useConfigAutoLoad, loadProject, autoLoadTubFor } from './useConfigAutoLoad';
 import { useStore } from '../store/useStore';
 
 vi.mock('@/services/api', () => ({
@@ -182,6 +182,162 @@ describe('useConfigAutoLoad 自动加载与抽屉联动回归（点击「加载�
 
 // 子 tub 发现（方案 A）：<car>/data 合法但记录全空（全部被软删）时，自动
 // 发现子目录里的子 tub 并回退加载最新一个；无子 tub 时维持现状（仍 setTub 空 data）。
+// 默认连接 <car>/data：配置加载后 Tub 加载器输入框默认指向 <car>/data；
+// data 文件夹还没有（未录制过）时静默保持该默认路径，不置 error。
+describe('useConfigAutoLoad 默认连接 <car>/data（data 缺失不报错）', () => {
+  const setupSingleProject = () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      root: '/home/x',
+      projects: ['/home/x/mycar'],
+      count: 1,
+      last_project: null,
+    });
+    mockLoadConfig.mockResolvedValue({ status: true, config: { IMAGE_H: 120 } } as never);
+  };
+
+  it('defaults tubPath to <car>/data and stays silent when the data folder is missing', async () => {
+    setupSingleProject();
+    mockLoadTub.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: { detail: 'Directory not found' } },
+    } as never);
+
+    render(<Harness />);
+
+    await waitFor(() => { expect(mockLoadTub).toHaveBeenCalledWith('/home/x/mycar/data'); });
+    // 默认连接：输入框路径落在 <car>/data，且不弹错误
+    expect(useStore.getState().tubPath).toBe('/home/x/mycar/data');
+    expect(useStore.getState().loadedTubPath).toBe('/home/x/mycar/data');
+    expect(useStore.getState().error).toBeNull();
+  });
+
+  it('clears stale records from a previously loaded tub when defaulting', async () => {
+    setupSingleProject();
+    useStore.setState({
+      tubPath: '/home/x/oldcar/data',
+      records: [{ _index: 0, _timestamp_ms: 0 }],
+      totalRecords: 1,
+    });
+    mockLoadTub.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 400, data: { detail: 'Path is not a valid tub (manifest.json missing)' } },
+    } as never);
+
+    render(<Harness />);
+
+    await waitFor(() => { expect(mockLoadTub).toHaveBeenCalledWith('/home/x/mycar/data'); });
+    expect(useStore.getState().tubPath).toBe('/home/x/mycar/data');
+    // 旧项目的残留记录不随默认路径展示
+    expect(useStore.getState().records).toEqual([]);
+    expect(useStore.getState().totalRecords).toBe(0);
+    expect(useStore.getState().error).toBeNull();
+  });
+
+  it('switching projects does not keep loading the old project\'s tub', async () => {
+    setupSingleProject();
+    // 切换前挂着别的项目的 tub
+    useStore.setState({ tubPath: '/home/x/oldcar/data' });
+    mockLoadTub.mockResolvedValue(tubPayload as never);
+
+    render(<Harness />);
+
+    // 不恢复旧项目路径，直接默认连接新项目的 data
+    await waitFor(() => { expect(mockLoadTub).toHaveBeenCalledWith('/home/x/mycar/data'); });
+    expect(mockLoadTub).not.toHaveBeenCalledWith('/home/x/oldcar/data');
+    expect(useStore.getState().tubPath).toBe('/home/x/mycar/data');
+  });
+
+  it('restores a same-project child tub instead of defaulting to ./data', async () => {
+    setupSingleProject();
+    useStore.setState({ tubPath: '/home/x/mycar/data/tub_7_26-10-20' });
+    mockLoadTub.mockImplementation(((p: string) => {
+      if (p === '/home/x/mycar/data/tub_7_26-10-20') {
+        return Promise.resolve({ ...childTubPayload });
+      }
+      return Promise.reject(new Error(`unexpected path ${p}`));
+    }) as never);
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(mockLoadTub).toHaveBeenCalledWith('/home/x/mycar/data/tub_7_26-10-20');
+    });
+    expect(useStore.getState().tubPath).toBe('/home/x/mycar/data/tub_7_26-10-20');
+  });
+});
+
+// 过期写回守卫（切换配置目录后来回闪动回归）：所有异步写回前校验项目
+// 目录（configPath）是否仍是发起时的路径，已被切换则本次结果整体作废。
+describe('loadProject/autoLoadTubFor 过期写回守卫', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('autoLoadTubFor: tub 加载在途时项目目录已切换，晚到结果不写回', async () => {
+    // 新项目 mycar-2 已是当前配置，旧项目 mycar 的自动加载还在途
+    useStore.setState({
+      configPath: '/home/x/mycar-2',
+      config: { B: 1 },
+      tubPath: '/home/x/mycar-2/data',
+      records: [],
+    });
+    let resolveA!: (value: unknown) => void;
+    mockLoadTub.mockImplementation(((p: string) => {
+      if (p === '/home/x/mycar/data') return new Promise((r) => { resolveA = r; });
+      return Promise.reject(new Error(`unexpected path ${p}`));
+    }) as never);
+
+    const pending = autoLoadTubFor('/home/x/mycar');
+    expect(useStore.getState().tubPath).toBe('/home/x/mycar/data');
+
+    resolveA(childTubPayload);
+    await pending;
+    // 过期作废：旧项目的记录不写回，也不改写新项目已接管的状态
+    expect(useStore.getState().records).toEqual([]);
+    expect(useStore.getState().configPath).toBe('/home/x/mycar-2');
+  });
+
+  it('loadProject: 恢复本项目 tub 在途时项目目录已切换，放弃写回', async () => {
+    useStore.setState({
+      configPath: '/home/x/mycar',
+      config: { A: 1 },
+      tubPath: '/home/x/mycar/data/tub_7',
+      records: [],
+    });
+    mockLoadConfig.mockResolvedValue({ status: true, config: { A: 2 } } as never);
+    let resolveRestore!: (value: unknown) => void;
+    mockLoadTub.mockImplementation(((p: string) => {
+      if (p === '/home/x/mycar/data/tub_7') return new Promise((r) => { resolveRestore = r; });
+      return Promise.reject(new Error(`unexpected path ${p}`));
+    }) as never);
+
+    const pending = loadProject('/home/x/mycar', (key) => key);
+    await flush();
+    // 恢复请求已发出，此刻用户切换到 mycar-2
+    expect(mockLoadTub).toHaveBeenCalledWith('/home/x/mycar/data/tub_7');
+    useStore.setState({ configPath: '/home/x/mycar-2', config: { B: 1 } });
+
+    resolveRestore(childTubPayload);
+    await pending;
+    expect(useStore.getState().records).toEqual([]);
+    expect(useStore.getState().configPath).toBe('/home/x/mycar-2');
+  });
+
+  it('loadProject: loadConfig 在途时别的项目已加载完成，本次整体放弃', async () => {
+    useStore.setState({ configPath: '', config: null, tubPath: '', records: [] });
+    let resolveCfg!: (value: unknown) => void;
+    mockLoadConfig.mockReturnValue(new Promise((r) => { resolveCfg = r; }) as never);
+
+    const pending = loadProject('/home/x/mycar', (key) => key);
+    // mycar 的 loadConfig 还在途，mycar-2 已抢先加载完成
+    useStore.setState({ configPath: '/home/x/mycar-2', config: { B: 1 } });
+    resolveCfg({ status: true, config: { A: 1 } });
+    await pending;
+
+    expect(mockLoadTub).not.toHaveBeenCalled();
+    expect(useStore.getState().configPath).toBe('/home/x/mycar-2');
+  });
+});
+
 describe('useConfigAutoLoad child tub fallback', () => {
   // 与后端返回顺序一致：last_modified 降序，第一条即最新
   const discoveredChildTubs = [

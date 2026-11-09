@@ -1,6 +1,5 @@
 import React from 'react';
 import { ConfigLoader } from './ConfigLoader';
-import { TubLoader } from './TubLoader';
 import { SimulatorConfig } from './SimulatorConfig';
 import { FolderOpen, Plug } from 'lucide-react';
 
@@ -81,8 +80,9 @@ export const SidePanel: React.FC = () => {
                   {t('common.sidePanel.loaders')}
                 </div>
                 <div className="space-y-6">
+                  {/* Tub 加载不再单独配置：配置加载后自动连接 <car>/data
+                      （useConfigAutoLoad），子 tub 切换走 Tub 视频库 */}
                   <ConfigLoader />
-                  <TubLoader />
                 </div>
               </>
             )}

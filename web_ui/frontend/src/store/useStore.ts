@@ -115,6 +115,9 @@ interface AppState {
 
   setConfig: (config: Record<string, unknown>, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
+  // 默认连接（配置加载后指向 <car>/data）：只落输入框路径并标记「已处理」，
+  // 让 TubManagerPage 不再重复拉取；data 缺失时保持默认路径、清掉旧 tub 残留
+  setDefaultTubPath: (path: string) => void;
   requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
@@ -226,6 +229,27 @@ export const useStore = create<AppState>()(
       },
 
       setConfig: (config, path) => set({ config, configPath: path, error: null, activeDrawer: null }),
+      // 默认连接：Tub 加载器输入框指向 <car>/data。loadedTubPath 同步置为该
+      // 路径，既让 TubManagerPage 跳过重复拉取，也让「data 缺失」的静默失败
+      // 不在页面重挂载时反复重试。真实记录仍由 setTub 在加载成功后写入。
+      setDefaultTubPath: (path) =>
+        set({
+          tubPath: path,
+          loadedTubPath: path,
+          records: [],
+          originalRecords: [],
+          totalRecords: 0,
+          tubTotalRecords: 0,
+          totalPhysicalRecords: 0,
+          deletedIndexes: [],
+          fields: [],
+          currentIndex: 0,
+          activeSessionId: null,
+          activeSessionRecords: [],
+          activeSessionIds: [],
+          activeSessionCrossTub: false,
+          isPlaying: false,
+        }),
       setTub: (path, records, fields, totalPhysicalRecords, deletedIndexes) =>
         set({
           tubPath: path,
