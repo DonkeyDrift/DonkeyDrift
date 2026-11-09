@@ -55,6 +55,21 @@ from donkeydrifter.utils import *
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# 车端日志同时落盘：launcher 拉起的车端 stdout 是 DEVNULL，终端起车关窗
+# 即丢，统一留档 logs/drive.log（滚动 2MB×2）便于事后排查（pilot 观测、
+# 帧冻结告警、热加载记录都在其中）。
+try:
+    from logging.handlers import RotatingFileHandler
+    _log_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'logs')
+    os.makedirs(_log_dir, exist_ok=True)
+    _drive_log = RotatingFileHandler(os.path.join(_log_dir, 'drive.log'),
+                                     maxBytes=2 * 1024 * 1024, backupCount=2)
+    _drive_log.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    logging.getLogger().addHandler(_drive_log)
+except Exception:
+    logger.warning('配置 drive.log 文件日志失败', exc_info=True)
+
 
 def _selected_model_from_disk():
     """无 --model 启动时回退读取 Web UI 持久化的所选模型（selected_model.json）
