@@ -42,8 +42,7 @@ from donkeycar.webui_instance import (
     find_live_instance,
     write_drive_pids,
     remove_drive_pid_file,
-    kill_previous_car_processes,
-    takeover_car_processes,
+    sweep_orphan_processes,
     select_car_python,
 )
 
@@ -1388,11 +1387,19 @@ class DriveCommand(DonkeyCommand):
         self.history_mgr.add_command_log(cmd_str)
 
         if has_car_process:
-            # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
-            kill_previous_car_processes()
-            # 接管模式：全量杀掉其它在跑的车进程（含别的链路启动的），确保本次
-            # drive 不被单实例守护拒绝、能正常运行
-            takeover_car_processes()
+            # 孤儿清扫（2026-11-09）：pid 文件外的手工/nohup 车端 + 无登记
+            # uvicorn 后端一并终止，确保本次 drive 不被单实例守护拒绝、
+            # 不产生双后端；清理范围见 webui_instance.sweep_orphan_processes
+            swept = sweep_orphan_processes()
+            cleaned = []
+            if swept["car_pids"]:
+                cleaned.append(f"车端 {swept['car_pids']}")
+            if swept["backend_pids"]:
+                cleaned.append(f"Web 后端 {swept['backend_pids']}")
+            if cleaned:
+                console.print(
+                    "[yellow]检测到孤儿进程，已清理: "
+                    + "、".join(cleaned) + "[/yellow]")
 
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")

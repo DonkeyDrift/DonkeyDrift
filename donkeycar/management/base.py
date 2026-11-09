@@ -23,7 +23,7 @@ from donkeycar.webui_instance import (
     find_live_instance,
     write_instance,
     remove_instance,
-    kill_previous_car_processes,
+    sweep_orphan_processes,
     read_drive_pids,
     write_drive_pids,
     remove_drive_pid_file,
@@ -124,12 +124,21 @@ def _read_drive_pid_file():
 
 
 def _kill_previous_drive_processes():
-    """杀掉上一次启动的车进程（manage.py drive），web 进程保留复用。
+    """drive 启动前清理旧栈：pid 文件内的旧车进程 + 孤儿进程全量清扫。
 
-    详见 donkeycar/webui_instance.py（issue #127：多链路复用同一 Web UI
-    实例，不再全杀）。
+    孤儿（手工 nohup 裸起的车端/uvicorn，不在任何登记里）不清会导致：
+    无登记 uvicorn → 复用误判再起一套 → 双后端（页面无画面、摇杆无效）；
+    无登记车端 → 单实例守护拒绝启动。清理范围与原因见
+    donkeycar/webui_instance.py ``sweep_orphan_processes``（2026-11-09）。
     """
-    kill_previous_car_processes()
+    swept = sweep_orphan_processes()
+    cleaned = []
+    if swept["car_pids"]:
+        cleaned.append(f"车端 {swept['car_pids']}")
+    if swept["backend_pids"]:
+        cleaned.append(f"Web 后端 {swept['backend_pids']}")
+    if cleaned:
+        print('检测到孤儿进程，已清理: ' + '、'.join(cleaned))
 
 HELP_CONFIG = 'location of config file to use. default: ./config.py'
 logger = logging.getLogger(__name__)

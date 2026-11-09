@@ -414,24 +414,50 @@ def _is_car_process(pid):
     return "manage.py" in cmdline and "drive" in cmdline
 
 
-def find_car_processes(exclude_pids=None, proc_dir="/proc"):
-    """扫描 /proc，返回所有在跑的车进程（manage.py drive）pid 列表。
+def _is_python_proc(command):
+    """ps 快照的命令行是否为 python 进程（首词 basename 以 python 开头）。
 
-    排除当前进程与 exclude_pids；非 Linux（无 /proc）返回 []。
+    ps 快照把 argv 以空格 join 成字符串做子串判定，会误命中 ``bash -c
+    "...manage.py drive..."`` 这类**命令文本里恰好含特征词**的包装器——
+    排查命令里带 grep/pgrep 特征词时甚至扫到并杀掉执行清扫的 shell 自己
+    （Linux /proc 路径按 cmdline 列表判定不存在此问题，本函数补齐语义）。
+    车端/uvicorn 都由 python 解释器启动，首词必须是 python 才参与匹配。
+    """
+    first = command.split(None, 1)[0] if command else ""
+    return os.path.basename(first).startswith("python")
+
+
+def find_car_processes(exclude_pids=None, proc_dir="/proc"):
+    """扫描在跑的车进程（manage.py drive），返回 pid 列表。
+
+    Linux 走 /proc 逐个读 cmdline；其余 POSIX（macOS 无 /proc）退化为
+    ``ps -axww`` 全量快照匹配（python 打头 + manage.py drive，见
+    ``_is_python_proc``）。Windows 两路都不可用，返回 []。
+    排除当前进程与 exclude_pids。
     """
     exclude = set(exclude_pids or ())
     pids = []
     try:
         entries = os.listdir(proc_dir)
     except OSError:
+        entries = None
+    if entries is not None:
+        for entry in entries:
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            if pid == os.getpid() or pid in exclude:
+                continue
+            if _is_car_process(pid):
+                pids.append(pid)
         return pids
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
+    # macOS 等 POSIX：ps 快照匹配（要求 python 打头，见 _is_python_proc）
+    for proc in _run_ps_snapshot():
+        pid = proc["pid"]
         if pid == os.getpid() or pid in exclude:
             continue
-        if _is_car_process(pid):
+        cmd = proc["command"]
+        if _is_python_proc(cmd) and "manage.py" in cmd and "drive" in cmd:
             pids.append(pid)
     return pids
 
@@ -514,6 +540,142 @@ def kill_previous_car_processes(pid_file=None):
         targets.append(pid)
     _terminate_processes(targets, grace_s=0.5)
     remove_drive_pid_file(pid_file)
+
+
+# ── 孤儿栈进程清扫（drive 启动前统一入口，2026-11-09 macOS 实战）────
+
+def _run_ps_snapshot():
+    """POSIX 全量进程快照（macOS 无 /proc，识别孤儿统一走 ps）。
+
+    返回 [{"pid", "ppid", "command"}]；非 POSIX / ps 失败返回 []。
+    ``-axww``：全量进程 + 宽输出不截断命令行（BSD ps 与 procps 均支持）。
+    """
+    if os.name != "posix":
+        return []
+    try:
+        out = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,ppid=,command="],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    snapshot = []
+    for line in out.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            snapshot.append({
+                "pid": int(parts[0]),
+                "ppid": int(parts[1]),
+                "command": parts[2],
+            })
+        except ValueError:
+            continue
+    return snapshot
+
+
+def _process_cwd(pid):
+    """读进程 cwd：Linux 走 /proc symlink；其余 POSIX 走 lsof。失败返回 None。"""
+    if os.name == "posix":
+        try:
+            return os.readlink(f"/proc/{int(pid)}/cwd")
+        except OSError:
+            pass
+        try:
+            out = subprocess.run(
+                ["lsof", "-a", "-p", str(int(pid)), "-d", "cwd", "-Fn"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for line in out.splitlines():
+            # lsof -F 输出格式：字段标识前缀 + 值，路径行以 n 开头
+            if line.startswith("n"):
+                return line[1:]
+    return None
+
+
+def _is_webui_backend_cmdline(command):
+    """命令行是否为 web_ui 后端 uvicorn（python -m uvicorn main:app ...）。"""
+    return "uvicorn" in command and "main:app" in command
+
+
+def _is_webui_backend_cwd(cwd):
+    """cwd 是否为某个仓库的 web_ui/backend（donkey web 起后端固定在此目录，
+    手工裸起按文档也在此目录——以此把别的 FastAPI 项目的 uvicorn 排除掉）。"""
+    if not cwd:
+        return False
+    parts = os.path.normpath(cwd).replace("\\", "/").rstrip("/").split("/")
+    return len(parts) >= 2 and parts[-2:] == ["web_ui", "backend"]
+
+
+def _descendant_pids(root_pid, snapshot):
+    """快照里 root_pid 的全部后代 pid（含间接，不含自身）。"""
+    children = {}
+    for proc in snapshot:
+        children.setdefault(proc["ppid"], []).append(proc["pid"])
+    seen, stack = [], [root_pid]
+    while stack:
+        pid = stack.pop()
+        for child in children.get(pid, ()):
+            if child not in seen:
+                seen.append(child)
+                stack.append(child)
+    return seen
+
+
+def find_webui_backend_processes(protected_pids=None):
+    """扫描在跑的 web_ui 后端（python 打头的 uvicorn main:app，且 cwd 为
+    */web_ui/backend）。
+
+    protected_pids：存活登记实例的进程树（复用场景绝不能杀，见 sweep）。
+    cwd 无法判定（lsof 失败/进程竞态退出）时不计入——误杀别的 FastAPI
+    项目的代价远大于漏杀孤儿。返回 pid 列表。
+    """
+    protected = set(protected_pids or ())
+    pids = []
+    for proc in _run_ps_snapshot():
+        pid = proc["pid"]
+        if pid == os.getpid() or pid in protected:
+            continue
+        if not _is_python_proc(proc["command"]):
+            continue
+        if not _is_webui_backend_cmdline(proc["command"]):
+            continue
+        if _is_webui_backend_cwd(_process_cwd(pid)):
+            pids.append(pid)
+    return pids
+
+
+def sweep_orphan_processes():
+    """drive 启动前清扫孤儿栈进程，返回 {"car_pids", "backend_pids"}。
+
+    孤儿从哪来：手工 nohup / 终端裸起的 manage.py drive、uvicorn 不在
+    drive.pid 与 webui.json 任何登记里，既有清理（kill_previous_car_processes
+    按 PID 文件、find_live_instance 按登记）均触及不到：
+    - 无登记 uvicorn → find_live_instance 判「无实例」→ 再起一套 → 双后端，
+      页面停在旧后端时表现为无画面、摇杆指令无效（2026-11-09 线上复现）
+    - 无登记车端 → drive 单实例守护拒绝启动（「检测到已运行的 drive 进程」）
+    - SIGTERM 卡在优雅关闭的 uvicorn（aiortc 协程残留）→ 两段式补 SIGKILL
+    处理：
+    - 车端：takeover_car_processes 全量接管（macOS 经 ps 快照，Linux /proc）
+    - uvicorn：有存活登记实例 → 只杀登记进程树之外的（顺带修复双后端）；
+      无登记 → 全部视为孤儿杀掉。
+    web 前端（vite/bundled 静态托管）与模拟器（DonkeySim）不在清理之列。
+    """
+    report = {"car_pids": [], "backend_pids": []}
+    inst = find_live_instance()
+    report["car_pids"] = takeover_car_processes()
+    protected = []
+    if inst:
+        snapshot = _run_ps_snapshot()
+        protected = [inst["pid"]] + _descendant_pids(inst["pid"], snapshot)
+    backend_pids = find_webui_backend_processes(protected_pids=protected)
+    if backend_pids:
+        _terminate_processes(backend_pids, grace_s=1.0)
+        report["backend_pids"] = backend_pids
+    return report
 
 
 # ── NPU 相关进程解释器选择 ──────────────────────────────────────────

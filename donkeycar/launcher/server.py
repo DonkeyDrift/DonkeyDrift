@@ -36,7 +36,7 @@ from donkeycar.webui_instance import (
     read_drive_model,
     write_drive_pids,
     remove_drive_pid_file,
-    kill_previous_car_processes,
+    sweep_orphan_processes,
     select_car_python,
 )
 
@@ -204,8 +204,17 @@ def _launch_drive():
     实际后端端口。探测超时不报错，返回 warning 提示照常跳转。
     """
     with _proc_lock:
-        # 只杀上一次的车进程；web 前后端进程保留复用
-        kill_previous_car_processes()
+        # 孤儿清扫：pid 文件外的手工/nohup 车端 + 无登记 uvicorn 后端
+        # （双后端会让页面停在旧后端上无画面、摇杆无效），范围与原因见
+        # webui_instance.sweep_orphan_processes（2026-11-09）
+        swept = sweep_orphan_processes()
+        cleaned = []
+        if swept["car_pids"]:
+            cleaned.append(f"车端 {swept['car_pids']}")
+        if swept["backend_pids"]:
+            cleaned.append(f"Web 后端 {swept['backend_pids']}")
+        if cleaned:
+            print("[launcher] 检测到孤儿进程，已清理: " + "、".join(cleaned))
 
         # 查找 mycar 项目
         project_path = _find_mycar_project()
@@ -340,8 +349,8 @@ def _launch_drive():
                 "error": f"启动进程失败: {e}",
             }
 
-        # 只记车进程（web 前后端不归 kill_previous_car_processes 管；无 /proc 的
-        # 平台会按文件全杀，写进 web PID 会让下次启动杀掉 Web UI，见 base.py donkey drive）
+        # 只记车进程（web 前后端不归孤儿清扫管；无 /proc 的平台会按文件全杀，
+        # 写进 web PID 会让下次启动杀掉 Web UI，见 base.py donkey drive）
         write_drive_pids([car_proc.pid])
 
         # 记录进程信息
