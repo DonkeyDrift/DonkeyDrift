@@ -152,7 +152,13 @@ def train(cfg: Config, tub_paths: str, model: str = None,
     model_path, model_num = \
         get_model_train_details(database, model)
 
+    # Keras 3 的 ModelCheckpoint 只接受 .keras/.h5 后缀；--model 传入
+    # 无后缀（或 .savedmodel 自动命名）路径时统一规范为 .keras，
+    # 保证保存、_meta.json/.tflite 转换与后续加载使用同一路径
     base_path, ext = tuple(os.path.splitext(model_path))
+    if ext not in ('.keras', '.h5'):
+        ext = '.keras'
+        model_path = base_path + ext
     kl = get_model_by_type(model_type, cfg)
     if transfer:
         kl.load(transfer)

@@ -1236,11 +1236,13 @@ async def _sse_event_generator(job_id: str):
         yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
         return
 
-    # 先订阅再发初始状态，尽量缩小订阅前的事件丢失窗口（#502 多订阅者扇出）
+    # 先订阅再发初始状态，尽量缩小订阅前的事件丢失窗口（#502 多订阅者扇出；
+    # 旧单 log_queue 已删除，必须 subscribe 注册本连接专属队列，否则 AttributeError
+    # 直接打断流，训练页收不到任何日志/进度/终态事件）
     sub = job.subscribe()
     try:
-        # Yield initial status
-        yield f"data: {json.dumps({'type': 'status', 'status': job.status})}\n\n"
+        # Yield initial status（带 error：断线重连后到达终态时前端才能显示失败原因）
+        yield f"data: {json.dumps({'type': 'status', 'status': job.status, 'error': job.error_message})}\n\n"
 
         while True:
             try:
