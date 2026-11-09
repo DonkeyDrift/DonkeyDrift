@@ -29,6 +29,7 @@ from donkeycar.webui_instance import (
     remove_drive_pid_file,
     select_car_python,
     select_backend_python,
+    open_url_best_effort,
 )
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -1388,10 +1389,16 @@ class Web(BaseCommand):
 
         Vite 启动需要数秒；若在其就绪前打开浏览器，页面会显示无法连接，
         且浏览器不会自动恢复，用户只能手动刷新。超时仍打开（由用户自行刷新）。
+        远程/无图形会话里 webbrowser 会静默失败，open_url_best_effort 会
+        回退桌面 X 会话；仍失败则明确提示手动访问地址，不再毫无反应。
         """
         if not self._wait_for_port_ready(frontend_port, timeout):
             print(f'警告: 前端端口 {frontend_port} 在 {timeout:.0f}s 内未就绪，仍将打开浏览器')
-        webbrowser.open(frontend_url)
+        if open_url_best_effort(frontend_url):
+            print(f'已在浏览器打开: {frontend_url}')
+        else:
+            print(f'提示: 当前会话无法拉起浏览器（远程/无图形环境），'
+                  f'请手动访问: {frontend_url}')
 
     def _choose_available_port(self, host, preferred_port, max_tries=50):
         port = int(preferred_port)

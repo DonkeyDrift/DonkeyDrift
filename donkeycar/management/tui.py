@@ -44,6 +44,7 @@ from donkeycar.webui_instance import (
     remove_drive_pid_file,
     sweep_orphan_processes,
     select_car_python,
+    open_url_best_effort,
 )
 
 
@@ -1461,9 +1462,16 @@ class DriveCommand(DonkeyCommand):
             drive_url = _drive_page_url(_lan_host(), frontend_port)
             if inst is not None:
                 # 复用实例不经过 `donkey web --open`，由 TUI 直接打开 Drive 页；
-                # 实例刚通过 find_live_instance() 探测，前端端口已在监听
-                webbrowser.open(drive_url)
-                console.print(f"[dim]已在浏览器打开 {drive_url}[/dim]")
+                # 实例刚通过 find_live_instance() 探测，前端端口已在监听。
+                # 远程/无图形会话 webbrowser 会静默失败，回退桌面 X 会话，
+                # 仍失败则明确提示手动打开，不再“毫无反应”。
+                if open_url_best_effort(drive_url):
+                    console.print(f"[dim]已在浏览器打开 {drive_url}[/dim]")
+                else:
+                    console.print(
+                        f"\n[bold green]当前会话无法自动拉起浏览器，"
+                        f"请在浏览器打开:[/bold green] {drive_url}"
+                    )
             else:
                 # 新起实例由 `donkey web --open` 在本机打开；远程终端用户请在
                 # 自己的浏览器打开下面的局域网地址
@@ -1510,6 +1518,13 @@ class DriveCommand(DonkeyCommand):
             cmd.extend(["--path", str(web_ui_path)])
         if backend_port is not None:
             cmd.extend(["--backend-port", str(backend_port)])
+        # 实车链路必须对外监听：P0 安全补强后 `donkey web` 默认仅回环
+        # （resolve_backend_host），TUI 打印给用户的 Drive 页地址是局域网
+        # IP（192.168.x.x），不显式传 host 会导致远程浏览器根本连不上
+        # （launcher/_launch_drive 实车链路同样显式传 0.0.0.0）。
+        # 非回环访问仍需令牌（auth.py P0 鉴权），URL 已自动带 ?token=。
+        cmd.extend(["--backend-host",
+                    os.environ.get("DRIVE_WEB_HOST", "").strip() or "0.0.0.0"])
         cmd.extend(["--open", "--route", "/drive"])
         return cmd
 

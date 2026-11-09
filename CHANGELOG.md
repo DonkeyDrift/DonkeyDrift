@@ -1,3 +1,12 @@
+## 2026-11-10 (279)
+
+- fix(tui,web): 启动 drive 后网页打不开/浏览器毫无反应——TUI 实车链路漏传对外监听 + 浏览器静默失败
+  - **根因①（连不上）**：P0 安全补强（4cdcda3e）后 `donkey web` 默认仅回环（`resolve_backend_host`），launcher 实车链路显式传了 `--backend-host 0.0.0.0`，但 TUI `DriveCommand.get_command_line` 没传——后端绑 127.0.0.1，而 TUI 打印给用户的 Drive 页地址是局域网 IP（192.168.x.x），远程浏览器 connection refused。此前未被察觉是因为会话常复用 launcher 起的 0.0.0.0 后端。
+  - **根因②（无反应）**：远程/无 DISPLAY 会话（SSH、ZCode 终端）里 `webbrowser.open` **静默返回 False**（`_tryorder=None`），`--open` 与 TUI 复用分支都不打印任何失败信息，桌面浏览器也拉不起来。
+  - **修复①**：TUI Drive 命令显式传 `--backend-host`（默认 `0.0.0.0`，`DRIVE_WEB_HOST` 可覆盖回环），与 launcher 口径一致；非回环访问仍走 P0 令牌鉴权（URL 自动带 `?token=`）。
+  - **修复②**：`webui_instance.open_url_best_effort()`（仅标准库，base/tui 共用）——webbrowser 失败且本机有桌面 X 会话（/tmp/.X11-unix/X0）时回退 `DISPLAY=:0 xdg-open`（同 launcher 拉桌面应用的口径）；`base.py --open` 与 TUI 复用分支改为打印「已在浏览器打开/请手动访问」结果，不再无声失败。
+  - **验证**：`test_tui_drive.py` 更新 patch 层并新增 `--backend-host 0.0.0.0` 回归断言（复用分支 patch 移到 helper 层，顺带消除了真实 helper 在测试机上触发 xdg-open 的副作用）；与 `test_sweep_orphan_processes.py` 合跑 41 过；`get_command_line` 实测默认 0.0.0.0、`DRIVE_WEB_HOST=127.0.0.1` 可覆盖。
+
 ## 2026-11-10 (278)
 
 - fix(drive): 全自动 pilot 恒定输出（小车冲出赛道）排查闭环 + 推理可观测性基建。完整调研见 `docs/issues/011-full-auto-constant-pilot-output.md`

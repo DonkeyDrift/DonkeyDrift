@@ -254,7 +254,11 @@ def test_drive_command_reusing_live_instance_opens_browser(monkeypatch, tmp_path
     monkeypatch.setattr(tui.console, "clear", lambda: None)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr(tui.webbrowser, "open", opened_urls.append)
+    # TUI 复用分支经 open_url_best_effort 打开浏览器（webbrowser 在无 DISPLAY
+    # 会话会静默失败，helper 负责桌面回退与结果反馈），patch 到 helper 一层
+    monkeypatch.setattr(
+        tui, "open_url_best_effort",
+        lambda url: opened_urls.append(url) or True)
     monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
     monkeypatch.delenv("DRIVE_API_PUBLIC_HOST", raising=False)
     monkeypatch.delenv("DRIVE_WEB_CONSOLE_URL", raising=False)
@@ -303,6 +307,12 @@ def test_drive_command_new_instance_leaves_browser_to_web_open(monkeypatch, tmp_
     tui.DriveCommand().execute()
 
     assert len(popen_calls) == 2
+    web_cmd, _ = popen_calls[0]
+    # 实车链路必须对外监听：P0 安全补强后 `donkey web` 默认仅回环，而 TUI
+    # 打印给用户的是局域网地址——不显式传 host 远程浏览器连不上（回归：
+    # 合并后启动 drive 网页打不开）
+    assert "--backend-host" in web_cmd
+    assert web_cmd[web_cmd.index("--backend-host") + 1] == "0.0.0.0"
     _, car_kwargs = popen_calls[1]
     assert opened_urls == []
     # 生产模式前端由后端托管，提示 URL 端口即后端端口
@@ -323,7 +333,9 @@ def test_drive_command_respects_user_drive_web_console_url(monkeypatch, tmp_path
     monkeypatch.setattr(tui.console, "clear", lambda: None)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr(tui.webbrowser, "open", lambda _url: None)
+    # 打开浏览器统一走 open_url_best_effort；测试里必须 mock，否则真实
+    # helper 的桌面回退会在跑测试的机器上执行 xdg-open（副作用）
+    monkeypatch.setattr(tui, "open_url_best_effort", lambda _url: True)
     monkeypatch.setenv("DRIVE_WEB_CONSOLE_URL", "http://192.0.2.10:8000")
 
     def fake_popen(cmd_list, **kwargs):

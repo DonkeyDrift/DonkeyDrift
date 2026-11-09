@@ -27,6 +27,7 @@ import sys
 import threading
 import time
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 # 实例登记文件与车进程 PID 文件（与 base.py / tui.py / launcher 既有约定一致）
@@ -723,3 +724,30 @@ def select_backend_python() -> str:
         if override:
             return override
     return _prefer_venv_npu()
+
+
+def open_url_best_effort(url: str) -> bool:
+    """尽力在本机拉起浏览器打开 URL（base.py --open 与 TUI 复用分支共用）。
+
+    远程会话（SSH/ZCode 终端）没有 DISPLAY，``webbrowser.open`` 会**静默**
+    返回 False——此前表现为「启动 drive 后网页毫无反应且无任何提示」。
+    此时若本机存在桌面 X 会话（/tmp/.X11-unix/X0），回退用 ``DISPLAY=:0``
+    的 xdg-open 在桌面上打开（与 launcher 拉起桌面应用的口径一致）。
+    返回是否成功派发；失败由调用方打印可手动访问的地址。
+    """
+    try:
+        if webbrowser.open(url):
+            return True
+    except Exception:
+        pass
+    if not os.environ.get('DISPLAY') and os.path.exists('/tmp/.X11-unix/X0'):
+        try:
+            env = dict(os.environ)
+            env['DISPLAY'] = ':0'
+            result = subprocess.run(
+                ['xdg-open', url], env=env, timeout=10,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return result.returncode == 0
+        except Exception:
+            return False
+    return False
