@@ -1,3 +1,13 @@
+## 2026-11-10 (278)
+
+- fix(drive): 全自动 pilot 恒定输出（小车冲出赛道）排查闭环 + 推理可观测性基建。完整调研见 `docs/issues/011-full-auto-constant-pilot-output.md`
+  - **定论**：模型/解释器/预处理/标签/执行链逐项对拍全部正常（arena MAE 0.055/0.017、扰动探针极差 0.384、相机 22fps 100% 唯一帧）；新进程实车两模型均正常跑圈（观测日志：新帧 50~57fps、angle 随弯道 -0.69~+0.10、零冻结告警）。根因归为**旧车端进程运行时性态**（最大嫌疑帧输送停滞，旧进程 stdout=DEVNULL 无直接取证），冻结检测器盯防复发。
+  - **可观测性**：`parts/pilot_holder.py` 每 5s 记 `pilot 观测`（输入 shape/dtype/mean + 输出 + 新帧数），输入帧 >2s 不变打 `疑似相机/管道冻结` 告警（对象 id + 1Hz 内容哈希兜底），`DK_PILOT_DEBUG=1` 逐帧；热加载单测 11 过 + 冻结检测冒烟验证。
+  - **日志落盘**：`templates/complete.py`（及 mycar manage.py）加 RotatingFileHandler → `logs/drive.log`（2MB×2），launcher（DEVNULL）/终端起车均留档，排查不再依赖启动方式。
+  - **诊断工具**：新增 `tools/diagnose_pilot.py`——Test A tub 对照(MAE) / Test B PilotHolder 路径对拍 / Test C 实时相机帧新鲜度 / Test C2 扰动敏感性探针；模型上车前先跑 Test A。
+  - **arena 口径统一**：`routers/arena.py` `fit_model_input_shape` 由 cv2 拉伸改 `fit_image_array`，与训练管道/车端 PilotHolder 同口径（4:3 下数值等价，其他比例防口径分裂；仍严格输出模型尺寸，不破坏 XNNPack 约束）。
+  - **车端调参（myconfig.py，车端目录不进本仓库）**：`AI_THROTTLE_MULT` 1.1→1.0——全自动油门=模型油门×该系数，模型预测(≈0.22)已接近手动记录(≈0.21)，×1.1 偏快导致弯道跑偏；弯道调参序 `0.9` → `STEERING_SMOOTHER_ALPHA=0.5` → 补录过弯数据重训。
+
 ## 2026-11-09 (277)
 
 - fix(infer): 修复 `main → RealCar-1` 引入的「无 TensorFlow 车端 tflite 推理不可用」回归
