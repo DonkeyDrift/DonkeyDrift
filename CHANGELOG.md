@@ -1,3 +1,12 @@
+## 2026-11-09 (277)
+
+- fix(infer): 修复 `main → RealCar-1` 引入的「无 TensorFlow 车端 tflite 推理不可用」回归
+  - **根因**：`utils.get_model_by_type` 在 RealCar-1 把模型输入尺寸来源从 `cfg.IMAGE_H/W` 改为 `TRAINING_IMAGE_SIZE`（默认 `160x120`）。旧 mycar 配置（main 时代创建）没有该键 → 回退 160x120，而车端真实模型是 `[1,240,320,3]`；无 TF 的 AidLux 车端走 `AidLiteTflite`，aidlite `set_model_properties` 必须先给形状 → 拿错误形状建解释器导致加载/推理失败。有 TF 的 `.venv` 走 `KerasLinear + TfLite`（形状取自模型自身）故本机复现不出。
+  - **修复①**：`parts/npu_pilot.py` 新增 `read_tflite_input_shape()`（纯 `struct` 解析 `.tflite` FlatBuffer 的 `subgraphs[0].inputs[0]` 张量 shape，无需 TF/flatbuffers）；`AidLite.load()` 的 tflite 分支改为**模型声明形状优先、构造时配置值仅作解析失败回退**。`parts/npu_pilot.py` 里 `AidLiteTflite` 的 `in_shapes` 文档同步订正为「回退值，load 时以模型为准」。
+  - **修复②**：`NpuLinearPilot.load()` 以 `interpreter.get_input_shape()` 覆盖构造尺寸；`run()` 补 `fit_image_array`（相机分辨率 ≠ 模型输入时等比缩放+白框，与 Keras/Torch 路径一致）。
+  - **修复③**：`utils.get_model_by_type` 无 `TRAINING_IMAGE_SIZE` 键时回退 `cfg.IMAGE_H/W`（恢复 main 语义，兼容旧 mycar 配置）。
+  - **验证**：新增 `tests/test_tflite_input_shape.py` 5 例（旧配置无 TF → `[[1,240,320,3]]`、显式 `160x120` → `[[1,120,160,3]]`、load 覆盖配置形状、与 `tf.lite` 形状对拍、坏文件返回 None）全过；相关套件 32 过；mycar 实模型 `pilot_1792809061430/pilot_1793348849607.tflite` 解析均为 `[1,240,320,3]`。
+
 ## 2026-10-24 (276)
 
 - fix(training): 本地训练路径补 macOS Metal GPU 防护——web UI「本地训练」/`python -m donkeycar.management train` 训出的模型塌缩成恒定输出

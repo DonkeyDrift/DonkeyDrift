@@ -17,7 +17,8 @@ keras 前返回本模块。
   1. .ctx.bin 只能配 TYPE_DSP；TYPE_CPU/TYPE_GPU 会被拒（StatusCode[120010]）
   2. NPU 形状必须读模型同目录的 qnn_model_info.json，不要硬编码；
      tflite 后端 aidlite 自己能解析模型，但 set_model_properties 需要先给值，
-     由 pilot 按 cfg.IMAGE_* 给约定值
+     因此 load() 直接解析 .tflite 的 FlatBuffer 取模型声明的输入形状
+     （read_tflite_input_shape），配置值只作解析失败时的回退
   3. 不要加载 htp_backend_extensions.json（AIMO 服务器 x86 路径，设备报
      Unknown Key，无增益）
   4. 运行环境：aidlite 只装在系统 /usr/bin/python3（cpython-312 的 .so），
@@ -31,12 +32,13 @@ import ctypes
 import json
 import logging
 import os
+import struct
 import sys
 import threading
 
 import numpy as np
 
-from donkeycar.utils import normalize_image
+from donkeycar.utils import fit_image_array, normalize_image
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,83 @@ _TFLITE_MODEL_EXTS = ('.tflite',)
 
 def _suffix_matches(path: str, exts) -> bool:
     return any(ext in path for ext in exts)
+
+
+# ── .tflite 输入形状（纯 Python 解析 FlatBuffer，不依赖 TF/flatbuffers） ───────
+def _fb_u16(buf, pos):
+    return struct.unpack_from('<H', buf, pos)[0]
+
+
+def _fb_u32(buf, pos):
+    return struct.unpack_from('<I', buf, pos)[0]
+
+
+def _fb_i32(buf, pos):
+    return struct.unpack_from('<i', buf, pos)[0]
+
+
+def _fb_field(buf, table, slot):
+    """表字段的绝对位置；字段缺省返回 0（FlatBuffer vtable 布局）。"""
+    vtable = table - _fb_i32(buf, table)
+    off = 4 + 2 * slot
+    if off + 2 > _fb_u16(buf, vtable):
+        return 0
+    rel = _fb_u16(buf, vtable + off)
+    return table + rel if rel else 0
+
+
+def _fb_table_vec(buf, table, slot):
+    """vector<Table> → 各子表绝对位置列表。"""
+    pos = _fb_field(buf, table, slot)
+    if not pos:
+        return []
+    vec = pos + _fb_u32(buf, pos)
+    n = _fb_u32(buf, vec)
+    return [vec + 4 + i * 4 + _fb_u32(buf, vec + 4 + i * 4) for i in range(n)]
+
+
+def _fb_int_vec(buf, table, slot):
+    """vector<int32> → Python int 列表。"""
+    pos = _fb_field(buf, table, slot)
+    if not pos:
+        return []
+    vec = pos + _fb_u32(buf, pos)
+    n = _fb_u32(buf, vec)
+    return list(struct.unpack_from('<%di' % n, buf, vec + 4))
+
+
+def read_tflite_input_shape(model_path: str):
+    """读取 .tflite 首个输入张量形状，如 [1, 240, 320, 3]；失败返回 None。
+
+    aidlite 的 set_model_properties 必须在建解释器前拿到形状，而训练产物尺寸
+    由 TRAINING_IMAGE_SIZE 决定（160x120 / 320x240 都可能），拿配置猜会在
+    模型尺寸与配置不一致时推理失败。TFLite 是 FlatBuffer：
+    Model.subgraphs[0].inputs[0] 是张量索引，该张量的 shape 字段即模型声明的
+    输入形状。解析失败（非标准产物/损坏）时返回 None，由调用方回退配置值。
+    """
+    try:
+        with open(model_path, 'rb') as f:
+            buf = f.read()
+        if buf[4:8] != b'TFL3':
+            return None
+        model = _fb_u32(buf, 0)
+        subgraphs = _fb_table_vec(buf, model, 2)
+        if not subgraphs:
+            return None
+        subgraph = subgraphs[0]
+        inputs = _fb_int_vec(buf, subgraph, 1)
+        tensors = _fb_table_vec(buf, subgraph, 0)
+        if not inputs or not tensors:
+            return None
+        dims = _fb_int_vec(buf, tensors[inputs[0]], 0)
+    except Exception:
+        logger.warning("解析 tflite 输入形状失败: %s", model_path, exc_info=True)
+        return None
+    if len(dims) == 3:            # 少数产物省略 batch 维
+        dims = [1] + dims
+    if len(dims) != 4:
+        return None
+    return [1 if d <= 0 else int(d) for d in dims]   # 动态 batch → 1
 
 
 class _quiet_c:
@@ -142,10 +221,19 @@ class AidLite:
                 aidlite.AccelerateType.TYPE_DSP               # ← 走 NPU
             soc_desc = f"{info.get('htp_socs_name')}/{info.get('data_type')}"
         else:
-            # tflite：形状须由构造方预先给出（aidlite 要求 set_model_properties
-            # 先给值；pilot 按 cfg.IMAGE_* 提供，linear 模型输出恒为 2×[1,1]）
+            # tflite：形状以模型文件声明为准（训练尺寸可能是 160x120 或
+            # 320x240，不能用配置猜）；解析失败才回退构造时给的配置值。
+            # linear 模型输出恒为 2×[1, 1]。
+            shape = read_tflite_input_shape(model_path)
+            if shape is not None:
+                if self.in_shapes and list(shape) != list(self.in_shapes[0]):
+                    logger.info("tflite 模型实际输入 %s，覆盖配置回退值 %s",
+                                shape, self.in_shapes[0])
+                self.in_shapes = [shape]
             if not self.in_shapes or not self.out_shapes:
-                raise ValueError("tflite 后端需在构造时提供 in_shapes/out_shapes")
+                raise ValueError(
+                    "tflite 后端需 in_shapes/out_shapes（模型形状解析失败时"
+                    "必须由构造方提供）")
             framework, accelerate = aidlite.FrameworkType.TYPE_TFLITE, \
                 aidlite.AccelerateType.TYPE_CPU
             soc_desc = "CPU"
@@ -231,8 +319,9 @@ class AidLite:
 class AidLiteTflite(AidLite):
     """.tflite 模型 → aidlite 内建 TFLite 后端（CPU），无需系统 TensorFlow。
 
-    形状必须构造时给定（aidlite 的 set_model_properties 先于模型解析）；
-    加载后如与模型声明不符会由 invoke 报错暴露。
+    aidlite 的 set_model_properties 先于模型解析，必须在构造时给形状；
+    这里给的是回退值，load() 会以模型文件声明的输入形状覆盖（见
+    read_tflite_input_shape）。
     """
 
     mode = 'tflite'
@@ -266,13 +355,18 @@ class NpuLinearPilot:
         self.interpreter.load(model_path)
         shape = self.interpreter.get_input_shape("img_in")
         if tuple(shape) != tuple(self.input_shape):
-            logger.warning("模型输入 %s 与 cfg.IMAGE_H/W/DEPTH %s 不一致，以模型为准",
-                           tuple(shape), tuple(self.input_shape))
+            logger.info("模型输入 %s 与构造尺寸 %s 不一致，以模型为准",
+                        tuple(shape), tuple(self.input_shape))
             self.input_shape = tuple(shape)
 
     def run(self, img_arr: np.ndarray, *other_arr) -> tuple:
         """行车循环入口：uint8 RGB 帧 → (angle, throttle)。其余输入（IMU 等）忽略。"""
-        norm_img_arr = normalize_image(np.asarray(img_arr))
+        x = np.asarray(img_arr)
+        # 与 Keras/torch 路径一致：相机分辨率与模型输入尺寸不同时等比缩放+白框
+        target_h, target_w = self.input_shape[0], self.input_shape[1]
+        if x.shape[0] != target_h or x.shape[1] != target_w:
+            x = fit_image_array(x, target_w, target_h)
+        norm_img_arr = normalize_image(x)
         out = self.interpreter.predict_from_dict({"img_in": norm_img_arr})
         steering, throttle = out[0], out[1]
         return float(steering[0]), float(throttle[0])

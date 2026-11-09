@@ -642,7 +642,13 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
     # 模型的图像输入尺寸由 TRAINING_IMAGE_SIZE 决定（默认 160x120，可选
     # 320x240），与相机采集分辨率 IMAGE_W/IMAGE_H 解耦。训练管道会把图像
     # 缩放到该尺寸（pipeline/training.py），推理端按加载到的模型输入自动适配。
-    train_h, train_w = get_training_image_size(cfg)
+    # 旧配置（main 时代创建的 mycar myconfig/config.py）没有该键，此时模型
+    # 就是按相机分辨率训练的，回退 IMAGE_H/W 才是正确约定；无 TF 的 tflite
+    # 分支在 load() 时还会以模型文件声明的形状覆盖（见 parts/npu_pilot.py）。
+    if getattr(cfg, 'TRAINING_IMAGE_SIZE', None):
+        train_h, train_w = get_training_image_size(cfg)
+    else:
+        train_h, train_w = cfg.IMAGE_H, cfg.IMAGE_W
 
     if 'aidlite_' in model_type:
         # NPU(AidLite/QNN) 路径不依赖 TensorFlow，必须在 import keras 之前返回，
