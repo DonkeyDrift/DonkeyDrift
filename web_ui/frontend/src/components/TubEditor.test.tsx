@@ -238,6 +238,54 @@ describe('TubEditor 触摸框选', () => {
       expect(useStore.getState().selectionEndIndex).toBe(8);
     });
   });
+
+  // 真实触屏上 touchend 之后浏览器必补发一套兼容鼠标事件（mousemove/mousedown/mouseup）。
+  // React 把 touchstart/touchmove 挂成 passive，触摸 handler 里的 preventDefault 抑制不了它们，
+  // 若不屏蔽，这组事件会把触摸链路刚提交的选区再走一遍鼠标逻辑（清锚点/清选区/塌缩成单帧），
+  // 表现为触屏上「框不住」。下面两例按真实时序先让 rAF（≈16ms）把选区落库，再补发兼容鼠标事件。
+  it('触摸滑动提交的选区不被 touchend 后补发的兼容鼠标事件清除', async () => {
+    const chart = mountEditor();
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchMove(chart, { touches: [{ clientX: 140, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+
+    // 等 rAF 先提交（真实浏览器里兼容鼠标事件约 300ms 后才补发，远晚于此）
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(useStore.getState().selectionStartIndex).toBe(2);
+
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    fireEvent.mouseDown(chart, { clientX: 140, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
+
+  it('两次轻触的选区不被补发的兼容鼠标事件塌缩为单帧', async () => {
+    const chart = mountEditor();
+
+    // 第一次轻触：只记录锚点，不应因补发的兼容 mousedown 立刻选出单帧
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
+    expect(useStore.getState().selectionStartIndex).toBeNull();
+
+    // 第二次轻触：提交锚点→当前的范围 [2, 8)，且不被补发的兼容事件塌缩
+    fireEvent.touchStart(chart, { touches: [{ clientX: 140, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    fireEvent.mouseDown(chart, { clientX: 140, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
 });
 
 describe('TubEditor 帧计数口径标签', () => {

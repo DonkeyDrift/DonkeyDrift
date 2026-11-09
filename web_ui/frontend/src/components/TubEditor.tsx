@@ -47,6 +47,7 @@ import {
   PLAYHEAD_SCROLL_PADDING_RATIO,
   DRAG_SELECTION_THRESHOLD_PX,
   MIN_SELECTION_DRAFT_WIDTH_PX,
+  TOUCH_COMPAT_MOUSE_SUPPRESS_MS,
   writeSliderValue,
   cssVarColor,
   type RecordAction,
@@ -101,6 +102,14 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const isSelectingRef = useRef(false);
   const dragStartRef = useRef<{ x: number; index: number } | null>(null);
   const isDragSelectingRef = useRef(false);
+  // 最近一次触摸交互时间戳：触屏上 touchend 后浏览器会补发兼容鼠标事件，需按时间窗屏蔽，
+  // 否则它们会把触摸链路刚提交的选区再走一遍鼠标逻辑（详见 TOUCH_COMPAT_MOUSE_SUPPRESS_MS）。
+  // 初值 -Infinity：页面刚加载（performance.now() 尚小）时不能把真实鼠标事件误判为兼容事件。
+  const lastTouchTsRef = useRef(Number.NEGATIVE_INFINITY);
+  const isCompatMouseEvent = useCallback(
+    () => performance.now() - lastTouchTsRef.current < TOUCH_COMPAT_MOUSE_SUPPRESS_MS,
+    []
+  );
   const currentIndexRef = useRef(useStore.getState().currentIndex);
   const selectionRangeRef = useRef<{ startIndex: number | null; endIndex: number | null }>({
     startIndex: useStore.getState().selectionStartIndex,
@@ -972,6 +981,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // 触屏上补发的兼容 mousemove：忽略，避免十字线/草稿被鼠标逻辑二次驱动
+      if (isCompatMouseEvent()) return;
       if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
 
       const rect = containerRef.current.getBoundingClientRect();
@@ -1062,7 +1073,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       }
 
     },
-    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange]
+    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange, isCompatMouseEvent]
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1093,6 +1104,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // 触屏上 touchend 后补发的兼容鼠标事件：直接忽略，避免覆盖触摸链路刚确立的锚点/选区
+      if (isCompatMouseEvent()) return;
       if (!chartRef.current || !containerRef.current || !records.length) return;
       if (event.button !== 0) return;
 
@@ -1137,11 +1150,13 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       selectionDraftRef.current = null;
       setSelectionDraft(null);
     },
-    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender, setSelectionRange, clearSelectionRange]
+    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender, setSelectionRange, clearSelectionRange, isCompatMouseEvent]
   );
 
   const handleMouseUp = useCallback(
     () => {
+      // 触屏上补发的兼容 mouseup：忽略（触摸链路的提交已在 handleTouchEnd 完成）
+      if (isCompatMouseEvent()) return;
       isSelectingRef.current = false;
 
       if (isDragSelectingRef.current) {
@@ -1159,7 +1174,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       selectionDraftRef.current = null;
       setSelectionDraft(null);
     },
-    [queueSelectionRangeUpdate, records.length]
+    [queueSelectionRangeUpdate, records.length, isCompatMouseEvent]
   );
 
   const isEditableTarget = (target: EventTarget | null) => {
@@ -1862,6 +1877,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
+      lastTouchTsRef.current = performance.now();
       if (!chartRef.current || !containerRef.current || !records.length) return;
       if (event.touches.length === 0) return;
 
@@ -1913,6 +1929,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
+      lastTouchTsRef.current = performance.now();
       if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
       if (event.touches.length === 0) return;
 
@@ -1998,6 +2015,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleTouchEnd = useCallback(
     () => {
+      lastTouchTsRef.current = performance.now();
       isSelectingRef.current = false;
 
       // 拖拽框选结束：提交草稿选区（与鼠标 mouseup 行为一致）
