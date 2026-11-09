@@ -54,6 +54,7 @@ export interface TrainerLocalConfig {
   model: string;
   modelType: string;
   transfer: string;
+  imageSize: string;
   advancedEnabled: boolean;
   batchSize: number;
   trainTestSplit: number;
@@ -211,6 +212,7 @@ export const useStore = create<AppState>()(
         model: '',
         modelType: 'linear',
         transfer: '',
+        imageSize: '160x120',
         advancedEnabled: false,
         batchSize: 128,
         trainTestSplit: 0.8,

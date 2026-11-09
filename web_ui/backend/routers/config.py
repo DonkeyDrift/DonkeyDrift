@@ -21,6 +21,7 @@ async def get_version():
 
 
 TRAINING_CONFIG_KEYS = [
+    'TRAINING_IMAGE_SIZE',
     'BATCH_SIZE',
     'TRAIN_TEST_SPLIT',
     'MAX_EPOCHS',

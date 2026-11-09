@@ -32,8 +32,9 @@ from donkeycar.pipeline.sequence import TubRecord, TubSequence, TfmIterator
 from donkeycar.pipeline.types import TubDataset
 from donkeycar.pipeline.augmentations import ImageAugmentation
 from donkeycar.parts.image_transformations import ImageTransformations
-from donkeycar.utils import disable_metal_gpu_on_macos, get_model_by_type, \
-    normalize_image, train_test_split
+from donkeycar.utils import disable_metal_gpu_on_macos, fit_image_array, \
+    get_model_by_type, get_training_image_size, normalize_image, \
+    train_test_split
 import tensorflow as tf
 import numpy as np
 
@@ -69,6 +70,9 @@ class BatchSequence(object):
         self.sequence = TubSequence(records)
         self.batch_size = self.config.BATCH_SIZE
         self.is_train = is_train
+        # 训练输入尺寸 (H, W)，来自 TRAINING_IMAGE_SIZE（默认 160x120）；
+        # image_processor 末端把图像缩放到该尺寸以匹配模型 input_shape。
+        self.train_hw = get_training_image_size(config)
         self.augmentation = ImageAugmentation(config, 'AUGMENTATIONS')
         self.transformation = ImageTransformations(config, 'TRANSFORMATIONS')
         self.post_transformation = ImageTransformations(config,
@@ -89,6 +93,11 @@ class BatchSequence(object):
         if self.is_train:
             img_arr = self.augmentation.run(img_arr)
         img_arr = self.post_transformation.run(img_arr)
+        # 最后把图像适配到模型训练输入尺寸（等比缩放 + 白框，与推理端
+        # PilotHolder 的适配口径一致），保证与模型 input_shape 严格匹配。
+        target_h, target_w = self.train_hw
+        if img_arr.shape[0] != target_h or img_arr.shape[1] != target_w:
+            img_arr = fit_image_array(img_arr, target_w, target_h)
 
         return img_arr
 

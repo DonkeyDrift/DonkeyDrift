@@ -157,6 +157,7 @@ beforeEach(() => {
       model: '',
       modelType: 'linear',
       transfer: '',
+      imageSize: '160x120',
       advancedEnabled: false,
       batchSize: 128,
       trainTestSplit: 0.8,

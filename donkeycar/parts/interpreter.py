@@ -194,9 +194,11 @@ class KerasInterpreter(Interpreter):
         weights_path = os.path.splitext(model_path)[0] + '.weights'
         try:
             self.model.load_weights(weights_path)
-        except ValueError as exc:
-            if 'File format not supported' not in str(exc):
-                raise
+        except ValueError:
+            # 无后缀路径的解析随 Keras 版本而异：Keras 3 报 'File format not
+            # supported'，Keras 2(tf-keras) 则按 TF checkpoint 解析、报
+            # 'Layer count mismatch ... found 0 saved layers'。legacy 权重实为
+            # h5，复制成 .h5 后缀后两种版本都能正确加载。
             with tempfile.TemporaryDirectory() as tmp_dir:
                 compatible_path = os.path.join(tmp_dir, 'model.weights.h5')
                 shutil.copyfile(weights_path, compatible_path)

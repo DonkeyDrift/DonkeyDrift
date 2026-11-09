@@ -202,6 +202,31 @@ def fit_image_array(img_arr, image_width, image_height, pad_color=(255, 255, 255
     return out
 
 
+DEFAULT_TRAINING_IMAGE_SIZE = "160x120"
+
+
+def get_training_image_size(cfg) -> Tuple[int, int]:
+    """训练输入尺寸 (H, W)，取自配置键 TRAINING_IMAGE_SIZE（形如 "160x120"）。
+
+    默认 "160x120"，可选 "320x240"。该尺寸只作用于训练（模型 input_shape
+    与训练管道末端缩放），与相机的 IMAGE_W/IMAGE_H（采集/推理分辨率）解耦：
+    推理端按加载到的模型输入自动适配（见 parts/pilot_holder.py）。值非法时
+    回退到默认 160x120。
+    """
+    w, h = 160, 120
+    spec = getattr(cfg, 'TRAINING_IMAGE_SIZE', DEFAULT_TRAINING_IMAGE_SIZE)
+    try:
+        w_str, h_str = str(spec).lower().replace('*', 'x').split('x')
+        w, h = int(w_str.strip()), int(h_str.strip())
+        if w <= 0 or h <= 0:
+            raise ValueError(spec)
+    except (ValueError, AttributeError):
+        logger.warning("TRAINING_IMAGE_SIZE=%r 非法，回退默认 %s",
+                       spec, DEFAULT_TRAINING_IMAGE_SIZE)
+        w, h = 160, 120
+    return h, w
+
+
 def load_pil_image(filename, cfg):
     """Loads an image from a file path as a PIL image. Also handles resizing.
 
@@ -614,6 +639,11 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
         model_type = cfg.DEFAULT_MODEL_TYPE
     logger.info(f'get_model_by_type: model type is: {model_type}')
 
+    # 模型的图像输入尺寸由 TRAINING_IMAGE_SIZE 决定（默认 160x120，可选
+    # 320x240），与相机采集分辨率 IMAGE_W/IMAGE_H 解耦。训练管道会把图像
+    # 缩放到该尺寸（pipeline/training.py），推理端按加载到的模型输入自动适配。
+    train_h, train_w = get_training_image_size(cfg)
+
     if 'aidlite_' in model_type:
         # NPU(AidLite/QNN) 路径不依赖 TensorFlow，必须在 import keras 之前返回，
         # 让车端能跑在只装 aidlite 的 python 上（见 parts/npu_pilot.py）
@@ -639,7 +669,7 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
         if used_model_type != 'linear':
             raise Exception(f'tflite fallback (no TF) only supports linear, got: {model_type}')
         interpreter = AidLiteTflite(
-            in_shapes=[[1, cfg.IMAGE_H, cfg.IMAGE_W, cfg.IMAGE_DEPTH]],
+            in_shapes=[[1, train_h, train_w, cfg.IMAGE_DEPTH]],
             out_shapes=[[1, 1], [1, 1]])
         return NpuLinearPilot(cfg, interpreter=interpreter)
 
@@ -649,7 +679,7 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
     from donkeycar.parts.interpreter import KerasInterpreter, TfLite, TensorRT, \
         FastAIInterpreter
 
-    input_shape = (cfg.IMAGE_H, cfg.IMAGE_W, cfg.IMAGE_DEPTH)
+    input_shape = (train_h, train_w, cfg.IMAGE_DEPTH)
     if 'tflite_' in model_type:
         interpreter = TfLite()
         used_model_type = model_type.replace('tflite_', '')

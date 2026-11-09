@@ -96,6 +96,9 @@ DEFAULT_MODEL_TYPE = 'linear' #(linear|categorical|rnn|imu|behavior|3d|localizer
 CREATE_TF_LITE = True  # automatically create tflite model in training
 CREATE_TENSOR_RT = False  # automatically create tensorrt model in training
 SAVE_MODEL_AS_H5 = False  # if old keras format should be used instead of savedmodel
+# 训练输入尺寸 "宽x高"，可选 "160x120"（默认）或 "320x240"；只作用于训练
+# （模型 input_shape + 训练管道缩放），与相机 IMAGE_W/H 解耦，推理端自动适配。
+TRAINING_IMAGE_SIZE = "160x120"
 BATCH_SIZE = 128
 TRAIN_TEST_SPLIT = 0.8
 MAX_EPOCHS = 100

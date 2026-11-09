@@ -1236,21 +1236,26 @@ async def _sse_event_generator(job_id: str):
         yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
         return
 
-    # Yield initial status
-    yield f"data: {json.dumps({'type': 'status', 'status': job.status})}\n\n"
+    # 先订阅再发初始状态，尽量缩小订阅前的事件丢失窗口（#502 多订阅者扇出）
+    sub = job.subscribe()
+    try:
+        # Yield initial status
+        yield f"data: {json.dumps({'type': 'status', 'status': job.status})}\n\n"
 
-    while True:
-        try:
-            msg = await asyncio.wait_for(job.log_queue.get(), timeout=1.0)
-            yield f"data: {json.dumps(msg)}\n\n"
-            if msg.get("type") == "status" and msg.get("status") in ("completed", "failed", "stopped"):
-                break
-        except asyncio.TimeoutError:
-            # Send keep-alive heartbeat
-            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-            # If job finished while we were waiting, exit
-            if job.status in ("completed", "failed", "stopped"):
-                break
+        while True:
+            try:
+                msg = await asyncio.wait_for(sub.get(), timeout=1.0)
+                yield f"data: {json.dumps(msg)}\n\n"
+                if msg.get("type") == "status" and msg.get("status") in ("completed", "failed", "stopped"):
+                    break
+            except asyncio.TimeoutError:
+                # Send keep-alive heartbeat
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                # If job finished while we were waiting, exit
+                if job.status in ("completed", "failed", "stopped"):
+                    break
+    finally:
+        job.unsubscribe(sub)
 
 
 @router.get("/train/{job_id}/logs")

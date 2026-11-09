@@ -408,6 +408,10 @@ DEFAULT_AI_FRAMEWORK = 'tensorflow'
 # tensorflow models: (linear|categorical|tflite_linear|tensorrt_linear)
 # pytorch models: (resnet18)
 DEFAULT_MODEL_TYPE = 'linear'
+# 训练输入尺寸 "宽x高"，可选 "160x120"（默认，训练更快、模型更小）或 "320x240"。
+# 只作用于训练：模型 input_shape 与此一致，训练管道会把图像缩放到该尺寸；
+# 与相机的 IMAGE_W/IMAGE_H（采集/推理分辨率）解耦，推理端按模型输入自动适配。
+TRAINING_IMAGE_SIZE = "160x120"
 BATCH_SIZE = 128                #how many records to use when doing one pass of gradient decent. Use a smaller number if your gpu is running out of memory.
 TRAIN_TEST_SPLIT = 0.8          #what percent of records to use for training. the remaining used for validation.
 MAX_EPOCHS = 100                #how many times to visit all records of your data
