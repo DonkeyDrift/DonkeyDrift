@@ -1236,21 +1236,28 @@ async def _sse_event_generator(job_id: str):
         yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
         return
 
-    # Yield initial status
-    yield f"data: {json.dumps({'type': 'status', 'status': job.status})}\n\n"
+    # Yield initial status（带 error：断线重连后到达终态时前端才能显示失败原因）
+    yield f"data: {json.dumps({'type': 'status', 'status': job.status, 'error': job.error_message})}\n\n"
 
-    while True:
-        try:
-            msg = await asyncio.wait_for(job.log_queue.get(), timeout=1.0)
-            yield f"data: {json.dumps(msg)}\n\n"
-            if msg.get("type") == "status" and msg.get("status") in ("completed", "failed", "stopped"):
-                break
-        except asyncio.TimeoutError:
-            # Send keep-alive heartbeat
-            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-            # If job finished while we were waiting, exit
-            if job.status in ("completed", "failed", "stopped"):
-                break
+    # TrainingJob 在 #502 重构为 subscribers 订阅模型（旧单 log_queue 已删除），
+    # 这里必须 subscribe 注册本连接专属队列，否则 AttributeError 直接打断流，
+    # 训练页收不到任何日志/进度/终态事件
+    sub = job.subscribe()
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(sub.get(), timeout=1.0)
+                yield f"data: {json.dumps(msg)}\n\n"
+                if msg.get("type") == "status" and msg.get("status") in ("completed", "failed", "stopped"):
+                    break
+            except asyncio.TimeoutError:
+                # Send keep-alive heartbeat
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                # If job finished while we were waiting, exit
+                if job.status in ("completed", "failed", "stopped"):
+                    break
+    finally:
+        job.unsubscribe(sub)
 
 
 @router.get("/train/{job_id}/logs")

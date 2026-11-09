@@ -199,6 +199,10 @@ class TrainingJobManager:
                 cwd=cwd
             )
 
+            # 训练子进程 stderr 尾部缓冲：失败时并入 error_message，
+            # 避免界面只显示无信息量的 "Exit code: 1" 而看不出真实原因
+            stderr_tail: list = []
+
             async def read_stream(stream, is_stderr=False):
                 while True:
                     line = await stream.readline()
@@ -206,6 +210,9 @@ class TrainingJobManager:
                         break
                     text = line.decode('utf-8', errors='ignore').rstrip()
                     if text:
+                        if is_stderr:
+                            stderr_tail.append(text)
+                            stderr_tail[:] = stderr_tail[-15:]
                         cleaned = _clean_training_line(text)
                         if not cleaned:
                             continue
@@ -265,6 +272,9 @@ class TrainingJobManager:
             else:
                 job.status = 'failed'
                 job.error_message = f"Exit code: {job.process.returncode}"
+                # 并入 stderr 最后几行，界面能直接看到真实报错（如 tub 不存在）
+                if stderr_tail:
+                    job.error_message += " | " + " / ".join(stderr_tail[-5:])
         except Exception as e:
             if job.status != 'stopped':
                 job.status = 'failed'

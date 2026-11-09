@@ -182,7 +182,14 @@ class KerasInterpreter(Interpreter):
             return outputs.numpy().squeeze(axis=0)
 
     def load(self, model_path: str) -> None:
+        """
+        加载 Keras 模型；训练侧无后缀模型名会被规范为 .keras，
+        原路径不存在时回退到同名 .keras，保持 --model models/xxx 旧用法可用
+        """
         logger.info(f'Loading model {model_path}')
+        if not os.path.exists(model_path) \
+                and os.path.exists(model_path + '.keras'):
+            model_path += '.keras'
         self._set_model(keras.models.load_model(model_path, compile=False))
 
     def load_json(self, model_path: str) -> None:
