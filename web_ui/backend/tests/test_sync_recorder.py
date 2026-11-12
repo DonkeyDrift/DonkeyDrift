@@ -239,3 +239,24 @@ class TestSyncRecorderTub:
                             beta_deg=0.0, yaw_rate_dps=0.0)
         rec.close()
         assert rec.frames_written == 1
+
+
+def test_recorder_closed_guard_noops_after_close(tmp_path):
+    """#504：close 后 on_camera_frame/on_telemetry no-op 不抛——封死与相机
+    线程 write_record 的 check-then-use 竞态窗口。"""
+    from sync_recorder import SyncRecorder
+
+    rec = SyncRecorder(path=str(tmp_path / "tub"))
+    rec.close()
+
+    # close 后调用不得抛异常、不得新增记录
+    before = rec.frames_written
+    rec.on_camera_frame(
+        t_s=1.0,
+        image=np.zeros((8, 8, 3), dtype=np.uint8),
+        pose={"x": 0.0, "y": 0.0, "heading_deg": 0.0},
+        beta_deg=5.0,
+        yaw_rate_dps=10.0,
+    )
+    rec.on_telemetry(t_s=1.1, fields={"imu/gyr_z": 5.0})
+    assert rec.frames_written == before

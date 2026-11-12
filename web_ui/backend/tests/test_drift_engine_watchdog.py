@@ -114,6 +114,9 @@ class TestEngagedWatchdogs:
         engine = _engine(tmp_path)
         engine.start("auto")
         _force_engaged(engine)  # 先接管，再开永不命中的相机循环
+        # #492：ENGAGED 期无遥测也触发看门狗——本用例聚焦检测丢失，
+        # 先喂一次遥测（0.2s 检测丢失先于 0.5s 遥测停滞触发）
+        engine.on_telemetry(t_s=time.monotonic(), fields={"imu/gyr_z": 10.0})
         engine.start_camera_loop(FakeCamera(), FakeTagDetector(),
                                  _homography(), tag_id=0)
         try:
@@ -143,6 +146,26 @@ class TestEngagedWatchdogs:
         finally:
             engine.stop_camera_loop()
 
+    def test_engaged_without_any_telemetry_triggers_watchdog(self, tmp_path):
+        """#492：遥测从未到达（车端链路从未建立）时 ENGAGED 必须立即
+        交还人工——yaw_rate 恒 0 无陀螺负反馈，比停滞更危险。"""
+        from drift_vision import FakeCamera
+
+        engine = _engine(tmp_path)
+        engine.start("auto")
+        engine.send_sink = lambda msg: True  # 下发"成功"，排除下发失败抢占
+        _force_engaged(engine)
+        # 不喂任何遥测：_last_telemetry_t 保持 None
+        engine.start_camera_loop(FakeCamera(), _always_hit_detector(),
+                                 _homography(), tag_id=0)
+        try:
+            assert _wait_until(
+                lambda: engine.session.state == DriftSessionState.IDLE), \
+                "遥测缺失必须触发看门狗交还人工"
+            assert any("遥测缺失" in r for r in _watchdog_reasons(engine))
+        finally:
+            engine.stop_camera_loop()
+
     def test_consecutive_send_failures_trigger_watchdog(self, tmp_path):
         """ENGAGED 期间控制下发连续失败 ≥3 次 → 看门狗；累计计数进 snapshot。"""
         from drift_vision import FakeCamera
@@ -151,6 +174,8 @@ class TestEngagedWatchdogs:
         engine.start("auto")
         engine.send_sink = lambda msg: False  # 车端链路持续失败
         _force_engaged(engine)
+        # #492：先喂一次遥测，3 次下发失败须抢在 0.5s 遥测停滞前累积
+        engine.on_telemetry(t_s=time.monotonic(), fields={"imu/gyr_z": 10.0})
         engine.start_camera_loop(FakeCamera(), _always_hit_detector(),
                                  _homography(), tag_id=0)
         try:

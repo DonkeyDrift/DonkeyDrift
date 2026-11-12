@@ -202,3 +202,73 @@ def test_run_error_on_nonzero_exit_without_result(monkeypatch):
     status = client.get(f"/api/simcollect/{job_id}/status").json()
     assert status["status"] == "error"
     assert "没找到模拟器" in status["error"]
+
+
+def test_spawn_run_holds_task_reference_and_releases_on_done(monkeypatch):
+    """#495：create_task 必须自持强引用（防 GC 静默取消），结束后释放。"""
+    import routers.simcollect as sc
+
+    started = asyncio.Event()
+
+    async def fake_run(job, **kwargs):
+        job.status = "running"
+        started.set()
+        await asyncio.sleep(30)  # 模拟长任务
+
+    monkeypatch.setattr(sc.simcollect_job_manager, "run", fake_run)
+
+    async def main():
+        job = sc.simcollect_job_manager.create_job(
+            steps=10, kp=1, kd=1, throttle=0.3, min_throttle=0.1, keep_sim=False)
+        try:
+            sc._spawn_run(job, steps=10)
+            assert len(sc._run_tasks) == 1, "任务期间必须持有强引用"
+            await asyncio.wait_for(started.wait(), timeout=2.0)
+            # 正常收尾路径（run 的 finally 已清状态）：done 后引用释放
+            task = next(iter(sc._run_tasks))
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            assert len(sc._run_tasks) == 0, "done 后必须释放引用"
+        finally:
+            sc.simcollect_job_manager.jobs.clear()
+            sc.simcollect_job_manager.active_job_id = None
+
+    asyncio.run(main())
+
+
+def test_spawn_run_rescues_job_orphaned_by_task_death(monkeypatch):
+    """#495：任务在 run() 的 finally 之前死掉（如启动前被取消）时，
+    done 回调兜底收尾——job 不得永久停在 pending/running 占坑。"""
+    import routers.simcollect as sc
+
+    async def never_runs(job, **kwargs):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(sc.simcollect_job_manager, "run", never_runs)
+
+    async def main():
+        job = sc.simcollect_job_manager.create_job(
+            steps=10, kp=1, kd=1, throttle=0.3, min_throttle=0.1, keep_sim=False)
+        try:
+            sc._spawn_run(job, steps=10)
+            task = next(iter(sc._run_tasks))
+            # 模拟 GC/取消发生在任务首步执行前：cancel 且不让出让它先跑
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            # done 回调兜底：job 已收尾、不再占用 get_running()
+            assert job.status == "error"
+            assert job.error and "取消" in job.error or job.error
+            assert sc.simcollect_job_manager.get_running() is None, \
+                "孤儿 job 不得永久占坑（后续 /start 会 409）"
+            assert len(sc._run_tasks) == 0
+        finally:
+            sc.simcollect_job_manager.jobs.clear()
+            sc.simcollect_job_manager.active_job_id = None
+
+    asyncio.run(main())

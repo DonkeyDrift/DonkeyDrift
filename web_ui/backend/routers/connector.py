@@ -313,11 +313,16 @@ async def stream_job_events(job_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     async def event_stream():
-        while True:
-            message = await job.log_queue.get()
-            yield f"data: {json.dumps(message, ensure_ascii=False)}\n\n"
-            if message.get("type") == "status" and message.get("status") in {"completed", "failed", "stopped"}:
-                break
+        # 每条 SSE 连接独立订阅（#502）：多页签各收全量，不再互偷
+        sub = job.subscribe()
+        try:
+            while True:
+                message = await sub.get()
+                yield f"data: {json.dumps(message, ensure_ascii=False)}\n\n"
+                if message.get("type") == "status" and message.get("status") in {"completed", "failed", "stopped"}:
+                    break
+        finally:
+            job.unsubscribe(sub)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

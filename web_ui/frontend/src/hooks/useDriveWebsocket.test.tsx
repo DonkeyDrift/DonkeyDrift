@@ -163,4 +163,41 @@ describe('useDriveWebsocket', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it('构造 WebSocket 抛异常：挂载中按间隔重连，卸载后 catch 分支不再拉起重连（#508）', () => {
+    vi.useFakeTimers();
+    let constructions = 0;
+    class ThrowingWebSocket {
+      constructor() {
+        constructions += 1;
+        throw new Error('bad url');
+      }
+    }
+    vi.stubGlobal('WebSocket', ThrowingWebSocket as unknown as typeof WebSocket);
+
+    const Probe: React.FC = () => {
+      useDriveWebsocket({ autoReconnect: true });
+      return null;
+    };
+
+    const { unmount } = render(<Probe />);
+    // 挂载后首次连接即抛异常 → catch
+    expect(constructions).toBe(1);
+
+    // 仍挂载：按 reconnectInterval（默认 3000ms）重连
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(constructions).toBe(2);
+
+    // 卸载后：catch 安排的重连定时器必须尊重卸载状态，不再复活已卸载组件
+    unmount();
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(constructions).toBe(2);
+
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });

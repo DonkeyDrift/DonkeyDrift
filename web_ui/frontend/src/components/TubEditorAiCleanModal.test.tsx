@@ -5,7 +5,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({
-    t: (key: string, _vars?: Record<string, unknown>) => key,
+    t: (key: string) => key,
     lang: 'zh',
   }),
 }));

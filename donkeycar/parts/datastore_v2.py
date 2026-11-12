@@ -464,6 +464,10 @@ class ManifestIterator(object):
                 raise StopIteration('No catalogs')
 
             if self.current_catalog_index >= len(self.manifest.catalog_paths):
+                # 迭代结束：显式关闭最后一个 catalog，句柄不留给 GC 兜底（#501）
+                if self.current_catalog is not None:
+                    self.current_catalog.close()
+                    self.current_catalog = None
                 raise StopIteration('No more catalogs')
 
             if self.current_catalog is None:
@@ -491,6 +495,10 @@ class ManifestIterator(object):
                         logger.error(f'Failed loading record {current_index}')
                         continue
             else:
+                # 换下一个 catalog 前关闭当前的（每个 Catalog 持有 catalog 与
+                # manifest 两组句柄，全 tub 迭代曾累计打开 2N 个，#501）
+                if self.current_catalog is not None:
+                    self.current_catalog.close()
                 self.current_catalog = None
                 self.current_catalog_index += 1
 

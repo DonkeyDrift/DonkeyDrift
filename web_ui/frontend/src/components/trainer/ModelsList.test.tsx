@@ -16,7 +16,9 @@ vi.mock('@/i18n', () => ({
 }));
 
 const mockListModels = vi.fn();
-const mockLoadModelToCar = vi.fn((..._args: unknown[]) => Promise.resolve({ message: 'ok' }));
+const mockLoadModelToCar = vi.fn<(...args: unknown[]) => Promise<{ message: string }>>(
+  () => Promise.resolve({ message: 'ok' }),
+);
 vi.mock('../../services/api', () => ({
   listModels: (...args: unknown[]) => mockListModels(...args),
   deleteModel: vi.fn(() => Promise.resolve()),

@@ -25,13 +25,32 @@ class ConnectorJob:
     status: Literal["pending", "running", "completed", "failed", "stopped"] = "pending"
     progress: float = 0.0
     logs: list[str] = field(default_factory=list)
-    log_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue())
+    # SSE 订阅者队列集合（#502）：多条连接同看一个 job 时各收全量副本；
+    # 旧单 log_queue 会让两个页签互偷日志行（每条只被其中一个拿到）
+    subscribers: list = field(default_factory=list)
     started_at: str = field(default_factory=lambda: datetime.now().isoformat())
     finished_at: Optional[str] = None
     process: Optional[asyncio.subprocess.Process] = None
     error_message: Optional[str] = None
     # 本次 rsync 传输统计（--stats 解析结果），仅 pull_tub/push_pilots 任务会有
     transfer_stats: Optional[dict] = None
+
+    def subscribe(self) -> asyncio.Queue:
+        """注册一个 SSE 订阅者，返回其专属队列（#502）。"""
+        sub: asyncio.Queue = asyncio.Queue()
+        self.subscribers.append(sub)
+        return sub
+
+    def unsubscribe(self, sub: asyncio.Queue) -> None:
+        try:
+            self.subscribers.remove(sub)
+        except ValueError:
+            pass
+
+    def publish(self, message: dict) -> None:
+        """把一条事件广播到所有活跃订阅者（同步 put_nowait，队列无界）。"""
+        for sub in list(self.subscribers):
+            sub.put_nowait(message)
 
 
 class ConnectorJobManager:
@@ -93,7 +112,7 @@ class ConnectorJobManager:
         if job.process and job.process.returncode is None:
             job.process.terminate()
         job.finished_at = datetime.now().isoformat()
-        await job.log_queue.put({"type": "status", "status": job.status})
+        job.publish({"type": "status", "status": job.status})
 
     async def run_pull_tub(self, job: ConnectorJob, config: ConnectorConfig, remote_tub: str, local_data_path: str, create_new_dir: bool):
         try:
@@ -129,7 +148,7 @@ class ConnectorJobManager:
             job.status = "failed"
             job.error_message = "没有可停止的远端驾驶进程"
             job.finished_at = datetime.now().isoformat()
-            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+            job.publish({"type": "status", "status": job.status, "error": job.error_message})
             return
         try:
             command = build_remote_drive_stop_command(config, target_pid)
@@ -144,7 +163,7 @@ class ConnectorJobManager:
         job.status = "failed"
         job.error_message = str(exc)
         job.finished_at = datetime.now().isoformat()
-        await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+        job.publish({"type": "status", "status": job.status, "error": job.error_message})
 
     async def _ensure_rsync_available(self, job: ConnectorJob, config: ConnectorConfig) -> bool:
         if shutil.which("rsync") is None:
@@ -167,7 +186,7 @@ class ConnectorJobManager:
                 if text:
                     output.append(text)
                     job.logs.append(text)
-                    await job.log_queue.put({"type": "log", "line": text, "timestamp": time.time()})
+                    job.publish({"type": "log", "line": text, "timestamp": time.time()})
             await process.wait()
             if process.returncode == 0:
                 return True
@@ -199,7 +218,7 @@ class ConnectorJobManager:
                     continue
                 output.append(text)
                 job.logs.append(text)
-                await job.log_queue.put({"type": "log", "line": text, "timestamp": time.time()})
+                job.publish({"type": "log", "line": text, "timestamp": time.time()})
             await job.process.wait()
             if job.status == "stopped":
                 return
@@ -208,7 +227,7 @@ class ConnectorJobManager:
                 if capture_pid and output:
                     try:
                         self.drive_pid = int(output[-1])
-                        await job.log_queue.put({"type": "drive_pid", "pid": self.drive_pid})
+                        job.publish({"type": "drive_pid", "pid": self.drive_pid})
                     except ValueError:
                         job.status = "failed"
                         job.error_message = "未能解析远端驾驶进程 PID"
@@ -221,7 +240,7 @@ class ConnectorJobManager:
             job.error_message = str(exc)
         finally:
             job.finished_at = datetime.now().isoformat()
-            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+            job.publish({"type": "status", "status": job.status, "error": job.error_message})
 
     async def _run_rsync(self, job: ConnectorJob, command: list[str]):
         job.status = "running"
@@ -241,11 +260,11 @@ class ConnectorJobManager:
                 if not text:
                     continue
                 job.logs.append(text)
-                await job.log_queue.put({"type": "log", "line": text, "timestamp": time.time()})
+                job.publish({"type": "log", "line": text, "timestamp": time.time()})
                 progress = parse_rsync_progress(text)
                 if progress is not None:
                     job.progress = progress
-                    await job.log_queue.put({"type": "progress", "progress": progress})
+                    job.publish({"type": "progress", "progress": progress})
                 # rsync --stats 输出以 "Number of files:" 开头，收集到结束用于统计
                 if text.startswith("Number of files:"):
                     in_stats = True
@@ -274,7 +293,7 @@ class ConnectorJobManager:
                 job.error_message = str(exc)
         finally:
             job.finished_at = datetime.now().isoformat()
-            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+            job.publish({"type": "status", "status": job.status, "error": job.error_message})
 
 
 connector_job_manager = ConnectorJobManager()

@@ -228,10 +228,28 @@ def _mint_link_from_store() -> str | None:
 
 
 def _app_running() -> bool:
+    # 精确匹配：只认 cmdline 首参数（argv0）等于桌面端可执行文件的进程。
+    # 旧 pgrep -f 子串匹配会把"tail 该目录日志/编辑器打开该目录文件"也
+    # 当成在跑，/link 便跳过拉起空转 25s（#500）
+    bin_path = str(ZCODE_APP_BIN)
+    if os.path.isdir("/proc"):
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    raw = f.read()
+            except OSError:
+                continue
+            argv0 = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+            if argv0 == bin_path:
+                return True
+        return False
+    # 非 Linux（无 /proc）：回退锚定 pgrep（^ 开头排除 tail 等前缀进程）
     try:
         return (
             subprocess.run(
-                ["pgrep", "-f", "/.zcode-app/zcode"],
+                ["pgrep", "-f", f"^{bin_path}"],
                 capture_output=True,
                 timeout=3,
             ).returncode
@@ -284,7 +302,7 @@ def _http_json(url: str, timeout: float = 2.0):
         return json.loads(resp.read().decode("utf-8"))
 
 
-async def _cdp_eval(ws, expression: str):
+async def _cdp_eval(ws, expression: str, timeout_s: float = 5.0):
     await ws.send(
         json.dumps(
             {
@@ -298,8 +316,15 @@ async def _cdp_eval(ws, expression: str):
             }
         )
     )
+    # recv 带超时（#500）：渲染进程"冻结但不崩"时不挂死 /link——超时抛
+    # TimeoutError，由 _cdp_remote_url 的 except 捕获走兜底拼链
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout_s
     while True:
-        msg = json.loads(await ws.recv())
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError(f"CDP eval 超时（>{timeout_s}s 无响应）")
+        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
         if msg.get("id") == 1:
             return (msg.get("result", {}).get("result") or {}).get("value")
 
