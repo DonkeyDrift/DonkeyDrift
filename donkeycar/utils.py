@@ -130,7 +130,7 @@ def rgb2gray(rgb):
     grey = np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
     # transform back if the input is a uint8 array
     if rgb.dtype.type is np.uint8:
-        grey = round(grey).astype(np.uint8)
+        grey = np.round(grey).astype(np.uint8)
     return grey
 
 

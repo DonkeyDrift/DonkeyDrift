@@ -142,7 +142,9 @@ def build_remote_drive_start_command(
     car_dir = validate_remote_path(config.car_dir)
     parts = []
     if bridge_server_url:
-        parts.append(f"DRIVE_API_SERVER_URL={shlex.quote(validate_bridge_url(bridge_server_url))}")
+        # 环境变量必须经 env 注入：shell 只把命令名之前的 VAR=value 当赋值，
+        # 直接写在 nohup 之后会被 nohup 当成程序名执行（exit 127，#483）
+        parts.append(f"env DRIVE_API_SERVER_URL={shlex.quote(validate_bridge_url(bridge_server_url))}")
     parts.extend(["python", "manage.py", "drive"])
     if pilot:
         model_name = validate_remote_name(pilot)

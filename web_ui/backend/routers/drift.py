@@ -136,9 +136,12 @@ async def camera_start(request: CameraStartRequest):
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     drift_engine._calibration_file = request.calibration_file
-    # 相机由 start_camera_loop 显式持有，stop_camera_loop 时释放（不靠 GC）
-    drift_engine.start_camera_loop(camera, detector, homography, request.tag_id,
-                                   heading_offset_deg=request.heading_offset_deg)
+    # 相机由 start_camera_loop 显式持有，stop_camera_loop 时释放（不靠 GC）。
+    # 放工作线程执行（#503）：其重入守卫会先 stop_camera_loop（两级 join 各
+    # 2s + close），直接在事件循环跑会在相机重启时卡住全部 API/WS 最多 4s
+    await asyncio.to_thread(
+        drift_engine.start_camera_loop, camera, detector, homography,
+        request.tag_id, heading_offset_deg=request.heading_offset_deg)
     return {"ok": True}
 
 
@@ -183,8 +186,16 @@ def install_drive_hooks() -> None:
 
     loop = asyncio.get_event_loop()
 
-    def _send_sink(msg: dict) -> None:
-        asyncio.run_coroutine_threadsafe(drive_mod.drive_state.send_to_car(msg), loop)
+    def _send_sink(msg: dict) -> bool:
+        # 同步取回 send_to_car 的布尔结果（车端掉线时显式 False），
+        # 让引擎的下发失败计数与"连续失败交还人工"看门狗在生产链路
+        # 真正生效（#493）；事件循环卡死等异常按 False 计入失败
+        fut = asyncio.run_coroutine_threadsafe(
+            drive_mod.drive_state.send_to_car(msg), loop)
+        try:
+            return bool(fut.result(timeout=2.0))
+        except Exception:
+            return False
 
     drift_engine.send_sink = _send_sink
 

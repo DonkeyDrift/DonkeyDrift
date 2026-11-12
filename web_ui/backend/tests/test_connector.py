@@ -164,6 +164,9 @@ def test_build_remote_drive_start_command_injects_bridge_url_safely():
     remote_command = command[-1]
     assert command[:3] == ["ssh", "-p", "22"]
     assert "DRIVE_API_SERVER_URL=ws://192.168.1.2:8000/api/drive/ws" in remote_command
+    # 环境变量必须经 env 注入：nohup 之后直接写 VAR=value 会被当程序名（#483）
+    assert "nohup env DRIVE_API_SERVER_URL=" in remote_command
+    assert "nohup DRIVE_API_SERVER_URL=" not in remote_command
     assert "--type tflite_linear" in remote_command
     assert "--model '~/mycar/models/pilot.tflite'" in remote_command
     assert ".donkeycar_drive.pid" in remote_command
@@ -282,6 +285,7 @@ def test_pull_tub_job_fails_when_command_building_fails():
         manager = ConnectorJobManager()
         job = manager.create_job("pull_tub")
 
+        sub = job.subscribe()
         await manager.run_pull_tub(
             job,
             ConnectorConfig(host="car.local", user="pi", car_dir="~/mycar"),
@@ -290,7 +294,7 @@ def test_pull_tub_job_fails_when_command_building_fails():
             False,
         )
 
-        event = await job.log_queue.get()
+        event = await sub.get()
         return job, event
 
     job, event = asyncio.run(run_job())
@@ -313,6 +317,7 @@ def test_pull_tub_job_fails_when_local_rsync_is_missing(monkeypatch):
         job = manager.create_job("pull_tub")
         monkeypatch.setattr(connector_engine.shutil, "which", lambda name: None)
 
+        sub = job.subscribe()
         await manager.run_pull_tub(
             job,
             ConnectorConfig(host="car.local", user="pi", car_dir="~/mycar"),
@@ -321,7 +326,7 @@ def test_pull_tub_job_fails_when_local_rsync_is_missing(monkeypatch):
             False,
         )
 
-        event = await job.log_queue.get()
+        event = await sub.get()
         return job, event
 
     job, event = asyncio.run(run_job())
@@ -360,13 +365,14 @@ def test_drive_command_keeps_stopped_status(monkeypatch):
         job = manager.create_job("drive_start")
         monkeypatch.setattr(connector_engine.asyncio, "create_subprocess_exec", create_process)
 
+        sub = job.subscribe()
         task = asyncio.create_task(manager._run_drive_command(job, ["ssh", "car"], capture_pid=True))
         await asyncio.sleep(0)
         job.status = "stopped"
         release_process.set()
         await task
 
-        event = await job.log_queue.get()
+        event = await sub.get()
         return job, event
 
     job, event = asyncio.run(run_job())
@@ -407,6 +413,7 @@ def test_drive_stop_failure_keeps_pid(monkeypatch):
         job = manager.create_job("drive_stop")
         monkeypatch.setattr(connector_engine.asyncio, "create_subprocess_exec", create_process)
 
+        sub = job.subscribe()
         await manager.run_drive_stop(job, ConnectorConfig(host="car.local", user="pi", car_dir="~/mycar"), None)
 
         return manager, job

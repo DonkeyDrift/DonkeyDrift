@@ -91,13 +91,10 @@ export const useGyroDrive = ({
         Math.min(1, (gamma / 45) * steerSensitivity)
       );
 
-      if (
-        Math.abs(angle - lastValueRef.current.angle) > 0.02 ||
-        Math.abs(throttle - lastValueRef.current.throttle) > 0.02
-      ) {
-        lastValueRef.current = { angle, throttle };
-        onChangeRef.current?.(angle, throttle);
-      }
+      // 每帧上报（不按值变化门控）：mux 侧新鲜度检查（LOCAL_INPUT_STALE_MS）
+      // 以「陀螺仪 tick 仍在跑」为活判据，稳持姿势不会被误杀（#508）
+      lastValueRef.current = { angle, throttle };
+      onChangeRef.current?.(angle, throttle);
 
       rafRef.current = requestAnimationFrame(tick);
     };

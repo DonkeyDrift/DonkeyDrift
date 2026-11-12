@@ -178,3 +178,21 @@ def test_pypi_trusted_publishing_workflow_is_configured():
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
     assert "python -m build --sdist --wheel" in workflow
     assert "python -m twine check dist/*" in workflow
+
+
+def test_pc_and_macos_extras_match_uv_training_course():
+    parser = ConfigParser()
+    parser.read(PROJECT_ROOT / "setup.cfg", encoding="utf-8")
+    extras = parser["options.extras_require"]
+
+    pc = {line.strip() for line in extras["pc"].splitlines() if line.strip()}
+    macos = {line.strip() for line in extras["macos"].splitlines() if line.strip()}
+
+    assert "tensorflow>=2.19,<2.20" in pc
+    assert "tf-keras" in pc
+    assert "tensorflow==2.15.*" not in pc
+    assert "tensorflow==2.15.*" in macos
+    assert "tensorflow-metal" in macos
+    for requirements in (pc, macos):
+        assert "kivy" not in requirements
+        assert "kivy-garden.matplotlib" not in requirements

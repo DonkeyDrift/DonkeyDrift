@@ -53,7 +53,25 @@ def test_find_donkeycar_python_uses_configured_first():
         found = mypc_probe.find_donkeycar_python(FakeSsh(), "/custom/python")
 
     assert found == "/custom/python"
-    # 配置路径排在候选首位，找到即返回（发现层同 _detect_python 一样先行执行）
+    # 默认共享 venv 不存在时，配置路径仍优先于 conda/system 发现层。
+
+
+def test_find_donkeycar_python_prefers_new_shared_venv_over_old_configured_conda():
+    def _run(ssh, command, timeout=20):
+        if "import sys; print(sys.executable)" in command:
+            if "DonkeyDrift/.venv/bin/python" in command:
+                return (0, "/home/u/projects/DonkeyDrift/.venv/bin/python\n", "")
+            if "/old/conda/python" in command:
+                return (0, "/old/conda/python\n", "")
+            return (1, "", "not found")
+        if "find_spec('donkeycar')" in command:
+            return (0, "", "")
+        return (0, "", "")
+
+    with patch.object(mypc_probe, "_run_remote", side_effect=_run):
+        found = mypc_probe.find_donkeycar_python(FakeSsh(), "/old/conda/python")
+
+    assert found == "/home/u/projects/DonkeyDrift/.venv/bin/python"
 
 
 def test_find_donkeycar_python_falls_back_to_discovery():

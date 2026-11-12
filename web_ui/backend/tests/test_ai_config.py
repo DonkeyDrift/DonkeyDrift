@@ -252,3 +252,26 @@ def test_test_endpoint_uses_active_credentials(client, monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer sk-abcdefgh1234"
     assert captured["data"]["model"] == "deepseek-chat"
 
+
+
+def test_corrupted_state_self_heals_to_defaults(client, tmp_path):
+    """#499：配置文件损坏时回退默认态（200），不再让全部端点 400 瘫痪。"""
+    path = tmp_path / "ai_config.json"
+    path.write_text('{"active_provider": "openai", "accounts": {', encoding="utf-8")  # 写一半崩溃形态
+    resp = client.get("/api/ai-config/providers")
+    assert resp.status_code == 200
+    body = resp.json()
+    providers = body.get("providers", body)
+    assert resp.status_code == 200
+    assert isinstance(providers, list)  # 自愈为默认态：供应商列表正常返回
+
+
+def test_save_state_atomic_no_tmp_leftover(client, tmp_path):
+    """#499：保存走 tmp+rename，落盘为合法 JSON 且无 .tmp 残留。"""
+    resp = client.post("/api/ai-config/providers/deepseek",
+                  json={"name": "主力", "api_key": "sk-1234567890abcd"})
+    assert resp.status_code == 200
+    path = tmp_path / "ai_config.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "deepseek" in data["accounts"]
+    assert not (tmp_path / "ai_config.json.tmp").exists()

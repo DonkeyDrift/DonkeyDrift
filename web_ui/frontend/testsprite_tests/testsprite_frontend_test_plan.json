@@ -1,4 +1,4 @@
-﻿[
+[
   {
     "id": "TC001",
     "title": "Load configuration successfully using a valid path",
@@ -244,145 +244,9 @@
   },
   {
     "id": "TC008",
-    "title": "Load a valid tub from a relative path and verify metadata is shown",
-    "description": "Verifies a user can enter a valid relative tub path, load the tub, and see record count and fields reflected in the UI.",
-    "category": "Tub Loader",
-    "priority": "High",
-    "steps": [
-      {
-        "type": "action",
-        "description": "Navigate to /"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify element \"Tub path input field\" is visible"
-      },
-      {
-        "type": "action",
-        "description": "Type \"./data\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Loading\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Success\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"record\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"fields\" is visible"
-      }
-    ]
-  },
-  {
-    "id": "TC009",
-    "title": "Load a non-existent tub path and verify error state and status bar",
-    "description": "Verifies an invalid tub path shows an error message and the status bar indicates no tub is loaded.",
-    "category": "Tub Loader",
-    "priority": "High",
-    "steps": [
-      {
-        "type": "action",
-        "description": "Navigate to /"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify element \"Tub path input field\" is visible"
-      },
-      {
-        "type": "action",
-        "description": "Type \"/nonexistent/tub\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Error\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"No tub loaded\" is visible"
-      }
-    ]
-  },
-  {
-    "id": "TC010",
-    "title": "Attempt to load with an empty tub path and verify an error is shown",
-    "description": "Verifies the loader does not proceed successfully when the tub path is blank and the UI shows an error state.",
-    "category": "Tub Loader",
-    "priority": "Medium",
-    "steps": [
-      {
-        "type": "action",
-        "description": "Navigate to /"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify element \"Tub path input field\" is visible"
-      },
-      {
-        "type": "action",
-        "description": "Type \"\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Error\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"No tub loaded\" is visible"
-      }
-    ]
-  },
-  {
-    "id": "TC011",
-    "title": "Verify loading indicator appears when starting a tub load",
-    "description": "Verifies the UI provides immediate loading feedback after clicking Load.",
-    "category": "Tub Loader",
-    "priority": "Medium",
-    "steps": [
-      {
-        "type": "action",
-        "description": "Navigate to /"
-      },
-      {
-        "type": "action",
-        "description": "Type \"./data\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Loading\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify element \"Status bar\" is visible"
-      }
-    ]
-  },
-  {
-    "id": "TC012",
-    "title": "Load a valid tub after a failed load and verify success replaces the error state",
-    "description": "Verifies recovery behavior: after an error load attempt, a valid load succeeds and the UI shows success and record metadata.",
-    "category": "Tub Loader",
+    "title": "Tub is selected automatically after configuration load and its path and record count are shown",
+    "description": "Verifies loading car configuration automatically selects and restores the tub (persisted tub path or <car>/data) with no manual TubLoader controls in the UI, and the selected tub path and record count are reflected in Current Data.",
+    "category": "Automatic Tub Loading",
     "priority": "High",
     "steps": [
       {
@@ -391,101 +255,11 @@
       },
       {
         "type": "action",
-        "description": "Type \"/nonexistent/tub\" into the \"Tub path\" input field"
+        "description": "Type \"~/mycar\" into \"Config path input field\""
       },
       {
         "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Error\" is visible"
-      },
-      {
-        "type": "action",
-        "description": "Type \"./data\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Success\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"record\" is visible"
-      }
-    ]
-  },
-  {
-    "id": "TC013",
-    "title": "Load a second tub path and verify the status bar updates to the new record count",
-    "description": "Verifies loading a tub updates the status bar record count, and re-loading with a different path updates it again.",
-    "category": "Tub Loader",
-    "priority": "Medium",
-    "steps": [
-      {
-        "type": "action",
-        "description": "Navigate to /"
-      },
-      {
-        "type": "action",
-        "description": "Type \"./data\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Success\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Record\" is visible"
-      },
-      {
-        "type": "action",
-        "description": "Type \"./data\" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Success\" is visible"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify text \"Record\" is visible"
-      }
-    ]
-  },
-  {
-    "id": "TC014",
-    "title": "Enter a tub path with leading/trailing spaces and verify load behavior is handled",
-    "description": "Verifies the loader handles whitespace in the tub path input and still results in a clear success or error message.",
-    "category": "Tub Loader",
-    "priority": "Low",
-    "steps": [
-      {
-        "type": "action",
-        "description": "Navigate to /"
-      },
-      {
-        "type": "assertion",
-        "description": "Verify element \"Tub path input field\" is visible"
-      },
-      {
-        "type": "action",
-        "description": "Type \"  ./data  \" into the \"Tub path\" input field"
-      },
-      {
-        "type": "action",
-        "description": "Click \"Load\" button"
+        "description": "Click on \"Load\" button"
       },
       {
         "type": "assertion",
@@ -493,7 +267,19 @@
       },
       {
         "type": "assertion",
-        "description": "Verify text \"Success\" is visible"
+        "description": "Verify element \"Tub path\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"record count\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Tub path input field\" is not visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Load Tub button\" is not visible"
       }
     ]
   },

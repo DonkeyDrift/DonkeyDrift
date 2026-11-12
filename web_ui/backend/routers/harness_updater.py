@@ -556,12 +556,15 @@ def _download_url_to_dir(url: str, info: dict) -> dict:
 
 
 def _filename_from_url(url: str, content_disposition: str) -> str:
+    def _safe(name: str) -> str:
+        # 只留文件名：URL/响应头来源不可信，带目录成分会穿越写出下载目录（#486）
+        base = os.path.basename(name.strip().replace("\\", "/"))
+        return base if base not in ("", ".", "..") else "installer"
+
     m = re.search(r'filename="?([^";]+)"?', content_disposition)
     if m:
-        return m.group(1)
-    path = urllib.parse.urlparse(url).path
-    name = os.path.basename(path) or "installer"
-    return name
+        return _safe(m.group(1))
+    return _safe(urllib.parse.urlparse(url).path)
 
 
 def install_component(component: dict) -> dict:
@@ -907,7 +910,12 @@ def ota_flash(ip: str, asset_path: str | None = None) -> dict:
             return {"status": "error", "message": "本地无已下载固件，请先执行一键更新检查下载"}
         asset_path = str(candidates[0])
 
-    path = Path(asset_path)
+    path = Path(asset_path).resolve()
+    # 固件路径必须位于本地-only 下载目录内：接口无鉴权暴露在局域网，
+    # 不限制的话任意调用者可借 asset_path 读本机任意文件外传到指定私网 IP（#486）
+    download_root = DOWNLOAD_DIR.resolve()
+    if path != download_root and download_root not in path.parents:
+        return {"status": "error", "message": f"固件路径必须在 {download_root} 内"}
     if not path.is_file():
         return {"status": "error", "message": f"固件文件不存在: {asset_path}"}
 

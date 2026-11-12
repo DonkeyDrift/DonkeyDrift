@@ -1,6 +1,11 @@
+import base64
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -9,9 +14,28 @@ if str(BACKEND_DIR) not in sys.path:
 import mypc_probe
 
 
+def _zsh_or_skip():
+    zsh = shutil.which("zsh")
+    if not zsh:
+        pytest.skip("zsh not available on this host")
+    return zsh
+
+
 class FakeSsh:
     def close(self):
         pass
+
+    def get_transport(self):
+        class _LiveTransport:
+            def is_active(self):
+                return True
+        return _LiveTransport()
+
+
+def _command_text(command):
+    if command.startswith("powershell ") and " -EncodedCommand " in command:
+        return base64.b64decode(command.rsplit(" ", 1)[-1]).decode("utf-16-le")
+    return command
 
 
 def _echo_executable(command):
@@ -36,6 +60,7 @@ def _make_dispatcher(commands, calls=None):
     def _run(ssh, command, timeout=20):
         if calls is not None:
             calls.append(command)
+        command = _command_text(command)
         for key, result in commands.items():
             if key in command:
                 return result(command) if callable(result) else result
@@ -290,6 +315,22 @@ def test_probe_windows_without_wsl():
     assert names["python"] == "fail"
 
 
+def test_probe_without_python_guides_to_one_click_environment_setup():
+    cmds = {
+        "uname -s": (0, "Darwin\n", ""),
+        "sw_vers -productVersion": (0, "26.5\n", ""),
+        "import sys; print(sys.executable)": (1, "", "not found"),
+    }
+    result = _probe(cmds)
+
+    python_check = next(c for c in result.checks if c.name == "python")
+    assert python_check.status == "fail"
+    assert "一键配置环境" in python_check.hint
+    assert "安装 Python" not in python_check.hint
+    assert "Homebrew" not in python_check.hint
+    assert any("一键配置环境" in s for s in result.suggestions)
+
+
 def test_probe_missing_donkeycar():
     cmds = {
         "uname -s": (0, "Linux\n", ""),
@@ -324,3 +365,165 @@ def test_probe_uses_configured_python_first():
 
     assert result.ok is True
     assert result.python_path == "/custom/python"
+
+
+def test_probe_uses_new_shared_venv_when_no_other_python_exists():
+    calls = []
+
+    def python_probe(command):
+        if "DonkeyDrift/.venv/bin/python" in command:
+            return (0, "/Users/u/projects/DonkeyDrift/.venv/bin/python\n", "")
+        return (1, "", "not found")
+
+    def donkeycar_probe(command):
+        return (0 if "DonkeyDrift/.venv/bin/python" in command else 1, "", "")
+
+    cmds = {
+        "uname -s": (0, "Darwin\n", ""),
+        "sw_vers -productVersion": (0, "26.5\n", ""),
+        "import sys; print(sys.executable)": python_probe,
+        "find_spec('donkeycar')": donkeycar_probe,
+        "--help": (0, "usage: donkey", ""),
+    }
+    result = _probe(cmds, calls=calls)
+
+    assert result.ok is True
+    assert result.python_path == "/Users/u/projects/DonkeyDrift/.venv/bin/python"
+    python_calls = [c for c in calls if "import sys; print(sys.executable)" in c]
+    assert "DonkeyDrift/.venv/bin/python" in python_calls[0]
+
+
+def test_probe_prefers_custom_shared_venv_over_existing_old_conda():
+    def python_probe(command):
+        if "DonkeyDrift/.venv/bin/python" in command:
+            return (0, "/Users/u/shared/DonkeyDrift/.venv/bin/python\n", "")
+        if "miniconda3/envs/donkey" in command:
+            return (0, "/Users/u/miniconda3/envs/donkey/bin/python3\n", "")
+        return (1, "", "not found")
+
+    cmds = {
+        "uname -s": (0, "Linux\n", ""),
+        "conda env list": (
+            0, "donkey  /Users/u/miniconda3/envs/donkey\n", "",
+        ),
+        "import sys; print(sys.executable)": python_probe,
+        "find_spec('donkeycar')": (0, "", ""),
+        "--help": (0, "usage: donkey", ""),
+    }
+    result = _probe(cmds, remote_dir_base="~/shared")
+
+    assert result.ok is True
+    assert result.python_path == "/Users/u/shared/DonkeyDrift/.venv/bin/python"
+
+
+def test_windows_probe_uses_shared_venv_and_safe_donkey_exe_commands():
+    calls = []
+
+    def python_probe(command):
+        if "DonkeyDrift\\.venv\\Scripts\\python.exe" in command:
+            return (0, "C:\\Users\\u\\projects\\DonkeyDrift\\.venv\\Scripts\\python.exe\n", "")
+        return (1, "", "not found")
+
+    def donkeycar_probe(command):
+        return (0 if "DonkeyDrift\\.venv\\Scripts\\python.exe" in command else 1, "", "")
+
+    cmds = {
+        "uname -s": (1, "", "not recognized"),
+        "wsl.exe -e uname -s": (1, "", ""),
+        "import sys; print(sys.executable)": python_probe,
+        "find_spec('donkeycar')": donkeycar_probe,
+        "--help": (0, "usage: donkey", ""),
+    }
+    result = _probe(cmds, calls=calls)
+
+    assert result.ok is True
+    assert result.python_path == "C:\\Users\\u\\projects\\DonkeyDrift\\.venv\\Scripts\\python.exe"
+    decoded = [_command_text(command) for command in calls]
+    python_commands = [c for c in decoded if "import sys; print(sys.executable)" in c]
+    assert "$HOME" in python_commands[0]
+    assert "projects\\DonkeyDrift\\.venv\\Scripts\\python.exe" in python_commands[0]
+    cli = next(c for c in decoded if "--help" in c)
+    assert "& 'C:\\Users\\u\\projects\\DonkeyDrift\\.venv\\Scripts\\donkey.exe' --help" in cli
+
+
+def test_posix_python_probe_executes_space_and_substitution_path_literally(tmp_path):
+    python = tmp_path / "My Projects" / "python$(touch PROBE_INJECTION)"
+    python.parent.mkdir()
+    python.symlink_to(sys.executable)
+
+    completed = subprocess.run(
+        mypc_probe._python_exec_probe(str(python)),
+        shell=True,
+        executable=_zsh_or_skip(),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip()
+    assert not (tmp_path / "PROBE_INJECTION").exists()
+
+
+def test_posix_python_probe_expands_only_leading_home(tmp_path):
+    home = tmp_path / "Test Home"
+    python = home / "My Projects" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+
+    completed = subprocess.run(
+        mypc_probe._python_exec_probe("~/My Projects/python"),
+        shell=True,
+        executable=_zsh_or_skip(),
+        cwd=tmp_path,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip()
+
+
+def test_posix_donkey_cli_probe_quotes_space_and_substitution_path(tmp_path):
+    bin_dir = tmp_path / "My Projects" / "env$(touch CLI_INJECTION)" / "bin"
+    bin_dir.mkdir(parents=True)
+    donkey = bin_dir / "donkey"
+    donkey.write_text("#!/bin/sh\nexit 0\n")
+    donkey.chmod(0o755)
+    resolved_python = str(bin_dir / "python")
+
+    completed = subprocess.run(
+        mypc_probe._donkey_cli_probe(resolved_python, resolved_python),
+        shell=True,
+        executable=_zsh_or_skip(),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert not (tmp_path / "CLI_INJECTION").exists()
+
+
+class _DeadTransportSsh(FakeSsh):
+    """exec 抛异常 + transport 已死：模拟探测中途 SSH 断连（#506）。"""
+    def get_transport(self):
+        class _T:
+            def is_active(self):
+                return False
+        return _T()
+
+    def exec_command(self, command, timeout=None):
+        raise OSError("SSH channel closed")
+
+
+def test_probe_reports_connection_loss_not_windows():
+    """#506：通道中断时按连接错误上报，不得误判 Windows 目标机。"""
+    ssh = _DeadTransportSsh()
+    result = mypc_probe.ProbeResult(ok=False)
+    mypc_probe._detect_platform(ssh, result)
+    assert result.platform == "unknown"
+    assert result.shell == "unknown"
+    assert any(c.status == "error" and "中断" in c.message for c in result.checks), \
+        "必须是连接中断诊断，而不是 Windows 建议"

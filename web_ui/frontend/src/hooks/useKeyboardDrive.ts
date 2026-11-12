@@ -30,7 +30,19 @@ export const useKeyboardDrive = ({
   useEffect(() => {
     if (!enabled) return;
 
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return (
+        !!el &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      );
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 输入框中的按键不驱动（与 useDriveHotkeys 守卫一致）；keyup 不过滤——
+      // 先按住驾驶键再聚焦输入框后松开时，过滤 keyup 会让按键残留、油门回不来（#512）
+      if (isEditableTarget(e.target)) return;
+
       const key = e.key.toLowerCase();
       if (key in keysRef.current) {
         (keysRef.current as Record<string, boolean>)[key] = true;
@@ -42,6 +54,13 @@ export const useKeyboardDrive = ({
       if (key in keysRef.current) {
         (keysRef.current as Record<string, boolean>)[key] = false;
       }
+    };
+
+    // 窗口失焦（alt-tab / 点击其它窗口，分屏下页面仍可见）时 keyup 永不触发，
+    // 按住的键会残留导致油门爬到 1.0 并保持——blur 时四键全清，由上方回中
+    // 逻辑在后续帧把油门/转向收回 0（#508）
+    const handleBlur = () => {
+      keysRef.current = { i: false, k: false, j: false, l: false };
     };
 
     // 60fps 平滑更新
@@ -88,11 +107,13 @@ export const useKeyboardDrive = ({
     rafRef.current = requestAnimationFrame(tick);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [enabled]);
 
