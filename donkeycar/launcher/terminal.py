@@ -280,9 +280,17 @@ class TerminalSession:
 
     # ------------------------------------------------------------------
     def on_input(self, data: bytes):
-        """客户端输入字节流写入 PTY。"""
+        """客户端输入字节流写入 PTY，Ctrl-C 直接投递给前台进程组。"""
         if self._closed or self._master is None:
             return
+        if data == b"\x03":
+            try:
+                pgid = os.tcgetpgrp(self._master)
+                if pgid > 0:
+                    os.killpg(pgid, signal.SIGINT)
+                    return
+            except OSError:
+                pass
         try:
             os.write(self._master, data)
         except OSError:

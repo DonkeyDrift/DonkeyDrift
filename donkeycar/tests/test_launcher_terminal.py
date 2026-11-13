@@ -211,7 +211,19 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
         if _wait_until(prompt_returned, timeout=1.0):
             break
     if not prompt_returned():
+        import subprocess
+        shell_pid = sess._proc.pid
         print(f"PTY output after Ctrl-C: {writer.output()[prompt_offset:]!r}")
+        processes = subprocess.run(
+            ["ps", "-eo", "pid,ppid,pgid,sid,stat,comm,args"],
+            capture_output=True, text=True, check=False,
+        ).stdout.splitlines()
+        print("\n".join(
+            line for line in processes
+            if line.split()[0].isdigit() and int(line.split()[0]) == shell_pid
+            or len(line.split()) > 1 and line.split()[1].isdigit()
+            and int(line.split()[1]) == shell_pid
+        ))
     assert prompt_returned()
     sess.on_input(b"echo alive-$((6*7))\n")
     assert _wait_until(lambda: b"alive-42" in writer.output())
