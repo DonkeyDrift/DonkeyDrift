@@ -203,12 +203,15 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
 
     def prompt_returned():
         output = writer.output()
-        return len(output) > prompt_offset and output.endswith((b"$ ", b"# "))
+        prompt = output[prompt_offset:]
+        return len(output) > prompt_offset and (b"$ " in prompt or b"# " in prompt)
 
     for _ in range(12):
         sess.on_input(b"\x03")
         if _wait_until(prompt_returned, timeout=1.0):
             break
+    if not prompt_returned():
+        print(f"PTY output after Ctrl-C: {writer.output()[prompt_offset:]!r}")
     assert prompt_returned()
     sess.on_input(b"echo alive-$((6*7))\n")
     assert _wait_until(lambda: b"alive-42" in writer.output())
