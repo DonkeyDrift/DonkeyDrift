@@ -35,6 +35,13 @@ jobs:
           pip install -e .[pc,dev]
           pip install build
           pip list
+      - name: Install simulator test dependency
+        run: |
+          python -m pip install \
+            "gym-donkeycar @ git+https://github.com/tawnkramer/gym-donkeycar@a1f4ca6961e17a6929c1f2e883358a1edafb479d"
+          SITE_PACKAGES="$(python -c 'import gym_donkeycar, pathlib; print(pathlib.Path(gym_donkeycar.__file__).resolve().parent.parent)')"
+          patch -p1 -d "$SITE_PACKAGES" \
+            < scripts/patches/gym-donkeycar-linux-resilience.patch
       - name: Verify DonkeyDrift imports
         run: |
           python -c "import donkeydrifter; from donkeydrifter import Vehicle"
@@ -55,8 +62,3 @@ jobs:
           python -m pytest tests/test_drift_controller.py -q
           cd ../../
           python scripts/simulate_drift_controller.py --beta-target 25 --duration 10
-
-      - name: Check version consistency
-        run: |
-          cd /home/aidlux/projects
-          python scripts/check_versions.py

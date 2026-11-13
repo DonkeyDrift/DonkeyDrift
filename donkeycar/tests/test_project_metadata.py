@@ -150,6 +150,18 @@ def test_python_ci_checks_donkeydrifter_import_and_build():
     assert "python -m build --sdist --wheel" in workflow
 
 
+def test_python_ci_installs_simulator_dependency_without_missing_version_script():
+    workflow = read_text(
+        PROJECT_ROOT / ".github" / "workflows" / "python-package-conda.yml"
+    )
+
+    assert "gym-donkeycar @ git+https://github.com/tawnkramer/gym-donkeycar@" in workflow
+    assert "scripts/patches/gym-donkeycar-linux-resilience.patch" in workflow
+    assert workflow.index("Install simulator test dependency") < workflow.index("Run tests")
+    assert "/home/aidlux/projects" not in workflow
+    assert "scripts/check_versions.py" not in workflow
+
+
 def test_super_linter_workflow_uses_donkeydrifter_name():
     workflow = read_text(PROJECT_ROOT / ".github" / "workflows" / "superlinter.yml")
 
