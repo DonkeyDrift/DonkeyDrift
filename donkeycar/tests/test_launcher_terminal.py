@@ -493,7 +493,7 @@ def test_enable_tcp_keepalive_sets_socket_options():
     s = socket.socket()
     try:
         terminal._enable_tcp_keepalive(s)
-        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0
         try:
             assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == terminal._TCP_KEEP_IDLE
             assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == terminal._TCP_KEEP_INTVL

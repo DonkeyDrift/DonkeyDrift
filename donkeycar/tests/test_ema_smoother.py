@@ -37,12 +37,13 @@ def test_zero_dither_is_absorbed():
     assert abs(v - (-0.012)) < 1e-3
 
 
-def test_slew_limits_step_rate():
+def test_slew_limits_step_rate(monkeypatch):
+    clock = iter([100.0, 100.02])
+    monkeypatch.setattr(time, "time", lambda: next(clock))
     s = EmaSmoother(alpha=1.0, slew_per_sec=6.0)
     s.run(0.0)
-    time.sleep(0.02)
     v = s.run(1.0)
-    # 20ms 间隔下 6/s 限幅只允许 ~0.12 的变化（留时间裕量）
+    # 固定 20ms 间隔时，6/s 限幅只允许 0.12 的变化
     assert 0.0 < v <= 6.0 * 0.03
 
 

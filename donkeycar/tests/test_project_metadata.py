@@ -158,6 +158,9 @@ def test_python_ci_installs_simulator_dependency_without_missing_version_script(
     assert "gym-donkeycar @ git+https://github.com/tawnkramer/gym-donkeycar@" in workflow
     assert "scripts/patches/gym-donkeycar-linux-resilience.patch" in workflow
     assert workflow.index("Install simulator test dependency") < workflow.index("Run tests")
+    assert '"tensorflow==2.15.1"' in workflow
+    assert "pip install -e .[pc,dev]" not in workflow
+    assert 'CUDA_VISIBLE_DEVICES: "-1"' in workflow
     assert "/home/aidlux/projects" not in workflow
     assert "scripts/check_versions.py" not in workflow
 
