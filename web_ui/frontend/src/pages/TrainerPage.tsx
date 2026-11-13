@@ -531,6 +531,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
                   user={myPcForm.user}
                   password={myPcForm.password}
                   pythonPath={myPcForm.pythonPath}
+                  remoteDirBase={myPcForm.remoteDirBase}
                   keyPath={myPcForm.keyPath}
                   onApplyPythonPath={(v) => setMyPcForm((f) => ({ ...f, pythonPath: v }))}
                   result={myPcProbe.result}

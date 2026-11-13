@@ -25,7 +25,7 @@ const mock = vi.hoisted(() => ({
         logs: string[];
       }
     | null,
-  start: vi.fn((_params: unknown) => Promise.resolve()),
+  start: vi.fn(() => Promise.resolve()),
   stop: vi.fn(() => Promise.resolve()),
   reset: vi.fn(),
 }));
@@ -65,7 +65,7 @@ describe('SimCollectCard', () => {
     fireEvent.change(screen.getByDisplayValue('1500'), { target: { value: '300' } });
     fireEvent.click(screen.getByText('开始采集'));
     expect(mock.start).toHaveBeenCalledTimes(1);
-    const params = mock.start.mock.calls[0][0] as { steps?: number };
+    const params = (mock.start.mock.calls as unknown[][])[0][0] as { steps?: number };
     expect(params.steps).toBe(300);
   });
 

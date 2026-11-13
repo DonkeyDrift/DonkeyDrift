@@ -11,12 +11,67 @@ WORKFLOW = (
 )
 
 
-def test_self_hosted_workflow_only_runs_for_trusted_push_or_dispatch():
-    data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+def _load_workflow():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
     triggers = data.get("on", data.get(True))
+    return text, data, triggers
+
+
+def test_workflow_runs_on_github_hosted_runner_without_self_hosted():
+    text, data, _ = _load_workflow()
     job = data["jobs"]["linux-validation"]
 
-    assert set(triggers) == {"push", "workflow_dispatch"}
-    assert "pull_request" not in triggers
-    assert job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
-    assert job["steps"][0]["with"]["persist-credentials"] is False
+    assert job["runs-on"] == "ubuntu-latest"
+    assert "self-hosted" not in text
+
+
+def test_workflow_triggers_on_pull_request_and_manual_dispatch_only():
+    _, _, triggers = _load_workflow()
+
+    assert set(triggers) == {"pull_request", "workflow_dispatch"}
+    assert "push" not in triggers
+    assert "pull_request_target" not in triggers
+
+
+def test_checkout_pins_exact_pr_head_sha_without_persisted_credentials():
+    _, data, _ = _load_workflow()
+    checkout = data["jobs"]["linux-validation"]["steps"][0]
+
+    assert checkout["with"]["ref"] == (
+        "${{ github.event.pull_request.head.sha || github.sha }}"
+    )
+    assert checkout["with"]["persist-credentials"] is False
+
+
+def test_patch_step_applies_gym_resilience_patch_to_installed_package():
+    _, data, _ = _load_workflow()
+    steps = data["jobs"]["linux-validation"]["steps"]
+
+    patch_steps = [
+        step for step in steps if "patch -p1" in str(step.get("run", ""))
+    ]
+
+    assert len(patch_steps) == 1
+    run = patch_steps[0]["run"]
+    assert "scripts/patches/gym-donkeycar-linux-resilience.patch" in run
+    assert "gym_donkeycar" in run
+
+
+def test_workflow_installs_tony007_model_and_vision_dependencies():
+    _, data, _ = _load_workflow()
+    install_steps = [
+        step for step in data["jobs"]["linux-validation"]["steps"]
+        if step.get("name") == "Install dependencies"
+    ]
+
+    assert len(install_steps) == 1
+    run = install_steps[0]["run"]
+    assert '".[dev]"' in run
+    assert "opencv-python-headless" in run
+    assert "matplotlib" in run
+    assert "plotly" in run
+    assert "albumentations" in run
+    assert '"pandas==3.0.3"' in run
+    assert '"tensorflow==2.15.1"' in run
+    assert "tf-keras" not in run

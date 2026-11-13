@@ -4,7 +4,7 @@
  * 从 api.ts 抽取的驾驶视频传输、WebSocket、控制接口。
  */
 
-import { api, API_URL, getApiErrorMessage } from "./api"
+import { api, API_URL } from "./api"
 import type { ConnectorJobState } from "./api";
 
 export type DriveVideoTransport = 'auto' | 'webrtc' | 'mjpeg';

@@ -12,7 +12,11 @@ write any config file. Keeping it separate from
 actionable setup guidance before a training job is started, instead of only
 surfacing a failed job after the fact.
 """
+import base64
+import ntpath
 import os
+import posixpath
+import shlex
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -235,29 +239,79 @@ def _discover_env_pythons(ssh) -> List[str]:
     return ordered
 
 
-def _python_exec_probe(python_cmd: str) -> str:
+def _ps_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _powershell_probe(script: str) -> str:
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
+
+
+def _posix_command_path(path: str) -> str:
+    if path == "~":
+        return "~"
+    if path.startswith("~/"):
+        return "~/" + shlex.quote(path[2:])
+    if path == "$HOME":
+        return '"$HOME"'
+    if path.startswith("$HOME/"):
+        return '"$HOME"/' + shlex.quote(path[len("$HOME/"):])
+    return shlex.quote(path)
+
+
+def _windows_python_invocation(python_cmd: str) -> str:
+    value = ntpath.normpath(python_cmd.replace("/", "\\"))
+    if value == "~":
+        return "& $HOME"
+    if value.startswith("~\\"):
+        return f"& (Join-Path $HOME {_ps_quote(value[2:])})"
+    return f"& {_ps_quote(value)}"
+
+
+def _shared_venv_python(remote_dir_base: str, shell: str) -> str:
+    base = remote_dir_base.strip() or "~/projects"
+    if shell == "windows":
+        return ntpath.join(
+            base.replace("/", "\\"), "DonkeyDrift", ".venv", "Scripts", "python.exe"
+        )
+    return posixpath.join(base, "DonkeyDrift", ".venv", "bin", "python")
+
+
+def _python_exec_probe(python_cmd: str, shell: str = "posix") -> str:
     """Command that prints sys.executable when the interpreter is usable."""
-    return (
-        f"{python_cmd} -c \"import sys; print(sys.executable)\""
+    code = "import sys; print(sys.executable)"
+    if shell == "windows":
+        script = f"{_windows_python_invocation(python_cmd)} -c {_ps_quote(code)}"
+        return _powershell_probe(script)
+    return f"{_posix_command_path(python_cmd)} -c \"{code}\""
+
+
+def _donkeycar_probe(python_cmd: str, shell: str = "posix") -> str:
+    """Check donkeycar with find_spec, without importing user packages."""
+    code = (
+        "import importlib.util,sys; "
+        "sys.exit(0 if importlib.util.find_spec('donkeycar') else 1)"
     )
+    if shell == "windows":
+        script = f"{_windows_python_invocation(python_cmd)} -c {_ps_quote(code)}"
+        return _powershell_probe(script)
+    return f"{_posix_command_path(python_cmd)} -c \"{code}\""
 
 
-def _donkeycar_probe(python_cmd: str) -> str:
-    """Command that succeeds only when donkeycar is importable (find_spec
-    only — no real import, so it is fast and side-effect free)."""
-    return (
-        f"{python_cmd} -c \"import importlib.util,sys; "
-        "sys.exit(0 if importlib.util.find_spec('donkeycar') else 1)\""
-    )
-
-
-def _donkey_cli_probe(python_cmd: str, resolved_python: str) -> str:
+def _donkey_cli_probe(python_cmd: str, resolved_python: str,
+                      shell: str = "posix") -> str:
     """Check the ``donkey`` console script sitting next to the interpreter."""
+    if shell == "windows":
+        resolved = ntpath.normpath(resolved_python.replace("/", "\\"))
+        directory = ntpath.dirname(resolved)
+        donkey_bin = ntpath.join(directory, "donkey.exe") if directory else "donkey.exe"
+        return _powershell_probe(f"& {_ps_quote(donkey_bin)} --help")
     if "/" in resolved_python:
         donkey_bin = resolved_python.rsplit("/", 1)[0] + "/donkey"
     else:
         donkey_bin = "donkey"
-    return f"{donkey_bin} --help"
+    return f"{_posix_command_path(donkey_bin)} --help"
 
 
 # ----------------------------------------------------------------------
@@ -308,7 +362,9 @@ def probe_mypc_environment(
         _detect_platform(ssh, result)
 
         # 3. Python interpreter discovery (also verifies donkeycar)
-        donkeycar_verified = _detect_python(ssh, result, python_path)
+        donkeycar_verified = _detect_python(
+            ssh, result, python_path, remote_dir_base
+        )
 
         # 4. donkeycar environment
         if result.python_path:
@@ -397,13 +453,15 @@ def _detect_platform(ssh, result: ProbeResult):
         ))
 
 
-def _detect_python(ssh, result: ProbeResult, configured_python: str) -> bool:
+def _detect_python(ssh, result: ProbeResult, configured_python: str,
+                   remote_dir_base: str = "~/projects") -> bool:
     """Select a usable interpreter, preferring ones that ship donkeycar.
 
     Returns True when the selected interpreter's donkeycar package has
     already been verified here, so ``_check_donkeycar`` can skip re-probing.
     """
-    candidates: List[str] = []
+    shell = result.shell
+    candidates = [_shared_venv_python(remote_dir_base, shell)]
     if configured_python and configured_python.strip():
         candidates.append(configured_python.strip())
     candidates.extend(_discover_env_pythons(ssh))
@@ -419,12 +477,12 @@ def _detect_python(ssh, result: ProbeResult, configured_python: str) -> bool:
 
     usable: List[str] = []  # resolved sys.executable of each working candidate
     for cmd in ordered:
-        code, out, _ = _run_remote(ssh, _python_exec_probe(cmd))
+        code, out, _ = _run_remote(ssh, _python_exec_probe(cmd, shell))
         executable = out.strip()
         if code != 0 or not executable:
             continue
         usable.append(executable)
-        code, _, _ = _run_remote(ssh, _donkeycar_probe(cmd))
+        code, _, _ = _run_remote(ssh, _donkeycar_probe(cmd, shell))
         if code == 0:
             result.python_path = executable
             result.checks.append(ProbeCheck(
@@ -450,23 +508,22 @@ def _detect_python(ssh, result: ProbeResult, configured_python: str) -> bool:
         status="fail",
         message="未找到可用的 Python 解释器。",
         hint=(
-            "请先安装 Python 3（Windows 安装时勾选 Add Python to PATH；"
-            "macOS 可用 Homebrew 安装），或在表单里手动填写正确的 python_path。"
+            "无需自行准备解释器；请使用页面下方的「一键配置环境」，"
+            "完成后点击「检测环境」重新检测。"
         ),
     ))
     return False
 
 
-def find_donkeycar_python(ssh, configured_python: str = "") -> str:
-    """给定一个已打开的 SSH 连接，返回远程某个能 import donkeycar 的解释器的
-    sys.executable；找不到返回 ''。
+def find_donkeycar_python(ssh, configured_python: str = "",
+                          remote_dir_base: str = "~/projects",
+                          shell: str = "posix") -> str:
+    """Return a remote interpreter that can import donkeycar, or ``''``.
 
-    候选顺序：先 configured_python（原样作为远程命令，~ 由远程 shell 展开），
-    再 _discover_env_pythons(ssh)，再 _default_python_candidates()；去重保序。
-    对每个候选：_python_exec_probe 可用（exit 0 且输出 sys.executable）后，
-    再用 _donkeycar_probe 验证 donkeycar 可导入，通过即返回该 sys.executable。
+    The installer-owned shared venv wins over legacy configured/conda/system
+    interpreters; those older candidates remain as compatibility fallbacks.
     """
-    candidates: List[str] = []
+    candidates = [_shared_venv_python(remote_dir_base, shell)]
     if configured_python and configured_python.strip():
         candidates.append(configured_python.strip())
     candidates.extend(_discover_env_pythons(ssh))
@@ -481,11 +538,11 @@ def find_donkeycar_python(ssh, configured_python: str = "") -> str:
             ordered.append(c)
 
     for cmd in ordered:
-        code, out, _ = _run_remote(ssh, _python_exec_probe(cmd))
+        code, out, _ = _run_remote(ssh, _python_exec_probe(cmd, shell))
         executable = out.strip()
         if code != 0 or not executable:
             continue
-        code, _, _ = _run_remote(ssh, _donkeycar_probe(cmd))
+        code, _, _ = _run_remote(ssh, _donkeycar_probe(cmd, shell))
         if code == 0:
             return executable
     return ""
@@ -500,7 +557,9 @@ def _check_donkeycar(ssh, result: ProbeResult, donkeycar_verified: bool = False)
             message="donkeycar 已安装。",
         ))
     else:
-        code, _, err = _run_remote(ssh, _donkeycar_probe(result.python_path))
+        code, _, err = _run_remote(
+            ssh, _donkeycar_probe(result.python_path, result.shell)
+        )
         if code == 0:
             result.checks.append(ProbeCheck(
                 name="donkeycar",
@@ -519,7 +578,9 @@ def _check_donkeycar(ssh, result: ProbeResult, donkeycar_verified: bool = False)
                 ),
             ))
 
-    code, _, err = _run_remote(ssh, _donkey_cli_probe(result.python_path, result.python_path))
+    code, _, err = _run_remote(ssh, _donkey_cli_probe(
+        result.python_path, result.python_path, result.shell
+    ))
     if code == 0:
         result.checks.append(ProbeCheck(
             name="donkey_cli",

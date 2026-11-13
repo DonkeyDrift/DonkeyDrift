@@ -1,7 +1,7 @@
 name: linux-validation
 
 on:
-  push:
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -10,17 +10,14 @@ permissions:
 jobs:
   linux-validation:
     name: linux-validation
-    if: >-
-      ${{
-        github.event_name == 'push' ||
-        github.event_name == 'workflow_dispatch'
-      }}
-    runs-on: [self-hosted, linux, tony007]
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout PR head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          # pull_request 事件必须检出到 PR 的准确 head SHA；workflow_dispatch
+          # 没有 pull_request 上下文时回退到触发提交本身。
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
           persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,6 +28,27 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
           python -m pip install -r web_ui/backend/requirements.txt
+          # TONY007 的全量验证环境是 TF/Keras 2.15；pc extra 当前解析到
+          # TF 2.19 + Keras 3，模型接口不兼容。这里显式对齐已验证组合。
+          python -m pip install \
+            opencv-python-headless matplotlib plotly albumentations \
+            "pandas==3.0.3" "tensorflow==2.15.1"
+          # PyPI 上的 gym-donkeycar 只发布到 1.0.13；1.3.1 只存在于 upstream
+          # git 仓库（其 gym_donkeycar/version.txt 为 1.3.1）。锁定 commit
+          # a1f4ca6 与 TONY007 本地 editable 安装同源，随后用下一步的补丁
+          # 叠加 Linux 韧性修复。
+          python -m pip install \
+            "gym-donkeycar @ git+https://github.com/tawnkramer/gym-donkeycar@a1f4ca6961e17a6929c1f2e883358a1edafb479d"
+      - name: Apply gym-donkeycar Linux resilience patch
+        run: |
+          # 通过已安装包自身的 __file__ 定位 site-packages：
+          # gym_donkeycar/__init__.py 的 parent 是包目录，再上一级即
+          # site-packages。补丁内路径为 a/gym_donkeycar/...，patch -p1
+          # 去掉第一段 a/ 后正好落在 site-packages/gym_donkeycar/...。
+          SITE_PACKAGES="$(python -c 'import gym_donkeycar, pathlib; print(pathlib.Path(gym_donkeycar.__file__).resolve().parent.parent)')"
+          echo "patching gym_donkeycar under: $SITE_PACKAGES"
+          patch -p1 -d "$SITE_PACKAGES" \
+            < scripts/patches/gym-donkeycar-linux-resilience.patch
       - name: Run root tests
         run: python -m pytest -q
       - name: Run backend tests

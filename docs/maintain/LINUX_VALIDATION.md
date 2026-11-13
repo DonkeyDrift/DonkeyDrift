@@ -2,7 +2,7 @@
 
 本文规定 Mac 与 Linux 验证机 TONY007 的使用边界，以及 `feat` 提交在 commit、push 和 PR 合并前的验证流程。
 
-> 本文只说明操作约定和待执行的管理员步骤，不表示 self-hosted runner、GitHub required check 或分支保护已经配置完成。
+> 本文说明操作约定与当前 GitHub-hosted PR 检查的工作方式；GitHub required check 与分支保护尚未配置，本文也不包含需要仓库 Admin 权限的配置步骤。
 
 ## 1. Mac 与 Linux 的边界
 
@@ -115,59 +115,21 @@ python3 scripts/linux_validation.py run --staged
 
 运行前由维护者确保 SSH 认证可用、TONY007 在线，并且指定 Python 环境已具备项目测试依赖。验证命令会把该 Python 的 `bin` 目录加入 `PATH`，让 `donkey` 等子命令可执行；同时把 `PYTHONPATH` 指向本次归档目录，避免子命令加载 Linux 工作树中的其他代码，并使用归档内的隔离 `HOME`，防止个人项目配置污染测试结果。不要把密码、私钥或令牌写入仓库、hooks、workflow 或本文。
 
-## 6. GitHub self-hosted runner：管理员配置
+## 6. GitHub-hosted PR 检查：无需 Admin 的 `linux-validation`
 
-**权限要求：需要目标仓库的 ADMIN 权限，WRITE 权限不足。** WRITE 不能代替 ADMIN 完成仓库 Actions runner 注册和分支保护/required check 配置。以下步骤必须由管理员执行；本次文档编写没有执行这些步骤。
+`.github/workflows/linux-validation.yml` 在 GitHub 托管的 `ubuntu-latest` 一次性虚拟机上运行。仓库维护者不需要任何 Admin 操作，PR 一旦打开或更新，该检查就会自动出现在 PR 的 Checks 页面：
 
-### 6.1 在 TONY007 注册仓库级 runner
+- **触发**：`pull_request` 与 `workflow_dispatch`，不再使用 `push` 触发，也没有任何 self-hosted runner。
+- **最小权限**：workflow 顶层声明 `permissions: contents: read`；checkout 步骤设置 `persist-credentials: false`，不在 runner 上遗留任何 Git 凭据。
+- **准确代码树**：checkout 的 `ref` 为 `${{ github.event.pull_request.head.sha || github.sha }}`——PR 事件检出 PR 分支的准确 head SHA，测试结论绑定该提交；手动触发时回退到触发提交本身。
+- **环境与依赖**：Python 3.11；安装 `.[dev]` 与 `web_ui/backend/requirements.txt` 后再安装 gym-donkeycar 1.3.1。PyPI 上的 gym-donkeycar 只发布到 1.0.13，1.3.1 只存在于 upstream git 仓库（其 `gym_donkeycar/version.txt` 为 1.3.1），因此锁定 commit `a1f4ca6` 从 git 安装，与 TONY007 本地 editable 安装同源。
+- **gym 韧性补丁**：安装后先用 `python -c 'import gym_donkeycar, pathlib; print(pathlib.Path(gym_donkeycar.__file__).resolve().parent.parent)'` 定位 site-packages（已安装包 `__init__.py` 所在目录的上一级），再用 `patch -p1 -d <site-packages>` 应用 `scripts/patches/gym-donkeycar-linux-resilience.patch`。补丁内路径形如 `a/gym_donkeycar/core/client.py`，`-p1` 去掉第一段 `a/` 后正好落在 `<site-packages>/gym_donkeycar/...` 上。该补丁让模拟器断连时 `observe()`/`wait_until_loaded()` 快速失败，并支持 `observe_timeout` 对“TCP 存活但遥测静默”的连接有界退出，是 dgym 重连测试依赖的行为。
+- **测试范围**：与 TONY007 全量验证同一命令面——根目录 `python -m pytest -q` 与 `web_ui/backend` 下的 `python -m pytest tests -q`。
 
-1. 打开目标 GitHub 仓库，进入 **Settings → Actions → Runners**。
-2. 点击 **New self-hosted runner**，选择 **Linux**，并选择与 TONY007 实际硬件一致的架构。
-3. 按页面显示的内容，在 TONY007 的专用 runner 目录下载并校验 GitHub Actions runner。注册令牌以 GitHub 页面实时生成的值为准，不要保存到仓库。
-4. 执行页面给出的配置命令，并明确设置名称和自定义标签。命令形式如下，URL 和令牌必须替换为当前仓库及页面实际值：
+`pull_request` 触发本身是安全默认：GitHub 使用 PR 基准分支上的 workflow 定义运行检查，fork PR 只拿到只读 token、不接触仓库秘密，且 GitHub-hosted runner 是每次销毁的一次性虚拟机。因此这里不需要旧方案中围绕 self-hosted runner 的触发边界管理，也不需要注册任何 runner。
 
-   ```bash
-   ./config.sh \
-     --url https://github.com/<OWNER>/<REPO> \
-     --token <REGISTRATION_TOKEN> \
-     --name TONY007 \
-     --labels tony007 \
-     --unattended
-   ```
+## 7. 边界：PR 检查不等于 TONY007 本地强制验证
 
-5. 按 GitHub 页面指引启动 runner。回到 **Settings → Actions → Runners**，确认名为 **TONY007** 的 runner 在线，并具有 **`tony007`** 标签。
-6. CI 的 Linux 验证 job 应通过 `self-hosted` 与 `tony007` 标签选中该 runner，避免落到其他机器。PR 的 Checks 页面中，对应 check 名称应为 **`linux-validation`**。
-
-runner 会执行仓库工作流中的代码。应使用专用、最小权限的运行环境，不给它配置与验证无关的凭据，也不要把它视为可安全执行任意贡献者代码的隔离沙箱。
-
-### 6.2 将 `linux-validation` 设为 required check
-
-先让相应 workflow 在目标仓库实际运行，使 `linux-validation` 出现在最近的 Checks 中；随后按仓库当前使用的保护机制配置。
-
-使用经典分支保护时：
-
-1. 进入 **Settings → Branches**。
-2. 在 **Branch protection rules** 下点击 **Add branch protection rule**，或编辑现有规则。
-3. 在 **Branch name pattern** 填写实际受保护分支（例如主分支名，以仓库现状为准）。
-4. 勾选 **Require status checks to pass before merging**。
-5. 在状态检查搜索框中选择准确的 **`linux-validation`**，不要只选择名称相近的 workflow 或其他 job。
-6. 点击 **Create** 或 **Save changes** 保存。
-
-如果仓库使用 rulesets，则走 **Settings → Rules → Rulesets**，新建或编辑 branch ruleset，在目标分支规则中启用 **Require status checks to pass**，通过 **Add checks** 添加 **`linux-validation`**，将 enforcement 设为 **Active** 后保存。经典分支保护与 rulesets 按现有治理方式选择，不要因重复配置而误判哪条规则实际生效。
-
-保存后，用一个同仓库测试 PR 验证：TONY007 被选中、`linux-validation` 真实运行且通过后才允许合并。仅看到绿色本地凭证或本地 hook 成功，不代表 GitHub 门禁已经生效。
-
-## 7. CI 的可信触发与 PUBLIC 仓库风险
-
-TONY007 的 self-hosted workflow 只响应：
-
-- 本仓库收到的 `push`，其代码只能来自具有推送权限的维护者；
-- 可信维护者通过 `workflow_dispatch` 手动启动的验证。
-
-工作流**不使用 `pull_request` 或 `pull_request_target` 触发**。同仓库分支推送后，`linux-validation` 会附着到该分支的 head commit，并显示在对应 PR 的 Checks 中，因此仍可把它设为 PR required check。
-
-不能只在 `pull_request` job 上添加 same-repo `if` 就认为这是安全边界：fork 作者可以在 PR 中修改 workflow 定义本身，包括删除条件或修改 runner 标签。审批设置和只读 token 也不能把持久 self-hosted runner 变成安全沙箱。
-
-**PUBLIC 仓库尤其危险**：不受信代码一旦在 TONY007 上运行，就可能读取 runner 可访问的凭据、篡改工作目录、攻击内网或留下持久后门。fork PR 不应触发此 self-hosted workflow；如需支持外部贡献，应另设隔离、临时且不含敏感凭据的验证方案。
-
-因此，必须保留当前的可信触发边界，并在 runner 上坚持最小权限、专用环境和不存放无关秘密。任何管理员配置变更后，都应实际检查 fork PR 不会触发 TONY007 的验证 job。
+- **验证对象不同**：本地强制验证（`scripts/linux_validation.py` + `.githooks`）绑定**准确 Git tree** 的通过凭证，由 commit-msg/pre-push 在提交、推送发生前拦截；GitHub PR 检查绑定 **PR head SHA**，在 PR 更新后于云端独立复跑。本地凭证不能证明 PR 检查已通过，PR 检查通过也不能替代本地门禁对暂存树/提交树的强制核验。
+- **当前未配置 required check**：把 `linux-validation` 设为合并前必需状态检查属于分支保护或 rulesets 配置，需要仓库 Admin 权限，本文不包含该步骤。配置完成之前，该检查失败**不会自动阻止合并**，只能作为 PR Checks 页面的人工核对信号。若未来要强制化，由管理员将 `linux-validation` 设为 required check，并用一个故意失败的测试 PR 验证合并确实被阻止。
+- **触发行为变化**：原 `push` 触发已移除，同仓库分支推送不再自动产生 check 结果；需要打开 PR 或手动 `workflow_dispatch` 才会运行。手动触发只验证触发时指定的提交。
