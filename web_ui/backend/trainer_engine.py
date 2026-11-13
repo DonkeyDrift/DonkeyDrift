@@ -278,7 +278,7 @@ class TrainingJobManager:
                     logger.warning('清理会话筛选文件失败 %s: %s',
                                    session_filter_path, e)
             job.finished_at = datetime.now().isoformat()
-            await job.log_queue.put({"type": "status", "status": job.status, "error": job.error_message})
+            job.publish({"type": "status", "status": job.status, "error": job.error_message})
 
     # ------------------------------------------------------------------
     # AIMO cloud NPU conversion (.onnx/.tflite/.pb/.pt/.pth/saved_model → .aidem)
@@ -336,7 +336,7 @@ class TrainingJobManager:
                             "is_stderr": is_stderr,
                             "timestamp": datetime.now().isoformat()
                         }
-                        await job.log_queue.put(payload)
+                        job.publish(payload)
                         job.logs.append(cleaned)
                         if not is_stderr:
                             self._parse_aimo_line(job, cleaned)

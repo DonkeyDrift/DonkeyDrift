@@ -1,0 +1,38 @@
+name: linux-validation
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-validation:
+    name: linux-validation
+    if: >-
+      ${{
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch'
+      }}
+    runs-on: [self-hosted, linux, tony007]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+          python -m pip install -r web_ui/backend/requirements.txt
+      - name: Run root tests
+        run: python -m pytest -q
+      - name: Run backend tests
+        working-directory: web_ui/backend
+        run: python -m pytest tests -q

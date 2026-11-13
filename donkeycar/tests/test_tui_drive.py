@@ -1,3 +1,4 @@
+import socket
 import sys
 
 import pytest
@@ -56,6 +57,17 @@ class ProcessingStreamWithoutFileno:
 
     def flush(self):
         pass
+
+
+def test_choose_available_backend_port_skips_loopback_listener():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        occupied_port = listener.getsockname()[1]
+
+        selected_port = tui.DriveCommand().choose_available_backend_port(occupied_port)
+
+        assert selected_port != occupied_port
 
 
 def test_drive_command_opens_web_console_drive_page(monkeypatch, tmp_path):

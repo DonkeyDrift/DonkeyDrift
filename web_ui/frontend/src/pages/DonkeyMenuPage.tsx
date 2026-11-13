@@ -15,14 +15,26 @@ import { useTranslation } from '@/i18n';
  *
  *  `?embedded=1` 标记当前为 DD 内嵌模式：launcher 据此把与 DD 顶栏重复的
  *  7/11/12（Drifter Console / Kimi Code Web / DeepSeek Harness）渲染为置灰
- *  占位行；单独打开 Donkey（:8090）时无此参数，仍保留完整可点击入口。 */
+ *  占位行；单独打开 Donkey（:8090）时无此参数，仍保留完整可点击入口。
+ *
+ *  iframe 以 no-referrer 加载：launcher 回环鉴权（auth.py，2026-10-12）
+ *  要求 Origin 干净（无 Origin/Referer 视为本机直连放行），而浏览器
+ *  iframe 跨端口导航默认携带 Referer，DD(:5188) → launcher(:8090) 永远
+ *  对不上，菜单会被 401 令牌页顶替；no-referrer 对齐本机直连信任级，
+ *  不削弱 launcher 对恶意站点的 CSRF/DNS-rebinding 防线。
+ *
+ *  高度：铺满 DD 顶栏以下的可视区，扣减 Layout 经 ResizeObserver 发布的
+ *  动态 --header-h（桌面单行 57px、移动端两行约 101px），不硬编码 3.5rem；
+ *  支持 dvh 的浏览器用 100dvh 动态视口，避免移动端 100vh 被浏览器
+ *  工具栏裁切导致外层出现双滚动。 */
 export const DonkeyMenuPage: React.FC = () => {
   const { t, lang } = useTranslation();
   return (
-    <div className="h-[calc(100vh-3.5rem)]">
+    <div className="h-[calc(100vh-var(--header-h))] supports-[height:100dvh]:h-[calc(100dvh-var(--header-h))]">
       <iframe
         src={`${getDonkeyUrl()}?embedded=1&lang=${lang}`}
         title={t('common.enterButtons.donkeyTitle')}
+        referrerPolicy="no-referrer"
         className="h-full w-full border-0 bg-zinc-950"
       />
     </div>

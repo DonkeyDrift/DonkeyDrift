@@ -4,14 +4,15 @@ import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, loadTub, getApiErrorMessage } from '../services/api';
+import { loadConfig, getApiErrorMessage } from '../services/api';
+import { autoLoadTubFor } from '../hooks/useConfigAutoLoad';
 import { FolderCog, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
 import { useTranslation } from '@/i18n';
 
 export const ConfigLoader: React.FC = () => {
   const { t } = useTranslation();
-  const { configPath, setConfig, setError, setLoading, config, setTub } = useStore();
+  const { configPath, setConfig, setError, setLoading, config } = useStore();
   const [path, setPath] = useState(configPath);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
@@ -20,40 +21,13 @@ export const ConfigLoader: React.FC = () => {
     setPath(configPath);
   }, [configPath]);
 
-  const autoLoadTub = useCallback(async (carPath: string) => {
-    try {
-      // Normalize path and append /data
-      const tubPath = carPath.endsWith('/') || carPath.endsWith('\\') 
-        ? `${carPath}data` 
-        : `${carPath}/data`;
-      
-      const data = await loadTub(tubPath);
-      setTub(data.path, data.records || [], data.fields || [], data.total_physical_records, data.deleted_indexes);
-    } catch {
-      console.warn('Auto-loading tub from ./data failed, user might need to select manually.');
-    }
-  }, [setTub]);
-
   const handleManualLoad = useCallback(async () => {
     if (!path.trim()) return;
     setLoading(true);
     try {
       const data = await loadConfig(path);
       setConfig(data.config, path);
-      
-      const currentTubPath = useStore.getState().tubPath;
-      if (currentTubPath && currentTubPath !== path + '/data'
-          && currentTubPath !== path.replace(/\/$/, '') + '/data') {
-        try {
-          const tubData = await loadTub(currentTubPath);
-          setTub(tubData.path, tubData.records || [], tubData.fields || [], tubData.total_physical_records, tubData.deleted_indexes);
-        } catch (err) {
-          console.warn('Failed to load persisted tub path, falling back to auto-load', err);
-          await autoLoadTub(path);
-        }
-      } else {
-        await autoLoadTub(path);
-      }
+      await autoLoadTubFor(path);
     } catch (err: unknown) {
       // 任何加载失败（包括目录不存在、缺少 config.py）都要反馈给用户，
       // 否则路径错误时界面毫无提示，只剩控制台里的 404。
@@ -61,7 +35,7 @@ export const ConfigLoader: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [path, autoLoadTub, setConfig, setError, setLoading, setTub, t]);
+  }, [path, setConfig, setError, setLoading, t]);
 
   const handleBrowserSelect = async (selectedPath: string) => {
     setPath(selectedPath);
@@ -72,7 +46,7 @@ export const ConfigLoader: React.FC = () => {
     try {
       const data = await loadConfig(selectedPath);
       setConfig(data.config, selectedPath);
-      await autoLoadTub(selectedPath);
+      await autoLoadTubFor(selectedPath);
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, t('common.configLoader.failedToLoadFromDir')));
     } finally {

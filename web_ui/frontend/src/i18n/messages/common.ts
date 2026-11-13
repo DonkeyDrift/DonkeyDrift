@@ -40,7 +40,6 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.fileBrowser.selectCurrent': '选择当前目录',
     // SidePanel
     'common.sidePanel.loaders': '加载器',
-    'common.sidePanel.connectors': '连接器',
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrifter GitHub 仓库',
     // EnterButtons
@@ -119,7 +118,6 @@ export const common: { zh: Record<string, string>; en: Record<string, string> } 
     'common.fileBrowser.selectCurrent': 'Select Current Directory',
     // SidePanel
     'common.sidePanel.loaders': 'Loaders',
-    'common.sidePanel.connectors': 'Connectors',
     // GitHubLink
     'common.githubLink.label': 'DonkeyDrifter on GitHub',
     // EnterButtons

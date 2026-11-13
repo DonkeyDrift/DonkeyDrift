@@ -1907,6 +1907,12 @@ MENU_HTML = r"""<!DOCTYPE html>
             .headerBreak{display:block;width:100%;height:0}
             #themeBtn{margin-left:0}
             #langBtn{margin-left:auto}
+            /* CWD 栏两行：第一行 标签（+内嵌时移入的版本号），第二行长路径
+               独占整行 —— 标签不折行、路径不被版本号挤压、长路径在自身行内
+               break-all 换行不横向溢出；桌面（>640px）仍为单行不动 */
+            .cwdBar{flex-wrap:wrap}
+            .cwdBar .label{flex:none;white-space:nowrap}
+            .cwdBar .path{order:2;flex-basis:100%;min-width:0}
         }
 
         /* DC panel */
@@ -2267,6 +2273,7 @@ MENU_HTML = r"""<!DOCTYPE html>
             var langBtn = document.getElementById('langBtn');
             if (langBtn) {
                 langBtn.textContent = uiLang === 'zh' ? '中' : 'EN';
+                langBtn.title = t('language.title');
             }
             renderThemeBtn();
             renderMenu();

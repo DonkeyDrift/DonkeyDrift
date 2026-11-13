@@ -97,21 +97,18 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
-test('加载 Tub → 加载模型 → 生成曲线 → 展示模型贴合摘要', async ({ page }) => {
-  // ConfigLoader：TubLoader 的『加载 Tub』按钮在 config 未加载时禁用
-  // （TubLoader.tsx:92 disabled={!config}），真实 UI 流程必须先加载配置。
+test('自动加载 Tub → 加载模型 → 生成曲线 → 展示模型贴合摘要', async ({ page }) => {
+  // DD 页面没有手动 TubLoader，Tub 全部自动选择：用户唯一的数据入口是
+  // ConfigLoader 的『加载配置』，加载成功后自动连带加载 <car>/data Tub
+  // （useConfigAutoLoad.ts loadProject：优先恢复持久化 tub，否则回退
+  // <car>/data）。
   await page.getByRole('textbox', { name: '配置路径输入框' }).fill('/tmp/car');
   await page.getByRole('button', { name: '加载配置' }).click();
 
-  // setConfig 会收起侧栏抽屉（useStore.ts:190 activeDrawer: null），
-  // 且配置加载后会自动连带加载 <car>/data Tub；等 PA 当前数据卡出现
-  // 『Tub: /tmp/tub』即代表 config + auto-tub 均已完成、抽屉已关闭。
+  // setConfig 会收起侧栏抽屉（useStore.ts setConfig 置 activeDrawer: null）；
+  // 等 PA 当前数据卡出现『Tub: /tmp/tub』即代表 config + 自动 Tub 均已完成、
+  // 抽屉已关闭。
   await expect(page.getByText('Tub: /tmp/tub').first()).toBeVisible();
-
-  // 重新打开抽屉，操作 SidePanel 的 TubLoader（真实中文 aria-label）
-  await page.getByRole('button', { name: '加载器' }).click();
-  await page.getByRole('textbox', { name: 'Tub 路径输入框' }).fill('/tmp/tub');
-  await page.getByRole('button', { name: '加载 Tub' }).click();
 
   // 模型选择器（包在 <label>『模型文件』内）
   const modelSelect = page.getByRole('combobox', { name: '模型文件' });

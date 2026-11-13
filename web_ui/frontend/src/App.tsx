@@ -74,7 +74,7 @@ function AppShell() {
   useConfigAutoLoad();
   const { pathname } = useLocation();
   // Drifter Console（/console）与 Donkey 菜单（/donkey）都是全屏 iframe，
-  // 左侧 Loaders/Connectors 浮动抽屉会遮挡内容，仅在这两个路由下隐藏 SidePanel。
+  // 左侧 Loaders 浮动抽屉会遮挡内容，仅在这两个路由下隐藏 SidePanel。
   const isFullBleed = pathname === '/console' || pathname === '/donkey';
   return (
     <ErrorBoundary>

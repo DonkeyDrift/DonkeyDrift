@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { LanguageProvider } from '@/i18n';
 import { useStore } from '../../store/useStore';
@@ -136,7 +136,7 @@ describe('DriveTargetCard', () => {
 
     await waitFor(() => expect(mockDiscover).toHaveBeenCalledTimes(1));
     expect(
-      await screen.findByText('未发现模拟器：请先启动 DonkeySim，或到 Connectors 抽屉手动配置'),
+      await screen.findByText('未发现模拟器：请先启动 DonkeySim 后重试'),
     ).toBeInTheDocument();
     expect(mockSave).not.toHaveBeenCalled();
   });
@@ -164,6 +164,106 @@ describe('DriveTargetCard', () => {
         config: { SIM_HOST: '192.168.3.55', DONKEY_GYM: true },
       }),
     );
+  });
+
+  // ---- 模拟器选择区（target='sim' 时工具条下方展开，无发现/保存按钮）----
+
+  it('target=sim 时自动调 discoverSimulator 并渲染 IP 列表', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [
+        { ip: '192.168.3.55', port: 9091, latency_ms: 3, reachable: true },
+        { ip: '192.168.3.66', port: 9091, latency_ms: 8, reachable: true },
+      ],
+      count: 2,
+      scanned: 256,
+      message: 'ok',
+    });
+    renderCard({ target: 'sim' });
+
+    // 无任何按钮触发，挂载后即自动扫描一次
+    await waitFor(() => expect(mockDiscover).toHaveBeenCalledWith('/tmp/mycar'));
+    expect(await screen.findByText('192.168.3.55:9091')).toBeInTheDocument();
+    expect(screen.getByText('192.168.3.66:9091')).toBeInTheDocument();
+    expect(screen.getByText('8ms')).toBeInTheDocument();
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it('点选列表 IP 以 {SIM_HOST, DONKEY_GYM:true} 自动保存并出现待重启提示', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [{ ip: '192.168.3.55', port: 9091, latency_ms: 3, reachable: true }],
+      count: 1,
+      scanned: 256,
+      message: 'ok',
+    });
+    mockSave.mockResolvedValue({ status: true, message: 'ok' });
+    renderCard({ target: 'sim' });
+
+    fireEvent.click(await screen.findByText('192.168.3.55:9091'));
+
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith({
+        path: '/tmp/mycar',
+        config: { SIM_HOST: '192.168.3.55', DONKEY_GYM: true },
+      }),
+    );
+    // 复用现有保存成功链路：待重启徽标 + 已选择 notice + 全局配置同步
+    expect(await screen.findByText('已保存，需重启驾驶生效')).toBeInTheDocument();
+    expect(await screen.findByText('已选择 192.168.3.55')).toBeInTheDocument();
+    expect(useStore.getState().config?.SIM_HOST).toBe('192.168.3.55');
+    // 同次停留不重扫：保存触发的重渲染不再发起发现
+    expect(mockDiscover).toHaveBeenCalledTimes(1);
+  });
+
+  it('点当前已选中的 IP 不重复保存', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [{ ip: '192.168.3.100', port: 9091, latency_ms: 3, reachable: true }],
+      count: 1,
+      scanned: 256,
+      message: 'ok',
+    });
+    renderCard({ target: 'sim' });
+
+    // 与 config.SIM_HOST 匹配的项高亮
+    const selected = await screen.findByText('192.168.3.100:9091');
+    expect(selected.closest('button')?.className).toContain('border-cyan-500/50');
+
+    fireEvent.click(selected);
+    await act(async () => {});
+
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(screen.queryByText('已保存，需重启驾驶生效')).not.toBeInTheDocument();
+  });
+
+  it('未发现时显示 WifiOff 提示，手动输入失焦自动保存', async () => {
+    mockDiscover.mockResolvedValue({
+      status: true,
+      found: [],
+      count: 0,
+      scanned: 256,
+      message: 'none',
+    });
+    mockSave.mockResolvedValue({ status: true, message: 'ok' });
+    renderCard({ target: 'sim' });
+
+    expect(
+      await screen.findByText('未发现模拟器：请先启动 DonkeySim，或在下方手动输入地址'),
+    ).toBeInTheDocument();
+
+    const input = screen.getByLabelText('模拟器地址');
+    fireEvent.change(input, { target: { value: ' 192.168.9.9 ' } });
+    fireEvent.blur(input);
+
+    // trim 后非空且与当前值不同才保存
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith({
+        path: '/tmp/mycar',
+        config: { SIM_HOST: '192.168.9.9', DONKEY_GYM: true },
+      }),
+    );
+    expect(await screen.findByText('已保存，需重启驾驶生效')).toBeInTheDocument();
   });
 
   it('重启失败时显示红色错误并给出 /donkey 降级链接', async () => {
