@@ -232,7 +232,9 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
             break
     if not prompt_returned():
         print(f"PTY output after Ctrl-C: {writer.output()[prompt_offset:]!r}")
-        print(f"shell_returncode={sess._proc.poll()} foreground={os.tcgetpgrp(sess._master)}")
+        foreground_after = os.tcgetpgrp(sess._master) if sess._master is not None else None
+        print(f"shell_returncode={sess._proc.poll()} foreground={foreground_after}")
+        print(f"FULL_PTY_OUTPUT {writer.output()!r}")
         processes = subprocess.run(
             ["ps", "-eo", "pid,ppid,pgid,sid,stat,comm,args"],
             capture_output=True, text=True, check=False,
