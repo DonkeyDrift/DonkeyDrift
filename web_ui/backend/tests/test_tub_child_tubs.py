@@ -119,3 +119,41 @@ def test_child_tubs_missing_directory_returns_404(tmp_path):
         "/api/tub/child_tubs", params={"tubPath": str(tmp_path / "no_such_dir")}
     )
     assert response.status_code == 404
+
+
+def test_sessions_empty_includes_child_tubs(tmp_path):
+    """父 tub 记录全部被软删 → sessions 为空，响应附带子 tub 列表。"""
+    _make_tub(tmp_path, record_count=2)
+    from donkeycar.parts.tub_v2 import Tub
+
+    tub = Tub(str(tmp_path))
+    try:
+        tub.delete_records([0, 1])
+    finally:
+        tub.close()
+    _make_tub(tmp_path / "tub_7_26-10-20", record_count=4)
+
+    client = _build_client()
+    response = client.get("/api/tub/sessions", params={"tubPath": str(tmp_path)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sessions"] == []
+    child_tubs = payload["child_tubs"]
+    assert len(child_tubs) == 1
+    assert child_tubs[0]["name"] == "tub_7_26-10-20"
+    assert child_tubs[0]["record_count"] == 4
+
+
+def test_sessions_non_empty_omits_child_tubs(tmp_path):
+    """sessions 非空时不附带 child_tubs 字段，避免无谓的目录扫描开销。"""
+    _make_tub(tmp_path, record_count=2)
+    _make_tub(tmp_path / "tub_7_26-10-20", record_count=4)
+
+    client = _build_client()
+    response = client.get("/api/tub/sessions", params={"tubPath": str(tmp_path)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["sessions"]) == 1
+    assert "child_tubs" not in payload

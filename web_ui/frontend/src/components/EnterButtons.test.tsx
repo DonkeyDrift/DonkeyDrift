@@ -50,6 +50,34 @@ describe('entry link components (Issue #175 nav-link style)', () => {
   });
 });
 
+describe('ZCode 行内录入表单控件一致性', () => {
+  // 行内表单的动作按钮必须沿用全站控件圆角 rounded-md（6px，与 ui/Button 一致），
+  // 不允许退回 Tailwind 默认 rounded（4px）造成同屏圆角不一致
+  it('uses the shared control radius (rounded-md) on its action buttons', async () => {
+    vi.useFakeTimers();
+    try {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      render(<ZCodeEntryLink />);
+      fireEvent.click(screen.getByRole('button', { name: 'common.enterButtons.zcode' }));
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      for (let i = 0; i < 5; i += 1) await act(async () => {});
+      openSpy.mockRestore();
+
+      const cancel = screen.getByRole('button', { name: 'common.fileBrowser.cancel' });
+      const submit = screen.getByRole('button', { name: 'drive.gpWizSave' });
+      expect(cancel.className).toContain('rounded-md');
+      expect(cancel.className).not.toMatch(/\brounded\b(?!-)/);
+      expect(submit.className).toContain('rounded-md');
+      expect(submit.className).not.toMatch(/\brounded\b(?!-)/);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+});
+
 describe('DonkeyEntryLink', () => {
   it('links to the embedded Donkey menu route in the current tab', () => {
     render(

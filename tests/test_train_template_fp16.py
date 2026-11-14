@@ -30,9 +30,10 @@ class TestTrainTemplateFp16Gate(unittest.TestCase):
     def test_macos_metal_gpu_disabled(self):
         # tensorflow-metal 在 Apple Silicon 上 float32 下也有已知数值问题
         # （train loss 尖峰、val loss 卡在"预测均值"退化水平），
-        # macOS 训练须隐藏 Metal GPU 回退 CPU
-        self.assertIn("sys.platform == 'darwin'", self.src)
-        self.assertIn("set_visible_devices([], 'GPU')", self.src)
+        # macOS 训练须隐藏 Metal GPU 回退 CPU；模板委托给
+        # donkeycar.utils.disable_metal_gpu_on_macos（pipeline/training.py
+        # 模块级也调用同一函数，覆盖 management train 等本地入口）
+        self.assertIn('disable_metal_gpu_on_macos', self.src)
 
     def test_mixed_float16_still_available_with_gpu(self):
         # 非 macOS 有 GPU 的机器仍应能启用 mixed_float16

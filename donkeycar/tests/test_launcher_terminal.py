@@ -103,30 +103,6 @@ def _wait_until(predicate, timeout=10.0, interval=0.05):
     return False
 
 
-def _proc_sigmasks(pid):
-    """读 /proc/<pid>/status 的 SigIgn/SigCgt 掩码；进程不在返回 None。"""
-    try:
-        with open(f"/proc/{pid}/status") as f:
-            ign = cgt = None
-            for line in f:
-                if line.startswith("SigIgn:"):
-                    ign = int(line.split()[1], 16)
-                elif line.startswith("SigCgt:"):
-                    cgt = int(line.split()[1], 16)
-            return ign, cgt
-    except OSError:
-        return None
-
-
-def _foreground_children(pid):
-    """经 /proc/<pid>/task/<pid>/children 列出直接子进程。"""
-    try:
-        with open(f"/proc/{pid}/task/{pid}/children") as f:
-            return [int(x) for x in f.read().split()]
-    except OSError:
-        return []
-
-
 @pytest.fixture
 def session():
     """起一个真实 bash PTY 会话，测试后确保关闭。"""
@@ -220,31 +196,37 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
     # 自报启动可消除这类时序误报。
     sess.on_input(b"sh -c 'echo started-$((6*7)); exec sleep 30'\n")
     assert _wait_until(lambda: b"started-42" in writer.output())
-    # 补发 Ctrl-C（每次间隔 1s，最多 12 次）：覆盖 SIGINT 落在 bash fork 子
-    # 进程与 tcsetpgrp 之间的微秒竞态窗口。echo 先入队（sleep 不读 stdin，
-    # 排队无害），sleep 一死立即执行。补发无副作用（SIGINT 只投给前台组，
-    # 前台已死即空操作）。
-    # 历史根因注记（已修复，见 terminal.py _become_tty_leader）：宿主进程以
-    # nohup/非交互 shell 后台方式启动时会带着 SIGINT=SIG_IGN，忽略位跨
-    # fork+exec 继承到 sleep，补发再多也无效；测试进程自身如此启动时，
-    # TerminalSession 子进程复位信号处置保证了本用例仍能通过。
-    sess.on_input(b"\x03")
-    sess.on_input(b"echo alive-$((6*7))\n")
+    # 等 Bash 在 Ctrl-C 后重新打印提示符，再发下一条命令。终端默认会把
+    # Ctrl-C 送达时尚未处理的输入清空，立即写入 echo 可能被一起丢弃；
+    # 新提示符则明确证明前台 sleep 已退出且 shell 可以接收下一条命令。
+    prompt_offset = len(writer.output())
+
+    def prompt_returned():
+        output = writer.output()
+        prompt = output[prompt_offset:]
+        return len(output) > prompt_offset and (b"$ " in prompt or b"# " in prompt)
+
     for _ in range(12):
-        if _wait_until(lambda: b"alive-42" in writer.output(), timeout=1.0):
-            break
         sess.on_input(b"\x03")
-    ok = _wait_until(lambda: b"alive-42" in writer.output())
-    if not ok:
-        # 现场取证：打印 pytest 进程与 bash/前台子进程的信号处置，用于
-        # 判定 Ctrl-C 失效根因（SIGINT 是否被继承性忽略：SigIgn 位 0x2）
-        import signal as _signal
-        print(f"DIAG pytest SIGINT disposition: {_signal.getsignal(_signal.SIGINT)!r}")
+        if _wait_until(prompt_returned, timeout=1.0):
+            break
+    if not prompt_returned():
+        import subprocess
         shell_pid = sess._proc.pid
-        print(f"DIAG shell pid={shell_pid} masks={_proc_sigmasks(shell_pid)}")
-        for child in _foreground_children(shell_pid):
-            print(f"DIAG child pid={child} masks={_proc_sigmasks(child)}")
-    assert ok
+        print(f"PTY output after Ctrl-C: {writer.output()[prompt_offset:]!r}")
+        processes = subprocess.run(
+            ["ps", "-eo", "pid,ppid,pgid,sid,stat,comm,args"],
+            capture_output=True, text=True, check=False,
+        ).stdout.splitlines()
+        print("\n".join(
+            line for line in processes
+            if line.split()[0].isdigit() and int(line.split()[0]) == shell_pid
+            or len(line.split()) > 1 and line.split()[1].isdigit()
+            and int(line.split()[1]) == shell_pid
+        ))
+    assert prompt_returned()
+    sess.on_input(b"echo alive-$((6*7))\n")
+    assert _wait_until(lambda: b"alive-42" in writer.output())
 
 
 def test_session_resize(session):
@@ -493,7 +475,7 @@ def test_enable_tcp_keepalive_sets_socket_options():
     s = socket.socket()
     try:
         terminal._enable_tcp_keepalive(s)
-        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0
         try:
             assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == terminal._TCP_KEEP_IDLE
             assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == terminal._TCP_KEEP_INTVL

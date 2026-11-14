@@ -11,8 +11,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _deep_merge_dicts(base, override):
+    """递归合并两个 dict：override 的键覆盖 base，嵌套 dict 逐键合并。
+
+    用于 myconfig 覆盖 config.py 的 dict 型配置（如 GYM_CONF）：myconfig
+    只需声明要改的键，config.py 后续新增的键不再被整体重定义静默丢失。
+    非 dict 值（标量/list/tuple）一律整体替换。
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 class Config:
-    
+
     def from_pyfile(self, filename):
         d = types.ModuleType('config')
         d.__file__ = filename
@@ -24,11 +40,17 @@ class Config:
             raise
         self.from_object(d)
         return True
-    
+
     def from_object(self, obj):
+        """拷贝 obj 的全大写属性；dict 值与已有同名 dict 做键级深合并，其余整体覆盖。"""
         for key in dir(obj):
             if key.isupper():
-                setattr(self, key, getattr(obj, key))
+                value = getattr(obj, key)
+                if isinstance(value, dict):
+                    existing = getattr(self, key, None)
+                    if isinstance(existing, dict):
+                        value = _deep_merge_dicts(existing, value)
+                setattr(self, key, value)
 
     def from_dict(self, d, keys=[]):
         msg = 'Overwriting config with: '

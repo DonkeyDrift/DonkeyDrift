@@ -363,7 +363,7 @@ describe('useConfigAutoLoad 自动 Tub 失败重置与过期请求覆盖（第�
   };
 
   it('全链路失败后清空全部 Tub 相关状态，而不是残留上一配置数据', async () => {
-    // 上一配置残留（tubPath 被 persist 持久化，records/fields 为运行时旧状态）
+    // 上一配置残留（tubPath/records/fields 会被 persist 持久化，刷新后仍在）
     const staleRecords = [
       { _index: 0, _timestamp_ms: 1000, 'cam/image_array': 'old_0.jpg', 'user/angle': 0.1, 'user/throttle': 0.5 },
       { _index: 1, _timestamp_ms: 2000, 'cam/image_array': 'old_1.jpg', 'user/angle': -0.1, 'user/throttle': 0.45 },
@@ -384,6 +384,8 @@ describe('useConfigAutoLoad 自动 Tub 失败重置与过期请求覆盖（第�
       currentIndex: 1,
       activeSessionId: 'sess_261020_1',
       activeSessionRecords: [staleRecords[0]],
+      activeSessionIds: ['sess_261020_1'],
+      activeSessionCrossTub: true,
       isPlaying: true,
     });
     mockLoadConfig.mockResolvedValue({ status: true, config: { IMAGE_H: 120 } } as never);
@@ -413,6 +415,8 @@ describe('useConfigAutoLoad 自动 Tub 失败重置与过期请求覆盖（第�
     expect(s.currentIndex).toBe(0);
     expect(s.activeSessionId).toBeNull();
     expect(s.activeSessionRecords).toEqual([]);
+    expect(s.activeSessionIds).toEqual([]);
+    expect(s.activeSessionCrossTub).toBe(false);
     expect(s.isPlaying).toBe(false);
   });
 

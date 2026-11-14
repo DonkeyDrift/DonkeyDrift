@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import time
+from dataclasses import replace
 
 import numpy as np
 import cv2
@@ -46,7 +47,12 @@ def test_drive_api_bridge_is_available_from_donkeydrifter_alias():
     assert DrifterDriveApiBridge is DriveApiBridge
 
 
-def test_drive_api_bridge_appends_car_role_to_url():
+def test_drive_api_bridge_appends_car_role_to_url(monkeypatch, tmp_path):
+    # 隔离真实 ~/.donkeycar/drive_api.token：无令牌时 URL 只带 role，
+    # 令牌注入语义由 test_drive_api_bridge_token.py 单独覆盖
+    monkeypatch.delenv(DriveApiBridge.API_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(DriveApiBridge, "API_TOKEN_FILE",
+                        tmp_path / "no_such.token")
     bridge = DriveApiBridge("ws://host:8000/api/drive/ws", auto_start=False)
     bridge_with_query = DriveApiBridge("ws://host/ws?token=x", auto_start=False)
 
@@ -119,7 +125,7 @@ def test_drive_api_bridge_sends_base64_frame(monkeypatch):
 
     outputs = bridge.run_threaded(img_arr="rgb-image", num_records=7, mode="user", recording=False)
 
-    assert outputs == (0.0, 0.0, "user", False, {}, False, None)
+    assert outputs == (0.0, 0.0, "user", False, {}, False, None, False)
     assert encoded_images == ["converted-rgb-image-4"]
     assert encoded_params == [[cv2.IMWRITE_JPEG_QUALITY, 95]]
     assert [p for p in sent_payloads if p.get("type") == "frame"] == [{
@@ -389,6 +395,9 @@ class FakeAvModule:
 
 def test_aiortc_video_track_converts_latest_frame(monkeypatch):
     monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+    # 转换语义测试走「印章关闭」直通路径（默认即关；印章开启走副本，由
+    # test_aiortc_video_track_stamp_default_off_env_can_enable 覆盖）
+    monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
     buffer = DriveVideoFrameBuffer(width=320, height=240)
     track = DriveAiortcVideoTrack(buffer, fps=60)
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
@@ -399,15 +408,20 @@ def test_aiortc_video_track_converts_latest_frame(monkeypatch):
     assert isinstance(output, FakeVideoFrame)
     assert output.image is frame
     assert output.format == "rgb24"
-    assert output.pts == 1
+    # 首帧语义（546c21b5，tests/test_drive_webrtc_track.py 锁定）：锚点帧 pts=0
+    assert output.pts == 0
     assert output.time_base is not None
 
 
 def test_aiortc_video_track_waits_for_next_frame(monkeypatch):
     async def scenario():
         monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+        monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "0")
         buffer = DriveVideoFrameBuffer(width=320, height=240)
-        track = DriveAiortcVideoTrack(buffer, fps=60)
+        # pacing=False：本测锁定「等真实新帧」语义。节拍补帧（默认开）下
+        # 第二次 recv 可能在节拍槽返回重复帧，等待语义由
+        # tests/test_drive_webrtc_track.py 的 pacing 用例覆盖。
+        track = DriveAiortcVideoTrack(buffer, fps=60, pacing=False)
         first = np.zeros((240, 320, 3), dtype=np.uint8)
         second = np.ones((240, 320, 3), dtype=np.uint8)
 
@@ -724,15 +738,32 @@ def test_drive_api_bridge_sends_webrtc_stats_when_session_active(monkeypatch):
         "type": "webrtc_stats",
         "session_id": "session-1",
         "source_fps": 60.0,
+        "arrival_gap_p50_ms": None,
+        "arrival_gap_p95_ms": None,
+        "recent_gaps_ms": None,
+        "ts_tail_age_ms": None,
+        "deque_len": None,
+        "deque_span_ms": None,
+        "deque_tail3": None,
+        "send_loop": {"frames": 0, "encode_avg_ms": 0.0, "encode_work_ms": 0.0, "send_avg_ms": 0.0, "loop_avg_ms": 0.0},
+        "push_total": 0,
+        "push_dedup_skipped": 0,
+        "push_appended": 0,
+        "past_dedup1": 0,
+        "past_resize": 0,
         "sent_fps": 59.0,
         "stale_frames": 2,
+        "pts_bumps": 0,
         "peer_connection_state": "connected",
         "ice_connection_state": "completed",
         "ice_gathering_state": "complete",
         "local_description_error": None,
+        "answer_error": None,
         "local_description_elapsed_ms": None,
         "answer_sent_elapsed_ms": None,
         "local_candidates_sent": 0,
+        "clock_offset_ms": None,
+        "clock_rtt_ms": None,
     }]
 
 
@@ -895,15 +926,19 @@ def test_drive_api_bridge_stops_mjpeg_fallback_after_aiortc_track_sends(monkeypa
 def test_drive_api_bridge_handles_reconnect_simulator():
     bridge = DriveApiBridge(server_url="ws://localhost:8000/api/drive/ws", auto_start=False)
     bridge._handle_message({"type": "reconnect_simulator"})
+    bridge._handle_message({"type": "reset_car"})
 
     assert bridge.reconnect_simulator is True
+    assert bridge.reset_car is True
 
     outputs = bridge.run_threaded(img_arr=None, num_records=0, mode="user", recording=False)
-    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator, car_mode_cmd
-    assert len(outputs) == 7, f"expected 7 outputs, got {len(outputs)}: {outputs}"
+    # outputs order: angle, throttle, mode, recording, buttons, reconnect_simulator, car_mode_cmd, reset_car
+    assert len(outputs) == 8, f"expected 8 outputs, got {len(outputs)}: {outputs}"
     assert outputs[5] is True
     assert outputs[6] is None
+    assert outputs[7] is True
     assert bridge.reconnect_simulator is False
+    assert bridge.reset_car is False
 
 
 def test_drive_api_bridge_caches_last_num_records():
@@ -955,9 +990,14 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
             raise StopAsyncIteration
 
     class FakeWebsockets:
+        connect_kwargs = []
+
         @staticmethod
-        def connect(url):
-            # 真实 websockets.connect 是异步上下文管理器工厂（非协程）
+        def connect(url, **kwargs):
+            # 真实 websockets.connect 是异步上下文管理器工厂（非协程）。
+            # 车端连接必须显式绕过代理 env（websockets>=14 为 proxy=None；
+            # 代理会把 ws://127.0.0.1:<port> 转发到代理机自身的回环）
+            FakeWebsockets.connect_kwargs.append(kwargs)
             return FakeWs()
 
     monkeypatch.setattr(bridge_mod, "websockets", FakeWebsockets())
@@ -975,6 +1015,273 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
     # 无退避的热重连两次间隔都趋近 0
     assert gap2 >= 0.04, f"第 2 次重连间隔 {gap2:.4f}s，缺少退避"
     assert gap3 >= 0.04, f"第 3 次重连间隔 {gap3:.4f}s，缺少退避"
+    # 每次连接都显式绕过代理（老版本 websockets 无 proxy 参数时 kwargs 为空）
+    assert all(kwargs.get("proxy", None) is None
+               for kwargs in FakeWebsockets.connect_kwargs)
+
+
+def test_connect_kwargs_bypass_proxy_when_supported():
+    """websockets>=14 必须给出 proxy=None；老版本无需（不读代理 env）。"""
+    from donkeycar.parts import drive_api_bridge as bridge_mod
+    kwargs = bridge_mod.WS_NO_PROXY_KWARGS
+    if "proxy" in kwargs:
+        assert kwargs["proxy"] is None
+    import inspect
+    has_proxy_param = "proxy" in inspect.signature(
+        bridge_mod.websockets.connect).parameters if bridge_mod.websockets else False
+    assert ("proxy" in kwargs) == has_proxy_param
+
+
+def test_post_json_bypasses_env_proxies(monkeypatch, tmp_path):
+    from donkeycar.parts import drive_api_bridge as bridge_mod
+    # 直连 session：trust_env=False 才能挡住 all_proxy env
+    # （proxies={"http": None} 会被 requests merge_setting 删键，真机实测 502）
+    assert bridge_mod._direct_session.trust_env is False
+    # 隔离真实令牌文件：无令牌时 headers 应为空
+    monkeypatch.delenv(DriveApiBridge.API_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(DriveApiBridge, "API_TOKEN_FILE",
+                        tmp_path / "no_such.token")
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, json=None, timeout=None, headers=None):
+        captured.update(url=url, timeout=timeout, headers=headers)
+        return FakeResp()
+
+    monkeypatch.setattr(bridge_mod._direct_session, "post", fake_post)
+    bridge = DriveApiBridge(auto_start=False,
+                            server_url="ws://127.0.0.1:8000/api/drive/ws")
+    bridge._post_json("/webrtc/answer", {"session_id": "s", "sdp": "x", "type": "answer"})
+    assert "webrtc/answer" in captured["url"]
+    assert captured["headers"] == {}
+
+
+# ---------------- 端到端时延探针（video_timestamp + 时钟同步） ----------------
+
+def test_drive_api_bridge_probe_flag_from_ctor_and_env(monkeypatch):
+    assert DriveApiBridge(auto_start=False).latency_probe is False
+    assert DriveApiBridge(auto_start=False, latency_probe=True).latency_probe is True
+    monkeypatch.setenv("DRIVE_WEBRTC_LATENCY_PROBE", "1")
+    assert DriveApiBridge(auto_start=False).latency_probe is True
+
+
+def test_aiortc_video_track_stamp_default_off_env_can_enable(monkeypatch):
+    from donkeycar.parts.video_timestamp import read_timestamp
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.av", FakeAvModule)
+    ts = time.time()
+
+    # 默认（无探针标志、无 env）：印章关闭——日常驾驶画面纯净，
+    # 徽标降级回帧间隔口径；原帧直通，无副本。
+    buffer_default = DriveVideoFrameBuffer(width=320, height=240)
+    track_default = DriveAiortcVideoTrack(buffer_default, fps=60)
+    assert track_default.frame_stamp is False
+    frame_default = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_default.update(frame_default)
+    output_default = asyncio.run(track_default.recv())
+    assert output_default.image is frame_default
+    assert read_timestamp(output_default.image) is None
+
+    # env 显式开启（DRIVE_WEBRTC_FRAME_STAMP=1）：烧入印章——浏览器
+    # 「真实 E2E」徽标与回环探针的像素通路依赖它；帧内容改写在副本上，
+    # 不污染缓冲。
+    monkeypatch.setenv("DRIVE_WEBRTC_FRAME_STAMP", "1")
+    buffer_on = DriveVideoFrameBuffer(width=320, height=240)
+    track_on = DriveAiortcVideoTrack(buffer_on, fps=60)
+    assert track_on.frame_stamp is True
+    frame_on = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_on.update(frame_on)
+    buffer_on.latest = replace(buffer_on.latest, timestamp=ts)
+    output_on = asyncio.run(track_on.recv())
+    assert output_on.image is not frame_on  # 副本，不污染缓冲
+    assert read_timestamp(output_on.image) is not None
+    assert abs(read_timestamp(output_on.image) - ts) * 1e6 < 128
+
+    # 探针标志恒开（默认 env 下也烧入）：显式探针要求必须可测
+    buffer_probe = DriveVideoFrameBuffer(width=320, height=240)
+    track_probe = DriveAiortcVideoTrack(buffer_probe, fps=60, latency_probe=True)
+    assert track_probe.frame_stamp is True
+    frame_probe = np.zeros((240, 320, 3), dtype=np.uint8)
+    buffer_probe.update(frame_probe)
+    output_probe = asyncio.run(track_probe.recv())
+    assert read_timestamp(output_probe.image) is not None
+
+
+def test_drive_api_bridge_syncs_clock_with_min_rtt_sample(monkeypatch):
+    async def scenario():
+        responses = [
+            {"server_time": 1000.0500},
+            {"server_time": 1000.0400},  # RTT 最小：0.01
+            {"server_time": 1000.0300},
+        ]
+        rtts = [0.03, 0.01, 0.05]
+        local_stamps = []
+
+        async def fake_get(path, timeout=3.0):
+            assert path == "/time"
+            t0 = time.time()
+            time.sleep(rtts.pop(0))
+            local_stamps.append((t0, time.time()))
+            return responses.pop(0)
+
+        bridge = DriveApiBridge(auto_start=False)
+        monkeypatch.setattr(bridge, "_get_json_async", fake_get)
+        await bridge._sync_clock(samples=3)
+
+        # 选中 min-RTT 样本（第 2 个）：offset ≈ server - (本机 t0 + rtt/2)
+        t0, t1 = local_stamps[1]
+        rtt = t1 - t0
+        # bridge 内部计的 t0/t1 与 fake_get 内记录的相差一次 await 开销，容差比较
+        assert abs(bridge.clock_rtt_ms - rtt * 1000.0) < 1.5
+        expected_offset_ms = (1000.0400 - (t0 + rtt / 2.0)) * 1000.0
+        assert abs(bridge.clock_offset_ms - expected_offset_ms) < 3.0
+        assert bridge._last_clock_sync > 0
+
+    asyncio.run(scenario())
+
+
+def test_drive_api_bridge_clock_sync_failure_is_non_fatal(monkeypatch):
+    async def scenario():
+        async def boom(path, timeout=3.0):
+            raise ConnectionError("backend down")
+
+        bridge = DriveApiBridge(auto_start=False)
+        monkeypatch.setattr(bridge, "_get_json_async", boom)
+        # 不抛异常：失败保留上次结果（此处为初始 None）
+        await bridge._sync_clock()
+
+        assert bridge.clock_offset_ms is None
+        assert bridge.clock_rtt_ms is None
+        assert bridge._last_clock_sync == 0.0
+
+    asyncio.run(scenario())
+
+
+def test_drive_api_bridge_webrtc_stats_carry_clock_fields(monkeypatch):
+    sent = []
+    bridge = DriveApiBridge(auto_start=False)
+    bridge.active_webrtc_session_id = "session-1"
+    bridge.clock_offset_ms = 3.2
+    bridge.clock_rtt_ms = 1.4
+    monkeypatch.setattr(bridge, "_send_json", sent.append)
+    monkeypatch.setattr(bridge.frame_buffer, "stats", lambda: {"source_fps": 60.0})
+    monkeypatch.setattr(bridge.webrtc_track, "stats", lambda: {"sent_fps": 60.0, "stale_frames": 0})
+
+    bridge._send_webrtc_stats()
+
+    assert sent[0]["clock_offset_ms"] == 3.2
+    assert sent[0]["clock_rtt_ms"] == 1.4
+
+
+def test_drive_api_bridge_offer_failure_recorded_and_reported(monkeypatch, caplog):
+    """offer→answer 任一环节抛异常：必须记录 answer_error 并随 stats 上报。
+
+    该协程经 run_coroutine_threadsafe 调度、future 无人 await，异常若不
+    显式捕获会被静默吞掉——真机曾表现为浏览器永久 MJPEG 降级且无日志。
+    """
+    import logging
+
+    class BrokenRemotePeer(FakePeerConnection):
+        async def setRemoteDescription(self, description):
+            raise RuntimeError("setRemoteDescription 失败")
+
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCPeerConnection",
+                        BrokenRemotePeer)
+    monkeypatch.setattr("donkeycar.parts.drive_api_bridge.RTCSessionDescription",
+                        FakeSessionDescription)
+
+    bridge = DriveApiBridge(auto_start=False)
+    posted = []
+
+    async def mock_post_webrtc_answer_async(session_id, sdp):
+        posted.append((session_id, sdp))
+
+    monkeypatch.setattr(bridge, "_post_webrtc_answer_async", mock_post_webrtc_answer_async)
+
+    with caplog.at_level(logging.WARNING, logger="donkeycar.parts.drive_api_bridge"):
+        bridge._handle_webrtc_signal({
+            "type": "webrtc_signal",
+            "signal_type": "offer",
+            "session_id": "session-x",
+            "sdp": "offer-sdp",
+            "description_type": "offer",
+        })
+
+    # answer 未发出；异常被记录到 webrtc_answer_error 并产生 WARNING 日志
+    assert posted == []
+    assert bridge.webrtc_answer_error is not None
+    assert "setRemoteDescription" in bridge.webrtc_answer_error
+    assert any("WebRTC offer 处理失败" in r.message for r in caplog.records)
+
+    # stats 携带 answer_error 字段
+    bridge.active_webrtc_session_id = "session-x"
+    sent = []
+    monkeypatch.setattr(bridge, "_send_json", lambda payload: sent.append(payload))
+    bridge._send_webrtc_stats()
+    stats_payload = next(p for p in sent if p.get("type") == "webrtc_stats")
+    assert stats_payload["answer_error"] == bridge.webrtc_answer_error
+
+
+# ---------------- 预览编码分辨率上限（模拟器 1080p 时延修复） ----------------
+
+def test_frame_buffer_caps_oversized_preview_frames():
+    """1080p 原生帧超过上限 → 等比缩到上限内（640×360，宽高比保持、尺寸取偶）。"""
+    buf = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True,
+                                max_width=640, max_height=480)
+    frame1080 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    latest = buf.update(frame1080)
+    assert latest.frame.shape == (360, 640, 3)
+
+
+def test_frame_buffer_cap_passthrough_small_and_native():
+    """小于上限的帧不缩放；未设上限（None）保持原生直通。"""
+    buf = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True,
+                                max_width=640, max_height=480)
+    frame480 = np.zeros((480, 640, 3), dtype=np.uint8)
+    assert buf.update(frame480).frame.shape == (480, 640, 3)
+
+    native = DriveVideoFrameBuffer(width=320, height=240, upscale_only=True)
+    frame1080 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    assert native.update(frame1080).frame.shape == (1080, 1920, 3)
+
+
+def test_frame_buffer_cap_applies_without_upscale_only():
+    """上限对非 upscale_only 路径同样生效（超限帧优先缩到上限而非拉伸到目标尺寸）。"""
+    buf = DriveVideoFrameBuffer(width=320, height=240,
+                                max_width=640, max_height=480)
+    frame1080 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    assert buf.update(frame1080).frame.shape == (360, 640, 3)
+
+
+def test_bridge_preview_max_resolution_precedence(monkeypatch):
+    for name in ("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT"):
+        monkeypatch.delenv(name, raising=False)
+    bridge = DriveApiBridge(auto_start=False)
+    assert bridge.frame_buffer.max_width == 640
+    assert bridge.frame_buffer.max_height == 480
+
+    # 显式参数优先；0 关闭（None 传给 buffer）
+    bridge = DriveApiBridge(auto_start=False,
+                            webrtc_preview_max_width=800, webrtc_preview_max_height=600)
+    assert (bridge.frame_buffer.max_width, bridge.frame_buffer.max_height) == (800, 600)
+    bridge = DriveApiBridge(auto_start=False,
+                            webrtc_preview_max_width=0, webrtc_preview_max_height=0)
+    assert bridge.frame_buffer.max_width is None
+    assert bridge.frame_buffer.max_height is None
+
+    # env 覆盖默认
+    monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "1280")
+    monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT", "720")
+    bridge = DriveApiBridge(auto_start=False)
+    assert (bridge.frame_buffer.max_width, bridge.frame_buffer.max_height) == (1280, 720)
+
+    # env 非法值回落默认
+    monkeypatch.setenv("DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", "abc")
+    bridge = DriveApiBridge(auto_start=False)
+    assert bridge.frame_buffer.max_width == 640
 
 
 def test_drive_api_bridge_ignores_malformed_numeric_fields():

@@ -79,6 +79,13 @@ interface AppState {
   currentIndex: number;
   activeSessionId: string | null;
   activeSessionRecords: TubRecord[];
+  // 录制视频库多选会话筛选：集合内全部会话 id（单选时即 [sessionId]），
+  // 编辑器删除/恢复刷新与 AI 筛选按此聚合；空数组表示整 tub 视图
+  activeSessionIds: string[];
+  // 跨 tub 合并视图（activeSessionRecords 来自多个 tub，帧带 __tubPath 标）：
+  // 删除/恢复后端 API 只收 _index 且作用于后端当前 tub，跨 tub _index 撞号会
+  // 删错数据，因此编辑器在此模式下强制只读（禁用帧级写操作入口）
+  activeSessionCrossTub: boolean;
   fields: string[];
   isLoading: boolean;
   loadedTubPath: string | null;
@@ -111,7 +118,7 @@ interface AppState {
   requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
-  setActiveSession: (sessionId: string | null, records: TubRecord[]) => void;
+  setActiveSession: (sessionId: string | null, records: TubRecord[], sessionIds?: string[], crossTub?: boolean) => void;
   setDeletedIndexes: (deletedIndexes: number[], totalPhysicalRecords?: number) => void;
   setCurrentIndex: (index: number | ((prev: number) => number)) => void;
   setIsDragging: (isDragging: boolean) => void;
@@ -157,6 +164,8 @@ export const useStore = create<AppState>()(
       currentIndex: 0,
       activeSessionId: null,
       activeSessionRecords: [],
+      activeSessionIds: [],
+      activeSessionCrossTub: false,
       fields: [],
       isLoading: false,
       loadedTubPath: null,
@@ -230,6 +239,8 @@ export const useStore = create<AppState>()(
           currentIndex: records.length > 0 ? 0 : 0,
           activeSessionId: null,
           activeSessionRecords: [],
+          activeSessionIds: [],
+          activeSessionCrossTub: false,
           error: null,
           activeDrawer: null,
           isPlaying: false,
@@ -248,6 +259,8 @@ export const useStore = create<AppState>()(
           currentIndex: 0,
           activeSessionId: null,
           activeSessionRecords: [],
+          activeSessionIds: [],
+          activeSessionCrossTub: false,
           isPlaying: false,
           isDragging: false,
           selectionStartIndex: null,
@@ -272,8 +285,15 @@ export const useStore = create<AppState>()(
               : 0,
           isPlaying: false,
         })),
-      setActiveSession: (sessionId, records) =>
-        set({ activeSessionId: sessionId, activeSessionRecords: records }),
+      setActiveSession: (sessionId, records, sessionIds, crossTub = false) =>
+        set({
+          activeSessionId: sessionId,
+          activeSessionRecords: records,
+          // 第三参缺省时从 sessionId 派生：所有既有调用点（单会话/清空）行为不变
+          activeSessionIds: sessionIds ?? (sessionId != null ? [sessionId] : []),
+          // 清空会话作用域（sessionId=null）时同步退出跨 tub 只读态
+          activeSessionCrossTub: sessionId != null && crossTub,
+        }),
       setCurrentIndex: (index) =>
         set((state) => ({
           currentIndex: typeof index === 'function' ? index(state.currentIndex) : index,

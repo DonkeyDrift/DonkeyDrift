@@ -35,11 +35,19 @@ DRIVE_WEBRTC_ENABLED = True
 DRIVE_WEBRTC_SINGLE_CLIENT = True
 DRIVE_WEBRTC_RECONNECT_TIMEOUT_SEC = 3.0
 DRIVE_WEBRTC_ICE_SERVERS = []
+# P0 低时延编码调优（默认开；0=回退 aiortc 上游参数）
+DRIVE_WEBRTC_ENCODER_TUNE = True
+# WebRTC 视频初始码率 bps（REMB 反馈仍会自动下调）
+DRIVE_WEBRTC_VIDEO_BITRATE = 1500000
+# P1a 媒体线程绑核（bridge/编码线程钉高容量核；0=关闭；实车推理重时可设 DRIVE_WEBRTC_MEDIA_CPUS=0-3 让媒体走小核）
+DRIVE_WEBRTC_AFFINITY = True
+# 可选：车辆线程也绑核（媒体核之外，再省 ~3ms；默认关，保持推理全核自由度）
+DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE = False
 
 #CAMERA
 CAMERA_TYPE = "PICAM"   # (PICAM|WEBCAM|CVCAM|CSIC|V4L|D435|OAKD|MOCK|IMAGE_LIST)
-IMAGE_W = 160
-IMAGE_H = 120
+IMAGE_W = 320           # 全链路原生 320x240（采集/tub/训练/推理/预览同分辨率）
+IMAGE_H = 240
 IMAGE_DEPTH = 3         # default RGB=3, make 1 for mono
 CAMERA_FRAMERATE = DRIVE_LOOP_HZ
 CAMERA_VFLIP = False
@@ -101,6 +109,7 @@ OPTIMIZER = None                #adam, sgd, rmsprop, etc.. None accepts default
 LEARNING_RATE = 0.001           #only used when OPTIMIZER specified
 LEARNING_RATE_DECAY = 0.0       #only used when OPTIMIZER specified
 CACHE_IMAGES = True             # if images are cached in training for speed up
+CACHE_MAX_BYTES = 268435456     # total byte budget of the image cache; images are LRU-evicted beyond it (NOCACHE ignores it)
 PRUNE_CNN = False
 PRUNE_PERCENT_TARGET = 75 # The desired percentage of pruning.
 PRUNE_PERCENT_PER_ITERATION = 20 # Percenge of pruning that is perform per iteration.

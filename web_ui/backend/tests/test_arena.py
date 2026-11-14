@@ -654,6 +654,59 @@ def test_predict_does_not_reload_config_per_frame(monkeypatch, tmp_path):
     assert calls["count"] == 1, f"config 被重复编译 {calls['count']} 次"
 
 
+def test_list_models_surfaces_aidem_in_conversion_subdir(tmp_path):
+    """AIMO 云转自包含子目录：列表以 <目录>/<文件> 透出 .aidem（跳过 x86 变体）。"""
+    models_dir = tmp_path / "models"
+    sub = models_dir / "pilot_save_path"
+    sub.mkdir(parents=True)
+    (sub / "pilot_qcs6490_w8a8.qnn240.ctx.bin.aidem").write_text("ctx")
+    (sub / "libpilot_qcs6490_w8a8.qnn240.x86.so.aidem").write_text("x86")
+    (sub / "qnn_model_info.json").write_text("{}")
+    # 无关子目录（savedmodel 已单独处理）不应重复收录
+    (models_dir / "pilot.savedmodel").mkdir()
+
+    from routers import arena
+
+    client = TestClient(FastAPI())
+    client.app.include_router(arena.router, prefix="/api/arena")
+
+    response = client.get(
+        "/api/arena/models",
+        params={"working_dir": str(tmp_path), "model_type": "aidlite_linear"},
+    )
+
+    assert response.status_code == 200
+    models = response.json()["models"]
+    assert [item["name"] for item in models] == [
+        "pilot_save_path/pilot_qcs6490_w8a8.qnn240.ctx.bin.aidem",
+    ]
+    assert models[0]["format"] == "aidem"
+    assert models[0]["path"] == str(
+        sub / "pilot_qcs6490_w8a8.qnn240.ctx.bin.aidem"
+    )
+
+
+def test_list_models_subdir_respects_extension_filter(tmp_path):
+    models_dir = tmp_path / "models"
+    sub = models_dir / "conv"
+    sub.mkdir(parents=True)
+    (sub / "pilot.ctx.bin.aidem").write_text("ctx")
+    (sub / "pilot.tflite").write_text("tflite")
+
+    from routers import arena
+
+    client = TestClient(FastAPI())
+    client.app.include_router(arena.router, prefix="/api/arena")
+
+    response = client.get(
+        "/api/arena/models",
+        params={"working_dir": str(tmp_path), "model_type": "tflite_linear"},
+    )
+
+    names = {item["name"] for item in response.json()["models"]}
+    assert names == {"conv/pilot.tflite"}
+
+
 def test_predict_cache_misses_after_tub_switch(monkeypatch, tmp_path):
     """#494：缓存键含 tub 身份与物理 _index——换 tub / 删记录后同一下标不得命中旧缓存。"""
     client, arena = make_client(monkeypatch)

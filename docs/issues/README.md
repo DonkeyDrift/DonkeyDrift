@@ -12,3 +12,4 @@
 | [006](006-trainer-naming-local-vs-car-computer.md) | [#365](https://github.com/DonkeyDrift/DonkeyDrift/issues/365) | Trainer「本机」与「车载电脑」命名颠倒 | bug / 文案 | `i18n/messages/trainer.ts` |
 | [007](007-model-import-422-and-load-to-car-400.md) | - | 导入模型 422 + 加载到车端 400 | bug | `services/api.ts` / `ModelsList.tsx` |
 | [008](008-drive-joystick-dock-right-anchor-scaling.md) | - | Drive 摇杆抽屉右缘常驻 + 连续缩放，窄屏不再折叠到视频下方 | enhancement | `pages/DrivePage.tsx` / `hooks/useElementWidth.ts` / `drive/VirtualJoystick.tsx` |
+| [009](009-drive-webrtc-mid-session-freeze.md) | - | Drive 页 WebRTC 画面中途卡死后永不恢复（环境瞬断无恢复路径） | bug | `hooks/useDriveWebRtcVideo.ts` / `drive/VideoStream.tsx` / `drive_api_bridge.py` |

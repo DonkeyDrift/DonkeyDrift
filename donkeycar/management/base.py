@@ -1,4 +1,5 @@
 import argparse
+import importlib.util
 import os
 import shutil
 import socket
@@ -7,6 +8,7 @@ import sys
 import logging
 import subprocess
 import time
+from datetime import datetime
 import signal
 import webbrowser
 
@@ -163,6 +165,25 @@ class CreateCar(BaseCommand):
         args = self.parse_args(args)
         self.create_car(path=args.path, template=args.template, overwrite=args.overwrite)
 
+    @staticmethod
+    def _backup_existing(file_path):
+        """overwrite 前把将被覆盖的文件备份到 <car>/backups/，返回备份路径。
+
+        createcar 是无版本跟踪的一次性覆盖（manage.py/config.py 常被用户深度
+        定制），没有这层备份，`donkey update` 一次就能抹掉全部本地改动。
+        """
+        if not os.path.exists(file_path):
+            return None
+        backup_dir = os.path.join(os.path.dirname(file_path), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        backup_path = os.path.join(
+            backup_dir, '%s.%s' % (os.path.basename(file_path), stamp))
+        shutil.copy2(file_path, backup_path)
+        print("Backed up existing %s to %s" % (os.path.basename(file_path),
+                                               backup_path))
+        return backup_path
+
     def create_car(self, path, template='complete', overwrite=False):
         """
         This script sets up the folder structure for donkey to work.
@@ -195,6 +216,7 @@ class CreateCar(BaseCommand):
         if os.path.exists(car_app_path) and not overwrite:
             print('Car app already exists. Delete it and rerun createcar to replace.')
         else:
+            self._backup_existing(car_app_path)
             print(f"Copying car application template: {template}")
             shutil.copyfile(app_template_path, car_app_path)
             os.chmod(car_app_path, stat.S_IRWXU)
@@ -202,12 +224,15 @@ class CreateCar(BaseCommand):
         if os.path.exists(car_config_path) and not overwrite:
             print('Car config already exists. Delete it and rerun createcar to replace.')
         else:
-            print("Copying car config defaults. Adjust these before starting your car.")
+            self._backup_existing(car_config_path)
+            print("Copying car config defaults. Adjust these before starting your car. "
+                  "Put personal overrides in myconfig.py so updates don't clobber them.")
             shutil.copyfile(config_template_path, car_config_path)
 
         if os.path.exists(train_app_path) and not overwrite:
             print('Train already exists. Delete it and rerun createcar to replace.')
         else:
+            self._backup_existing(train_app_path)
             print("Copying train script. Adjust these before starting your car.")
             shutil.copyfile(train_template_path, train_app_path)
             os.chmod(train_app_path, stat.S_IRWXU)
@@ -813,6 +838,11 @@ class Train(BaseCommand):
         parser.add_argument('--comment', type=str,
                             help='comment added to model database - use '
                                  'double quotes for multiple words')
+        parser.add_argument('--session-filter', type=str, default=None,
+                            help='只训练选中的录制会话：JSON 文件路径。支持平坦列表 '
+                                 '["26-10-20_0", ...]（对所有 tub 生效）或按 tub 分组 '
+                                 '{"<tub路径>": ["26-10-20_0", ...]}（不在映射中的 tub '
+                                 '整体排除）')
         parser.add_argument('--convert-npu', action='store_true',
                             help='训练后自动将导出的 onnx 经 AIMO 云转为 '
                                  '.aidem 上 NPU（需 API Key 与网络）')
@@ -824,6 +854,8 @@ class Train(BaseCommand):
         args.tub = ','.join(args.tub)
         my_cfg = args.myconfig
         cfg = load_config(args.config, my_cfg)
+        if args.session_filter:
+            cfg.TRAIN_FILTER = self._load_session_filter(args.session_filter)
         framework = args.framework if args.framework \
             else getattr(cfg, 'DEFAULT_AI_FRAMEWORK', 'tensorflow')
 
@@ -861,6 +893,64 @@ class Train(BaseCommand):
         if args.convert_npu:
             self._convert_npu_after_train(args)
 
+    def _load_session_filter(self, filter_path):
+        """读取 --session-filter 指定的 JSON，构造 cfg.TRAIN_FILTER 闭包。
+
+        两种合法形态：
+          1. 平坦列表 ["26-10-20_0", ...]：对所有加载的 tub 生效；
+          2. 按 tub 分组 {"<tub路径>": ["26-10-20_0", ...]}：record 通过当且仅当
+             (归一化 tub 路径, session_id) 命中映射；不在映射里的 tub 整体排除。
+             键与 record.base_path 两侧都用 normpath+abspath 对齐。
+
+        JSON 侧统一 str() 化，容忍数字型 session id。读取失败或形态非法时
+        报错并以非零码退出，绝不静默退化为训练全量。
+        """
+        import json
+        expanded = os.path.expanduser(filter_path)
+        try:
+            with open(expanded, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except OSError as e:
+            logger.error('无法读取 --session-filter 文件 %s: %s', expanded, e)
+            sys.exit(1)
+        except json.JSONDecodeError as e:
+            logger.error('--session-filter 文件 %s 不是合法 JSON: %s', expanded, e)
+            sys.exit(1)
+
+        def _to_id_set(value, ctx):
+            if not isinstance(value, list):
+                logger.error('--session-filter %s 应为会话 id 列表，实际: %r',
+                             ctx, value)
+                sys.exit(1)
+            return {str(item) for item in value}
+
+        if isinstance(data, list):
+            allowed = _to_id_set(data, '顶层列表')
+
+            def _flat_filter(record):
+                return str(record.underlying.get('_session_id', '')) in allowed
+
+            return _flat_filter
+
+        if isinstance(data, dict):
+            mapping = {}
+            for tub_key, ids in data.items():
+                key = os.path.normpath(os.path.abspath(
+                    os.path.expanduser(tub_key)))
+                mapping[key] = _to_id_set(ids, f'tub {tub_key!r}')
+
+            def _grouped_filter(record):
+                tub_allowed = mapping.get(
+                    os.path.normpath(os.path.abspath(record.base_path)))
+                return tub_allowed is not None \
+                    and str(record.underlying.get('_session_id', '')) in tub_allowed
+
+            return _grouped_filter
+
+        logger.error('--session-filter 文件 %s 顶层应为列表或对象，实际: %r',
+                     expanded, data)
+        sys.exit(1)
+
     def _convert_npu_after_train(self, args):
         """训练产物 <stem>.onnx → AIMO 云转 .aidem（校准图取自 tub 前若干张）。"""
         stem = os.path.splitext(os.path.expanduser(args.model))[0]
@@ -897,41 +987,70 @@ class ModelDatabase(BaseCommand):
         print(tub_txt)
 
 
-class Gui(BaseCommand):
-    def run(self, args):
-        from donkeycar.management.ui.ui import main
-        main()
-
-
 class Tui(BaseCommand):
+    def parse_args(self, args):
+        parser = argparse.ArgumentParser(prog='tui', usage='%(prog)s [options]')
+        parser.add_argument('-v', '--verbose', action="store_true",
+                            default=False,
+                            help='Drive 启动前显示命令预览并确认（默认一键直接启动）')
+        parsed_args = parser.parse_args(args)
+        return parsed_args
+
     def run(self, args):
         from donkeycar.management.tui import main
-        main()
+        main(verbose=self.parse_args(args).verbose)
+
+
+def resolve_backend_host(host=None):
+    """解析后端监听地址：显式参数 > DRIVE_WEB_HOST > 127.0.0.1。
+
+    P0 安全补强前默认 0.0.0.0（局域网任意设备可直连无鉴权 API）；现默认
+    仅回环，对外监听必须显式 --backend-host 0.0.0.0 或设 DRIVE_WEB_HOST
+    （launcher/_launch_drive 的实车链路即显式传 0.0.0.0）。
+    """
+    if host:
+        return host
+    return os.environ.get('DRIVE_WEB_HOST', '').strip() or '127.0.0.1'
 
 
 class Web(BaseCommand):
+    # Web 与 Drive 共享的参数（Drive 逐字复用，仅 --route 默认值不同）——
+    # 新增参数只改这里，两个命令自动同步
+    WEB_COMMON_ARGS = [
+        (('--path',), dict(default='./web_ui',
+                           help='web_ui 根目录路径 (默认: ./web_ui)')),
+        (('--frontend-port',), dict(type=int, default=5188,
+                                    help='前端端口 (默认: 5188)')),
+        (('--backend-port',), dict(type=int, default=8000,
+                                   help='后端端口 (默认: 8000)')),
+        (('--backend-host',), dict(default=None,
+                                   help='后端监听地址 (默认: 127.0.0.1 仅本机；对外监听请显式传 0.0.0.0 或设 DRIVE_WEB_HOST)')),
+        (('--install-deps',), dict(action='store_true',
+                                   help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')),
+        (('--open',), dict(action='store_true',
+                           help='启动后自动打开浏览器')),
+        (('--route',), dict(default=None,
+                            help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')),
+        (('--dev',), dict(action='store_true',
+                          help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
+                               '默认为生产模式：构建 dist 后由后端静态托管（#135）')),
+        (('--debug',), dict(action='store_true',
+                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')),
+    ]
+
+    @classmethod
+    def _add_web_args(cls, parser, route_default='/'):
+        for names, kwargs in cls.WEB_COMMON_ARGS:
+            if names == ('--route',):
+                kwargs = dict(kwargs, default=route_default)
+            parser.add_argument(*names, **kwargs)
+
     def parse_args(self, args):
         parser = argparse.ArgumentParser(prog='web', usage='%(prog)s [options]')
-        parser.add_argument('--path', default='./web_ui',
-                            help='web_ui 根目录路径 (默认: ./web_ui)')
-        parser.add_argument('--frontend-port', type=int, default=5188,
-                            help='前端端口 (默认: 5188)')
-        parser.add_argument('--backend-port', type=int, default=8000,
-                            help='后端端口 (默认: 8000)')
-        parser.add_argument('--backend-host', default='0.0.0.0',
-                            help='后端监听地址 (默认: 0.0.0.0)')
-        parser.add_argument('--install-deps', action='store_true',
-                            help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
-        parser.add_argument('--open', action='store_true',
-                            help='启动后自动打开浏览器')
-        parser.add_argument('--route', default='/',
-                            help='自动打开的前端路由，HashRouter 路由会转换为 /#/route')
-        parser.add_argument('--dev', action='store_true',
-                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
-                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
-        parser.add_argument('--debug', action='store_true',
-                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
-        return parser.parse_args(args)
+        self._add_web_args(parser)
+        parsed = parser.parse_args(args)
+        parsed.backend_host = resolve_backend_host(parsed.backend_host)
+        return parsed
 
     def run(self, args):
         args = self.parse_args(args)
@@ -1119,11 +1238,18 @@ class Web(BaseCommand):
         # 均以 frontend_port 为准，保持复用链路兼容）。
         frontend_port = backend_port
         frontend_proc = None
-        frontend_url = self._build_frontend_url(frontend_port, args.route if args.open else None)
+        # 对外监听（非回环）时生成带令牌的局域网入口，--open 直接打开它实现自动登录
+        lan_entry = None
+        if str(args.backend_host) not in ('127.0.0.1', 'localhost', '::1'):
+            lan_entry = self._lan_entry_url(web_ui_path, backend_port, args.route)
+        frontend_url = lan_entry or self._build_frontend_url(frontend_port, args.route if args.open else None)
 
         print(f'Web UI 路径: {web_ui_path}')
         print(f'Web UI:  http://localhost:{backend_port}/')
         print(f'API 文档: http://localhost:{backend_port}/docs')
+        if lan_entry:
+            print(f'局域网入口: {lan_entry}')
+            print('（令牌已自动带入，浏览器打开即完成登录并种下 Cookie）')
         if args.open:
             print(f'将打开: {frontend_url}')
         print('按 Ctrl+C 停止')
@@ -1182,6 +1308,44 @@ class Web(BaseCommand):
             return f'http://localhost:{frontend_port}/'
         normalized_route = route if str(route).startswith('/') else f'/{route}'
         return f'http://localhost:{frontend_port}/#{normalized_route}'
+
+    @staticmethod
+    def _lan_ip():
+        """取本机局域网 IP：UDP connect 不发包，仅用于选路由接口；失败返回 None。"""
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        except OSError:
+            return None
+        finally:
+            s.close()
+
+    def _lan_entry_url(self, web_ui_path, backend_port, route=None):
+        """对外监听时的局域网入口 URL：自动带 auth 令牌，打开即登录。
+
+        令牌来源与后端鉴权完全同一套（web_ui/backend/auth.py 的
+        DRIVE_API_TOKEN 环境变量 > ~/.donkeycar/drive_api.token），
+        后端 302 种 Cookie 后后续访问无需再带令牌。本机监听返回 None。
+        """
+        ip = self._lan_ip()
+        if not ip:
+            return None
+        try:
+            auth_path = os.path.join(web_ui_path, 'backend', 'auth.py')
+            spec = importlib.util.spec_from_file_location('dd_web_auth', auth_path)
+            web_auth = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(web_auth)
+            token = web_auth.load_or_create_token()
+        except Exception as e:
+            print(f'读取访问令牌失败，未生成局域网入口: {e}')
+            return None
+        if not token:
+            return None
+        route_part = ''
+        if route and route != '/':
+            route_part = '#' + (route if str(route).startswith('/') else f'/{route}')
+        return f'http://{ip}:{backend_port}/?token={token}{route_part}'
 
     def _wait_for_port_ready(self, port, timeout=30.0):
         """轮询本机端口直至可连接或超时。返回是否就绪。"""
@@ -1328,8 +1492,6 @@ class Drive(Web):
 
     def parse_args(self, args):
         parser = argparse.ArgumentParser(prog='drive', usage='%(prog)s [options]')
-        parser.add_argument('--path', default='./web_ui',
-                            help='web_ui 根目录路径 (默认: ./web_ui)')
         parser.add_argument('--car', default=None,
                             help='车目录路径（须含 manage.py，默认: 当前目录）')
         parser.add_argument('--model', default=None,
@@ -1338,24 +1500,10 @@ class Drive(Web):
                             help='模型类型 (linear|categorical)，透传给 manage.py drive --type')
         parser.add_argument('--js', action='store_true',
                             help='使用物理摇杆，透传给 manage.py drive --js')
-        parser.add_argument('--frontend-port', type=int, default=5188,
-                            help='前端端口 (默认: 5188)')
-        parser.add_argument('--backend-port', type=int, default=8000,
-                            help='后端端口 (默认: 8000)')
-        parser.add_argument('--backend-host', default='0.0.0.0',
-                            help='后端监听地址 (默认: 0.0.0.0)')
-        parser.add_argument('--install-deps', action='store_true',
-                            help='启动前自动安装缺失的前后端依赖 (等价于先运行 `donkey installweb`)')
-        parser.add_argument('--open', action='store_true',
-                            help='启动后自动打开浏览器')
-        parser.add_argument('--route', default='/drive',
-                            help='自动打开的前端路由 (默认: /drive)')
-        parser.add_argument('--dev', action='store_true',
-                            help='开发模式：用 Vite dev 服务器起前端（HMR 热更新，页面切换明显慢于生产构建）。'
-                                 '默认为生产模式：构建 dist 后由后端静态托管（#135）')
-        parser.add_argument('--debug', action='store_true',
-                            help='启用 DEBUG 日志模式 (默认仅输出 WARNING 及以上级别日志)')
-        return parser.parse_args(args)
+        self._add_web_args(parser, route_default='/drive')
+        parsed = parser.parse_args(args)
+        parsed.backend_host = resolve_backend_host(parsed.backend_host)
+        return parsed
 
     def run(self, args):
         args = self.parse_args(args)
@@ -1651,7 +1799,6 @@ def execute_from_command_line():
         'update': UpdateCar,
         'train': Train,
         'models': ModelDatabase,
-        'ui': Gui,
         'tui': Tui,
         'web': Web,
         'drive': Drive,
@@ -1664,10 +1811,10 @@ def execute_from_command_line():
         command = commands[args[1]]
         c = command()
         c.run(args[2:])
-    elif len(args) == 1:
-        # Default to TUI
+    elif len(args) == 1 or (len(args) == 2 and args[1] in ('-v', '--verbose')):
+        # Default to TUI；裸命令也允许 -v/--verbose 进入详细模式
         c = Tui()
-        c.run([])
+        c.run(args[1:])
     else:
         dk.utils.eprint('DonkeyDrift CLI')
         dk.utils.eprint('Usage: The available commands are:')

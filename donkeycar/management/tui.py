@@ -33,7 +33,7 @@ from rich.markdown import Markdown
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 try:
-    from donkeycar.management.ui.rc_file_handler import rc_handler
+    from donkeycar.management.rc_file_handler import rc_handler
 except Exception:
     rc_handler = None
 
@@ -66,6 +66,31 @@ def _lan_host():
     except OSError:
         pass
     return "localhost"
+
+def _drive_api_token():
+    """读取 Web 后端访问令牌：DRIVE_API_TOKEN 环境变量 > ~/.donkeycar/drive_api.token。
+
+    与车端 DriveApiBridge.load_api_token、后端 auth.load_or_create_token 同源。
+    后端绑 0.0.0.0 时非回环访问必须带令牌（main.py auth_middleware），
+    局域网 Drive 页 URL 需要拼上 ?token= 才能过鉴权门；取不到返回 ""——
+    仅回环/未配令牌时保持原样即可。
+    """
+    token = os.environ.get("DRIVE_API_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        return (Path.home() / ".donkeycar" / "drive_api.token").read_text(
+            encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+def _drive_page_url(host, frontend_port):
+    """拼 Drive 页面 URL：有令牌时 ?token= 放 # 之前（查询串发给服务器过鉴权门，
+    后端种 Cookie 后 302 回干净 URL，HashRouter 深链不丢）；无令牌保持原样。"""
+    token = _drive_api_token()
+    if token:
+        return f"http://{host}:{frontend_port}/?token={token}#/drive"
+    return f"http://{host}:{frontend_port}/#/drive"
 
 # 初始化 Console
 console = Console()
@@ -193,20 +218,51 @@ def _change_to_project(project_path: Path, title: str) -> bool:
         return False
 
 
+def _resolve_project_input(raw: str) -> Optional[Path]:
+    """把用户输入的路径解析为有效 mycar 项目目录；无效时打印原因并返回 None。"""
+    candidate = Path(os.path.expanduser(raw.strip()))
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    candidate = candidate.resolve()
+    if _is_valid_project_dir(candidate):
+        return candidate
+    console.print(
+        f"[red]不是有效的 mycar 项目（需同时包含 manage.py 和 myconfig.py）: {candidate}[/red]")
+    return None
+
+
+def _prompt_project_path() -> Optional[Path]:
+    """手动输入 mycar 项目路径（项目不在默认扫描目录 ~/projects 下时的兜底入口）。"""
+    console.print(
+        "[dim]可直接输入 mycar 项目目录路径（相对/绝对路径均可，支持 ~），输入 '0' 取消。[/dim]")
+    while True:
+        raw = Prompt.ask("请输入项目路径", default="0").strip()
+        if raw == "0" or not raw:
+            return None
+        selected = _resolve_project_input(raw)
+        if selected is not None:
+            return selected
+
+
 def _choose_project(projects: List[Path]) -> Optional[Path]:
     console.print("[bold]发现多个有效项目:[/bold]")
     for idx, project_path in enumerate(projects, 1):
         console.print(f"{idx}. {project_path.name}")
-    console.print("\n[dim]提示: 输入编号选择项目，输入 '0' 取消[/dim]")
+    console.print(
+        "\n[dim]提示: 输入编号选择项目，也可直接粘贴其他目录的项目路径，输入 '0' 取消[/dim]")
 
     while True:
-        choice = Prompt.ask("请输入编号", default="0")
+        choice = Prompt.ask("请输入编号或项目路径", default="0").strip()
         if choice == "0":
             return None
         if choice.isdigit():
             idx = int(choice)
             if 1 <= idx <= len(projects):
                 return projects[idx - 1]
+        else:
+            selected = _resolve_project_input(choice)
+            if selected is not None:
+                return selected
         console.print("[red]无效的选择，请重新输入[/red]")
 
 
@@ -577,51 +633,34 @@ class OpenProjectCommand(DonkeyCommand):
     def execute(self):
         console.clear()
         console.print(Panel(f"[bold orange1]{self.description}[/bold orange1]", title=f"配置 {self.name}"))
-        
+
         base_dir = Path(os.path.expanduser("~/projects"))
-        if not base_dir.exists():
-             console.print(f"[red]项目根目录 {base_dir} 不存在！[/red]")
-             Prompt.ask("按回车键返回...")
-             return
-
-        console.print(f"[dim]正在扫描 {base_dir} 下的项目...[/dim]")
-
-        try:
-            valid_projects = _find_valid_projects(base_dir)
-        except Exception as e:
-             console.print(f"[red]扫描出错: {e}[/red]")
-             Prompt.ask("按回车键返回...")
-             return
+        valid_projects: List[Path] = []
+        if base_dir.exists():
+            console.print(f"[dim]正在扫描 {base_dir} 下的项目...[/dim]")
+            try:
+                valid_projects = _find_valid_projects(base_dir)
+            except Exception as e:
+                console.print(f"[red]扫描出错: {e}[/red]")
 
         if not valid_projects:
-            console.print(f"[yellow]在 {base_dir} 下未找到有效的 DonkeyCar 项目。[/yellow]")
-            Prompt.ask("按回车键返回...")
-            return
-
-        if len(valid_projects) == 1:
+            # 默认扫描目录不存在或没有项目：允许手动输入任意路径下的项目
+            if base_dir.exists():
+                console.print(f"[yellow]在 {base_dir} 下未找到有效的 DonkeyCar 项目。[/yellow]")
+            else:
+                console.print(f"[yellow]默认项目根目录 {base_dir} 不存在。[/yellow]")
+            selected_project = _prompt_project_path()
+            if selected_project is not None:
+                _change_to_project(selected_project, "项目切换成功")
+        elif len(valid_projects) == 1:
             console.print(f"[dim]仅发现一个有效项目: {valid_projects[0].name}，自动打开。[/dim]")
             _change_to_project(valid_projects[0], "自动打开项目")
-            Prompt.ask("按回车键返回菜单...")
-            return
+        else:
+            selected_project = _choose_project(valid_projects)
+            if selected_project is not None:
+                _change_to_project(selected_project, "项目切换成功")
 
-        console.print("[bold]发现以下有效项目:[/bold]")
-        for idx, project_path in enumerate(valid_projects, 1):
-            console.print(f"{idx}. {project_path.name}")
-        
-        console.print("\n[dim]提示: 输入编号选择项目，输入 '0' 取消[/dim]")
-        
-        while True:
-            choice = Prompt.ask("请输入编号", default="0")
-            if choice == "0":
-                return
-            elif choice.isdigit():
-                idx = int(choice)
-                if 1 <= idx <= len(valid_projects):
-                    selected_project = valid_projects[idx-1]
-                    _change_to_project(selected_project, "项目切换成功")
-                    Prompt.ask("按回车键返回菜单...")
-                    return
-            console.print("[red]无效的选择，请重新输入[/red]")
+        Prompt.ask("按回车键返回菜单...")
 
     def get_command_line(self, params):
         return [] # Not used since we override execute
@@ -1215,26 +1254,42 @@ class TrainOnlineCommand(DonkeyCommand):
         return [] # Not used
 
 class DriveCommand(DonkeyCommand):
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         super().__init__("Drive", "打开 Web Console 驾驶控制台", "驾驶", is_favorite=True)
         self.options = []
+        # -v/--verbose 启动 TUI 时保留命令预览与执行确认；默认跳过、一键直接启动
+        self.verbose = verbose
 
     def execute(self):
         console.clear()
         console.print(Panel(f"[bold orange1]{self.description}[/bold orange1]", title=f"配置 {self.name}"))
 
         if not is_valid_mycar_folder():
-            # 未进入项目时：仅有一个有效项目则自动进入；否则仍允许打开 Web Console
-            projects = _find_valid_projects()
-            if len(projects) == 1:
-                console.print(f"[dim]当前目录不是 mycar 项目，仅发现一个有效项目: {projects[0].name}，自动打开。[/dim]")
-                if not _change_to_project(projects[0], "自动打开项目"):
-                    Prompt.ask("按回车键返回菜单...")
-                    return
-            else:
+            # 未进入项目时逐级回退：上次项目 -> 扫描 ~/projects -> 手动选择/输入；
+            # 全部失败才退化为仅打开 Web Console（此时不启动车辆进程）
+            console.print("[dim]当前目录不是有效的 mycar 项目文件夹，尝试自动进入项目...[/dim]")
+            opened = False
+            last_project = _get_last_project_path()
+            if last_project is not None:
+                opened = _change_to_project(last_project, "自动恢复上次项目")
+            if not opened:
+                projects = _find_valid_projects()
+                if len(projects) == 1:
+                    console.print(f"[dim]仅发现一个有效项目: {projects[0].name}，自动打开。[/dim]")
+                    opened = _change_to_project(projects[0], "自动打开项目")
+                elif projects:
+                    selected_project = _choose_project(projects)
+                    if selected_project is not None:
+                        opened = _change_to_project(selected_project, "项目切换成功")
+            if not opened:
+                selected_project = _prompt_project_path()
+                if selected_project is not None:
+                    opened = _change_to_project(selected_project, "项目切换成功")
+            if not opened:
                 console.print(Panel(
-                    "[yellow]当前目录不是有效的 mycar 项目文件夹。[/yellow]\n\n"
-                    "仍将打开 Web Console 驾驶控制台，但不会启动车辆进程（manage.py）。\n"
+                    "[yellow]未进入任何 mycar 项目。[/yellow]\n\n"
+                    "仍将打开 Web Console 驾驶控制台，但不会启动车辆进程（manage.py），"
+                    "驾驶页面将显示「车端离线」。\n"
                     "如需连接车辆，请先执行 [bold]open[/bold] 命令进入项目。",
                     title="提示",
                     border_style="yellow"
@@ -1242,6 +1297,7 @@ class DriveCommand(DonkeyCommand):
 
         current_params = {}
         car_path = Path.cwd()
+        has_car_process = _is_valid_project_dir(car_path)
 
         # issue #127：探测存活的 Web UI 实例，存活则复用、只起车进程
         inst = find_live_instance()
@@ -1257,45 +1313,58 @@ class DriveCommand(DonkeyCommand):
             # 无实例：用默认端口（不再从 8100 漂移），由 donkey web 自行登记实例
             backend_port = self.choose_available_backend_port(8000)
             web_cmd = self.get_command_line(current_params, backend_port=backend_port)
-        car_cmd = self.get_car_command_line()
+        car_cmd = self.get_car_command_line() if has_car_process else None
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
-        cmd_str = self.get_preview_command(web_cmd, car_cmd, drive_api_server_url)
+        # WebRTC 时延探针（docs/guide/real-car-webrtc-camera-test.md）：
+        # 帧上烧入捕获时间戳，供 scripts/webrtc_loop_probe.py 闭环实测；
+        # 画面左上角会出现可见时间戳，正常驾驶默认关闭。
+        # 不再交互提问，需要实测时在启动 TUI 前设 DRIVE_WEBRTC_LATENCY_PROBE=1
+        #（取值口径与 DriveApiBridge 的 env 解析一致）
+        probe = has_car_process and os.environ.get(
+            "DRIVE_WEBRTC_LATENCY_PROBE", "").strip() in ("1", "true", "True")
+        current_params["latency_probe"] = probe
+        cmd_str = self.get_preview_command(
+            web_cmd, car_cmd, drive_api_server_url, probe=probe)
 
-        console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
-        console.print("\n[bold yellow]命令预览:[/bold yellow]")
-        console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
+        # 默认一键直接启动（菜单选中即执行，仅保留必要交互）；
+        # -v/--verbose 才展示命令预览并要求确认，供排查/复用命令时使用
+        if self.verbose:
+            console.print("[dim]将启动 DonkeyDrift Web UI 的 Drive 标签页，并连接当前车辆项目。[/dim]")
+            console.print("\n[bold yellow]命令预览:[/bold yellow]")
+            console.print(Panel(f"[green]{cmd_str}[/green]", title="Drive Processes"))
 
-        console.print("([green]y[/green]:执行 [red]n[/red]:取消 [orange1]c[/orange1]:复制命令)")
-        action = Prompt.ask(
-            "请选择操作",
-            choices=["y", "n", "c", "copy"],
-            default="y",
-            show_choices=False
-        )
+            console.print("([green]y[/green]:执行 [red]n[/red]:取消 [orange1]c[/orange1]:复制命令)")
+            action = Prompt.ask(
+                "请选择操作",
+                choices=["y", "n", "c", "copy"],
+                default="y",
+                show_choices=False
+            )
 
-        if action == "copy":
-            import pyperclip
-            try:
-                pyperclip.copy(cmd_str)
-                console.print("[green]✓ 命令已复制到剪贴板[/green]")
-            except ImportError:
-                console.print("[red]✗ 未安装 pyperclip，无法复制。请手动复制上方命令。[/red]")
-            Prompt.ask("按回车键返回...")
-            return
+            if action == "copy":
+                import pyperclip
+                try:
+                    pyperclip.copy(cmd_str)
+                    console.print("[green]✓ 命令已复制到剪贴板[/green]")
+                except ImportError:
+                    console.print("[red]✗ 未安装 pyperclip，无法复制。请手动复制上方命令。[/red]")
+                Prompt.ask("按回车键返回...")
+                return
 
-        if action != "y":
-            console.print("[yellow]操作已取消[/yellow]")
-            time.sleep(1)
-            return
+            if action != "y":
+                console.print("[yellow]操作已取消[/yellow]")
+                time.sleep(1)
+                return
 
         self.history_mgr.update_last_params(self.name, current_params)
         self.history_mgr.add_command_log(cmd_str)
 
-        # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
-        kill_previous_car_processes()
-        # 接管模式：全量杀掉其它在跑的车进程（含别的链路启动的），确保本次
-        # drive 不被单实例守护拒绝、能正常运行
-        takeover_car_processes()
+        if has_car_process:
+            # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
+            kill_previous_car_processes()
+            # 接管模式：全量杀掉其它在跑的车进程（含别的链路启动的），确保本次
+            # drive 不被单实例守护拒绝、能正常运行
+            takeover_car_processes()
 
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")
@@ -1303,6 +1372,7 @@ class DriveCommand(DonkeyCommand):
         # 用户确认后重新探测（确认期间实例状态可能变化）
         inst = find_live_instance()
         processes = []
+        car_process = None
         try:
             creation_flags = self.get_creation_flags()
             # 将子进程的 stdin 重定向，避免它们干扰父进程终端（如修改回显、cbreak 等）
@@ -1321,29 +1391,34 @@ class DriveCommand(DonkeyCommand):
                 backend_port = inst["backend_port"]
                 frontend_port = inst["frontend_port"]
 
-            car_env = os.environ.copy()
-            car_env["DRIVE_API_SERVER_URL"] = \
-                self.get_drive_api_server_url(backend_port=backend_port)
-            # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口；
-            # 用局域网 IP，远程终端（DC/SSH）用户可直接点击（用户已显式设置时尊重其值）
-            #（DriveApiBridge 未设置时硬编码回落 5188）
-            car_env.setdefault(
-                "DRIVE_WEB_CONSOLE_URL", f"http://{_lan_host()}:{frontend_port}"
-            )
-            car_process = subprocess.Popen(
-                car_cmd,
-                cwd=car_path,
-                env=car_env,
-                stdin=subprocess.DEVNULL,
-                creationflags=creation_flags
-            )
-            processes.append(car_process)
+            if has_car_process:
+                car_env = os.environ.copy()
+                car_env["DRIVE_API_SERVER_URL"] = \
+                    self.get_drive_api_server_url(backend_port=backend_port)
+                # 探针开关由启动 TUI 前的 shell env 决定（见上方 probe 探测）；
+                # 显式归一化置 0/1，让车端子进程拿到的取值确定
+                car_env["DRIVE_WEBRTC_LATENCY_PROBE"] = "1" if probe else "0"
+                # 让 manage.py drive 打印的"请打开浏览器访问"提示指向真实前端端口；
+                # 用局域网 IP，远程终端（DC/SSH）用户可直接点击（用户已显式设置时尊重其值）
+                #（DriveApiBridge 未设置时硬编码回落 5188）
+                car_env.setdefault(
+                    "DRIVE_WEB_CONSOLE_URL", f"http://{_lan_host()}:{frontend_port}"
+                )
+                car_process = subprocess.Popen(
+                    car_cmd,
+                    cwd=car_path,
+                    env=car_env,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creation_flags
+                )
+                processes.append(car_process)
 
             # 记录本次启动的进程 PID，供下次启动时清理
             write_drive_pids([p.pid for p in processes])
 
-            # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开
-            drive_url = f"http://{_lan_host()}:{frontend_port}/#/drive"
+            # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开；
+            # 带 ?token= 过 P0 鉴权门（非回环来源一律要令牌，本机用 LAN IP 亦然）
+            drive_url = _drive_page_url(_lan_host(), frontend_port)
             if inst is not None:
                 # 复用实例不经过 `donkey web --open`，由 TUI 直接打开 Drive 页；
                 # 实例刚通过 find_live_instance() 探测，前端端口已在监听
@@ -1356,8 +1431,23 @@ class DriveCommand(DonkeyCommand):
                     f"\n[bold green]Drive 页面: {drive_url}[/bold green] "
                     "[dim]（远程终端请在自己的浏览器打开此地址）[/dim]"
                 )
+            if probe:
+                repo_root = Path(__file__).resolve().parents[2]
+                console.print(
+                    "\n[bold cyan]时延探针已开启[/bold cyan] "
+                    "[dim]（画面含时间戳印章；探针会接管浏览器视频会话，页面自动降级 MJPEG 属预期）。"
+                    "另开终端实测端到端时延:[/dim]\n"
+                    f"[green]{sys.executable} {repo_root / 'scripts' / 'webrtc_loop_probe.py'} "
+                    f"--backend http://127.0.0.1:{backend_port} --duration 10 "
+                    "--gate-fps 58 --gate-latency-ms 60[/green]"
+                )
 
-            self.monitor_processes(web_process, car_process)
+            if web_process is None and car_process is None:
+                # 复用运行中的实例且未进入项目：没有需要守护的进程，直接返回
+                console.print(
+                    "[yellow]未启动任何新进程（复用运行中的 Web UI 且未进入 mycar 项目）。[/yellow]")
+            else:
+                self.monitor_processes(web_process, car_process)
             console.print(f"\n[bold green]✓ 执行结束[/bold green]")
         except KeyboardInterrupt:
             console.print("\n[yellow]收到中断信号，正在停止...[/yellow]")
@@ -1390,7 +1480,6 @@ class DriveCommand(DonkeyCommand):
         port = preferred_port
         while port < preferred_port + 100:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
                     sock.bind(("0.0.0.0", port))
                     return port
@@ -1409,17 +1498,21 @@ class DriveCommand(DonkeyCommand):
 
         return f"ws://localhost:{backend_port}/api/drive/ws"
 
-    def get_preview_command(self, web_cmd, car_cmd, drive_api_server_url=None):
-        car_prefix = f"DRIVE_API_SERVER_URL={drive_api_server_url or self.get_drive_api_server_url()}"
-        web_section = (
-            "Web Console（复用已有实例，不重复启动）"
-            if web_cmd is None
-            else "Web Console:\n" + " ".join(web_cmd)
-        )
-        return "\n\n".join([
-            web_section,
-            "车辆进程:\n" + " ".join([car_prefix] + car_cmd),
-        ])
+    def get_preview_command(self, web_cmd, car_cmd, drive_api_server_url=None,
+                            probe=False):
+        sections = []
+        if web_cmd is None:
+            sections.append("Web Console（复用已有实例，不重复启动）")
+        else:
+            sections.append("Web Console:\n" + " ".join(web_cmd))
+        if car_cmd is not None:
+            prefixes = [
+                f"DRIVE_API_SERVER_URL={drive_api_server_url or self.get_drive_api_server_url()}",
+            ]
+            if probe:
+                prefixes.append("DRIVE_WEBRTC_LATENCY_PROBE=1")
+            sections.append("车辆进程:\n" + " ".join(prefixes + car_cmd))
+        return "\n\n".join(sections)
 
     def get_creation_flags(self):
         if sys.platform == "win32":
@@ -1482,7 +1575,8 @@ class DriveCommand(DonkeyCommand):
                     self.stop_processes([web_process, car_process])
                     return
 
-                if not car_exit_reported and car_process.poll() is not None:
+                if (not car_exit_reported and car_process is not None
+                        and car_process.poll() is not None):
                     car_exit_code = car_process.returncode
                     if car_exit_code:
                         console.print(
@@ -1556,11 +1650,12 @@ class WebUICommand(DonkeyCommand):
 # 菜单系统
 # -----------------------------------------------------------------------------
 class MenuSystem:
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
         self.commands: Dict[str, List[DonkeyCommand]] = {
             "管理": [CreateCarCommand(), OpenProjectCommand()],
             "数据": [ClearDataCommand(), BackupDataCommand(), RestoreDataCommand()],
-            "驾驶": [DriveCommand(), DrifterConsoleCommand()],
+            "驾驶": [DriveCommand(verbose=verbose), DrifterConsoleCommand()],
             "筛选": [WebUICommand(), DonkeyUICommand()],
             "训练": [TrainLocalCommand(), TrainOnlineCommand()],
         }
@@ -1599,6 +1694,9 @@ class MenuSystem:
 
             console.print(table)
             console.print("[dim]提示: 输入编号选择功能，输入 '?' 显示帮助，输入 '0' 退出[/dim]")
+            if self.verbose:
+                console.print(
+                    "[dim]详细模式(-v)：Drive 启动前显示命令预览并需确认[/dim]")
 
             choice = Prompt.ask("\n请选择", default="0")
 
@@ -1636,10 +1734,12 @@ class MenuSystem:
 - **参数输入**: 进入功能后，根据提示输入参数。[]内为默认值，直接回车即可使用。
 - **常用功能**: 带 `*` 标记的为常用功能。
 - **历史记录**: 您的输入会被自动记录，下次使用时作为默认值。
+- **一键启动**: Drive 默认选中即直接启动；以 `donkey tui -v` 启动可恢复
+  命令预览与执行确认。
 
 ## 常见问题
 - 如果 `donkey` 命令未找到，请确保已激活 conda 环境。
-- 只有在确认页面输入 `y` 才会真正执行命令。
+- 除 Drive 一键启动外，只有在确认页面输入 `y` 才会真正执行命令。
         """)
         console.print(Panel(md, title="帮助说明", border_style="green"))
         Prompt.ask("按回车键返回...")
@@ -1647,10 +1747,10 @@ class MenuSystem:
 # -----------------------------------------------------------------------------
 # 入口
 # -----------------------------------------------------------------------------
-def main():
+def main(verbose: bool = False):
     try:
         _auto_open_project()
-        app = MenuSystem()
+        app = MenuSystem(verbose=verbose)
         app.show_main_menu()
     except KeyboardInterrupt:
         _restore_terminal()

@@ -309,3 +309,31 @@ describe('DriftCard i18n', () => {
     expect(document.body.textContent ?? '').not.toMatch(/[\u4e00-\u9fff]/);
   });
 });
+
+describe('DriftCard 窄屏布局', () => {
+  it('模式控制行允许换行：按钮不被挤压成竖排或溢出卡片', async () => {
+    renderCard();
+    await screen.findByText('标定');
+
+    const row = screen.getByText('自动漂移').closest('div');
+    expect(row?.className).toContain('flex-wrap');
+  });
+
+  it('相机接入表单窄屏降为 2 列、sm 起恢复单行六列', async () => {
+    renderCard();
+    await screen.findByText('启动相机');
+
+    const grid = screen.getByText('相机 index').closest('div.grid');
+    expect(grid?.className).toContain('grid-cols-2');
+    expect(grid?.className).toContain('sm:grid-cols-[1fr_1fr_1fr_1fr_2fr_auto]');
+  });
+
+  it('实时状态窄屏降为 3 列、sm 起恢复 6 列：标签不再多行挤压', async () => {
+    renderCard();
+    await screen.findByText('遥测/已录帧');
+
+    const grid = screen.getByText('遥测/已录帧').closest('div.grid');
+    expect(grid?.className).toContain('grid-cols-3');
+    expect(grid?.className).toContain('sm:grid-cols-6');
+  });
+});

@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+import auth as web_auth
 from drift_engine import drift_engine
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,11 @@ class DriveState:
         # 心跳
         self.car_last_seen: Optional[datetime] = None
 
+        # 车端上报的模拟器连接状态（遥测 sim_connected 字段）。
+        # 恢复 worker 据此判断是否真的需要重连，避免把健康连接杀掉。
+        self.car_sim_connected: Optional[bool] = None
+        self.car_sim_seen_at: float = 0.0
+
         # 车端槽位易主记录：新车端连接顶掉旧连接时打点，
         # 短窗口内多次易主 = 多个 drive 进程互踢的连接风暴指纹
         self.car_takeover_times = deque(maxlen=64)
@@ -57,6 +63,8 @@ class DriveState:
         self.webrtc_session: Optional[dict] = None
         self.webrtc_stats = {
             "source_fps": 0.0,
+            "arrival_gap_p50_ms": None,
+            "arrival_gap_p95_ms": None,
             "sent_fps": 0.0,
             "browser_fps": 0.0,
             "browser_p95_frame_interval_ms": 0.0,
@@ -66,10 +74,12 @@ class DriveState:
             "jitter_buffer_delay_ms": 0.0,
             "disconnect_count": 0,
             "stale_frames": 0,
+            "pts_bumps": 0,
             "peer_connection_state": None,
             "ice_connection_state": None,
             "ice_gathering_state": None,
             "local_description_error": None,
+            "answer_error": None,
             "local_description_elapsed_ms": None,
             "answer_sent_elapsed_ms": None,
             "local_candidates_sent": 0,
@@ -78,6 +88,18 @@ class DriveState:
             "last_answer_at": None,
             "last_client_ice_at": None,
             "last_car_ice_at": None,
+            "clock_offset_ms": None,
+            "clock_rtt_ms": None,
+            "e2e_latency_p50_ms": 0.0,
+            "e2e_latency_p95_ms": 0.0,
+            "e2e_latency_max_ms": 0.0,
+            "e2e_samples": 0,
+            "e2e_present_p50_ms": 0.0,
+            "e2e_present_p95_ms": 0.0,
+            "e2e_display_p50_ms": 0.0,
+            "e2e_display_p95_ms": 0.0,
+            "callback_late_p95_ms": 0.0,
+            "vsync_quantum_p95_ms": 0.0,
             "degraded": False,
         }
 
@@ -109,6 +131,24 @@ class DriveState:
         self.sim_recovery_interval: float = float(
             os.environ.get("SIM_RECOVERY_INTERVAL", "5.0")
         )
+
+    def note_telemetry_sim_state(self, msg: dict) -> None:
+        """从车端遥测消息提取模拟器连接状态。"""
+        if msg.get("sim_connected") is not None:
+            self.car_sim_connected = bool(msg["sim_connected"])
+            self.car_sim_seen_at = time.time()
+
+    def should_skip_sim_recovery(self) -> bool:
+        """恢复 worker 是否应跳过本轮重连：模拟器确认在线且状态新鲜。
+
+        遥测丢失超过 3 个恢复周期视为状态过期，回到「未知」档照常发
+        重连命令——此时车端可能已换进程，旧状态不可信。
+        """
+        fresh = (
+            self.car_sim_connected is not None
+            and time.time() - self.car_sim_seen_at < self.sim_recovery_interval * 3
+        )
+        return bool(fresh and self.car_sim_connected)
 
     async def broadcast_to_clients(self, data: dict):
         """向所有已连接的客户端广播消息，失败时关闭并清理失效连接。"""
@@ -150,7 +190,12 @@ class DriveState:
             return False
 
     async def _sim_recovery_worker(self):
-        """周期性向车端发送重连模拟器请求。"""
+        """周期性向车端发送重连模拟器请求。
+
+        仅在车端遥测确认模拟器离线（或状态未知且已过期）时才发送：
+        重连命令会让车端重建模拟器连接，健康连接被反复杀掉曾导致
+        车端永久掉线（dgym update 线程卡死在 observe() 自旋后不再自愈）。
+        """
         while True:
             try:
                 await asyncio.sleep(self.sim_recovery_interval)
@@ -159,6 +204,11 @@ class DriveState:
 
             if self.car_ws is None:
                 logger.debug("恢复任务：车端不在线，跳过本次重连")
+                continue
+
+            # 遥测确认模拟器已连接（且信息新鲜）时跳过本次重连
+            if self.should_skip_sim_recovery():
+                logger.debug("恢复任务：模拟器已连接，跳过本次重连")
                 continue
 
             try:
@@ -210,15 +260,32 @@ class DriveState:
             return
         for key in (
             "source_fps",
+            "arrival_gap_p50_ms",
+            "arrival_gap_p95_ms",
+            "push_total",
+            "push_dedup_skipped",
+            "push_appended",
+            "past_dedup1",
+            "past_resize",
+            "recent_gaps_ms",
+            "ts_tail_age_ms",
+            "deque_len",
+            "deque_span_ms",
+            "deque_tail3",
+            "send_loop",
             "sent_fps",
             "stale_frames",
+            "pts_bumps",
             "peer_connection_state",
             "ice_connection_state",
             "ice_gathering_state",
             "local_description_error",
+            "answer_error",
             "local_description_elapsed_ms",
             "answer_sent_elapsed_ms",
             "local_candidates_sent",
+            "clock_offset_ms",
+            "clock_rtt_ms",
         ):
             if key in data:
                 self.webrtc_stats[key] = data[key]
@@ -266,6 +333,20 @@ class WebRtcBrowserStatsRequest(BaseModel):
     frames_dropped: Optional[int] = None
     jitter_ms: Optional[float] = None
     jitter_buffer_delay_ms: Optional[float] = None
+    # 真实端到端时延（rVFC captureTime → expectedDisplayTime，浏览器本地钟差自洽）
+    e2e_latency_p50_ms: Optional[float] = None
+    e2e_latency_p95_ms: Optional[float] = None
+    e2e_samples: Optional[int] = None
+    # 诊断口径：同一印章样本在三个时间锚点上的时延拆解，定位尾部来源
+    # （now=回调执行时刻；present=合成提交时刻；display=预期可见时刻）
+    e2e_latency_max_ms: Optional[float] = None
+    e2e_present_p50_ms: Optional[float] = None
+    e2e_present_p95_ms: Optional[float] = None
+    e2e_display_p50_ms: Optional[float] = None
+    e2e_display_p95_ms: Optional[float] = None
+    # 回调迟滞（rVFC 回调执行 − 合成提交）与合成→可见 vsync 量子的 p95
+    callback_late_p95_ms: Optional[float] = None
+    vsync_quantum_p95_ms: Optional[float] = None
 
 
 # ------------------------------------------------------------------
@@ -460,6 +541,22 @@ async def load_model(request: LoadModelRequest):
     }
 
 
+@router.post("/reset_car")
+async def reset_car():
+    """就近复位模拟器小车：转发 reset_car 命令给车端（dgym 发 reset_to_nearest）。
+
+    复位是人工兜底指令，fire-and-forget 下发（与自动恢复的重连命令同级，
+    无需 ACK）。车端离线返回 503，前端据此置灰按钮并提示。
+    """
+    if not drive_state.car_online():
+        raise HTTPException(status_code=503, detail="车端未连接")
+
+    sent = await drive_state.send_to_car({"type": "reset_car"})
+    if not sent:
+        raise HTTPException(status_code=502, detail="指令下发失败")
+    return {"success": True}
+
+
 # ------------------------------------------------------------------
 # WebRTC 信令接口
 # ------------------------------------------------------------------
@@ -489,10 +586,12 @@ async def create_webrtc_session(request: WebRtcSessionRequest):
         "browser_p95_frame_interval_ms": 0.0,
         "disconnect_count": 0,
         "stale_frames": 0,
+        "pts_bumps": 0,
         "peer_connection_state": None,
         "ice_connection_state": None,
         "ice_gathering_state": None,
         "local_description_error": None,
+        "answer_error": None,
         "local_description_elapsed_ms": None,
         "answer_sent_elapsed_ms": None,
         "local_candidates_sent": 0,
@@ -501,6 +600,18 @@ async def create_webrtc_session(request: WebRtcSessionRequest):
         "last_answer_at": None,
         "last_client_ice_at": None,
         "last_car_ice_at": None,
+        "clock_offset_ms": None,
+        "clock_rtt_ms": None,
+        "e2e_latency_p50_ms": 0.0,
+        "e2e_latency_p95_ms": 0.0,
+        "e2e_latency_max_ms": 0.0,
+        "e2e_samples": 0,
+        "e2e_present_p50_ms": 0.0,
+        "e2e_present_p95_ms": 0.0,
+        "e2e_display_p50_ms": 0.0,
+        "e2e_display_p95_ms": 0.0,
+        "callback_late_p95_ms": 0.0,
+        "vsync_quantum_p95_ms": 0.0,
         "degraded": False,
     })
     return {"success": True, "session_id": session_id, "single_client": True}
@@ -570,11 +681,21 @@ async def update_webrtc_browser_stats(request: WebRtcBrowserStatsRequest):
     _require_webrtc_session(request.session_id)
     drive_state.webrtc_stats["browser_fps"] = request.browser_fps
     drive_state.webrtc_stats["browser_p95_frame_interval_ms"] = request.browser_p95_frame_interval_ms
-    for key in ("inbound_fps", "frames_dropped", "jitter_ms", "jitter_buffer_delay_ms"):
+    for key in ("inbound_fps", "frames_dropped", "jitter_ms", "jitter_buffer_delay_ms",
+                "e2e_latency_p50_ms", "e2e_latency_p95_ms", "e2e_samples",
+                "e2e_latency_max_ms", "e2e_present_p50_ms", "e2e_present_p95_ms",
+                "e2e_display_p50_ms", "e2e_display_p95_ms",
+                "callback_late_p95_ms", "vsync_quantum_p95_ms"):
         value = getattr(request, key)
         if value is not None:
             drive_state.webrtc_stats[key] = value
     return {"success": True}
+
+
+@router.get("/time")
+async def server_time():
+    """时钟同步基准：车端/探针 NTP 式采样本端点估算时钟偏移。"""
+    return {"server_time": time.time()}
 
 
 @router.get("/webrtc/stats")
@@ -586,10 +707,24 @@ async def webrtc_stats():
         "session_id": session.get("session_id") if session else None,
         "webrtc_available": True,
         "source_fps": drive_state.webrtc_stats["source_fps"],
+        "arrival_gap_p50_ms": drive_state.webrtc_stats.get("arrival_gap_p50_ms"),
+        "arrival_gap_p95_ms": drive_state.webrtc_stats.get("arrival_gap_p95_ms"),
+        "send_loop": drive_state.webrtc_stats.get("send_loop"),
+        "push_total": drive_state.webrtc_stats.get("push_total"),
+        "push_dedup_skipped": drive_state.webrtc_stats.get("push_dedup_skipped"),
+        "push_appended": drive_state.webrtc_stats.get("push_appended"),
+        "past_dedup1": drive_state.webrtc_stats.get("past_dedup1"),
+        "past_resize": drive_state.webrtc_stats.get("past_resize"),
+        "recent_gaps_ms": drive_state.webrtc_stats.get("recent_gaps_ms"),
+        "ts_tail_age_ms": drive_state.webrtc_stats.get("ts_tail_age_ms"),
+        "deque_len": drive_state.webrtc_stats.get("deque_len"),
+        "deque_span_ms": drive_state.webrtc_stats.get("deque_span_ms"),
+        "deque_tail3": drive_state.webrtc_stats.get("deque_tail3"),
         "sent_fps": drive_state.webrtc_stats["sent_fps"],
         "browser_fps": drive_state.webrtc_stats["browser_fps"],
         "browser_p95_frame_interval_ms": drive_state.webrtc_stats["browser_p95_frame_interval_ms"],
         "inbound_fps": drive_state.webrtc_stats["inbound_fps"],
+        "render_fps_gap": (drive_state.webrtc_stats["inbound_fps"] or 0) - (drive_state.webrtc_stats["browser_fps"] or 0),
         "frames_dropped": drive_state.webrtc_stats["frames_dropped"],
         "jitter_ms": drive_state.webrtc_stats["jitter_ms"],
         "jitter_buffer_delay_ms": drive_state.webrtc_stats["jitter_buffer_delay_ms"],
@@ -599,6 +734,7 @@ async def webrtc_stats():
         "ice_connection_state": drive_state.webrtc_stats["ice_connection_state"],
         "ice_gathering_state": drive_state.webrtc_stats["ice_gathering_state"],
         "local_description_error": drive_state.webrtc_stats["local_description_error"],
+        "answer_error": drive_state.webrtc_stats["answer_error"],
         "local_description_elapsed_ms": drive_state.webrtc_stats["local_description_elapsed_ms"],
         "answer_sent_elapsed_ms": drive_state.webrtc_stats["answer_sent_elapsed_ms"],
         "local_candidates_sent": drive_state.webrtc_stats["local_candidates_sent"],
@@ -607,6 +743,19 @@ async def webrtc_stats():
         "last_answer_at": drive_state.webrtc_stats["last_answer_at"],
         "last_client_ice_at": drive_state.webrtc_stats["last_client_ice_at"],
         "last_car_ice_at": drive_state.webrtc_stats["last_car_ice_at"],
+        "clock_offset_ms": drive_state.webrtc_stats["clock_offset_ms"],
+        "clock_rtt_ms": drive_state.webrtc_stats["clock_rtt_ms"],
+        "pts_bumps": drive_state.webrtc_stats["pts_bumps"],
+        "e2e_latency_p50_ms": drive_state.webrtc_stats["e2e_latency_p50_ms"],
+        "e2e_latency_p95_ms": drive_state.webrtc_stats["e2e_latency_p95_ms"],
+        "e2e_latency_max_ms": drive_state.webrtc_stats["e2e_latency_max_ms"],
+        "e2e_samples": drive_state.webrtc_stats["e2e_samples"],
+        "e2e_present_p50_ms": drive_state.webrtc_stats["e2e_present_p50_ms"],
+        "e2e_present_p95_ms": drive_state.webrtc_stats["e2e_present_p95_ms"],
+        "e2e_display_p50_ms": drive_state.webrtc_stats["e2e_display_p50_ms"],
+        "e2e_display_p95_ms": drive_state.webrtc_stats["e2e_display_p95_ms"],
+        "callback_late_p95_ms": drive_state.webrtc_stats["callback_late_p95_ms"],
+        "vsync_quantum_p95_ms": drive_state.webrtc_stats["vsync_quantum_p95_ms"],
         "transport": "webrtc",
         "degraded": drive_state.webrtc_stats["degraded"],
     }
@@ -621,6 +770,19 @@ async def drive_ws(
     role: str = Query("client", description="连接角色: car 或 client"),
     client_id: Optional[str] = Query(None, description="浏览器客户端标识"),
 ):
+    # P0 鉴权门（Starlette HTTP 中间件不覆盖 WS 握手）：非回环客户端须
+    # 携带令牌（?token= / Cookie / Bearer / X-Donkey-Token），判定与
+    # auth.py 一致；拒绝时 close 先于 accept，握手被 ASGI 服务器判 403。
+    # 只对真实网络连接设门：ASGI scope["client"] 由服务器传输层填写
+    # （(host, port) 元组，unix socket 为 None），外部不可伪造；其余形态
+    # 是进程内直调的测试替身，无网络对端，直接放行。
+    client = websocket.client
+    if isinstance(client, (tuple, list)) or client is None:
+        query = dict(websocket.query_params)
+        if not web_auth.is_authorized(websocket.headers, query, client):
+            await websocket.close(code=1008)
+            return
+
     await websocket.accept()
 
     if role == "car":
@@ -674,6 +836,7 @@ async def drive_ws(
 
                 # 车端遥测曲线数据，原样广播给所有客户端（车端已按 100Hz 节流）
                 if msg.get("type") == "telemetry":
+                    drive_state.note_telemetry_sim_state(msg)
                     for hook in list(drive_state.telemetry_hooks):
                         try:
                             hook(msg)
@@ -730,6 +893,9 @@ async def drive_ws(
             # 页面表现为「车端在线却始终无画面」（线上复现过）。
             if drive_state.car_ws is websocket:
                 drive_state.car_ws = None
+                # 模拟器状态随车端失效，恢复 worker 回到「状态未知」档
+                drive_state.car_sim_connected = None
+                drive_state.car_sim_seen_at = 0.0
                 await drive_state.broadcast_to_clients({
                     "type": "car_connection",
                     "online": False,

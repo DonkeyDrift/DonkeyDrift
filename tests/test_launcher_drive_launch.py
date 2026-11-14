@@ -55,6 +55,17 @@ def _reset_processes():
     })
 
 
+@pytest.fixture(autouse=True)
+def _drive_web_token():
+    """隔离真实 ~/.donkeycar/drive_api.token：默认无令牌，URL 断言稳定。
+
+    需要令牌场景的用例把 stub 的 return_value 设成测试令牌即可。
+    """
+    stub = mock.Mock(return_value="")
+    with mock.patch.object(launcher_server, "_drive_web_token", stub):
+        yield stub
+
+
 # ===========================================================================
 # _wait_for_web_ready
 # ===========================================================================
@@ -197,6 +208,41 @@ class TestLaunchDrive:
         # 就绪等待发生在 web Popen 之后（顺序由 wait 桩记录的先后保证）
         wait.assert_called_once()
         kill.assert_called_once()
+
+    def test_cold_start_passes_token_and_external_bind(
+            self, _drive_web_token):
+        """P0 安全补强：有令牌时跳转 URL 在 #/drive 前带 ?token=（后端
+        鉴权门放行），新起 web 显式 --backend-host 0.0.0.0（实车远程
+        访问的显式 opt-in，鉴权由令牌兜底）。"""
+        _drive_web_token.return_value = "tok-xyz"
+        procs = [_FakeProc(), _FakeProc()]
+        patches = self._patch_common(inst=None, ready=(5189, 8001, None))
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: procs.pop(0),
+        ) as popen:
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"], patches["model"]:
+                result = launcher_server._launch_drive()
+        # token 必须在 # 之前——fragment 不进 HTTP 请求，服务器看不到
+        assert result["url"] == \
+            "http://localhost:5189/?token=tok-xyz#/drive"
+        web_cmd = popen.call_args_list[0].args[0]
+        assert web_cmd[web_cmd.index("--backend-host") + 1] == "0.0.0.0"
+
+    def test_cold_start_without_token_keeps_clean_url(self, _drive_web_token):
+        """取不到令牌（后端鉴权关闭）：URL 不带 ?token=，保持干净跳转。"""
+        _drive_web_token.return_value = ""
+        procs = [_FakeProc(), _FakeProc()]
+        patches = self._patch_common(inst=None, ready=(5189, 8001, None))
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: procs.pop(0),
+        ):
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"], patches["model"]:
+                result = launcher_server._launch_drive()
+        assert result["url"] == "http://localhost:5189/#/drive"
 
     def test_cold_start_ready_timeout_still_launches_with_warning(self):
         """就绪等待超时：不报 error，照常 launched 并透出 warning。"""

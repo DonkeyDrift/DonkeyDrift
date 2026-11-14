@@ -4,7 +4,8 @@ DonkeyGymEnv 渲染分辨率与 NN 输入分辨率解耦的单测。
 验证：设置 render_img_w/render_img_h 后，向模拟器请求更高渲染分辨率，
 dgym 内部把渲染帧下采样回 img_w×img_h 作为 cam/image_array（NN 输入），
 并把渲染原始帧作为 preview/image_array；未设置 render 键时缺省按
-1920×1080 全高清渲染（Drive 页面用户看到的必须是最高画质）。
+640×480 渲染（与 Drive 预览编码分辨率上限对齐——实测模拟器遥测节拍
+固定 20fps 与渲染分辨率无关，更高渲染只多耗 CPU/编解码时延）。
 """
 import numpy as np
 import pytest
@@ -39,18 +40,6 @@ class FakeLowResEnv:
         pass
 
 
-class FakeFullHdEnv:
-    """返回 1080×1920 全高清渲染帧的假模拟器环境。"""
-    def reset(self):
-        return np.zeros((1080, 1920, 3), dtype=np.uint8), {}
-
-    def step(self, action):
-        return np.zeros((1080, 1920, 3), dtype=np.uint8), 0.0, False, False, {}
-
-    def close(self):
-        pass
-
-
 def test_requests_render_resolution_from_simulator():
     captured = {}
 
@@ -80,23 +69,23 @@ def test_downsample_nn_input_and_keep_preview_resolution():
     assert env.preview_frame.shape == (480, 640, 3)  # 预览帧（preview/image_array）
 
 
-def test_no_render_keys_defaults_to_fullhd_render():
+def test_no_render_keys_defaults_to_preview_cap_render():
     captured = {}
 
     def fake_make(env_name, conf=None):
         captured.update(conf or {})
-        return FakeFullHdEnv()
+        return FakeHighResEnv()
 
     with patch("donkeycar.parts.dgym.gym.make", side_effect=fake_make):
         env = DonkeyGymEnv(sim_path="remote", conf={"img_h": 120, "img_w": 160})
 
-    # 未设置 render_img_w/h：缺省按 1920×1080 全高清渲染（Drive 页必须最高画质），
-    # NN 输入仍下采样回 img_w×img_h
-    assert captured["img_w"] == 1920
-    assert captured["img_h"] == 1080
-    assert captured["cam_resolution"] == (1080, 1920, 3)
+    # 未设置 render_img_w/h：缺省按 640×480 渲染（与 Drive 预览编码分辨率上限
+    # 对齐；实测模拟器节拍固定 20fps 与分辨率无关），NN 输入仍下采样回 img_w×img_h
+    assert captured["img_w"] == 640
+    assert captured["img_h"] == 480
+    assert captured["cam_resolution"] == (480, 640, 3)
     assert env.frame.shape == (120, 160, 3)
-    assert env.preview_frame.shape == (1080, 1920, 3)
+    assert env.preview_frame.shape == (480, 640, 3)
 
 
 def test_run_threaded_outputs_preview_when_enabled():

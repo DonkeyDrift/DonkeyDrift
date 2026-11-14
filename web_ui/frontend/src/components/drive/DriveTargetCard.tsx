@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Crosshair, Loader2, RotateCcw, Wifi, WifiOff } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '../ui/Card';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -36,12 +35,15 @@ interface Notice {
 }
 
 /**
- * 「驾驶目标」卡片：展示当前驾驶目标（真车/模拟器）与车端在线状态，
+ * 「驾驶目标」连接器条：展示当前驾驶目标（真车/模拟器）与车端在线状态，
  * 分段按钮切换目标——本质是改 myconfig.py 的 DONKEY_GYM（切模拟器时
  * 保留/发现 SIM_HOST），保存后需重启本机 manage.py drive 进程生效，
  * 重启走 launcher 的 /api/launch/drive（先杀旧进程再起新的、重读配置）。
  *
- * 模拟器目标（target === 'sim'）时，卡片内以 border-t 展开内嵌模拟器选择区
+ * 扁平化设计：不再使用带头尾的厚重卡片，所有元素排在同一 flex 行内，
+ * 宽度足够时单行展示、空间不足时 flex-wrap 折行；副标题悬停展开不占行宽。
+ *
+ * 模拟器目标（target === 'sim'）时，工具条下方以 border-t 展开内嵌选择区
  * （替代原 Connectors 抽屉的 SimulatorConfig）：进入即自动扫描局域网模拟器、
  * 点选 IP 或手动输入即自动保存，全程无「发现/保存」按钮。
  */
@@ -233,32 +235,33 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
   }, [t]);
 
   return (
-    <Card>
-      <CardHeader>
+    /* 扁平工具条：宽屏单行（flex-wrap 仅在空间不足时折行） */
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {/* 标题：图标 + 文案，副标题悬停展开（不占行宽） */}
         <SectionCardTitle
-          icon={<Crosshair className="w-5 h-5" />}
+          icon={<Crosshair className="w-4 h-4 text-cyan-400" />}
           title={t('drive.targetTitle')}
           subtitle={t('drive.targetSubtitle')}
         />
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* 状态行：当前目标 + 车端在线状态点 + 模拟器离线重连徽标 */}
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+
+        {/* 当前目标 + 车端在线状态点 + 模拟器离线重连徽标（原状态行扁平并入一行） */}
+        <span className="inline-flex items-center gap-1.5 text-sm">
           <span className="text-zinc-400">{t('drive.targetCurrent')}</span>
           <span className="text-zinc-100 font-medium">{targetLabel}</span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
-            <span
-              className={`w-2 h-2 rounded-full ${carOnline ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-            />
-            {carOnline ? t('drive.targetCarOnline') : t('drive.targetCarOffline')}
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+          <span
+            className={`w-2 h-2 rounded-full ${carOnline ? 'bg-emerald-400' : 'bg-zinc-600'}`}
+          />
+          {carOnline ? t('drive.targetCarOnline') : t('drive.targetCarOffline')}
+        </span>
+        {simConnected === false && (
+          <span className="inline-flex items-center gap-1 text-amber-400 text-xs font-medium whitespace-nowrap">
+            <WifiOff className="w-3.5 h-3.5" aria-hidden />
+            {t('drive.simOfflineReconnecting')}
           </span>
-          {simConnected === false && (
-            <span className="inline-flex items-center gap-1 text-amber-400 text-xs font-medium whitespace-nowrap">
-              <WifiOff className="w-3.5 h-3.5" aria-hidden />
-              {t('drive.simOfflineReconnecting')}
-            </span>
-          )}
-        </div>
+        )}
 
         {/* 分段切换：真车 | 模拟器（当前目标高亮） */}
         <div
@@ -272,7 +275,7 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
               type="button"
               onClick={() => void handleSelect(option)}
               disabled={saving}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                 target === option
                   ? 'bg-cyan-600 text-white'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
@@ -285,27 +288,27 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
 
         {/* 已保存待重启：琥珀提示（样式对齐 DrivePage 的 modelRestartRequired 徽章）+ 重启主按钮 */}
         {pendingRestart && (
-          <div className="flex flex-wrap items-center gap-2">
+          <>
             <span
-              className="inline-flex items-center px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
+              className="inline-flex items-center px-3 py-1 rounded-lg border border-amber-500/30 bg-amber-500/20 text-amber-400 text-xs font-medium whitespace-nowrap"
               role="status"
             >
               {t('drive.targetSavedNeedRestart')}
             </span>
-            <Button size="sm" onClick={() => void handleRestart()} disabled={restarting}>
+            <Button size="sm" className="px-3 py-1 text-xs" onClick={() => void handleRestart()} disabled={restarting}>
               {restarting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3.5 h-3.5" />
               )}
               {t('drive.targetRestartButton')}
             </Button>
-          </div>
+          </>
         )}
 
         {/* 行内提示：保存/重启结果（成功绿、失败红） */}
         {notice && (
-          <div
+          <span
             className={`text-xs leading-relaxed ${
               notice.type === 'success'
                 ? 'text-emerald-400'
@@ -316,88 +319,88 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
             role="status"
           >
             {notice.message}
-          </div>
+          </span>
         )}
 
         {/* 重启失败降级指引：打开 Donkey 菜单手动启动驾驶 */}
         {restartFailed && (
           <Link
             to="/donkey"
-            className="inline-block text-xs text-cyan-400 hover:text-cyan-300 underline"
+            className="text-xs text-cyan-400 hover:text-cyan-300 underline"
           >
             {t('drive.targetRestartFallbackLink')}
           </Link>
         )}
+      </div>
 
-        {/* 模拟器选择区：仅 sim 目标展开（border-t 分隔）——进入即自动扫描、
-            点选 IP 或手动输入即自动保存，无发现/保存按钮（替代原 Connectors 抽屉） */}
-        {target === 'sim' && (
-          <div className="border-t border-zinc-800 pt-3 space-y-2">
-            {/* 扫描中：spinner + 文案 */}
-            {scanState === 'scanning' && (
-              <div className="flex items-center gap-2 text-xs text-zinc-400" role="status">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
-                {t('drive.simScanning')}
-              </div>
-            )}
-
-            {/* 扫描完成：发现列表（样式对齐原 SimulatorConfig，当前已选项高亮）或未发现提示 */}
-            {scanState === 'done' &&
-              (foundHosts.length > 0 ? (
-                <div className="space-y-1.5">
-                  <p className="text-xs text-zinc-400">{t('drive.simFoundTitle')}</p>
-                  <div className="max-h-40 overflow-y-auto space-y-1.5">
-                    {foundHosts.map((host) => (
-                      <button
-                        key={`${host.ip}:${host.port}`}
-                        type="button"
-                        onClick={() => handlePickHost(host)}
-                        disabled={saving}
-                        className={`w-full flex items-center justify-between rounded-md border px-3 py-2 text-left transition-colors ${
-                          currentSimHost === host.ip
-                            ? 'border-cyan-500/50 bg-cyan-950/30'
-                            : 'border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800'
-                        } ${saving ? 'cursor-not-allowed' : ''}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Wifi className="w-4 h-4 text-emerald-400" aria-hidden />
-                          <span className="text-sm text-zinc-100 font-mono">
-                            {host.ip}:{host.port}
-                          </span>
-                        </div>
-                        <span className="text-xs text-zinc-400">{host.latency_ms}ms</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-zinc-500">
-                  <WifiOff className="w-3.5 h-3.5" aria-hidden />
-                  <span>{t('drive.simNotFoundHint')}</span>
-                </div>
-              ))}
-
-            {/* SIM_HOST 手动输入兜底：自动发现失败时可手填，失焦或回车自动保存 */}
-            <div className="flex items-center gap-2">
-              <label htmlFor="drive-sim-host" className="text-xs text-zinc-400 whitespace-nowrap">
-                {t('drive.simHostLabel')}
-              </label>
-              <Input
-                id="drive-sim-host"
-                value={simHostInput}
-                onChange={(e) => setSimHostInput(e.target.value)}
-                onBlur={commitSimHostInput}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitSimHostInput();
-                }}
-                placeholder={t('drive.simHostPlaceholder')}
-                className="h-7 w-44 px-2 py-1 text-xs font-mono"
-                disabled={saving}
-              />
+      {/* 模拟器选择区：仅 sim 目标展开（border-t 分隔）——进入即自动扫描、
+          点选 IP 或手动输入即自动保存，无发现/保存按钮（替代原 Connectors 抽屉） */}
+      {target === 'sim' && (
+        <div className="mt-2.5 border-t border-zinc-800 pt-2.5">
+          {/* 扫描中：spinner + 文案 */}
+          {scanState === 'scanning' && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400" role="status">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+              {t('drive.simScanning')}
             </div>
+          )}
+
+          {/* 扫描完成：发现列表（样式对齐原 SimulatorConfig，当前已选项高亮）或未发现提示 */}
+          {scanState === 'done' &&
+            (foundHosts.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs text-zinc-400">{t('drive.simFoundTitle')}</p>
+                <div className="max-h-40 overflow-y-auto space-y-1.5">
+                  {foundHosts.map((host) => (
+                    <button
+                      key={`${host.ip}:${host.port}`}
+                      type="button"
+                      onClick={() => handlePickHost(host)}
+                      disabled={saving}
+                      className={`w-full flex items-center justify-between rounded-md border px-3 py-2 text-left transition-colors ${
+                        currentSimHost === host.ip
+                          ? 'border-cyan-500/50 bg-cyan-950/30'
+                          : 'border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800'
+                      } ${saving ? 'cursor-not-allowed' : ''}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Wifi className="w-4 h-4 text-emerald-400" aria-hidden />
+                        <span className="text-sm text-zinc-100 font-mono">
+                          {host.ip}:{host.port}
+                        </span>
+                      </div>
+                      <span className="text-xs text-zinc-400">{host.latency_ms}ms</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <WifiOff className="w-3.5 h-3.5" aria-hidden />
+                <span>{t('drive.simNotFoundHint')}</span>
+              </div>
+            ))}
+
+          {/* SIM_HOST 手动输入兜底：自动发现失败时可手填，失焦或回车自动保存 */}
+          <div className="mt-2 flex items-center gap-2">
+            <label htmlFor="drive-sim-host" className="text-xs text-zinc-400 whitespace-nowrap">
+              {t('drive.simHostLabel')}
+            </label>
+            <Input
+              id="drive-sim-host"
+              value={simHostInput}
+              onChange={(e) => setSimHostInput(e.target.value)}
+              onBlur={commitSimHostInput}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitSimHostInput();
+              }}
+              placeholder={t('drive.simHostPlaceholder')}
+              className="h-7 w-44 px-2 py-1 text-xs font-mono"
+              disabled={saving}
+            />
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </div>
   );
 };

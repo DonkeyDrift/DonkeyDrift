@@ -3,6 +3,7 @@ Training Job Engine - manages local and online training jobs with SSE streaming.
 """
 import asyncio
 import json
+import logging
 import os
 import queue
 import re
@@ -18,6 +19,9 @@ from fastapi import HTTPException
 
 from web_online_trainer import WebOnlineTrainer
 from trainer_session import load_session
+
+
+logger = logging.getLogger(__name__)
 
 
 # Regex to strip ANSI escape codes (colour, cursor movement, etc.)
@@ -52,9 +56,11 @@ class TrainingJob:
     id: str
     # 'local' = on the machine running this backend; 'mypc' = on the user's
     # own computer (SSH callback, config train_my_pc.conf); 'mypc_install' =
-    # shared uv environment setup on the user's computer; 'online' = on the
-    # configured cloud server (config train_online.conf).
-    mode: Literal['local', 'mypc', 'mypc_install', 'online']
+    # dependency install job and shared uv environment setup on the user's
+    # computer; 'online' = on the configured cloud server (config
+    # train_online.conf); 'aimo' = AIMO cloud NPU conversion
+    # (donkeycar/tools/aimo_npu_convert.py, .aidem artifact).
+    mode: Literal['local', 'mypc', 'mypc_install', 'online', 'aimo']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
     # SSE 订阅者队列集合（#502）：多条连接同看一个 job 时各收全量副本；
     # 旧单 log_queue 会让两个页签互偷日志行（每条只被其中一个拿到）
@@ -71,6 +77,8 @@ class TrainingJob:
     trainer: Optional[object] = None
     stop_event: Optional[threading.Event] = None
     error_message: Optional[str] = None
+    # aimo 转换成功后的 .aidem 产物绝对路径（从工具输出 [5/5] 行解析）
+    result_path: Optional[str] = None
 
     def subscribe(self) -> asyncio.Queue:
         """注册一个 SSE 订阅者，返回其专属队列（#502）。"""
@@ -100,7 +108,7 @@ class TrainingJobManager:
             cls._instance.jobs: Dict[str, TrainingJob] = {}
         return cls._instance
 
-    def create_job(self, mode: Literal['local', 'mypc', 'mypc_install', 'online']) -> TrainingJob:
+    def create_job(self, mode: Literal['local', 'mypc', 'mypc_install', 'online', 'aimo']) -> TrainingJob:
         job_id = str(uuid.uuid4())[:8]
         job = TrainingJob(id=job_id, mode=mode)
         self.jobs[job_id] = job
@@ -117,7 +125,9 @@ class TrainingJobManager:
             return
 
         job.status = 'stopped'
-        if job.mode == 'local' and job.process:
+        # aimo 与 local 同为本地子进程：terminate 即可（AIMO 云端任务本身
+        # 无法取消，但本地轮询/上传进程终止后不再消耗资源）
+        if job.mode in ('local', 'aimo') and job.process:
             try:
                 job.process.terminate()
             except Exception:
@@ -149,7 +159,9 @@ class TrainingJobManager:
     # ------------------------------------------------------------------
     async def run_local(self, job: TrainingJob, tub: str, model: str,
                         model_type: str, transfer: Optional[str] = None,
-                        working_dir: Optional[str] = None):
+                        working_dir: Optional[str] = None,
+                        session_ids: Optional[list] = None,
+                        session_filter: Optional[dict] = None):
         job.status = 'running'
         cwd = working_dir or os.getcwd()
         # 用后端自身解释器经模块入口拉起训练（不依赖 PATH 里的 donkey 指向哪个
@@ -159,7 +171,27 @@ class TrainingJobManager:
         if transfer:
             cmd.extend(["--transfer", transfer])
 
+        # 会话筛选：把选中的会话落盘为临时 JSON，经 CLI 的 --session-filter
+        # 转成 cfg.TRAIN_FILTER（两者都缺省 = 不筛选）。grouped dict
+        # {tub绝对路径: [session_id,...]} 原样写入（CLI 原生支持：不在映射中的
+        # tub 整体排除），优先于平坦 session_ids 列表
+        session_filter_path = None
         try:
+            filter_payload = session_filter if session_filter else session_ids
+            if filter_payload:
+                session_filter_path = os.path.join(
+                    cwd, f'.train_session_filter_{job.id}.json')
+                with open(session_filter_path, 'w', encoding='utf-8') as f:
+                    if isinstance(filter_payload, dict):
+                        json.dump(
+                            {str(k): [str(s) for s in v]
+                             for k, v in filter_payload.items()},
+                            f, ensure_ascii=False)
+                    else:
+                        json.dump([str(s) for s in filter_payload], f,
+                                  ensure_ascii=False)
+                cmd.extend(["--session-filter", session_filter_path])
+
             job.process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -218,6 +250,96 @@ class TrainingJobManager:
                                         "globalPercent": job.progress.global_percent,
                                     }
                                 })
+
+            await asyncio.gather(
+                read_stream(job.process.stdout),
+                read_stream(job.process.stderr, True)
+            )
+
+            await job.process.wait()
+
+            if job.status == 'stopped':
+                pass  # already set
+            elif job.process.returncode == 0:
+                job.status = 'completed'
+            else:
+                job.status = 'failed'
+                job.error_message = f"Exit code: {job.process.returncode}"
+        except Exception as e:
+            if job.status != 'stopped':
+                job.status = 'failed'
+                job.error_message = str(e)
+        finally:
+            # 会话筛选临时文件随 job 结束/停止/异常统一清理；清理失败不影响任务状态
+            if session_filter_path and os.path.exists(session_filter_path):
+                try:
+                    os.remove(session_filter_path)
+                except OSError as e:
+                    logger.warning('清理会话筛选文件失败 %s: %s',
+                                   session_filter_path, e)
+            job.finished_at = datetime.now().isoformat()
+            job.publish({"type": "status", "status": job.status, "error": job.error_message})
+
+    # ------------------------------------------------------------------
+    # AIMO cloud NPU conversion (.onnx/.tflite/.pb/.pt/.pth/saved_model → .aidem)
+    # ------------------------------------------------------------------
+    async def run_aimo_convert(self, job: TrainingJob, model_path: str,
+                               out_dir: str = "./models", precision: str = "INT8",
+                               calib_tubs: Optional[str] = None,
+                               calib_max: int = 100,
+                               calib_mix_synth: int = 30,
+                               calib_dataset: str = "imagenet",
+                               timeout_s: int = 3600,
+                               working_dir: Optional[str] = None):
+        """Run donkeycar.tools.aimo_npu_convert as a subprocess, stream its log.
+
+        Same subprocess pipeline as run_local: the tool prints [0/5]..[5/5]
+        stage markers which are parsed into coarse progress, and the final
+        "[5/5] 已下载到:" line yields the .aidem artifact path. The AIMO API
+        key never passes through here — the tool reads it from the
+        environment / key file on the backend machine itself.
+        """
+        job.status = 'running'
+        cwd = working_dir or os.getcwd()
+        cmd = [sys.executable, "-m", "donkeycar.tools.aimo_npu_convert",
+               "--onnx", model_path, "--out", out_dir or "./models",
+               "--precision", precision,
+               "--calib-max", str(int(calib_max)),
+               "--calib-dataset", calib_dataset or "imagenet",
+               "--timeout", str(int(timeout_s))]
+        if calib_tubs:
+            cmd.extend(["--calib-tubs", calib_tubs])
+        if calib_mix_synth:
+            cmd.extend(["--calib-mix-synth", str(int(calib_mix_synth))])
+
+        try:
+            job.process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
+            )
+
+            async def read_stream(stream, is_stderr=False):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    text = line.decode('utf-8', errors='ignore').rstrip()
+                    if text:
+                        cleaned = _clean_training_line(text)
+                        if not cleaned:
+                            continue
+                        payload = {
+                            "type": "log",
+                            "line": cleaned,
+                            "is_stderr": is_stderr,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        job.publish(payload)
+                        job.logs.append(cleaned)
+                        if not is_stderr:
+                            self._parse_aimo_line(job, cleaned)
 
             await asyncio.gather(
                 read_stream(job.process.stdout),
@@ -433,6 +555,28 @@ class TrainingJobManager:
     # ------------------------------------------------------------------
     # Shared parsing
     # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_aimo_line(job: TrainingJob, line: str):
+        """Parse aimo_npu_convert output into coarse stage progress.
+
+        The tool prints [0/5]..[5/5] stage markers (including [2.5/5] for the
+        calibration upload) and a final download line:
+            [3/5] 已提交，轮询中（间隔 15s，上限 3600s）...
+            [5/5] 已下载到: /abs/path/models/xxx.aidem
+        """
+        try:
+            m = re.match(r"^\[(\d+(?:\.\d)?)/5\]", line)
+            if m:
+                stage = float(m.group(1))
+                job.progress.current_step = int(stage)
+                job.progress.total_steps = 5
+                job.progress.global_percent = min(stage / 5.0 * 100.0, 100.0)
+            m = re.search(r"已下载到[:：]\s*(\S+)", line)
+            if m:
+                job.result_path = m.group(1)
+        except Exception:
+            pass
+
     def _parse_line(self, job: TrainingJob, line: str):
         """Parse Keras-style training output for local jobs."""
         try:

@@ -1,0 +1,12 @@
+# 依赖锁定输入（P0.2 安全补强，2026-10-12）
+#
+# 依赖的唯一真源仍是 setup.cfg 的 install_requires / extras_require；
+# 本文件只声明“要锁定并审计的 extras 组合”（核心 + PC/服务端运行时 +
+# 后端 + 开发测试）。转译成精确固定版本见 requirements-lock.txt，
+# 重生成: scripts/regenerate_lock.sh
+#
+# 不在锁定范围（有意为之）:
+#   torch  — 旧式可选后端，torch==2.1.* 为兼容性刻意钉死，单独评估
+#   pi/nano — 树莓派/Jetson 依赖在目标机上经 apt/系统源解析，pip 锁不住
+#   macos  — macOS 开发机专属（tensorflow-metal 等），与 pc 差异仅 TF 来源
+.[pc,fastapi-backend,dev]

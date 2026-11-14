@@ -7,6 +7,11 @@ import { useTranslation } from '@/i18n';
 
 export const DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS = 3000;
 export const DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS = 5000;
+// 画面比例锁定 4:3（车端相机 320×240）：页面宽度只改变显示尺寸，不改变比例
+export const DRIVE_VIDEO_ASPECT_RATIO = '4 / 3';
+// 显示尺寸钳制：宽度 320~640px ↔ 画面 320×240 ~ 640×480（原生分辨率到 2 倍放大）
+export const DRIVE_VIDEO_MIN_WIDTH_PX = 320;
+export const DRIVE_VIDEO_MAX_WIDTH_PX = 640;
 
 interface VideoStreamProps {
   className?: string;
@@ -18,7 +23,16 @@ interface VideoStreamProps {
   objectFit?: 'contain' | 'cover';
 }
 
-export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomingSignal = null, transport, clientId, onLatencyChange, objectFit = 'contain' }) => {
+// React.memo：DrivePage 的转向/油门显示 state 以 20Hz 更新会重渲染整页，
+// 视频 subtree（WebRTC <video> + 徽标）props 稳定，memo 掉这批无效重渲染
+export const VideoStream = React.memo(function VideoStream({
+  className = '',
+  incomingSignal = null,
+  transport,
+  clientId,
+  onLatencyChange,
+  objectFit = 'contain',
+}: VideoStreamProps) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<'loading' | 'connected' | 'error'>('loading');
   const [retryCount, setRetryCount] = useState(0);
@@ -26,7 +40,6 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const [carOnline, setCarOnline] = useState<boolean | null>(null);
   const [mjpegFallbackAllowed, setMjpegFallbackAllowed] = useState(false);
   const [multiCarWarning, setMultiCarWarning] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<string>('16/9');
   const imgRef = useRef<HTMLImageElement>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,16 +48,24 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const prevWebRtcVisibleRef = useRef(false);
   const selectedTransport = transport ?? getDriveVideoTransport();
   const forceMjpeg = selectedTransport === 'mjpeg';
-  const { videoRef, state, stats, metrics, videoReady } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline });
+  const diagnosticMode = import.meta.env.VITE_DRIVE_WEBRTC_DIAGNOSTIC === '1';
+  const { videoRef, state, stats, metrics, videoReady, renderThrottleDetected } = useDriveWebRtcVideo({ incomingSignal, disabled: forceMjpeg, clientId, carOnline });
 
   const streamUrl = `${API_URL}/drive/video`;
+  const [mjpegSrc, setMjpegSrc] = useState<string | undefined>(streamUrl);
+  const mjpegSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 浮层阴影走语义 shadow-lg（--shadow-lg）：Apple 扁平浮层阴影（深/浅各有取值）
   const webRtcConnected = state === 'connected' && !stats.degraded;
   const webRtcVisible = webRtcConnected && videoReady;
   const degraded = forceMjpeg || mjpegFallbackAllowed;
   const [mjpegVisible, setMjpegVisible] = useState(!webRtcVisible);
   const browserFps = Math.round(metrics.browserFps || stats.browser_fps || 0);
-  const latencyMs = Math.round(metrics.p95FrameIntervalMs || stats.browser_p95_frame_interval_ms || 0);
+  // 徽标优先显示真实端到端时延：rVFC captureTime 通路（浏览器原生）优先，
+  // 浏览器不提供时走像素印章兜底（帧内嵌车端捕获时刻，经双段时钟对齐）；
+  // 两者皆无时回退旧的 p95 帧间隔（帧到达节奏，非时延，仅作降级参考）
+  const e2eP95Ms = metrics.e2eLatencyP95Ms || stats.e2e_latency_p95_ms || 0;
+  const hasTrueE2e = e2eP95Ms > 0 && (metrics.e2eSamples > 0 || (stats.e2e_samples ?? 0) > 0);
+  const latencyMs = Math.round(hasTrueE2e ? e2eP95Ms : metrics.p95FrameIntervalMs || stats.browser_p95_frame_interval_ms || 0);
 
   const resetRetry = () => {
     if (retryTimerRef.current) {
@@ -115,23 +136,6 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
 
   useEffect(() => resetFallbackTimer, []);
 
-  // 动态根据实际 WebRTC 视频画面调整容器宽高比
-  useEffect(() => {
-    if (!webRtcVisible) return;
-    const video = videoRef.current;
-    if (!video) return;
-    const updateRatio = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setAspectRatio(`${video.videoWidth}/${video.videoHeight}`);
-      }
-    };
-    if (video.readyState >= 1) {
-      updateRatio();
-    } else {
-      video.addEventListener('loadedmetadata', updateRatio, { once: true });
-    }
-  }, [webRtcVisible]);
-
   useEffect(() => {
     const wasVisible = prevWebRtcVisibleRef.current;
     if (webRtcVisible && !wasVisible) {
@@ -144,7 +148,12 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         clearTimeout(mjpegFadeTimerRef.current);
         mjpegFadeTimerRef.current = null;
       }
+      if (mjpegSrcTimerRef.current) {
+        clearTimeout(mjpegSrcTimerRef.current);
+        mjpegSrcTimerRef.current = null;
+      }
       setMjpegVisible(true);
+      setMjpegSrc(streamUrl);
     }
     prevWebRtcVisibleRef.current = webRtcVisible;
     return () => {
@@ -153,7 +162,25 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
         mjpegFadeTimerRef.current = null;
       }
     };
-  }, [webRtcVisible]);
+  }, [webRtcVisible, streamUrl]);
+
+  // MJPEG 淡出动画完成后彻底断开 src，避免在 WebRTC 显示期间仍后台解码/占用带宽
+  useEffect(() => {
+    if (!mjpegVisible && mjpegSrc) {
+      mjpegSrcTimerRef.current = setTimeout(() => {
+        mjpegSrcTimerRef.current = null;
+        setMjpegSrc(undefined);
+      }, 500);
+    } else if (mjpegVisible && !mjpegSrc) {
+      setMjpegSrc(streamUrl);
+    }
+    return () => {
+      if (mjpegSrcTimerRef.current) {
+        clearTimeout(mjpegSrcTimerRef.current);
+        mjpegSrcTimerRef.current = null;
+      }
+    };
+  }, [mjpegVisible, mjpegSrc, streamUrl]);
 
   // 车端在线状态与多车端抢占告警：不依赖降级状态常驻轮询
   // （WebRTC 正常时也需要 carOnline 供其心跳判断、multi_car_warning 提示多开）
@@ -187,6 +214,16 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
     onLatencyChange?.(latencyMs);
   }, [latencyMs, onLatencyChange]);
 
+  // 测量口径提示：未开启像素印章时，徽章显示的是帧间隔而非真实端到端时延。
+  useEffect(() => {
+    if (webRtcConnected && (stats.e2e_samples ?? 0) === 0) {
+      console.warn(
+        '[drive-webrtc] 当前徽章显示的是帧间隔而非真实 E2E 时延。' +
+        '如需精确测量，请车端启用 DRIVE_WEBRTC_FRAME_STAMP=1（或 VITE_DRIVE_WEBRTC_DIAGNOSTIC=1 模式）。',
+      );
+    }
+  }, [webRtcConnected, stats.e2e_samples]);
+
   const statusMeta = (() => {
     if (forceMjpeg) {
       return { icon: Wifi, text: t('driveViz.transportMjpeg'), color: 'text-amber-400', pulse: false };
@@ -210,24 +247,43 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
   const StatusIcon = statusMeta.icon;
 
   return (
-    <div className={`relative bg-zinc-950 overflow-hidden ${className}`} style={{ aspectRatio }}>
+    <div
+      className={`relative bg-zinc-950 overflow-hidden ${className}`}
+      style={{
+        // 高度固定走 aspectRatio；height:auto 防调用方传入 h-full 之类把比例顶掉
+        aspectRatio: DRIVE_VIDEO_ASPECT_RATIO,
+        width: '100%',
+        minWidth: DRIVE_VIDEO_MIN_WIDTH_PX,
+        maxWidth: DRIVE_VIDEO_MAX_WIDTH_PX,
+        height: 'auto',
+      }}
+    >
       {/* 摄像头未连接时不画四角取景框，仅靠容器圆角呈现干净外框 */}
 
       <div className="absolute top-2 left-2 z-30 flex items-start gap-2">
-        <div className="rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-lg backdrop-blur-md min-w-[4.5rem]">
+        <div className="rounded-md border border-white/10 bg-zinc-900/85 px-2 py-1 text-center shadow-lg min-w-[4.5rem]">
           <div className={`text-xs leading-none flex items-center justify-center gap-1 ${statusMeta.color}`}>
             <StatusIcon className={`w-3 h-3 ${statusMeta.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
             {statusMeta.text}
           </div>
-          <div className="text-base font-mono leading-tight text-cyan-400">{latencyMs > 0 ? `${latencyMs}ms` : '-'}</div>
+          <div className="text-base font-mono leading-tight text-cyan-400">
+            {latencyMs > 0 ? `${latencyMs}ms` : '-'}
+            {hasTrueE2e && <span className="ml-1 text-[10px] text-zinc-400">E2E</span>}
+            {diagnosticMode && <span className="ml-1 text-[10px] text-amber-400">{t('driveViz.diagnostic')}</span>}
+          </div>
         </div>
         {degraded && (
           <span className="rounded bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300">
             {t('driveViz.non60FpsPath')}
           </span>
         )}
+        {renderThrottleDetected && (
+          <span className="rounded bg-red-400/10 px-2 py-0.5 text-xs text-red-300" title={t('driveViz.renderThrottleTooltip')}>
+            {t('driveViz.renderThrottle')}
+          </span>
+        )}
       </div>
-      <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/35 px-2 py-1 text-center shadow-lg backdrop-blur-md">
+      <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/85 px-2 py-1 text-center shadow-lg">
         <div className="text-xs text-zinc-400 uppercase leading-none">FPS</div>
         <div className="text-base font-mono leading-tight text-cyan-400">{webRtcConnected ? browserFps : mjpegFps}</div>
       </div>
@@ -242,14 +298,9 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       <img
         key={retryCount}
         ref={imgRef}
-        src={streamUrl}
+        src={mjpegSrc}
         alt={t('driveViz.cameraFeedAlt')}
-        onLoad={() => {
-          setStatus('connected');
-          if (imgRef.current && imgRef.current.naturalWidth > 0 && imgRef.current.naturalHeight > 0) {
-            setAspectRatio(`${imgRef.current.naturalWidth}/${imgRef.current.naturalHeight}`);
-          }
-        }}
+        onLoad={() => setStatus('connected')}
         onError={() => {
           setStatus('error');
           scheduleRetry();
@@ -264,6 +315,7 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
           autoPlay
           playsInline
           muted
+          disablePictureInPicture
           className={`absolute inset-0 w-full h-full ${objectFit === 'cover' ? 'object-cover' : 'object-contain'} transition-opacity duration-500 ${
             webRtcVisible ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
           }`}
@@ -280,4 +332,4 @@ export const VideoStream: React.FC<VideoStreamProps> = ({ className = '', incomi
       )}
     </div>
   );
-};
+});

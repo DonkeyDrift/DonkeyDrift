@@ -35,13 +35,21 @@ DRIVE_WEBRTC_ENABLED = True
 DRIVE_WEBRTC_SINGLE_CLIENT = True
 DRIVE_WEBRTC_RECONNECT_TIMEOUT_SEC = 3.0
 DRIVE_WEBRTC_ICE_SERVERS = []
+# P0 低时延编码调优（默认开；0=回退 aiortc 上游参数）
+DRIVE_WEBRTC_ENCODER_TUNE = True
+# WebRTC 视频初始码率 bps（REMB 反馈仍会自动下调）
+DRIVE_WEBRTC_VIDEO_BITRATE = 1500000
+# P1a 媒体线程绑核（bridge/编码线程钉高容量核；0=关闭；实车推理重时可设 DRIVE_WEBRTC_MEDIA_CPUS=0-3 让媒体走小核）
+DRIVE_WEBRTC_AFFINITY = True
+# 可选：车辆线程也绑核（媒体核之外，再省 ~3ms；默认关，保持推理全核自由度）
+DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE = False
 # MJPEG 降级路径的 JPEG 编码质量（0-100，默认 95 接近无损，保证降级路径最高画质）。
 DRIVE_VIDEO_JPEG_QUALITY = 95
 
 #CAMERA
 CAMERA_TYPE = "PICAM"   # (PICAM|WEBCAM|CVCAM|CSIC|V4L|D435|OAKD|MOCK|IMAGE_LIST)
-IMAGE_W = 160
-IMAGE_H = 120
+IMAGE_W = 320           # 全链路原生 320x240（采集/tub/训练/推理/预览同分辨率）
+IMAGE_H = 240
 IMAGE_DEPTH = 3         # default RGB=3, make 1 for mono
 CAMERA_FRAMERATE = DRIVE_LOOP_HZ
 CAMERA_VFLIP = False
@@ -417,6 +425,7 @@ CREATE_TF_LITE = True           # automatically create tflite model in training
 CREATE_TENSOR_RT = False        # automatically create tensorrt model in training
 SAVE_MODEL_AS_H5 = False        # if old keras format should be used instead of savedmodel
 CACHE_POLICY = 'ARRAY'          # if images are cached as array in training other options are 'NOCACHE' and 'BINARY'
+CACHE_MAX_BYTES = 268435456     # total byte budget of the process-wide image cache; with CACHE_POLICY ARRAY/BINARY the least-recently-used images are evicted beyond this budget (256MiB = ~1194 frames of 320x240x3). NOCACHE ignores it. Raise to keep a small tub fully hot in RAM for speed; lower to cap training memory harder.
 
 PRUNE_CNN = False               #This will remove weights from your model. The primary goal is to increase performance.
 PRUNE_PERCENT_TARGET = 75       # The desired percentage of pruning.
@@ -598,6 +607,12 @@ USE_JOYSTICK_AS_DEFAULT = False    #when starting the manage.py, when True, will
 JOYSTICK_MAX_THROTTLE = 0.5         #this scalar is multiplied with the -1 to 1 throttle value to limit the maximum throttle. This can help if you drop the controller or just don't need the full speed available.
 JOYSTICK_STEERING_SCALE = 1.0       #some people want a steering that is less sensitve. This scalar is multiplied with the steering -1 to 1. It can be negative to reverse dir.
 AUTO_RECORD_ON_THROTTLE = True      #if true, we will record whenever throttle is not zero. if false, you must manually toggle recording with some other trigger. Usually circle button on joystick.
+
+# 录制数据异步落盘：run() 只入队立即返回，图像编码+catalog 写盘由后台线程执行，
+# 磁盘抖动不再灌进车辆主循环（60Hz 下任一轮超时即掉帧）。队列满丢最旧保最新，
+# 退出时排空队列；False 回退同步写。
+TUB_ASYNC_WRITE = True
+
 CONTROLLER_TYPE = 'xbox'            #(ps3|ps4|xbox|pigpio_rc|nimbus|wiiu|F710|rc3|MM1|custom) custom will run the my_joystick.py controller written by the `donkey createjs` command
 USE_NETWORKED_JS = False            #should we listen for remote joystick control over the network?
 NETWORK_JS_SERVER_IP = None         #when listening for network joystick control, which ip is serving this information

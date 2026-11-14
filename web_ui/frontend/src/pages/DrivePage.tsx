@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { VideoStream } from '../components/drive/VideoStream';
-import { TelemetryChart, TelemetryLegend, curvesByGroup } from '../components/drive/TelemetryChart';
+import { TelemetryChart, TelemetryLegend, CURVES } from '../components/drive/TelemetryChart';
 import { VirtualJoystick } from '../components/drive/VirtualJoystick';
 import { ControlBars } from '../components/drive/ControlBars';
 import { VerticalThrottleBar } from '../components/drive/VerticalThrottleBar';
@@ -23,13 +23,14 @@ import { useGamepadStore } from '../store/useGamepadStore';
 import { useStore } from '../store/useStore';
 import { useTelemetryStore } from '../store/useTelemetryStore';
 import { createDriveClientId, listModels, loadModelToCar, getApiErrorMessage } from '../services/api';
+import { sendResetCar } from '../services/apiDrive';
 import { useGamepadDrive } from '../hooks/useGamepadDrive';
 import { useGyroDrive } from '../hooks/useGyroDrive';
 import { useElementWidth, useElementHeight } from '../hooks/useElementWidth';
 import { useTranslation } from '@/i18n';
 import { cn } from '../lib/utils';
 import { freshControl } from '../lib/inputFreshness';
-import { AlertTriangle, Circle, ChevronLeft, ChevronRight, Info, Joystick, Loader2, Lock, Maximize2, Minimize2, WifiOff } from 'lucide-react';
+import { AlertTriangle, Circle, ChevronLeft, ChevronRight, Info, Joystick, Loader2, Lock, Maximize2, Minimize2, RotateCcw, WifiOff } from 'lucide-react';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
 
 type DrivePageProps = {
@@ -50,6 +51,11 @@ const DOCK_CLUSTER_W = DOCK_PANEL_W + 8 + 30; // 设计基准：面板 + 簇内 
 const DOCK_MIN_SCALE = 0.62;
 const DOCK_MIN_VIDEO_W = 320;
 const DOCK_OVERLAY_OPACITY = 0.4; // 悬浮模式面板整体不透明度（设计方案确认值）
+
+// 遥测曲线单图布局：视频列实测宽度低于该值时曲线叠加回画面上（宽屏默认下置面板）。
+// 取值与 VideoStream 显示尺寸上限（DRIVE_VIDEO_MAX_WIDTH_PX=640）对齐——视频已到最大
+// 钳制宽度仍放不下下置面板的列宽以下，叠加比下置更省竖向空间；全屏恒为叠加。
+const CURVE_OVERLAY_MAX_W = 640;
 
 export const DrivePage = React.memo(function DrivePage({ active = true }: DrivePageProps) {
   const { t, lang } = useTranslation();
@@ -143,6 +149,11 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const [recordDuration, setRecordDuration] = useState(0);
   const [recordingLock, setRecordingLock] = useState(false);
   const recordingLockRef = useRef(false);
+  // 模拟器复位按钮：800ms 防连点锁 + 结果提示（4s 自动消失）
+  const [resetCarLock, setResetCarLock] = useState(false);
+  const resetCarLockRef = useRef(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
+  const resetNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentModel, setCurrentModel] = useState<string>('');
   const [modelLoading, setModelLoading] = useState(false);
   const [modelNotice, setModelNotice] = useState<string | null>(null);
@@ -152,7 +163,9 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   useEffect(() => {
     inputSourceRef.current = inputSource;
   }, [inputSource]);
-  const [joystickOpen, setJoystickOpen] = useState(false);
+  const [dockPanel, setDockPanel] = useState<'joystick' | 'sim' | null>(null);
+  const joystickOpen = dockPanel === 'joystick';
+  const simCollectOpen = dockPanel === 'sim';
   // 摇杆抽屉布局：观测「视频 + 抽屉」行的实际宽度，驱动连续缩放与悬浮模式（docs/issues/008）。
   // 注意 main 用的是 Tailwind container（640/768/1024/1280 断点量化），行宽非连续变化属预期。
   const [dockRowRef, dockRowW] = useElementWidth<HTMLDivElement>();
@@ -163,23 +176,24 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
   const dockScale = Math.min(1, Math.max(DOCK_MIN_SCALE, (dockRowW - 360) / DOCK_CLUSTER_W));
   // 悬浮阈值按「展开态等效宽」判定（收起时 = 把手 + 面板 + gap，恰与展开自然宽相等），
   // 保证收起/展开切换时模式不跳变
-  const dockOpenW = joystickOpen ? dockAsideW : dockAsideW + DOCK_PANEL_W + 8;
+  const dockOpenW = dockPanel !== null ? dockAsideW : dockAsideW + DOCK_PANEL_W + 8;
   const dockOverlay = dockRowW < DOCK_MIN_VIDEO_W + 12 + DOCK_MIN_SCALE * dockOpenW;
   // 悬浮模式下面板顶对齐视频顶：实测工具栏高度让过（工具栏 mb-4 = 16px 间距）
   const [driveToolbarRef, driveToolbarH] = useElementHeight<HTMLDivElement>();
   const [fullscreen, setFullscreen] = useState(false);
-  const videoContainerRef = useRef<HTMLDivElement>(null);
-  const [steeringVisibleKeys, setSteeringVisibleKeys] = useState<Set<string>>(
-    () => new Set(curvesByGroup('steering').filter((c) => c.defaultOn).map((c) => c.key as string)),
-  );
-  const [throttleVisibleKeys, setThrottleVisibleKeys] = useState<Set<string>>(
-    () => new Set(curvesByGroup('throttle').filter((c) => c.defaultOn).map((c) => c.key as string)),
+  // 视频容器：ref 供原生全屏用，实测宽度驱动曲线下置/叠加布局切换（与 dockOverlay 同模式，
+  // 不依赖 window.innerWidth，规避页面留白/滚动条偏差）
+  const [videoContainerRef, videoContainerW] = useElementWidth<HTMLDivElement>();
+  // 曲线显隐（合并单图后统一一套，不再分转向/油门两组）：默认核心驾驶信号，
+  // 陀螺仪/加速度 6 条默认关、由图例勾选开启，避免单图 12 条线过密
+  const [curveVisibleKeys, setCurveVisibleKeys] = useState<Set<string>>(
+    () => new Set(CURVES.filter((c) => c.defaultOn).map((c) => c.key as string)),
   );
   const gamepadRef = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
   const gyroRef = useRef({ angle: 0, throttle: 0, updatedAt: 0 });
 
-  const toggleSteeringCurve = useCallback((key: string) => {
-    setSteeringVisibleKeys((prev) => {
+  const toggleCurve = useCallback((key: string) => {
+    setCurveVisibleKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
@@ -190,26 +204,13 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     });
   }, []);
 
-  const toggleThrottleCurve = useCallback((key: string) => {
-    setThrottleVisibleKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+  // 全选/全不选：把全部曲线一次性设为显示或隐藏
+  const setCurveAll = useCallback((select: boolean) => {
+    setCurveVisibleKeys(select ? new Set(CURVES.map((c) => c.key as string)) : new Set());
   }, []);
 
-  // 全选/全不选：把整组曲线一次性设为显示或隐藏
-  const setSteeringAll = useCallback((select: boolean) => {
-    setSteeringVisibleKeys(select ? new Set(curvesByGroup('steering').map((c) => c.key as string)) : new Set());
-  }, []);
-
-  const setThrottleAll = useCallback((select: boolean) => {
-    setThrottleVisibleKeys(select ? new Set(curvesByGroup('throttle').map((c) => c.key as string)) : new Set());
-  }, []);
+  // 曲线布局模式：默认下置面板；视频列实测宽不足 CURVE_OVERLAY_MAX_W 或全屏时叠加到画面上
+  const curveOverlay = fullscreen || videoContainerW < CURVE_OVERLAY_MAX_W;
 
   const toggleFullscreen = useCallback(() => {
     const el = videoContainerRef.current;
@@ -315,6 +316,13 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     t = c.throttle;
     return { angle: a, throttle: t, drive_mode: mode };
   }, [mode]);
+
+  // 摇杆输入回调：稳定引用（读 ref、无闭包依赖），避免 20Hz 重渲染时把
+  // VirtualJoystick 的 memo/比较打穿
+  const handleJoystickChange = useCallback((a: number, t: number) => {
+    joystickRef.current = { angle: a, throttle: t, updatedAt: Date.now() };
+    lastInputType.current = 'joystick';
+  }, []);
 
   // 控制循环：60Hz 持续发送完整控制状态，避免视频链路影响控制输出。
   useDriveControlLoop({
@@ -423,6 +431,28 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
     }
   }, [recording, send]);
 
+  // 就近复位模拟器小车：后端转发 reset_car 给车端，dgym 发 reset_to_nearest。
+  // 旧版模拟器会静默忽略该消息；失败（车端离线等）在按钮下方提示。
+  const handleResetCar = useCallback(() => {
+    if (resetCarLockRef.current) return;
+    resetCarLockRef.current = true;
+    setResetCarLock(true);
+    window.setTimeout(() => {
+      resetCarLockRef.current = false;
+      setResetCarLock(false);
+    }, 800);
+
+    sendResetCar()
+      .then(() => setResetNotice(t('drive.resetCar')))
+      .catch((err) => {
+        setResetNotice(`${t('drive.resetCarFailed')}: ${getApiErrorMessage(err)}`);
+      })
+      .finally(() => {
+        if (resetNoticeTimerRef.current) clearTimeout(resetNoticeTimerRef.current);
+        resetNoticeTimerRef.current = setTimeout(() => setResetNotice(null), 4000);
+      });
+  }, [t]);
+
   // 快捷键（仅在 drive section 可见时启用，避免流程页其它区域误触 #178）
   useDriveHotkeys({
     enabled: active,
@@ -460,14 +490,15 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
       />
       {/* 手柄桥模式：仅真车目标下显示（ESP32 双槽位 车固件 ↔ RC_BLE_Bridge 切换） */}
       {driveTarget === 'car' && <GamepadBridgeCard />}
-      {/* 模式卡随目标切换：真车只显示漂移卡，模拟器只显示采集卡，未知保持两张都显示 */}
+      {/* 模式卡随目标切换：真车/未知显示漂移卡；模拟器采集移到右侧抽屉把手（虚拟摇杆下侧） */}
       {driveTarget !== 'sim' && <DriftCard />}
-      {driveTarget !== 'car' && <SimCollectCard />}
       {/* 视频 + 遥测 | 右侧抽屉：任何屏宽保持左右并排，抽屉右缘常驻、随宽度连续缩放（008）；
           窄屏抽屉转悬浮半透明浮层，不再折叠到视频下方 */}
       <div ref={dockRowRef} className="relative flex flex-row items-start gap-3">
-        {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐） */}
-        <div className="flex-1 min-w-0 flex flex-col lg:h-[calc(100vh-9rem)]">
+        {/* 左：视频 + 遥测（顶部工具栏与视频同列，右边缘与视频画面右边界对齐）。
+            lg 用 min-h 而非固定 h：曲线下置面板比原图例行高，固定高度下 flex 会压缩
+            视频容器、裁掉画面上下（VideoStream 高度由宽度按 4:3 推导，不随容器高走） */}
+        <div className="flex-1 min-w-0 flex flex-col lg:min-h-[calc(100vh-9rem)]">
           <div ref={driveToolbarRef} className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
             {/* 左：Park 状态 + 驾驶模式 + 模型 */}
             <div className="flex flex-wrap items-center gap-2 lg:gap-3">
@@ -552,55 +583,71 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
             </div>
           </div>
 
-          {/* 摄像头：填满剩余空间并裁边放大；遥测曲线左右分栏覆盖在画面下方；右下角为原生全屏放大 */}
+          {/* 摄像头：画面比例锁定 4:3（320×240），显示尺寸随页面宽度在 320×240~640×480 之间缩放
+              （VideoStream 内钳制，全屏同样受限）；遥测曲线合并为单图——宽屏下置面板、窄屏叠加在
+              画面下方（curveOverlay 实测切换）；右下角为原生全屏放大 */}
           <div
             ref={videoContainerRef}
             className={cn(
-              'relative flex-1 min-h-0 aspect-video lg:aspect-auto bg-black',
+              'relative shrink-0 bg-black flex items-center justify-center',
               !fullscreen && 'rounded-lg overflow-hidden',
             )}
           >
-            {active ? (
-              <VideoStream className="w-full h-full" objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
-            ) : (
-              <div className="w-full h-full bg-zinc-950 border border-zinc-800 rounded-lg" />
-            )}
-            <div className="absolute inset-x-3 bottom-3 z-20 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* 画面尺寸包装（≤640、与钳制后的画面同宽）：圆角/曲线浮层/全屏按钮锚定在这层
+                跟随画面而非整块黑底容器——宽屏有黑边时圆角不落黑边、按钮不飞出画面外；
+                全屏时该层撑满整屏，浮层与按钮行为与原先一致 */}
+            <div
+              className={cn(
+                'relative flex w-full items-center justify-center',
+                fullscreen ? 'h-full' : 'max-w-[640px] rounded-lg overflow-hidden',
+              )}
+            >
+              {active ? (
+                <VideoStream objectFit="cover" incomingSignal={webRtcSignal} clientId={clientIdRef.current} />
+              ) : (
+                <div className="w-full h-full min-h-[240px] bg-zinc-950 border border-zinc-800 rounded-lg" />
+              )}
+              {curveOverlay && (
+                <div className="absolute inset-x-3 bottom-3 z-20">
+                  <TelemetryChart
+                    active={active}
+                    overlay
+                    visibleKeys={curveVisibleKeys}
+                    onToggleCurve={toggleCurve}
+                    chartHeightClassName={fullscreen ? 'h-44' : undefined}
+                  />
+                </div>
+              )}
+              {/* 全屏/放大：画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+                aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
+                className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
+              >
+                {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
+            </div>
+          </div>
+          {/* 曲线（合并单图）：宽屏为视频下方面板（内置图例 + 全选，宽度与钳制后的画面对齐）；
+              窄屏叠加在画面上，合并后的图例放视频下方保持可操作；全屏时无外部内容 */}
+          {curveOverlay ? (
+            !fullscreen && (
+              <div className="mt-3 shrink-0">
+                <TelemetryLegend visibleKeys={curveVisibleKeys} onToggle={toggleCurve} onToggleAll={setCurveAll} />
+              </div>
+            )
+          ) : (
+            <div className="mt-3 shrink-0 mx-auto w-full max-w-[640px]">
               <TelemetryChart
                 active={active}
-                overlay
-                title="driveViz.chartTitleSteering"
-                group="steering"
-                visibleKeys={steeringVisibleKeys}
-                onToggleCurve={toggleSteeringCurve}
-                chartHeightClassName={fullscreen ? 'h-44' : undefined}
-              />
-              <TelemetryChart
-                active={active}
-                overlay
-                title="driveViz.chartTitleThrottle"
-                group="throttle"
-                visibleKeys={throttleVisibleKeys}
-                onToggleCurve={toggleThrottleCurve}
-                chartHeightClassName={fullscreen ? 'h-44' : undefined}
+                visibleKeys={curveVisibleKeys}
+                onToggleCurve={toggleCurve}
+                onToggleAllCurves={setCurveAll}
               />
             </div>
-            {/* 全屏/放大：整个视频画面右下角（与遥测浮层同 inset，叠在曲线之上 z-30） */}
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              title={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              aria-label={fullscreen ? t('driveViz.exitFullscreen') : t('driveViz.fullscreen')}
-              className="absolute right-3 bottom-3 z-30 p-2 rounded-lg bg-slate-950/60 backdrop-blur-sm border border-white/10 text-slate-200 hover:text-white hover:bg-slate-900/70 transition-colors"
-            >
-              {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-            </button>
-          </div>
-          {/* 曲线显隐图例：分左右两组放在视频画面外部（下方），不再遮挡画面；每组左侧带「全选」 */}
-          <div className="mt-3 shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <TelemetryLegend group="steering" visibleKeys={steeringVisibleKeys} onToggle={toggleSteeringCurve} onToggleAll={setSteeringAll} />
-            <TelemetryLegend group="throttle" visibleKeys={throttleVisibleKeys} onToggle={toggleThrottleCurve} onToggleAll={setThrottleAll} />
-          </div>
+          )}
         </div>
 
         {/* 右：摇杆抽屉（面板 + 把手）——右缘常驻（008）：贴地时以负 margin-left 把缩放省出的
@@ -620,81 +667,123 @@ export const DrivePage = React.memo(function DrivePage({ active = true }: DriveP
           }}
         >
           <div className="flex items-start gap-2">
-            {/* 面板内容：夹在视频画面与把手（展开开关）之间；宽度固定自然宽，缩放交给 transform */}
+            {/* 面板槽：摇杆 / 模拟器采集共用（互斥展开，把手点哪个显示哪个）；
+                夹在视频画面与把手列之间；宽度固定自然宽，缩放交给 transform */}
             <div
-              className={`${joystickOpen ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-float overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
-                joystickOpen && dockOverlay ? 'border-cyan-500/30 backdrop-blur-[2px]' : ''
+              className={`${dockPanel !== null ? 'w-96 border' : 'w-0 border-0'} max-h-[calc(100vh-143px)] lg:max-h-[calc(100vh-4rem)] bg-zinc-900 border-zinc-800 shadow-float overflow-y-auto overflow-x-hidden rounded-lg will-change-[width,opacity] transition-[width,opacity] duration-300 ease-in-out ${
+                dockPanel !== null && dockOverlay ? 'border-cyan-500/30 backdrop-blur-[2px]' : ''
               }`}
-              style={joystickOpen && dockOverlay ? { opacity: DOCK_OVERLAY_OPACITY } : undefined}
+              style={dockPanel !== null && dockOverlay ? { opacity: DOCK_OVERLAY_OPACITY } : undefined}
             >
-              <div className={`p-4 space-y-4 transition-opacity duration-300 ${joystickOpen ? 'opacity-100' : 'opacity-0'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <SectionCardTitle
-                    icon={<Joystick className="w-5 h-5" />}
-                    title={t('drive.virtualJoystick')}
-                    subtitle={t('drive.virtualJoystickSubtitle')}
-                    subtitleMarquee
-                  />
-                  <InputSourceSelector
-                    value={inputSource}
-                    onChange={setInputSource}
-                    gamepadConnected={gamepadConnected}
-                    gyroAvailable={permissionState !== 'unsupported'}
-                  />
-                </div>
-                <div className="flex flex-col items-center gap-4">
-                  <div className="grid grid-cols-[auto_220px] gap-6">
-                    <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
-                    <div className="flex flex-col items-center gap-2 w-[220px]">
-                      <VirtualJoystick
-                        scale={dockScale}
-                        onChange={(a, t) => {
-                          joystickRef.current = { angle: a, throttle: t, updatedAt: Date.now() };
-                          lastInputType.current = 'joystick';
-                        }}
-                        size={220}
+              <div className={`p-4 space-y-4 transition-opacity duration-300 ${dockPanel !== null ? 'opacity-100' : 'opacity-0'}`}>
+                {joystickOpen && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <SectionCardTitle
+                        icon={<Joystick className="w-5 h-5" />}
+                        title={t('drive.virtualJoystick')}
+                        subtitle={t('drive.virtualJoystickSubtitle')}
+                        subtitleMarquee
                       />
-                      <ControlBars angle={angle} className="w-full" />
+                      <InputSourceSelector
+                        value={inputSource}
+                        onChange={setInputSource}
+                        gamepadConnected={gamepadConnected}
+                        gyroAvailable={permissionState !== 'unsupported'}
+                      />
                     </div>
-                  </div>
-                  <ProgrammableButtons className="w-full max-w-[240px]" />
-                  <GamepadConfigPanel
-                    axes={gamepadAxes}
-                    padId={gamepadPadId}
-                    mapping={gamepadMapping}
-                    connected={gamepadConnected}
-                    defaultOpen={inputSource === 'gamepad'}
-                    className="max-w-[360px]"
-                  />
-                  <ParameterPanel className="w-full max-w-[360px]" />
-                  <div className="text-xs text-zinc-500 text-center">
-                    {t('drive.hotkeysLine1')}<br />
-                    {t('drive.hotkeysLine2')}
-                  </div>
-                </div>
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="grid grid-cols-[auto_220px] gap-6">
+                        <VerticalThrottleBar throttle={throttle} className="h-[220px]" />
+                        <div className="flex flex-col items-center gap-2 w-[220px]">
+                          <VirtualJoystick
+                            scale={dockScale}
+                            onChange={handleJoystickChange}
+                            size={220}
+                          />
+                          <ControlBars angle={angle} className="w-full" />
+                        </div>
+                      </div>
+                      <ProgrammableButtons className="w-full max-w-[240px]" />
+                      {driveTarget === 'sim' && (
+                        <div className="w-full max-w-[240px] flex flex-col items-center gap-1">
+                          <button
+                            onClick={handleResetCar}
+                            disabled={resetCarLock || !carState.online}
+                            title={t('drive.resetCarHint')}
+                            className="w-full flex items-center justify-center gap-2 rounded-lg border bg-zinc-900 px-3 py-2 text-sm text-zinc-200 border-zinc-800 transition-colors hover:bg-zinc-800 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                          >
+                            <RotateCcw className={cn('w-4 h-4', resetCarLock && 'animate-spin')} />
+                            {t('drive.resetCar')}
+                          </button>
+                          {resetNotice && (
+                            <div className="text-xs text-zinc-400 text-center">{resetNotice}</div>
+                          )}
+                        </div>
+                      )}
+                      <GamepadConfigPanel
+                        axes={gamepadAxes}
+                        padId={gamepadPadId}
+                        mapping={gamepadMapping}
+                        connected={gamepadConnected}
+                        defaultOpen={inputSource === 'gamepad'}
+                        className="max-w-[360px]"
+                      />
+                      <ParameterPanel className="w-full max-w-[360px]" />
+                      <div className="text-xs text-zinc-500 text-center">
+                        {t('drive.hotkeysLine1')}<br />
+                        {t('drive.hotkeysLine2')}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {/* 模拟器采集：仅模拟器目标渲染；有任务时内容自动展开详情 */}
+                {simCollectOpen && driveTarget === 'sim' && <SimCollectCard />}
               </div>
             </div>
 
-            {/* 浮动触发把手：抽屉收起/展开开关；中文竖排、英文横排两行。
+            {/* 浮动触发把手列：虚拟摇杆在上、模拟器采集在下（同款样式，中文竖排、英文横排两行）。
                 hit-44 把触控热区扩到 44px（视觉尺寸不变，抽屉布局常量 DOCK_CLUSTER_W 不受影响） */}
-            <button
-              onClick={() => setJoystickOpen(!joystickOpen)}
-              title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
-              className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
-            >
-              {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
-              {lang === 'en' ? (
-                <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
-                  {t('drive.virtualJoystick').split(' ').map((word) => (
-                    <span key={word}>{word}</span>
-                  ))}
-                </span>
-              ) : (
-                <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
-                  {t('drive.virtualJoystick')}
-                </span>
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <button
+                onClick={() => setDockPanel(joystickOpen ? null : 'joystick')}
+                title={joystickOpen ? t('drive.collapseJoystick') : t('drive.expandJoystick')}
+                className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+              >
+                {joystickOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+                {lang === 'en' ? (
+                  <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
+                    {t('drive.virtualJoystick').split(' ').map((word) => (
+                      <span key={word}>{word}</span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                    {t('drive.virtualJoystick')}
+                  </span>
+                )}
+              </button>
+              {driveTarget === 'sim' && (
+                <button
+                  onClick={() => setDockPanel(simCollectOpen ? null : 'sim')}
+                  title={simCollectOpen ? t('drive.collapseSimCollect') : t('drive.expandSimCollect')}
+                  className="hit-44 shrink-0 border rounded-lg transition-all duration-300 shadow-lg flex flex-col items-center gap-1 px-1.5 py-2 bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                >
+                  {simCollectOpen ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+                  {lang === 'en' ? (
+                    <span className="flex flex-col items-center leading-none text-xs font-medium tracking-wide">
+                      {t('drive.simCollectTitle').split(' ').map((word) => (
+                        <span key={word}>{word}</span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium [writing-mode:vertical-rl] tracking-wider leading-none">
+                      {t('drive.simCollectTitle')}
+                    </span>
+                  )}
+                </button>
               )}
-            </button>
+            </div>
           </div>
         </aside>
       </div>

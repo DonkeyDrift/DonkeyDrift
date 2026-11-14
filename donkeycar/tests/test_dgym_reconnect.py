@@ -45,6 +45,16 @@ def mock_gym_make():
         yield m
 
 
+def _wait_until(predicate, timeout=3.0, interval=0.05):
+    """轮询等待后台线程达成的状态（重建由专用线程异步完成，不能同步断言）。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
 def test_update_survives_step_exception_and_reconnects(mock_gym_make):
     """
     模拟 step() 在运行一段时间后抛出异常（如 TCP 断开）。
@@ -214,10 +224,17 @@ def test_update_detects_disconnect_and_reconnects(mock_gym_make):
     gym_env.shutdown()
     thread.join(timeout=2.0)
     assert not thread.is_alive(), "shutdown 后线程应该退出"
-def test_run_threaded_reconnect_closes_env(mock_gym_make):
-    """验证 run_threaded 收到 reconnect=True 时会关闭当前 env。"""
-    fake_env = FakeEnv(fail_after=9999)
-    mock_gym_make.return_value = fake_env
+def test_run_threaded_reconnect_rebuilds_in_background(mock_gym_make):
+    """run_threaded(reconnect=True) 只投递请求立即返回，后台线程完成「关闭+重建」。
+
+    重建（close+gym.make+reset，含模拟器 load_scene）耗时数秒，同步执行会
+    卡住车辆主循环、转向/油门断供。契约：run_threaded 零阻塞、旧 env 被
+    close、新 env 接管、connected 恢复 True。
+    """
+    old_env = FakeEnv(fail_after=9999)
+    new_env = FakeEnv(fail_after=9999)
+    made = [old_env, new_env]
+    mock_gym_make.side_effect = lambda *a, **k: made.pop(0)
 
     gym_env = DonkeyGymEnv(
         sim_path="remote",
@@ -226,27 +243,30 @@ def test_run_threaded_reconnect_closes_env(mock_gym_make):
         env_name="donkey-generated-track-v0",
         conf={"img_h": 120, "img_w": 160},
     )
+    assert gym_env.env is old_env
 
-    # 通过 run_threaded 请求重连
+    t0 = time.perf_counter()
     gym_env.run_threaded(0.0, 0.0, 0.0, reconnect=True)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.2, f"run_threaded 应立即返回，实际耗时 {elapsed:.3f}s"
 
-    # update 线程会在下一次循环中关闭 env 并重连
-    thread = threading.Thread(target=gym_env.update, daemon=True)
-    thread.start()
-
-    time.sleep(0.3)
-
-    assert fake_env.closed, "收到重连请求后 env 应该被关闭"
-    assert gym_env.env is None, "env 应该被设为 None"
+    assert _wait_until(lambda: gym_env.env is new_env), "后台线程应完成重建并切换到新 env"
+    assert old_env.closed, "重建时应关闭旧 env"
+    assert gym_env.connected is True, "新连接建立后 connected 应为 True"
 
     gym_env.shutdown()
-    thread.join(timeout=2.0)
 
 
-def test_run_threaded_watchdog_forces_reconnect_when_stale(mock_gym_make):
-    """验证主循环侧看门狗：超过 watchdog_sec 无新帧时强制关闭 env。"""
-    fake_env = FakeEnv(fail_after=9999)
-    mock_gym_make.return_value = fake_env
+def test_run_threaded_watchdog_rebuilds_when_stale(mock_gym_make):
+    """看门狗：遥测停更超窗时投递后台重建（关闭旧 env、换新 env），主循环不阻塞。
+
+    旧契约「看门狗只 _close_env 置 None」会让车端永久掉线（update 线程常已
+    卡死，没人重连）；现行契约是「关闭+重连」由后台线程一次完成。
+    """
+    old_env = FakeEnv(fail_after=9999)
+    new_env = FakeEnv(fail_after=9999)
+    made = [old_env, new_env]
+    mock_gym_make.side_effect = lambda *a, **k: made.pop(0)
 
     gym_env = DonkeyGymEnv(
         sim_path="remote",
@@ -255,17 +275,22 @@ def test_run_threaded_watchdog_forces_reconnect_when_stale(mock_gym_make):
         env_name="donkey-generated-track-v0",
         conf={"img_h": 120, "img_w": 160, "watchdog_sec": 5.0},
     )
-
-    assert gym_env.env is not None
+    assert gym_env.env is old_env
     assert gym_env.connected is True
 
-    # 伪造「长时间无新帧」：把最后成功 step 时间戳拨到很久以前
+    # 伪造「长时间无新帧」：把看门狗时间戳拨到很久以前
     gym_env._last_frame_ts = time.time() - 10.0
-    gym_env.run_threaded(0.0, 0.0, 0.0)
 
-    assert gym_env.env is None, "看门狗超时后应强制关闭 env"
-    assert gym_env.connected is False, "看门狗超时后 connected 应为 False"
-    assert fake_env.closed, "看门狗超时后应调用 env.close()"
+    t0 = time.perf_counter()
+    gym_env.run_threaded(0.0, 0.0, 0.0)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.2, f"看门狗只投递请求，run_threaded 不应被重建阻塞，实际 {elapsed:.3f}s"
+
+    assert _wait_until(lambda: gym_env.env is new_env), "后台线程应完成重建并切换到新 env"
+    assert old_env.closed, "重建时应关闭旧 env"
+    assert gym_env.connected is True
+
+    gym_env.shutdown()
 
 
 def test_update_refreshes_last_frame_ts_on_successful_step(mock_gym_make):
@@ -304,14 +329,16 @@ class WedgedEnv(FakeEnv):
         return obs, 0.0, False, False, {}
 
 
-def test_watchdog_closes_env_when_frames_stall(mock_gym_make):
+def test_watchdog_rebuilds_while_update_thread_wedged(mock_gym_make):
     """
     模拟器断连且 step() 卡死（gym_donkeycar observe 自旋）时，
-    主循环侧的看门狗应检测到帧时间戳过旧并强制关闭 env，
-    使 update 线程在 step 返回后进入重连逻辑。
+    后台重建线程仍能换掉死 env：卡死的 update 线程永远回不到重连分支，
+    看门狗投递的重建是唯一能救活连接的路径，且不阻塞 Vehicle 主循环。
     """
     wedged_env = WedgedEnv(fail_after=10**12)
-    mock_gym_make.return_value = wedged_env
+    new_env = FakeEnv(fail_after=9999)
+    made = [wedged_env, new_env]
+    mock_gym_make.side_effect = lambda *a, **k: made.pop(0)
 
     gym_env = DonkeyGymEnv(
         sim_path="remote",
@@ -331,13 +358,13 @@ def test_watchdog_closes_env_when_frames_stall(mock_gym_make):
     # 模拟 Vehicle 主循环周期性调用 run_threaded
     for _ in range(40):
         gym_env.run_threaded(0.0, 0.0)
-        if gym_env.env is None:
+        if gym_env.env is new_env:
             break
         time.sleep(0.05)
 
-    assert wedged_env.closed, "看门狗应强制 close() 卡死的 env"
-    assert gym_env.env is None, "看门狗触发后 env 应被设为 None"
-    assert gym_env.connected is False, "看门狗触发后 connected 应为 False"
+    assert wedged_env.closed, "后台重建应 close() 卡死的 env"
+    assert gym_env.env is new_env, "重建后应由新 env 接管"
+    assert gym_env.connected is True, "新连接建立后 connected 应回到 True"
 
     gym_env.shutdown()
 

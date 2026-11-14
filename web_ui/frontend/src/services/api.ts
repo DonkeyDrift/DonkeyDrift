@@ -17,7 +17,7 @@ export const getDriveVideoTransport = (): DriveVideoTransport => {
  * crypto.randomUUID() 仅在 secure context（HTTPS 或 localhost）下可用，
  * 通过局域网 IP 访问时需回退到 crypto.getRandomValues()。
  */
-const generateUuid = (): string => {
+export const generateUuid = (): string => {
   if (typeof crypto?.randomUUID === 'function') {
     return crypto.randomUUID();
   }
@@ -174,7 +174,32 @@ export interface ChildTubInfo {
 
 export const listTubSessions = async (tubPath: string) => {
   const response = await api.get('/tub/sessions', { params: { tubPath } });
-  return response.data as { status: boolean; path: string; sessions: TubSession[] };
+  return response.data as {
+    status: boolean;
+    path: string;
+    sessions: TubSession[];
+    // sessions 为空（如全部被软删）时后端附带，供「子 tub」切换引导
+    child_tubs?: ChildTubInfo[];
+  };
+};
+
+// 家族聚合视图：一个录制家族的跨 tub 会话（_session_id 跨 tub 会撞名，
+// 必须按 (tub_path, session_id) 复合键区分，见 issue 方案 B）
+export interface FamilyTubSession extends TubSession {
+  tub_path: string;
+  tub_name: string;
+}
+
+export const listFamilyTubSessions = async (tubPath: string) => {
+  const response = await api.get('/tub/family_sessions', { params: { tubPath } });
+  return response.data as {
+    status: boolean;
+    path: string;
+    family_root: string;
+    sessions: FamilyTubSession[];
+    // 家族聚合为空（成员全删/无成员）时后端附带，供「子 tub」切换引导
+    child_tubs?: ChildTubInfo[];
+  };
 };
 
 export const listChildTubs = async (tubPath: string) => {
@@ -497,9 +522,25 @@ export interface DriveWebRtcStats {
   local_candidates_sent?: number;
   offer_to_answer_elapsed_ms?: number | null;
   inbound_fps?: number;
+  render_fps_gap?: number;
   frames_dropped?: number;
   jitter_ms?: number;
   jitter_buffer_delay_ms?: number;
+  e2e_latency_p50_ms?: number;
+  e2e_latency_p95_ms?: number;
+  e2e_samples?: number;
+  /** 诊断口径：同一印章样本三锚点时延拆解（now/present/display）与回调迟滞、vsync 量子 */
+  e2e_latency_max_ms?: number;
+  e2e_present_p50_ms?: number;
+  e2e_present_p95_ms?: number;
+  e2e_display_p50_ms?: number;
+  e2e_display_p95_ms?: number;
+  callback_late_p95_ms?: number;
+  vsync_quantum_p95_ms?: number;
+  /** 真实新帧 pts 被顶号次数（呈现晚一拍的帧数，e2e 尾部来源） */
+  pts_bumps?: number;
+  /** 车端↔后端时钟偏移（后端钟 − 车端钟，ms）：像素印章 e2e 的车钟域校正项 */
+  clock_offset_ms?: number;
   transport: 'webrtc' | 'mjpeg';
   degraded: boolean;
 }
@@ -528,6 +569,16 @@ export const sendDriveWebRtcBrowserStats = async (
     frames_dropped?: number;
     jitter_ms?: number;
     jitter_buffer_delay_ms?: number;
+    e2e_latency_p50_ms?: number;
+    e2e_latency_p95_ms?: number;
+    e2e_samples?: number;
+    e2e_latency_max_ms?: number;
+    e2e_present_p50_ms?: number;
+    e2e_present_p95_ms?: number;
+    e2e_display_p50_ms?: number;
+    e2e_display_p95_ms?: number;
+    callback_late_p95_ms?: number;
+    vsync_quantum_p95_ms?: number;
   }
 ) => {
   const response = await api.post('/drive/webrtc/browser-stats', { session_id: sessionId, ...metrics });
@@ -561,6 +612,11 @@ export const startLocalTrain = async (params: {
   model_type: string;
   transfer?: string;
   working_dir?: string;
+  // 只训练选中的录制会话；undefined/空 = 不筛选（请求体与旧版一致）
+  session_ids?: string[];
+  // 按 tub 分组的会话筛选 {tub绝对路径: [session_id,...]}（跨 tub 撞名必须带
+  // tub 维度）；优先于平坦 session_ids，两者都缺省 = 家族全量
+  session_filter?: Record<string, string[]>;
 }) => {
   const response = await api.post('/trainer/train/local', params);
   return response.data;
@@ -609,6 +665,36 @@ export const getJobStatus = async (jobId: string) => {
 
 export const createLogStream = (jobId: string) => {
   return new EventSource(`${API_URL}/trainer/train/${jobId}/logs`);
+};
+
+// ------------------------------------------------------------------
+// AIMO cloud NPU conversion (.aidem)
+// ------------------------------------------------------------------
+export interface AimoKeyStatus {
+  sdk: boolean;
+  key: boolean;
+  keySource: 'env' | 'file' | null;
+}
+
+export const getAimoKeyStatus = async (): Promise<AimoKeyStatus> => {
+  const response = await api.get('/trainer/aimo/key-status');
+  return response.data as AimoKeyStatus;
+};
+
+// 状态查询 / 停止 / SSE 日志复用训练任务的 getJobStatus / stopTrain / createLogStream
+export const startAimoConvert = async (params: {
+  model_path: string;
+  out_dir?: string;
+  working_dir?: string;
+  precision?: 'INT8' | 'INT16' | 'FP16';
+  calib_tubs?: string | null;
+  calib_max?: number;
+  calib_mix_synth?: number;
+  calib_dataset?: string;
+  timeout_s?: number;
+}) => {
+  const response = await api.post('/trainer/train/aimo', params);
+  return response.data as { job_id: string; status: string };
 };
 
 // ------------------------------------------------------------------
