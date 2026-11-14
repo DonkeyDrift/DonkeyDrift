@@ -103,6 +103,8 @@ class FakeSsh:
 
     def close(self):
         self.closed = True
+        for channel in self.channels:
+            channel.close()
 
 
 class BlockingStartSsh(FakeSsh):
