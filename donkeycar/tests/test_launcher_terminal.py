@@ -208,6 +208,18 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
     # Ctrl-C 送达时尚未处理的输入清空，立即写入 echo 可能被一起丢弃；
     # 新提示符则明确证明前台 sleep 已退出且 shell 可以接收下一条命令。
     prompt_offset = len(writer.output())
+    import subprocess
+    shell_pid = sess._proc.pid
+    foreground_pgid = os.tcgetpgrp(sess._master)
+    processes = subprocess.run(
+        ["ps", "-eo", "pid,ppid,pgid,sid,stat,comm,args"],
+        capture_output=True, text=True, check=False,
+    ).stdout.splitlines()
+    print(f"BEFORE_CTRL_C shell={shell_pid} foreground={foreground_pgid}")
+    print("\n".join(
+        line for line in processes
+        if "sleep 30" in line or f"/bin/bash -lm" in line
+    ))
 
     def prompt_returned():
         output = writer.output()
@@ -219,18 +231,15 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
         if _wait_until(prompt_returned, timeout=1.0):
             break
     if not prompt_returned():
-        import subprocess
-        shell_pid = sess._proc.pid
         print(f"PTY output after Ctrl-C: {writer.output()[prompt_offset:]!r}")
+        print(f"shell_returncode={sess._proc.poll()} foreground={os.tcgetpgrp(sess._master)}")
         processes = subprocess.run(
             ["ps", "-eo", "pid,ppid,pgid,sid,stat,comm,args"],
             capture_output=True, text=True, check=False,
         ).stdout.splitlines()
         print("\n".join(
             line for line in processes
-            if line.split()[0].isdigit() and int(line.split()[0]) == shell_pid
-            or len(line.split()) > 1 and line.split()[1].isdigit()
-            and int(line.split()[1]) == shell_pid
+            if "sleep 30" in line or "/bin/bash -lm" in line
         ))
     assert prompt_returned()
     sess.on_input(b"echo alive-$((6*7))\n")
