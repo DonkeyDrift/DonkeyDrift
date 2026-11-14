@@ -26,6 +26,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 
+import signal
 import pytest
 
 from donkeycar.launcher import terminal
@@ -104,11 +105,18 @@ def _wait_until(predicate, timeout=10.0, interval=0.05):
 
 
 @pytest.fixture
-def session():
+def session(request):
     """起一个真实 bash PTY 会话，测试后确保关闭。"""
     if os.name != "posix":
         pytest.skip("PTY terminal bridge is POSIX-only")
-    sess = TerminalSession()
+    previous_mask = None
+    if getattr(request, "param", False):
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        sess = TerminalSession()
+    finally:
+        if previous_mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
     with terminal._sessions_lock:
         terminal._sessions[sess.sid] = sess
     writer = _FakeWriter()
@@ -227,6 +235,12 @@ def test_session_ctrl_c_interrupts_foreground_process(session):
     assert prompt_returned()
     sess.on_input(b"echo alive-$((6*7))\n")
     assert _wait_until(lambda: b"alive-42" in writer.output())
+
+
+@pytest.mark.parametrize("session", [True], indirect=True)
+def test_session_ctrl_c_unblocks_inherited_sigint(session):
+    """宿主屏蔽 SIGINT 时，PTY 子进程仍须在启动时解除屏蔽。"""
+    test_session_ctrl_c_interrupts_foreground_process(session)
 
 
 def test_session_resize(session):

@@ -222,7 +222,7 @@ class TerminalSession:
     宽限期耗尽仍无人重连的会话由 _sessions_sweeper 后台线程清扫。
     """
 
-    def __init__(self, shell=("/bin/bash", "-il"), cwd=None, env=None):
+    def __init__(self, shell=("/bin/bash", "-l"), cwd=None, env=None):
         if not _IS_POSIX:
             raise RuntimeError(
                 "Web 终端依赖 POSIX PTY（pty/fcntl/termios），仅支持 Linux/macOS")
@@ -265,6 +265,12 @@ class TerminalSession:
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             signal.signal(signal.SIGQUIT, signal.SIG_DFL)
             signal.signal(signal.SIGHUP, signal.SIG_DFL)
+            # 处置复位不能替代屏蔽解除：宿主若屏蔽了控制信号，PTY 子进程
+            # 会继承该掩码，Ctrl-C 即使送达前台进程组也不会生效。
+            signal.pthread_sigmask(
+                signal.SIG_UNBLOCK,
+                {signal.SIGINT, signal.SIGQUIT, signal.SIGHUP},
+            )
 
         self._proc = subprocess.Popen(
             list(shell),
