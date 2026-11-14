@@ -222,7 +222,7 @@ class TerminalSession:
     宽限期耗尽仍无人重连的会话由 _sessions_sweeper 后台线程清扫。
     """
 
-    def __init__(self, shell=("/bin/bash", "-l"), cwd=None, env=None):
+    def __init__(self, shell=("/bin/bash", "-lm"), cwd=None, env=None):
         if not _IS_POSIX:
             raise RuntimeError(
                 "Web 终端依赖 POSIX PTY（pty/fcntl/termios），仅支持 Linux/macOS")
