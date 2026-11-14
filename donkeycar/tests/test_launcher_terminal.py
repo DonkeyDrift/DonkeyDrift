@@ -254,6 +254,21 @@ def test_session_ctrl_c_unblocks_inherited_sigint(session):
     test_session_ctrl_c_interrupts_foreground_process(session)
 
 
+def test_session_ctrl_c_survives_login_errexit(tmp_path):
+    """登录 profile 的 set -e 不得把 Ctrl-C 变成整个终端退出。"""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bash_profile").write_text("set -e\n", encoding="utf-8")
+    env = dict(os.environ, HOME=str(home))
+    sess = TerminalSession(env=env, cwd=str(tmp_path))
+    writer = _FakeWriter()
+    sess.attach(writer)
+    try:
+        test_session_ctrl_c_interrupts_foreground_process((sess, writer))
+    finally:
+        sess.close()
+
+
 def test_session_resize(session):
     sess, writer = session
     sess.on_resize(123, 45)

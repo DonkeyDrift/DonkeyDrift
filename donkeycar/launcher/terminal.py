@@ -222,7 +222,7 @@ class TerminalSession:
     宽限期耗尽仍无人重连的会话由 _sessions_sweeper 后台线程清扫。
     """
 
-    def __init__(self, shell=("/bin/bash", "-lm"), cwd=None, env=None):
+    def __init__(self, shell=("/bin/bash", "-l"), cwd=None, env=None):
         if not _IS_POSIX:
             raise RuntimeError(
                 "Web 终端依赖 POSIX PTY（pty/fcntl/termios），仅支持 Linux/macOS")
@@ -282,6 +282,9 @@ class TerminalSession:
         )
         os.close(slave)
         self._master = master
+        # 登录 profile 可能启用 errexit（例如 CI 的 conda 初始化）。交互终端
+        # 中 Ctrl-C 让前台命令返回非零是正常行为，不应让登录 shell 随之退出。
+        os.write(master, b"set +e\n")
         logger.info("终端会话已建立: pid=%d", self._proc.pid)
 
     # ------------------------------------------------------------------
