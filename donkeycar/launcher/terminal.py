@@ -222,7 +222,7 @@ class TerminalSession:
     宽限期耗尽仍无人重连的会话由 _sessions_sweeper 后台线程清扫。
     """
 
-    def __init__(self, shell=("/bin/bash", "-l"), cwd=None, env=None):
+    def __init__(self, shell=("/bin/bash", "-il"), cwd=None, env=None):
         if not _IS_POSIX:
             raise RuntimeError(
                 "Web 终端依赖 POSIX PTY（pty/fcntl/termios），仅支持 Linux/macOS")
@@ -280,17 +280,9 @@ class TerminalSession:
 
     # ------------------------------------------------------------------
     def on_input(self, data: bytes):
-        """客户端输入字节流写入 PTY，Ctrl-C 直接投递给前台进程组。"""
+        """客户端输入字节流写入 PTY。"""
         if self._closed or self._master is None:
             return
-        if data == b"\x03":
-            try:
-                pgid = os.tcgetpgrp(self._master)
-                if pgid > 0:
-                    os.killpg(pgid, signal.SIGINT)
-                    return
-            except OSError:
-                pass
         try:
             os.write(self._master, data)
         except OSError:
