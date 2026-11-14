@@ -43,7 +43,38 @@ class PilotHolder:
         resolved_type = model_type or getattr(self.cfg, "DEFAULT_MODEL_TYPE", "linear")
         pilot = dk_utils.get_model_by_type(resolved_type, self.cfg)
         pilot.load(model_path)
+        self._validate_input_shape(pilot, model_path)
         return pilot, resolved_type
+
+    def _validate_input_shape(self, pilot, model_path: str):
+        """校验模型输入 HxWxD 与 cfg 相机分辨率一致，不一致直接拒绝加载。
+
+        分辨率调整后（如 160x120 → 320x240）旧模型形状不匹配：推理首帧
+        必然抛异常，而 drive 主循环对部件异常的策略是整体退出（vehicle.py
+        只捕获 KeyboardInterrupt 后 stop()），若发生在自动模式下会带停循环。
+        在加载期拦截，错误经桥接层回传 Web UI，旧模型保持不变。
+        """
+        expected = (getattr(self.cfg, "IMAGE_H", None),
+                    getattr(self.cfg, "IMAGE_W", None),
+                    getattr(self.cfg, "IMAGE_DEPTH", None))
+        if not all(isinstance(v, int) and v > 0 for v in expected):
+            return
+        try:
+            shape = tuple(pilot.get_input_shape('img_in'))
+        except Exception:  # pragma: no cover - 拿不到输入形状的模型类型不拦截
+            return
+        try:
+            # TfLite/Keras 返回的可能是 np.integer，统一转 Python int 再比较
+            actual = tuple(int(d) for d in shape[-3:])
+        except (TypeError, ValueError):  # pragma: no cover - 动态/未知维度不拦截
+            return
+        if len(actual) != 3:
+            return
+        if actual != expected:
+            raise ValueError(
+                f"模型输入 {actual[1]}x{actual[0]}x{actual[2]} 与当前相机分辨率 "
+                f"{expected[1]}x{expected[0]}x{expected[2]} 不一致（{model_path}）；"
+                f"请用当前分辨率数据重新训练，或将 myconfig.py 改回模型对应的分辨率")
 
     def load(self, model_path: str, model_type: Optional[str] = None):
         """构建并原子替换当前模型；构建失败时保留旧模型并把异常抛给调用方。"""

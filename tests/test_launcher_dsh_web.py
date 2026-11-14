@@ -47,6 +47,7 @@ import pytest
 
 from donkeycar.launcher import dsh_web
 from donkeycar.launcher import kimi_web
+from donkeycar.launcher import auth as launch_auth
 from donkeycar.launcher.dsh_web import launch_dsh_web
 from donkeycar.launcher import server as launcher_server
 
@@ -1466,6 +1467,11 @@ def _pin_own_hosts(monkeypatch):
         launcher_server, "launch_dsh_web",
         lambda cwd=None: {"status": "ok",
                           "url": "http://tony007.local:58641/?token=T1"})
+    # 鉴权门的本机名字判定同步钉死（launcher/auth.py 的 Host 钳制）
+    monkeypatch.setattr(launch_auth, "_local_ips",
+                        lambda: frozenset({"192.168.3.62"}))
+    monkeypatch.setattr(launch_auth, "_hostname_variants",
+                        lambda: {"localhost", "tony007", "tony007.local"})
 
 
 def test_endpoint_entry_host_follows_request_host(http_server, monkeypatch):
@@ -1490,14 +1496,16 @@ def test_endpoint_trusts_x_forwarded_host_from_loopback(http_server,
         "http://192.168.3.62:58641/?token=T1"
 
 
-def test_endpoint_unknown_host_leaves_url_untouched(http_server, monkeypatch):
-    # Host 不是本机地址：原样返回（防 token 泄给未知主机）
+def test_endpoint_unknown_host_rejected_at_auth_gate(http_server,
+                                                     monkeypatch):
+    # Host 不是本机名字（DNS-rebinding 形态）：P0 鉴权门直接 401，
+    # 令牌不随拒绝响应外泄；"未知主机不改写 URL"的兜底由
+    # TestEntryUrlForClient 单元测试覆盖
     _pin_own_hosts(monkeypatch)
     code, _h, payload = _post(http_server + "/api/launch/dsh", b"{}",
                               headers={"Host": "evil.example.com:8090"})
-    assert code == 200
-    assert json.loads(payload)["url"] == \
-        "http://tony007.local:58641/?token=T1"
+    assert code == 401
+    assert b"T1" not in payload
 
 
 # ===========================================================================

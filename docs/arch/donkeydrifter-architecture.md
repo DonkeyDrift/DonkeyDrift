@@ -201,7 +201,6 @@ DonkeyDrifter 是一个开源的小型自动驾驶 / **漂移（Drifting）遥�
 | `cnnactivations` | 卷积层激活可视化 |
 | `train` | tensorflow/pytorch 训练 |
 | `models` | PilotDatabase 查询 |
-| `ui` | Kivy 桌面 GUI（`management/ui/`，历史） |
 | `tui` | **rich/prompt_toolkit 交互终端**（无参数默认进入）：建车/开项目/清数据(回收站)/备份/恢复/本地训练/在线训练/驾驶/Drifter Console/Web UI |
 | `web` | 拉起 FastAPI 后端 + Vite 前端；生产模式构建 dist 由后端托管 SPA（同端口），dev 模式 Vite HMR + `/api` 代理 |
 | `drive` | `web` 基础上再启动 `manage.py drive`，注入 `DRIVE_API_SERVER_URL=ws://127.0.0.1:<backend>/api/drive/ws` 让车端以 `role=car` 回连 |

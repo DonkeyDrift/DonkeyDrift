@@ -52,6 +52,8 @@ configure_gpu_memory()
 from docopt import docopt
 from tensorflow.keras import mixed_precision
 
+from donkeycar.utils import disable_metal_gpu_on_macos
+
 # 3. Enable mixed precision training only on non-macOS machines with a GPU.
 # On CPU or Apple Metal (macOS), mixed_float16 is slower and numerically
 # unstable (loss diverges), so keep the default float32 there.
@@ -62,12 +64,11 @@ try:
         mixed_precision.set_global_policy(policy)
         print('Mixed precision policy set to mixed_float16')
     else:
-        if gpus and sys.platform == 'darwin':
-            # tensorflow-metal is numerically unstable on Apple Silicon even
-            # in float32 (train loss spikes, val loss pinned at the
-            # predict-mean baseline — upstream issue keras-team/tf-keras#140).
-            # Hide the Metal GPU so training runs deterministically on CPU.
-            tf.config.set_visible_devices([], 'GPU')
+        # tensorflow-metal is numerically unstable on Apple Silicon even
+        # in float32 (train loss spikes, val loss pinned at the
+        # predict-mean baseline — upstream issue keras-team/tf-keras#140).
+        # Hide the Metal GPU so training runs deterministically on CPU.
+        if disable_metal_gpu_on_macos():
             print('Disabled Metal GPU on macOS (numerical instability); '
                   'training on CPU (float32)')
         print('Skipping mixed_float16 (no GPU or macOS); using float32')

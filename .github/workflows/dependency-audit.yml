@@ -1,0 +1,51 @@
+name: Dependency audit
+
+# P0.2 依赖安全门禁（2026-10-12）：
+# pip-audit 审计 requirements-lock.txt（scripts/regenerate_lock.sh 生成的
+# 精确固定 + 哈希锁），发现任何已知 CVE 即失败。依赖真源是 setup.cfg，
+# 锁文件由 requirements.in 声明的 extras 组合编译而来，两者变更都要重锁。
+# 除推送/PR 触发外每周定时复扫，跟进新披露漏洞。
+on:
+  push:
+    paths:
+      - "requirements.in"
+      - "requirements-lock.txt"
+      - "setup.cfg"
+      - "scripts/regenerate_lock.sh"
+      - ".github/workflows/dependency-audit.yml"
+  pull_request:
+    paths:
+      - "requirements.in"
+      - "requirements-lock.txt"
+      - "setup.cfg"
+      - "scripts/regenerate_lock.sh"
+      - ".github/workflows/dependency-audit.yml"
+  schedule:
+    # 每周一 06:17 UTC（错峰整点）
+    - cron: "17 6 * * 1"
+
+jobs:
+  pip-audit:
+    name: pip-audit locked requirements
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+
+      - name: Audit locked dependencies
+        # --disable-pip：锁文件全量 == 固定 + 哈希，免建虚拟环境直接查
+        # 漏洞库；--strict：任一依赖收集失败整体判失败，不静默放过
+        run: >
+          python -m pip_audit
+          -r requirements-lock.txt
+          --disable-pip
+          --strict
+          --progress-spinner off

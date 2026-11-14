@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { listModels, deleteModel, downloadModelUrl, loadModelToCar, importModel, uploadModelLoss, API_URL, getApiErrorMessage } from '../../services/api';
 import { useStore } from '../../store/useStore';
-import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload, ImagePlus } from 'lucide-react';
+import { FileText, Copy, TrendingDown, Download, Send, Trash2, Boxes, X, Upload, ImagePlus, Cpu } from 'lucide-react';
 import { SectionCardTitle } from '../ui/SectionCardTitle';
+import { NpuConvertModal, isNpuConvertible } from './NpuConvertModal';
 import { useTranslation } from '@/i18n';
 
 interface ModelItem {
   name: string;
+  type?: 'file' | 'dir';
   size: number;
   modified: string;
   path: string;
@@ -54,6 +56,9 @@ export const ModelsList: React.FC = () => {
   const [uploadLossImage, setUploadLossImage] = useState<File | null>(null);
   const [uploadMetaJson, setUploadMetaJson] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  // NPU 云转弹窗：npuInitialPath 为空 = 从头部按钮进入（手填任意模型路径）
+  const [showNpuConvert, setShowNpuConvert] = useState(false);
+  const [npuInitialPath, setNpuInitialPath] = useState<string>('');
   const [hoverPreview, setHoverPreview] = useState<{
     path: string;
     name: string;
@@ -209,6 +214,19 @@ export const ModelsList: React.FC = () => {
         />
         <div className="flex items-center gap-3">
           <button
+            onClick={() => {
+              setNpuInitialPath('');
+              setShowNpuConvert(true);
+            }}
+            className="inline-flex items-center gap-1 text-xs text-cyan-500 hover:text-cyan-400 transition-colors"
+            title={t('trainer.npuConvertTitle')}
+            aria-label={t('trainer.npuConvertTitle')}
+            data-testid="npu-convert-open"
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            {t('trainer.npuConvertBtn')}
+          </button>
+          <button
             onClick={() => setShowImport(true)}
             disabled={importing}
             className="inline-flex items-center gap-1 text-xs text-cyan-500 hover:text-cyan-400 disabled:text-zinc-600 transition-colors"
@@ -276,6 +294,20 @@ export const ModelsList: React.FC = () => {
                   >
                     <ImagePlus className="w-3 h-3" />
                     {t('trainer.uploadLoss')}
+                  </button>
+                )}
+                {isNpuConvertible(m.name, m.type ?? 'file') && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNpuInitialPath(m.path);
+                      setShowNpuConvert(true);
+                    }}
+                    title={t('trainer.npuConvert')}
+                    aria-label={t('trainer.npuConvert')}
+                    className="dd-hit-v p-1 text-zinc-500 hover:text-cyan-400 transition-colors"
+                  >
+                    <Cpu className="w-3.5 h-3.5" />
                   </button>
                 )}
                 <a
@@ -541,6 +573,14 @@ export const ModelsList: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* AIMO NPU 云转弹窗 */}
+      <NpuConvertModal
+        isOpen={showNpuConvert}
+        onClose={() => setShowNpuConvert(false)}
+        initialModelPath={npuInitialPath || undefined}
+        onCompleted={refresh}
+      />
 
       {/* Delete confirmation modal */}
       {confirmDelete && (

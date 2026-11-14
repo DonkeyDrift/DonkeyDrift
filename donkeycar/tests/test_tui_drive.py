@@ -1,3 +1,4 @@
+import socket
 import sys
 
 import pytest
@@ -21,6 +22,9 @@ def _isolate_process_registry(monkeypatch):
     monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
     # 局域网探测在测试环境不确定，默认固定 localhost；LAN 行为有专测
     monkeypatch.setattr(tui, "_lan_host", lambda: "localhost")
+    # Drive 流程不应再出现交互 Confirm（时延探针提问已移除，开关走 env）；
+    # 此 patch 是回归护栏：若有人加回提问，测试环境也不会卡在读 stdin
+    monkeypatch.setattr(tui.Confirm, "ask", lambda *args, **kwargs: False)
 
 
 class FakeProcess:
@@ -53,6 +57,17 @@ class ProcessingStreamWithoutFileno:
 
     def flush(self):
         pass
+
+
+def test_choose_available_backend_port_skips_loopback_listener():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        occupied_port = listener.getsockname()[1]
+
+        selected_port = tui.DriveCommand().choose_available_backend_port(occupied_port)
+
+        assert selected_port != occupied_port
 
 
 def test_drive_command_opens_web_console_drive_page(monkeypatch, tmp_path):
@@ -202,7 +217,9 @@ def test_drive_command_does_not_start_without_manage_py(monkeypatch, tmp_path):
 
     tui.DriveCommand().execute()
 
-    assert popen_calls == []
+    # 无 manage.py：车进程（manage.py drive）绝不启动；Web Console 属
+    # 一键启动范围，默认模式会正常拉起
+    assert not any("manage.py" in cmd for cmd, _ in popen_calls)
 
 
 class PollingProcess(FakeProcess):
@@ -390,3 +407,139 @@ def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path)
     tui.DriveCommand().execute()
 
     assert takeover_calls == ["called"]
+
+
+# ---------------- WebRTC 时延探针集成（TUI 不再提问，开关走 env） ----------------
+
+def _drive_with_probe_env(monkeypatch, tmp_path, probe_env):
+    popen_calls = []
+    prompts = iter(["y", ""])
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+    if probe_env is None:
+        monkeypatch.delenv("DRIVE_WEBRTC_LATENCY_PROBE", raising=False)
+    else:
+        monkeypatch.setenv("DRIVE_WEBRTC_LATENCY_PROBE", probe_env)
+    monkeypatch.setattr(
+        tui.DriveCommand, "choose_available_backend_port",
+        lambda self, preferred_port=8100: 8000)
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+    tui.DriveCommand().execute()
+    return popen_calls
+
+
+def test_drive_command_probe_env_on_sets_env_one(monkeypatch, tmp_path):
+    popen_calls = _drive_with_probe_env(monkeypatch, tmp_path, "1")
+    car_kwargs = popen_calls[1][1]
+    assert car_kwargs["env"]["DRIVE_WEBRTC_LATENCY_PROBE"] == "1"
+
+
+def test_drive_command_probe_env_true_normalized(monkeypatch, tmp_path):
+    popen_calls = _drive_with_probe_env(monkeypatch, tmp_path, "true")
+    car_kwargs = popen_calls[1][1]
+    assert car_kwargs["env"]["DRIVE_WEBRTC_LATENCY_PROBE"] == "1"
+
+
+def test_drive_command_probe_env_unset_sets_env_zero(monkeypatch, tmp_path):
+    # 未显式开启时归一化置 0：车端子进程拿到的取值确定，不靠继承链上的空缺
+    popen_calls = _drive_with_probe_env(monkeypatch, tmp_path, None)
+    car_kwargs = popen_calls[1][1]
+    assert car_kwargs["env"]["DRIVE_WEBRTC_LATENCY_PROBE"] == "0"
+
+
+def test_get_preview_command_probe_env():
+    cmd = tui.DriveCommand()
+    base = cmd.get_preview_command(
+        ["donkey", "web"], ["python", "manage.py", "drive"],
+        "ws://localhost:8000/api/drive/ws")
+    on = cmd.get_preview_command(
+        ["donkey", "web"], ["python", "manage.py", "drive"],
+        "ws://localhost:8000/api/drive/ws", probe=True)
+    assert "DRIVE_WEBRTC_LATENCY_PROBE" not in base
+    assert "DRIVE_WEBRTC_LATENCY_PROBE=1" in on
+    # 前缀顺序：URL 在前，探针 env 跟随，随后是车命令本身
+    assert on.index("DRIVE_API_SERVER_URL=") < on.index("DRIVE_WEBRTC_LATENCY_PROBE=1")
+    assert "manage.py" in on
+
+
+# ---------------- 一键启动与 -v/--verbose 确认 ----------------
+
+def _run_drive(monkeypatch, tmp_path, answers, verbose=False):
+    """跑一次 Drive 流程，answers 依序喂给 Prompt.ask。
+
+    默认（非 verbose）只剩"按回车键返回菜单"一次交互；verbose=True 时
+    首个应答是执行确认页的 y/n/c。返回 (popen_calls, asks)。
+    """
+    popen_calls = []
+    asks = []
+
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    answers = iter(answers)
+    monkeypatch.setattr(
+        tui.Prompt, "ask",
+        lambda *args, **kwargs: asks.append(args[0] if args else "")
+        or next(answers))
+    # 取消路径有 time.sleep(1)，测试里跳过
+    monkeypatch.setattr(tui.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        tui.DriveCommand, "choose_available_backend_port",
+        lambda self, preferred_port=8100: 8000)
+
+    def fake_popen(cmd_list, **kwargs):
+        popen_calls.append((cmd_list, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(tui.subprocess, "Popen", fake_popen)
+    tui.DriveCommand(verbose=verbose).execute()
+    return popen_calls, asks
+
+
+def test_drive_command_default_launches_without_confirm(monkeypatch, tmp_path):
+    # 默认一键启动：无命令预览/确认交互，选中即拉起 web + 车进程
+    popen_calls, asks = _run_drive(monkeypatch, tmp_path, [""])
+    assert len(asks) == 1
+    assert "按回车" in asks[0]
+    assert len(popen_calls) == 2
+
+
+def test_drive_command_verbose_confirms_before_launch(monkeypatch, tmp_path):
+    popen_calls, asks = _run_drive(
+        monkeypatch, tmp_path, ["y", ""], verbose=True)
+    assert len(asks) == 2
+    assert "请选择操作" in asks[0]
+    assert len(popen_calls) == 2
+
+
+def test_drive_command_verbose_cancel_skips_launch(monkeypatch, tmp_path):
+    popen_calls, asks = _run_drive(
+        monkeypatch, tmp_path, ["n"], verbose=True)
+    assert "请选择操作" in asks[0]
+    assert popen_calls == []
+
+
+def test_tui_cli_verbose_flag_and_menu_wiring():
+    from donkeycar.management.base import Tui
+
+    assert Tui().parse_args(["-v"]).verbose is True
+    assert Tui().parse_args(["--verbose"]).verbose is True
+    assert Tui().parse_args([]).verbose is False
+
+    # verbose 从 CLI 一路传到菜单里的 DriveCommand
+    assert tui.MenuSystem(verbose=True).commands["驾驶"][0].verbose is True
+    assert tui.MenuSystem().commands["驾驶"][0].verbose is False

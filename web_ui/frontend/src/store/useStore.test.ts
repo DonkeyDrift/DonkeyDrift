@@ -69,6 +69,37 @@ describe('useStore activeTraining（刷新后恢复训练进度）', () => {
   });
 });
 
+// 多选会话筛选（家族视图）：setActiveSession 第三参 sessionIds 缺省时从
+// sessionId 派生（向后兼容，所有既有调用点行为不变）；显式传入则保留集合。
+describe('useStore setActiveSession 多选集合派生', () => {
+  beforeEach(() => {
+    useStore.setState({ activeSessionId: null, activeSessionRecords: [], activeSessionIds: [] });
+  });
+
+  it('第三参缺省时，sessionId 非空派生为单元素数组', () => {
+    useStore.getState().setActiveSession('s1', []);
+    expect(useStore.getState().activeSessionIds).toEqual(['s1']);
+  });
+
+  it('第三参缺省时，sessionId 为 null 派生为空数组', () => {
+    useStore.getState().setActiveSession(null, []);
+    expect(useStore.getState().activeSessionIds).toEqual([]);
+  });
+
+  it('显式传入 sessionIds 时原样保留（多选聚合写回）', () => {
+    useStore.getState().setActiveSession('s2', [], ['s1', 's2']);
+    expect(useStore.getState().activeSessionId).toBe('s2');
+    expect(useStore.getState().activeSessionIds).toEqual(['s1', 's2']);
+  });
+
+  it('setTub 切换 tub 时清空多选集合', () => {
+    useStore.getState().setActiveSession('s2', [], ['s1', 's2']);
+    useStore.getState().setTub('/tmp/tub2', [], ['cam/image_array']);
+    expect(useStore.getState().activeSessionIds).toEqual([]);
+    expect(useStore.getState().activeSessionId).toBeNull();
+  });
+});
+
 // 回归（代码审查）：自动 Tub 全部失败后残留上一配置的数据；从浏览配置入口进入时
 // 持久化 Tub 也不被恢复。需要 clearTub() 做完整重置：浏览态（tub 数据/计数/会话/
 // 播放/拖动/选择历史）全部回到空初始态，但不触碰 config/configPath、isLooping 与 error。
@@ -81,7 +112,7 @@ describe('useStore clearTub（Tub 浏览态完整重置）', () => {
     ];
     const state = useStore.getState();
     state.setTub('/tmp/tub-red', records, ['user/angle', 'cam/image_array'], 5, [3, 4]);
-    state.setActiveSession('session-red', records);
+    state.setActiveSession('session-red', records, ['session-red', 'session-red-2'], true);
     state.setCurrentIndex(1);
     state.setIsPlaying(true);
     state.setIsDragging(true);
@@ -116,6 +147,8 @@ describe('useStore clearTub（Tub 浏览态完整重置）', () => {
     expect(s.currentIndex).toBe(0);
     expect(s.activeSessionId).toBeNull();
     expect(s.activeSessionRecords).toEqual([]);
+    expect(s.activeSessionIds).toEqual([]);
+    expect(s.activeSessionCrossTub).toBe(false);
     expect(s.isPlaying).toBe(false);
     expect(s.isDragging).toBe(false);
     expect(s.selectionStartIndex).toBeNull();

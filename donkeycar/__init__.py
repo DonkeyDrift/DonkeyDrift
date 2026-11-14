@@ -6,8 +6,8 @@ from ._version import __version__
 
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
-if sys.version_info.major < 3 or sys.version_info.minor < 11:
-    msg = f'Donkey Requires Python 3.11 or greater. You are using {sys.version}'
+if sys.version_info.major < 3 or sys.version_info.minor < 10:
+    msg = f'Donkey Requires Python 3.10 or greater. You are using {sys.version}'
     raise ValueError(msg)
 
 # The default recursion limits in CPython are too small.

@@ -28,6 +28,7 @@ from donkeydrifter.parts.datastore import TubHandler
 from donkeydrifter.parts.controller import JoystickController
 from donkeydrifter.parts.drive_api_bridge import DriveApiBridge
 from donkeydrifter.parts.throttle_filter import ThrottleFilter
+from donkeydrifter.parts.steering_smoother import SteeringSmoother
 from donkeydrifter.parts.behavior import BehaviorPart
 from donkeydrifter.parts.file_watcher import FileWatcher
 from donkeydrifter.parts.launch import AiLaunch
@@ -65,9 +66,15 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
 
     inputs = []
 
-    cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=cfg.GYM_CONF, delay=cfg.SIM_ARTIFICIAL_LATENCY, output_preview=True)
+    # 模拟器出图必须等于 IMAGE_W×IMAGE_H（GYM_CONF 缺 img 键时 dgym 回退 160x120，
+    # 与模型/录制分辨率错位）；渲染分辨率仍由 render_img_w/h 独立控制
+    sim_conf = dict(cfg.GYM_CONF)
+    sim_conf["img_w"] = cfg.IMAGE_W
+    sim_conf["img_h"] = cfg.IMAGE_H
+
+    cam = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST, env_name=cfg.DONKEY_GYM_ENV_NAME, conf=sim_conf, delay=cfg.SIM_ARTIFICIAL_LATENCY, output_preview=True)
     threaded = True
-    inputs = ['angle', 'throttle', 'brake', 'reconnect_simulator']
+    inputs = ['angle', 'throttle', 'brake', 'reconnect_simulator', 'reset_car']
 
     # cam/image_array 保持 NN 输入分辨率（IMAGE_W×IMAGE_H）；preview/image_array 为
     # 模拟器渲染分辨率原始帧，供 Drive 页面展示最高画质，与 NN 输入解耦。
@@ -128,11 +135,15 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
             video_fps=getattr(cfg, "DRIVE_VIDEO_FPS", 60),
             webrtc_enabled=getattr(cfg, "DRIVE_WEBRTC_ENABLED", True),
             webrtc_ice_servers=getattr(cfg, "DRIVE_WEBRTC_ICE_SERVERS", None),
+            webrtc_video_bitrate=getattr(cfg, "DRIVE_WEBRTC_VIDEO_BITRATE", None),
+            webrtc_encoder_tune=getattr(cfg, "DRIVE_WEBRTC_ENCODER_TUNE", None),
             jpeg_quality=getattr(cfg, "DRIVE_VIDEO_JPEG_QUALITY", 95),
             preserve_source_resolution=True,
+            webrtc_preview_max_width=getattr(cfg, "DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", None),
+            webrtc_preview_max_height=getattr(cfg, "DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT", None),
         )
-        # outputs 顺序必须与 DriveApiBridge.run_threaded 的 7 元组返回值严格一致
-        # (Vehicle/Memory 按位置配对)：少写或错序会导致重连标志被静默丢弃。
+        # outputs 顺序必须与 DriveApiBridge.run_threaded 的 8 元组返回值严格一致
+        # (Vehicle/Memory 按位置配对)：少写或错序会导致重连/复位标志被静默丢弃。
         # inputs 顺序必须与 run_threaded 签名严格一致（Vehicle 按位置解包），
         # 尾部 sim/connected 由上面的 SimConnectionState 提供；中间键在模拟器
         # 模式下不存在时 Memory.get 返回 None，遥测自动省略对应字段。
@@ -148,8 +159,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
                       'rc/steering', 'rc/throttle', 'rc/mode', 'rc/park',
                       'drift/yaw_error', 'drift/steering_correction', 'drift/throttle_mode',
                       'sim/connected'],
-              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd'],
+              outputs=['user/angle', 'user/throttle', 'user/mode', 'recording', 'web/buttons', 'reconnect_simulator', 'car/mode_cmd', 'reset_car'],
               threaded=True)
+        # 预览帧事件驱动直推 WebRTC 帧缓冲:车辆循环轮询喂帧会被循环负载欠采样
+        # (实测 58Hz 源经轮询只剩 ~50Hz 进编码器),直推后编码器吃满源帧率,
+        # 「出帧→被拾取」的轮询等待同时归零。run_threaded 里的 update 保留作
+        # 兜底(帧缓冲按到达时刻去重,双写不会重复进编码器)。
+        cam.set_frame_sink(ctr.frame_buffer.update)
 
     #this throttle filter will allow one tap back for esc reverse
     th_filter = ThrottleFilter()
@@ -377,6 +393,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
                   'pilot/angle', 'pilot/throttle', 'pilot/brake'],
           outputs=['angle', 'throttle', 'brake'])
 
+    # 转向平滑：滤掉上游瞬时跳变（虚拟摇杆微释放拍零、控制链路抖动），
+    # 避免转向阶跃直达模拟器/执行器引发车身弹跳。
+    # STEERING_SMOOTHER_ALPHA=1 且 STEERING_SMOOTHER_SLEW_PER_SEC=0 可完全禁用。
+    V.add(SteeringSmoother(getattr(cfg, 'STEERING_SMOOTHER_ALPHA', 0.35),
+                           getattr(cfg, 'STEERING_SMOOTHER_SLEW_PER_SEC', 8.0)),
+          inputs=['angle'], outputs=['angle'])
+
 
     #to give the car a boost when starting ai mode in a race.
     aiLauncher = AiLaunch(cfg.AI_LAUNCH_DURATION, cfg.AI_LAUNCH_THROTTLE, cfg.AI_LAUNCH_KEEP_ENABLED)
@@ -434,7 +457,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None, camera_type
     # do we want to store new records into own dir or append to existing
     tub_path = TubHandler(path=cfg.DATA_PATH).create_tub_path() if \
         cfg.AUTO_CREATE_NEW_TUB else cfg.DATA_PATH
-    tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta)
+    tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta,
+                           async_write=getattr(cfg, 'TUB_ASYNC_WRITE', True))
     V.add(tub_writer, inputs=inputs, outputs=["tub/num_records"], run_condition='recording')
 
     if cfg.PUB_CAMERA_IMAGES:

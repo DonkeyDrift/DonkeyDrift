@@ -70,4 +70,10 @@ describe('ModelSelector', () => {
 
     expect(screen.queryByText('a.h5')).not.toBeInTheDocument();
   });
+
+  it('触发器带窄屏触控最小高度（与同排模式选择器/录制按钮一致）', () => {
+    render(<ModelSelector value="" options={[]} onChange={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /无模型/ }).className).toContain('max-lg:min-h-[40px]');
+  });
 });

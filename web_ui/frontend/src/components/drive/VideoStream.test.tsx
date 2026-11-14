@@ -2,7 +2,14 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS, DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS, VideoStream } from './VideoStream';
+import {
+  DRIVE_VIDEO_ASPECT_RATIO,
+  DRIVE_VIDEO_MAX_WIDTH_PX,
+  DRIVE_VIDEO_MJPEG_FALLBACK_DELAY_MS,
+  DRIVE_VIDEO_MJPEG_FIRST_FRAME_TIMEOUT_MS,
+  DRIVE_VIDEO_MIN_WIDTH_PX,
+  VideoStream,
+} from './VideoStream';
 import { useDriveWebRtcVideo } from '../../hooks/useDriveWebRtcVideo';
 
 vi.mock('../../hooks/useDriveWebRtcVideo', () => ({
@@ -26,9 +33,10 @@ const connectedState = () => ({
     transport: 'webrtc' as const,
     degraded: false,
   },
-  metrics: { browserFps: 58, p95FrameIntervalMs: 24 },
+  metrics: { browserFps: 58, p95FrameIntervalMs: 24, e2eLatencyP50Ms: 18, e2eLatencyP95Ms: 26, e2eSamples: 120 },
   error: null,
   videoReady: true,
+  renderThrottleDetected: false,
   sessionId: 'session-1',
   reconnect: vi.fn(),
 });
@@ -48,9 +56,10 @@ const degradedState = () => ({
     transport: 'webrtc' as const,
     degraded: true,
   },
-  metrics: { browserFps: 0, p95FrameIntervalMs: 0 },
+  metrics: { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 },
   error: null,
   videoReady: false,
+  renderThrottleDetected: false,
   sessionId: 'session-1',
   reconnect: vi.fn(),
 });
@@ -72,12 +81,13 @@ beforeEach(() => {
 });
 
 describe('VideoStream', () => {
-  it('默认渲染 WebRTC video 与 FPS 指标', () => {
+  it('默认渲染 WebRTC video 与 FPS 指标（e2e 采样存在时徽标显示端到端时延）', () => {
     render(<VideoStream />);
 
     expect(screen.getByText('WebRTC')).toBeInTheDocument();
     expect(screen.getByText('58')).toBeInTheDocument();
-    expect(screen.getByText('24ms')).toBeInTheDocument();
+    expect(screen.getByText('26ms')).toBeInTheDocument();
+    expect(screen.getByText('E2E')).toBeInTheDocument();
     expect(screen.queryByText('P95 24ms')).not.toBeInTheDocument();
     expect(screen.queryByText('源 60')).not.toBeInTheDocument();
     expect(screen.queryByText('发 59')).not.toBeInTheDocument();
@@ -85,11 +95,40 @@ describe('VideoStream', () => {
     expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-0');
   });
 
+  it('画面比例锁定 4:3 且显示尺寸钳制在 320×240~640×480', () => {
+    const { container } = render(<VideoStream />);
+    const box = container.firstElementChild as HTMLElement;
+    expect(box.style.aspectRatio).toBe(DRIVE_VIDEO_ASPECT_RATIO);
+    expect(box.style.width).toBe('100%');
+    expect(box.style.minWidth).toBe(`${DRIVE_VIDEO_MIN_WIDTH_PX}px`);
+    expect(box.style.maxWidth).toBe(`${DRIVE_VIDEO_MAX_WIDTH_PX}px`);
+    expect(box.style.height).toBe('auto');
+  });
+
   it('WebRTC 连接时通过 onLatencyChange 回传 P95 延迟', () => {
     const onLatencyChange = vi.fn();
     render(<VideoStream onLatencyChange={onLatencyChange} />);
 
-    expect(onLatencyChange).toHaveBeenCalledWith(24);
+    expect(onLatencyChange).toHaveBeenCalledWith(26);
+  });
+
+  it('有真实 e2e 采样时徽标显示端到端时延并带 E2E 标记', () => {
+    render(<VideoStream />);
+
+    expect(screen.getByText('26ms')).toBeInTheDocument();
+    expect(screen.getByText('E2E')).toBeInTheDocument();
+    expect(screen.queryByText('24ms')).not.toBeInTheDocument();
+  });
+
+  it('无真实 e2e 采样时徽标回退 p95 帧间隔且不带 E2E 标记', () => {
+    mockWebRtc.mockReturnValue({
+      ...connectedState(),
+      metrics: { browserFps: 58, p95FrameIntervalMs: 24, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 },
+    });
+    render(<VideoStream />);
+
+    expect(screen.getByText('24ms')).toBeInTheDocument();
+    expect(screen.queryByText('E2E')).not.toBeInTheDocument();
   });
 
   it('WebRTC 降级后在 fallback 延迟前 video 透明、MJPEG 可见', () => {
@@ -138,7 +177,9 @@ describe('VideoStream', () => {
     expect(screen.getByAltText('摄像头画面')).toHaveClass('opacity-100');
 
     mockWebRtc.mockReturnValue(connectedState());
-    rerender(<VideoStream />);
+    // VideoStream 已 memo：需用变化的 props 触发重渲染（生产中 hook 内部 setState
+    // 自会触发重渲染，这里 hook 被 mock，状态翻转只能由父级重渲染带入）
+    rerender(<VideoStream clientId="retry-2" />);
 
     // WebRTC 立即开始渐入
     expect(screen.getByLabelText('WebRTC 摄像头画面')).toHaveClass('opacity-100');
@@ -230,9 +271,10 @@ describe('VideoStream', () => {
         transport: 'webrtc',
         degraded: true,
       },
-      metrics: { browserFps: 0, p95FrameIntervalMs: 0 },
+      metrics: { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 },
       error: null,
       videoReady: false,
+      renderThrottleDetected: false,
       sessionId: null,
       reconnect: vi.fn(),
     });

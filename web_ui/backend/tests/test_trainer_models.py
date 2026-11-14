@@ -317,3 +317,45 @@ def test_upload_model_loss_invalid_meta_400(tmp_path):
         )
     assert resp.status_code == 400
 
+
+
+def test_list_models_surfaces_ctx_bin_aidem_in_subdir(tmp_path):
+    """AIMO zip 解压产物目录：列表透出车端 .ctx.bin.aidem（跳过 x86 变体）。
+
+    name 带 <目录>/ 前缀——前端 loadToCar 拼 ./models/<name> 即子目录相对路径，
+    /drive/load_model 的校验（parts[0]=='models'、禁 ..）允许一级子目录。
+    """
+    models_dir = tmp_path / "models"
+    sub = models_dir / "pilot_save_path"
+    sub.mkdir(parents=True)
+    (sub / "pilot_qcs6490_w8a8.qnn240.ctx.bin.aidem").write_bytes(b"ctx")
+    (sub / "libpilot_qcs6490_w8a8.qnn240.x86.so.aidem").write_bytes(b"x86")
+    (sub / "qnn_model_info.json").write_text("{}")
+
+    with _build_client() as client:
+        resp = client.get("/api/trainer/models", params={"working_dir": str(tmp_path)})
+
+    assert resp.status_code == 200
+    items = resp.json()["models"]
+    names = {i["name"] for i in items}
+    assert "pilot_save_path/pilot_qcs6490_w8a8.qnn240.ctx.bin.aidem" in names
+    # x86 模拟器变体与信息文件不上列表
+    assert not any("x86" in n for n in names)
+    assert not any(n.endswith("qnn_model_info.json") for n in names)
+    entry = next(i for i in items if i["name"].startswith("pilot_save_path/"))
+    assert entry["type"] == "file"
+    assert entry["path"] == str(sub / "pilot_qcs6490_w8a8.qnn240.ctx.bin.aidem")
+    assert entry["previewPath"] is None
+
+
+def test_list_models_does_not_scan_savedmodel_dir_for_aidem(tmp_path):
+    models_dir = tmp_path / "models"
+    sub = models_dir / "m.savedmodel"
+    sub.mkdir(parents=True)
+    (sub / "x.aidem").write_bytes(b"x")
+
+    with _build_client() as client:
+        resp = client.get("/api/trainer/models", params={"working_dir": str(tmp_path)})
+
+    names = {i["name"] for i in resp.json()["models"]}
+    assert names == {"m.savedmodel"}

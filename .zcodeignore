@@ -1,0 +1,121 @@
+
+env/*
+data/*
+dist/*
+
+*.pyc
+.ipynb_checkpoints
+*.egg-info/
+.git.bfg-report
+.DS_Store
+lag_log.csv
+
+.cache
+site/*
+build
+
+#IDE
+.idea
+.spyproject
+.pytest_cache
+.coverage
+.vscode
+
+# codecov
+htmlcov/
+
+# PyTorch
+lightning_logs
+tb_logs
+.donkey_history
+web_ui/frontend/node_modules/
+.donkey_history
+.ssh-tmp/
+.worktrees/
+start_test.sh
+# mypc 连接记忆（含内网主机信息，本机私有，不入库）
+mypc_known_hosts.json
+
+# 本机 agent 说明文件与工作目录（用户私人文件，不入库）
+/AGENTS.md
+/CLAUDE.md
+.trae/
+.superpowers/
+Package/
+
+# Trainer SSH 配置（用户本机/云端连接信息，不入库）
+web_ui/backend/train_my_pc.conf
+web_ui/backend/train_online.conf
+
+# 密钥、证书与本机凭据（防再漏）
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+known_hosts
+*.ovpn
+*.p12
+*.keystore
+credentials*
+secrets*
+*.log
+
+# 本机 agent 工作目录
+.claude/
+.agents/
+
+# Playwright 运行产物
+web_ui/frontend/test-results/
+web_ui/frontend/playwright-report/
+
+# 俯拍漂移链路延迟测量报告（本机产物）
+latency_report.json
+
+# 本机科普 HTML 页面（保留本地、不入库）
+docs/architecture-guide.html
+
+# NPU 车端运行环境（python3.12 + system-site-packages，见 CHANGELOG 2026-09-22；本机构建，不入库）
+.venv-npu/
+
+# Web 后端运行时状态（车端选中模型/驾驶参数，运行期生成）
+web_ui/backend/data/
+
+# AIMO / NPU 转换密钥：只从环境变量取，本机凭据目录/密钥文件一律不入库
+.aidlux_cred/
+aimo_api_key
+
+# aidlite 自建绑定：libaidlite_cabi.so 按本机 aidlite.hpp/libaidlite.so 编出，换设备/换 SDK 都要重编
+# （bash scripts/aidlite_cabi/rebuild.sh）→ 产物不入库；门面装在 venv 里由脚本复制
+scripts/aidlite_cabi/libaidlite_cabi.so
+scripts/aidlite_cabi/aidlite/__pycache__/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import {
   getTrainerConfig,
@@ -7,6 +7,7 @@ import {
   loadMyconfig,
   saveTrainingConfig,
   listTrainerTubs,
+  type FamilyTubSession,
   type TrainerTub,
 } from '../services/api';
 import { AdvancedOptions } from '../components/trainer/AdvancedOptions';
@@ -15,6 +16,7 @@ import { RemoteConfigForm } from '../components/trainer/RemoteConfigForm';
 import { MyPcProbePanel } from '../components/trainer/MyPcProbePanel';
 import { TubSelector } from '../components/trainer/TubSelector';
 import { SectionCardTitle } from '../components/ui/SectionCardTitle';
+import { SessionFilterPicker, type SessionFilterState } from '../components/trainer/SessionFilterPicker';
 import { ProgressPanel } from '../components/trainer/ProgressPanel';
 import { LogPanel } from '../components/trainer/LogPanel';
 import { ModelsList } from '../components/trainer/ModelsList';
@@ -52,6 +54,37 @@ export const TrainerPage = React.memo(function TrainerPage() {
   // Tub candidates for local training (fetched from /trainer/tubs)
   const [tubCandidates, setTubCandidates] = React.useState<TrainerTub[]>([]);
   const [currentTubPath, setCurrentTubPath] = React.useState('');
+  // 录制会话筛选（仅本地训练）：默认不启用 = 训练全部记录
+  const [sessionFilter, setSessionFilter] = React.useState<SessionFilterState>({
+    enabled: false,
+    selected: [],
+    isFullSelection: false,
+  });
+  const resetSessionFilter = useCallback(() => {
+    setSessionFilter({ enabled: false, selected: [], isFullSelection: false });
+  }, []);
+  // 家族会话列表（SessionFilterPicker 上报）：渲染「训练数据范围」摘要用，
+  // 与 Picker 共享同一份拉取结果，避免重复请求
+  const [sessionFilterList, setSessionFilterList] = useState<{
+    path: string;
+    sessions: FamilyTubSession[];
+  } | null>(null);
+  const handleFilterSessionsChange = useCallback(
+    (path: string, sessions: FamilyTubSession[]) => {
+      setSessionFilterList({ path, sessions });
+    },
+    []
+  );
+  // Picker 的拉取路径（与 SessionFilterPicker 内同一规则）：摘要只在
+  // 上报路径与当前路径一致时渲染，避免 tub 切换瞬间残留旧家族数据
+  const sessionFilterFetchPath = useMemo(() => {
+    const candidate = tubCandidates.find(
+      (c) =>
+        c.relative_path === trainerLocalConfig.tub ||
+        c.absolute_path === trainerLocalConfig.tub
+    );
+    return candidate ? candidate.absolute_path : trainerLocalConfig.tub;
+  }, [tubCandidates, trainerLocalConfig.tub]);
   // Don't re-autofill after the user has manually edited the tub path
   const tubManuallyEdited = useRef(false);
   // Don't overwrite mypc host/user/password once the user has typed anything
@@ -190,6 +223,8 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
         if (next !== null && next !== trainerLocalConfig.tub) {
           setTrainerLocalConfig({ tub: next });
+          // tub 由自动填充切换时同样重置会话筛选，避免残留旧 tub 的勾选
+          resetSessionFilter();
         }
         if (next !== null && !myPcTubEditedRef.current) {
           setMyPcForm((f) => {
@@ -270,13 +305,33 @@ export const TrainerPage = React.memo(function TrainerPage() {
       config: trainingConfig,
     });
 
+    // 勾选子集且启用筛选时按 tub 分组（复合键拆回 {tub绝对路径: [session_id]}）：
+    // _session_id 跨 tub 撞名，平坦列表会让 CLI 对每个 tub 都放行同名会话；
+    // 全选/未启用不传（家族全量，由后端展开家族 tub 后训练）
+    const filterSubset =
+      sessionFilter.enabled &&
+      !sessionFilter.isFullSelection &&
+      sessionFilter.selected.length > 0;
+    const sessionFilterPayload = filterSubset
+      ? sessionFilter.selected.reduce<Record<string, string[]>>((acc, key) => {
+          const sep = key.indexOf('::');
+          const tubPath = key.slice(0, sep);
+          const sid = key.slice(sep + 2);
+          if (tubPath && sid) {
+            (acc[tubPath] ??= []).push(sid);
+          }
+          return acc;
+        }, {})
+      : undefined;
+
     startLocal({
       tub: trainerLocalConfig.tub,
       model: `./models/${modelName}`,
       model_type: trainerLocalConfig.modelType,
       transfer: trainerLocalConfig.transfer.trim() || undefined,
+      session_filter: sessionFilterPayload,
     });
-  }, [trainerLocalConfig, configPath, startLocal]);
+  }, [trainerLocalConfig, configPath, startLocal, sessionFilter]);
 
   const handleOnlineStart = useCallback(() => {
     setTrainerOnlineConfig(onlineForm);
@@ -336,17 +391,89 @@ export const TrainerPage = React.memo(function TrainerPage() {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="space-y-6">
           {mode === 'local' ? (
-            <LocalConfigForm
-              config={trainerLocalConfig}
-              onConfigChange={(patch) => {
-                if (patch.tub !== undefined) {
-                  tubManuallyEdited.current = true;
-                }
-                setTrainerLocalConfig(patch);
-              }}
-              tubCandidates={tubCandidates}
-              currentTubPath={currentTubPath}
-            />
+            <>
+              <LocalConfigForm
+                config={trainerLocalConfig}
+                onConfigChange={(patch) => {
+                  if (patch.tub !== undefined) {
+                    tubManuallyEdited.current = true;
+                    // 切换 tub 后旧 tub 的会话勾选不再有意义，重置筛选状态
+                    resetSessionFilter();
+                  }
+                  setTrainerLocalConfig(patch);
+                }}
+                tubCandidates={tubCandidates}
+                currentTubPath={currentTubPath}
+              />
+              <SessionFilterPicker
+                tub={trainerLocalConfig.tub}
+                tubCandidates={tubCandidates}
+                enabled={sessionFilter.enabled}
+                selected={sessionFilter.selected}
+                onChange={setSessionFilter}
+                onSessionsChange={handleFilterSessionsChange}
+              />
+              {/* 训练数据范围摘要：家族布局下「默认全部训练」实际覆盖整个
+                  家族（后端展开），此处列出将参与训练的 Tub 段数/帧数，
+                  避免只训根 tub 的静默漏训 */}
+              {sessionFilterList &&
+                sessionFilterList.path === sessionFilterFetchPath &&
+                sessionFilterList.sessions.length > 0 &&
+                (() => {
+                  const filterActive =
+                    sessionFilter.enabled && !sessionFilter.isFullSelection;
+                  const scoped = filterActive
+                    ? sessionFilterList.sessions.filter((s) =>
+                        sessionFilter.selected.includes(
+                          `${s.tub_path}::${s.session_id}`
+                        )
+                      )
+                    : sessionFilterList.sessions;
+                  const scopedTubs = new Set(scoped.map((s) => s.tub_path)).size;
+                  const scopedFrames = scoped.reduce(
+                    (sum, s) => sum + s.record_count,
+                    0
+                  );
+                  return (
+                    <div
+                      className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-2"
+                      data-testid="training-scope-summary"
+                    >
+                      <div className="text-sm text-zinc-300">
+                        {t('trainer.trainingScopeTitle')}
+                      </div>
+                      <div className="text-xs text-zinc-400">
+                        {filterActive
+                          ? t('trainer.trainingScopeFiltered', {
+                              segments: scoped.length,
+                              tubs: scopedTubs,
+                              frames: scopedFrames,
+                            })
+                          : t('trainer.trainingScopeAll', {
+                              tubs: scopedTubs,
+                              frames: scopedFrames,
+                            })}
+                      </div>
+                      {filterActive && scoped.length > 0 && (
+                        <ul className="max-h-24 overflow-y-auto space-y-1 border-t border-zinc-800 pt-2">
+                          {scoped.map((s) => (
+                            <li
+                              key={`${s.tub_path}::${s.session_id}`}
+                              className="text-xs text-zinc-500 font-mono"
+                            >
+                              {s.tub_name}/{s.session_id}
+                              <span className="text-zinc-600">
+                                {' '}
+                                · {t('trainer.sessionFilterFrames', { count: s.record_count })}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })()}
+            </>
           ) : mode === 'mypc' ? (
             <>
               <RemoteConfigForm
@@ -444,7 +571,14 @@ export const TrainerPage = React.memo(function TrainerPage() {
 
           <button
             onClick={handleAction}
-            disabled={mode === 'mypc' && !isRunning && myPcProbe.loading}
+            disabled={
+              (mode === 'mypc' && !isRunning && myPcProbe.loading) ||
+              // 已启用会话筛选但一段都没勾选：禁止开始，提示文案在筛选面板里
+              (mode === 'local' &&
+                !isRunning &&
+                sessionFilter.enabled &&
+                sessionFilter.selected.length === 0)
+            }
             className={`w-full px-4 py-2 rounded-md font-medium transition-colors text-white disabled:opacity-60 disabled:cursor-not-allowed ${
               isRunning
                 ? 'bg-red-600 hover:bg-red-700'

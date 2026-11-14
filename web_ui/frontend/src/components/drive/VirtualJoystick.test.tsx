@@ -1,46 +1,143 @@
+import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VirtualJoystick } from './VirtualJoystick';
 
-// jsdom 未实现指针捕获 API，摇杆 handler 里会调用，补成 no-op
-beforeAll(() => {
+// jsdom 无 PointerEvent 构造器与 pointer capture，手动补齐
+let rafCallbacks: Map<number, FrameRequestCallback>;
+let rafSeq = 0;
+
+const stepRaf = (now: number) => {
+  const cbs = [...rafCallbacks.entries()];
+  rafCallbacks.clear();
+  cbs.forEach(([, cb]) => cb(now));
+};
+
+const lastCall = (mock: ReturnType<typeof vi.fn>) => mock.mock.calls.at(-1) as [number, number] | undefined;
+
+const zeroCalls = (mock: ReturnType<typeof vi.fn>) =>
+  mock.mock.calls.filter(([a, t]) => Math.abs(a) < 1e-9 && Math.abs(t) < 1e-9);
+
+/** -0 与 0 在 toEqual 下不相等，终点断言统一用 closeTo */
+const expectLastCallNear = (mock: ReturnType<typeof vi.fn>, a: number, t: number) => {
+  const [angle, throttle] = lastCall(mock)!;
+  expect(angle).toBeCloseTo(a, 6);
+  expect(throttle).toBeCloseTo(t, 6);
+};
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  rafCallbacks = new Map();
+  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+    const id = ++rafSeq;
+    rafCallbacks.set(id, cb);
+    return id;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+    rafCallbacks.delete(id);
+  });
   HTMLElement.prototype.setPointerCapture = vi.fn();
   HTMLElement.prototype.releasePointerCapture = vi.fn();
 });
 
-describe('VirtualJoystick', () => {
-  it('按下/拖动上报对应值，松开回中', () => {
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+/** size=220 → maxRadius=82；jsdom 下容器中心为 (0,0)，client 坐标即偏移 */
+const pressAt = (el: HTMLElement, x: number, y: number, pointerId = 1) =>
+  fireEvent.pointerDown(el, { pointerId, clientX: x, clientY: y });
+const moveTo = (el: HTMLElement, x: number, y: number, pointerId = 1) =>
+  fireEvent.pointerMove(el, { pointerId, clientX: x, clientY: y });
+const release = (el: HTMLElement, pointerId = 1) =>
+  fireEvent.pointerUp(el, { pointerId, clientX: 0, clientY: 0 });
+
+describe('VirtualJoystick 回中行为', () => {
+  it('拖拽时输出映射正确', () => {
     const onChange = vi.fn();
-    const { container } = render(<VirtualJoystick onChange={onChange} size={220} />);
-    const pad = container.firstElementChild as HTMLElement;
-
-    fireEvent.pointerDown(pad, { pointerId: 1, clientX: 41, clientY: -41 });
-    // jsdom 布局全 0 → 中心 (0,0)，maxRadius=82：x=41 ≈ 0.5 右打、y=-41 ≈ 0.5 前进
-    const [, downThrottle] = onChange.mock.calls.at(-1) as [number, number];
-    expect(downThrottle).toBeGreaterThan(0.4);
-
-    fireEvent.pointerUp(pad, { pointerId: 1, clientX: 41, clientY: -41 });
-    const [upAngle, upThrottle] = onChange.mock.calls.at(-1) as [number, number];
-    expect(upAngle).toBe(0);
-    // 回中值经 -y/maxRadius 计算可能是 -0，按数值比较
-    expect(Math.abs(upThrottle)).toBe(0);
+    const { container } = render(<VirtualJoystick onChange={onChange} />);
+    const el = container.firstChild as HTMLElement;
+    pressAt(el, 41, -41);
+    expect(lastCall(onChange)).toBeDefined();
+    const [angle, throttle] = lastCall(onChange)!;
+    expect(angle).toBeCloseTo(0.5, 1);   // 41/82
+    expect(throttle).toBeCloseTo(0.5, 1); // 上推为正
   });
 
-  it('拖拽期间指针静止也按帧持续重发当前值（稳持心跳 #508）', async () => {
+  it('松开不立即拍零，宽限期后斜坡回中', () => {
+    const onChange = vi.fn();
+    const { container } = render(<VirtualJoystick onChange={onChange} />);
+    const el = container.firstChild as HTMLElement;
+    pressAt(el, 41, -41);
+    moveTo(el, 41, -41);
+    const callsBeforeRelease = onChange.mock.calls.length;
+    release(el);
+
+    // 松开后、宽限期内：不得新增任何 (0,0) 输出
+    expect(onChange.mock.calls.length).toBe(callsBeforeRelease);
+    vi.advanceTimersByTime(100);
+    expect(zeroCalls(onChange)).toHaveLength(0);
+
+    // 宽限期(200ms)结束 → 斜坡开始，逐帧衰减
+    vi.advanceTimersByTime(120);
+    const t0 = performance.now();
+    stepRaf(t0 + 16);
+    const mid = lastCall(onChange)!;
+    expect(Math.abs(mid[0])).toBeLessThan(0.5);
+    expect(Math.abs(mid[0])).toBeGreaterThan(0.01);
+
+    // 斜坡(180ms)走完 → 终点精确回中
+    stepRaf(t0 + 500);
+    expectLastCallNear(onChange, 0, 0);
+  });
+
+  it('宽限期内重新按下视为继续拖拽，全程无拍零', () => {
+    const onChange = vi.fn();
+    const { container } = render(<VirtualJoystick onChange={onChange} />);
+    const el = container.firstChild as HTMLElement;
+    pressAt(el, 41, -41);
+    release(el);
+    // 100ms 后（宽限期内）重新按下
+    vi.advanceTimersByTime(100);
+    pressAt(el, 50, -50);
+    moveTo(el, 50, -50);
+
+    // 越过宽限期 + 斜坡时长，确认回中从未发生
+    vi.advanceTimersByTime(500);
+    stepRaf(performance.now() + 600);
+    expect(zeroCalls(onChange)).toHaveLength(0);
+    expectLastCallNear(onChange, 50 / 82, 50 / 82);
+  });
+
+  it('pointercancel 与 pointerup 同样走宽限期回中', () => {
+    const onChange = vi.fn();
+    const { container } = render(<VirtualJoystick onChange={onChange} />);
+    const el = container.firstChild as HTMLElement;
+    pressAt(el, 41, -41);
+    fireEvent.pointerCancel(el, { pointerId: 1, clientX: 0, clientY: 0 });
+    vi.advanceTimersByTime(100);
+    expect(zeroCalls(onChange)).toHaveLength(0);
+    vi.advanceTimersByTime(120);
+    stepRaf(performance.now() + 16);
+    stepRaf(performance.now() + 500);
+    expectLastCallNear(onChange, 0, 0);
+  });
+
+  it('拖拽期间指针静止也按帧持续重发当前值（稳持心跳 #508）', () => {
     const onChange = vi.fn();
     const { container } = render(<VirtualJoystick onChange={onChange} size={220} />);
-    const pad = container.firstElementChild as HTMLElement;
+    const el = container.firstChild as HTMLElement;
+    pressAt(el, 0, -60);
 
-    fireEvent.pointerDown(pad, { pointerId: 1, clientX: 0, clientY: -60 });
-    await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThan(2));
-
-    // 之后不再有任何 pointermove：心跳 rAF 仍持续重发同值
-    const count = onChange.mock.calls.length;
-    await new Promise((r) => setTimeout(r, 200));
-    expect(onChange.mock.calls.length).toBeGreaterThan(count);
-    const [angle, throttle] = onChange.mock.calls.at(-1) as [number, number];
-    expect(angle).toBe(0);
-    expect(throttle).toBeCloseTo(60 / 82, 1);
+    // 不再触发 pointermove，连续两帧仍应重发当前值
+    const countAfterPress = onChange.mock.calls.length;
+    stepRaf(performance.now() + 16);
+    expect(onChange.mock.calls.length).toBeGreaterThan(countAfterPress);
+    const countAfterFirstFrame = onChange.mock.calls.length;
+    stepRaf(performance.now() + 32);
+    expect(onChange.mock.calls.length).toBeGreaterThan(countAfterFirstFrame);
+    expectLastCallNear(onChange, 0, 60 / 82);
   });
 });

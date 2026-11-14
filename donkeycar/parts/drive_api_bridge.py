@@ -8,15 +8,39 @@ import base64
 import json
 import logging
 import os
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Lock, Thread
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 from fractions import Fraction
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
+
+# GIL 切换间隔(毫秒,env 可调):车端是多线程 Python 进程(采集/车辆循环/
+# aiortc 事件循环/编码线程池),默认 5ms 的切换量子会让事件循环线程在
+# 「帧到达→唤醒→提交编码→回包发送」链路上被整车循环长切片耽搁——
+# 实测编码 await 19ms 而编码本体仅 1.6ms(52fps vs 60fps 的差距全在这里)。
+# 调小量子换唤醒时延;实车推理吞吐敏感,默认仅在不启用推理的模拟器链路生效
+# 由 manage.py drive 注入,此处只读 env。
+_GIL_SWITCH_MS = float(os.environ.get("DRIVE_GIL_SWITCH_MS", "0") or 0)
+if _GIL_SWITCH_MS > 0:
+    sys.setswitchinterval(_GIL_SWITCH_MS / 1000.0)
+
+from .video_timestamp import draw_timestamp
+from .frame_freshness import get_source_arrival
+from . import cpu_affinity
+from .webrtc_encoder import (
+    install_send_loop_probe,
+    install_tuned_vp8_encoder,
+    resolve_tune_enabled,
+    resolve_video_bitrate,
+    send_loop_stats,
+)
 
 # 车端 WebRTC 底层日志控制：默认抑制，DEBUG 模式开启
 def _configure_webrtc_logging():
@@ -36,6 +60,33 @@ try:
     import websockets
 except Exception:  # pragma: no cover - 运行环境缺少 websockets 时由连接线程记录错误
     websockets = None
+
+
+def _no_proxy_connect_kwargs():
+    """车端连接永远绕过 shell 代理 env（http_proxy/all_proxy）。
+
+    实测代理会把 ws://127.0.0.1:<port> 以 CONNECT 转发到代理机自身的回环：
+    轻则握手失败（did not receive a valid HTTP response），重则代理机上
+    恰有同端口服务时静默连到**错误机器的后端**。websockets>=14 用
+    proxy=None 显式禁用；老版本不读代理 env，无需处理。
+    """
+    if websockets is None:
+        return {}
+    try:
+        import inspect
+        if "proxy" in inspect.signature(websockets.connect).parameters:
+            return {"proxy": None}
+    except (TypeError, ValueError):  # pragma: no cover - 签名不可读时保守不动
+        pass
+    return {}
+
+
+WS_NO_PROXY_KWARGS = _no_proxy_connect_kwargs()
+# requests 同理，用 trust_env=False 的直连 session。不能用
+# proxies={"http": None}：requests 的 merge_setting 会删除值为 None 的
+# 键，all_proxy env 依然生效——真机实测 answer 回传被代理拦成 502。
+_direct_session = requests.Session()
+_direct_session.trust_env = False
 
 try:
     import av
@@ -122,27 +173,60 @@ class DriveVideoFrameBuffer:
 
     def __init__(self, width: int = 320, height: int = 240,
                  clock: Callable[[], float] = time.time, history_size: int = 120,
-                 upscale_only: bool = False):
+                 upscale_only: bool = False,
+                 max_width: Optional[int] = None, max_height: Optional[int] = None):
         self.width = width
         self.height = height
         self.upscale_only = upscale_only
+        # 预览编码分辨率上限：模拟器「保留原生分辨率」路径（upscale_only）
+        # 的帧可远大于编码器实时能力（1080p 软编实测 fps 3.9/时延 447ms），
+        # 超限帧按宽高比缩到上限内（软件编码才能跟上帧率）。
+        # None = 不设限（保留原有行为）。
+        self.max_width = max_width
+        self.max_height = max_height
         self.clock = clock
         self.frame_id = 0
         self.latest: Optional[DriveVideoFrame] = None
         self.timestamps = deque(maxlen=history_size)
         self.lock = Lock()
         self.waiters = []
+        # 模拟器模式下记录上次消费的帧到达时刻（侧信道值），用于按内容去重；
+        # 实车路径侧信道恒为 None，该字段保持 None、永不触发去重。
+        self._source_arrival: Optional[float] = None
+        # 诊断计数:update 总调用 / 因同源去重跳过的次数(_set_frame 直推与
+        # 车辆循环 run_threaded 双写时的竞态观测用)
+        self.push_total = 0
+        self.push_dedup_skipped = 0
+        self.push_appended = 0
 
     def update(self, img_arr):
         if img_arr is None:
             return None
+        self.push_total += 1
+
+        # 模拟器模式（frame_freshness 有值）：同一到达帧被车辆循环重复轮询时
+        # 直接跳过——frame_id/时间戳只随真实新帧推进，source_fps 反映真实新帧率，
+        # 旧帧不再被重复编码；帧时间戳取到达时刻，把「出帧→轮询」等待纳入时延口径。
+        # 实车（侧信道为 None）：保持 update 时钟 + 不去重的原行为。
+        source_ts = get_source_arrival()
+        if source_ts is not None and source_ts == self._source_arrival:
+            self.push_dedup_skipped += 1
+            return self.latest
+        self.past_dedup1 = getattr(self, "past_dedup1", 0) + 1
 
         frame = self._resize(img_arr)
-        timestamp = self.clock()
+        self.past_resize = getattr(self, "past_resize", 0) + 1
+        timestamp = source_ts if source_ts is not None else self.clock()
         wakeups = []
         with self.lock:
+            if source_ts is not None and source_ts == self._source_arrival:
+                # 并发 update 双检：预检与加锁之间已有人消费同一到达帧
+                self.push_dedup_skipped += 1
+                return self.latest
+            self._source_arrival = source_ts
             self.frame_id += 1
             self.timestamps.append(timestamp)
+            self.push_appended += 1
             self.latest = DriveVideoFrame(frame_id=self.frame_id, frame=frame, timestamp=timestamp)
             pending_waiters = []
             for waiter in self.waiters:
@@ -167,6 +251,13 @@ class DriveVideoFrameBuffer:
             return img_arr
         if cv2 is None:
             return img_arr
+        if self.max_width and self.max_height and \
+                (w > self.max_width or h > self.max_height):
+            # 超过编码分辨率上限：按宽高比等比缩到上限内（尺寸取偶，yuv420 色度对齐）
+            scale = min(self.max_width / w, self.max_height / h)
+            target_w = max(2, int(w * scale)) // 2 * 2
+            target_h = max(2, int(h * scale)) // 2 * 2
+            return cv2.resize(img_arr, (target_w, target_h))
         if self.upscale_only and h >= self.height and w >= self.width:
             # 预览源分辨率已不低于目标分辨率：保留原生高分辨率帧，避免有损降采样
             #（模拟器预览「最高画质」：渲染分辨率≥ DRIVE_VIDEO_WIDTH×HEIGHT 时直接使用）。
@@ -210,7 +301,29 @@ class DriveVideoFrameBuffer:
         else:
             elapsed = timestamps[-1] - timestamps[0]
             source_fps = 0.0 if elapsed <= 0 else (len(timestamps) - 1) / elapsed
-        return {"source_fps": source_fps, "frame_id": frame_id}
+        stats = {"source_fps": source_fps, "frame_id": frame_id,
+                 "push_total": self.push_total,
+                 "push_dedup_skipped": self.push_dedup_skipped,
+                 "push_appended": self.push_appended,
+                 "past_dedup1": getattr(self, "past_dedup1", 0),
+                 "past_resize": getattr(self, "past_resize", 0)}
+        # 到达间隔分布:定位「模拟器真实发送节拍 vs 客户端消费被拖慢」。
+        # p50≈16.7ms = 源节拍未被拖慢;持续 ~19ms = 采集线程被共置负载(GIL)拖住。
+        if len(timestamps) >= 10:
+            gaps = sorted(timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1))
+            stats["arrival_gap_p50_ms"] = round(gaps[len(gaps) // 2] * 1000, 2)
+            stats["arrival_gap_p95_ms"] = round(gaps[int(len(gaps) * 0.95)] * 1000, 2)
+            # 原始最近间隔采样:直观看清缺口模式(比 p50/p95 更不易被均值掩盖)
+            stats["recent_gaps_ms"] = [round((timestamps[i + 1] - timestamps[i]) * 1000, 1)
+                                       for i in range(max(len(timestamps) - 9, 0), len(timestamps) - 1)]
+            stats["ts_tail_age_ms"] = round((time.time() - timestamps[-1]) * 1000, 1)
+        # 最原始状态:长度/总跨度/绝对尾值。appends 率与 deque 导出 fps 矛盾时
+        # 以此判定是「追加真慢」还是「统计口径失真」。
+        stats["deque_len"] = len(timestamps)
+        if timestamps:
+            stats["deque_span_ms"] = round((timestamps[-1] - timestamps[0]) * 1000, 1)
+            stats["deque_tail3"] = [int(t * 1000) % 100000 for t in timestamps[-3:]]
+        return stats
 
 
 class DriveWebRtcVideoTrack:
@@ -258,20 +371,168 @@ class DriveWebRtcVideoTrack:
 
 
 class DriveAiortcVideoTrack(VideoStreamTrack):
-    """aiortc 使用的视频轨道，输出最新真实帧。"""
+    """aiortc 使用的视频轨道：真实新帧零等待出帧，慢源按声明 fps 补重复帧。
+
+    出帧由两部分组成（DRIVE_WEBRTC_FRAME_PACING，默认开）：
+    - 真实新帧：到达即发，不等节拍（时延口径不因节拍变差）；
+    - 重复帧：源速率低于声明 fps（如模拟器 20fps 硬上限）时，在节拍槽重复
+      最新帧，把「发送/呈现」帧率补齐到声明 fps——内容仍随源推进，绝不伪造
+      新内容。重复帧带原帧采集印章，接收端按印章去重后时延口径仍是
+      「采集→首现」真实值；source_fps 如实报告内容新帧率，瓶颈可见。
+    """
+
+    # 源静默超过该秒数不再补重复帧：断流时画面必须显式停摆（浏览器看门狗
+    # 随后重连），不能把冻结帧以 60fps 持续呈现成「活着」的假象。
+    REPEAT_MAX_AGE_S = 1.0
+
+    # 预期新帧槽位持有：重复帧若抢在新帧前占掉它的 pts 槽，新帧被 +1 顶到
+    # 下一槽，接收端按 pts 调度会把新内容晚一个帧周期呈现（实测 p50 +8ms/
+    # p95 +15ms）。按到达周期 EMA 预测新帧时刻，临近时短持有本槽让新帧赢下
+    # 竞速；持有上限封顶，源停摆时重复帧照常出。
+    FRESH_RACE_WINDOW_S = 0.005
+    FRESH_HOLD_MAX_S = 0.012
 
     def __init__(self, frame_buffer: DriveVideoFrameBuffer, fps: int = 60,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 latency_probe: bool = False,
+                 pacing: Optional[bool] = None,
+                 pacing_clock: Callable[[], float] = time.monotonic):
         super().__init__()
         self.frame_buffer = frame_buffer
         self.fps = fps
         self.clock = clock
+        self.latency_probe = latency_probe
+        # 帧内时间戳印章默认关闭（日常驾驶画面纯净优先）：浏览器端「真实 E2E」
+        # 徽标（像素印章读取）需要时 env DRIVE_WEBRTC_FRAME_STAMP=1 显式开启，
+        # 徽标随之从帧间隔口径升级为真时延；latency_probe（显式探针）恒开，
+        # 不受该 env 影响。
+        stamp_env = os.environ.get("DRIVE_WEBRTC_FRAME_STAMP", "0").strip().lower()
+        self.frame_stamp = bool(latency_probe) or stamp_env not in ("0", "false", "off", "no", "")
+        # 帧节拍 env DRIVE_WEBRTC_FRAME_PACING=0 可关（退回只发真实新帧）；
+        # pacing_clock 走单调钟（墙钟可回拨），测试可注入假钟。
+        if pacing is None:
+            pace_env = os.environ.get("DRIVE_WEBRTC_FRAME_PACING", "1").strip().lower()
+            pacing = pace_env not in ("0", "false", "off", "no", "")
+        self.pacing = bool(pacing)
+        self.pacing_clock = pacing_clock
+        self.interval = 1.0 / fps
+        self.repeat_frames = 0
+        self._next_repeat_at: Optional[float] = None
+        self._last_fresh_at: Optional[float] = None
+        # 新帧到达周期/迟到量 EMA：驱动「预期新帧槽位持有」的预测
+        self._fresh_period_ema: Optional[float] = None
+        self._fresh_lateness_ema = 0.0
+        # 补帧预算（漏桶）：以 fps 速率积累、每次出帧消耗 1。重复帧允许
+        # 小额欠账出帧（≥0 即发），地板 −2 兜底——任意窗口出帧数 ≤ 按 fps
+        # 积累数 + 常数；源在 30~60fps 之间时总出帧速率仍被钉在声明 fps。
+        self._emit_tokens = 1.0
+        self._token_refill_at: Optional[float] = None
         self.last_frame_id = 0
         self.pts = 0
+        # pts 墙钟锚点：RTP 时间戳 = pts * time_base，必须跟随帧的真实
+        # 采集时刻推进。若改成「每帧 +1」，实际发送速率低于声明 fps 时
+        # （编码/负载波动，实测 48~57fps vs 60fps）媒体时钟会持续慢于
+        # 墙钟，接收端缓冲时序随运行时长失真。
+        self._pts_anchor_t: Optional[float] = None
+        self._pts_anchor_pts = 0
+        self._pts_next = 0
         self.time_base = Fraction(1, fps)
         self.sent_timestamps = deque(maxlen=120)
         self.sent_frames = 0
         self.stale_frames = 0
+        # 真实新帧被顶号次数（目标 pts ≤ _pts_next 被迫 +1）：每顶一号该帧
+        # 呈现晚一个帧周期，是 e2e 尾部 +16.7ms 样本的直接来源，须可观测
+        self.pts_bumps = 0
+
+    def _refill_tokens(self, now: float):
+        if self._token_refill_at is None:
+            self._token_refill_at = now
+            return
+        self._emit_tokens = min(
+            2.0,
+            self._emit_tokens + (now - self._token_refill_at) * self.fps)
+        self._token_refill_at = now
+
+    def _advance_repeat_slot(self, now: float):
+        """节拍槽按绝对晶格推进（+= interval），asyncio 唤醒抖动不积累进 60Hz
+        节拍；落后超过一槽时保相位快进（跳槽），不突发追赶。"""
+        self._next_repeat_at += self.interval
+        if self._next_repeat_at <= now:
+            behind = now - self._next_repeat_at
+            self._next_repeat_at += (int(behind / self.interval) + 1) * self.interval
+
+    def _note_fresh_arrival(self, fresh_at: float):
+        """记录新帧到达节奏：周期 EMA 预测下一个新帧时刻，迟到 EMA 自动
+        加大持有窗口。停摆恢复后的巨大间隔不参与估计。"""
+        prev = self._last_fresh_at
+        if prev is None:
+            return
+        delta = fresh_at - prev
+        if not 0.0 < delta < 1.0:
+            return
+        if self._fresh_period_ema is None:
+            self._fresh_period_ema = delta
+            return
+        eta = prev + self._fresh_period_ema * max(
+            1, round((fresh_at - prev) / self._fresh_period_ema))
+        self._fresh_lateness_ema = (
+            0.7 * self._fresh_lateness_ema + 0.3 * max(0.0, fresh_at - eta))
+        self._fresh_period_ema = 0.7 * self._fresh_period_ema + 0.3 * delta
+
+    def _expected_fresh_hold(self, now: float) -> float:
+        """预期新帧落在本槽 pts 竞速窗口（距到达不足半槽）时的持有秒数；
+        0 = 不持有。封顶 FRESH_HOLD_MAX_S，源漂移/停摆时持有自然过期。"""
+        if self._fresh_period_ema is None or self._last_fresh_at is None:
+            return 0.0
+        eta = self._last_fresh_at + self._fresh_period_ema * max(
+            1, round((now - self._last_fresh_at) / self._fresh_period_ema))
+        until = eta + self._fresh_lateness_ema - now
+        if until > self.interval / 2:
+            return 0.0
+        hold = until + self.FRESH_RACE_WINDOW_S
+        return min(max(hold, 0.0), self.FRESH_HOLD_MAX_S)
+
+    def _emit(self, latest: DriveVideoFrame, fresh: bool = False) -> "av.VideoFrame":
+        """出一帧（真实新帧或重复帧），推进 pts/计数并构造编码输入帧。"""
+        self.sent_frames += 1
+        self.sent_timestamps.append(self.clock())
+        if self._pts_anchor_t is None:
+            # 首帧：以首帧时间戳为墙钟锚点，pts 从 0 起算。
+            # 早期版本这里只设锚点、下面的 target 未赋值，
+            # `target if target > self.pts` 抛 UnboundLocalError，
+            # WebRTC 轨道首帧即崩（tests/test_drive_webrtc_track.py 回归）。
+            self._pts_anchor_t = latest.timestamp
+            self._pts_anchor_pts = self._pts_next
+            self.pts = self._pts_next
+        else:
+            target = self._pts_anchor_pts + int(round(
+                (latest.timestamp - self._pts_anchor_t) * self.fps))
+            # 单调保护：
+            # - target > _pts_next：按墙钟差值推进（真实新帧正常路径）。
+            # - target <= _pts_next（墙钟回拨/重复帧——重复帧沿用原帧采集
+            #   时刻，target 不再增长）：退化为 +1，保证 pts 严格递增不回退。
+            #   节拍重复帧正走这条：媒体钟随出帧节拍继续走 60Hz，接收端
+            #   呈现帧率即声明 fps。
+            if target > self._pts_next:
+                self._pts_next = target
+            else:
+                if fresh:
+                    # 真实新帧被顶号（pts 竞速/墙钟回拨）：呈现晚一拍，计数观测
+                    self.pts_bumps += 1
+                self._pts_next += 1
+            self.pts = self._pts_next
+        if self.frame_stamp:
+            # 印章画在副本上：latest.frame 由缓冲共享（编码重试/多消费方），
+            # 相机数组可能复用内存，原地画会污染自动驾驶管线输入。
+            # 重复帧同样画原帧采集时刻——接收端靠它识别重复帧并去重。
+            probe_frame = latest.frame.copy()
+            draw_timestamp(probe_frame, latest.timestamp)
+            frame = av.VideoFrame.from_ndarray(probe_frame, format="rgb24")
+        else:
+            frame = av.VideoFrame.from_ndarray(latest.frame, format="rgb24")
+        frame.pts = self.pts
+        frame.time_base = self.time_base
+        return frame
 
     async def recv(self):
         if av is None:
@@ -281,17 +542,57 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
             latest = self.frame_buffer.get_latest()
             if latest is not None and latest.frame_id != self.last_frame_id:
                 self.last_frame_id = latest.frame_id
-                self.pts += 1
-                self.sent_frames += 1
-                self.sent_timestamps.append(self.clock())
-                frame = av.VideoFrame.from_ndarray(latest.frame, format="rgb24")
-                frame.pts = self.pts
-                frame.time_base = self.time_base
-                return frame
+                fresh_at = self.pacing_clock()
+                self._note_fresh_arrival(fresh_at)
+                self._last_fresh_at = fresh_at
+                if self.pacing:
+                    # 真实新帧零等待立即出帧；消耗补帧预算（可短暂透支），
+                    # 并把下一个补帧节拍槽锚到本次出帧之后
+                    self._refill_tokens(fresh_at)
+                    self._emit_tokens = max(self._emit_tokens - 1.0, -2.0)
+                    self._next_repeat_at = fresh_at + self.interval
+                return self._emit(latest, fresh=True)
+            if self.pacing and latest is not None:
+                now = self.pacing_clock()
+                if self._next_repeat_at is None:
+                    self._next_repeat_at = now + self.interval
+                wait = self._next_repeat_at - now
+                if wait <= 0:
+                    # 预期新帧将至：短持有本槽让新帧赢下 pts 竞速（重复帧
+                    # 抢先会把新帧的 pts 顶到下一槽，呈现晚一个帧周期）
+                    hold = self._expected_fresh_hold(now)
+                    if hold > 0:
+                        woke = await self.frame_buffer.wait_for_new_frame(
+                            self.last_frame_id, timeout=hold)
+                        if woke is not None:
+                            continue
+                        now = self.pacing_clock()
+                    self._refill_tokens(now)
+                    # 预算允许欠账到地板：新帧紧贴节拍槽之后到达时（源节拍
+                    # 过冲），本槽已发过重复帧、新帧再立即发 = 两连发，旧逻辑
+                    # 会再跳过下槽补偿 → 呈现侧 33ms 空洞。允许下槽带小额欠账
+                    # 出帧把空洞填平（间隔序列回到 60Hz 均匀），地板 −2 保证
+                    # 任意窗口出帧数 ≤ 按 fps 积累数 + 常数，不超发。
+                    if (self._emit_tokens >= 0.0
+                            and now - self._last_fresh_at <= self.REPEAT_MAX_AGE_S):
+                        self._emit_tokens -= 1.0
+                        self._advance_repeat_slot(now)
+                        self.repeat_frames += 1
+                        return self._emit(latest)
+                    # 预算透支或源已静默：跳过本槽，下个节拍槽再看
+                    self._advance_repeat_slot(now)
+                    continue
+                woke = await self.frame_buffer.wait_for_new_frame(
+                    self.last_frame_id,
+                    timeout=min(wait, max(self.interval, 0.05)),
+                )
+                if woke is not None:
+                    continue
+                continue
             self.stale_frames += 1
             await self.frame_buffer.wait_for_new_frame(
                 self.last_frame_id,
-                timeout=max(1.0 / self.fps, 0.05),
+                timeout=max(self.interval, 0.05),
             )
 
     def stats(self):
@@ -303,12 +604,18 @@ class DriveAiortcVideoTrack(VideoStreamTrack):
         return {
             "sent_fps": sent_fps,
             "sent_frames": self.sent_frames,
+            "repeat_frames": self.repeat_frames,
             "stale_frames": self.stale_frames,
+            "pts_bumps": self.pts_bumps,
         }
 
 
 class DriveApiBridge:
     """车端 WebSocket 桥接 Part。"""
+
+    # 访问令牌来源（与 web_ui/backend/auth.py 同源）：环境变量 > 令牌文件
+    API_TOKEN_ENV = "DRIVE_API_TOKEN"
+    API_TOKEN_FILE = Path.home() / ".donkeycar" / "drive_api.token"
 
     def __init__(self, server_url: str = "ws://localhost:8000/api/drive/ws",
                  role: str = "car", reconnect_interval: float = 3.0,
@@ -317,8 +624,12 @@ class DriveApiBridge:
                  video_fps: int = 60, webrtc_enabled: bool = True,
                  webrtc_ice_servers=None, webrtc_local_description_timeout: float = 8.0,
                  jpeg_quality: int = 95, preserve_source_resolution: bool = False,
-                 model_loader=None):
-        self.server_url = self._with_role(server_url, role)
+                 model_loader=None, latency_probe: bool = False,
+                 webrtc_video_bitrate=None, webrtc_encoder_tune=None,
+                 webrtc_preview_max_width=None, webrtc_preview_max_height=None):
+        self.api_token = self._load_api_token()
+        self.server_url = self._with_token(
+            self._with_role(server_url, role), self.api_token)
         self.http_api_base = self._http_api_base(server_url)
         self.reconnect_interval = reconnect_interval
         self.video_transport = video_transport
@@ -331,8 +642,22 @@ class DriveApiBridge:
         # issue #003 热加载：车端常驻的可原子替换模型容器（PilotHolder）。
         # 为 None 表示当前车端不支持热加载（legacy json / 漂移回放占用 pilot 输出）。
         self.model_loader = model_loader
-        self.frame_buffer = DriveVideoFrameBuffer(width=video_width, height=video_height,
-                                                 upscale_only=preserve_source_resolution)
+        # P2 预览编码分辨率上限：preserve_source_resolution（模拟器）路径的
+        # 高分辨率帧直接进软编会把帧率拖垮（1080p 实测 fps 3.9/时延 447ms）。
+        # 默认 640×480（等比缩放）；env 或参数显式 0 = 关闭上限定回原生。
+        self.frame_buffer = DriveVideoFrameBuffer(
+            width=video_width, height=video_height,
+            upscale_only=preserve_source_resolution,
+            max_width=self._resolve_preview_max(
+                webrtc_preview_max_width, "DRIVE_WEBRTC_PREVIEW_MAX_WIDTH", 640),
+            max_height=self._resolve_preview_max(
+                webrtc_preview_max_height, "DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT", 480),
+        )
+        # P0 编码调优：低时延 VP8 参数（cpu-used=15 / 关降噪 / 周期关键帧 /
+        # 1.5Mbps 初始码率）。进程级补丁、幂等；可用 env/参数关闭回退上游默认。
+        if video_transport == "webrtc" and webrtc_enabled and resolve_tune_enabled(webrtc_encoder_tune):
+            install_tuned_vp8_encoder(bitrate=resolve_video_bitrate(webrtc_video_bitrate))
+            install_send_loop_probe()
 
         self.angle = 0.0
         self.throttle = 0.0
@@ -343,10 +668,16 @@ class DriveApiBridge:
         self.car_mode = None
         self.buttons: Dict[str, bool] = {}
         self.reconnect_simulator = False
+        self.reset_car = False
 
         self.connected = False
         self.ws = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        # offer 处理串行锁：setLocalDescription 隐含 ICE gathering 可能耗时数秒，
+        # 期间新 offer（浏览器快速重连/会话接管）会并发进入，后到的清理会把
+        # 在途 peer 关掉（InvalidStateError: RTCPeerConnection is closed）。
+        # 串行化保证「最后一次 offer 的处理完整胜出」。
+        self._webrtc_accept_lock: Optional[asyncio.Lock] = None
         self.running = False
         self.last_frame = 0.0
         self.thread = None
@@ -356,23 +687,81 @@ class DriveApiBridge:
         self.last_telemetry = 0.0
         self.telemetry_interval = 0.01  # 100Hz，与固件 $IMU 上行对齐
         self.last_num_records: int = 0
+        # P1a 可选：车辆线程（run_threaded 调用方）钉到媒体核之外的核
+        self._vehicle_pin_attempted = False
         self.active_webrtc_session_id = None
         self.webrtc_peer = None
         self.aiortc_track = None
         self.webrtc_local_description_error = None
+        # offer→answer 全链路失败原因（setRemoteDescription/createAnswer/回传任一
+        # 环节抛异常都会被 _accept_webrtc_offer 记到这里并上报 stats）
+        self.webrtc_answer_error = None
         self.webrtc_local_description_elapsed_ms = None
         self.webrtc_answer_sent_elapsed_ms = None
         self.local_candidates_sent = 0
         self.sent_local_ice_candidates = set()
         self.webrtc_track = DriveWebRtcVideoTrack(self.frame_buffer, fps=video_fps)
 
+        # 端到端时延探针：在推流帧上烧入捕获时刻印章（video_timestamp），
+        # 供 scripts/webrtc_loop_probe.py 解码实测；env 显式开启优先于配置项
+        self.latency_probe = latency_probe or os.environ.get(
+            "DRIVE_WEBRTC_LATENCY_PROBE", "").strip() in ("1", "true", "True")
+        # 与后端的时钟同步（NTP 式：offset = server - (t0 + rtt/2)，取 RTT 最小样本）。
+        # 探针端把车端本地戳换成后端时钟域时使用；同一台机器上 offset≈0。
+        self.clock_offset_ms: Optional[float] = None
+        self.clock_rtt_ms: Optional[float] = None
+        self._last_clock_sync = 0.0
+
         if auto_start:
             self.start()
+
+    @staticmethod
+    def _resolve_preview_max(param, env_name: str, default: int) -> Optional[int]:
+        """预览上限优先级：参数 > env > 默认；0 = 关闭（None 传给 buffer）。"""
+        value = param
+        if value is None:
+            env = os.environ.get(env_name, "").strip()
+            if env:
+                try:
+                    value = int(env)
+                except ValueError:
+                    logger.warning(f"忽略非法 {env_name}: {env!r}")
+        if value is None:
+            return default
+        return None if int(value) <= 0 else int(value)
 
     @staticmethod
     def _with_role(server_url: str, role: str) -> str:
         separator = "&" if "?" in server_url else "?"
         return f"{server_url}{separator}role={role}"
+
+    @classmethod
+    def _load_api_token(cls) -> str:
+        """车端访问令牌：DRIVE_API_TOKEN 环境变量 > ~/.donkeycar/drive_api.token。
+
+        与后端 auth.load_or_create_token 同源（后端把令牌落盘在该文件，
+        同机车进程直接复用）；取不到返回 ""（后端关闭鉴权/仅回环时的常态）。
+        """
+        token = os.environ.get(cls.API_TOKEN_ENV, "").strip()
+        if token:
+            return token
+        try:
+            return cls.API_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _with_token(server_url: str, token: str) -> str:
+        """把访问令牌拼进 WS URL 查询串（浏览器无法给 WS 握手自定义头，
+        URL 令牌是远程车端唯一的握手凭据通道）。"""
+        if not token:
+            return server_url
+        separator = "&" if "?" in server_url else "?"
+        return f"{server_url}{separator}token={quote(token, safe='')}"
+
+    def _auth_headers(self) -> Dict[str, str]:
+        """HTTP 调用的显式令牌头（与后端 auth 的 X-Donkey-Token 通道一致）。"""
+        return {"X-Donkey-Token": self.api_token} if self.api_token else {}
 
     @staticmethod
     def _http_api_base(server_url: str) -> str:
@@ -399,8 +788,20 @@ class DriveApiBridge:
         logger.info(f"DriveApiBridge 启动中，服务端地址: {self.server_url}")
 
     def _run_loop(self):
+        # P1a 媒体线程绑核：bridge 线程 + 其编码线程池钉到高容量核，
+        # 避免与车辆循环（numpy/推理）在核间迁移互相拖慢（实测 p50 -12ms）。
+        if cpu_affinity.affinity_enabled():
+            media = cpu_affinity.media_cpu_set()
+            if cpu_affinity.pin_current_thread(media):
+                logger.info(f"bridge 线程已绑核: {sorted(media)}")
         self.loop = asyncio.new_event_loop()
         self.loop.set_exception_handler(self._handle_loop_exception)
+        if cpu_affinity.affinity_enabled():
+            self.loop.set_default_executor(ThreadPoolExecutor(
+                max_workers=4,
+                initializer=cpu_affinity.pin_current_thread,
+                initargs=(cpu_affinity.media_cpu_set(),),
+            ))
         asyncio.set_event_loop(self.loop)
         self.loop.run_until_complete(self._connect_loop())
 
@@ -426,10 +827,14 @@ class DriveApiBridge:
 
         while self.running:
             try:
-                async with websockets.connect(self.server_url) as ws:
+                async with websockets.connect(self.server_url, **WS_NO_PROXY_KWARGS) as ws:
                     self.ws = ws
                     self.connected = True
                     logger.info("已连接到 Web Console Drive 服务端")
+                    try:
+                        await self._sync_clock()
+                    except Exception as exc:
+                        logger.debug(f"时钟同步失败（不影响主链路）: {exc!r}")
                     try:
                         async for message in ws:
                             try:
@@ -463,6 +868,9 @@ class DriveApiBridge:
             return
         if msg.get("type") == "reconnect_simulator":
             self.reconnect_simulator = True
+            return
+        if msg.get("type") == "reset_car":
+            self.reset_car = True
             return
         if msg.get("type") in ("load_model", "restart_with_model"):
             # issue #003 热加载：运行时原子替换推理模型，无需重启车端进程。
@@ -603,6 +1011,23 @@ class DriveApiBridge:
             logger.warning("缺少 aiortc 依赖，无法建立 WebRTC PeerConnection")
             return
 
+        if self._webrtc_accept_lock is None:
+            # 绑定到 bridge 事件循环；各 offer 处理在同一循环上排队
+            self._webrtc_accept_lock = asyncio.Lock()
+        async with self._webrtc_accept_lock:
+            # offer 处理任何一步失败都必须可见：本协程经 run_coroutine_threadsafe
+            # 调度、future 无人 await，异常会被静默吞掉——真机曾表现为浏览器永久
+            # MJPEG 降级，stats 里 answer/ICE 全部停滞且无任何日志可查
+            self.webrtc_answer_error = None
+            try:
+                await self._accept_webrtc_offer_inner(msg)
+            except Exception as exc:
+                self.webrtc_answer_error = f"{type(exc).__name__}: {exc!r}"
+                logger.warning(
+                    "WebRTC offer 处理失败（浏览器将因收不到 answer 降级 MJPEG）: %s",
+                    self.webrtc_answer_error, exc_info=True)
+
+    async def _accept_webrtc_offer_inner(self, msg: dict):
         if self.webrtc_peer is not None:
             await self._close_webrtc_peer(self.webrtc_peer)
             self.webrtc_peer = None
@@ -619,7 +1044,8 @@ class DriveApiBridge:
             @peer.on("icecandidate")
             def on_icecandidate(candidate):
                 self._handle_local_ice_candidate(candidate)
-        self.aiortc_track = DriveAiortcVideoTrack(self.frame_buffer, fps=self.video_fps)
+        self.aiortc_track = DriveAiortcVideoTrack(self.frame_buffer, fps=self.video_fps,
+                                                  latency_probe=self.latency_probe)
         peer.addTrack(self.aiortc_track)
         await peer.setRemoteDescription(RTCSessionDescription(sdp=msg.get("sdp", ""), type="offer"))
         answer = await peer.createAnswer()
@@ -716,7 +1142,8 @@ class DriveApiBridge:
 
     def _post_json(self, path: str, payload: dict):
         url = f"{self.http_api_base}{path}"
-        response = requests.post(url, json=payload, timeout=3)
+        response = _direct_session.post(
+            url, json=payload, timeout=3, headers=self._auth_headers())
         response.raise_for_status()
         return response
 
@@ -725,10 +1152,45 @@ class DriveApiBridge:
         url = f"{self.http_api_base}{path}"
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
-            None, lambda: requests.post(url, json=payload, timeout=3)
+            None, lambda: _direct_session.post(
+                url, json=payload, timeout=3, headers=self._auth_headers())
         )
         response.raise_for_status()
         return response
+
+    async def _get_json_async(self, path: str, timeout: float = 3.0):
+        url = f"{self.http_api_base}{path}"
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, lambda: _direct_session.get(
+                url, timeout=timeout, headers=self._auth_headers())
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def _sync_clock(self, samples: int = 5):
+        """NTP 式采样后端 /time，取 RTT 最小样本估算本机→后端时钟偏移。
+
+        自身不抛异常：时钟同步是探针的辅助能力，失败只降级（offset 维持
+        上次值/None），调用点（连接循环、run_threaded 保鲜）无需各自兜底。
+        """
+        best_rtt = None
+        best_offset = None
+        try:
+            for _ in range(samples):
+                t0 = time.time()
+                resp = await self._get_json_async("/time")
+                t1 = time.time()
+                rtt = t1 - t0
+                offset = float(resp.get("server_time", t1)) - (t0 + rtt / 2.0)
+                if best_rtt is None or rtt < best_rtt:
+                    best_rtt, best_offset = rtt, offset
+        except Exception as exc:
+            logger.debug(f"时钟同步采样失败（保留上次结果）: {exc!r}")
+            return
+        self.clock_rtt_ms = best_rtt * 1000.0
+        self.clock_offset_ms = best_offset * 1000.0
+        self._last_clock_sync = time.time()
 
     def _post_webrtc_answer(self, session_id: str, sdp: str):
         self._post_json("/webrtc/answer", {
@@ -768,15 +1230,32 @@ class DriveApiBridge:
             "type": "webrtc_stats",
             "session_id": self.active_webrtc_session_id,
             "source_fps": source_stats.get("source_fps", 0.0),
+            "arrival_gap_p50_ms": source_stats.get("arrival_gap_p50_ms"),
+            "arrival_gap_p95_ms": source_stats.get("arrival_gap_p95_ms"),
+            "push_total": source_stats.get("push_total", 0),
+            "push_dedup_skipped": source_stats.get("push_dedup_skipped", 0),
+            "push_appended": source_stats.get("push_appended", 0),
+            "past_dedup1": source_stats.get("past_dedup1", 0),
+            "past_resize": source_stats.get("past_resize", 0),
+            "recent_gaps_ms": source_stats.get("recent_gaps_ms"),
+            "ts_tail_age_ms": source_stats.get("ts_tail_age_ms"),
+            "deque_len": source_stats.get("deque_len"),
+            "deque_span_ms": source_stats.get("deque_span_ms"),
+            "deque_tail3": source_stats.get("deque_tail3"),
+            "send_loop": send_loop_stats(),
             "sent_fps": track_stats.get("sent_fps", 0.0),
             "stale_frames": track_stats.get("stale_frames", 0),
+            "pts_bumps": track_stats.get("pts_bumps", 0),
             "peer_connection_state": getattr(self.webrtc_peer, "connectionState", None),
             "ice_connection_state": getattr(self.webrtc_peer, "iceConnectionState", None),
             "ice_gathering_state": getattr(self.webrtc_peer, "iceGatheringState", None),
             "local_description_error": self.webrtc_local_description_error,
+            "answer_error": self.webrtc_answer_error,
             "local_description_elapsed_ms": self.webrtc_local_description_elapsed_ms,
             "answer_sent_elapsed_ms": self.webrtc_answer_sent_elapsed_ms,
             "local_candidates_sent": self.local_candidates_sent,
+            "clock_offset_ms": self.clock_offset_ms,
+            "clock_rtt_ms": self.clock_rtt_ms,
         })
 
     def _send_heartbeat(self):
@@ -855,6 +1334,15 @@ class DriveApiBridge:
                     rc_mode=None, rc_park=None,
                     drift_yaw_error=None, drift_steering_correction=None,
                     drift_throttle_mode=None, sim_connected=None):
+        # P1a 可选绑核：默认关闭（车辆线程保持全核自由度，实车推理不受限）；
+        # DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE=1 时钉到媒体核之外的核（实测再省 ~3ms）
+        if not self._vehicle_pin_attempted:
+            self._vehicle_pin_attempted = True
+            if (cpu_affinity.affinity_enabled()
+                    and cpu_affinity.pin_vehicle_thread_enabled()):
+                cpus = cpu_affinity.vehicle_cpu_set()
+                if cpu_affinity.pin_current_thread(cpus):
+                    logger.info(f"车辆线程已绑核: {sorted(cpus)}（DRIVE_WEBRTC_AFFINITY_PIN_VEHICLE=1）")
         if img_arr is not None and self.video_transport == "webrtc":
             self.frame_buffer.update(img_arr)
             now = time.time()
@@ -864,6 +1352,13 @@ class DriveApiBridge:
             if now - self.last_webrtc_stats >= 1.0:
                 self.last_webrtc_stats = now
                 self._send_webrtc_stats()
+            # 时钟同步保鲜（60s）：异步发起即返回，绝不阻塞车辆循环
+            if now - self._last_clock_sync >= 60.0 and self.loop is not None and self.loop.is_running():
+                self._last_clock_sync = now
+                try:
+                    asyncio.run_coroutine_threadsafe(self._sync_clock(), self.loop)
+                except Exception:
+                    pass
             if now - self.last_car_state >= 1.0:
                 self.last_car_state = now
                 self.last_num_records = int(num_records or 0)
@@ -919,7 +1414,9 @@ class DriveApiBridge:
         self.buttons = {}
         reconnect = self.reconnect_simulator
         self.reconnect_simulator = False
-        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect, car_mode_cmd
+        reset_car = self.reset_car
+        self.reset_car = False
+        return self.angle, self.throttle, self.mode, self.recording, buttons, reconnect, car_mode_cmd, reset_car
 
     def run(self, img_arr=None, num_records=0, mode=None, recording=None,
             imu_gz=None, imu_gx=None, imu_gy=None,

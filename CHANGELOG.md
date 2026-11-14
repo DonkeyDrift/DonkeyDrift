@@ -1,3 +1,223 @@
+## 2026-10-24 (276)
+
+- fix(training): 本地训练路径补 macOS Metal GPU 防护——web UI「本地训练」/`python -m donkeycar.management train` 训出的模型塌缩成恒定输出
+  - **根因(主)**:Metal 防护(禁 GPU 回退 CPU float32)此前只存在于模板 `templates/train.py`(Darwin 分支)和 `train_online.py` 的远程 sed 补丁里;真正的本地训练入口(web UI 训练器 → `donkeycar.management train` → `pipeline/training.py`)完全没有防护。Metal + mixed FP16 数值不稳(keras-team/tf-keras#140)→ loss 尖峰(4.0/7.85)后塌缩,模型输出恒定(坏模型 pilot_1792739150191 angle 输出峰峰值仅 0.03)。
+  - **修复**:`utils.py` 新增公共助手 `disable_metal_gpu_on_macos()`(非 darwin/无 GPU/无 TF 返回 False;TF 运行时已初始化则告警返回 False,不炸);`pipeline/training.py` 模块级调用,覆盖一切走该模块的本地训练;模板 `train.py` Darwin 分支改调公共助手(保留 `mixed_precision.set_global_policy(policy)` 文本——远程 sed 补丁 `_patch_remote_train_py_if_macos` 依赖它)。
+  - **验证**:新增 `tests/test_disable_metal_gpu.py`(6 例,fake TF 覆盖 5 分支+pipeline 守卫断言)+ 更新 `test_train_template_fp16.py`,10 项全过;回归 `test_online_trainer_workspace.py`+`test_train.py` 44 passed(`test_train[data9]` 间歇性收敛断言失败为已知 flaky——测试自带注释,单独重跑 2/2 通过,与本改动无关)。mycar 实数据(7884 条,240x320)重训:守卫日志正常触发,loss 平滑无尖峰;30 epoch 模型 **angle 相关 0.959 / MSE 0.0102**(预测均值对照 0.1263),throttle 相关 0.867;keras 与 tflite 输出最大差 3.6e-7(转换无损)。
+  - **次要发现(训练动力学,非代码 bug)**:CPU 下该漂移数据 val_loss 可能先在「预测均值」平台期停 5+ epoch——一次 10 epoch+patience 5 的试训在 ep8 早停于平台期,模型近恒定(pred_var=0.0000);同数据 30 epoch 关早停则顺利走出平台(val 0.207→0.028,结束时仍在降)。**若重训后模型仍恒定:加大 `EARLY_STOP_PATIENCE`(如 15)或 `MAX_EPOCHS`,确认 val_loss 走出平台期再停。**
+  - 评测踩坑:`KerasPilot.run(img_arr)` 入参是 **uint8 [0,255]**(内部自行 `normalize_image`),喂 [0,1] 会因二次归一化得到假「恒定输出」;评测 tflite 用 `tf.lite.Interpreter` 直喂 float32/255 或与 keras 模型对拍。
+  - mycar 里的坏模型 pilot_1792739150191 / pilot_1792764613701 应废弃,用修复后代码重训。
+
+## 2026-10-13 (275)
+
+- fix(webui): 连接器便签页「保存后重开显示未配置」——自动加载逻辑从「加载器」抽屉的 ConfigLoader 上移到 App 级 `useConfigAutoLoad`(随应用常驻):持久化 configPath 恢复 + 无路径时自动发现 mycar 不再依赖抽屉挂载(刷新后直接打开连接器时 ConfigLoader 未挂载,config 恒 null,表单显示未配置;实际保存一直成功,可抓帧验证)。ConfigLoader 移除重复逻辑,8 项回归测试迁移至 hook 测试(394 全过)。
+
+## 2026-10-13 (274)
+
+- perf(sim): sdsandbox 异步采集管线——AsyncGPUReadback 替 ReadPixels + 去冗余 `sensorCam.Render()` + stb 工作线程 JPEG + 自检仪表 + `--quality/--vsync/--telemetry_fps` 二分开关(分支 `feature/telemetry-fps-60`,已推送)。实测 **sim 主线程采包段 ~6-12ms→0.5ms,遥测 ceiling ~58.3Hz 消除**(baseline send_fps=60.0);全链路 live 门禁 **stamp_fps 59.77 / e2e p50 2.9 / p95 4.55ms** PASS
+  - 二分数据(M4 原生 arm64,640×480):baseline 60.62 / quality0 59.98 / vsync0 60.74 / CLI fps30 30.53(sim 侧 send/render_fps 自检确认各自生效)——M4 上质量/同步开关已无关帧率(余量旋钮,留给弱机如 Windows 宿主/Linux 板);CLI 30fps 时 render 仍 60、发送精确 30。
+  - 附带修复:Car.cs FixedUpdate 内加速度改用 `fixedDeltaTime`(原 `deltaTime` 帧率波动失真)。
+  - 注意:2022.3 中 `AsyncGPUReadback(Request)` 位于 **`UnityEngine.Rendering`** 命名空间。
+
+## 2026-10-13 (273)
+
+- feat(sim): 方案 B 落地——sdsandbox 源码重编原生 arm64 DonkeySim,**替代 BepInEx 补丁**;实测 stamp_fps 59.0 / e2e p50 3.25 / p95 3.71ms(live 门禁 58/30ms 全 PASS,较方案 A 的 4.62ms 又降 ~1ms,且消灭 Rosetta 偶发 SIGSEGV)
+  - sdsandbox 分支 `feature/telemetry-fps-60`(DonkeyDrift/sdsandbox,已推送):`cam_config` 可选 `fps` 键(默认 20 向后兼容),遥测发送节流从 FixedUpdate(50Hz 上限)挪到 Update(跟随渲染帧率);项目升级 Unity 2020.3.49f1→2022.3.49f1(编辑器原生 arm64);移除在 2022.3 下编译报错的 win/linux 交叉编译工具链包;`BuildCommand` 场景列表修全(只编 menu 会导致收不到遥测)。
+  - 构建:`Unity -batchmode -projectPath sdsim -executeMethod BuildCommand.Build -buildTargetStandaloneOSX <out.app> -quit`(universal 二进制,M4 跑原生 arm64)。旧 BepInEx app 备份在 `donkey_sim.app.bepinex-backup`。
+  - gym-donkeycar master:`fps` 键三处透传(已推送);mycar `GYM_CONF` 加 `"fps": 60`(旧模拟器忽略此键,Windows 装包后即生效)。
+
+## 2026-10-13 (272)
+
+- feat(webrtc): 模拟器源 60fps 真实采集 + 事件驱动直推——全链路实测 **stamp_fps 60.05、e2e p50 3.95 / p95 4.62ms**（此前 20fps / p95 44ms；目标 ≥60FPS、≤30ms 双双达成，live 门禁 `--gate-fps 58 --gate-latency-ms 30` 全 PASS）
+  - **破 20fps 硬上限（方案 A：BepInEx 运行时补丁）**：sdsandbox 源码 `TcpCarHandler.limitFPS=20` 锁死遥测/JPEG 推流（游戏渲染本就 60fps，发送是现拍现编，提节流即真 60fps 内容、无插帧）。SimTelemetryFps 插件把 `limitFPS`→60、`Time.fixedDeltaTime`→1/60（发送在 FixedUpdate，不改只发 50Hz）、画质档 0 + 关 vsync；Mac 已装进 `donkey_sim.app`（启动 shim 注入，BepInEx 5 arm64 Mono 会崩预载器故走 x86_64 Rosetta），Windows 部署包另行分发。
+  - **事件驱动直推**：`DonkeyGymEnv.set_frame_sink` 让模拟器帧在 `_set_frame` 里直推 `frame_buffer.update`，不再等车辆主循环轮询——循环负载高时轮询节拍跌破源帧率，60Hz 源被欠采样到 ~52Hz；直推后吃满源帧率且轮询等待归零。**顺序约束**：先换 `preview_frame` 再记到达时刻（`_arrive_and_push`），否则车辆循环读到「旧帧+新时刻」会去重竞态吞掉真实新帧。模板 `simulator.py` 与已有 `mycar/manage.py`（内联 drive）各自接线。
+  - **gym_donkeycar fork 客户端**：`SO_RCVBUF` 8MB（默认缓冲只够几条 60KB 消息，消费抖动直接反压模拟器发送线程）、JPEG 解码 PIL→cv2（GIL 释放、逐字节一致）。
+  - **观测性**：`/api/drive/webrtc/stats` 新增到达间隔 p50/p95/recent 采样、push 分段计数（total/dedup/appended/resize）、发送循环分段（编码 await/本体/发包/节拍）；`DRIVE_DGYM_TIMING=1` 打采集分段日志。
+  - 排查链存档：源端 58.8Hz 独立验证 → 车辆循环欠采样（50.4）→ 直推接线在 mycar 未生效（sink_pushes=0 暴露模板≠实车 manage.py）→ 修复后 60.05 PASS。Rosetta 模拟器偶发 SIGSEGV（~15-30min）为已知残留，原生 arm64 需方案 B 源码重编。
+  - 测试：相关 83 项全过；全量套件失败项经 stash 基线逐一确认为既有。文档：`docs/arch/webrtc-e2e-latency.md` 新增 2026-10-13 节。
+
+## 2026-10-12 (271)
+
+- feat(webrtc): 端到端图传闭环测试编排器 `scripts/e2e_video_test.py`——一条命令跑通「隔离后端→合成源→回环探针门禁→headless 真实浏览器实测」，历史落盘 + `--compare-last` 指标对比，把图传优化变成「改旋钮→重跑→看增减」的闭环
+  - 场景矩阵：`pipeline-320p60`/`pipeline-480p60`（管线能力，fps≥58）、`simcadence-320p20`/`simcadence-480p20`（模拟器 20fps 节拍仿真，fps≥19）、`live`（直测在跑车端，须 `--backend`）；统一门禁 p95≤50ms + 印章覆盖 100%。
+  - 浏览器支路（`--browser`）：自动探测 Chrome/Chromium/Edge，`--headless=new` 打开 Drive 页，页面自身完成 WebRTC 接入与像素印章采样并 POST 回后端，编排器轮询 `/api/drive/webrtc/stats` 取**含抖动缓冲与呈现的真实用户口径**（本机 Edge 实测：480p60 inbound 60fps / p50 28.9ms；20fps 节拍 p50 45.2ms——与有窗浏览器 44ms 互证）。
+  - 隔离：默认自动起随机端口的独立后端实例，不干扰在跑正式实例；`live` 场景例外。全部子进程剥代理 env，失败时倒合成源日志尾部。
+  - `--set K=V` 把任意 env（如 `DRIVE_WEBRTC_VIDEO_BITRATE`）注入合成源做 A/B；`--compare-last` 对历史 JSONL（`~/.donkeycar/video_pipeline_history.jsonl`）按场景对比 fps/p50/p95 增减；退出码可作 CI 门禁。
+  - 实测：三场景 + live 全 PASS（pipeline-320p60 60.07fps/p95 4.6ms；480p60 60.07fps/5.45ms；simcadence 20.06fps/7.38ms；live 真实模拟器流 20.06fps/p95 24.3ms）。
+  - 文档：新增 `docs/guide/e2e-video-pipeline-testing.md`（分段时延预算表、场景矩阵、优化闭环工作流、可 A/B 旋钮清单、判读规则与陷阱），`docs/arch/webrtc-e2e-latency.md` 复现方法节挂链接。
+
+
+## 2026-10-12 (270)
+
+- fix(webrtc): 模拟器链路「时延大、帧率低」三连根因修复——探针押帧假象 + 消费循环节拍 + 渲染分辨率错配；实测模拟器流 e2e p95 25.3ms、浏览器徽标 44ms E2E（目标 <50ms 达成；60FPS 对管线成立、模拟器源有 20fps 硬上限）
+  - **先修测量**：`webrtc_loop_probe` 的 aiortc 接收端 `JitterBuffer` 靠「下一帧首包时间戳变化」判帧界、无视 marker 位，每个收齐的帧被押到下一帧首包到达才解码——探针读数系统性虚高一整个帧周期（20fps 源 +50ms、60fps 源 +16.7ms；20fps 模拟器流旧读数 p50 63.4ms，逐段插桩证明车端仅 ~12ms）。浏览器不受影响（Chrome `jitterBufferTarget=0`）。修复：探针进程内替换 `MarkerReleaseJitterBuffer`，按车端 VP8 打包器置位的 marker=1 立即出帧，与浏览器行为对齐。
+  - **模拟器源 20fps 硬上限（闭源端行为，非本仓库可修）**：同一模拟器在 1920×1080/640×480/320×240 渲染下 gym step 均恒定 20.00fps（p50 ~50ms/步）；`cam_config` 协议无帧率键、客户端 `observe()` 1ms 自旋不限速。模拟器预览帧率预期上限 20fps；60FPS 门禁对合成源/真车相机成立。
+  - **消费循环节拍**：本机 `mycar/config.py` `DRIVE_LOOP_HZ` 20→60（旧模板残留）——20Hz 轮询把「帧到达→被消费」平均拖 25ms 且漏帧（实测 source_fps 17.5 < 20）；改后 source/sent 满速率 20.0fps、0 丢帧。
+  - **渲染分辨率对齐预览编码上限**：`dgym` 缺省渲染 1920×1080→640×480、`cfg_simulator` 模板同步（并更新 `test_dgym_preview`/`test_template_simulator_preview`/`test_resolution_consistency` 断言）——实测渲染分辨率不影响模拟器帧率，1080p 渲染只多烧模拟器 CPU（实测 71%）并放大每帧编解码与传输耗时，而 `DRIVE_WEBRTC_PREVIEW_MAX_*` 本就把预览编码限制在 640×480，高渲染像素全被丢弃。
+  - 实测（25s 门禁，探针修正后）：模拟器真实流 `--gate-fps 19 --gate-latency-ms 50` → **stamp_fps 20.04、p50 15.15 / p95 25.29ms PASS**；合成源 60fps `--gate-fps 58` → **stamp_fps 60.04、p50 4.11 / p95 4.64ms PASS**；真实浏览器 Drive 页徽标 **「WebRTC 44ms E2E」**（inbound 20fps、Chrome 抖动缓冲 13.9ms、丢帧 0）。
+  - 逐段插桩（真实 drive 进程）：到达→取帧 p50 9.8ms + 编码 1.4ms + 编码→发包 0.3ms ≈ 车端 12ms，与修正后探针读数吻合。
+  - 文档：`docs/arch/webrtc-e2e-latency.md` 新增 2026-10-12 实测与三个新陷阱（押帧口径、遮挡窗口 rVFC 停摆、模拟器 20fps 上限），复现命令补模拟器门禁变体。
+  - 本机非仓库文件：`mycar/config.py`（备份 `/tmp/mycar_config.py.bak`）；drive 进程以 `DRIVE_WEBRTC_FRAME_STAMP=1` 重启（徽标报真 E2E 依赖印章，日常可按 (269) 默认关闭）。
+
+
+## 2026-10-12 (269)
+
+- feat(webrtc): 帧时间戳印章默认关闭（用户报障「画面左上角黑白条纹闪动」）——画面纯净优先，`DRIVE_WEBRTC_FRAME_STAMP=1` 显式开启
+  - 定性：左上角黑白方块条非故障，是 `video_timestamp` 印章每帧烧入微秒时间戳，比特逐帧变化即视觉上的「闪动」；浏览器「XXms E2E」真时延徽标与 `webrtc_loop_probe` 回环探针都靠它解码。
+  - 默认翻转：`DriveAiortcVideoTrack` 的 env 缺省 `1` → `0`（`drive_api_bridge.py`），日常驾驶原帧直通不再烧入；`latency_probe` 显式探针恒开不受影响（探针口径见 `webrtc_loop_probe` 文档）；空串值视同关闭。开启时行为不变（帧副本上烧入、不污染自动驾驶管线输入）。
+  - 前端零改动：`useDriveWebRtcVideo` 本就按「无印章 → 降级」设计，徽标自动退回帧间隔口径（参考值，非时延）；要报真 E2E 时车端开 env 重启即可。
+  - 同步：`video_timestamp` 模块 docstring、`docs/arch/webrtc-e2e-latency.md` 两处口径、测试改写 `test_aiortc_video_track_stamp_default_off_env_can_enable`（默认关原帧直通 / env 开含副本与解码精度断言 / 探针恒开）。
+
+## 2026-10-12 (268)
+
+- fix(sim): 模拟器画面恒 160x120——全链路统一 320x240（模板默认 + 接线契约 + 本机 mycar）
+  - 背景（用户报障「模拟器能启动了，但画面还是 160x120」），两处叠加：
+    1. `mycar/config.py` 的 `IMAGE_W/H` 仍是 160/120——2026-10-09 (265) 那轮「`myconfig.py` 加 `IMAGE_W=320/IMAGE_H=240`」的覆盖随 myconfig 后续改写丢失（现只剩 SIM_HOST/DONKEY_GYM/DONKEY_SIM_PATH 三项），config.py 的默认值重新生效；
+    2. 更隐蔽：`cfg_complete/cfg_basic/cfg_square/cfg_path_follow` 的 `GYM_CONF` 压根没有 `img_w/img_h` 键，`dgym` 缺省回退 160x120——只改 `IMAGE_W/H` 模拟器出图仍 160x120，且与 320x240 的模型/录制错位，autopilot 首帧形状不匹配会带停整个 drive 主循环（`vehicle.py` 对部件异常整体 stop）。
+    实测日志：模拟器按 1920×1080 渲染（`done sending cam config. {'img_w': 1920, 'img_h': 1080}`），dgym 把它下采样成 160x120，再由 `DriveVideoFrameBuffer` 上采样成 320x240 的糊画。
+  - 模板默认：`cfg_basic/cfg_complete/cfg_path_follow/cfg_simulator/cfg_square` 的 `IMAGE_W/H` 160/120 → 320/240（`cfg_cv_control` 本就 320x240），与 (265) 定下的「车端原生 320x240」口径对齐；`cfg_simulator` 中「img_w/img_h 仍为 160×120」注释同步。
+  - 接线契约（`templates/{complete,basic,simulator}.py` 的 `add_simulator`）：构造 `sim_conf` 时强制 `img_w/img_h = IMAGE_W/H`——不是 `setdefault`，GYM_CONF 停留旧值同样会错位；渲染分辨率不受影响，仍由 `render_img_w/render_img_h` 独立控制（缺省 1920×1080），dgym 按渲染分辨率出图再下采样回 NN 分辨率。
+  - 本机（非仓库文件）：`mycar/config.py` `IMAGE_W/H = 320/240`、`mycar/manage.py` 同步注入。
+  - 可观测性：`dgym` 连接成功日志带上分辨率 `[DonkeyGymEnv] 已连接到模拟器 …（cam/image_array 320x240，渲染 1920x1080）`——「配置改了但出图还是旧分辨率」这类问题以后看日志即判。
+  - 实测（重启车端后）：连接日志 `cam/image_array 320x240，渲染 1920x1080`；Playwright 打开 Drive 页读 `<video>` = **320×240**（`videoWidth/videoHeight`），源帧 native 等尺寸直通 `_resize`，不再有 160x120→320x240 上采样；source/sent ~17.6fps（`DRIVE_LOOP_HZ=20`），车端 20Hz 循环无异常。
+  - 测试：新增 `donkeycar/tests/test_resolution_consistency.py` 3 项（模板默认分辨率 / 三个 drive 模板强制对齐 / cfg_simulator 的 GYM_CONF 引用 `IMAGE_W/H`），连同 `test_template_simulator_preview`、`test_dgym_preview` 全绿。
+  - 影响面：既有 160x120 tub 可继续训练（加载时统一 resize 到 cfg 尺寸，混训正常）；旧 160x120 模型在 320x240 配置下热加载会被 PilotHolder 形状校验拒绝（预期行为，报错带两边分辨率与出路）；新采集帧为 320x240。
+  - 回归：`donkeycar/tests`、`tests`、`web_ui/backend/tests` 三段分别跑通（backend **632 passed / 3 skipped**；`tests` **525 passed / 2 failed**；`donkeycar/tests` 全量跑完，13 failed 逐项复核均为既有问题，见下）。新增 `tests/conftest.py`：补 `frame_freshness` 侧信道重置（`donkeycar/tests/conftest.py` 同款 autouse 夹具）——此前 `test_dgym_rst_e2e` 留下的到达时刻会让 `DriveVideoFrameBuffer.update()` 在紧随其后的 `test_drive_webrtc_track` 里按陈旧侧信道去重、帧永不推进，`recv()` 无限等待把整个套件卡死；补上后该组合由挂死转 4 passed。
+  - 既有失败（与本次改动无关，逐项定位）：`test_dgym_reconnect` 2 项看门狗用例（把 dgym 连接日志回退成旧 print 仍复现）；`test_launcher_terminal::test_enable_tcp_keepalive`（macOS 平台断言，单跑也挂）；`test_web_ui_branding`（index.html 标题已是 DonkeyDrifter，测试仍期望 DonkeyDrift Web UI）；`test_train` 4 项（注释自陈收敛断言 flaky）；`test_launcher_kimi_web::test_cwd_matching_instance_reused`、`test_webui_instance::test_kill_only_car_processes`（单跑同样失败）；`test_scripts` 4 项与 `test_template::test_drive` 属环境问题（`donkey` 不在 PATH、车端 drive 单实例锁挡住，补 PATH / 改 HOME 后分别 4 passed、5 passed）。
+  - 已知卡点（`donkeycar/tests/test_tui_project_selection.py`：1 项 100% CPU 死循环 + 2 项 `OSError: reading from stdin`，上一轮用 `--ignore` 绕开）——本轮已修，根因三层：
+    1. 死循环：未提交的「手动输入项目路径兜底」特性给 `DriveCommand.execute` 加了 `_prompt_project_path()` 回退、`_choose_project` 提示改名「请输入编号或项目路径」，而测试里的 `Prompt.ask` 替身恒回 `"n"`（既非 `"0"` 也非空）→ 产品侧重新提示环无限转，`_patch_no_sleep` 又把 `time.sleep` 置空 → 100% CPU；
+    2. 断言过期：`test_open_project_command_prompts_when_multiple_projects` 仍断言旧文案「请输入编号」；
+    3. `OSError`：10-08 `10f85fdd` 给 Drive 加的 WebRTC 探针用 `rich.prompt.Confirm.ask` 读真实 stdin，绕开只 mock 了 `tui.Prompt.ask` 的用例（pytest 捕获 stdin 下必抛）。
+  - fix(tests)：只动测试、`tui.py` 一行未改（探针 Confirm 问法是既有产品惯例，`test_tui_drive.py` 已示范在测试侧关掉）——新增 `_patch_confirm_off`（Confirm 一律答否）与 `_drive_ask`（记录提示文本；编号/路径类回 `"0"` 取消、其余回 `"n"` 不执行，杜绝无效答案触发重新提示环）；断言对齐新流程：无项目 `["请输入项目路径", "请选择操作"]`、多项目 `["请输入编号或项目路径", "请输入项目路径", "请选择操作"]`、编号文案改 `startswith`。
+  - 验证：`donkeycar/tests/test_tui_*.py` + `tests/test_tui_project_selection.py` 共 **64 passed**（1.3s）；全量 `donkeycar/tests` 不再需要 `--ignore`、无挂起，**13 failed / 660 passed / 29 skipped**（246s）——失败项与上文逐项定位的既有问题一致（`test_launcher_kimi_web`/`test_webui_instance` 两项本轮未复现），原 3 项 TUI 失败/挂起全部转绿。
+
+## 2026-10-12 (267)
+
+- security(P0.1): launcher :8090 与 Web 后端 token 鉴权 + 默认只绑 127.0.0.1——对外监听改显式 opt-in
+  - 动机：此前 launcher（含 `/terminal` 浏览器 shell）与 Web 后端（含 `/api/drive/ws` 车控通道）对 LAN 裸奔无鉴权，任一局域网设备可开 shell/控车。P0 评估后按「本机免密、远程要令牌」收紧。
+  - 鉴权策略（`donkeycar/launcher/auth.py` + `web_ui/backend/auth.py` 同构）：回环 TCP 客户端 + 自身 Host + 干净 Origin 自动放行（本机体验/代理/curl/TestClient 不受影响）；非回环客户端须带令牌（`?token=` / `Authorization: Bearer` / `X-Donkey-Token` / Cookie）。DNS-rebinding 防线=Host 钉死（仅回环字面量/主机名变体/本机 IP；缺 Host 一律拒）；Cookie 过门额外要求自身 Host + 干净 Origin（挡跨站导航自动带 Cookie 的 CSRF），显式令牌豁免 Origin 检查。令牌生命周期 env > `~/.donkeycar/{launcher,drive_api}.token`（0600 原子写）> 首次生成落盘，`hmac.compare_digest` 比较；`?token=` 首访页面 → Set-Cookie(HttpOnly) + 302 剥参（/api/* 与 WS 不重定向保 curl/桥接兼容）。总开关 `DONKEY_LAUNCHER_AUTH=off` / `DRIVE_API_AUTH=off`。
+  - 默认绑定收紧：launcher 与 `donkey web/drive` 后端默认 `127.0.0.1`；实车远程显式 opt-in——systemd unit 传 `--host 0.0.0.0`、launcher 起 web 传 `--backend-host 0.0.0.0`（token 鉴权兜底）。launcher 跳转 URL 自动带 `?token=`（fragment 之前）过后端鉴权门，令牌由后端启动时生成落盘、launcher 只读防两进程竞态。
+  - 车端桥接（`drive_api_bridge.py`）：WS URL 注入 `?token=`（quote 编码）+ HTTP 请求带 `X-Donkey-Token`，令牌取 env/文件只读不生成。
+  - Starlette `@app.middleware("http")` 不覆盖 WebSocket——`drive_ws` 在 `accept()` 前独立鉴权门（真网络客户端才查，测试替身跳过）；OPTIONS 预检豁免保跨域开发链路。
+  - 测试：新增 `tests/test_launcher_auth.py` 47 项（令牌生命周期/开关/回环矩阵/Host 钉死/CSRF/HTTP 门/cookie 流转）、`web_ui/backend/tests/test_api_auth.py`（判定矩阵 + HTTP 门 + drive_ws 门）、`donkeycar/tests/test_drive_api_bridge_token.py`（令牌加载/注入/URL 构造）；`test_launcher_drive_launch.py` 补令牌跳转 URL 与 0.0.0.0 opt-in 断言（autouse 桩隔离真实令牌文件）。既有 TestClient 用例经 testclient/testserver 标记与 None-client 容忍全数保持绿色。
+- security(P0.2): 依赖锁定 + pip-audit CI 门禁
+  - `requirements.in`（声明锁定范围：core + pc + fastapi-backend + dev，torch/pi/nano/macos 有意排除）→ `scripts/regenerate_lock.sh` 用 `uv pip compile` 生成 `requirements-lock.txt`（Linux x86_64 / Py3.11 全量 `==` 固定 + sha256 哈希，115 包；国内默认清华源，`LOCK_INDEX_URL` 可覆盖）。
+  - `.github/workflows/dependency-audit.yml`：依赖文件变更推送/PR + 每周定时复扫，`pip-audit -r requirements-lock.txt --disable-pip --strict`，任何已知 CVE 即红。当前锁全量审计 **0 已知漏洞**。
+- security(P0.3): Dockerfile 安全重写——旧镜像 python:3.6（EOL）+ 引用不存在的 `setup.py`/`[tf]`（根本构建不过）+ Jupyter 空密码空 token 绑 0.0.0.0（匿名 RCE）
+  - 新镜像 python:3.11-slim、按 setup.cfg 真实 extras 安装（editable 保持代码即导入源）、非 root `donkey` 用户、`ENV DRIVE_WEB_HOST=0.0.0.0`（容器内端口映射语义，token 鉴权兜底）；Jupyter 必须持令牌启动（`JUPYTER_TOKEN` 缺省启动时随机生成打日志），绝不空密码/空 token。新增 `.dockerignore` 防 .venv/node_modules/模型数据混入构建上下文。本机无 Docker 未能 build 验证，CMD 语法已 `sh -n` 校验。
+- feat(P1): 实车安全联锁验收 runbook + 可执行清单脚本
+  - `docs/plan/overhead-drift-safety-acceptance.md`：把测试计划 §4.3/§5/§6 的安全链路核对固化为独立验收 runbook（三层兜底模型、R1~R8 清单、失败升级路径），两条「带回分析」决策点改为当场判定。
+  - `scripts/safety_acceptance.py`：`radius-sign`（半径环符号三值判定：r≤-0.6 保持 -1 / r≥+0.6 置 +1 打热改载荷 / 其余停下修机理模型）；`beta-noise`（低速 β 序列上回放三种接管判据——现行 500ms 零次跌破 / 滑窗均值 / 超阈占比，与 `drift_session.py` 语义逐条对齐，输出噪声水位 + 接管延迟 + 判定建议）；`checklist`（R1~R8 交互或 `--answers` 驱动，`--server` 拉 `/api/drift/state` 取证含 `--token`，JSON 验收记录 + 终判）。判定逻辑 19 项单测 + CLI 冒烟（no_data / criterion_mismatch→window_mean / incomplete 终判）锁定。
+  - 文档同步：README 增安全段（默认绑定/令牌/审计/镜像），`docs/guide/uv-venv-setup.md` 的 uv.lock 空壳说明指向新的 requirements-lock.txt。
+
+## 2026-10-12 (266)
+
+- refactor(management): 退役 Kivy 桌面 GUI——Web UI 功能对齐后整体移除，全平台安装瘦身
+  - 删除 `donkeycar/management/ui/` 整包（car/tub/train/pilot 四屏 + 全部 .kv）与只服务于它的 `management/graph.py`；`base.py` 移除 `Gui` 命令与 `'ui'` 注册，`donkey ui` 不复存在。四大屏能力均已由 Web UI 覆盖（Tub Manager/Trainer/Drive/Pilot Arena，迁移记录见 `docs/plan/pilot-arena-web-ui-migration.md`）。
+  - `rc_file_handler.py`（`~/.donkeyrc` 持久化，TUI 与 launcher server 共用）从 ui 包迁至 `management/` 包根，导入路径同步更新；`from kivy import Logger` 换标准库 logging。替换暴露一个边界：atexit 阶段（如 pytest 退出）logging 向已关闭的捕获流打错误报告（不抛异常但刷屏），新增 `log_safe()` 在调用期间临时关 `logging.raiseExceptions` 吞掉，rc 文件写入不再受日志影响。
+  - setup.cfg 四个 extras（pc/macos/pi/nano）删去 `kivy` + `kivy-garden.matplotlib`；`package_data` 删 `*.kv`（全部 .kv 都在已删的 ui 包内）。Pi/Jetson 安装少编译一条 SDL2 重依赖链。pyproject/uv.lock 本就未含 kivy，无需重锁。
+  - venv 卸载 Kivy 2.3.1 / Kivy-Garden / kivy_garden.matplotlib；`import kivy` 确认失败，rc_handler、base、tui、launcher 导入正常，`donkey` 命令表与 TUI 入口可用。
+  - 文档同步：README extras 描述、`docs/arch/donkeydrifter-architecture.md` 命令表删 `ui` 行；docs/plan 两篇迁移文档与 CHANGELOG 历史条目按惯例保留原状。
+
+## 2026-10-09 (265)
+
+- fix(training): 训练 OOM 根治——TubRecord 无界图像缓存改为全局字节预算 LRU（新配置 `CACHE_MAX_BYTES`，默认 256MiB）+ 训练进程 glibc arena 封顶，板上 2 万帧训练峰值 RSS 从 3.4GB（死亡区）降到 ~1.2GB（安全区）
+  - 背景：10-08/10-09 两次整机死机，内核日志为训练 python anon ~3.4GB、swap 耗尽触发 OOM 风暴误杀 dbus/journald。第一层根因在 `TubRecord._image`：`CACHE_POLICY=ARRAY`（默认）把每个加载过的 uint8 图像永驻 record（无上限不淘汰），`from_generator().repeat().batch()` 每 epoch 遍历全部 records → 一个 epoch 后整根 tub 常驻（2 万帧 320x240×3 ≈ 4.4GB 量级）。
+  - 修复一（缓存层，`donkeycar/pipeline/image_cache.py` 新模块）：保留 NOCACHE/ARRAY/BINARY 三态语义，ARRAY/BINARY 的存储从"每 record 无界槽位"换成进程级 `BoundedImageCache`——以 tub 图像绝对路径为键的 LRU，总字节预算 `CACHE_MAX_BYTES` 超限按 LRU 淘汰（单条超预算时保留最新一条，退化为单条缓存而非死循环）。`TubRecord._image` 改为该缓存上的属性槽位，per-record 语义原样保留（含 test_train 依赖的"processor 结果驻留后、下次带不同 processor 的调用作用在缓存值上"）。未改默认策略为 NOCACHE 的原因：`test_train.py::test_training_pipeline` 显式依赖默认回退 ARRAY 的缓存命中语义；且集中修复同时覆盖 training/benchmarks/web_ui/管理 UI/torch_data 等全部 `TubRecord.image()` 消费方。
+  - 修复二（训练进程，`pipeline/training.py`）：TF import 前 `mallopt(M_ARENA_MAX=2)` + env setdefault——tf.data 的 float64 batch 高速流转（BATCH_SIZE×320×240×3×8B，BS=64 时 118MB/批）在默认 per-core arena 下留下 0.6~1GB"已释放未归还"堆驻留；进程内 mallopt 实测有效（env 变量在解释器启动时已被 glibc 读掉，运行中设 env 无效）。数值行为零变化（纯分配器调优）。
+  - 数值行为红线验证：NOCACHE/有界缓存下喂给模型的数据与改动前逐位一致（增强仍按 batch 在线、归一化仍在 `get_x` 现场、只缓存 uint8 不缓存 float64 归一化结果）；"缓存命中值 == 磁盘重载值"、"槽位被淘汰后回退重读原图" 均有单测锁定。tf.data 管线、`TubDataset.get_records()`、Collator 接口未动；车上 .tflite 推理与 320x240 五链路不受影响。
+  - 配置：`CACHE_MAX_BYTES` 进 cfg_complete/cfg_basic 模板与代码默认（256MiB ≈ 1194 帧 320x240x3）。权衡：小 tub（≲1200 帧）可全量热缓存（命中 0.001ms/帧 vs 未命中 0.55ms/帧）；大 tub 固定顺序循环访问下 LRU 命中率→0，预算纯属封顶，可调小（如 128MiB）给 tf.data/激活让内存。
+  - 实测矩阵（本机 A1，合成 tub，`donkeycar/benchmarks/image_cache_bench.py`）：
+    - 缓存基准（3000 帧/2400 训练帧）：改动前 ARRAY 一个 epoch RSS +608MB 且随帧数线性外推（1.6 万帧 ≈ 3.7GB+，与事故吻合）→ 改动后 ARRAY@256MiB 驻留钉死 268416000B（1165 帧）、峰值 328MB、连续 3 epoch 平稳（328→309→290MB）；NOCACHE 全程 +2MB；NOCACHE 解码开销 0.55ms/帧（2 万帧一个 epoch 仅 +11s，可接受）。
+    - 2 万帧全量训练（linear，2 epochs）：BS=128+默认分配器（=改动前实况）峰值 3431MB、Epoch 2 被 memguard 按预案消灭（journal 留痕 avail=834MB→579MB、进程 3.35→3.44GB）——即缓存封顶后 BS=128 仍然致命，剩余大头是 tf.data/激活的分配器高水位（与 batch/预取无关：prefetch(1) 实验无改善）；+arena 封顶后分解实验 2830→2231（env）/1863（mallopt）；**BS=32 + CACHE 128MiB + mallopt：Epoch 1 稳态 ~1.0GB，全程峰值 1491.5MB（≤1.5GB 达标），loss 0.065→0.021 / val_loss 0.0039→0.0020 正常收敛，memguard 全程静默**（墙钟 1626s/2 epochs）。
+    - 内存分相（BS=64）：import TF 490MB → 建 model+2 万 records +85MB → 纯 tf.data 50 批 +~550MB → fit 工作区 +~1.2GB；图像缓存钉在预算内（stats：entries=1165/268416000B/hits=0）。
+  - 板上训练配置建议（数据支撑）：320x240 CPU 训练 BATCH_SIZE=128 物理不可行（激活+工作区 ~2GB 起，无论缓存/预取怎么调）；建议 `BATCH_SIZE ≤ 64`（余量紧）或 **32**（实测安全），大 tub 配 `CACHE_MAX_BYTES = 134217728`（128MiB）。`mycar/myconfig.py` 当前 BATCH_SIZE=128，板上自训请改为 32/64——本次未代改，属用户训练策略决策；远端 GPU 训练流不受影响。
+  - 测试：新增 `donkeycar/tests/test_image_cache.py` 14 项（LRU 淘汰/预算不变量/get 刷新/缩预算/覆盖同键/槽位语义/命中==重载/多 epoch 平稳/__copy__ 共享/预算下放）；`test_pipeline`+`test_training_pipeline`×24+`test_drift_replay`×14+`test_image_cache` 全绿。工作区纪律：未 commit，模板 CRLF 行尾保持（cfg_basic 以二进制方式插入单行）。
+  - 定位沉淀（2026-10-10）：实测证明板上训练内存贴红线且速度无收益，用户拍板 **A1 只做推理、训练走远端 GPU**；应急配方与完整实验矩阵/手法/教训见 `docs/arch/a1-board-train-vs-inference.md`。
+
+## 2026-10-09 (264)
+
+- feat(camera): 车端分辨率 160x120 → 320x240，全链路（WebRTC/采集/筛选/训练/推理）原生 320x240
+  - 改动只有一处配置：`~/projects/mycar/myconfig.py` 增加 `IMAGE_W=320 / IMAGE_H=240`（此前 myconfig 未覆盖，config.py 默认 160x120 生效）。该值是五条链路的共同源头：相机采集（Webcam/pygame）、tub 记录、训练集加载 resize（`load_image_sized`）、模型输入 shape（`get_model_by_type`）、autopilot 输入帧。WebRTC 流尺寸 `DRIVE_VIDEO_WIDTH/HEIGHT` 本就是 320x240——升级前是 160x120 经 `DriveVideoFrameBuffer` cv2.resize 上采样的模糊画面，升级后 `_resize` 命中等尺寸直通分支，少一次 resize 且画面原生清晰。
+  - 实测（犀牛派 A1，Ubi Camera v4 @pygame/RGB，`manage.py drive` 重启后）：
+    - drive 主循环 58.7 Hz（`source_fps` 即 bridge `run_threaded` 节拍，与 160x120 时的 59.1 持平；4 倍像素几乎零成本，因为编码器此前就按 320x240@60 调优过——VP8 cpu-used/noise-sensitivity 那轮）；
+    - WebRTC 会话 sent_fps 58.7、frames_dropped 0、jitter 4ms、degraded=false；浏览器探针（`e2e/webrtc-browser-probe.mjs`）pass=true；
+    - TFLite 推理 p50 2.9ms(160x120 旧模型) → 13.7ms(320x240 新模型)，仍在 60Hz 预算 16.7ms 内；Keras float 路径 53.5ms 超预算——车端自动跑请选 `.tflite`（训练产物自动双份，UI 按扩展名下发类型）；
+    - 采集：TubWriter 写入 320x240 jpg 实测 696 fps（60Hz 需求的 11 倍），单帧 45.5KB（160x120 的 ~4 倍），录制时磁盘写入 ~2.7MB/s；
+    - 训练：本机 CPU linear 97~104s/epoch（651 records、BATCH_SIZE 64、与 drive 进程并行负载下），旧 160x120 tub 与新 320x240 tub 混训正常（加载时统一 resize 到 cfg 尺寸）；远端 GPU 训练流（train_online 打包上传）不受影响，分辨率随 cfg 打包带走；
+    - 筛选：`/api/tub/load` + `/api/tub/image` 对 320x240 tub 端到端取图验证通过（端点只透传 jpg 字节 + ETag 缓存，分辨率无关）。
+- fix(pilot_holder): 热加载新增模型输入形状校验——旧分辨率模型在加载期显式拒绝，不再等到 autopilot 首帧炸掉 drive 主循环
+  - 背景：`PilotHolder.run()` 直接把相机帧喂给模型，vehicle 主循环对部件异常的策略是 traceback 后整体 stop（`vehicle.py` 只捕 KeyboardInterrupt）。分辨率提升后若误选旧 160x120 模型（web UI 模型列表仍可见），首次推理形状不匹配异常会带停整个循环。校验放在 `PilotHolder._build`：`get_input_shape('img_in')` 尾三维 ≠ `(IMAGE_H, IMAGE_W, IMAGE_DEPTH)` 时抛 ValueError，经桥接层回传 Web UI「车端热加载失败」，旧模型保持不变。注意 shape 元素可能是 np.int32，须先转 Python int 再比较（否则 `isinstance(d, int)` 判断静默放行——首版就栽在这）。
+  - 实测：旧 `pilot_1791379009443.tflite` 加载被拒（报错含两边分辨率与两条出路：重训或改回配置）；新训 320x240 tflite 正常加载推理；`test_pilot_holder_hot_load` 等 77 项相关测试全过。
+- fix(webui/e2e): 修复浏览器探针采样必挂——`page.evaluate` 传入函数不能引用模块闭包
+  - 现象：探针每次都在采样期报 `Execution context was destroyed`，重试亦然；且无对应导航/请求失败日志，极具迷惑性。
+  - 根因：`sampleInPage` 内引用了模块作用域的 `percentile`。Playwright evaluate 只序列化函数源码，闭包变量不会进页面 → 页内 rVFC 采样结束时 `percentile is not defined`（PAGEERROR 可见），promise 永不 resolve，挂起的 evaluate 被页面后续 react-router 懒加载 chunk 失败触发的整页 reload（react-vendor 内置 location.reload()）以 "Execution context was destroyed" 拒绝。
+  - 修复：分位数计算内联为页内局部 `pctl`；等待/采样循环对 ctx-destroyed 容错并最多重试 3 次（首帧前后的首装 reload 同样容忍）。
+  - 实测：修复前连续 6+ 次失败，修复后 pass=true（headless 渲染 45fps 为 SwiftShader 软渲染瓶颈；硬件加速真标签页 browser_fps 58.4）。
+  - 边界与注意：旧 160x120 数据/模型仍可读可训（训练加载时放大插值，无新信息但流程兼容）；`models/pilot_1791379009443.*` 为旧分辨率模型，热加载会被新校验拦截；新采集请用 320x240，分辨率切换期不要混用不同分辨率模型。
+
+## 2026-10-07 (260)
+
+- tools(npu): 收入 NPU/参考对照的固定流程四件套 `scripts/npu_eval/`
+  - 动机：每转一版模型都要回答"输出准不准、哪个头退化"，而临时脚本容易犯两个错——① 直接取 tub 前 N 张（实测 787 帧里仅 272 帧唯一，重复帧会让"连续帧输出相同"伪装成模型退化）；② 回归/标量输出上用余弦相似度（单元素向量符号翻转即误报 -1）。
+  - 内容：`make_eval_set.py`（去重 + 有真值时按真值分层抽样 + 生成能推双侧的合成图）、`npu_eval.py`（aidlite/QNN240+DSP，默认 AIMO 的 `/255` 输入约定）、`ref_eval.py`（工程 TFLite 的 float32 参考，尺度按源模型走）、`cmp_eval.py`（逐头平均/最大 |Δ|、非零帧数、合成输入逐项对照）、README（尺度对照表 + 实测样例 + 注意事项）。
+  - 实测（DKG-1，21 帧去重真实图）：混入合成图校准的 INT16 版 steering 平均|Δ| **0.0031**（非零 21/21）、throttle **0.0020**；仅 tub 校准的旧版 steering 非零 **0/21**。
+- fix(npu): 修「AIMO 单侧校准把输出头截死」——新增 `--calib-mix-synth`（校准集混入合成图）
+  - 现象：NPU 模型（INT8/INT16 均）在真实车帧上 steering **恒为 0**，而 float32 参考在同一批帧给出 −0.159~−0.338（21 帧去重抽样、21 个不同值）。先怀疑测试帧选取，遂去重（787 帧里仅 272 唯一）并按转角均匀抽样 —— **仍全 0**，排除。
+  - 定位：用合成输入（黑/白/灰/左右分块/上下分块）探响应 → 发现**每个输出头只保留一侧符号**（steering 负→0、throttle 正→0）；再读**原始整型**张量确认值为 0 → 不是索引/读取问题，是量化范围问题。
+  - 根因：AIMO 按**校准数据**的激活范围给每个张量定 min/max。tub 真实帧的参考输出恰好单侧（steering 全负、throttle 多为负）⇒ 输出张量被标成单侧范围 ⇒ 反号值被压到零点。
+  - 修复：`donkeycar/tools/aimo_npu_convert.py` 新增 `--calib-mix-synth N`（建议 ≥30），在校准集里混入 black/white/gray/左右分块/上下分块/渐变/噪声合成图，与真实帧按 `N:(max−N)` 混合，把输出范围拉回双侧。
+  - 实测（21 帧去重真实图 vs float32 参考）：steering 平均|Δ| **0.2307 → 0.0031**（最大 0.0058，非零 **21/21**）；throttle 平均|Δ| 0.0017 → 0.0020（非零 21/21）；推理 **0.84 ms/次**（50 次）。车端主用模型更新为 `DKG-1_qcs6490_w8a16_mixcal.qnn240.ctx.bin.aidem`（旧的取帧单侧校准版本移入 `models/_superseded/` 留档）。
+  - 判据与复现：`docs/npu/AIMO量化校准-单侧校准陷阱.md`（含"读原始整型张量 → 合成图推双侧 → 换混合校准集"三步判据）。
+- feat(npu): 收入 aidlite 的 C-ABI 外壳 + ctypes 门面 —— 工程 Python 版本直接跑 NPU（回到单环境）
+  - 背景：本板镜像的官方 aidlite 绑定是 `soaidlitesdk.cpython-310-aarch64-linux-gnu.so`（pybind11 扩展模块，ABI 按 Python 版本锁死：3.12 实测 `ImportError: Python version mismatch ... compiled for Python 3.10 ... 3.12.14`），而工程 `python_requires >=3.11` 且 `donkeycar/__init__.py` 有 `minor < 11` 硬门槛 ⇒ 工程自己的解释器无法 `import aidlite`，NPU 只能依赖额外的 3.10 环境（而该环境装不进工程）。AidLux 亦不提供任何 py3.12 包。
+  - 方案：镜像自带官方头文件 `/usr/local/include/aidlux/aidlite/aidlite.hpp`（726 行）与 `libaidlite.so`（与 Python 版本无关，任意解释器可 dlopen）→ 自建 `extern "C"` 外壳（151 行）+ ctypes 门面（375 行，API 形状对齐官方绑定：`Model/Config/InterpreterBuilder/Interpreter` + 各枚举）。`set_input_tensor/get_output_tensor` 一律 `is_native=false`，由 aidlite 按模型自带量化参数做量化/反量化。
+  - 为什么 ctypes 可行：这是**运行期绑定**，不走 CPython C-API —— 外壳 `PyInit_*` 入口 0 个、引用的 Python C-API 符号 0 个（对比官方扩展模块：1 个入口 + 141 个 C-API 符号），因此**不锁 Python 版本、不需要 `python3-dev`**，只需 `g++`。
+  - 落地：`scripts/aidlite_cabi/`（外壳 cpp + 门面包 + `rebuild.sh` + README + 换设备依赖清单）。`rebuild.sh` 是**探测式且幂等**的：目标解释器已能用官方绑定则直接跳过；缺头文件/库/g++ 给准确修复命令；重复运行=重编重装（升级 aidlite-sdk 后正是需要跑一次）。`libaidlite_cabi.so` 按本机头文件编出，**不入库**（`.gitignore` 已加）。
+  - 实测（Python 3.12.14 + aidlite 2.5.1.304 + `DKG-1_qcs6490_w8a8.qnn240.ctx.bin.aidem`）：`Model.create_instance` ✅、`set_model_properties rc=0`、`init()=0`、`load_model()=0`、输出张量名 `['StatefulPartitionedCall_0','StatefulPartitionedCall_1']`；直调 aidlite **0.88 ms/次**（20 次），经工程 `NpuLinearPilot` **1.68 ms/次**（100 次，含 pilot 归一化）；与 3.10 官方绑定输出**逐位一致** `[0.0, -0.062795]`。授权不受影响（license 校验在 `libaidlite.so` 内）。
+  - 边界：只实现车端 NPU 用到的子集（`Context/TensorInfo/DeviceInfo/缓冲区接口` 未实现）；aidlite 的 TFLite/CPU 后端经此门面 `init()` 返回 1（有 TF 的解释器走原生 TF 路径，本环境不用该路）；**aidlite-sdk 升级后需重跑 `rebuild.sh`**；官方若提供匹配 ABI 的绑定应改回官方。
+- fix(npu): AIMO 转换修复「校准集被静默跳过」+ 源模型类型自动识别 + 精度/校准集可选
+  - 现象：把 tub 真实车帧当校准集传入后，服务端仍报 `No quantization data uploaded`，一次任务白跑。
+  - 根因①（关键）：`CalibrationDatasetType.Custom` 的枚举值是**空字符串 `''`**，而脚本传的是字面量 `"custom"` —— SDK 内部「`mode == Image` 且 `dataset == Custom` 才真正上传」的守卫条件不成立，**上传被静默跳过**，调用不报错，直到提交后服务端才暴露。（`mode="cv"` 恰好没事：`CalibrationDataMode.Image` 的值就是 `'cv'`，字符串相等成立。）
+  - 根因②：源模型类型被写死 `SourceModelType.ONNX`，现成的 `.tflite` 必须先转 onnx 才能送 AIMO；而 onnx 与 TF 2.19 的 protobuf 依赖不可共存（onnx ≥1.23 需 protobuf ≥6.31，TF 2.19 需 <6），还会把 numpy 顶到 2.x（AidLite 要求 <2）。
+  - 修复：
+    1. 量化参数改传 **SDK 枚举成员**（`CalibrationDataMode.Image` / `CalibrationDatasetType.Custom` 或内置集成员），并新增**上传后自查**：`quantize_options.calibration_data_files` 为空时打印告警，不再静默。
+    2. 新增 `resolve_source_type()`：按扩展名/目录自动识别 `.tflite / .onnx / .pb(frozen) / .pt,.pth / saved_model`，也可用 `source_type` 显式指定；`new_task` 改用 `getattr(SourceModelType, src_type)`。
+    3. 新增 `--precision INT8|INT16|FP16`（`ModelDataPrecision` 的 `A8_W8 / A16_W8 / Afp16_Wfp16`），并**按精度组装参数**：`quantize_mode` 与 `enable_per_channel_quantize` 是 INT8/INT16 专用，与 FP16 混用会被服务端拒（`code=201 Transform Params Error : unsupported mix precision options`）。
+    4. 新增 `--calib-dataset imagenet|coco|face|normal`（无校准 tub 时的内置校准集）。
+    5. 校准图由**软链改为真实拷贝**（`shutil.copy2`）—— AIMO SDK 上传不跟随符号链接，软链等于没传。
+  - 实测（`DKG-1.tflite` → QCS6490 / QNN 2.40，tub 真实车帧 100 张校准）：`[2.5/5] 校准集已上传: 100 张 -> 100 个 URL`，服务端 **30 s** 完成 int8 转换（`w8a8`）；`--precision INT16` 亦成功（`w8a16`）。两版产物的 **steering 输出头量化后恒 0**（读原始整数张量即为 0，与校准集无关），throttle 与 float32 参考吻合（INT16 Δ6.8e-4）——属量化精度问题，另开条目跟进。
+  - 注：**不要把 `onnx` / `tf2onnx` 装进带 TF 的项目 venv**（`AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'` 或 `VersionError: gencode 6.31.1 runtime 5.29.6`，两者不可共存）；确需 onnx 就在独立 venv 里转，只把产物交给 AIMO/设备。
+
+## 2026-10-07 (261)
+
+- feat(webui): Trainer 页模型列表新增「转 NPU」——图形化 AIMO 云转入口（.aidem 产出即列表可见）
+  - 动机：`donkeycar/tools/aimo_npu_convert.py` 此前只能 SSH 上车敲 CLI（参数长、云端轮询动辄几十分钟、日志肉眼盯），想把训练完的 `.tflite`/saved_model 转成 QCS6490 NPU 模型在网页端一步完成。
+  - 后端：完全复用训练 job 基础设施——`trainer_engine.py` 新增 `aimo` job 模式，以子进程跑 `python -m donkeycar.tools.aimo_npu_convert`（与 `run_local` 同管道：stdout/stderr 逐行泵进 SSE 日志流），解析 `[n/5]` 阶段行为粗粒度进度、`[5/5] 已下载到:` 为产物路径（`job.result_path`）；停止 = terminate 子进程。新端点：`POST /api/trainer/train/aimo`（状态/日志/停止复用 `/train/{job_id}/status|logs|stop`）、`GET /api/trainer/aimo/key-status`（`find_spec` 探测 aplux_aimo + 按工具同优先级判 API Key 是否已配置，只回布尔与来源不回 key；刻意不在后端进程 import donkeycar 避免连带加载 TF）。
+  - 前端：`ModelsList` 头部「转 NPU」按钮（任意路径手填）+ 可转换类型行内 Cpu 按钮（`.tflite/.onnx/.pb/.pt/.pth/.savedmodel`，`.h5/.aidem/.ckpt` 不显示）；新组件 `NpuConvertModal`：源路径/输出目录/精度 INT8|INT16|FP16/校准 tub 下拉（来自 `/trainer/tubs`）/校准张数/合成图混入数——无 tub 时切换为内置校准集选择，单侧校准陷阱提示直接进表单；转换期弹窗内 SSE 实时日志 + 阶段进度条，终态后查 REST 补拿产物路径展示；运行中可关窗（后端继续跑），完成后回调刷新模型列表。未装 SDK/Key 时开弹窗即黄色警告，避免白跑。
+  - 工具：`aimo_npu_convert.py` 的 `aplux_aimo` 导入失败改为友好报错（原样裸 traceback 会整屏进 Web 日志面板）。
+  - 测试：后端新增 `test_trainer_aimo.py` 7 例（job 化与命令行组装/参数校验/key-status 不泄漏/key-status 未配置/result_path/阶段与产物路径解析），全套 582 passed；前端新增 15 例（isNpuConvertible/警告横幅/参数映射/SSE 驱动进度与终态产物路径/停止/行内按钮显隐/头部入口），全套 398 passed + `tsc` 与生产构建通过。
+  - 实测（真机 Playwright + 临时 uvicorn 8027）：弹窗开合、SDK/Key 缺失警告横幅、提交后子进程日志回流（无 SDK 时友好报错行）、失败终态 + Exit code 展示均正常；AIMO 云端全链路（登录→提交→轮询→下载 .aidem）待板卡配置 `AIMO_API_KEY` 后按 CLI 同路径生效。
+
+## 2026-10-07 (262)
+
+- fix(npu): AIMO 产物为 zip 压缩包时自动解压进 Models——自包含子目录 + 列表透出 .ctx.bin.aidem
+  - 现象：Web 端「转 NPU」完成后 models 目录里落的是一个 zip（`<模型名>_save_path.zip`），车端/列表都不能直接用，还要 SSH 上车手动解压摆位。
+  - 根因：AIMO SDK 的 `task.download(OutputModel)` 下载的就是整包（内含 `*.ctx.bin.aidem`、x86 模拟器变体 `lib*.x86.so.aidem`、`qnn_model_info.json`、htp 配置等 7 个文件）。且 `npu_pilot.load()` 硬性要求 `qnn_model_info.json` 与 `.aidem` **同目录且文件名固定**（donkeycar/parts/npu_pilot.py:133）——多个 NPU 模型平铺在 models/ 会互相覆盖形状定义。
+  - 修复（`donkeycar/tools/aimo_npu_convert.py` 新增 `_unpack_if_archive`）：下载后检测 zip → 安全解压（zip-slip 校验）到 `models/<zip 名>/` 自包含子目录 → 删除压缩包 → `[5/5] 已下载到:` 直接报车端模型路径（Web 端弹窗的产物路径随之正确）；优先取 `*.ctx.bin.aidem`，无 .aidem 时报目录。CLI 与 Web 共用此路径，均即时生效。
+  - 配套：`/api/trainer/models` 扫描一级子目录，把其中的 `*.aidem` 以 `<目录>/<文件名>` 透出（跳过 x86 变体与 `.savedmodel`）；`load_model` 的相对路径校验本就允许 `models/<一级子目录>/<文件>`，前端 `./models/${name}` 拼接天然兼容，Drive 页「加载到车端」对解压产物直接可用。
+  - 迁移与实测：已把本次转出的 `pilot_1791379009443_save_path.zip` 用新逻辑落成 `models/pilot_1791379009443_save_path/`（zip 清理）；重启 8001 实例后模型列表同时显示 `.tflite` 与 `<目录>/…ctx.bin.aidem`，key-status 正常。测试：新增 `donkeycar/tests/test_aimo_npu_convert.py` 5 例（ctx.bin 优先/回退、zip-slip 拒收、非 zip 原样、无 .aidem 落目录）+ `test_trainer_models.py` 2 例（子目录透出与 .savedmodel 不误扫），backend 全套 584 passed。
+
+## 2026-10-07 (263)
+
+- fix(npu): 修「切换 .aidem 失败 init rc=1」与「Arena 扫不到 aidlite_linear」——板卡缺 QNN240 后端 + Arena 列表不扫子目录
+  - 现象①：Drive 页切换 .aidem 模型，车端报 `interpreter.init() 失败 rc=1`；现象②：Pilot Arena 模型列表过滤 aidlite_linear 后为空。
+  - 根因①（环境）：aidlite 本体能 import，但 `_quiet_c()` 静默层下被吞的原生日志显示 `dlopen(/usr/local/lib/libaidlite_qnn240.so) failure → Backend retrieve failed (StatusCode[100061])`——**QNN240 后端插件未安装**（板上只有 qnn236；此前 3.12 实验时装过 2.5.1.304，环境还原回滚后被清掉）。AIMO 产物目标 runtime 是 QNN 2.40，缺它必然 init 失败。
+  - 修复①：`sudo aid-pkg install aidlite-qnn240`（2.5.1.304）。注意 aid-pkg 安装器**需要 PTY**（无 TTY 时报 `Get terminal width failed! Not Supported`），脚本化用 `printf 'y\n' | script -qec "sudo aid-pkg install ..." /dev/null`。装回后 npu_pilot 加载+推理实测通过（steering 0.042 / throttle −0.028，双侧非零——混合校准版输出头未被截断）；后端插件是 init 时 dlopen，车端常驻进程**无需重启**即生效。
+  - 根因②（代码）：与上一条目同款问题——`/api/arena/models` 只扫 models 顶层，AIMO 自包含子目录里的 `.ctx.bin.aidem` 不上列表。修复：同款一级子目录扫描（name 带 `<目录>/` 前缀，跳过 x86 变体与 .savedmodel，遵守 model_type 扩展名过滤）；`/pilots/load` 收列表返回的绝对路径，无需改动。
+  - 实测：重启 8001 后 `/api/arena/models?model_type=aidlite_linear` 列出该模型；`POST /api/arena/pilots/load`（aidlite_linear）加载成功、随 unload 释放。测试：`test_arena.py` 新增 2 例（子目录透出+过滤），backend 全套 586 passed。
+  - 注：`aidlite-qnn240` 是系统级包，不在 git 里——**换板/还原环境后需重装**（见环境备份记忆）。
+
 # 变更日志
 
 ## 2026-11-02 (275)

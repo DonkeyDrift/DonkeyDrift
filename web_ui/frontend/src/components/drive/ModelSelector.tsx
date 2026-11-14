@@ -46,7 +46,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         <button
           onClick={() => !disabled && setOpen(!open)}
           disabled={disabled}
-          className={`w-full px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-medium flex items-center justify-between gap-2 text-cyan-400 hover:bg-zinc-800 transition-colors min-w-[6.5rem]
+          className={`w-full px-3 py-1.5 max-lg:min-h-[40px] rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-medium flex items-center justify-between gap-2 text-cyan-400 hover:bg-zinc-800 transition-colors min-w-[6.5rem]
             ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
           `}
           title={t('drive.currentModel')}

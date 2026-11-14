@@ -161,6 +161,11 @@ def test_drive_pid_file_roundtrip(instance_file):
 # ===========================================================================
 
 def test_kill_only_car_processes(instance_file):
+    # cmdline 过滤依赖 /proc（Linux）；macOS 等无 /proc 平台按设计退化
+    # 为「PID 文件全杀」（webui_instance.kill_previous_car_processes 文档串），
+    # 本用例的过滤断言仅适用于 Linux
+    if not os.path.isdir("/proc"):
+        pytest.skip("cmdline 过滤仅 Linux 支持（无 /proc 平台按设计全杀）")
     pid_file = webui_instance.DRIVE_PID_FILE
     write_drive_pids([101, 202], pid_file=pid_file)
 

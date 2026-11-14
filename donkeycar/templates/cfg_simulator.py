@@ -23,13 +23,16 @@ DATA_PATH = os.path.join(CAR_PATH, 'data')
 MODELS_PATH = os.path.join(CAR_PATH, 'models')
 
 #VEHICLE
-DRIVE_LOOP_HZ = 20      # the vehicle loop will pause if faster than this speed.
+DRIVE_LOOP_HZ = 60      # the vehicle loop will pause if faster than this speed.
+                        # 模拟器模式与 DRIVE_VIDEO_FPS(60) 对齐：轮询节拍低于出帧
+                        # 速率会把「出帧→轮询」等待（20Hz 平均 25ms）计入 FPV
+                        # 端到端时延，且轮询拿不到新帧的拍次是纯空转。
 MAX_LOOPS = None        # the vehicle loop can abort after this many iterations, when given a positive integer.
 
 #CAMERA
 CAMERA_TYPE = "MOCK"   # (PICAM|WEBCAM|CVCAM|CSIC|V4L|D435|MOCK|IMAGE_LIST)
-IMAGE_W = 160
-IMAGE_H = 120
+IMAGE_W = 320           # 全链路原生 320x240（采集/tub/训练/推理/预览同分辨率）
+IMAGE_H = 240
 IMAGE_DEPTH = 3         # default RGB=3, make 1 for mono
 CAMERA_FRAMERATE = DRIVE_LOOP_HZ
 CAMERA_VFLIP = False
@@ -135,6 +138,12 @@ USE_JOYSTICK_AS_DEFAULT = False      #when starting the manage.py, when True, wi
 JOYSTICK_MAX_THROTTLE = 0.5         #this scalar is multiplied with the -1 to 1 throttle value to limit the maximum throttle. This can help if you drop the controller or just don't need the full speed available.
 JOYSTICK_STEERING_SCALE = 1.0       #some people want a steering that is less sensitve. This scalar is multiplied with the steering -1 to 1. It can be negative to reverse dir.
 AUTO_RECORD_ON_THROTTLE = True      #if true, we will record whenever throttle is not zero. if false, you must manually toggle recording with some other trigger. Usually circle button on joystick.
+
+# 录制数据异步落盘：run() 只入队立即返回，图像编码+catalog 写盘由后台线程执行，
+# 磁盘抖动不再灌进车辆主循环（60Hz 下任一轮超时即掉帧）。队列满丢最旧保最新，
+# 退出时排空队列；False 回退同步写。
+TUB_ASYNC_WRITE = True
+
 CONTROLLER_TYPE = 'xbox'            #(ps3|ps4|xbox|nimbus|wiiu|F710|rc3|MM1|custom) custom will run the my_joystick.py controller written by the `donkey createjs` command
 USE_NETWORKED_JS = False            #should we listen for remote joystick control over the network?
 NETWORK_JS_SERVER_IP = None         #when listening for network joystick control, which ip is serving this information
@@ -244,12 +253,18 @@ GYM_CONF["country"] = "Place"
 GYM_CONF["bio"] = "I race robots."
 
 # 模拟器相机渲染分辨率（预览用），与 NN 输入 IMAGE_W×IMAGE_H 解耦：
-# - img_w/img_h 仍为 NN 输入分辨率（160×120），训练/推理不受影响；
-# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 1920×1080 全高清），
+# - img_w/img_h 仍为 NN 输入分辨率（IMAGE_W×IMAGE_H，模板默认 320×240），训练/推理不受影响；
+# - render_img_w/render_img_h 控制模拟器渲染分辨率（默认 640×480，与下方预览编码上限对齐），
 #   dgym 内部会把渲染帧下采样回 img_w×img_h 作为 cam/image_array，
-#   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示最高画质。
-GYM_CONF["render_img_w"] = 1920
-GYM_CONF["render_img_h"] = 1080
+#   同时把渲染原始帧作为 preview/image_array 供 Drive 页面展示。
+#   实测模拟器遥测/出图节拍固定 20fps、与渲染分辨率无关：更高渲染不涨帧率也不涨预览
+#   画质（编码上限就在 640×480），只多烧模拟器 CPU、放大编解码与传输时延。
+GYM_CONF["render_img_w"] = 640
+GYM_CONF["render_img_h"] = 480
+# Drive 预览（WebRTC）编码分辨率上限：原生帧直接进软编码超过实时能力会把帧率
+# 拖垮（实测 1080p fps 3.9/时延 447ms），超限帧等比缩到上限内；0 = 关闭上限定回原生
+DRIVE_WEBRTC_PREVIEW_MAX_WIDTH = 640
+DRIVE_WEBRTC_PREVIEW_MAX_HEIGHT = 480
 
 def get_wsl_host_ip():
     # 尝试 1: 使用 ipconfig.exe (最准确，能获取 Windows 局域网 IP)

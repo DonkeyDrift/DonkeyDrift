@@ -7,6 +7,7 @@ Created on Sun Jun 25 10:44:24 2017
 """
 
 import time
+import inspect
 import numpy as np
 import logging
 from threading import Thread
@@ -15,6 +16,38 @@ from prettytable import PrettyTable
 import traceback
 
 logger = logging.getLogger(__name__)
+
+
+def validate_input_arity(part, inputs, threaded):
+    """V.add 时校验 inputs 数量不超过部件执行函数的可接收位置参数数量。
+
+    Vehicle 每轮按位置解包 `run_threaded(*inputs)`（threaded 部件）或
+    `run(*inputs)`（普通部件），inputs/签名错配只能在运行期暴露且症状隐蔽
+    （首拍 TypeError 或参数整体错位）。这里在注册期 fail fast；带 *args
+    的部件与参数少于 inputs 的部件（尾部靠默认值兜底）均合法。
+    """
+    if not inputs:
+        return
+    fn = getattr(part, 'run_threaded' if threaded else 'run', None)
+    if not callable(fn):
+        return
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return
+    positional = 0
+    for param in sig.parameters.values():
+        if param.kind == param.VAR_POSITIONAL:
+            return
+        if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD):
+            positional += 1
+    if len(inputs) > positional:
+        raise ValueError(
+            "Part %s: %s() accepts %d positional argument(s) but %d inputs "
+            "were registered: %r. Align inputs with the %s signature or the "
+            "vehicle loop will fail/mispair at runtime." % (
+                part.__class__.__name__, fn.__name__, positional,
+                len(inputs), inputs, fn.__name__))
 
 
 class PartProfiler:
@@ -90,6 +123,7 @@ class Vehicle:
         assert type(inputs) is list, "inputs is not a list: %r" % inputs
         assert type(outputs) is list, "outputs is not a list: %r" % outputs
         assert type(threaded) is bool, "threaded is not a boolean: %r" % threaded
+        validate_input_arity(part, inputs, threaded)
 
         p = part
         logger.info('Adding part {}.'.format(p.__class__.__name__))

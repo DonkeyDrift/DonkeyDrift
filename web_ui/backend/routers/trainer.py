@@ -14,7 +14,7 @@ import threading
 import zipfile
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -51,6 +51,11 @@ class LocalTrainRequest(BaseModel):
     model_type: str = "linear"
     transfer: Optional[str] = None
     working_dir: Optional[str] = None
+    # 只训练选中的录制会话（_session_id 列表）；None/空列表 = 不筛选（向后兼容）
+    session_ids: Optional[List[str]] = None
+    # 按 tub 分组的会话筛选 {tub绝对路径: [session_id, ...]}：跨 tub 撞名的
+    # session_id 必须带 tub 维度；不在映射中的 tub 整体排除。优先于 session_ids
+    session_filter: Optional[Dict[str, List[str]]] = None
 
 
 class OnlineTrainRequest(BaseModel):
@@ -87,6 +92,24 @@ class MyPcInstallRequest(BaseModel):
     gym_path: str
     python_path: str = ""
     key_path: str = ""
+
+
+class AimoConvertRequest(BaseModel):
+    """AIMO 云端 NPU 转换请求（.onnx/.tflite/.pb/.pt/.pth/saved_model → .aidem）。
+
+    model_path 为待转换源模型路径；calib_tubs 为逗号分隔的 tub 路径（取
+    images/ 帧做量化校准，留空则用内置数据集）；AIMO API Key 不经过本接口
+    ——转换子进程在后端机器上自行从环境变量/密钥文件读取。
+    """
+    model_path: str
+    out_dir: str = "./models"
+    working_dir: Optional[str] = None
+    precision: str = "INT8"
+    calib_tubs: Optional[str] = None
+    calib_max: int = 100
+    calib_mix_synth: int = 30
+    calib_dataset: str = "imagenet"
+    timeout_s: int = 3600
 
 
 class StopRequest(BaseModel):
@@ -648,6 +671,43 @@ async def list_models(working_dir: Optional[str] = None):
             "finalLoss": loss_info.get("final_loss"),
             "bestLoss": loss_info.get("best_loss"),
         })
+        continue
+
+    def _add_subdir_aidem(subdir: str, display_prefix: str):
+        """AIMO zip 解压产物目录（<zip 名>/）：透出车端用的 .ctx.bin.aidem。
+
+        npu_pilot 要求 qnn_model_info.json 与 .aidem 同目录且文件名固定，
+        因此每次转换的产物集是自包含子目录；列表以 <目录>/<文件名> 展示，
+        load_model 相对路径 ./models/<目录>/<文件名> 同样可用。x86 模拟器
+        变体（lib*.x86.so.aidem）不上列表。
+        """
+        try:
+            entries = sorted(os.listdir(subdir))
+        except OSError:
+            return
+        for f in entries:
+            low = f.lower()
+            if not low.endswith(".aidem") or ".x86." in low:
+                continue
+            fpath = os.path.join(subdir, f)
+            if not os.path.isfile(fpath):
+                continue
+            stat = os.stat(fpath)
+            items.append({
+                "name": f"{display_prefix}/{f}",
+                "type": "file",
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "path": os.path.abspath(fpath),
+                "previewPath": None,
+                "finalLoss": None,
+                "bestLoss": None,
+            })
+
+    for dname in sorted(os.listdir(models_dir)):
+        dpath = os.path.join(models_dir, dname)
+        if os.path.isdir(dpath) and not dname.lower().endswith(".savedmodel"):
+            _add_subdir_aidem(dpath, dname)
     return {"models": items}
 
 
@@ -954,17 +1014,41 @@ async def list_backups(working_dir: Optional[str] = None):
 # ------------------------------------------------------------------
 # Job management
 # ------------------------------------------------------------------
+def _expand_family_tub_paths(tub: str, base_dir: Optional[str] = None) -> str:
+    """训练前把 tub 路径展开为「家族成员 tub」逗号分隔绝对路径。
+
+    donkeycar train --tub 对逗号分隔路径逐个加载（pipeline/training.py），
+    不做子 tub 展开：家族布局（data/ 自身是 tub 且含 tub_序号_日期 子目录）下
+    只训根 tub，漏掉全部子 tub，「默认全部训练」名不副实。相对路径按训练
+    子进程的工作目录（working_dir，缺省后端 cwd）取绝对，保证展开结果与
+    CLI 解析 tub 的基准一致。发现异常或成员为空时回退原样透传，绝不因
+    展开失败让训练挂掉。
+    """
+    try:
+        from routers.tub import _discover_family_tubs
+        base = base_dir or os.getcwd()
+        anchor = os.path.abspath(os.path.join(base, os.path.expanduser(tub)))
+        members = _discover_family_tubs(anchor)
+        if members:
+            return ",".join(members)
+    except Exception:
+        pass
+    return tub
+
+
 @router.post("/train/local")
 async def start_local_train(request: LocalTrainRequest):
     job = job_manager.create_job("local")
     asyncio.create_task(
         job_manager.run_local(
             job,
-            tub=request.tub,
+            tub=_expand_family_tub_paths(request.tub, request.working_dir),
             model=request.model,
             model_type=request.model_type,
             transfer=request.transfer,
             working_dir=request.working_dir,
+            session_ids=request.session_ids,
+            session_filter=request.session_filter,
         )
     )
     return {"job_id": job.id, "status": job.status}
@@ -1052,6 +1136,65 @@ async def start_mypc_resume_train(request: MyPcTrainRequest):
     return {"job_id": job.id, "status": job.status}
 
 
+@router.post("/train/aimo")
+async def start_aimo_convert(request: AimoConvertRequest):
+    """Start an AIMO cloud NPU conversion job (.aidem artifact).
+
+    Reuses the training job infrastructure: status via
+    /train/{job_id}/status, live logs via /train/{job_id}/logs (SSE),
+    stop via /train/{job_id}/stop.
+    """
+    if not request.model_path.strip():
+        raise HTTPException(status_code=400, detail="model_path is required")
+    if request.precision not in ("INT8", "INT16", "FP16"):
+        raise HTTPException(status_code=400, detail="precision must be INT8, INT16 or FP16")
+    job = job_manager.create_job("aimo")
+    asyncio.create_task(
+        job_manager.run_aimo_convert(
+            job,
+            model_path=request.model_path,
+            out_dir=request.out_dir,
+            precision=request.precision,
+            calib_tubs=request.calib_tubs or None,
+            calib_max=request.calib_max,
+            calib_mix_synth=request.calib_mix_synth,
+            calib_dataset=request.calib_dataset,
+            timeout_s=request.timeout_s,
+            working_dir=request.working_dir,
+        )
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.get("/aimo/key-status")
+async def get_aimo_key_status():
+    """AIMO 云转前置条件检查：SDK 是否安装、API Key 是否已配置。
+
+    只返回布尔与来源，绝不返回 key 本身。刻意不在本进程 import
+    donkeycar（会连带加载 TF）：SDK 用 find_spec 探测，key 判定与
+    donkeycar/tools/aimo_npu_convert.py 的 load_api_key 优先级保持一致。
+    """
+    sdk_ok = False
+    try:
+        import importlib.util
+        sdk_ok = importlib.util.find_spec("aplux_aimo") is not None
+    except Exception:
+        sdk_ok = False
+
+    key_env_var = "AIMO_API_KEY"
+    key_file_env_var = "AIMO_KEY_FILE"
+    default_key_file = os.path.expanduser("~/.aidlux_cred/aimo_api_key")
+    key_configured = False
+    key_source = None
+    if (os.environ.get(key_env_var) or "").strip():
+        key_configured, key_source = True, "env"
+    else:
+        key_file = os.environ.get(key_file_env_var) or default_key_file
+        if key_file and os.path.isfile(key_file):
+            key_configured, key_source = True, "file"
+    return {"sdk": sdk_ok, "key": key_configured, "keySource": key_source}
+
+
 @router.get("/train/{job_id}/status")
 async def get_job_status(job_id: str):
     job = job_manager.get_job(job_id)
@@ -1072,6 +1215,7 @@ async def get_job_status(job_id: str):
         "started_at": job.started_at,
         "finished_at": job.finished_at,
         "error": job.error_message,
+        "result_path": job.result_path,
     }
 
 
