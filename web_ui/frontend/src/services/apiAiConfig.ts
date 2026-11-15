@@ -4,7 +4,7 @@
  * 从 api.ts 抽取的 AI 供应商配置、OAuth、AIMO 转换接口。
  */
 
-import { api, API_URL, getApiErrorMessage } from './api'
+import { api } from './api'
 import type { AiActiveConfig } from './api'
 
 export interface AimoKeyStatus {

@@ -654,8 +654,6 @@ def test_predict_does_not_reload_config_per_frame(monkeypatch, tmp_path):
     assert calls["count"] == 1, f"config 被重复编译 {calls['count']} 次"
 
 
-
-
 def test_list_models_surfaces_aidem_in_conversion_subdir(tmp_path):
     """AIMO 云转自包含子目录：列表以 <目录>/<文件> 透出 .aidem（跳过 x86 变体）。"""
     models_dir = tmp_path / "models"

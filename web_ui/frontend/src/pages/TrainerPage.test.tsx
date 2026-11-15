@@ -36,16 +36,14 @@ vi.mock('../services/api', () => ({
 const { mockStartMyPc, mockResumeMyPc, mockJobState, mockStartLocal } = vi.hoisted(() => ({
   mockStartMyPc: vi.fn(() => Promise.resolve()),
   mockResumeMyPc: vi.fn(() => Promise.resolve()),
-  mockStartLocal: vi.fn(
-    (_params: {
-      tub: string;
-      model: string;
-      model_type: string;
-      transfer?: string;
-      session_ids?: string[];
-      session_filter?: Record<string, string[]>;
-    }) => Promise.resolve()
-  ),
+  mockStartLocal: vi.fn<(params: {
+    tub: string;
+    model: string;
+    model_type: string;
+    transfer?: string;
+    session_ids?: string[];
+    session_filter?: Record<string, string[]>;
+  }) => Promise<void>>(() => Promise.resolve()),
   mockJobState: { job: null as { status: string } | null },
 }));
 vi.mock('../hooks/useTrainingJob', () => ({

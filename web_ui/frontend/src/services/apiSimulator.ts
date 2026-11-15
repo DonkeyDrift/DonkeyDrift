@@ -4,7 +4,7 @@
  * 从 api.ts 抽取的模拟器发现/配置/采集接口。
  */
 
-import { api, API_URL, getApiErrorMessage } from './api'
+import { api, API_URL } from './api'
 
 export interface SimulatorHost {
   ip: string;

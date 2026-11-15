@@ -4,7 +4,7 @@
  * 从 api.ts 抽取的 Arena 相关接口（模型列表、Pilot 加载/卸载、预测等）。
  */
 
-import { api, API_URL, getApiErrorMessage } from './api'
+import { api, API_URL } from './api'
 
 export interface ArenaModel {
   name: string;

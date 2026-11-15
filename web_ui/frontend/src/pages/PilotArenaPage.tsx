@@ -17,8 +17,6 @@ import { ArrowLeftRight, ArrowRightLeft, Cpu, Database, LineChart, SlidersHorizo
 import { useStore } from '../store/useStore';
 import {
   ArenaMetricSummary,
-  ArenaModel,
-  ArenaPilot,
   ArenaPredictionPoint,
   ArenaPredictionsSummary,
   getArenaPredictions,
@@ -32,7 +30,7 @@ import {
   getApiErrorMessage,
 } from '../services/api';
 import { useTranslation } from '@/i18n';
-import { useResolvedTheme, type ResolvedTheme } from '@/lib/theme';
+import { useResolvedTheme } from '@/lib/theme';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -49,15 +47,11 @@ import {
   ARENA_PREDICTION_MIN_INTERVAL_MS,
   ARENA_BATCH_PREFETCH_MIN_INTERVAL_MS,
   ARENA_INFERENCE_CONCURRENCY_DEFAULT,
-  ARENA_SERIES_COLORS,
-  ARENA_SERIES_CSS_VARS,
-  cssVarColor,
   resolveArenaSeriesColors,
   formatValue,
   getRecordImagePath,
   drawControlLine,
   getRecordUserControl,
-  type ArenaSeriesColors,
   type ViewerState,
   defaultViewer,
 } from "./PilotArenaPage.utils";

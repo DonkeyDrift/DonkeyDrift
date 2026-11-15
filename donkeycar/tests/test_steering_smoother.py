@@ -22,12 +22,13 @@ def test_ema_smooths_step():
     assert abs(v - 0.5) < 1e-6
 
 
-def test_slew_limits_step_rate():
+def test_slew_limits_step_rate(monkeypatch):
+    clock = iter([100.0, 100.02])
+    monkeypatch.setattr(time, "time", lambda: next(clock))
     s = SteeringSmoother(alpha=1.0, slew_per_sec=8.0)
     s.run(0.0)
-    time.sleep(0.02)
     v = s.run(1.0)
-    # 20ms 间隔下 8/s 限幅只允许 ~0.16 的变化（留时间裕量）
+    # 固定 20ms 间隔时，8/s 限幅只允许 0.16 的变化
     assert 0.0 < v <= 8.0 * 0.03
 
 

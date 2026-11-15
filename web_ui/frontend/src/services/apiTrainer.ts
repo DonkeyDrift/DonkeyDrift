@@ -4,7 +4,7 @@
  * 从 api.ts 抽取的训练配置、模型管理、MyPc 远程训练接口。
  */
 
-import { api, API_URL, getApiErrorMessage } from "./api"
+import { api, API_URL } from "./api"
 
 export const saveTrainingConfig = async (payload: {
   path: string;

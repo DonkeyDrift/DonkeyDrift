@@ -4,7 +4,7 @@
  * 从 api.ts 抽取的 Tub 会话、记录、AI 清洗接口。
  */
 
-import { api, API_URL, getApiErrorMessage } from "./api"
+import { api, API_URL } from "./api"
 import type { ConnectorJobState } from "./api";
 import { generateUuid } from "./api";
 
