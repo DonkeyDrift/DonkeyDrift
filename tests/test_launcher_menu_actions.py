@@ -472,6 +472,13 @@ class TestFrontendWiring:
         assert 'id="langBtn"' in MENU_HTML
         assert 'class="sectionTitle"' in MENU_HTML
 
+    def test_lang_btn_title_parity_with_theme_btn(self):
+        # 顶栏两个 32px 圆形静音按钮（主题/语言）提示行为应一致：主题按钮由
+        # renderThemeBtn 同步 aria-label + title（hover 有文字提示），语言按钮
+        # 此前只经 data-i18n-aria 同步 aria-label、没有 title —— applyLanguage
+        # 需同样同步 langBtn.title，消除同排按钮 hover 提示不一致。
+        assert "langBtn.title = t('language.title');" in MENU_HTML
+
     def test_new_i18n_keys_bilingual(self):
         for key in ("overlay.working", "overlay.done",
                     "menu.createcar.prompt", "menu.clear.confirm",

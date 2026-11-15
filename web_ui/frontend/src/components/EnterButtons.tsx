@@ -386,13 +386,13 @@ export const ZCodeEntryLink: React.FC = () => {
             <button
               type="button"
               onClick={handlePromptCancel}
-              className="rounded px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="rounded-md px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
             >
               {t('common.fileBrowser.cancel')}
             </button>
             <button
               type="submit"
-              className="rounded bg-cyan-500/15 px-2.5 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/25 transition-colors"
+              className="rounded-md bg-cyan-500/15 px-2.5 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/25 transition-colors"
             >
               {t('drive.gpWizSave')}
             </button>

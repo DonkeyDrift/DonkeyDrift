@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, SquareTerminal } from 'lucide-react';
+import { Loader2, RefreshCw, SquareTerminal } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { discoverConnectorConsoles } from '../services/api';
@@ -97,8 +97,11 @@ export const DrifterConsolePage: React.FC = () => {
     };
   }, [selectedIp]);
 
+  // 高度：铺满动态顶栏（Layout 发布的 --header-h，桌面 57px / 移动端约 101px）以下的
+  // 可视区；100vh 基线保证不支持 dvh 的浏览器不丢 height，支持者经 @supports 升级到
+  // 动态视口（与 DonkeyMenuPage 同款双写法）。
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+    <div className="flex h-[calc(100vh-var(--header-h,3.5rem))] supports-[height:100dvh]:h-[calc(100dvh-var(--header-h,3.5rem))] flex-col">
       {/* 极简工具条：选择车端 / 重扫 / 手动 IP。只负责“连到哪台车”，不喧宾夺主。 */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2">
         <SquareTerminal className="h-4 w-4 shrink-0 text-cyan-400" />
@@ -107,7 +110,7 @@ export const DrifterConsolePage: React.FC = () => {
         </label>
         <select
           id="console-device-select"
-          className="h-9 min-w-[160px] flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 sm:flex-none"
+          className="h-9 min-w-[160px] flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent sm:flex-none"
           value={selectedIp}
           onChange={(e) => setSelectedIp(e.target.value)}
         >
@@ -125,16 +128,23 @@ export const DrifterConsolePage: React.FC = () => {
           <RefreshCw className={`h-4 w-4 ${scanning ? 'animate-spin' : ''}`} />
           {t('console.rescan')}
         </Button>
+        <label htmlFor="console-manual-ip" className="sr-only">
+          {t('console.manualIp')}
+        </label>
         <Input
+          id="console-manual-ip"
           value={manualIp}
           onChange={(e) => setManualIp(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') connectManual();
           }}
           placeholder="192.168.x.x"
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
           className="h-9 w-36 sm:w-40"
         />
-        <Button onClick={connectManual} variant="secondary" size="sm">
+        <Button onClick={connectManual} disabled={!manualIp.trim()} variant="secondary" size="sm">
           {t('console.connect')}
         </Button>
         {version && (
@@ -154,7 +164,8 @@ export const DrifterConsolePage: React.FC = () => {
           />
         </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center bg-zinc-900/30 px-6 text-center text-sm text-zinc-500">
+        <div className="flex flex-1 items-center justify-center gap-2 bg-zinc-900/30 px-6 text-center text-sm text-zinc-500">
+          {scanning && <Loader2 className="h-4 w-4 animate-spin" />}
           {scanning ? t('console.scanning') : scanFailed ? t('console.scanFailed') : t('console.noDevice')}
         </div>
       )}

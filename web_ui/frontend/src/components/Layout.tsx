@@ -85,12 +85,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             {/* 桌面导航（≥lg）；手机/竖屏平板收进汉堡菜单。
                 流程页锚点（#178）；Car Connector 已改为右侧控制区图标按钮（Issue #406）；
                 高级入口（Donkey / Drift Console / Kimi Code Web / DeepSeek Harness）融入导航行但弱化样式，
-                见 EnterButtons.tsx（Issue #175） */}
-            <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium h-14 ml-4">
-              {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单。
-                  space-x-6 补上二者间距：nav 的 space-x-6 只作用于直接子元素，
-                  display:contents 包装层不产生盒模型，内部链接需自己继承同等 24px 间距 */}
-              <div className="hidden xl:contents space-x-6">
+                见 EnterButtons.tsx（Issue #175）。
+                条目间距由 gap-6 单一来源提供：display:contents 包装层提升出来的
+                链接同样是 flex item，自动吃到同一 gap，无需也不允许再叠 space-x */}
+            <nav className="hidden lg:flex items-center gap-6 text-sm font-medium h-14 ml-4">
+              {/* Donkey / Drifter Console 入口在 ≥xl 进主导航，lg 档收进「⋯」菜单 */}
+              <div className="hidden xl:contents">
                 <DonkeyEntryLink />
                 <DrifterConsoleEntryLink />
               </div>

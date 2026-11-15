@@ -265,6 +265,12 @@ class TerminalSession:
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             signal.signal(signal.SIGQUIT, signal.SIG_DFL)
             signal.signal(signal.SIGHUP, signal.SIG_DFL)
+            # 处置复位不能替代屏蔽解除：宿主若屏蔽了控制信号，PTY 子进程
+            # 会继承该掩码，Ctrl-C 即使送达前台进程组也不会生效。
+            signal.pthread_sigmask(
+                signal.SIG_UNBLOCK,
+                {signal.SIGINT, signal.SIGQUIT, signal.SIGHUP},
+            )
 
         self._proc = subprocess.Popen(
             list(shell),
@@ -276,6 +282,9 @@ class TerminalSession:
         )
         os.close(slave)
         self._master = master
+        # 登录 profile 可能启用 errexit（例如 CI 的 conda 初始化）。交互终端
+        # 中 Ctrl-C 让前台命令返回非零是正常行为，不应让登录 shell 随之退出。
+        os.write(master, b"set +e\n")
         logger.info("终端会话已建立: pid=%d", self._proc.pid)
 
     # ------------------------------------------------------------------

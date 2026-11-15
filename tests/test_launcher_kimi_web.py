@@ -436,7 +436,9 @@ class TestLiveInstanceUrl:
         _write_instance(inst_dir, pid=os.getpid())
         token_file = tmp_path / "server.token"
         token_file.write_text("tok-xyz\n", encoding="utf-8")
-        monkeypatch.setattr(kimi_web, "_proc_cwd", lambda pid: "/home/testuser/projects")
+        monkeypatch.setattr(
+            kimi_web, "_proc_cwd",
+            lambda pid: os.path.realpath("/home/testuser/projects"))
         monkeypatch.setattr(kimi_web, "_probe_server", lambda *a, **k: True)
         url = kimi_web._live_instance_url(inst_dir, token_file,
                                           cwd="/home/testuser/projects")

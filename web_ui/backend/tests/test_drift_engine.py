@@ -328,7 +328,10 @@ class TestPreviewDisabled:
         engine.start_camera_loop(FakeCamera(), FakeTagDetector(),
                                  _homography(), tag_id=0, preview_hz=0)
         try:
-            time.sleep(0.3)
+            deadline = time.time() + 5.0
+            while time.time() < deadline \
+                    and engine.snapshot()["frames_total"] <= 3:
+                time.sleep(0.02)
             assert engine.snapshot()["frames_total"] > 3, "循环确实在跑"
             assert engine.last_preview_jpeg is None, \
                 "preview_hz<=0 不得产出预览 JPEG"
