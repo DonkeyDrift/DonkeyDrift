@@ -75,17 +75,17 @@ def _normalize_remote_path(path: str, platform: str, remote_home: str = "") -> s
     return value
 
 
-def _powershell_command(script: str) -> str:
+def _powershell_command(script: str, shell: str = "powershell") -> str:
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
+    return f"{shell} -NoProfile -NonInteractive -EncodedCommand {encoded}"
 
 
 def _posix_step(name: str, script: str) -> InstallStep:
     return InstallStep(name, f"zsh -lc {shlex.quote(script)}")
 
 
-def _windows_step(name: str, script: str) -> InstallStep:
-    command = _powershell_command(script)
+def _windows_step(name: str, script: str, shell: str = "powershell") -> InstallStep:
+    command = _powershell_command(script, shell)
     if len(command) <= 8191:
         return InstallStep(name, command)
 
@@ -98,7 +98,7 @@ $ddZip.CopyTo($ddOutput)
 $ddZip.Dispose()
 $ddInput.Dispose()
 Invoke-Expression ([System.Text.Encoding]::UTF8.GetString($ddOutput.ToArray()))"""
-    command = _powershell_command(bootstrap)
+    command = _powershell_command(bootstrap, shell)
     if len(command) > 8191:
         raise ValueError(f"Windows 步骤 {name} 压缩后仍超过 8191 字符，请缩短仓库路径。")
     return InstallStep(name, command)
@@ -301,7 +301,8 @@ def _is_python_download_timeout(output: str) -> bool:
 def _build_install_steps(platform: str, repo_path: str, gym_path: str,
                          python_mirror: bool = False,
                          remote_home: str = "",
-                         index: str = UV_INDEX) -> list[InstallStep]:
+                         index: str = UV_INDEX,
+                         shell: str = "powershell") -> list[InstallStep]:
     if platform not in ("macos", "windows"):
         raise ValueError(f"不支持的平台: {platform}；仅支持 macOS Apple Silicon 和 Windows PowerShell。")
     repo_path = _normalize_remote_path(repo_path, platform, remote_home)
@@ -320,7 +321,11 @@ def _build_install_steps(platform: str, repo_path: str, gym_path: str,
     install_args = f"{quote(editable_repo)} -e {quote(gym_path)} {pin_args}"
     repair_args = f"{quote(editable_repo)} {pin_args}"
     prelude = _windows_prelude(python_mirror, index) if windows else _mac_prelude(python_mirror, index)
-    make_step = _windows_step if windows else _posix_step
+    if windows:
+        def make_step(name: str, script: str) -> InstallStep:
+            return _windows_step(name, script, shell=shell)
+    else:
+        make_step = _posix_step
     native_check = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
     steps = []
 
@@ -556,7 +561,9 @@ echo "Acceptance: installation and automatic activation passed"
 
 def build_install_steps(platform: str, repo_path: str, gym_path: str,
                         remote_home: str = "",
-                        index: str = UV_INDEX) -> list[InstallStep]:
+                        index: str = UV_INDEX,
+                        shell: str = "powershell") -> list[InstallStep]:
     return _build_install_steps(
-        platform, repo_path, gym_path, remote_home=remote_home, index=index
+        platform, repo_path, gym_path, remote_home=remote_home, index=index,
+        shell=shell,
     )

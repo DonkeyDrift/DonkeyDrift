@@ -12,6 +12,7 @@ import os
 import platform
 import queue
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -57,6 +58,14 @@ def detect_platform() -> str:
 
 def default_gym_path(repo_root: Path) -> Path:
     return repo_root.parent / "gym-donkeycar"
+
+
+def _windows_shell() -> str:
+    return "pwsh" if shutil.which("pwsh") else "powershell"
+
+
+def _windows_shell_kwargs(platform_name: str) -> dict:
+    return {"shell": _windows_shell()} if platform_name == "windows" else {}
 
 
 def _step_env():
@@ -120,7 +129,10 @@ def deploy(repo_path: str, gym_path: str, timeout: int = INSTALL_TIMEOUT,
     home = os.path.expanduser("~")
     repo_path = _normalize_remote_path(repo_path, platform_name, home)
     gym_path = _normalize_remote_path(gym_path, platform_name, home)
-    steps = _build_install_steps(platform_name, repo_path, gym_path)
+    steps = _build_install_steps(platform_name, repo_path, gym_path,
+                                 **_windows_shell_kwargs(platform_name))
+    if platform_name == "windows":
+        print(f"PowerShell 解释器: {_windows_shell()}")
 
     print(f"DonkeyDrift 一键部署（平台: {platform_name}）")
     print(f"DonkeyDrift 仓库: {repo_path}")
@@ -139,13 +151,15 @@ def deploy(repo_path: str, gym_path: str, timeout: int = INSTALL_TIMEOUT,
         ):
             print("Python 下载超时，使用批准的南大镜像重试一次。")
             retry = _build_install_steps(
-                platform_name, repo_path, gym_path, python_mirror=True
+                platform_name, repo_path, gym_path, python_mirror=True,
+                **_windows_shell_kwargs(platform_name)
             )[index]
             code, output = _run_step(retry, deadline)
         if code != 0 and step.name == "install-dependencies":
             print("安装源失败，回退官方 PyPI 重试一次。")
             retry = _build_install_steps(
-                platform_name, repo_path, gym_path, index=PYPI_FALLBACK_INDEX
+                platform_name, repo_path, gym_path, index=PYPI_FALLBACK_INDEX,
+                **_windows_shell_kwargs(platform_name)
             )[index]
             code, output = _run_step(retry, deadline)
         if code != 0:
