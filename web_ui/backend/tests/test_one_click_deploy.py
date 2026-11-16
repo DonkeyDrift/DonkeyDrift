@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from install_steps import build_install_steps as shared_build_install_steps
+from install_steps import (
+    PYPI_FALLBACK_INDEX,
+    UV_INDEX,
+    build_install_steps as shared_build_install_steps,
+)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -142,6 +146,48 @@ def test_run_step_executes_in_neutral_home_cwd(tmp_path):
     code, lines = runner._run_step(step, time.time() + 30)
     assert code == 0
     assert lines[-1] == os.path.expanduser("~")
+
+
+def test_build_install_steps_index_override():
+    steps = shared_build_install_steps(
+        "macos", "/Users/test/DonkeyDrift", "/Users/test/gym-donkeycar"
+    )
+    fallback = shared_build_install_steps(
+        "macos", "/Users/test/DonkeyDrift", "/Users/test/gym-donkeycar",
+        index=PYPI_FALLBACK_INDEX,
+    )
+    assert UV_INDEX in steps[3].command
+    assert PYPI_FALLBACK_INDEX in fallback[3].command
+    assert UV_INDEX not in fallback[3].command
+
+
+def test_deploy_falls_back_to_pypi_on_install_failure(tmp_path, monkeypatch, capsys):
+    _zsh_or_skip()
+    monkeypatch.setattr(runner, "detect_platform", lambda: "macos")
+
+    builds = []
+
+    def fake_build(platform, repo, gym, python_mirror=False, remote_home="", index=UV_INDEX):
+        builds.append(index)
+        install_command = (
+            "zsh -lc 'echo install-ok'"
+            if index == PYPI_FALLBACK_INDEX
+            else "zsh -lc 'echo \"HTTP status client error (403 Forbidden)\"; exit 2'"
+        )
+        steps = [
+            runner.InstallStep(name, "zsh -lc 'echo ok'")
+            for name in STEP_NAMES
+        ]
+        steps[3] = runner.InstallStep("install-dependencies", install_command)
+        return steps
+
+    monkeypatch.setattr(runner, "_build_install_steps", fake_build)
+    code = runner.deploy(str(tmp_path / "repo"), str(tmp_path / "gym"))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert builds == [UV_INDEX, PYPI_FALLBACK_INDEX]
+    assert "回退官方 PyPI" in out
+    assert "install-ok" in out
 
 
 def test_main_dry_run_prints_steps(tmp_path, monkeypatch, capsys):

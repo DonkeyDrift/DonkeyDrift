@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 
 UV_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"
+PYPI_FALLBACK_INDEX = "https://pypi.org/simple"
 UV_PYTHON_MIRROR = "https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"
 GYM_REPOSITORY = "https://github.com/tawnkramer/gym-donkeycar"
 INSTALL_TIMEOUT = 3600
@@ -103,23 +104,23 @@ Invoke-Expression ([System.Text.Encoding]::UTF8.GetString($ddOutput.ToArray()))"
     return InstallStep(name, command)
 
 
-def _mac_prelude(python_mirror: bool = False) -> str:
+def _mac_prelude(python_mirror: bool = False, index: str = UV_INDEX) -> str:
     lines = [
         "set -e",
         'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"',
-        f"export UV_DEFAULT_INDEX={shlex.quote(UV_INDEX)}",
+        f"export UV_DEFAULT_INDEX={shlex.quote(index)}",
     ]
     if python_mirror:
         lines.append(f"export UV_PYTHON_INSTALL_MIRROR={shlex.quote(UV_PYTHON_MIRROR)}")
     return "\n".join(lines)
 
 
-def _windows_prelude(python_mirror: bool = False) -> str:
+def _windows_prelude(python_mirror: bool = False, index: str = UV_INDEX) -> str:
     lines = [
         "$ErrorActionPreference = 'Stop'",
         "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force",
         '$env:Path = "$HOME\\.local\\bin;$HOME\\.cargo\\bin;$env:Path"',
-        f"$env:UV_DEFAULT_INDEX = {_ps_quote(UV_INDEX)}",
+        f"$env:UV_DEFAULT_INDEX = {_ps_quote(index)}",
     ]
     if python_mirror:
         lines.append(f"$env:UV_PYTHON_INSTALL_MIRROR = {_ps_quote(UV_PYTHON_MIRROR)}")
@@ -299,7 +300,8 @@ def _is_python_download_timeout(output: str) -> bool:
 
 def _build_install_steps(platform: str, repo_path: str, gym_path: str,
                          python_mirror: bool = False,
-                         remote_home: str = "") -> list[InstallStep]:
+                         remote_home: str = "",
+                         index: str = UV_INDEX) -> list[InstallStep]:
     if platform not in ("macos", "windows"):
         raise ValueError(f"不支持的平台: {platform}；仅支持 macOS Apple Silicon 和 Windows PowerShell。")
     repo_path = _normalize_remote_path(repo_path, platform, remote_home)
@@ -317,7 +319,7 @@ def _build_install_steps(platform: str, repo_path: str, gym_path: str,
     pin_args = " ".join(quote(value) for value in PINS)
     install_args = f"{quote(editable_repo)} -e {quote(gym_path)} {pin_args}"
     repair_args = f"{quote(editable_repo)} {pin_args}"
-    prelude = _windows_prelude(python_mirror) if windows else _mac_prelude(python_mirror)
+    prelude = _windows_prelude(python_mirror, index) if windows else _mac_prelude(python_mirror, index)
     make_step = _windows_step if windows else _posix_step
     native_check = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
     steps = []
@@ -553,7 +555,8 @@ echo "Acceptance: installation and automatic activation passed"
 
 
 def build_install_steps(platform: str, repo_path: str, gym_path: str,
-                        remote_home: str = "") -> list[InstallStep]:
+                        remote_home: str = "",
+                        index: str = UV_INDEX) -> list[InstallStep]:
     return _build_install_steps(
-        platform, repo_path, gym_path, remote_home=remote_home
+        platform, repo_path, gym_path, remote_home=remote_home, index=index
     )
