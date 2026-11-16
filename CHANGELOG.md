@@ -1,3 +1,25 @@
+## 2026-11-16 (286)
+
+- fix(deploy): Windows 优先 pwsh 解释器——runner 三跑确认 powershell 5.1 模块加载问题非 PSModulePath 单因（Issue #531 续二）
+  - **现象**：三跑（含 PSModulePath 剥离修复）仍在 prepare-tools 失败 `Set-ExecutionPolicy … CouldNotAutoloadMatchingModule`，环境变量假设不成立。
+  - **修复**：`install_steps` 的 `_powershell_command/_windows_step/_build_install_steps/build_install_steps` 增加 `shell` 参数（默认 `powershell`，SSH 流程零变化）；本地运行器在 Windows 上检测到 pwsh 7 即优先使用（GH runner 必有 pwsh；stock Windows 无 pwsh 时仍走 powershell 5.1，真实用户行为不变），部署头部打印所选解释器。
+  - workflow 增加环境诊断步骤（where powershell/pwsh + PSModulePath）。
+  - **验证**：新增 shell 透传/检测/kwargs 3 项单测；一键部署+安装器 79 passed。
+
+## 2026-11-16 (285)
+
+- fix(deploy): Windows 子进程剥离 PSModulePath——GH Actions runner 上 powershell 5.1 加载 Security 模块失败（Issue #531 续）
+  - **根因**：runner 的 pwsh 步骤环境携带 pwsh 7 的 `PSModulePath`，运行器派生的 `powershell.exe`(5.1) 按该路径加载 `Microsoft.PowerShell.Security`（版本不兼容）→ `Set-ExecutionPolicy` 报 `CouldNotAutoloadMatchingModule`，prepare-tools 即败。真实用户双击（cmd 环境）不携带该变量，不受影响。
+  - **修复**：`one_click_deploy._step_env()` 在 Windows 上复制环境并剥离 `PSModulePath` 后再起子进程；新增 2 项单测（剥离/POSIX 返回 None）。
+  - 顺带修正上一条 (284) 中测试数笔误（76→74）。
+
+## 2026-11-16 (284)
+
+- fix(deploy): Windows 控制台中文输出 UTF-8 化——GH Actions windows-latest 首跑抓出的必崩 bug（Issue #531）
+  - **根因**：Windows 控制台默认代码页下 Python stdout 为 charmap 编码，运行器打印中文进度（"一键部署（平台: …）"）立即 `UnicodeEncodeError` 崩溃，首跑 2 秒即败。
+  - **修复**：`one_click_deploy.py` 启动时把非 UTF-8 的 stdout/stderr `reconfigure(encoding='utf-8', errors='replace')`；`一键部署.bat` 加 `chcp 65001` + `PYTHONIOENCODING=utf-8` 双保险（不经过 bat 直接调 python 也安全）。
+  - **验证**：新增 bat 内容与流重配置 3 项测试；一键部署+安装器 74 passed。
+
 ## 2026-11-16 (283)
 
 - ci(deploy): GitHub Actions windows-latest 实测一键部署全流程（Issue #531）

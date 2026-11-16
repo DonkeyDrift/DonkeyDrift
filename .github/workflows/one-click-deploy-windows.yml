@@ -24,6 +24,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: 环境诊断
+        shell: pwsh
+        run: |
+          where.exe powershell 2>$null
+          where.exe pwsh 2>$null
+          "PSModulePath=$env:PSModulePath"
+
       - name: 一键部署（.bat 入口全流程）
         shell: pwsh
         run: '& ".\一键部署.bat"'

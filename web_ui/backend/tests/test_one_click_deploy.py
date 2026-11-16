@@ -190,6 +190,73 @@ def test_deploy_falls_back_to_pypi_on_install_failure(tmp_path, monkeypatch, cap
     assert "install-ok" in out
 
 
+def test_bat_entry_forces_utf8_console():
+    bat = (REPO_ROOT / "一键部署.bat").read_text(encoding="utf-8")
+    assert "chcp 65001" in bat
+    assert "PYTHONIOENCODING=utf-8" in bat
+
+
+def test_force_utf8_streams_reconfigures_non_utf8(monkeypatch):
+    class FakeStream:
+        encoding = "cp1252"
+
+        def reconfigure(self, encoding=None, errors=None):
+            self.encoding = encoding
+            self.errors = errors
+
+    fake_out, fake_err = FakeStream(), FakeStream()
+    monkeypatch.setattr(runner.sys, "stdout", fake_out)
+    monkeypatch.setattr(runner.sys, "stderr", fake_err)
+    runner._force_utf8_streams()
+    assert fake_out.encoding == "utf-8" and fake_out.errors == "replace"
+    assert fake_err.encoding == "utf-8"
+
+
+def test_force_utf8_streams_keeps_utf8_alone(monkeypatch):
+    class FakeStream:
+        encoding = "UTF-8"
+
+        def reconfigure(self, **kwargs):
+            raise AssertionError("utf-8 stream must not be reconfigured")
+
+    monkeypatch.setattr(runner.sys, "stdout", FakeStream())
+    monkeypatch.setattr(runner.sys, "stderr", FakeStream())
+    runner._force_utf8_streams()
+
+
+def test_step_env_strips_psmodulepath_on_windows(monkeypatch):
+    monkeypatch.setattr(runner.os, "name", "nt")
+    monkeypatch.setattr(runner.os, "environ", {"PSModulePath": "C:\\pwsh7\\modules", "PATH": "x"})
+    env = runner._step_env()
+    assert env == {"PATH": "x"}
+
+
+def test_step_env_none_on_posix(monkeypatch):
+    monkeypatch.setattr(runner.os, "name", "posix")
+    assert runner._step_env() is None
+
+
+def test_build_install_steps_shell_override():
+    steps = shared_build_install_steps(
+        "windows", r"C:\Users\Test\DonkeyDrift", r"C:\Users\Test\gym-donkeycar",
+        shell="pwsh",
+    )
+    assert steps[0].command.startswith("pwsh -NoProfile -NonInteractive -EncodedCommand ")
+
+
+def test_windows_shell_prefers_pwsh(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "C:/pwsh.exe" if name == "pwsh" else None)
+    assert runner._windows_shell() == "pwsh"
+    monkeypatch.setattr(runner.shutil, "which", lambda name: None)
+    assert runner._windows_shell() == "powershell"
+
+
+def test_windows_shell_kwargs_only_on_windows(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "x" if name == "pwsh" else None)
+    assert runner._windows_shell_kwargs("windows") == {"shell": "pwsh"}
+    assert runner._windows_shell_kwargs("macos") == {}
+
+
 def test_main_dry_run_prints_steps(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, "detect_platform", lambda: "macos")
     code = runner.main(
