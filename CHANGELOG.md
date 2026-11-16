@@ -1,3 +1,14 @@
+## 2026-11-16 (277)
+
+- feat(deploy): 本地一键部署工具——免 SSH 在全新机器一键装好 DonkeyDrift 训练环境（Issue #526）
+  - **背景**:原「环境一键部署」只存在于另一台机器的 DD 页面（Trainer「局域网主机」模式），经 SSH 到目标机执行 9 步安装；全新机器无法自我引导（本机无环境时没处点按钮）。
+  - **共享步骤模块**:新增 `web_ui/backend/install_steps.py`——从 `mypc_installer.py` 原样抽出 9 步幂等安装命令生成器（macOS zsh / Windows PowerShell，仅 stdlib 依赖），SSH 一键安装与本地一键部署共用同一事实来源；`mypc_installer.py` 改为导入并 re-export 原接口，SSH 流程零行为变化。
+  - **本地运行器**:新增 `scripts/one_click_deploy.py`（仅 stdlib）——平台检测、默认路径（仓库根 + 旁路 `gym-donkeycar`，缺则自动克隆）、逐步本地执行、`[n/9]` 进度日志、超时与南大镜像重试、失败后幂等续跑；仓库根新增双击入口 `一键部署.command`（macOS）与 `一键部署.bat`（Windows，本仓未实测）。
+  - **修复共享验收脚本既有 bug**:`donkey --help` 的输出走 stderr（stdout 为 0 字节），原 `$(donkey --help)` 捕获为空导致 CLI 子命令检查必败——macOS 改 `2>&1` 捕获、Windows 捕获加 `$ErrorActionPreference` 守卫；本地执行步骤统一在用户主目录 cwd（对齐 SSH 语义，避免 `python -c` 把 cwd 泄漏进 `sys.path[0]` 导致 import 到错误 checkout）。
+  - **验证**:macOS arm64 全新环境实测——首次部署 9/9 步通过，验收输出与远程安装完全一致（Python 3.11.18 / TF 2.15.1 + Metal GPU / numpy 1.26.4 / 11 个 gym 环境 / donkey CLI 子命令 / 钩子激活与离开停用）；幂等重跑全部走复用路径（uv/.venv/gym）；mypc 测试族 103 passed（含新增 `test_one_click_deploy.py` 10 项；`test_trainer_mypc_installer.py` 全部原样通过证明重构零行为变化）。
+  - **测试环境注记**:部署的浮动依赖组合（starlette 1.10）TestClient 需 `httpx2`（不在 dev extras/lock 中），跑后端路由测试需另装。
+  - **待办**:Linux（TONY007）在线后补 `linux_validation.py` 并走收尾 PR 合入 Tony；飞书部署文档待 Linux 在线核对；Windows 入口未实测。
+
 ## 2026-10-24 (276)
 
 - fix(training): 本地训练路径补 macOS Metal GPU 防护——web UI「本地训练」/`python -m donkeycar.management train` 训出的模型塌缩成恒定输出
