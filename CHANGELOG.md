@@ -1,3 +1,10 @@
+## 2026-11-16 (284)
+
+- fix(deploy): Windows 控制台中文输出 UTF-8 化——GH Actions windows-latest 首跑抓出的必崩 bug（Issue #531）
+  - **根因**：Windows 控制台默认代码页下 Python stdout 为 charmap 编码，运行器打印中文进度（"一键部署（平台: …）"）立即 `UnicodeEncodeError` 崩溃，首跑 2 秒即败。
+  - **修复**：`one_click_deploy.py` 启动时把非 UTF-8 的 stdout/stderr `reconfigure(encoding='utf-8', errors='replace')`；`一键部署.bat` 加 `chcp 65001` + `PYTHONIOENCODING=utf-8` 双保险（不经过 bat 直接调 python 也安全）。
+  - **验证**：新增 bat 内容与流重配置 3 项测试；一键部署+安装器 76 passed。
+
 ## 2026-11-16 (283)
 
 - ci(deploy): GitHub Actions windows-latest 实测一键部署全流程（Issue #531）

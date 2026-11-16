@@ -21,6 +21,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "web_ui" / "backend"))
 
+
+def _force_utf8_streams() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if stream.encoding and stream.encoding.lower().replace("-", "") != "utf8":
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_force_utf8_streams()
+
 from install_steps import (  # noqa: E402
     INSTALL_TIMEOUT,
     PYPI_FALLBACK_INDEX,
