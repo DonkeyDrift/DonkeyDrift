@@ -224,6 +224,18 @@ def test_force_utf8_streams_keeps_utf8_alone(monkeypatch):
     runner._force_utf8_streams()
 
 
+def test_step_env_strips_psmodulepath_on_windows(monkeypatch):
+    monkeypatch.setattr(runner.os, "name", "nt")
+    monkeypatch.setattr(runner.os, "environ", {"PSModulePath": "C:\\pwsh7\\modules", "PATH": "x"})
+    env = runner._step_env()
+    assert env == {"PATH": "x"}
+
+
+def test_step_env_none_on_posix(monkeypatch):
+    monkeypatch.setattr(runner.os, "name", "posix")
+    assert runner._step_env() is None
+
+
 def test_main_dry_run_prints_steps(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, "detect_platform", lambda: "macos")
     code = runner.main(
