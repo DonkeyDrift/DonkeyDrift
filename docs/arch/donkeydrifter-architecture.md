@@ -182,6 +182,8 @@ DonkeyDrifter 是一个开源的小型自动驾驶 / **漂移（Drifting）遥�
 - `management/train_online.py`：`OnlineTrainer` SSH 打包上传数据到远程 GPU 训练并回传模型；
 - Web 后端 `web_online_trainer.py`：把 Rich 输出改为队列 emit，SSH PTY 流式读远端输出、解析进度（1h 超时）；
 - `mypc_probe.py`：paramiko 无副作用预检远端环境（平台/Python 路径/donkey CLI），返回可操作建议。
+- `install_steps.py`：9 步幂等安装命令生成器（macOS zsh / Windows PowerShell，仅 stdlib 依赖），SSH「一键安装」与本地一键部署共用同一事实来源。
+- `scripts/one_click_deploy.py` + 仓库根 `一键部署.command`/`一键部署.bat`：本地一键部署——在全新机器上免 SSH 自引导执行与「局域网主机一键安装」完全一致的安装与验收。
 
 ---
 

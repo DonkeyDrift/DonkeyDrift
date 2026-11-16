@@ -1,3 +1,21 @@
+## 2026-11-16 (282)
+
+- fix(deploy): 一键部署安装源失败自动回退官方 PyPI（Issue #528）
+  - **背景**：安装步骤固定清华镜像（沿用 SSH 安装器）。实测两种真实故障让 `install-dependencies` 必败——镜像对短时多次全量解析的 IP 返 403 拦截页（curl 实测同 403）；用户开着系统代理时镜像拒绝代理出口 IP。官方 PyPI 走代理反而可用。
+  - **改动**：`install_steps.py` 的 prelude 与 `_build_install_steps`/`build_install_steps` 增加 `index` 参数（默认仍 `UV_INDEX`，SSH 一键安装流程零变化），新增常量 `PYPI_FALLBACK_INDEX`；`scripts/one_click_deploy.py` 在 `install-dependencies` 失败时自动用官方 PyPI 重建该步骤重试一次（日志明示"回退官方 PyPI"），其余步骤不变。
+  - **验证**：新增回退触发与 index 透传 2 项测试；一键部署+安装器测试 71 passed（零回归）；Linux 全量验证通过；真实裸机实测：清华 403 下自动回退官方源完成 9/9 步。
+
+## 2026-11-16 (281)
+
+- feat(deploy): 本地一键部署工具——免 SSH 在全新机器一键装好 DonkeyDrift 训练环境（Issue #526）
+  - **背景**:原「环境一键部署」只存在于另一台机器的 DD 页面（Trainer「局域网主机」模式），经 SSH 到目标机执行 9 步安装；全新机器无法自我引导（本机无环境时没处点按钮）。
+  - **共享步骤模块**:新增 `web_ui/backend/install_steps.py`——从 `mypc_installer.py` 原样抽出 9 步幂等安装命令生成器（macOS zsh / Windows PowerShell，仅 stdlib 依赖），SSH 一键安装与本地一键部署共用同一事实来源；`mypc_installer.py` 改为导入并 re-export 原接口，SSH 流程零行为变化。
+  - **本地运行器**:新增 `scripts/one_click_deploy.py`（仅 stdlib）——平台检测、默认路径（仓库根 + 旁路 `gym-donkeycar`，缺则自动克隆）、逐步本地执行、`[n/9]` 进度日志、超时与南大镜像重试、失败后幂等续跑；仓库根新增双击入口 `一键部署.command`（macOS）与 `一键部署.bat`（Windows，本仓未实测）。
+  - **修复共享验收脚本既有 bug**:`donkey --help` 的输出走 stderr（stdout 为 0 字节），原 `$(donkey --help)` 捕获为空导致 CLI 子命令检查必败——macOS 改 `2>&1` 捕获、Windows 捕获加 `$ErrorActionPreference` 守卫；本地执行步骤统一在用户主目录 cwd（对齐 SSH 语义，避免 `python -c` 把 cwd 泄漏进 `sys.path[0]` 导致 import 到错误 checkout）。
+  - **验证**:macOS arm64 全新环境实测——首次部署 9/9 步通过，验收输出与远程安装完全一致（Python 3.11.18 / TF 2.15.1 + Metal GPU / numpy 1.26.4 / 11 个 gym 环境 / donkey CLI 子命令 / 钩子激活与离开停用）；幂等重跑全部走复用路径（uv/.venv/gym）；mypc 测试族 103 passed（含新增 `test_one_click_deploy.py` 10 项；`test_trainer_mypc_installer.py` 全部原样通过证明重构零行为变化）。
+  - **测试环境注记**:部署的浮动依赖组合（starlette 1.10）TestClient 需 `httpx2`（不在 dev extras/lock 中），跑后端路由测试需另装。
+  - **待办**:Linux（TONY007）在线后补 `linux_validation.py` 并走收尾 PR 合入 Tony；飞书部署文档待 Linux 在线核对；Windows 入口未实测。
+
 ## 2026-11-10 (280)
 
 - feat(pilot): 「pilot 观测」周期日志改为配置开关，默认关闭
