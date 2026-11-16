@@ -159,6 +159,74 @@ def denormalize_image(img_arr_float):
     return (img_arr_float * 255.0).astype(np.uint8)
 
 
+def fit_pil_image(img, image_width, image_height, pad_color=(255, 255, 255)):
+    """Resize a PIL image to (image_width, image_height) without stretching.
+
+    - If already (image_width, image_height), return as-is.
+    - Scale uniformly to fit inside (image_width, image_height).
+    - If aspect ratio differs, paste centered onto a white canvas (letterbox/pillarbox).
+    """
+    src_w, src_h = img.size
+    target_w, target_h = int(image_width), int(image_height)
+    if (src_w, src_h) == (target_w, target_h):
+        return img
+    scale = min(float(target_w) / max(1, src_w), float(target_h) / max(1, src_h))
+    new_w = min(target_w, max(1, int(round(src_w * scale))))
+    new_h = min(target_h, max(1, int(round(src_h * scale))))
+    resample = getattr(getattr(Image, "Resampling", Image), "BILINEAR")
+    resized = img.resize((new_w, new_h), resample)
+    if (new_w, new_h) == (target_w, target_h):
+        return resized
+    fill = 255 if resized.mode == 'L' else pad_color
+    canvas = Image.new(resized.mode, (target_w, target_h), fill)
+    canvas.paste(resized, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+    return canvas
+
+
+def fit_image_array(img_arr, image_width, image_height, pad_color=(255, 255, 255)):
+    """Resize a numpy image array (H, W[, C]) to (image_height, image_width[, C])
+    using proportional scaling + white border padding (never stretching)."""
+    if img_arr is None:
+        return None
+    a = np.asarray(img_arr)
+    target_w, target_h = int(image_width), int(image_height)
+    if a.ndim < 2 or (a.shape[0] == target_h and a.shape[1] == target_w):
+        return img_arr
+    squeezed = a.ndim == 3 and a.shape[2] == 1
+    pil_in = a[:, :, 0] if squeezed else a
+    im = Image.fromarray(pil_in.astype(np.uint8))
+    fitted = fit_pil_image(im, target_w, target_h, pad_color=pad_color)
+    out = np.asarray(fitted, dtype=a.dtype)
+    if squeezed and out.ndim == 2:
+        out = out.reshape(target_h, target_w, 1)
+    return out
+
+
+DEFAULT_TRAINING_IMAGE_SIZE = "160x120"
+
+
+def get_training_image_size(cfg) -> Tuple[int, int]:
+    """训练输入尺寸 (H, W)，取自配置键 TRAINING_IMAGE_SIZE（形如 "160x120"）。
+
+    默认 "160x120"，可选 "320x240"。该尺寸只作用于训练（模型 input_shape
+    与训练管道末端缩放），与相机的 IMAGE_W/IMAGE_H（采集/推理分辨率）解耦：
+    推理端按加载到的模型输入自动适配（见 parts/pilot_holder.py）。值非法时
+    回退到默认 160x120。
+    """
+    w, h = 160, 120
+    spec = getattr(cfg, 'TRAINING_IMAGE_SIZE', DEFAULT_TRAINING_IMAGE_SIZE)
+    try:
+        w_str, h_str = str(spec).lower().replace('*', 'x').split('x')
+        w, h = int(w_str.strip()), int(h_str.strip())
+        if w <= 0 or h <= 0:
+            raise ValueError(spec)
+    except (ValueError, AttributeError):
+        logger.warning("TRAINING_IMAGE_SIZE=%r 非法，回退默认 %s",
+                       spec, DEFAULT_TRAINING_IMAGE_SIZE)
+        w, h = 160, 120
+    return h, w
+
+
 def load_pil_image(filename, cfg):
     """Loads an image from a file path as a PIL image. Also handles resizing.
 
@@ -170,16 +238,17 @@ def load_pil_image(filename, cfg):
     """
     try:
         img = Image.open(filename)
-        if img.height != cfg.IMAGE_H or img.width != cfg.IMAGE_W:
-            img = img.resize((cfg.IMAGE_W, cfg.IMAGE_H))
-
         if cfg.IMAGE_DEPTH == 1:
             img = img.convert('L')
+        else:
+            img = img.convert('RGB')
+        if img.height != cfg.IMAGE_H or img.width != cfg.IMAGE_W:
+            img = fit_pil_image(img, cfg.IMAGE_W, cfg.IMAGE_H)
         
         return img
 
     except Exception as e:
-        logger.error(f'failed to load image from {filename}: {e.message}')
+        logger.error(f'failed to load image from {filename}: {getattr(e, "message", e)}')
         return None
 
 
@@ -208,11 +277,12 @@ def load_image_sized(filename, image_width, image_height, image_depth):
     """
     try:
         img = Image.open(filename)
-        if img.height != image_height or img.width != image_width:
-            img = img.resize((image_width, image_height))
-
         if image_depth == 1:
             img = img.convert('L')
+        else:
+            img = img.convert('RGB')
+        if img.height != image_height or img.width != image_width:
+            img = fit_pil_image(img, image_width, image_height)
 
         img_arr = np.asarray(img)
 
@@ -225,7 +295,7 @@ def load_image_sized(filename, image_width, image_height, image_depth):
         return img_arr
 
     except Exception as e:
-        logger.error(f'failed to load image from {filename}: {e.message}')
+        logger.error(f'failed to load image from {filename}: {getattr(e, "message", e)}')
         return None
 
 
@@ -569,6 +639,17 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
         model_type = cfg.DEFAULT_MODEL_TYPE
     logger.info(f'get_model_by_type: model type is: {model_type}')
 
+    # 模型的图像输入尺寸由 TRAINING_IMAGE_SIZE 决定（默认 160x120，可选
+    # 320x240），与相机采集分辨率 IMAGE_W/IMAGE_H 解耦。训练管道会把图像
+    # 缩放到该尺寸（pipeline/training.py），推理端按加载到的模型输入自动适配。
+    # 旧配置（main 时代创建的 mycar myconfig/config.py）没有该键，此时模型
+    # 就是按相机分辨率训练的，回退 IMAGE_H/W 才是正确约定；无 TF 的 tflite
+    # 分支在 load() 时还会以模型文件声明的形状覆盖（见 parts/npu_pilot.py）。
+    if getattr(cfg, 'TRAINING_IMAGE_SIZE', None):
+        train_h, train_w = get_training_image_size(cfg)
+    else:
+        train_h, train_w = cfg.IMAGE_H, cfg.IMAGE_W
+
     if 'aidlite_' in model_type:
         # NPU(AidLite/QNN) 路径不依赖 TensorFlow，必须在 import keras 之前返回，
         # 让车端能跑在只装 aidlite 的 python 上（见 parts/npu_pilot.py）
@@ -594,7 +675,7 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
         if used_model_type != 'linear':
             raise Exception(f'tflite fallback (no TF) only supports linear, got: {model_type}')
         interpreter = AidLiteTflite(
-            in_shapes=[[1, cfg.IMAGE_H, cfg.IMAGE_W, cfg.IMAGE_DEPTH]],
+            in_shapes=[[1, train_h, train_w, cfg.IMAGE_DEPTH]],
             out_shapes=[[1, 1], [1, 1]])
         return NpuLinearPilot(cfg, interpreter=interpreter)
 
@@ -604,7 +685,7 @@ def get_model_by_type(model_type: str, cfg: 'Config') -> Union['KerasPilot', 'Fa
     from donkeycar.parts.interpreter import KerasInterpreter, TfLite, TensorRT, \
         FastAIInterpreter
 
-    input_shape = (cfg.IMAGE_H, cfg.IMAGE_W, cfg.IMAGE_DEPTH)
+    input_shape = (train_h, train_w, cfg.IMAGE_DEPTH)
     if 'tflite_' in model_type:
         interpreter = TfLite()
         used_model_type = model_type.replace('tflite_', '')

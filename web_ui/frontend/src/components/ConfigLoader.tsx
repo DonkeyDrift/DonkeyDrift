@@ -4,15 +4,17 @@ import { SectionCardTitle } from './ui/SectionCardTitle';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useStore } from '../store/useStore';
-import { loadConfig, getApiErrorMessage } from '../services/api';
-import { autoLoadTubFor } from '../hooks/useConfigAutoLoad';
+import { loadProject } from '../hooks/useConfigAutoLoad';
 import { FolderCog, FolderOpen, Search } from 'lucide-react';
 import { FileBrowserModal } from './FileBrowserModal';
 import { useTranslation } from '@/i18n';
 
+// 配置加载（config → 自动连接 <car>/data tub）的流程统一在
+// useConfigAutoLoad.loadProject：手动加载与 App 级自动加载共用同一实现，
+// 含「加载在途时切换目录 → 旧结果作废」的过期守卫，避免两份拷贝漂移。
 export const ConfigLoader: React.FC = () => {
   const { t } = useTranslation();
-  const { configPath, setConfig, setError, setLoading, config } = useStore();
+  const { configPath, config } = useStore();
   const [path, setPath] = useState(configPath);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
@@ -23,35 +25,14 @@ export const ConfigLoader: React.FC = () => {
 
   const handleManualLoad = useCallback(async () => {
     if (!path.trim()) return;
-    setLoading(true);
-    try {
-      const data = await loadConfig(path);
-      setConfig(data.config, path);
-      await autoLoadTubFor(path);
-    } catch (err: unknown) {
-      // 任何加载失败（包括目录不存在、缺少 config.py）都要反馈给用户，
-      // 否则路径错误时界面毫无提示，只剩控制台里的 404。
-      setError(getApiErrorMessage(err, t('common.configLoader.failedToLoad')));
-    } finally {
-      setLoading(false);
-    }
-  }, [path, setConfig, setError, setLoading, t]);
+    await loadProject(path, t);
+  }, [path, t]);
 
   const handleBrowserSelect = async (selectedPath: string) => {
     setPath(selectedPath);
     setIsBrowserOpen(false);
-    
     // Auto trigger load
-    setLoading(true);
-    try {
-      const data = await loadConfig(selectedPath);
-      setConfig(data.config, selectedPath);
-      await autoLoadTubFor(selectedPath);
-    } catch (err: unknown) {
-      setError(getApiErrorMessage(err, t('common.configLoader.failedToLoadFromDir')));
-    } finally {
-      setLoading(false);
-    }
+    await loadProject(selectedPath, t);
   };
 
   // 自动加载逻辑已上移至 App 级 useConfigAutoLoad(见 hooks/):
@@ -76,7 +57,7 @@ export const ConfigLoader: React.FC = () => {
             aria-label={t('common.configLoader.pathInputAria')}
           />
           <div className="flex justify-end gap-2">
-            <Button 
+            <Button
               variant="secondary"
               onClick={() => setIsBrowserOpen(true)}
               className="min-w-[100px]"
@@ -85,7 +66,7 @@ export const ConfigLoader: React.FC = () => {
               <Search className="w-4 h-4" />
               {t('common.configLoader.browse')}
             </Button>
-            <Button 
+            <Button
               onClick={handleManualLoad}
               className="min-w-[100px]"
               aria-label={t('common.configLoader.loadAria')}
@@ -106,8 +87,8 @@ export const ConfigLoader: React.FC = () => {
           </p>
         )}
       </CardContent>
-      
-      <FileBrowserModal 
+
+      <FileBrowserModal
         isOpen={isBrowserOpen}
         onClose={() => setIsBrowserOpen(false)}
         onSelect={handleBrowserSelect}

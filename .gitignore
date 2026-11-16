@@ -3,6 +3,9 @@ env/*
 data/*
 dist/*
 
+# RL M1 采样/smoke 产物(npz/jsonl/直方图/结果 json):大文件留本地不进 git
+outputs/
+
 *.pyc
 .ipynb_checkpoints
 *.egg-info/

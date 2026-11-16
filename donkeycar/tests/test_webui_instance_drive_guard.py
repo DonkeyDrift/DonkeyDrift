@@ -3,6 +3,9 @@
 
 import json
 import os
+import subprocess
+import sys
+import time
 
 import pytest
 
@@ -71,3 +74,51 @@ def test_release_only_removes_own_record(tmp_path):
     release_drive_instance_lock(f)
     # 登记 pid 不是当前进程：保持不动
     assert json.loads(f.read_text(encoding="utf-8")) == other
+
+
+def _winerr87():
+    exc = OSError(87, "参数错误")
+    exc.winerror = 87
+    return exc
+
+
+def test_pid_alive_does_not_kill_target():
+    """回归：探活绝不能杀进程。
+
+    Windows 上 os.kill 对 0 以外的任意 sig 都走 TerminateProcess，早年
+    _pid_alive 用 os.kill(pid, 0) 探活 → 每次 find_live_instance 都把在跑的
+    Web UI 杀掉（uvicorn 变孤儿 + 登记陈旧 → TUI 再起一个后端 → 双后端、
+    页面连不到车端）。现改为 OpenProcess，必须证明目标进程活得好好的。
+    """
+    from donkeycar import webui_instance
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert webui_instance._pid_alive(proc.pid) is True
+        time.sleep(0.3)
+        assert proc.poll() is None, "探活把目标进程杀掉了"
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+def test_pid_alive_false_for_dead_pid():
+    from donkeycar import webui_instance
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait(timeout=10)
+    assert webui_instance._pid_alive(proc.pid) is False
+
+
+def test_pid_gone_error_recognises_wrapped_and_plain_winerror87(monkeypatch):
+    """POSIX 分支的兜底：winerror=87 无论是原生 OSError 还是被包成
+    SystemError，都要判为「进程不存在」而不是冒泡。"""
+    from donkeycar import webui_instance
+
+    def fake_kill(_pid, _sig):
+        raise SystemError(
+            "<built-in function kill> returned a result with an exception set"
+        ) from _winerr87()
+
+    monkeypatch.setattr(webui_instance, "os", type("O", (), {"name": "posix", "kill": fake_kill}))
+    assert webui_instance._pid_alive(424242) is False

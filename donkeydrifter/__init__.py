@@ -75,7 +75,14 @@ class _DonkeyDrifterAliasFinder(importlib.abc.MetaPathFinder,
             return None
 
         legacy_name = "donkeycar" + fullname[len("donkeydrifter"):]
-        legacy_spec = importlib.util.find_spec(legacy_name)
+        # find_spec 对「父包不存在」的点路径(如 donkeycar.rl.rewards 而无
+        # donkeycar.rl)抛 ModuleNotFoundError 而非返回 None——别名是 fallback
+        # 语义,查无 legacy 一律按未命中处理,交还真实 donkeydrifter 文件系统
+        # (否则 donkeydrifter/ 下任何新增子包都会在孙子级导入时炸引导)。
+        try:
+            legacy_spec = importlib.util.find_spec(legacy_name)
+        except ModuleNotFoundError:
+            return None
         if legacy_spec is None:
             return None
 

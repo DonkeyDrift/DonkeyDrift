@@ -104,6 +104,27 @@ describe('TubEditor 拖拽框选', () => {
     });
   });
 
+  it('拖拽越出绘图区右边界仍按边界帧推进（不被提前冻结）', async () => {
+    // 真实图表 chartArea 内缩（左轴/图例/刻度留白）：越界拖拽必须继续按边界帧更新草稿框
+    const originalArea = chartState.chart.chartArea;
+    chartState.chart.chartArea = { left: 40, right: 190, top: 20, bottom: 90 };
+    try {
+      const chart = mountEditor();
+      fireEvent.mouseDown(chart, { clientX: 60, clientY: 50, button: 0 });
+      fireEvent.mouseMove(chart, { clientX: 90, clientY: 50 });
+      // 越出右边界（clientX 500 > chartArea.right 190）：应夹取到最右一帧
+      fireEvent.mouseMove(chart, { clientX: 500, clientY: 50 });
+      fireEvent.mouseUp(chart);
+
+      await waitFor(() => {
+        expect(useStore.getState().selectionStartIndex).toBe(3);
+        expect(useStore.getState().selectionEndIndex).toBe(10);
+      });
+    } finally {
+      chartState.chart.chartArea = originalArea;
+    }
+  });
+
   it('水平位移低于阈值时视为点击，不产生拖拽选区', async () => {
     const chart = mountEditor();
     fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
@@ -160,6 +181,110 @@ describe('TubEditor 拖拽框选', () => {
 
     expect(useStore.getState().selectionStartIndex).toBeNull();
     expect(useStore.getState().selectionEndIndex).toBeNull();
+  });
+});
+
+describe('TubEditor 触摸框选', () => {
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
+  });
+
+  beforeEach(() => {
+    const records = makeRecords();
+    useStore.getState().setActiveSession('s1', records);
+    useStore.setState({ totalRecords: records.length });
+    useStore.getState().clearSelectionRange();
+  });
+
+  it('触摸水平滑动超过阈值后抬手提交选区', async () => {
+    const chart = mountEditor();
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchMove(chart, { touches: [{ clientX: 140, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
+
+  it('触摸滑动越出绘图区右边界仍按边界帧推进', async () => {
+    const chart = mountEditor();
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchMove(chart, { touches: [{ clientX: 90, clientY: 50 }] });
+    // 越出右边界（clientX 600 > chartArea.right 200）：应夹取到最右一帧
+    fireEvent.touchMove(chart, { touches: [{ clientX: 600, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(10);
+    });
+  });
+
+  it('两次轻触（位移低于阈值）提交锚点选区', async () => {
+    const chart = mountEditor();
+
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+    expect(useStore.getState().selectionStartIndex).toBeNull();
+    expect(useStore.getState().currentIndex).toBe(2);
+
+    fireEvent.touchStart(chart, { touches: [{ clientX: 140, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
+
+  // 真实触屏上 touchend 之后浏览器必补发一套兼容鼠标事件（mousemove/mousedown/mouseup）。
+  // React 把 touchstart/touchmove 挂成 passive，触摸 handler 里的 preventDefault 抑制不了它们，
+  // 若不屏蔽，这组事件会把触摸链路刚提交的选区再走一遍鼠标逻辑（清锚点/清选区/塌缩成单帧），
+  // 表现为触屏上「框不住」。下面两例按真实时序先让 rAF（≈16ms）把选区落库，再补发兼容鼠标事件。
+  it('触摸滑动提交的选区不被 touchend 后补发的兼容鼠标事件清除', async () => {
+    const chart = mountEditor();
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchMove(chart, { touches: [{ clientX: 140, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+
+    // 等 rAF 先提交（真实浏览器里兼容鼠标事件约 300ms 后才补发，远晚于此）
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(useStore.getState().selectionStartIndex).toBe(2);
+
+    fireEvent.mouseMove(chart, { clientX: 140, clientY: 50 });
+    fireEvent.mouseDown(chart, { clientX: 140, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
+  });
+
+  it('两次轻触的选区不被补发的兼容鼠标事件塌缩为单帧', async () => {
+    const chart = mountEditor();
+
+    // 第一次轻触：只记录锚点，不应因补发的兼容 mousedown 立刻选出单帧
+    fireEvent.touchStart(chart, { touches: [{ clientX: 40, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    fireEvent.mouseDown(chart, { clientX: 40, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
+    expect(useStore.getState().selectionStartIndex).toBeNull();
+
+    // 第二次轻触：提交锚点→当前的范围 [2, 8)，且不被补发的兼容事件塌缩
+    fireEvent.touchStart(chart, { touches: [{ clientX: 140, clientY: 50 }] });
+    fireEvent.touchEnd(chart, { touches: [] });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    fireEvent.mouseDown(chart, { clientX: 140, clientY: 50, button: 0 });
+    fireEvent.mouseUp(chart);
+
+    await waitFor(() => {
+      expect(useStore.getState().selectionStartIndex).toBe(2);
+      expect(useStore.getState().selectionEndIndex).toBe(8);
+    });
   });
 });
 

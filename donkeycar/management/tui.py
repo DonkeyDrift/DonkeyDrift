@@ -42,9 +42,9 @@ from donkeycar.webui_instance import (
     find_live_instance,
     write_drive_pids,
     remove_drive_pid_file,
-    kill_previous_car_processes,
-    takeover_car_processes,
+    sweep_orphan_processes,
     select_car_python,
+    open_url_best_effort,
 )
 
 
@@ -160,13 +160,40 @@ class HistoryManager:
 # 辅助函数
 # -----------------------------------------------------------------------------
 def is_valid_mycar_folder():
-    """检查当前目录是否为有效的 mycar 项目"""
-    return _is_valid_project_dir(Path.cwd())
+    """检查当前目录是否为可用的 mycar 项目（缺 myconfig.py 时现场补齐）"""
+    cwd = Path.cwd()
+    return _is_valid_project_dir(cwd) and _ensure_myconfig(cwd)
 
 
 def _is_valid_project_dir(project_path: Path) -> bool:
-    """检查目录是否为有效的 mycar 项目。"""
-    return (project_path / "manage.py").exists() and (project_path / "myconfig.py").exists()
+    """目录是否像 mycar 项目：有 manage.py + （config.py 或 myconfig.py）。
+
+    myconfig.py 只是用户覆盖项，缺失不再直接判整个目录无效——交给
+    _ensure_myconfig() 现场从模板补齐（曾因误删 myconfig.py 把 Drive 卡在
+    「请输入项目路径」流程）。
+    """
+    if not (project_path / "manage.py").exists():
+        return False
+    return ((project_path / "config.py").exists()
+            or (project_path / "myconfig.py").exists())
+
+
+def _ensure_myconfig(project_path: Path) -> bool:
+    """确保项目里有 myconfig.py；缺则按 createcar 口径从模板生成。"""
+    if (project_path / "myconfig.py").exists():
+        return True
+    if not (project_path / "manage.py").exists():
+        return False
+    try:
+        from donkeycar.management.base import write_myconfig_from_template
+        write_myconfig_from_template(str(project_path))
+        console.print(
+            f"[yellow]未找到 myconfig.py，已从模板生成: "
+            f"{project_path / 'myconfig.py'}[/yellow]")
+        return True
+    except Exception as e:
+        console.print(f"[red]生成 myconfig.py 失败: {e}[/red]")
+        return False
 
 
 def _find_valid_projects(base_dir: Optional[Path] = None) -> List[Path]:
@@ -210,6 +237,7 @@ def _save_last_project_path(project_path: Path):
 def _change_to_project(project_path: Path, title: str) -> bool:
     try:
         os.chdir(project_path)
+        _ensure_myconfig(project_path)  # 缺 myconfig.py 时补模板，避免后续命令判无效
         _save_last_project_path(project_path)
         console.print(Panel(f"[bold green]✓ 已切换工作目录至: {project_path}[/bold green]", title=title))
         return True
@@ -1360,11 +1388,19 @@ class DriveCommand(DonkeyCommand):
         self.history_mgr.add_command_log(cmd_str)
 
         if has_car_process:
-            # 只杀上一次的车进程（manage.py drive）释放硬件，web 前后端保留复用（issue #127）
-            kill_previous_car_processes()
-            # 接管模式：全量杀掉其它在跑的车进程（含别的链路启动的），确保本次
-            # drive 不被单实例守护拒绝、能正常运行
-            takeover_car_processes()
+            # 孤儿清扫（2026-11-09）：pid 文件外的手工/nohup 车端 + 无登记
+            # uvicorn 后端一并终止，确保本次 drive 不被单实例守护拒绝、
+            # 不产生双后端；清理范围见 webui_instance.sweep_orphan_processes
+            swept = sweep_orphan_processes()
+            cleaned = []
+            if swept["car_pids"]:
+                cleaned.append(f"车端 {swept['car_pids']}")
+            if swept["backend_pids"]:
+                cleaned.append(f"Web 后端 {swept['backend_pids']}")
+            if cleaned:
+                console.print(
+                    "[yellow]检测到孤儿进程，已清理: "
+                    + "、".join(cleaned) + "[/yellow]")
 
         console.print(f"\n[bold cyan]>> [{datetime.now().strftime('%H:%M:%S')}] 开始执行...[/bold cyan]")
         console.print("[bold yellow]提示: 按 ESC 键停止运行并返回菜单[/bold yellow]")
@@ -1413,17 +1449,29 @@ class DriveCommand(DonkeyCommand):
                 )
                 processes.append(car_process)
 
-            # 记录本次启动的进程 PID，供下次启动时清理
-            write_drive_pids([p.pid for p in processes])
+            # 只记车进程：kill_previous_car_processes() 在无 /proc 的平台（Windows）
+            # 会按 PID 文件全杀，写进 web 进程会让下次启动杀掉 Web UI（uvicorn 变
+            # 孤儿 + 登记陈旧 → 双后端、页面连不到车端），见 base.py donkey drive。
+            if car_process is not None:
+                write_drive_pids([car_process.pid])
+            else:
+                remove_drive_pid_file()
 
             # Drive 页面地址用局域网 IP：远程终端（DC/SSH）里 localhost 打不开；
             # 带 ?token= 过 P0 鉴权门（非回环来源一律要令牌，本机用 LAN IP 亦然）
             drive_url = _drive_page_url(_lan_host(), frontend_port)
             if inst is not None:
                 # 复用实例不经过 `donkey web --open`，由 TUI 直接打开 Drive 页；
-                # 实例刚通过 find_live_instance() 探测，前端端口已在监听
-                webbrowser.open(drive_url)
-                console.print(f"[dim]已在浏览器打开 {drive_url}[/dim]")
+                # 实例刚通过 find_live_instance() 探测，前端端口已在监听。
+                # 远程/无图形会话 webbrowser 会静默失败，回退桌面 X 会话，
+                # 仍失败则明确提示手动打开，不再“毫无反应”。
+                if open_url_best_effort(drive_url):
+                    console.print(f"[dim]已在浏览器打开 {drive_url}[/dim]")
+                else:
+                    console.print(
+                        f"\n[bold green]当前会话无法自动拉起浏览器，"
+                        f"请在浏览器打开:[/bold green] {drive_url}"
+                    )
             else:
                 # 新起实例由 `donkey web --open` 在本机打开；远程终端用户请在
                 # 自己的浏览器打开下面的局域网地址
@@ -1470,6 +1518,13 @@ class DriveCommand(DonkeyCommand):
             cmd.extend(["--path", str(web_ui_path)])
         if backend_port is not None:
             cmd.extend(["--backend-port", str(backend_port)])
+        # 实车链路必须对外监听：P0 安全补强后 `donkey web` 默认仅回环
+        # （resolve_backend_host），TUI 打印给用户的 Drive 页地址是局域网
+        # IP（192.168.x.x），不显式传 host 会导致远程浏览器根本连不上
+        # （launcher/_launch_drive 实车链路同样显式传 0.0.0.0）。
+        # 非回环访问仍需令牌（auth.py P0 鉴权），URL 已自动带 ?token=。
+        cmd.extend(["--backend-host",
+                    os.environ.get("DRIVE_WEB_HOST", "").strip() or "0.0.0.0"])
         cmd.extend(["--open", "--route", "/drive"])
         return cmd
 
@@ -1525,13 +1580,20 @@ class DriveCommand(DonkeyCommand):
         for process in reversed(processes):
             if process and process.poll() is None:
                 if sys.platform == "win32":
-                    os.kill(process.pid, signal.CTRL_C_EVENT)
+                    # Windows: uv shim 是 re-exec 结构，CTRL_C_EVENT 与 process.kill()
+                    # 都只触及直接子进程，真正的 python/uvicorn 孙子会变孤儿继续占用
+                    # 端口（drive 后端残留的根因）；且 uvicorn 优雅退出常拖满 10s
+                    # 超时。直接 taskkill /T /F 强杀整棵进程树：毫秒级、不留孤儿。
+                    subprocess.run(
+                        ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                        capture_output=True,
+                    )
                 else:
                     process.send_signal(signal.SIGINT)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
 
     def monitor_processes(self, web_process, car_process):
         import select

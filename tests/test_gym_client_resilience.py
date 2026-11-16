@@ -10,6 +10,7 @@ aborted 状态不一致——上层（dgym）从此再也检测不到失联，�
 RST/断连统一收敛为 aborted=True + do_process_msgs=False + 读线程退出；
 is_connected() 成为权威健康信号。
 """
+import os
 import socket
 import struct
 import time
@@ -37,7 +38,7 @@ class _RstServer:
             time.sleep(0.05)
         # SO_LINGER(1, 0) + close => 发送 RST 而非 FIN，模拟模拟器侧强制复位
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
-                        struct.pack("ii", 1, 0))
+                        struct.pack("HH" if os.name == "nt" else "ii", 1, 0))
         conn.close()
 
     def close(self):

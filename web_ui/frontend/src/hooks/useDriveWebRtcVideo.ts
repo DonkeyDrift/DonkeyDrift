@@ -51,6 +51,9 @@ interface UseDriveWebRtcVideoOptions {
 
 export interface DriveVideoMetrics {
   browserFps: number;
+  callbackFps?: number;
+  presentedFps?: number;
+  missedCallbacks?: number;
   p95FrameIntervalMs: number;
   /** 真实端到端时延 p50/p95（captureTime→expectedDisplayTime），无采样时为 0 */
   e2eLatencyP50Ms: number;
@@ -58,8 +61,10 @@ export interface DriveVideoMetrics {
   e2eSamples: number;
 }
 
-/** rVFC 采样窗口：240 帧 ≈ 4s@60fps，足够稳定的 p95 */
+/** 240 个有效样本：日常 15Hz 约 16s，逐帧诊断 60Hz 约 4s。 */
 export const E2E_SAMPLE_WINDOW = 240;
+
+export const FRAME_STAMP_SAMPLE_INTERVAL_MS = 1000 / 15;
 
 /** 单次 e2e 采样有效性上限：超过视为异常值（时钟毛刺/标签缺失），丢弃 */
 export const E2E_SAMPLE_MAX_MS = 1000;
@@ -133,6 +138,37 @@ interface BrowserInboundStats {
   jitter_buffer_delay_ms?: number;
 }
 
+interface PresentedFrameObservation {
+  time: number;
+  count: number;
+}
+
+export const recordPresentedFrame = (
+  window: PresentedFrameObservation[], time: number, count: number | undefined,
+): PresentedFrameObservation[] => {
+  if (!Number.isFinite(time) || time < 0 || count === undefined
+    || !Number.isSafeInteger(count) || count < 0) {
+    return [];
+  }
+  const previous = window.at(-1);
+  if (previous && (time <= previous.time || count <= previous.count)) {
+    return [{ time, count }];
+  }
+  return [...window.slice(-119), { time, count }];
+};
+
+export const calculatePresentationMetrics = (
+  window: PresentedFrameObservation[],
+): Pick<DriveVideoMetrics, 'presentedFps' | 'missedCallbacks'> => {
+  if (window.length < 2) return {};
+  const first = window[0];
+  const last = window[window.length - 1];
+  return {
+    presentedFps: (last.count - first.count) * 1000 / (last.time - first.time),
+    missedCallbacks: last.count - first.count - (window.length - 1),
+  };
+};
+
 export const calculateVideoMetrics = (timestamps: number[]): DriveVideoMetrics => {
   if (timestamps.length < 2) {
     return { browserFps: 0, p95FrameIntervalMs: 0, e2eLatencyP50Ms: 0, e2eLatencyP95Ms: 0, e2eSamples: 0 };
@@ -197,13 +233,16 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     watchdogIntervalMs = 1000,
   } = options;
   const { t } = useTranslation();
+  const diagnosticMode = import.meta.env.VITE_DRIVE_WEBRTC_DIAGNOSTIC === '1';
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const clientIdRef = useRef(clientId ?? createDriveClientId());
   const frameTimestampsRef = useRef<number[]>([]);
+  const presentedFramesRef = useRef<PresentedFrameObservation[]>([]);
   const e2eSamplesRef = useRef<number[]>([]);
   const frameCallbackRef = useRef<number | null>(null);
+  const frameCallbackVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastBrowserStatsSentAtRef = useRef(0);
   const lastMetricsAtRef = useRef(0);
   const trackReceivedRef = useRef(false);
@@ -229,24 +268,16 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   // 画布被跨域帧污染（SecurityError）等结构性失败：永久关像素通路，不逐帧重试
   const stampBrokenRef = useRef(false);
   // 已采样过的印章值：车端 60Hz 节拍会给同一内容帧补重复帧（同印章），
-  // 时延口径=「采集→首现」，重复帧必须跳过，否则补帧间隔会掺进真实时延
+  // 逐帧诊断取首现；日常抽样只能保证同一印章不重复计入，不能保证捕获首现。
   const stampSeenRef = useRef<Set<number>>(new Set());
-  // 三锚点诊断样本（同一首现样本集）：present=合成提交、display=预期可见、
+  // 三锚点诊断样本（同一抽样集）：present=合成提交、display=预期可见、
   // late=回调迟滞、quantum=合成→可见 vsync 量子。定位 e2e 尾部在哪一段。
   const e2ePresentSamplesRef = useRef<number[]>([]);
   const e2eDisplaySamplesRef = useRef<number[]>([]);
   const lateSamplesRef = useRef<number[]>([]);
   const quantumSamplesRef = useRef<number[]>([]);
-  // 印章探测自适应降频：车端默认不烧印章（DRIVE_WEBRTC_FRAME_STAMP=0），
-  // 此时逐帧 drawImage+getImageData 是纯开销且落在 60Hz 呈现关键路径上；
-  // 未激活时每 15 帧（≈4Hz@60fps）探一次，一旦读到印章即恢复逐帧精确采样。
-  // 印章探测自适应降频：车端默认不烧印章（DRIVE_WEBRTC_FRAME_STAMP=0），
-  // 此时逐帧 drawImage+getImageData 是纯开销且落在 60Hz 呈现关键路径上；
-  // 未激活时每 15 帧（≈4Hz@60fps）探一次，一旦读到印章即恢复逐帧精确采样。
-  const STAMP_PROBE_STRIDE = 15;
   const stampActiveRef = useRef(false);
-  // 初始值 = STRIDE-1：会话首帧立即探测一次，快速识别车端是否烧印章
-  const stampProbeCounterRef = useRef(STAMP_PROBE_STRIDE - 1);
+  const lastStampSampleAtRef = useRef<number | null>(null);
 
   const startRef = useRef<() => void>(() => undefined);
 
@@ -283,17 +314,24 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     lastPresentationAtRef.current = 0;
     mutedAtRef.current = 0;
     videoReadyRef.current = false;
-    if (frameCallbackRef.current !== null && videoRef.current?.cancelVideoFrameCallback) {
-      videoRef.current.cancelVideoFrameCallback(frameCallbackRef.current);
+    // React 卸载时会先清空 videoRef，取消回调必须使用注册时的元素引用。
+    if (frameCallbackRef.current !== null) {
+      frameCallbackVideoRef.current?.cancelVideoFrameCallback?.(frameCallbackRef.current);
       frameCallbackRef.current = null;
     }
+    frameCallbackVideoRef.current = null;
     e2eSamplesRef.current = [];
     e2ePresentSamplesRef.current = [];
     e2eDisplaySamplesRef.current = [];
     lateSamplesRef.current = [];
     quantumSamplesRef.current = [];
     stampActiveRef.current = false;
-    stampProbeCounterRef.current = STAMP_PROBE_STRIDE - 1;
+    lastStampSampleAtRef.current = null;
+    stampSeenRef.current.clear();
+    frameTimestampsRef.current = [];
+    presentedFramesRef.current = [];
+    lastMetricsAtRef.current = 0;
+    lastBrowserStatsSentAtRef.current = 0;
     if (videoRef.current) {
       videoRef.current.onloadeddata = null;
     }
@@ -370,7 +408,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
   }, []);
 
   // 像素印章 e2e：canvas 采样呈现帧左上角印章区并解码车端捕获时刻，
-  // 与「本机钟 + 时钟锚」对齐后相减 = 内容到达→屏幕呈现的真实时延。
+  // 与「本机钟 + 时钟锚」对齐，计算捕获→回调/预计显示时延，非屏幕出光实测。
   // 印章可读时以此口径优先：它是重复帧的唯一身份（60Hz 节拍补帧沿用原帧
   // 印章），captureTime 通路区分不出重复帧。返回 null 时才退回 captureTime。
   const readPixelStampE2e = useCallback((
@@ -449,12 +487,23 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
     if (!video?.requestVideoFrameCallback) {
       return;
     }
+    const scheduledPeer = peerRef.current;
+    if (frameCallbackRef.current !== null) {
+      frameCallbackVideoRef.current?.cancelVideoFrameCallback?.(frameCallbackRef.current);
+    }
+    frameCallbackVideoRef.current = video;
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
+      if (!mountedRef.current || peerRef.current !== scheduledPeer) return;
       // 入口先采两个钟：画布读回/回调排队耗时不得掺进 e2e（readPixelStampE2e 内用）
       const perfNowMs = performance.now();
       const unixNowMs = Date.now();
+      // 先订阅下一帧，再执行可能阻塞的像素读回，避免注册落后于下一次合成。
+      frameCallbackRef.current = video.requestVideoFrameCallback(onFrame);
       lastPresentationAtRef.current = perfNowMs;
       frameTimestampsRef.current = [...frameTimestampsRef.current.slice(-119), metadata.presentationTime];
+      presentedFramesRef.current = recordPresentedFrame(
+        presentedFramesRef.current, metadata.presentationTime, metadata.presentedFrames,
+      );
       // 真实端到端时延：像素印章口径优先（可识别 60Hz 节拍重复帧），
       // 无印章时退回 captureTime 通路：expectedDisplayTime(呈现时刻) −
       // captureTime(采集时刻)，两者同处浏览器时钟域（Chrome 经 RTCP SR 映射），
@@ -462,23 +511,24 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       // 且重复帧的 captureTime 是补帧出帧时刻（时延会报小）——开节拍补帧时
       // 该通路样本仅供参考，精确口径以像素印章为准。
       let sampledE2e: number | null = null;
-      // 像素印章读回自适应降频：印章激活后逐帧精确采样；未激活时段内
-      // 每 15 帧探测一次，避免无印章时对每帧呈现路径造成固定开销
+      // 只对像素读回限频；FPS 和看门狗仍跟随每个呈现回调。
       let pixelSample: ReturnType<typeof readPixelStampE2e> = null;
-      if (stampActiveRef.current) {
+      const canReadStamp = clockOffsetRef.current !== null && !stampBrokenRef.current
+        && video.readyState >= 2
+        && video.videoWidth >= FRAME_STAMP_SAMPLE_WIDTH
+        && video.videoHeight >= FRAME_STAMP_SAMPLE_HEIGHT;
+      const stampSampleDue = canReadStamp && (diagnosticMode
+        || lastStampSampleAtRef.current === null
+        || perfNowMs - lastStampSampleAtRef.current >= FRAME_STAMP_SAMPLE_INTERVAL_MS);
+      if (stampSampleDue) {
+        lastStampSampleAtRef.current = perfNowMs;
         pixelSample = readPixelStampE2e(perfNowMs, unixNowMs, metadata);
-      } else {
-        stampProbeCounterRef.current += 1;
-        if (stampProbeCounterRef.current >= STAMP_PROBE_STRIDE) {
-          stampProbeCounterRef.current = 0;
-          pixelSample = readPixelStampE2e(perfNowMs, unixNowMs, metadata);
-        }
       }
       if (pixelSample !== null) {
         stampActiveRef.current = true;
       }
       if (pixelSample !== null) {
-        // 同印章 = 同一内容帧的节拍重复帧：只取首现时刻
+        // 日常模式取首次抽到的该印章，逐帧诊断才是首次呈现。
         const seen = stampSeenRef.current;
         if (!seen.has(pixelSample.stamp)) {
           seen.add(pixelSample.stamp);
@@ -487,7 +537,7 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
             if (oldest !== undefined) seen.delete(oldest);
           }
           sampledE2e = pixelSample.e2eMs;
-          // 三锚点诊断（同一首现样本集）：present/display 已在读取处过滤值域；
+          // 三锚点诊断（同一抽样集）：present/display 已在读取处过滤值域；
           // late=回调迟滞、quantum=合成→可见 vsync 量子
           const pushDiag = (ref: { current: number[] }, value: number | null | undefined) => {
             if (value === null || value === undefined || !Number.isFinite(value)) return;
@@ -504,7 +554,8 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
             ];
           }
         }
-      } else {
+      } else if (!stampActiveRef.current || stampSampleDue) {
+        // 已确认有印章但本帧未抽样时，不混入无法识别重复帧的 captureTime。
         const captureTime = (metadata as VideoFrameCallbackMetadata & { captureTime?: number }).captureTime;
         if (captureTime !== undefined && metadata.expectedDisplayTime !== undefined) {
           const e2e = metadata.expectedDisplayTime - captureTime;
@@ -516,50 +567,58 @@ export const useDriveWebRtcVideo = (options: UseDriveWebRtcVideoOptions = {}) =>
       if (sampledE2e !== null) {
         e2eSamplesRef.current = [...e2eSamplesRef.current.slice(-(E2E_SAMPLE_WINDOW - 1)), sampledE2e];
       }
-      const nextMetrics: DriveVideoMetrics = {
-        ...calculateVideoMetrics(frameTimestampsRef.current),
-        e2eLatencyP50Ms: calculatePercentile(e2eSamplesRef.current, 0.5),
-        e2eLatencyP95Ms: calculatePercentile(e2eSamplesRef.current, 0.95),
-        e2eSamples: e2eSamplesRef.current.length,
-      };
-      // FPS/延迟徽标无需逐帧刷新：500ms 节流一次，避免 60fps 重渲染 VideoStream（#135）
-      const now = performance.now();
-      if (now - lastMetricsAtRef.current >= 500) {
-        lastMetricsAtRef.current = now;
-        setMetrics(nextMetrics);
-      }
+      const updateMetrics = perfNowMs - lastMetricsAtRef.current >= 500;
       const sessionId = sessionIdRef.current;
-      if (sessionId && nextMetrics.browserFps > 0 && metadata.presentationTime - lastBrowserStatsSentAtRef.current >= 1000) {
-        lastBrowserStatsSentAtRef.current = metadata.presentationTime;
-        collectBrowserInboundStats(peerRef.current)
-          .then((inboundStats) => {
-            const present = e2ePresentSamplesRef.current;
-            const display = e2eDisplaySamplesRef.current;
-            const late = lateSamplesRef.current;
-            const quantum = quantumSamplesRef.current;
-            return sendDriveWebRtcBrowserStats(sessionId, {
-              browser_fps: nextMetrics.browserFps,
-              browser_p95_frame_interval_ms: nextMetrics.p95FrameIntervalMs,
-              e2e_latency_p50_ms: nextMetrics.e2eSamples > 0 ? nextMetrics.e2eLatencyP50Ms : undefined,
-              e2e_latency_p95_ms: nextMetrics.e2eSamples > 0 ? nextMetrics.e2eLatencyP95Ms : undefined,
-              e2e_samples: nextMetrics.e2eSamples,
-              e2e_latency_max_ms: nextMetrics.e2eSamples > 0
-                ? Math.max(...e2eSamplesRef.current) : undefined,
-              e2e_present_p50_ms: present.length ? calculatePercentile(present, 0.5) : undefined,
-              e2e_present_p95_ms: present.length ? calculatePercentile(present, 0.95) : undefined,
-              e2e_display_p50_ms: display.length ? calculatePercentile(display, 0.5) : undefined,
-              e2e_display_p95_ms: display.length ? calculatePercentile(display, 0.95) : undefined,
-              callback_late_p95_ms: late.length ? calculatePercentile(late, 0.95) : undefined,
-              vsync_quantum_p95_ms: quantum.length ? calculatePercentile(quantum, 0.95) : undefined,
-              ...inboundStats,
-            });
-          })
-          .catch(() => undefined);
+      const reportStats = Boolean(sessionId
+        && metadata.presentationTime - lastBrowserStatsSentAtRef.current >= 1000);
+      if (updateMetrics || reportStats) {
+        const callbackMetrics = calculateVideoMetrics(frameTimestampsRef.current);
+        const presentationMetrics = calculatePresentationMetrics(presentedFramesRef.current);
+        const nextMetrics: DriveVideoMetrics = {
+          ...callbackMetrics,
+          ...presentationMetrics,
+          callbackFps: callbackMetrics.browserFps,
+          browserFps: presentationMetrics.presentedFps ?? callbackMetrics.browserFps,
+          e2eLatencyP50Ms: calculatePercentile(e2eSamplesRef.current, 0.5),
+          e2eLatencyP95Ms: calculatePercentile(e2eSamplesRef.current, 0.95),
+          e2eSamples: e2eSamplesRef.current.length,
+        };
+        // FPS/延迟徽标无需逐帧刷新：500ms 节流一次（#135）。
+        if (updateMetrics) {
+          lastMetricsAtRef.current = perfNowMs;
+          setMetrics(nextMetrics);
+        }
+        if (sessionId && reportStats && nextMetrics.browserFps > 0) {
+          lastBrowserStatsSentAtRef.current = metadata.presentationTime;
+          collectBrowserInboundStats(peerRef.current)
+            .then((inboundStats) => {
+              const present = e2ePresentSamplesRef.current;
+              const display = e2eDisplaySamplesRef.current;
+              const late = lateSamplesRef.current;
+              const quantum = quantumSamplesRef.current;
+              return sendDriveWebRtcBrowserStats(sessionId, {
+                browser_fps: nextMetrics.browserFps,
+                browser_p95_frame_interval_ms: nextMetrics.p95FrameIntervalMs,
+                e2e_latency_p50_ms: nextMetrics.e2eSamples > 0 ? nextMetrics.e2eLatencyP50Ms : undefined,
+                e2e_latency_p95_ms: nextMetrics.e2eSamples > 0 ? nextMetrics.e2eLatencyP95Ms : undefined,
+                e2e_samples: nextMetrics.e2eSamples,
+                e2e_latency_max_ms: nextMetrics.e2eSamples > 0
+                  ? Math.max(...e2eSamplesRef.current) : undefined,
+                e2e_present_p50_ms: present.length ? calculatePercentile(present, 0.5) : undefined,
+                e2e_present_p95_ms: present.length ? calculatePercentile(present, 0.95) : undefined,
+                e2e_display_p50_ms: display.length ? calculatePercentile(display, 0.5) : undefined,
+                e2e_display_p95_ms: display.length ? calculatePercentile(display, 0.95) : undefined,
+                callback_late_p95_ms: late.length ? calculatePercentile(late, 0.95) : undefined,
+                vsync_quantum_p95_ms: quantum.length ? calculatePercentile(quantum, 0.95) : undefined,
+                ...inboundStats,
+              });
+            })
+            .catch(() => undefined);
+        }
       }
-      frameCallbackRef.current = video.requestVideoFrameCallback(onFrame);
     };
     frameCallbackRef.current = video.requestVideoFrameCallback(onFrame);
-  }, [readPixelStampE2e]);
+  }, [diagnosticMode, readPixelStampE2e]);
 
   const start = useCallback(async () => {
     if (startInFlightRef.current) {

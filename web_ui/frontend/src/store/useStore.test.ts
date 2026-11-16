@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useStore, type TubRecord } from './useStore';
+import { useStore } from './useStore';
 
 // 回归（点击「加载器」没有反应）：setError(null) 不得联动关闭侧边抽屉。
 // ConfigLoader 挂载时会 setError(null)，老用户（persist 了 configPath、全局 config 为 null）
@@ -10,11 +10,17 @@ describe('useStore.setError 与 activeDrawer 联动', () => {
     useStore.setState({ error: null, activeDrawer: null });
   });
 
-  it('setError(null) 仅清除错误，不改变 activeDrawer', () => {
+  it('setError(null) 仅清除错误，不改变 activeDrawer（loaders）', () => {
     useStore.setState({ activeDrawer: 'loaders' });
     useStore.getState().setError(null);
     expect(useStore.getState().error).toBeNull();
     expect(useStore.getState().activeDrawer).toBe('loaders');
+  });
+
+  it('setError(null) 在 connectors 抽屉打开时同样不联动', () => {
+    useStore.setState({ activeDrawer: 'connectors' });
+    useStore.getState().setError(null);
+    expect(useStore.getState().activeDrawer).toBe('connectors');
   });
 
   it('路径类错误（含 not found / Failed）保持既有行为：打开 loaders 抽屉', () => {
@@ -69,6 +75,48 @@ describe('useStore activeTraining（刷新后恢复训练进度）', () => {
   });
 });
 
+// 默认连接（配置加载后指向 <car>/data）：只落输入框路径并标记「已处理」，
+// 同时清掉旧 tub 的残留记录，data 缺失时保持默认路径等待首次录制。
+describe('useStore setDefaultTubPath 默认连接', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tubPath: '/old/data',
+      loadedTubPath: '/old/data',
+      records: [{ _index: 0, _timestamp_ms: 0 }],
+      originalRecords: [{ _index: 0, _timestamp_ms: 0 }],
+      totalRecords: 1,
+      tubTotalRecords: 1,
+      totalPhysicalRecords: 1,
+      deletedIndexes: [2],
+      fields: ['cam/image_array'],
+      activeSessionId: 's1',
+      activeSessionRecords: [{ _index: 0, _timestamp_ms: 0 }],
+      activeSessionIds: ['s1'],
+      activeSessionCrossTub: true,
+      isPlaying: true,
+    });
+  });
+
+  it('落默认路径并清空旧 tub 残留，loadedTubPath 同步标记已处理', () => {
+    useStore.getState().setDefaultTubPath('/new/data');
+    const state = useStore.getState();
+    expect(state.tubPath).toBe('/new/data');
+    expect(state.loadedTubPath).toBe('/new/data');
+    expect(state.records).toEqual([]);
+    expect(state.originalRecords).toEqual([]);
+    expect(state.totalRecords).toBe(0);
+    expect(state.tubTotalRecords).toBe(0);
+    expect(state.totalPhysicalRecords).toBe(0);
+    expect(state.deletedIndexes).toEqual([]);
+    expect(state.fields).toEqual([]);
+    expect(state.activeSessionId).toBeNull();
+    expect(state.activeSessionRecords).toEqual([]);
+    expect(state.activeSessionIds).toEqual([]);
+    expect(state.activeSessionCrossTub).toBe(false);
+    expect(state.isPlaying).toBe(false);
+  });
+});
+
 // 多选会话筛选（家族视图）：setActiveSession 第三参 sessionIds 缺省时从
 // sessionId 派生（向后兼容，所有既有调用点行为不变）；显式传入则保留集合。
 describe('useStore setActiveSession 多选集合派生', () => {
@@ -97,76 +145,5 @@ describe('useStore setActiveSession 多选集合派生', () => {
     useStore.getState().setTub('/tmp/tub2', [], ['cam/image_array']);
     expect(useStore.getState().activeSessionIds).toEqual([]);
     expect(useStore.getState().activeSessionId).toBeNull();
-  });
-});
-
-// 回归（代码审查）：自动 Tub 全部失败后残留上一配置的数据；从浏览配置入口进入时
-// 持久化 Tub 也不被恢复。需要 clearTub() 做完整重置：浏览态（tub 数据/计数/会话/
-// 播放/拖动/选择历史）全部回到空初始态，但不触碰 config/configPath、isLooping 与 error。
-// 期望值均取自 useStore 初始状态字面量，手工推导，不复用生产代码计算。
-describe('useStore clearTub（Tub 浏览态完整重置）', () => {
-  const seedLoadedTubBrowseState = () => {
-    const records: TubRecord[] = [
-      { _index: 0, _timestamp_ms: 1000, 'user/angle': 0.1 },
-      { _index: 1, _timestamp_ms: 2000, 'user/angle': 0.2 },
-    ];
-    const state = useStore.getState();
-    state.setTub('/tmp/tub-red', records, ['user/angle', 'cam/image_array'], 5, [3, 4]);
-    state.setActiveSession('session-red', records, ['session-red', 'session-red-2'], true);
-    state.setCurrentIndex(1);
-    state.setIsPlaying(true);
-    state.setIsDragging(true);
-    state.setSelectionRange(0, 2);
-    state.setConfig({ drive_mode: 'manual' }, '/tmp/mycar/config-red.yml');
-    state.setIsLooping(true);
-    // setError 有抽屉联动副作用，error 用直接写入隔离（本组测试不关心 activeDrawer）
-    useStore.setState({ error: '加载 Tub 失败-red' });
-  };
-
-  // clearTub 尚未实现时以断言失败（而非 TypeError）进入 RED：先取函数、断言存在、再调用
-  const getClearTub = () =>
-    (useStore.getState() as ReturnType<typeof useStore.getState> & { clearTub?: () => void })
-      .clearTub;
-
-  it('将 Tub 数据、计数、会话、播放、拖动与选择历史全部重置为空初始态', () => {
-    seedLoadedTubBrowseState();
-    const clearTub = getClearTub();
-    expect(typeof clearTub).toBe('function');
-    clearTub!();
-
-    const s = useStore.getState();
-    expect(s.tubPath).toBe('');
-    expect(s.loadedTubPath).toBeNull();
-    expect(s.records).toEqual([]);
-    expect(s.originalRecords).toEqual([]);
-    expect(s.totalRecords).toBe(0);
-    expect(s.tubTotalRecords).toBe(0);
-    expect(s.totalPhysicalRecords).toBe(0);
-    expect(s.deletedIndexes).toEqual([]);
-    expect(s.fields).toEqual([]);
-    expect(s.currentIndex).toBe(0);
-    expect(s.activeSessionId).toBeNull();
-    expect(s.activeSessionRecords).toEqual([]);
-    expect(s.activeSessionIds).toEqual([]);
-    expect(s.activeSessionCrossTub).toBe(false);
-    expect(s.isPlaying).toBe(false);
-    expect(s.isDragging).toBe(false);
-    expect(s.selectionStartIndex).toBeNull();
-    expect(s.selectionEndIndex).toBeNull();
-    expect(s.selectionHistory).toEqual([]);
-    expect(s.selectionHistoryIndex).toBe(-1);
-  });
-
-  it('不误清 config/configPath、isLooping 与 error', () => {
-    seedLoadedTubBrowseState();
-    const clearTub = getClearTub();
-    expect(typeof clearTub).toBe('function');
-    clearTub!();
-
-    const s = useStore.getState();
-    expect(s.config).toEqual({ drive_mode: 'manual' });
-    expect(s.configPath).toBe('/tmp/mycar/config-red.yml');
-    expect(s.isLooping).toBe(true);
-    expect(s.error).toBe('加载 Tub 失败-red');
   });
 });

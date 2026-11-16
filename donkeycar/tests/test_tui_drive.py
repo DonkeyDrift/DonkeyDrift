@@ -7,7 +7,7 @@ from donkeycar.management import tui
 
 
 @pytest.fixture(autouse=True)
-def _isolate_process_registry(monkeypatch):
+def _isolate_process_registry(monkeypatch, tmp_path):
     """隔离进程登记副作用，默认走"无存活实例"路径。
 
     实例登记与车进程 PID 文件在本机真实 home 目录（~/.donkeycar/），
@@ -16,10 +16,15 @@ def _isolate_process_registry(monkeypatch):
     需要复用路径的用例自行再 patch tui.find_live_instance。
     """
     monkeypatch.setattr(tui, "find_live_instance", lambda: None)
-    monkeypatch.setattr(tui, "kill_previous_car_processes", lambda: None)
-    monkeypatch.setattr(tui, "takeover_car_processes", lambda: None)
+    monkeypatch.setattr(
+        tui, "sweep_orphan_processes",
+        lambda: {"car_pids": [], "backend_pids": []})
     monkeypatch.setattr(tui, "write_drive_pids", lambda pids: None)
     monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
+    # HOME 隔离到 tmp_path：_drive_api_token 会回退读真实
+    # ~/.donkeycar/drive_api.token，本机存在该文件时 URL 会拼上真实
+    # ?token=，打乱本文件「无令牌 URL」类断言（回归隔离，2026-11-09）
+    monkeypatch.setenv("HOME", str(tmp_path))
     # 局域网探测在测试环境不确定，默认固定 localhost；LAN 行为有专测
     monkeypatch.setattr(tui, "_lan_host", lambda: "localhost")
     # Drive 流程不应再出现交互 Confirm（时延探针提问已移除，开关走 env）；
@@ -261,7 +266,11 @@ def test_drive_command_reusing_live_instance_opens_browser(monkeypatch, tmp_path
     monkeypatch.setattr(tui.console, "clear", lambda: None)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr(tui.webbrowser, "open", opened_urls.append)
+    # TUI 复用分支经 open_url_best_effort 打开浏览器（webbrowser 在无 DISPLAY
+    # 会话会静默失败，helper 负责桌面回退与结果反馈），patch 到 helper 一层
+    monkeypatch.setattr(
+        tui, "open_url_best_effort",
+        lambda url: opened_urls.append(url) or True)
     monkeypatch.delenv("DRIVE_API_SERVER_URL", raising=False)
     monkeypatch.delenv("DRIVE_API_PUBLIC_HOST", raising=False)
     monkeypatch.delenv("DRIVE_WEB_CONSOLE_URL", raising=False)
@@ -310,6 +319,12 @@ def test_drive_command_new_instance_leaves_browser_to_web_open(monkeypatch, tmp_
     tui.DriveCommand().execute()
 
     assert len(popen_calls) == 2
+    web_cmd, _ = popen_calls[0]
+    # 实车链路必须对外监听：P0 安全补强后 `donkey web` 默认仅回环，而 TUI
+    # 打印给用户的是局域网地址——不显式传 host 远程浏览器连不上（回归：
+    # 合并后启动 drive 网页打不开）
+    assert "--backend-host" in web_cmd
+    assert web_cmd[web_cmd.index("--backend-host") + 1] == "0.0.0.0"
     _, car_kwargs = popen_calls[1]
     assert opened_urls == []
     # 生产模式前端由后端托管，提示 URL 端口即后端端口
@@ -330,7 +345,9 @@ def test_drive_command_respects_user_drive_web_console_url(monkeypatch, tmp_path
     monkeypatch.setattr(tui.console, "clear", lambda: None)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr(tui.webbrowser, "open", lambda _url: None)
+    # 打开浏览器统一走 open_url_best_effort；测试里必须 mock，否则真实
+    # helper 的桌面回退会在跑测试的机器上执行 xdg-open（副作用）
+    monkeypatch.setattr(tui, "open_url_best_effort", lambda _url: True)
     monkeypatch.setenv("DRIVE_WEB_CONSOLE_URL", "http://192.0.2.10:8000")
 
     def fake_popen(cmd_list, **kwargs):
@@ -381,11 +398,12 @@ def test_drive_command_uses_lan_ip_for_remote_terminal(monkeypatch, tmp_path):
     assert opened_urls == ["http://192.168.3.103:8000/#/drive"]
 
 
-def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path):
-    """执行前调用接管清理（takeover_car_processes），杀掉其它在跑车进程。"""
+def test_drive_command_sweep_kills_orphan_processes(monkeypatch, tmp_path):
+    """执行前调用孤儿清扫（sweep_orphan_processes），杀掉 pid 文件外的
+    手工/nohup 车端与无登记 uvicorn 后端。"""
     popen_calls = []
     prompts = iter(["y", ""])
-    takeover_calls = []
+    sweep_calls = []
 
     (tmp_path / "manage.py").write_text("", encoding="utf-8")
     (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
@@ -395,8 +413,9 @@ def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path)
     monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
     monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: next(prompts))
     monkeypatch.setattr(
-        tui, "takeover_car_processes",
-        lambda: takeover_calls.append("called") or [171399])
+        tui, "sweep_orphan_processes",
+        lambda: sweep_calls.append("called")
+        or {"car_pids": [171399], "backend_pids": [42]})
 
     def fake_popen(cmd_list, **kwargs):
         popen_calls.append((cmd_list, kwargs))
@@ -406,7 +425,7 @@ def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path)
 
     tui.DriveCommand().execute()
 
-    assert takeover_calls == ["called"]
+    assert sweep_calls == ["called"]
 
 
 # ---------------- WebRTC 时延探针集成（TUI 不再提问，开关走 env） ----------------

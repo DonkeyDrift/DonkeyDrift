@@ -36,6 +36,51 @@ def test_is_valid_project_dir_checks_required_files(tmp_path):
     assert not tui._is_valid_project_dir(tmp_path / "missing")
 
 
+def test_project_dir_valid_with_config_but_no_myconfig(tmp_path):
+    """myconfig.py 缺失不再直接判整个目录无效——先认项目，再由 _ensure_myconfig 补齐。"""
+    project = tmp_path / "mycar"
+    project.mkdir()
+    (project / "manage.py").write_text("", encoding="utf-8")
+    (project / "config.py").write_text("import os\nDRIVE_LOOP_HZ = 20\n", encoding="utf-8")
+
+    assert tui._is_valid_project_dir(project)
+    assert not (project / "myconfig.py").exists()
+
+
+def test_ensure_myconfig_generates_from_template(tmp_path):
+    project = tmp_path / "mycar"
+    project.mkdir()
+    (project / "manage.py").write_text("", encoding="utf-8")
+    (project / "config.py").write_text('"""cfg"""\nimport os\nDRIVE_LOOP_HZ = 20\n', encoding="utf-8")
+
+    assert tui._ensure_myconfig(project) is True
+
+    myconfig = (project / "myconfig.py").read_text(encoding="utf-8")
+    # 模板正文 + config.py 内容以注释形式追加
+    assert "# DRIVE_LOOP_HZ = 20" in myconfig
+
+
+def test_ensure_myconfig_keeps_existing_file(tmp_path):
+    project = tmp_path / "mycar"
+    project.mkdir()
+    (project / "manage.py").write_text("", encoding="utf-8")
+    (project / "myconfig.py").write_text("DONKEY_GYM = True\n", encoding="utf-8")
+
+    assert tui._ensure_myconfig(project) is True
+    assert (project / "myconfig.py").read_text(encoding="utf-8") == "DONKEY_GYM = True\n"
+
+
+def test_is_valid_mycar_folder_repairs_missing_myconfig(monkeypatch, tmp_path):
+    project = tmp_path / "mycar"
+    project.mkdir()
+    (project / "manage.py").write_text("", encoding="utf-8")
+    (project / "config.py").write_text("import os\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    assert tui.is_valid_mycar_folder() is True
+    assert (project / "myconfig.py").exists()
+
+
 def test_find_valid_projects_returns_sorted_projects(tmp_path):
     projects_dir = tmp_path / "projects"
     _make_project(projects_dir / "z_car")

@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "sim_app_a": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app/Contents/MacOS/donkey_sim",
+    "sim_app_b": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app/Contents/MacOS/donkey_sim",
+    "ports": [
+      9091,
+      9092
+    ],
+    "sequence": "straight 6s -> circle(steer 0.5) 12s",
+    "note": "统计分布对比口径,非逐位对拍;同二进制时度量实例间方差",
+    "recorded_at": "2026-11-02 00:10:33"
+  },
+  "instance_a": {
+    "port": 9091,
+    "n_frames": 361,
+    "speed": {
+      "n": 361,
+      "mean": 0.841,
+      "p50": 0.534,
+      "p90": 2.419,
+      "max": 3.033
+    },
+    "abs_cte": {
+      "n": 361,
+      "mean": 2.131,
+      "p50": 1.166,
+      "p90": 6.75,
+      "max": 10.409
+    },
+    "abs_yaw_rate_deg_s": {
+      "n": 360,
+      "mean": 14.661,
+      "p50": 10.358,
+      "p90": 31.577,
+      "max": 277.508
+    },
+    "path_len_m": 14.95,
+    "net_displacement_m": 7.92,
+    "displacement_efficiency": 0.53
+  },
+  "instance_b": {
+    "port": 9092,
+    "n_frames": 360,
+    "speed": {
+      "n": 360,
+      "mean": 0.872,
+      "p50": 0.575,
+      "p90": 2.426,
+      "max": 3.035
+    },
+    "abs_cte": {
+      "n": 360,
+      "mean": 2.929,
+      "p50": 2.236,
+      "p90": 8.112,
+      "max": 10.338
+    },
+    "abs_yaw_rate_deg_s": {
+      "n": 359,
+      "mean": 15.081,
+      "p50": 11.002,
+      "p90": 34.231,
+      "max": 339.757
+    },
+    "path_len_m": 15.43,
+    "net_displacement_m": 7.78,
+    "displacement_efficiency": 0.504
+  },
+  "comparison": {
+    "speed": {
+      "p50_a": 0.534,
+      "p50_b": 0.575,
+      "rel_diff_p50": 0.071,
+      "within_10pct": true
+    },
+    "abs_cte": {
+      "p50_a": 1.166,
+      "p50_b": 2.236,
+      "rel_diff_p50": 0.479,
+      "within_10pct": false
+    },
+    "abs_yaw_rate_deg_s": {
+      "p50_a": 10.358,
+      "p50_b": 11.002,
+      "rel_diff_p50": 0.059,
+      "within_10pct": true
+    },
+    "displacement_efficiency": {
+      "a": 0.53,
+      "b": 0.504,
+      "abs_diff": 0.026
+    },
+    "verdict": "存在 >10% 的 p50 相对差——M3 多开需按实例分布归一/课程再评估(见逐项)"
+  }
+}

@@ -32,8 +32,9 @@ from donkeycar.pipeline.sequence import TubRecord, TubSequence, TfmIterator
 from donkeycar.pipeline.types import TubDataset
 from donkeycar.pipeline.augmentations import ImageAugmentation
 from donkeycar.parts.image_transformations import ImageTransformations
-from donkeycar.utils import disable_metal_gpu_on_macos, get_model_by_type, \
-    normalize_image, train_test_split
+from donkeycar.utils import disable_metal_gpu_on_macos, fit_image_array, \
+    get_model_by_type, get_training_image_size, normalize_image, \
+    train_test_split
 import tensorflow as tf
 import numpy as np
 
@@ -69,6 +70,9 @@ class BatchSequence(object):
         self.sequence = TubSequence(records)
         self.batch_size = self.config.BATCH_SIZE
         self.is_train = is_train
+        # 训练输入尺寸 (H, W)，来自 TRAINING_IMAGE_SIZE（默认 160x120）；
+        # image_processor 末端把图像缩放到该尺寸以匹配模型 input_shape。
+        self.train_hw = get_training_image_size(config)
         self.augmentation = ImageAugmentation(config, 'AUGMENTATIONS')
         self.transformation = ImageTransformations(config, 'TRANSFORMATIONS')
         self.post_transformation = ImageTransformations(config,
@@ -89,6 +93,11 @@ class BatchSequence(object):
         if self.is_train:
             img_arr = self.augmentation.run(img_arr)
         img_arr = self.post_transformation.run(img_arr)
+        # 最后把图像适配到模型训练输入尺寸（等比缩放 + 白框，与推理端
+        # PilotHolder 的适配口径一致），保证与模型 input_shape 严格匹配。
+        target_h, target_w = self.train_hw
+        if img_arr.shape[0] != target_h or img_arr.shape[1] != target_w:
+            img_arr = fit_image_array(img_arr, target_w, target_h)
 
         return img_arr
 
@@ -143,7 +152,42 @@ def train(cfg: Config, tub_paths: str, model: str = None,
     model_path, model_num = \
         get_model_train_details(database, model)
 
+    # Keras 3 的 ModelCheckpoint 只接受 .keras/.h5 后缀；--model 传入
+    # 无后缀（或 .savedmodel 自动命名）路径时统一规范为 .keras，
+    # 保证保存、_meta.json/.tflite 转换与后续加载使用同一路径
     base_path, ext = tuple(os.path.splitext(model_path))
+    if ext not in ('.keras', '.h5'):
+        ext = '.keras'
+        model_path = base_path + ext
+
+    # GPU 状态通报：缺 CUDA 运行库/驱动时 TF 静默回退 CPU，只在内部告警里
+    # 提一句；这里把最终训练设备明明白白写进日志（Web UI 训练页 SSE 可见），
+    # 避免「为什么训练这么慢」要翻 TF 噪声告警才能定位。
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        names = []
+        for gpu in gpus:
+            try:
+                name = tf.config.experimental.get_device_details(gpu).get(
+                    'device_name') or gpu.name
+            except Exception:
+                name = gpu.name
+            names.append(name)
+        logger.info('Training on GPU: ' + ', '.join(names))
+    else:
+        logger.warning('No GPU visible to TensorFlow - training on CPU. '
+                       'On Linux: pip install "tensorflow[and-cuda]"; '
+                       'on macOS CPU is intentional (Metal disabled).')
+
+    # 显存按需增长：TF 默认初始化即预占整卡显存，Web UI 再并发第二个
+    # 训练/推理进程时会因显存被占光而初始化失败。需在任何算子执行
+    # （GPU 设备实例化）之前设置，已在运行则静默跳过。
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except Exception:
+            pass
+
     kl = get_model_by_type(model_type, cfg)
     if transfer:
         kl.load(transfer)

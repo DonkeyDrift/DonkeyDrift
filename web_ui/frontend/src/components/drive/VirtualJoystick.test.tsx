@@ -124,20 +124,32 @@ describe('VirtualJoystick 回中行为', () => {
     stepRaf(performance.now() + 500);
     expectLastCallNear(onChange, 0, 0);
   });
+});
 
-  it('拖拽期间指针静止也按帧持续重发当前值（稳持心跳 #508）', () => {
+describe('VirtualJoystick 拖拽心跳（#508）', () => {
+  it('指针静止不触发 pointermove 时，按帧持续重发当前值', () => {
     const onChange = vi.fn();
-    const { container } = render(<VirtualJoystick onChange={onChange} size={220} />);
+    const { container } = render(<VirtualJoystick onChange={onChange} />);
     const el = container.firstChild as HTMLElement;
     pressAt(el, 0, -60);
+    const afterPress = onChange.mock.calls.length;
 
-    // 不再触发 pointermove，连续两帧仍应重发当前值
-    const countAfterPress = onChange.mock.calls.length;
+    // 不再有任何指针事件：连续三帧心跳都重发同值（60/82）
+    const base = performance.now();
+    stepRaf(base + 16);
+    stepRaf(base + 32);
+    stepRaf(base + 48);
+    expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(afterPress + 3);
+    for (const [angle, throttle] of onChange.mock.calls.slice(afterPress)) {
+      expect(angle).toBe(0);
+      expect(throttle).toBeCloseTo(60 / 82, 6);
+    }
+
+    // 松开进入宽限期：心跳随 dragging=false 停止，不再新增输出
+    const beforeRelease = onChange.mock.calls.length;
+    release(el);
+    vi.advanceTimersByTime(50);
     stepRaf(performance.now() + 16);
-    expect(onChange.mock.calls.length).toBeGreaterThan(countAfterPress);
-    const countAfterFirstFrame = onChange.mock.calls.length;
-    stepRaf(performance.now() + 32);
-    expect(onChange.mock.calls.length).toBeGreaterThan(countAfterFirstFrame);
-    expectLastCallNear(onChange, 0, 60 / 82);
+    expect(onChange.mock.calls.length).toBe(beforeRelease);
   });
 });

@@ -90,6 +90,18 @@ export const LocalConfigForm: React.FC<LocalConfigFormProps> = ({
         {config.advancedEnabled && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="space-y-1">
+              <label className="text-xs text-zinc-500">{t('trainer.imageSize')}</label>
+              <select
+                value={config.imageSize}
+                onChange={(e) => onConfigChange({ imageSize: e.target.value })}
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+              >
+                <option value="160x120">{t('trainer.imageSize160')}</option>
+                <option value="320x240">{t('trainer.imageSize320')}</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
               <label className="text-xs text-zinc-500">{t('trainer.batchSize')}</label>
               <input
                 type="number"
