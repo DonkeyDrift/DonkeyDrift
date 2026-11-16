@@ -1,3 +1,9 @@
+## 2026-11-16 (283)
+
+- ci(deploy): GitHub Actions windows-latest 实测一键部署全流程（Issue #531）
+  - 新增 `.github/workflows/one-click-deploy-windows.yml`：真实 Windows runner 上经仓库根 `一键部署.bat` 入口执行完整 9 步部署与验收（与 macOS 共用 install_steps 步骤生成器）；workflow_dispatch 手动触发 + main 上部署文件变更自动触发，90 分钟超时。
+  - 补上 Windows 入口此前的"未实测"空白；首跑结果见 workflow 运行记录。
+
 ## 2026-11-16 (282)
 
 - fix(deploy): 一键部署安装源失败自动回退官方 PyPI（Issue #528）
