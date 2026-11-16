@@ -236,6 +236,27 @@ def test_step_env_none_on_posix(monkeypatch):
     assert runner._step_env() is None
 
 
+def test_build_install_steps_shell_override():
+    steps = shared_build_install_steps(
+        "windows", r"C:\Users\Test\DonkeyDrift", r"C:\Users\Test\gym-donkeycar",
+        shell="pwsh",
+    )
+    assert steps[0].command.startswith("pwsh -NoProfile -NonInteractive -EncodedCommand ")
+
+
+def test_windows_shell_prefers_pwsh(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "C:/pwsh.exe" if name == "pwsh" else None)
+    assert runner._windows_shell() == "pwsh"
+    monkeypatch.setattr(runner.shutil, "which", lambda name: None)
+    assert runner._windows_shell() == "powershell"
+
+
+def test_windows_shell_kwargs_only_on_windows(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "x" if name == "pwsh" else None)
+    assert runner._windows_shell_kwargs("windows") == {"shell": "pwsh"}
+    assert runner._windows_shell_kwargs("macos") == {}
+
+
 def test_main_dry_run_prints_steps(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, "detect_platform", lambda: "macos")
     code = runner.main(
