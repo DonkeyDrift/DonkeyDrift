@@ -59,6 +59,17 @@ def default_gym_path(repo_root: Path) -> Path:
     return repo_root.parent / "gym-donkeycar"
 
 
+def _step_env():
+    """Windows 上剥离 PSModulePath：pwsh 7 的模块路径会让子进程
+    powershell.exe (5.1) 无法加载 Microsoft.PowerShell.Security。"""
+    if os.name != "nt":
+        return None
+    env = dict(os.environ)
+    env.pop("PSModulePath", None)
+    env.pop("psmodulepath", None)
+    return env
+
+
 def _run_step(step: InstallStep, deadline: float) -> tuple[int, list[str]]:
     if os.name == "nt":
         argv = step.command.split()
@@ -70,6 +81,7 @@ def _run_step(step: InstallStep, deadline: float) -> tuple[int, list[str]]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=os.path.expanduser("~"),
+            env=_step_env(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"无法启动步骤 {step.name}: {exc}") from exc
