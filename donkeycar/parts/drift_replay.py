@@ -4,8 +4,8 @@ DriftReplayPart 是一个"假 Pilot"：实现与 KerasPilot 同构的 Part 接�
 （输出 pilot/angle、pilot/throttle，-1~1，run_condition='run_pilot'），
 用"录制数据按 t_rel 时戳重放"替代"模型推理"。
 
-链路：DriftReplayPart -> pilot/* -> DriveMode -> steering/throttle
-      -> ArdPWMSteering/Throttle -> 串口下发 -> ESP32。
+链路：DriftReplayPart -> PilotHolder -> pilot/* -> DriveMode -> steering/throttle
+      -> ArdPWMSteering/Throttle -> 串口下发 -> ESP32。Web 热加载模型后由模型替换回放。
 
 安全机制（Part 内部，-1~1 域）：
 - 限幅：max_throttle/max_steering
@@ -153,11 +153,14 @@ class DriftReplayPart:
             return value
         return max(previous - max_delta, min(previous + max_delta, value))
 
-    def run(self, park: bool = False) -> tuple[float, float]:
+    def run(self, img_arr=None, park: bool = False) -> tuple[float, float]:
         """Vehicle 主循环调用，输出 (angle, throttle)。
 
+        :param img_arr: PilotHolder 传入的相机帧；回放不使用，仅为对齐 Pilot 接口
         :param park: 外部注入的 park 信号（True 时输出 0,0 并停发）
         """
+        if isinstance(img_arr, bool):
+            park = img_arr
         if self._shutdown or not self._loaded:
             return 0.0, 0.0
 

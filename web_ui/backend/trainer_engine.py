@@ -56,10 +56,9 @@ class TrainingJob:
     id: str
     # 'local' = on the machine running this backend; 'mypc' = on the user's
     # own computer (SSH callback, config train_my_pc.conf); 'mypc_install' =
-    # dependency install job and shared uv environment setup on the user's
-    # computer; 'online' = on the configured cloud server (config
-    # train_online.conf); 'aimo' = AIMO cloud NPU conversion
-    # (donkeycar/tools/aimo_npu_convert.py, .aidem artifact).
+    # shared uv environment setup on the user's computer; 'online' = on the
+    # configured cloud server (config train_online.conf); 'aimo' = AIMO cloud
+    # NPU conversion (donkeycar/tools/aimo_npu_convert.py, .aidem artifact).
     mode: Literal['local', 'mypc', 'mypc_install', 'online', 'aimo']
     status: Literal['pending', 'running', 'completed', 'failed', 'stopped'] = 'pending'
     # SSE 订阅者队列集合（#502）：多条连接同看一个 job 时各收全量副本；
@@ -79,6 +78,23 @@ class TrainingJob:
     error_message: Optional[str] = None
     # aimo 转换成功后的 .aidem 产物绝对路径（从工具输出 [5/5] 行解析）
     result_path: Optional[str] = None
+
+    def subscribe(self) -> asyncio.Queue:
+        """注册一个 SSE 订阅者，返回其专属队列（#502）。"""
+        sub: asyncio.Queue = asyncio.Queue()
+        self.subscribers.append(sub)
+        return sub
+
+    def unsubscribe(self, sub: asyncio.Queue) -> None:
+        try:
+            self.subscribers.remove(sub)
+        except ValueError:
+            pass
+
+    def publish(self, message: dict) -> None:
+        """把一条事件广播到所有活跃订阅者（同步 put_nowait，队列无界）。"""
+        for sub in list(self.subscribers):
+            sub.put_nowait(message)
 
     def subscribe(self) -> asyncio.Queue:
         """注册一个 SSE 订阅者，返回其专属队列（#502）。"""
@@ -199,6 +215,10 @@ class TrainingJobManager:
                 cwd=cwd
             )
 
+            # 训练子进程 stderr 尾部缓冲：失败时并入 error_message，
+            # 避免界面只显示无信息量的 "Exit code: 1" 而看不出真实原因
+            stderr_tail: list = []
+
             async def read_stream(stream, is_stderr=False):
                 while True:
                     line = await stream.readline()
@@ -206,6 +226,9 @@ class TrainingJobManager:
                         break
                     text = line.decode('utf-8', errors='ignore').rstrip()
                     if text:
+                        if is_stderr:
+                            stderr_tail.append(text)
+                            stderr_tail[:] = stderr_tail[-15:]
                         cleaned = _clean_training_line(text)
                         if not cleaned:
                             continue
@@ -265,6 +288,9 @@ class TrainingJobManager:
             else:
                 job.status = 'failed'
                 job.error_message = f"Exit code: {job.process.returncode}"
+                # 并入 stderr 最后几行，界面能直接看到真实报错（如 tub 不存在）
+                if stderr_tail:
+                    job.error_message += " | " + " / ".join(stderr_tail[-5:])
         except Exception as e:
             if job.status != 'stopped':
                 job.status = 'failed'

@@ -1,0 +1,205 @@
+{
+  "label": "treat_s7_i2",
+  "model": "/Users/hwp/Dev/DKC/DonkeyDrift/outputs/rl_runs/m3_treat_s7/final_model",
+  "port": 9304,
+  "episodes_detail": [
+    {
+      "ep": 0,
+      "ep_rew": 689.287,
+      "ep_len": 1160,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.447,
+      "max_abs_cte": 2.343,
+      "components": {
+        "cte": -33.713,
+        "progress": 723.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 1,
+      "ep_rew": 176.52,
+      "ep_len": 310,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.42,
+      "max_abs_cte": 2.013,
+      "components": {
+        "cte": -8.48,
+        "progress": 185.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 2,
+      "ep_rew": 1239.349,
+      "ep_len": 2000,
+      "end_reason": "step_budget",
+      "mean_abs_cte": 0.413,
+      "max_abs_cte": 1.553,
+      "components": {
+        "cte": -35.651,
+        "progress": 1275.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 3,
+      "ep_rew": 1229.773,
+      "ep_len": 2000,
+      "end_reason": "step_budget",
+      "mean_abs_cte": 0.416,
+      "max_abs_cte": 1.733,
+      "components": {
+        "cte": -38.227,
+        "progress": 1268.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 4,
+      "ep_rew": 1234.669,
+      "ep_len": 2000,
+      "end_reason": "step_budget",
+      "mean_abs_cte": 0.416,
+      "max_abs_cte": 1.843,
+      "components": {
+        "cte": -35.331,
+        "progress": 1270.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 5,
+      "ep_rew": 1112.27,
+      "ep_len": 1828,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.427,
+      "max_abs_cte": 2.094,
+      "components": {
+        "cte": -37.73,
+        "progress": 1150.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 6,
+      "ep_rew": 620.825,
+      "ep_len": 1015,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.423,
+      "max_abs_cte": 2.112,
+      "components": {
+        "cte": -25.175,
+        "progress": 646.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 7,
+      "ep_rew": 1225.825,
+      "ep_len": 2000,
+      "end_reason": "step_budget",
+      "mean_abs_cte": 0.427,
+      "max_abs_cte": 1.787,
+      "components": {
+        "cte": -42.175,
+        "progress": 1268.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 8,
+      "ep_rew": 1221.343,
+      "ep_len": 2000,
+      "end_reason": "step_budget",
+      "mean_abs_cte": 0.425,
+      "max_abs_cte": 1.814,
+      "components": {
+        "cte": -41.657,
+        "progress": 1263.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 9,
+      "ep_rew": 1208.051,
+      "ep_len": 1973,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.428,
+      "max_abs_cte": 2.125,
+      "components": {
+        "cte": -44.949,
+        "progress": 1253.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 10,
+      "ep_rew": 957.654,
+      "ep_len": 1585,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.423,
+      "max_abs_cte": 2.12,
+      "components": {
+        "cte": -35.346,
+        "progress": 993.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 11,
+      "ep_rew": 1218.422,
+      "ep_len": 2000,
+      "end_reason": "step_budget",
+      "mean_abs_cte": 0.423,
+      "max_abs_cte": 1.769,
+      "components": {
+        "cte": -41.578,
+        "progress": 1260.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    }
+  ],
+  "summary": {
+    "episodes": 12,
+    "mean_ep_rew": 1011.166,
+    "std_ep_rew": 327.551,
+    "offtrack_rate": 0.5,
+    "terminated_rate": 0.0,
+    "mean_ep_len": 1655.9,
+    "mean_abs_cte_all": 0.424
+  },
+  "meta": {
+    "sim_app": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app/Contents/MacOS/donkey_sim",
+    "spawn_seed_base": 50000,
+    "max_steps": 2000,
+    "time_step": 0.05,
+    "cte_limit": 2.0,
+    "wall_s": 74.1,
+    "finished_at": "2026-11-03 08:47:15"
+  }
+}

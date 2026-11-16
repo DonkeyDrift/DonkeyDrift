@@ -32,7 +32,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from donkeycar.utils import normalize_image, train_test_split
+from donkeycar.utils import fit_image_array, get_training_image_size, \
+    normalize_image, train_test_split
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,12 @@ class TorchLinearPilot:
 
     def run(self, img_arr: np.ndarray, *other_arr) -> tuple:
         """行车循环入口：uint8 RGB 帧 → (angle, throttle)。其余输入忽略。"""
-        x = normalize_image(np.asarray(img_arr)).astype(np.float32)
+        x = np.asarray(img_arr)
+        # 与 Keras 路径一致：相机分辨率与模型输入尺寸不同时自动等比缩放/加白框
+        target_h, target_w = self.input_shape[0], self.input_shape[1]
+        if x.shape[0] != target_h or x.shape[1] != target_w:
+            x = fit_image_array(x, target_w, target_h)
+        x = normalize_image(x).astype(np.float32)
         t = torch.from_numpy(x)[None, ...]          # [1,H,W,C]
         with torch.no_grad():
             a, th = self.net(t)
@@ -135,15 +141,21 @@ class TorchLinearPilot:
 class _TubDataset(Dataset):
     """(image /255 float32 HWC, [angle, throttle]) 对；与 KerasLinear 口径一致"""
 
-    def __init__(self, records):
+    def __init__(self, records, image_hw=None):
         self.records = records
+        self.image_hw = image_hw
 
     def __len__(self):
         return len(self.records)
 
     def __getitem__(self, idx):
         r = self.records[idx]
-        img = r.image(as_nparray=True).astype(np.float32) / 255.0
+        img = r.image(as_nparray=True)
+        if self.image_hw is not None:
+            target_h, target_w = self.image_hw
+            if img.shape[0] != target_h or img.shape[1] != target_w:
+                img = fit_image_array(img, target_w, target_h)
+        img = img.astype(np.float32) / 255.0
         y = np.array([r.underlying['user/angle'],
                       r.underlying['user/throttle']], np.float32)
         return torch.from_numpy(img), torch.from_numpy(y)
@@ -176,15 +188,15 @@ def train_torch_linear(cfg, tub_paths: str, model_output_path: str,
                 len(train_records), len(val_records), tubs)
 
     device = torch.device('cpu')
-    net = TorchLinear((getattr(cfg, 'IMAGE_H', 120),
-                       getattr(cfg, 'IMAGE_W', 160),
+    image_hw = get_training_image_size(cfg)
+    net = TorchLinear((image_hw[0], image_hw[1],
                        getattr(cfg, 'IMAGE_DEPTH', 3))).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     mse = nn.MSELoss()
-    train_loader = DataLoader(_TubDataset(train_records), batch_size=batch,
-                              shuffle=True, num_workers=0)
-    val_loader = DataLoader(_TubDataset(val_records), batch_size=batch,
-                            shuffle=False, num_workers=0)
+    train_loader = DataLoader(_TubDataset(train_records, image_hw),
+                              batch_size=batch, shuffle=True, num_workers=0)
+    val_loader = DataLoader(_TubDataset(val_records, image_hw),
+                            batch_size=batch, shuffle=False, num_workers=0)
 
     history = {'loss': [], 'val_loss': []}
     best_val, best_state = float('inf'), None

@@ -173,9 +173,9 @@ class KerasPilot(ABC):
             validation_data=validation_data,
             validation_steps=validation_steps,
             epochs=epochs,
-            verbose=verbose,
-            workers=1,
-            use_multiprocessing=False)
+            verbose=verbose)
+        # Keras 3 的 fit() 已移除 workers/use_multiprocessing 参数
+        # （Keras 2 中默认值即 workers=1, use_multiprocessing=False，行为不变）
         toc = datetime.datetime.now()
         logger.info(f'////////// Finished training in: {toc - tic} //////////')
 

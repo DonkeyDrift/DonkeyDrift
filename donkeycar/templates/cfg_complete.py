@@ -59,6 +59,10 @@ CAMERA_INDEX = 0  # used for 'WEBCAM' and 'CVCAM' when there is more than one ca
 CSIC_CAM_GSTREAMER_FLIP_PARM = 0 # (0 => none , 4 => Flip horizontally, 6 => Flip vertically)
 BGR2RGB = False  # true to convert from BRG format to RGB format; requires opencv
 SHOW_PILOT_IMAGE = False  # show the image used to do the inference when in autopilot mode
+# Pilot 周期观测日志间隔（秒）：>0 时每 N 秒记一条「pilot 观测」（推理输入
+# 统计 + 输出 + 新帧数，排查全自动异常用）；0=关闭（默认，安静）。
+# 帧冻结告警（输入 >2s 不更新）不受此键影响，始终开启。
+PILOT_OBSERVE_INTERVAL = 0
 
 # For IMAGE_LIST camera
 # PATH_MASK = "~/mycar/data/tub_1_20-03-12/*.jpg"
@@ -260,7 +264,7 @@ VESC_STEERING_OFFSET = 0.5 # VESC accepts steering inputs from 0 to 1. Coupled w
 # 漂移操作回放（Drift Replay）
 # - 用人工录制的 Tub v2 转向/油门时间序列替代模型推理
 # - 用 scripts/build_drift_clip.py 从 Tub 生成 replay clip JSON
-# - 与 KerasPilot 互斥：仅在未加载 --model 且 DRIFT_REPLAY_ENABLED=True 时生效
+# - 仅在未加载 --model 且 DRIFT_REPLAY_ENABLED=True 时作为初始 pilot；Web 热加载后切换为模型
 # - 安全：固件侧需 RC CH4 拨到 FULL_AUTO 才接受 pilot 数据；Park/mode 随时可接管
 # - 固件无 slew rate，max_delta_* 是上位机必须承担的变化率限制
 #
@@ -408,6 +412,10 @@ DEFAULT_AI_FRAMEWORK = 'tensorflow'
 # tensorflow models: (linear|categorical|tflite_linear|tensorrt_linear)
 # pytorch models: (resnet18)
 DEFAULT_MODEL_TYPE = 'linear'
+# 训练输入尺寸 "宽x高"，可选 "160x120"（默认，训练更快、模型更小）或 "320x240"。
+# 只作用于训练：模型 input_shape 与此一致，训练管道会把图像缩放到该尺寸；
+# 与相机的 IMAGE_W/IMAGE_H（采集/推理分辨率）解耦，推理端按模型输入自动适配。
+TRAINING_IMAGE_SIZE = "160x120"
 BATCH_SIZE = 128                #how many records to use when doing one pass of gradient decent. Use a smaller number if your gpu is running out of memory.
 TRAIN_TEST_SPLIT = 0.8          #what percent of records to use for training. the remaining used for validation.
 MAX_EPOCHS = 100                #how many times to visit all records of your data

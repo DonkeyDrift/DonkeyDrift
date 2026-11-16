@@ -45,6 +45,22 @@ def create_models(keras_pilot, dir):
     return km, kl, krt
 
 
+def test_keras_interpreter_loads_legacy_json_and_weights(tmp_dir):
+    source = KerasLinear()
+    json_path = os.path.join(tmp_dir, 'model.json')
+    with open(json_path, 'w', encoding='utf-8') as handle:
+        handle.write(source.interpreter.model.to_json())
+    h5_path = os.path.join(tmp_dir, 'model.weights.h5')
+    source.interpreter.model.save_weights(h5_path)
+    shutil.copyfile(h5_path, os.path.join(tmp_dir, 'model.weights'))
+
+    loaded = KerasLinear()
+    loaded.interpreter.load_json(json_path)
+    img = get_test_img(source)
+
+    assert loaded.run(img) == approx(source.run(img), rel=TOLERANCE, abs=TOLERANCE)
+
+
 @pytest.mark.parametrize('keras_pilot', test_data)
 def test_keras_vs_tflite_and_tensorrt(keras_pilot, tmp_dir):
     """ This test cannot run for the 3D CNN model in tflite and the LSTM

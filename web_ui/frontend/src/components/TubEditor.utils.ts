@@ -11,6 +11,11 @@ export const MAX_UNDO_HISTORY = 10;
 export const PLAYHEAD_SCROLL_PADDING_RATIO = 0.15;
 export const DRAG_SELECTION_THRESHOLD_PX = 5;
 export const MIN_SELECTION_DRAFT_WIDTH_PX = 2;
+/** 触屏上 touchend 后浏览器会补发一套兼容鼠标事件（mousemove/mousedown/mouseup）。
+ *  React 把 touchstart/touchmove 挂成 passive，preventDefault 抑制不了这组事件，
+ *  若不按时间窗屏蔽，它们会把触摸链路刚提交的选区再走一遍鼠标逻辑（清锚点/清选区/
+ *  塌缩成单帧），表现为触屏上「框不住」。窗口取兼容事件补发延迟（~300ms）之上。 */
+export const TOUCH_COMPAT_MOUSE_SUPPRESS_MS = 700;
 
 /** 把全局播放位置写进下方的不受控进度条（value 直写 DOM，播放期零 re-render）。
  *  值一律夹到当前量程（records.length - 1）：越界时浏览器会静默截断显示值，量程变化后

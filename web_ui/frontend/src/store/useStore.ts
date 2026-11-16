@@ -54,6 +54,7 @@ export interface TrainerLocalConfig {
   model: string;
   modelType: string;
   transfer: string;
+  imageSize: string;
   advancedEnabled: boolean;
   batchSize: number;
   trainTestSplit: number;
@@ -94,7 +95,7 @@ interface AppState {
   isPlaying: boolean;
   isLooping: boolean;
   error: string | null;
-  activeDrawer: 'loaders' | null;
+  activeDrawer: 'loaders' | 'connectors' | null;
   // 配置自动加载每页面生命周期只尝试一次（ConfigLoader 随抽屉开关反复挂载，
   // 不能用组件内 ref 记忆）；不持久化，刷新页面后重新尝试
   configAutoLoadTried: boolean;
@@ -114,7 +115,9 @@ interface AppState {
 
   setConfig: (config: Record<string, unknown>, path: string) => void;
   setTub: (path: string, records: TubRecord[], fields: string[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
-  clearTub: () => void;
+  // 默认连接（配置加载后指向 <car>/data）：只落输入框路径并标记「已处理」，
+  // 让 TubManagerPage 不再重复拉取；data 缺失时保持默认路径、清掉旧 tub 残留
+  setDefaultTubPath: (path: string) => void;
   requestTubRefresh: () => void;
   setRecords: (records: TubRecord[]) => void;
   setAllRecords: (records: TubRecord[], totalPhysicalRecords?: number, deletedIndexes?: number[]) => void;
@@ -126,7 +129,7 @@ interface AppState {
   setIsLooping: (isLooping: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  setActiveDrawer: (drawer: 'loaders' | null) => void;
+  setActiveDrawer: (drawer: 'loaders' | 'connectors' | null) => void;
   setSelectionRange: (startIndex: number, endIndex: number) => void;
   clearSelectionRange: () => void;
   undoSelectionRange: () => void;
@@ -174,7 +177,7 @@ export const useStore = create<AppState>()(
       isPlaying: false,
       isLooping: false,
       error: null,
-      activeDrawer: 'loaders',
+      activeDrawer: 'loaders' as 'loaders' | 'connectors' | null,
       configAutoLoadTried: false,
       selectionStartIndex: null,
       selectionEndIndex: null,
@@ -212,6 +215,7 @@ export const useStore = create<AppState>()(
         model: '',
         modelType: 'linear',
         transfer: '',
+        imageSize: '160x120',
         advancedEnabled: false,
         batchSize: 128,
         trainTestSplit: 0.8,
@@ -225,6 +229,27 @@ export const useStore = create<AppState>()(
       },
 
       setConfig: (config, path) => set({ config, configPath: path, error: null, activeDrawer: null }),
+      // 默认连接：Tub 加载器输入框指向 <car>/data。loadedTubPath 同步置为该
+      // 路径，既让 TubManagerPage 跳过重复拉取，也让「data 缺失」的静默失败
+      // 不在页面重挂载时反复重试。真实记录仍由 setTub 在加载成功后写入。
+      setDefaultTubPath: (path) =>
+        set({
+          tubPath: path,
+          loadedTubPath: path,
+          records: [],
+          originalRecords: [],
+          totalRecords: 0,
+          tubTotalRecords: 0,
+          totalPhysicalRecords: 0,
+          deletedIndexes: [],
+          fields: [],
+          currentIndex: 0,
+          activeSessionId: null,
+          activeSessionRecords: [],
+          activeSessionIds: [],
+          activeSessionCrossTub: false,
+          isPlaying: false,
+        }),
       setTub: (path, records, fields, totalPhysicalRecords, deletedIndexes) =>
         set({
           tubPath: path,
@@ -244,29 +269,6 @@ export const useStore = create<AppState>()(
           error: null,
           activeDrawer: null,
           isPlaying: false,
-        }),
-      clearTub: () =>
-        set({
-          tubPath: '',
-          loadedTubPath: null,
-          records: [],
-          originalRecords: [],
-          totalRecords: 0,
-          tubTotalRecords: 0,
-          totalPhysicalRecords: 0,
-          deletedIndexes: [],
-          fields: [],
-          currentIndex: 0,
-          activeSessionId: null,
-          activeSessionRecords: [],
-          activeSessionIds: [],
-          activeSessionCrossTub: false,
-          isPlaying: false,
-          isDragging: false,
-          selectionStartIndex: null,
-          selectionEndIndex: null,
-          selectionHistory: [],
-          selectionHistoryIndex: -1,
         }),
       // 手动刷新 Tub：清空已加载标记并递增令牌，让 TubManagerPage 重新全量拉取
       requestTubRefresh: () =>

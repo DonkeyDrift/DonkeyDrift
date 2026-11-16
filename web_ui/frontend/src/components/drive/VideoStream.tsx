@@ -60,8 +60,16 @@ export const VideoStream = React.memo(function VideoStream({
   const degraded = forceMjpeg || mjpegFallbackAllowed;
   const [mjpegVisible, setMjpegVisible] = useState(!webRtcVisible);
   const browserFps = Math.round(metrics.browserFps || stats.browser_fps || 0);
-  // 徽标优先显示真实端到端时延：rVFC captureTime 通路（浏览器原生）优先，
-  // 浏览器不提供时走像素印章兜底（帧内嵌车端捕获时刻，经双段时钟对齐）；
+  const fpsTooltip = metrics.presentedFps !== undefined
+    ? t('driveViz.fpsPresentedTooltip', {
+      presented: metrics.presentedFps.toFixed(1),
+      callback: (metrics.callbackFps ?? 0).toFixed(1),
+      missed: metrics.missedCallbacks ?? 0,
+      interval: metrics.p95FrameIntervalMs.toFixed(1),
+    })
+    : t('driveViz.fpsCallbackTooltip', { interval: metrics.p95FrameIntervalMs.toFixed(1) });
+  // 徽标显示像素印章采样，缺失时使用浏览器 captureTime 估计；
+  // 日常抽样不保证首次呈现，逐帧诊断保留内容去重测量；
   // 两者皆无时回退旧的 p95 帧间隔（帧到达节奏，非时延，仅作降级参考）
   const e2eP95Ms = metrics.e2eLatencyP95Ms || stats.e2e_latency_p95_ms || 0;
   const hasTrueE2e = e2eP95Ms > 0 && (metrics.e2eSamples > 0 || (stats.e2e_samples ?? 0) > 0);
@@ -214,15 +222,15 @@ export const VideoStream = React.memo(function VideoStream({
     onLatencyChange?.(latencyMs);
   }, [latencyMs, onLatencyChange]);
 
-  // 测量口径提示：未开启像素印章时，徽章显示的是帧间隔而非真实端到端时延。
+  // 无本地或后端 E2E 样本时才提示，避免后端上报尚未到达时误报。
   useEffect(() => {
-    if (webRtcConnected && (stats.e2e_samples ?? 0) === 0) {
+    if (webRtcConnected && !hasTrueE2e) {
       console.warn(
         '[drive-webrtc] 当前徽章显示的是帧间隔而非真实 E2E 时延。' +
-        '如需精确测量，请车端启用 DRIVE_WEBRTC_FRAME_STAMP=1（或 VITE_DRIVE_WEBRTC_DIAGNOSTIC=1 模式）。',
+        '像素时间戳测量需车端启用 DRIVE_WEBRTC_FRAME_STAMP=1；逐帧诊断还需前端 VITE_DRIVE_WEBRTC_DIAGNOSTIC=1。',
       );
     }
-  }, [webRtcConnected, stats.e2e_samples]);
+  }, [hasTrueE2e, webRtcConnected]);
 
   const statusMeta = (() => {
     if (forceMjpeg) {
@@ -268,7 +276,12 @@ export const VideoStream = React.memo(function VideoStream({
           </div>
           <div className="text-base font-mono leading-tight text-cyan-400">
             {latencyMs > 0 ? `${latencyMs}ms` : '-'}
-            {hasTrueE2e && <span className="ml-1 text-[10px] text-zinc-400">E2E</span>}
+            {hasTrueE2e && (
+              <span
+                className="ml-1 text-[10px] text-zinc-400"
+                title={t(diagnosticMode ? 'driveViz.e2eDiagnosticTooltip' : 'driveViz.e2eSampledTooltip')}
+              >E2E</span>
+            )}
             {diagnosticMode && <span className="ml-1 text-[10px] text-amber-400">{t('driveViz.diagnostic')}</span>}
           </div>
         </div>
@@ -283,7 +296,10 @@ export const VideoStream = React.memo(function VideoStream({
           </span>
         )}
       </div>
-      <div className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/85 px-2 py-1 text-center shadow-lg">
+      <div
+        className="absolute right-2 top-2 z-30 rounded-md border border-white/10 bg-zinc-900/85 px-2 py-1 text-center shadow-lg"
+        title={webRtcConnected ? fpsTooltip : undefined}
+      >
         <div className="text-xs text-zinc-400 uppercase leading-none">FPS</div>
         <div className="text-base font-mono leading-tight text-cyan-400">{webRtcConnected ? browserFps : mjpegFps}</div>
       </div>

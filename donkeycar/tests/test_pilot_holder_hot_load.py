@@ -98,6 +98,42 @@ def test_failed_load_keeps_previous_pilot(monkeypatch):
     assert holder.model_path == "/tmp/good.h5"
 
 
+def test_initial_pilot_is_replaced_by_hot_load(monkeypatch):
+    created = []
+    _patch_models(monkeypatch, created)
+    replay = FakePilot("replay")
+    holder = PilotHolder(FakeCfg(), initial_pilot=replay)
+
+    assert holder.current() is replay
+    holder.load("/tmp/model.tflite", "tflite_linear")
+
+    assert replay.shutdown_called is True
+    assert holder.current() is created[0]
+    assert holder.run("img") == (0.1, 0.2)
+
+
+def test_legacy_json_uses_json_interpreter(monkeypatch):
+    class FakeInterpreter:
+        def __init__(self):
+            self.loaded_path = None
+
+        def load_json(self, model_path):
+            self.loaded_path = model_path
+
+    pilot = FakePilot("linear")
+    pilot.interpreter = FakeInterpreter()
+
+    import donkeycar.utils as dk_utils
+    monkeypatch.setattr(dk_utils, "get_model_by_type", lambda *_: pilot)
+    holder = PilotHolder(FakeCfg())
+
+    holder.load("/tmp/legacy.json", "linear")
+
+    assert pilot.interpreter.loaded_path == "/tmp/legacy.json"
+    assert pilot.loaded_path is None
+    assert holder.model_path == "/tmp/legacy.json"
+
+
 class FakeLoader:
     def __init__(self, fail=False):
         self.fail = fail
@@ -192,3 +228,66 @@ def test_restart_with_model_alias_hot_loads(tmp_path):
 
     assert loader.calls == [(str(model_file), None)]
     assert sent[-1]["success"] is True
+
+
+# ── 推理可观测性：周期日志默认关闭、PILOT_OBSERVE_INTERVAL 控制、冻结告警常开 ──
+
+class _ObsCfg(FakeCfg):
+    """带 PILOT_OBSERVE_INTERVAL 的配置基类。"""
+
+
+def _observe_holder(monkeypatch, caplog, interval_value):
+    """构造已加载假 pilot 的 holder，返回 (holder, frame)。"""
+    created = []
+    _patch_models(monkeypatch, created)
+
+    cfg = _ObsCfg()
+    if interval_value is not None:
+        cfg.PILOT_OBSERVE_INTERVAL = interval_value
+    holder = PilotHolder(cfg, output_count=2)
+    holder.load("/fake/m.tflite", "linear")
+    import numpy as np
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    return holder, frame
+
+
+def test_observe_log_disabled_by_default(monkeypatch, caplog):
+    """缺省（无配置键）时不打周期观测日志。"""
+    import logging
+    holder, frame = _observe_holder(monkeypatch, caplog, None)
+    with caplog.at_level(logging.INFO, logger="donkeycar.parts.pilot_holder"):
+        holder._obs_last_log -= 10.0  # 模拟早过了日志间隔
+        holder._observe(frame, (0.05, 0.21))
+    assert not any("pilot 观测" in r.message for r in caplog.records)
+
+
+def test_observe_log_disabled_with_zero(monkeypatch, caplog):
+    """PILOT_OBSERVE_INTERVAL = 0 时同样不打周期观测日志。"""
+    import logging
+    holder, frame = _observe_holder(monkeypatch, caplog, 0)
+    with caplog.at_level(logging.INFO, logger="donkeycar.parts.pilot_holder"):
+        holder._obs_last_log -= 10.0
+        holder._observe(frame, (0.05, 0.21))
+    assert not any("pilot 观测" in r.message for r in caplog.records)
+
+
+def test_observe_log_enabled_by_interval(monkeypatch, caplog):
+    """PILOT_OBSERVE_INTERVAL = 5 且到点时打印「pilot 观测」。"""
+    import logging
+    holder, frame = _observe_holder(monkeypatch, caplog, 5)
+    with caplog.at_level(logging.INFO, logger="donkeycar.parts.pilot_holder"):
+        holder._obs_last_log -= 10.0
+        holder._observe(frame, (0.05, 0.21))
+    assert any("pilot 观测" in r.message for r in caplog.records)
+
+
+def test_freeze_warning_fires_even_when_log_disabled(monkeypatch, caplog):
+    """周期日志关闭时帧冻结告警仍然生效（安全网常开）。"""
+    import logging
+    from donkeycar.parts.pilot_holder import _OBS_FREEZE_WARN_S
+    holder, frame = _observe_holder(monkeypatch, caplog, 0)
+    with caplog.at_level(logging.WARNING, logger="donkeycar.parts.pilot_holder"):
+        holder._observe(frame, (0.05, 0.21))  # 登记对象 id
+        holder._obs_fresh_since -= (_OBS_FREEZE_WARN_S + 0.5)
+        holder._observe(frame, (0.05, 0.21))  # 同一对象且超时 → 告警
+    assert any("冻结" in r.message for r in caplog.records)

@@ -1,0 +1,19 @@
+{
+  "run_name": "rl_m2_smoke",
+  "new_steps": 100000,
+  "total_timesteps": 100352,
+  "lr": 0.0001,
+  "seed": 7,
+  "time_step": 0.05,
+  "wall_s": 314.8,
+  "steps_per_s_incl_updates": 318.8,
+  "sb3": "2.9.2",
+  "torch": "2.15.0",
+  "reward_cfg": "RewardConfig(w_cte=1.0, cte_deadband_m=0.5, cte_huber_delta_m=0.5, w_drift=0.0, drift_mu_deg=25.0, drift_sigma_deg=10.0, drift_speed_floor_mps=2.0, drift_speed_ref_mps=6.0, w_progress=1.0, progress_speed_floor_mps=0.3, w_overspeed=0.5, speed_max_mps=8.0, w_step=0.0, w_timeout=0.0, w_done=1.0, node_spacing_m=1.0)",
+  "curriculum": {
+    "lateral": 1.0,
+    "heading": 8.0,
+    "seed": 7
+  },
+  "finished_at": "2026-11-02 10:13:14"
+}

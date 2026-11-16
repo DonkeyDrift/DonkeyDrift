@@ -9,11 +9,12 @@ import { loadConfig, loadTub, listChildTubs } from '../services/api';
 // 最终代码审查缺陷：浏览配置入口（FileBrowserModal 选择车辆目录）没有像手动
 // 加载那样优先恢复持久化的 tubPath，而是直接 autoLoadTubFor(<car>) 加载
 // <car>/data——用户上次选定的 tub 被静默替换成本次车辆目录下的默认 data。
-// 本测试要求：选择车辆目录后仍 loadConfig(<car>)，但 Tub 应优先恢复
-// store 里持久化的路径，而不是直接加载 <car>/data。
+// 本测试要求：选择车辆目录后仍 loadConfig(<car>)，但本项目内持久化的 tub
+// 应优先恢复；属于其他项目的持久化 tub 按 main 架构不恢复（避免旧项目 tub
+// 继续被加载/轮询），默认连接新项目的 <car>/data。
 
 const { CAR_DIR } = vi.hoisted(() => ({ CAR_DIR: '/home/x/mycar' }));
-const SAVED_TUB = '/saved/tub';
+const SAVED_TUB = '/home/x/mycar/data/tub_7_26-10-20';
 
 vi.mock('@/i18n', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -91,7 +92,7 @@ describe('ConfigLoader 浏览选择车辆目录', () => {
     }));
   });
 
-  it('应优先恢复持久化的 tubPath，而不是直接加载 <car>/data', async () => {
+  it('应优先恢复本项目持久化的 tubPath，而不是直接加载 <car>/data', async () => {
     render(<ConfigLoader />);
 
     fireEvent.click(screen.getByLabelText('common.configLoader.browseAria'));
@@ -108,5 +109,23 @@ describe('ConfigLoader 浏览选择车辆目录', () => {
     expect(useStore.getState().configPath).toBe(CAR_DIR);
     expect(useStore.getState().tubPath).toBe(SAVED_TUB);
     expect(useStore.getState().records).toEqual(savedTubRecords);
+  });
+
+  it('持久化 tub 属于其他项目时不恢复，默认连接新项目 <car>/data', async () => {
+    useStore.setState({ tubPath: '/saved/tub' });
+    render(<ConfigLoader />);
+
+    fireEvent.click(screen.getByLabelText('common.configLoader.browseAria'));
+    fireEvent.click(await screen.findByRole('button', { name: 'pick-mycar' }));
+
+    await waitFor(() => {
+      expect(useStore.getState().isLoading).toBe(false);
+      expect(mockLoadTub.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    expect(mockLoadConfig).toHaveBeenCalledWith(CAR_DIR);
+    expect(mockLoadTub).toHaveBeenCalledWith(`${CAR_DIR}/data`);
+    expect(useStore.getState().tubPath).toBe(`${CAR_DIR}/data`);
+    expect(useStore.getState().records).toEqual(dataTubRecords);
   });
 });

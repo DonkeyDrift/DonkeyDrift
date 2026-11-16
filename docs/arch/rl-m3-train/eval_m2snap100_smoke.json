@@ -1,0 +1,70 @@
+{
+  "label": "m2snap100_smoke",
+  "model": "/Users/hwp/Dev/DKC/DonkeyDrift/outputs/rl_runs/rl_m2_smoke/snap_100000/model",
+  "port": 9301,
+  "episodes_detail": [
+    {
+      "ep": 0,
+      "ep_rew": 56.458,
+      "ep_len": 98,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.4,
+      "max_abs_cte": 2.289,
+      "components": {
+        "cte": -3.542,
+        "progress": 60.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 1,
+      "ep_rew": 35.214,
+      "ep_len": 77,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.51,
+      "max_abs_cte": 2.121,
+      "components": {
+        "cte": -2.786,
+        "progress": 38.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    },
+    {
+      "ep": 2,
+      "ep_rew": 22.821,
+      "ep_len": 53,
+      "end_reason": "cte_limit",
+      "mean_abs_cte": 0.581,
+      "max_abs_cte": 2.228,
+      "components": {
+        "cte": -4.179,
+        "progress": 27.0,
+        "drift": 0.0,
+        "overspeed": 0.0,
+        "done": 0.0
+      }
+    }
+  ],
+  "summary": {
+    "episodes": 3,
+    "mean_ep_rew": 38.164,
+    "std_ep_rew": 13.89,
+    "offtrack_rate": 1.0,
+    "terminated_rate": 0.0,
+    "mean_ep_len": 76,
+    "mean_abs_cte_all": 0.497
+  },
+  "meta": {
+    "sim_app": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app/Contents/MacOS/donkey_sim",
+    "spawn_seed_base": 50000,
+    "max_steps": 2000,
+    "time_step": 0.05,
+    "cte_limit": 2.0,
+    "wall_s": 12.6,
+    "finished_at": "2026-11-02 21:29:33"
+  }
+}

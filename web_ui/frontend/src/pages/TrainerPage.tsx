@@ -26,6 +26,7 @@ import { useTranslation } from '@/i18n';
 import { Cpu, Database, SlidersHorizontal } from 'lucide-react';
 
 const TRAINING_KEYS = [
+  'TRAINING_IMAGE_SIZE',
   'BATCH_SIZE',
   'TRAIN_TEST_SPLIT',
   'MAX_EPOCHS',
@@ -256,6 +257,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
         const updates: Partial<typeof trainerLocalConfig> = {};
 
         // Read training config values (prefer myconfig.py overrides)
+        if (merged.TRAINING_IMAGE_SIZE !== undefined) updates.imageSize = merged.TRAINING_IMAGE_SIZE;
         if (merged.BATCH_SIZE !== undefined) updates.batchSize = merged.BATCH_SIZE;
         if (merged.TRAIN_TEST_SPLIT !== undefined) updates.trainTestSplit = merged.TRAIN_TEST_SPLIT;
         if (merged.MAX_EPOCHS !== undefined) updates.maxEpochs = merged.MAX_EPOCHS;
@@ -288,6 +290,7 @@ export const TrainerPage = React.memo(function TrainerPage() {
     // Save training config to myconfig.py
     const trainingConfig: Record<string, string | number | boolean> = {};
     if (trainerLocalConfig.advancedEnabled) {
+      trainingConfig['TRAINING_IMAGE_SIZE'] = trainerLocalConfig.imageSize;
       trainingConfig['BATCH_SIZE'] = trainerLocalConfig.batchSize;
       trainingConfig['TRAIN_TEST_SPLIT'] = trainerLocalConfig.trainTestSplit;
       trainingConfig['MAX_EPOCHS'] = trainerLocalConfig.maxEpochs;

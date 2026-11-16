@@ -3,8 +3,8 @@
 """运行时可热切换的推理模型容器（issue #003 热加载）。
 
 车端模型过去只在 `manage.py drive` 启动时按 `--model` 加载，运行中换模型
-只能重启车端进程。本 Part 在启动时无条件注册，内部持有一个 KerasPilot，
-允许在车端进程运行期间原子替换：
+只能重启车端进程。本 Part 在启动时无条件注册，内部持有当前 pilot（模型或
+漂移回放），允许在车端进程运行期间原子替换：
 
 - Web 端选模型 → 后端经 WebSocket 下发 `load_model` → DriveApiBridge 调用
   `PilotHolder.load(path, type)`，构建新模型后原子替换当前实例；
@@ -15,23 +15,54 @@
 
 仅依赖 `donkeycar.utils.get_model_by_type`，不在模块导入期引入 TensorFlow。
 """
+import hashlib
 import logging
+import os
 import threading
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# 推理可观测性参数：帧冻结告警阈值 / 内容哈希兜底采样间隔（秒）。
+# 周期观测日志的间隔由配置键 PILOT_OBSERVE_INTERVAL 控制（默认 0=关闭，
+# 见 __init__），帧冻结告警不受该开关键影响、始终开启（低噪声安全网）。
+_OBS_FREEZE_WARN_S = 2.0
+_OBS_HASH_INTERVAL = 1.0
 
 
 class PilotHolder:
     """可原子替换内部 KerasPilot 的常驻 Part。"""
 
-    def __init__(self, cfg, output_count: int = 2):
+    def __init__(self, cfg, output_count: int = 2, initial_pilot=None):
         self.cfg = cfg
         self.output_count = int(output_count)
         self._lock = threading.Lock()
-        self._pilot = None
+        self._pilot = initial_pilot
         self._model_path: Optional[str] = None
         self._model_type: Optional[str] = None
+        self._target_hw: Optional[tuple[int, int]] = None
+        # 推理可观测性状态（issue：全自动 pilot 恒定输出排查）
+        self._obs_debug = os.environ.get('DK_PILOT_DEBUG', '').strip() not in ('', '0')
+        # 周期观测日志间隔（秒）：myconfig 键 PILOT_OBSERVE_INTERVAL，
+        # 0/缺省=关闭（默认不打观测日志）；帧冻结告警与 DK_PILOT_DEBUG
+        # 逐帧日志不受此键控制。
+        try:
+            self._obs_log_interval = float(
+                getattr(cfg, 'PILOT_OBSERVE_INTERVAL', 0) or 0)
+        except (TypeError, ValueError):
+            self._obs_log_interval = 0.0
+        self._obs_reset(now=time.time())
+
+    def _obs_reset(self, now: float) -> None:
+        """初始化/换模型后重置观测状态。"""
+        self._obs_last_log = now
+        self._obs_frame_id: Optional[int] = None
+        self._obs_frame_digest: Optional[str] = None
+        self._obs_last_hash = now
+        self._obs_fresh_since: Optional[float] = None
+        self._obs_freeze_warned = False
+        self._obs_fresh_frames = 0
 
     # ------------------------------------------------------------------
     # 构建 / 加载
@@ -42,51 +73,58 @@ class PilotHolder:
 
         resolved_type = model_type or getattr(self.cfg, "DEFAULT_MODEL_TYPE", "linear")
         pilot = dk_utils.get_model_by_type(resolved_type, self.cfg)
-        pilot.load(model_path)
-        self._validate_input_shape(pilot, model_path)
-        return pilot, resolved_type
+        if model_path.lower().endswith('.json'):
+            pilot.interpreter.load_json(model_path)
+        else:
+            pilot.load(model_path)
+        target_hw = self._validate_input_shape(pilot, model_path)
+        return pilot, resolved_type, target_hw
 
-    def _validate_input_shape(self, pilot, model_path: str):
-        """校验模型输入 HxWxD 与 cfg 相机分辨率一致，不一致直接拒绝加载。
+    def _validate_input_shape(self, pilot, model_path: str) -> Optional[tuple[int, int]]:
+        """校验模型输入通道数与 cfg 一致，并记录模型期望的 (H, W)。
 
-        分辨率调整后（如 160x120 → 320x240）旧模型形状不匹配：推理首帧
-        必然抛异常，而 drive 主循环对部件异常的策略是整体退出（vehicle.py
-        只捕获 KeyboardInterrupt 后 stop()），若发生在自动模式下会带停循环。
-        在加载期拦截，错误经桥接层回传 Web UI，旧模型保持不变。
+        若模型输入 (H, W) 与当前相机分辨率不一致（例如云端训练的 160x120 模型
+        运行在 320x240 相机配置下），run() 会在推理前自动执行等比缩放 + 加白框
+        填充（不直接拉伸）。若颜色通道数 D 不一致则拒绝加载。
         """
         expected = (getattr(self.cfg, "IMAGE_H", None),
                     getattr(self.cfg, "IMAGE_W", None),
                     getattr(self.cfg, "IMAGE_DEPTH", None))
-        if not all(isinstance(v, int) and v > 0 for v in expected):
-            return
         try:
             shape = tuple(pilot.get_input_shape('img_in'))
         except Exception:  # pragma: no cover - 拿不到输入形状的模型类型不拦截
-            return
+            return None
         try:
             # TfLite/Keras 返回的可能是 np.integer，统一转 Python int 再比较
             actual = tuple(int(d) for d in shape[-3:])
         except (TypeError, ValueError):  # pragma: no cover - 动态/未知维度不拦截
-            return
-        if len(actual) != 3:
-            return
-        if actual != expected:
+            return None
+        if len(actual) != 3 or actual[0] <= 0 or actual[1] <= 0:
+            return None
+        if isinstance(expected[2], int) and expected[2] > 0 and actual[2] != expected[2]:
             raise ValueError(
-                f"模型输入 {actual[1]}x{actual[0]}x{actual[2]} 与当前相机分辨率 "
-                f"{expected[1]}x{expected[0]}x{expected[2]} 不一致（{model_path}）；"
-                f"请用当前分辨率数据重新训练，或将 myconfig.py 改回模型对应的分辨率")
+                f"模型输入通道数 {actual[2]} 与当前相机配置 {expected[2]} 不一致（{model_path}）")
+        if (isinstance(expected[0], int) and isinstance(expected[1], int)
+                and (actual[0], actual[1]) != (expected[0], expected[1])):
+            logger.info(
+                "模型输入 %dx%d 与相机分辨率 %dx%d 不同，推理时将自动等比缩放/加白框适配（%s）",
+                actual[1], actual[0], expected[1], expected[0], model_path,
+            )
+        return (actual[0], actual[1])
 
     def load(self, model_path: str, model_type: Optional[str] = None):
         """构建并原子替换当前模型；构建失败时保留旧模型并把异常抛给调用方。"""
         if not model_path or not isinstance(model_path, str):
             raise ValueError("model_path 无效")
         # 构建在锁外完成：热加载可能耗时数百毫秒到数秒，不能阻塞推理线程。
-        pilot, resolved_type = self._build(model_path, model_type)
+        pilot, resolved_type, target_hw = self._build(model_path, model_type)
         with self._lock:
             old = self._pilot
             self._pilot = pilot
             self._model_path = model_path
             self._model_type = resolved_type
+            self._target_hw = target_hw
+            self._obs_reset(now=time.time())
         if old is not None:
             try:
                 old.shutdown()
@@ -101,10 +139,91 @@ class PilotHolder:
     def run(self, img_arr, *other_arr):
         with self._lock:
             pilot = self._pilot
+            target_hw = self._target_hw
         if pilot is None:
             # 与「启动时未注册 pilot」等价：DriveMode 收到 None 按 0 处理。
             return tuple(None for _ in range(self.output_count))
-        return pilot.run(img_arr, *other_arr)
+        if target_hw is not None and img_arr is not None and hasattr(img_arr, "shape"):
+            from donkeycar.utils import fit_image_array
+            target_h, target_w = target_hw
+            if img_arr.shape[0] != target_h or img_arr.shape[1] != target_w:
+                img_arr = fit_image_array(img_arr, target_w, target_h)
+        outputs = pilot.run(img_arr, *other_arr)
+        self._observe(img_arr, outputs)
+        return outputs
+
+    def _observe(self, img_arr, outputs) -> None:
+        """推理输入/输出观测：可选的周期统计日志 + 帧冻结检测（常开）。
+
+        排查「全自动时 pilot 输出恒定」这类问题的首要线索是模型到底看到了
+        什么：输入帧若持续不变，输出恒定就是必然。开销控制：对象 id 每帧
+        比较（O(1)），内容哈希最多每秒一次兜底（防原地改写的相机实现）。
+        周期统计日志由 myconfig 键 PILOT_OBSERVE_INTERVAL 控制（秒，
+        默认 0=关闭），帧冻结告警始终开启，DK_PILOT_DEBUG=1 时逐帧打印。
+        观测自身绝不抛异常、绝不影响主链路。
+        """
+        try:
+            now = time.time()
+            outs_desc = self._format_outputs(outputs)
+
+            fresh = False
+            if img_arr is not None and hasattr(img_arr, 'shape'):
+                arr_id = id(img_arr)
+                if arr_id != self._obs_frame_id:
+                    fresh = True
+                    self._obs_frame_id = arr_id
+                    self._obs_fresh_since = now
+                elif now - self._obs_last_hash >= _OBS_HASH_INTERVAL:
+                    # 同一对象也可能是原地改写，低频哈希兜底比对
+                    self._obs_last_hash = now
+                    digest = hashlib.sha1(img_arr.tobytes()).hexdigest()[:10]
+                    if digest != self._obs_frame_digest:
+                        fresh = True
+                        self._obs_fresh_since = now
+                    self._obs_frame_digest = digest
+            if fresh:
+                self._obs_fresh_frames += 1
+                self._obs_freeze_warned = False
+            elif self._obs_fresh_since is not None:
+                frozen_s = now - self._obs_fresh_since
+                if frozen_s > _OBS_FREEZE_WARN_S and not self._obs_freeze_warned:
+                    self._obs_freeze_warned = True
+                    logger.warning(
+                        "pilot 输入帧已 %.1fs 未更新（疑似相机/管道冻结），"
+                        "当前输出[%s]——输出恒定先查输入！", frozen_s, outs_desc)
+
+            if (self._obs_log_interval > 0
+                    and now - self._obs_last_log >= self._obs_log_interval):
+                interval = now - self._obs_last_log
+                in_desc = '无图像输入'
+                if img_arr is not None and hasattr(img_arr, 'shape'):
+                    try:
+                        in_desc = (f"输入 shape={img_arr.shape} dtype={img_arr.dtype} "
+                                   f"mean={float(img_arr.mean()):.1f}")
+                    except Exception:
+                        in_desc = f"输入 shape={getattr(img_arr, 'shape', '?')}"
+                logger.info("pilot 观测: %s 输出[%s] 新帧 %d/%.1fs（%s）",
+                            in_desc, outs_desc, self._obs_fresh_frames, interval,
+                            self._model_path or '未加载')
+                self._obs_fresh_frames = 0
+                self._obs_last_log = now
+
+            if self._obs_debug:
+                logger.info("pilot frame: 输入 id=%s 输出[%s]",
+                            self._obs_frame_id, outs_desc)
+        except Exception:  # pragma: no cover - 观测失败不影响推理
+            logger.debug("pilot 观测异常", exc_info=True)
+
+    @staticmethod
+    def _format_outputs(outputs) -> str:
+        outs = outputs if isinstance(outputs, tuple) else (outputs,)
+        parts = []
+        for value in outs:
+            try:
+                parts.append(f"{float(value):+.3f}")
+            except (TypeError, ValueError):
+                parts.append(repr(value))
+        return '/'.join(parts) if parts else '空'
 
     def shutdown(self):
         with self._lock:

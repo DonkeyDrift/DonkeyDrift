@@ -1,0 +1,106 @@
+{
+ "prereg": "docs/arch/rl-m3-ab-prereg.md",
+ "eval_protocol": "≥2 重拉实例 ×12 局/实例/臂/种子, held-out spawn seed 50000+, sync 0.05 state, 分解 reward",
+ "paired_table": {
+  "s7": {
+   "C": {
+    "mean_rew": 47.96,
+    "offtrack": 1.0,
+    "ep_len": 94.9,
+    "instances": [
+     50.687,
+     45.241
+    ]
+   },
+   "T": {
+    "mean_rew": 890.48,
+    "offtrack": 0.584,
+    "ep_len": 1456.8,
+    "instances": [
+     769.8,
+     1011.166
+    ]
+   },
+   "delta": 842.52,
+   "h1_threshold_10pct_of_C": 4.8,
+   "T_pass": true
+  },
+  "s8": {
+   "C": {
+    "mean_rew": 42.81,
+    "offtrack": 1.0,
+    "ep_len": 88.0,
+    "instances": [
+     46.631,
+     38.995
+    ]
+   },
+   "T": {
+    "mean_rew": 551.27,
+    "offtrack": 0.709,
+    "ep_len": 1120.6,
+    "instances": [
+     538.232,
+     564.317
+    ]
+   },
+   "delta": 508.46,
+   "h1_threshold_10pct_of_C": 4.28,
+   "T_pass": true
+  },
+  "s9": {
+   "C": {
+    "mean_rew": 59.85,
+    "offtrack": 1.0,
+    "ep_len": 110.2,
+    "instances": [
+     52.533,
+     67.173
+    ]
+   },
+   "T": {
+    "mean_rew": 1102.89,
+    "offtrack": 0.25,
+    "ep_len": 1710.8,
+    "instances": [
+     1179.229,
+     1026.56
+    ]
+   },
+   "delta": 1043.04,
+   "h1_threshold_10pct_of_C": 5.99,
+   "T_pass": true
+  }
+ },
+ "verdict_summary": {
+  "delta_pass_seeds": "3/3",
+  "H1_requires": ">=2/3",
+  "absolute_gate": {
+   "threshold": 40.0,
+   "C_pass": true,
+   "T_pass": true
+  },
+  "verdict": "H1 支持(BC 热启动显著优)"
+ },
+ "kl_monitor_note": "实验臂 KL(policy‖BC): 起步 0.004 → 峰值 ~0.89(策略大幅超越 BC 先验),仅监控不进损失",
+ "raw_eval_files": [
+  "eval_ctrl_s7_heldout12.json",
+  "eval_ctrl_s7_i1.json",
+  "eval_ctrl_s7_i2.json",
+  "eval_ctrl_s8_heldout12.json",
+  "eval_ctrl_s8_i1.json",
+  "eval_ctrl_s8_i2.json",
+  "eval_ctrl_s9_heldout12.json",
+  "eval_ctrl_s9_i1.json",
+  "eval_ctrl_s9_i2.json",
+  "eval_curr18_s7_heldout12.json",
+  "eval_m2snap100_heldout12.json",
+  "eval_m2snap100_smoke.json",
+  "eval_treat_s7_i1.json",
+  "eval_treat_s7_i2.json",
+  "eval_treat_s8_i1.json",
+  "eval_treat_s8_i2.json",
+  "eval_treat_s9_i1.json",
+  "eval_treat_s9_i2.json"
+ ]
+}

@@ -1,0 +1,283 @@
+{
+  "meta": {
+    "sim_app": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app",
+    "mode": "auto",
+    "host": "127.0.0.1",
+    "port": 9091,
+    "started": "2026-11-01 23:52:27",
+    "sim_exe": "/Users/hwp/Dev/DKC/sdsandbox/build/donkey_sim.app/Contents/MacOS/donkey_sim"
+  },
+  "items": [
+    {
+      "id": 1,
+      "name": "连接+info字段齐全性",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "info_keys": [
+          "accel",
+          "car",
+          "collision_impulse",
+          "cte",
+          "flipped",
+          "forward_vel",
+          "frame_id",
+          "gyro",
+          "hit",
+          "lap",
+          "lap_count",
+          "last_lap_time",
+          "lidar",
+          "pos",
+          "speed",
+          "state_obs",
+          "stuck_time",
+          "vel"
+        ],
+        "known_hit": [
+          "forward_vel",
+          "hit",
+          "car",
+          "lidar",
+          "frame_id",
+          "collision_impulse",
+          "flipped",
+          "stuck_time",
+          "lap",
+          "last_lap_time",
+          "lap_count"
+        ],
+        "missing_core": [],
+        "obs_shape": [
+          16
+        ],
+        "reset_elapsed_s": 0.034549332995084114,
+        "reset_mode": "reset_to_nearest"
+      },
+      "elapsed_s": 0.14
+    },
+    {
+      "id": 2,
+      "name": "reset_car 耗时 p50/p95<2s",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "trials": 5,
+        "p50_s": 0.049,
+        "p95_s": 0.05,
+        "max_s": 0.05,
+        "raw": [
+          0.05,
+          0.049,
+          0.049,
+          0.047,
+          0.05
+        ],
+        "pose_jump_detected": 5
+      },
+      "elapsed_s": 10.0
+    },
+    {
+      "id": 3,
+      "name": "边界动作含 brake 不炸连接",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "actions_sent": 24,
+        "new_frames_seen": 24,
+        "connected_after": true
+      },
+      "elapsed_s": 1.25
+    },
+    {
+      "id": 4,
+      "name": "frame_skip=1 n control↔n 帧",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "controls": 60,
+        "new_frames_received": 60,
+        "sim_frame_id_delta": 59,
+        "fid_step_deltas": {
+          "monotonic": true,
+          "dups": 0,
+          "distribution": {
+            "1": 59
+          }
+        },
+        "note": "每步等待新遥测帧返回,n control ↔ n 新帧由构造保证;fid 停走=该拍 sim 未消费新 control 的自由帧(非丢帧)"
+      },
+      "elapsed_s": 3.0
+    },
+    {
+      "id": 7,
+      "name": "同seed复现+spawn字段探针(记录)",
+      "mandatory": false,
+      "status": "record",
+      "detail": {
+        "same_seed42_poses": [
+          [
+            -7.404,
+            0.797
+          ],
+          [
+            -7.371,
+            0.758
+          ],
+          [
+            -7.404,
+            0.797
+          ]
+        ],
+        "same_seed7_poses": [
+          [
+            -0.215,
+            0.717
+          ],
+          [
+            -0.261,
+            0.68
+          ],
+          [
+            -0.215,
+            0.717
+          ]
+        ],
+        "plain_reset_poses": [
+          [
+            -0.261,
+            0.68
+          ],
+          [
+            -0.215,
+            0.717
+          ],
+          [
+            -0.261,
+            0.68
+          ]
+        ],
+        "lateral1_poses": [
+          [
+            2.217,
+            0.682
+          ],
+          [
+            2.406,
+            0.678
+          ],
+          [
+            4.666,
+            0.888
+          ]
+        ],
+        "intra_seed42_spread_m": 0.039,
+        "intra_seed7_spread_m": 0.046,
+        "inter_seed_max_diff_m": 7.189,
+        "plain_spread_m": 0.046,
+        "verdict": "sim 支持 reset_car 扩展字段(同 seed 可复现、异 seed 位置不同)——订单事实2的判死结论对本 sim 不成立"
+      },
+      "elapsed_s": 1.75
+    },
+    {
+      "id": 6,
+      "name": "帧率实测(窗/headless×2 × img_enc)",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "windowed": {
+          "img_enc_none": {
+            "n_steps": 150,
+            "wall_elapsed_s": 7.5,
+            "steps_per_s": 20.0,
+            "stale_steps": 0,
+            "step_ms_p50": 49.9,
+            "step_ms_p95": 52.5,
+            "sim_frame_id_delta": 150
+          },
+          "jpg": {
+            "n_steps": 150,
+            "wall_elapsed_s": 7.5,
+            "steps_per_s": 20.0,
+            "stale_steps": 0,
+            "step_ms_p50": 49.8,
+            "step_ms_p95": 57.8,
+            "sim_frame_id_delta": 150
+          }
+        },
+        "headless_keep_gfx": {
+          "headless": true,
+          "keep_graphics": true,
+          "img_enc_none": {
+            "n_steps": 150,
+            "wall_elapsed_s": 7.5,
+            "steps_per_s": 20.0,
+            "stale_steps": 0,
+            "step_ms_p50": 50.0,
+            "step_ms_p95": 51.8,
+            "sim_frame_id_delta": 150
+          },
+          "jpg": {
+            "n_steps": 150,
+            "wall_elapsed_s": 7.51,
+            "steps_per_s": 19.98,
+            "stale_steps": 0,
+            "step_ms_p50": 50.1,
+            "step_ms_p95": 51.9,
+            "sim_frame_id_delta": 150
+          }
+        },
+        "headless_nographics": {
+          "headless": true,
+          "keep_graphics": false,
+          "img_enc_none": {
+            "n_steps": 150,
+            "wall_elapsed_s": 7.5,
+            "steps_per_s": 20.0,
+            "stale_steps": 0,
+            "step_ms_p50": 50.0,
+            "step_ms_p95": 51.9,
+            "sim_frame_id_delta": 150
+          },
+          "jpg": {
+            "n_steps": 150,
+            "wall_elapsed_s": 7.5,
+            "steps_per_s": 20.0,
+            "stale_steps": 0,
+            "step_ms_p50": 50.0,
+            "step_ms_p95": 52.1,
+            "sim_frame_id_delta": 150
+          }
+        },
+        "conclusion": "窗口 20.0 步/s;keep-gfx 20.0;nographics 20.0(none 编码口径)。nographics 若显著低于 keep-gfx,即坐实「无图形设备异步观测掉帧」教训,M3 多开应采用 keep-gfx 离屏渲染"
+      },
+      "elapsed_s": 0.0
+    },
+    {
+      "id": 5,
+      "name": "断连恢复(杀→拉起→看门狗重建)",
+      "mandatory": true,
+      "status": "pass",
+      "detail": {
+        "stop": {
+          "mode": "child_pid",
+          "pids": [
+            25860
+          ]
+        },
+        "detect_death_s": 2.0,
+        "recovery_s": 4.77,
+        "post_recovery_reset_s": 0.053,
+        "post_recovery_reset_move": true
+      },
+      "elapsed_s": 7.45
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "record": 1,
+    "failed": 0,
+    "blockers": 0,
+    "mandatory_failed": []
+  }
+}

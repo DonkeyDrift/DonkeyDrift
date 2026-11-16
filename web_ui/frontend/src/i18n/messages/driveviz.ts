@@ -18,6 +18,10 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.renderThrottle': '渲染降频',
     'driveViz.renderThrottleTooltip': '浏览器接收帧率正常但呈现帧率过低，可能因标签页后台、窗口遮挡或省电策略。请保持页面前台可见并开启硬件加速。',
     'driveViz.diagnostic': '诊断',
+    'driveViz.e2eSampledTooltip': '日常模式：像素印章最多 15Hz 抽样，表示抽中帧的呈现年龄，不保证首次呈现；无印章时使用浏览器估计。此值不是屏幕出光实测。',
+    'driveViz.e2eDiagnosticTooltip': '诊断模式：逐帧读取像素印章并按内容去重；无印章时使用浏览器估计。逐帧测量存在读回开销，此值不是屏幕出光实测。',
+    'driveViz.fpsPresentedTooltip': '浏览器提交合成 {presented}fps；视频回调 {callback}fps；当前窗口漏采回调 {missed} 次。回调间隔 P95 为 {interval}ms，不能代表全部呈现帧间隔。提交合成计数不是屏幕出光实测，也不代表唯一内容帧数。',
+    'driveViz.fpsCallbackTooltip': '当前无有效 presentedFrames 对照，FPS 使用视频回调计数；回调间隔 P95 为 {interval}ms。回调次数不足不等于源视频丢帧。',
     // TelemetryChart
     'driveViz.chartTitle': '遥测曲线',
     'driveViz.waitingData': '（等待数据）',
@@ -74,6 +78,10 @@ export const driveviz: { zh: Record<string, string>; en: Record<string, string> 
     'driveViz.renderThrottle': 'Render throttled',
     'driveViz.renderThrottleTooltip': 'Browser receives frames at full rate but presents slowly. Keep the tab visible, avoid window occlusion, and enable hardware acceleration.',
     'driveViz.diagnostic': 'DIAG',
+    'driveViz.e2eSampledTooltip': 'Daily mode: pixel stamps are sampled at up to 15Hz. Samples measure the observed frame age, not necessarily its first presentation. Without stamps, browser estimates are used. This is not a physical display measurement.',
+    'driveViz.e2eDiagnosticTooltip': 'Diagnostic mode: pixel stamps are read every frame and deduplicated by content. Without stamps, browser estimates are used. Readback adds overhead. This is not a physical display measurement.',
+    'driveViz.fpsPresentedTooltip': 'Submitted for composition: {presented}fps; video callbacks: {callback}fps; missed callbacks in this window: {missed}. Callback interval P95: {interval}ms, not the interval distribution of all presented frames. Composition counts are not physical display measurements or unique content counts.',
+    'driveViz.fpsCallbackTooltip': 'No valid presentedFrames comparison is available. FPS uses video callback counts; callback interval P95: {interval}ms. Fewer callbacks do not imply source video frame loss.',
     // TelemetryChart
     'driveViz.chartTitle': 'Telemetry Chart',
     'driveViz.waitingData': '(Waiting for data)',

@@ -82,6 +82,19 @@ export const getApiErrorMessage = (error: unknown, fallback = t('common.unknownE
   return fallback;
 };
 
+// 「data 文件夹还没有」的两种后端响应：目录不存在（404 Directory not
+// found）与目录存在但尚无录制（400 manifest.json missing）。自动连接 /
+// 刷新恢复场景把它们当正常空状态静默处理，不作为错误弹给用户。
+export const isTubMissingError = (error: unknown): boolean => {
+  if (!axios.isAxiosError(error)) return false;
+  const status = error.response?.status;
+  const detail = error.response?.data?.detail;
+  if (typeof detail !== 'string') return false;
+  if (status === 404) return detail.includes('Directory not found');
+  if (status === 400) return detail.includes('manifest.json missing');
+  return false;
+};
+
 export const getVersion = async (): Promise<string> => {
   const response = await api.get('/config/version');
   return response.data.version as string;
@@ -537,7 +550,7 @@ export interface DriveWebRtcStats {
   e2e_display_p95_ms?: number;
   callback_late_p95_ms?: number;
   vsync_quantum_p95_ms?: number;
-  /** 真实新帧 pts 被顶号次数（呈现晚一拍的帧数，e2e 尾部来源） */
+  /** 真实新帧触发 PTS 单调保护的次数，最小增量为一个 90kHz tick */
   pts_bumps?: number;
   /** 车端↔后端时钟偏移（后端钟 − 车端钟，ms）：像素印章 e2e 的车钟域校正项 */
   clock_offset_ms?: number;

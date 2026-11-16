@@ -2,6 +2,7 @@ import logging
 from typing import List
 from donkeycar.config import Config
 from donkeycar.parts import cv as cv_parts
+from donkeycar.parts import fisheye as fisheye_parts
 
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,11 @@ def image_transformer(name: str, config):
         return cv_parts.ImageResize(config.RESIZE_WIDTH, config.RESIZE_HEIGHT)
     elif "SCALE" == name:
         return cv_parts.ImageScale(config.SCALE_WIDTH, config.SCALE_HEIGHT)
+    #
+    # geometry transformations
+    #
+    elif "FISHEYE" == name:
+        return fisheye_parts.FisheyeUndistort(config)
     elif name.startswith("CUSTOM"):
         return custom_transformer(name, config)
     else:
