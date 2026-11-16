@@ -1,0 +1,29 @@
+name: One-click deploy (Windows)
+
+# Windows 实测一键部署（2026-11-16）：
+# 在真实 windows-latest runner 上通过仓库根的 一键部署.bat 入口执行完整 9 步
+# 部署（uv 安装 → gym 克隆 → Python 3.11 venv → 依赖 → shell 钩子 → 验收），
+# 与 macOS 路径共用同一套 install_steps 步骤生成器。默认手动触发；部署
+# 相关文件在 main 上变更时也自动跑一次。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/one_click_deploy.py"
+      - "web_ui/backend/install_steps.py"
+      - "一键部署.bat"
+      - ".github/workflows/one-click-deploy-windows.yml"
+
+jobs:
+  deploy:
+    name: Run 一键部署.bat end to end
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 一键部署（.bat 入口全流程）
+        shell: pwsh
+        run: '& ".\一键部署.bat"'
