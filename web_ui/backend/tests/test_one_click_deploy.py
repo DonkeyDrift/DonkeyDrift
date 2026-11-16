@@ -190,6 +190,40 @@ def test_deploy_falls_back_to_pypi_on_install_failure(tmp_path, monkeypatch, cap
     assert "install-ok" in out
 
 
+def test_bat_entry_forces_utf8_console():
+    bat = (REPO_ROOT / "一键部署.bat").read_text(encoding="utf-8")
+    assert "chcp 65001" in bat
+    assert "PYTHONIOENCODING=utf-8" in bat
+
+
+def test_force_utf8_streams_reconfigures_non_utf8(monkeypatch):
+    class FakeStream:
+        encoding = "cp1252"
+
+        def reconfigure(self, encoding=None, errors=None):
+            self.encoding = encoding
+            self.errors = errors
+
+    fake_out, fake_err = FakeStream(), FakeStream()
+    monkeypatch.setattr(runner.sys, "stdout", fake_out)
+    monkeypatch.setattr(runner.sys, "stderr", fake_err)
+    runner._force_utf8_streams()
+    assert fake_out.encoding == "utf-8" and fake_out.errors == "replace"
+    assert fake_err.encoding == "utf-8"
+
+
+def test_force_utf8_streams_keeps_utf8_alone(monkeypatch):
+    class FakeStream:
+        encoding = "UTF-8"
+
+        def reconfigure(self, **kwargs):
+            raise AssertionError("utf-8 stream must not be reconfigured")
+
+    monkeypatch.setattr(runner.sys, "stdout", FakeStream())
+    monkeypatch.setattr(runner.sys, "stderr", FakeStream())
+    runner._force_utf8_streams()
+
+
 def test_main_dry_run_prints_steps(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, "detect_platform", lambda: "macos")
     code = runner.main(
