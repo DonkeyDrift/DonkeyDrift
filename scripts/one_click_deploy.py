@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT / "web_ui" / "backend"))
 
 from install_steps import (  # noqa: E402
     INSTALL_TIMEOUT,
+    PYPI_FALLBACK_INDEX,
     InstallStep,
     _build_install_steps,
     _clean_line,
@@ -118,6 +119,12 @@ def deploy(repo_path: str, gym_path: str, timeout: int = INSTALL_TIMEOUT,
             print("Python 下载超时，使用批准的南大镜像重试一次。")
             retry = _build_install_steps(
                 platform_name, repo_path, gym_path, python_mirror=True
+            )[index]
+            code, output = _run_step(retry, deadline)
+        if code != 0 and step.name == "install-dependencies":
+            print("安装源失败，回退官方 PyPI 重试一次。")
+            retry = _build_install_steps(
+                platform_name, repo_path, gym_path, index=PYPI_FALLBACK_INDEX
             )[index]
             code, output = _run_step(retry, deadline)
         if code != 0:

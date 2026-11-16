@@ -1,3 +1,10 @@
+## 2026-11-16 (278)
+
+- fix(deploy): 一键部署安装源失败自动回退官方 PyPI（Issue #528）
+  - **背景**：安装步骤固定清华镜像（沿用 SSH 安装器）。实测两种真实故障让 `install-dependencies` 必败——镜像对短时多次全量解析的 IP 返 403 拦截页（curl 实测同 403）；用户开着系统代理时镜像拒绝代理出口 IP。官方 PyPI 走代理反而可用。
+  - **改动**：`install_steps.py` 的 prelude 与 `_build_install_steps`/`build_install_steps` 增加 `index` 参数（默认仍 `UV_INDEX`，SSH 一键安装流程零变化），新增常量 `PYPI_FALLBACK_INDEX`；`scripts/one_click_deploy.py` 在 `install-dependencies` 失败时自动用官方 PyPI 重建该步骤重试一次（日志明示"回退官方 PyPI"），其余步骤不变。
+  - **验证**：新增回退触发与 index 透传 2 项测试；一键部署+安装器测试 71 passed（零回归）；Linux 全量验证通过；真实裸机实测：清华 403 下自动回退官方源完成 9/9 步。
+
 ## 2026-11-16 (277)
 
 - feat(deploy): 本地一键部署工具——免 SSH 在全新机器一键装好 DonkeyDrift 训练环境（Issue #526）
