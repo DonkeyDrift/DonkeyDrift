@@ -66,6 +66,7 @@ const degradedState = () => ({
 
 beforeEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   mockWebRtc.mockReturnValue(connectedState());
   // /drive/stats 常驻轮询的默认桩：保持单测封闭（不真实请求本机后端）
   vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -105,6 +106,30 @@ describe('VideoStream', () => {
     expect(box.style.height).toBe('auto');
   });
 
+  it('FPS 提示区分合成提交与回调漏采', () => {
+    const state = connectedState();
+    mockWebRtc.mockReturnValue({
+      ...state,
+      metrics: {
+        ...state.metrics, browserFps: 60, presentedFps: 60, callbackFps: 30, missedCallbacks: 30,
+      },
+    });
+    render(<VideoStream />);
+    expect(screen.getByText('60')).toBeInTheDocument();
+    const title = screen.getByText('FPS').parentElement?.getAttribute('title');
+    expect(title).toContain('提交合成 60.0fps');
+    expect(title).toContain('回调 30.0fps');
+    expect(title).toContain('漏采回调 30 次');
+    expect(title).toContain('回调间隔 P95');
+  });
+
+  it('元数据不可用时 FPS 提示注明回调计数回退', () => {
+    render(<VideoStream />);
+    const title = screen.getByText('FPS').parentElement?.getAttribute('title');
+    expect(title).toContain('无有效 presentedFrames 对照');
+    expect(title).toContain('FPS 使用视频回调计数');
+  });
+
   it('WebRTC 连接时通过 onLatencyChange 回传 P95 延迟', () => {
     const onLatencyChange = vi.fn();
     render(<VideoStream onLatencyChange={onLatencyChange} />);
@@ -118,6 +143,26 @@ describe('VideoStream', () => {
     expect(screen.getByText('26ms')).toBeInTheDocument();
     expect(screen.getByText('E2E')).toBeInTheDocument();
     expect(screen.queryByText('24ms')).not.toBeInTheDocument();
+  });
+
+  it('日常 E2E 提示明确抽样不保证首次呈现', () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_DIAGNOSTIC', '0');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      render(<VideoStream />);
+      expect(screen.getByText('E2E').getAttribute('title')).toContain('15Hz');
+      expect(screen.getByText('E2E').getAttribute('title')).toContain('不保证首次呈现');
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('诊断 E2E 提示明确逐帧读取存在开销', () => {
+    vi.stubEnv('VITE_DRIVE_WEBRTC_DIAGNOSTIC', '1');
+    render(<VideoStream />);
+    expect(screen.getByText('E2E').getAttribute('title')).toContain('逐帧');
+    expect(screen.getByText('E2E').getAttribute('title')).toContain('读回开销');
   });
 
   it('无真实 e2e 采样时徽标回退 p95 帧间隔且不带 E2E 标记', () => {

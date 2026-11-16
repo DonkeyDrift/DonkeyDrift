@@ -44,8 +44,8 @@ interface Notice {
  * 宽度足够时单行展示、空间不足时 flex-wrap 折行；副标题悬停展开不占行宽。
  *
  * 模拟器目标（target === 'sim'）时，工具条下方以 border-t 展开内嵌选择区
- * （替代原 Connectors 抽屉的 SimulatorConfig）：进入即自动扫描局域网模拟器、
- * 点选 IP 或手动输入即自动保存，全程无「发现/保存」按钮。
+ * （Connectors 抽屉 SimulatorConfig 的行内快捷入口）：进入即自动扫描局域网
+ * 模拟器、点选 IP 或手动输入即自动保存，全程无「发现/保存」按钮。
  */
 export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
   target,
@@ -137,7 +137,7 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
           path: configPath,
           config: { SIM_HOST: simHost, DONKEY_GYM: donkeyGym },
         });
-        // 同步全局配置（与点选 IP 保存一致）
+        // 同步全局配置（与 SimulatorConfig 保存成功后一致）
         if (config) {
           useStore.setState({
             config: { ...config, SIM_HOST: simHost, DONKEY_GYM: donkeyGym },
@@ -334,7 +334,8 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
       </div>
 
       {/* 模拟器选择区：仅 sim 目标展开（border-t 分隔）——进入即自动扫描、
-          点选 IP 或手动输入即自动保存，无发现/保存按钮（替代原 Connectors 抽屉） */}
+          点选 IP 或手动输入即自动保存，无发现/保存按钮（Connectors 抽屉
+          SimulatorConfig 的行内快捷入口，两者共存不互斥） */}
       {target === 'sim' && (
         <div className="mt-2.5 border-t border-zinc-800 pt-2.5">
           {/* 扫描中：spinner + 文案 */}
@@ -345,7 +346,7 @@ export const DriveTargetCard: React.FC<DriveTargetCardProps> = ({
             </div>
           )}
 
-          {/* 扫描完成：发现列表（样式对齐原 SimulatorConfig，当前已选项高亮）或未发现提示 */}
+          {/* 扫描完成：发现列表（样式对齐 SimulatorConfig，当前已选项高亮）或未发现提示 */}
           {scanState === 'done' &&
             (foundHosts.length > 0 ? (
               <div className="space-y-1.5">

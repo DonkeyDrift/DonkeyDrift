@@ -705,8 +705,6 @@ def test_list_models_subdir_respects_extension_filter(tmp_path):
 
     names = {item["name"] for item in response.json()["models"]}
     assert names == {"conv/pilot.tflite"}
-
-
 def test_predict_cache_misses_after_tub_switch(monkeypatch, tmp_path):
     """#494：缓存键含 tub 身份与物理 _index——换 tub / 删记录后同一下标不得命中旧缓存。"""
     client, arena = make_client(monkeypatch)

@@ -23,16 +23,46 @@ from donkeycar.webui_instance import (
     find_live_instance,
     write_instance,
     remove_instance,
-    kill_previous_car_processes,
+    sweep_orphan_processes,
     read_drive_pids,
     write_drive_pids,
     remove_drive_pid_file,
     select_car_python,
     select_backend_python,
+    open_url_best_effort,
 )
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
+
+
+def write_myconfig_from_template(car_path):
+    """按 createcar 的口径在 car_path 下生成 myconfig.py（已存在则不动）。
+
+    先复制模板 myconfig.py，再把 config.py 自 ``import os`` 起的全部内容以
+    注释形式追加——myconfig.py 是用户覆盖项，缺失时用它兜底重建，而不是让
+    调用方（如 TUI）把整个车目录判为无效。
+
+    createcar / `donkey update` / TUI 共用本函数；读写一律显式 utf-8（模板
+    含中文注释，Windows 默认 GBK 会解码失败）。
+    """
+    myconfig_path = os.path.join(car_path, 'myconfig.py')
+    if os.path.exists(myconfig_path):
+        return myconfig_path
+
+    shutil.copyfile(os.path.join(TEMPLATES_PATH, 'myconfig.py'), myconfig_path)
+    car_config_path = os.path.join(car_path, 'config.py')
+    if os.path.exists(car_config_path):
+        # 把 config.py 内容全部注释后追加，作为 myconfig 的可编辑覆盖清单
+        with open(car_config_path, 'rt', encoding='utf-8') as cfg, \
+                open(myconfig_path, 'at', encoding='utf-8') as mcfg:
+            copy = False
+            for line in cfg:
+                if "import os" in line:
+                    copy = True
+                if copy:
+                    mcfg.write("# " + line)
+    return myconfig_path
 
 
 def _ensure_display_and_backend():
@@ -95,12 +125,21 @@ def _read_drive_pid_file():
 
 
 def _kill_previous_drive_processes():
-    """杀掉上一次启动的车进程（manage.py drive），web 进程保留复用。
+    """drive 启动前清理旧栈：pid 文件内的旧车进程 + 孤儿进程全量清扫。
 
-    详见 donkeycar/webui_instance.py（issue #127：多链路复用同一 Web UI
-    实例，不再全杀）。
+    孤儿（手工 nohup 裸起的车端/uvicorn，不在任何登记里）不清会导致：
+    无登记 uvicorn → 复用误判再起一套 → 双后端（页面无画面、摇杆无效）；
+    无登记车端 → 单实例守护拒绝启动。清理范围与原因见
+    donkeycar/webui_instance.py ``sweep_orphan_processes``（2026-11-09）。
     """
-    kill_previous_car_processes()
+    swept = sweep_orphan_processes()
+    cleaned = []
+    if swept["car_pids"]:
+        cleaned.append(f"车端 {swept['car_pids']}")
+    if swept["backend_pids"]:
+        cleaned.append(f"Web 后端 {swept['backend_pids']}")
+    if cleaned:
+        print('检测到孤儿进程，已清理: ' + '、'.join(cleaned))
 
 HELP_CONFIG = 'location of config file to use. default: ./config.py'
 logger = logging.getLogger(__name__)
@@ -206,7 +245,6 @@ class CreateCar(BaseCommand):
         # add car application and config files if they don't exist
         app_template_path = os.path.join(TEMPLATES_PATH, template+'.py')
         config_template_path = os.path.join(TEMPLATES_PATH, 'cfg_' + template + '.py')
-        myconfig_template_path = os.path.join(TEMPLATES_PATH, 'myconfig.py')
         train_template_path = os.path.join(TEMPLATES_PATH, 'train.py')
         car_app_path = os.path.join(path, 'manage.py')
         car_config_path = os.path.join(path, 'config.py')
@@ -239,19 +277,7 @@ class CreateCar(BaseCommand):
 
         if not os.path.exists(mycar_config_path):
             print("Copying my car config overrides")
-            shutil.copyfile(myconfig_template_path, mycar_config_path)
-            # now copy file contents from config to myconfig, with all lines
-            # commented out.
-            cfg = open(car_config_path, "rt")
-            mcfg = open(mycar_config_path, "at")
-            copy = False
-            for line in cfg:
-                if "import os" in line:
-                    copy = True
-                if copy:
-                    mcfg.write("# " + line)
-            cfg.close()
-            mcfg.close()
+            write_myconfig_from_template(path)
 
         print("Donkey setup complete.")
 
@@ -1363,10 +1389,16 @@ class Web(BaseCommand):
 
         Vite 启动需要数秒；若在其就绪前打开浏览器，页面会显示无法连接，
         且浏览器不会自动恢复，用户只能手动刷新。超时仍打开（由用户自行刷新）。
+        远程/无图形会话里 webbrowser 会静默失败，open_url_best_effort 会
+        回退桌面 X 会话；仍失败则明确提示手动访问地址，不再毫无反应。
         """
         if not self._wait_for_port_ready(frontend_port, timeout):
             print(f'警告: 前端端口 {frontend_port} 在 {timeout:.0f}s 内未就绪，仍将打开浏览器')
-        webbrowser.open(frontend_url)
+        if open_url_best_effort(frontend_url):
+            print(f'已在浏览器打开: {frontend_url}')
+        else:
+            print(f'提示: 当前会话无法拉起浏览器（远程/无图形环境），'
+                  f'请手动访问: {frontend_url}')
 
     def _choose_available_port(self, host, preferred_port, max_tries=50):
         port = int(preferred_port)
@@ -1554,11 +1586,11 @@ class Drive(Web):
             stdin=subprocess.DEVNULL, **popen_kwargs,
         )
 
-        # 记录进程 PID，供下次启动时清理；复用实例时 web 进程不属于本进程管
-        if frontend_proc is not None:
-            write_drive_pids([frontend_proc.pid, backend_proc.pid, car_proc.pid])
-        else:
-            write_drive_pids([car_proc.pid])
+        # 只记车进程：kill_previous_car_processes() 在没有 /proc 的平台（Windows）
+        # 无法按 cmdline 区分角色，会把 PID 文件里的进程全杀——若把 web 前后端的
+        # PID 也写进来，下次启动就会杀掉 Web UI：uvicorn 变孤儿、实例登记陈旧，
+        # TUI 于是再新起一个后端 → 双后端并存、页面连不到车端（表现为「没有画面」）。
+        write_drive_pids([car_proc.pid])
 
         if args.open:
             frontend_url = self._build_frontend_url(frontend_port, args.route)

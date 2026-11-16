@@ -136,7 +136,7 @@ describe('DriveTargetCard', () => {
 
     await waitFor(() => expect(mockDiscover).toHaveBeenCalledTimes(1));
     expect(
-      await screen.findByText('未发现模拟器：请先启动 DonkeySim 后重试'),
+      await screen.findByText('未发现模拟器：请先启动 DonkeySim，或到 Connectors 抽屉手动配置'),
     ).toBeInTheDocument();
     expect(mockSave).not.toHaveBeenCalled();
   });

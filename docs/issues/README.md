@@ -13,3 +13,5 @@
 | [007](007-model-import-422-and-load-to-car-400.md) | - | 导入模型 422 + 加载到车端 400 | bug | `services/api.ts` / `ModelsList.tsx` |
 | [008](008-drive-joystick-dock-right-anchor-scaling.md) | - | Drive 摇杆抽屉右缘常驻 + 连续缩放，窄屏不再折叠到视频下方 | enhancement | `pages/DrivePage.tsx` / `hooks/useElementWidth.ts` / `drive/VirtualJoystick.tsx` |
 | [009](009-drive-webrtc-mid-session-freeze.md) | - | Drive 页 WebRTC 画面中途卡死后永不恢复（环境瞬断无恢复路径） | bug | `hooks/useDriveWebRtcVideo.ts` / `drive/VideoStream.tsx` / `drive_api_bridge.py` |
+| [010](010-simulator-boot-crash.md) | - | 源码重编 DonkeySim 偶发启动/运行期崩溃（交接排查档案） | bug | `DonkeySim` |
+| [011](011-full-auto-constant-pilot-output.md) | - | drive 全自动 pilot 恒定输出、小车冲出赛道（排查档案+经验沉淀） | bug / 调研 | `parts/pilot_holder.py` / `tools/diagnose_pilot.py` / `routers/arena.py` |

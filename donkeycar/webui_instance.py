@@ -22,10 +22,12 @@ import atexit
 import json
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 # 实例登记文件与车进程 PID 文件（与 base.py / tui.py / launcher 既有约定一致）
@@ -37,6 +39,11 @@ DRIVE_MODEL_FILE = Path.home() / ".donkeycar" / "drive_model.json"
 
 # 探测超时（秒）：仅本机回环探测，快速失败
 PROBE_TIMEOUT_S = 2.0
+
+# 硬杀信号：Windows 没有 SIGKILL（且 os.kill 对非 CTRL_*_EVENT 的任意 sig 都是
+# TerminateProcess，SIGTERM 本身即强杀），故为 None 时跳过「SIGTERM 后再升级
+# SIGKILL」的第二阶段——否则 signal.SIGKILL 取属性就 AttributeError。
+_SIGKILL = getattr(signal, "SIGKILL", None)
 
 
 # ── 实例登记读写 ────────────────────────────────────────────────────
@@ -100,14 +107,78 @@ def remove_instance(only_pid=None, instance_file=None):
 
 # ── 存活探测与复用 ──────────────────────────────────────────────────
 
+def _pid_gone_error(exc):
+    """异常是否表示「pid 已不存在」（Windows ``winerror=87``）。
+
+    Windows 上 ``os.kill`` 面对不存在、或正处于退出过程中的 pid 会失败：
+    前者抛原生 ``OSError``（``winerror=87`` ERROR_INVALID_PARAMETER），
+    后者 CPython 偶发把它包成 ``SystemError``（``__cause__`` 才是那个
+    ``OSError``），此时 ``except OSError`` 抓不住、会冒泡崩掉 TUI。
+    """
+    if isinstance(exc, SystemError):
+        exc = exc.__cause__
+    return isinstance(exc, OSError) and getattr(exc, "winerror", None) == 87
+
+
+def _pid_alive_windows(pid):
+    """Windows 探活：OpenProcess + GetExitCodeProcess，安全且无副作用。
+
+    **绝不能**用 ``os.kill(pid, 0)``：Python 文档明示，Windows 上 os.kill 对
+    CTRL_C_EVENT/CTRL_BREAK_EVENT 之外的任意 sig（含 0）都会走
+    ``TerminateProcess``——即「探活」会把目标进程杀掉。曾因此在 TUI/launcher
+    每次复用探测时杀掉正在跑的 Web UI（uvicorn 变孤儿、实例登记被判陈旧），
+    于是又新起一个后端 → 双后端并存、页面连不到车端（表现为「没有画面」）。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+    STILL_ACTIVE = 259
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE,
+                                            ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False,
+                                  int(pid))
+    if not handle:
+        # 打不开：进程不存在 -> ERROR_INVALID_PARAMETER(87) 判死；
+        # 拒绝访问(5) 说明进程在、只是没权限 -> 视为存活交端口探测裁决。
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _pid_alive(pid):
-    """pid 是否有存活进程（无权限视为存活，交给端口探测裁决）。"""
+    """pid 是否有存活进程（无权限视为存活，交给端口探测裁决）。
+
+    Windows 走 ``_pid_alive_windows``（OpenProcess），**不得**用
+    ``os.kill(pid, 0)``——Windows 上那是 TerminateProcess，会把目标进程杀掉
+    （见 ``_pid_alive_windows`` docstring）。POSIX 才用 ``os.kill(pid, 0)``，
+    其中不存在抛 ``ProcessLookupError``、无权限抛 ``PermissionError``。
+    """
+    if os.name == "nt":
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
+    except OSError as exc:
+        return not _pid_gone_error(exc)
+    except SystemError as exc:
+        return not _pid_gone_error(exc)
     return True
 
 
@@ -344,26 +415,94 @@ def _is_car_process(pid):
     return "manage.py" in cmdline and "drive" in cmdline
 
 
-def find_car_processes(exclude_pids=None, proc_dir="/proc"):
-    """扫描 /proc，返回所有在跑的车进程（manage.py drive）pid 列表。
+def _is_python_proc(command):
+    """ps 快照的命令行是否为 python 进程（首词 basename 以 python 开头）。
 
-    排除当前进程与 exclude_pids；非 Linux（无 /proc）返回 []。
+    ps 快照把 argv 以空格 join 成字符串做子串判定，会误命中 ``bash -c
+    "...manage.py drive..."`` 这类**命令文本里恰好含特征词**的包装器——
+    排查命令里带 grep/pgrep 特征词时甚至扫到并杀掉执行清扫的 shell 自己
+    （Linux /proc 路径按 cmdline 列表判定不存在此问题，本函数补齐语义）。
+    车端/uvicorn 都由 python 解释器启动，首词必须是 python 才参与匹配。
+    """
+    first = command.split(None, 1)[0] if command else ""
+    return os.path.basename(first).startswith("python")
+
+
+def find_car_processes(exclude_pids=None, proc_dir="/proc"):
+    """扫描在跑的车进程（manage.py drive），返回 pid 列表。
+
+    Linux 走 /proc 逐个读 cmdline；其余 POSIX（macOS 无 /proc）退化为
+    ``ps -axww`` 全量快照匹配（python 打头 + manage.py drive，见
+    ``_is_python_proc``）。Windows 两路都不可用，返回 []。
+    排除当前进程与 exclude_pids。
     """
     exclude = set(exclude_pids or ())
     pids = []
     try:
         entries = os.listdir(proc_dir)
     except OSError:
+        entries = None
+    if entries is not None:
+        for entry in entries:
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            if pid == os.getpid() or pid in exclude:
+                continue
+            if _is_car_process(pid):
+                pids.append(pid)
         return pids
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
+    # macOS 等 POSIX：ps 快照匹配（要求 python 打头，见 _is_python_proc）
+    for proc in _run_ps_snapshot():
+        pid = proc["pid"]
         if pid == os.getpid() or pid in exclude:
             continue
-        if _is_car_process(pid):
+        cmd = proc["command"]
+        if _is_python_proc(cmd) and "manage.py" in cmd and "drive" in cmd:
             pids.append(pid)
     return pids
+
+
+def _kill_process_tree(pid):
+    """Windows：``taskkill /T /F`` 终止 pid 及其所有子进程。
+
+    **只按 pid 杀不够**：uv 建的 venv ``python.exe`` 只是 shim，真正跑
+    ``manage.py`` 的是它 re-exec 出来的子进程（Popen 拿到的 pid 是 shim 的）。
+    旧实现只杀 shim → 留下孤儿车进程，随后被 drive 单实例守护判为「已在运行」
+    而拒绝新进程（表现为车端离线、报「检测到已运行的 drive 进程（pid=...）」）。
+    """
+    try:
+        subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+                       capture_output=True, check=False)
+    except Exception:
+        pass
+
+
+def _terminate_processes(pids, grace_s):
+    """尽力终止 pids（吞掉「已不存在/无权限」类错误）。
+
+    Windows：``taskkill /T /F`` 一次连带子进程杀净（无 SIGKILL，os.kill 的
+    SIGTERM 本身即 TerminateProcess）；POSIX：先 SIGTERM，宽限 ``grace_s``
+    秒后对尚存者补 SIGKILL（Windows 无 ``signal.SIGKILL``）。
+    """
+    if not pids:
+        return
+    if os.name == "nt":
+        for pid in pids:
+            _kill_process_tree(pid)
+        return
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (OSError, SystemError):
+            pass
+    if _SIGKILL is not None:
+        threading.Event().wait(grace_s)
+        for pid in pids:
+            try:
+                os.kill(pid, _SIGKILL)
+            except (OSError, SystemError):
+                pass
 
 
 def takeover_car_processes(exclude_pids=None):
@@ -375,20 +514,9 @@ def takeover_car_processes(exclude_pids=None):
     不在清理之列。返回本次杀掉的 pid 列表。
     """
     pids = find_car_processes(exclude_pids=exclude_pids)
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-    if pids:
-        # 给被杀进程的父进程（TUI monitor 循环）留出回收时间，避免僵尸 pid
-        # 被 drive 实例登记误判为存活
-        threading.Event().wait(1.0)
-        for pid in pids:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+    # 给被杀进程的父进程（TUI monitor 循环）留出回收时间，避免僵尸 pid
+    # 被 drive 实例登记误判为存活
+    _terminate_processes(pids, grace_s=1.0)
     return pids
 
 
@@ -411,18 +539,144 @@ def kill_previous_car_processes(pid_file=None):
             if is_car is False:
                 continue  # web 进程，保留
         targets.append(pid)
-    for pid in targets:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-    threading.Event().wait(0.5)
-    for pid in targets:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+    _terminate_processes(targets, grace_s=0.5)
     remove_drive_pid_file(pid_file)
+
+
+# ── 孤儿栈进程清扫（drive 启动前统一入口，2026-11-09 macOS 实战）────
+
+def _run_ps_snapshot():
+    """POSIX 全量进程快照（macOS 无 /proc，识别孤儿统一走 ps）。
+
+    返回 [{"pid", "ppid", "command"}]；非 POSIX / ps 失败返回 []。
+    ``-axww``：全量进程 + 宽输出不截断命令行（BSD ps 与 procps 均支持）。
+    """
+    if os.name != "posix":
+        return []
+    try:
+        out = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,ppid=,command="],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    snapshot = []
+    for line in out.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            snapshot.append({
+                "pid": int(parts[0]),
+                "ppid": int(parts[1]),
+                "command": parts[2],
+            })
+        except ValueError:
+            continue
+    return snapshot
+
+
+def _process_cwd(pid):
+    """读进程 cwd：Linux 走 /proc symlink；其余 POSIX 走 lsof。失败返回 None。"""
+    if os.name == "posix":
+        try:
+            return os.readlink(f"/proc/{int(pid)}/cwd")
+        except OSError:
+            pass
+        try:
+            out = subprocess.run(
+                ["lsof", "-a", "-p", str(int(pid)), "-d", "cwd", "-Fn"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for line in out.splitlines():
+            # lsof -F 输出格式：字段标识前缀 + 值，路径行以 n 开头
+            if line.startswith("n"):
+                return line[1:]
+    return None
+
+
+def _is_webui_backend_cmdline(command):
+    """命令行是否为 web_ui 后端 uvicorn（python -m uvicorn main:app ...）。"""
+    return "uvicorn" in command and "main:app" in command
+
+
+def _is_webui_backend_cwd(cwd):
+    """cwd 是否为某个仓库的 web_ui/backend（donkey web 起后端固定在此目录，
+    手工裸起按文档也在此目录——以此把别的 FastAPI 项目的 uvicorn 排除掉）。"""
+    if not cwd:
+        return False
+    parts = os.path.normpath(cwd).replace("\\", "/").rstrip("/").split("/")
+    return len(parts) >= 2 and parts[-2:] == ["web_ui", "backend"]
+
+
+def _descendant_pids(root_pid, snapshot):
+    """快照里 root_pid 的全部后代 pid（含间接，不含自身）。"""
+    children = {}
+    for proc in snapshot:
+        children.setdefault(proc["ppid"], []).append(proc["pid"])
+    seen, stack = [], [root_pid]
+    while stack:
+        pid = stack.pop()
+        for child in children.get(pid, ()):
+            if child not in seen:
+                seen.append(child)
+                stack.append(child)
+    return seen
+
+
+def find_webui_backend_processes(protected_pids=None):
+    """扫描在跑的 web_ui 后端（python 打头的 uvicorn main:app，且 cwd 为
+    */web_ui/backend）。
+
+    protected_pids：存活登记实例的进程树（复用场景绝不能杀，见 sweep）。
+    cwd 无法判定（lsof 失败/进程竞态退出）时不计入——误杀别的 FastAPI
+    项目的代价远大于漏杀孤儿。返回 pid 列表。
+    """
+    protected = set(protected_pids or ())
+    pids = []
+    for proc in _run_ps_snapshot():
+        pid = proc["pid"]
+        if pid == os.getpid() or pid in protected:
+            continue
+        if not _is_python_proc(proc["command"]):
+            continue
+        if not _is_webui_backend_cmdline(proc["command"]):
+            continue
+        if _is_webui_backend_cwd(_process_cwd(pid)):
+            pids.append(pid)
+    return pids
+
+
+def sweep_orphan_processes():
+    """drive 启动前清扫孤儿栈进程，返回 {"car_pids", "backend_pids"}。
+
+    孤儿从哪来：手工 nohup / 终端裸起的 manage.py drive、uvicorn 不在
+    drive.pid 与 webui.json 任何登记里，既有清理（kill_previous_car_processes
+    按 PID 文件、find_live_instance 按登记）均触及不到：
+    - 无登记 uvicorn → find_live_instance 判「无实例」→ 再起一套 → 双后端，
+      页面停在旧后端时表现为无画面、摇杆指令无效（2026-11-09 线上复现）
+    - 无登记车端 → drive 单实例守护拒绝启动（「检测到已运行的 drive 进程」）
+    - SIGTERM 卡在优雅关闭的 uvicorn（aiortc 协程残留）→ 两段式补 SIGKILL
+    处理：
+    - 车端：takeover_car_processes 全量接管（macOS 经 ps 快照，Linux /proc）
+    - uvicorn：有存活登记实例 → 只杀登记进程树之外的（顺带修复双后端）；
+      无登记 → 全部视为孤儿杀掉。
+    web 前端（vite/bundled 静态托管）与模拟器（DonkeySim）不在清理之列。
+    """
+    report = {"car_pids": [], "backend_pids": []}
+    inst = find_live_instance()
+    report["car_pids"] = takeover_car_processes()
+    protected = []
+    if inst:
+        snapshot = _run_ps_snapshot()
+        protected = [inst["pid"]] + _descendant_pids(inst["pid"], snapshot)
+    backend_pids = find_webui_backend_processes(protected_pids=protected)
+    if backend_pids:
+        _terminate_processes(backend_pids, grace_s=1.0)
+        report["backend_pids"] = backend_pids
+    return report
 
 
 # ── NPU 相关进程解释器选择 ──────────────────────────────────────────
@@ -470,3 +724,30 @@ def select_backend_python() -> str:
         if override:
             return override
     return _prefer_venv_npu()
+
+
+def open_url_best_effort(url: str) -> bool:
+    """尽力在本机拉起浏览器打开 URL（base.py --open 与 TUI 复用分支共用）。
+
+    远程会话（SSH/ZCode 终端）没有 DISPLAY，``webbrowser.open`` 会**静默**
+    返回 False——此前表现为「启动 drive 后网页毫无反应且无任何提示」。
+    此时若本机存在桌面 X 会话（/tmp/.X11-unix/X0），回退用 ``DISPLAY=:0``
+    的 xdg-open 在桌面上打开（与 launcher 拉起桌面应用的口径一致）。
+    返回是否成功派发；失败由调用方打印可手动访问的地址。
+    """
+    try:
+        if webbrowser.open(url):
+            return True
+    except Exception:
+        pass
+    if not os.environ.get('DISPLAY') and os.path.exists('/tmp/.X11-unix/X0'):
+        try:
+            env = dict(os.environ)
+            env['DISPLAY'] = ':0'
+            result = subprocess.run(
+                ['xdg-open', url], env=env, timeout=10,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return result.returncode == 0
+        except Exception:
+            return False
+    return False

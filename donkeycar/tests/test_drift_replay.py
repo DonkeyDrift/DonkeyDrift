@@ -69,6 +69,16 @@ def test_run_returns_zero_before_clip_loaded(clock):
     assert throttle == 0.0
 
 
+def test_run_accepts_and_ignores_pilot_image(clip_file, clock):
+    part = DriftReplayPart(clip_path=clip_file, warmup_frames=0,
+                           max_delta_steering=1.0, max_delta_throttle=1.0)
+
+    angle, throttle = part.run(object())
+
+    assert angle == 0.0
+    assert throttle == 0.0
+
+
 def test_missing_clip_file_degrades_instead_of_raising(tmp_path, clock):
     """clip 文件不存在时不抛异常，降级为未加载（输出 0,0）。
 

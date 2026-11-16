@@ -1015,6 +1015,8 @@ def test_connect_loop_backs_off_after_clean_server_close(monkeypatch):
     # 无退避的热重连两次间隔都趋近 0
     assert gap2 >= 0.04, f"第 2 次重连间隔 {gap2:.4f}s，缺少退避"
     assert gap3 >= 0.04, f"第 3 次重连间隔 {gap3:.4f}s，缺少退避"
+
+
     # 每次连接都显式绕过代理（老版本 websockets 无 proxy 参数时 kwargs 为空）
     assert all(kwargs.get("proxy", None) is None
                for kwargs in FakeWebsockets.connect_kwargs)

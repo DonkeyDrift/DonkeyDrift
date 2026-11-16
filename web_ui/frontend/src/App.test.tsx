@@ -8,7 +8,10 @@ import { useStore } from './store/useStore';
 // 回归测试（#135）：顶部导航切回 Tub Manager 不应重新全量拉取 tub，
 // 仅在首次加载（含刷新页面恢复 tubPath）和手动刷新时拉取。
 
-vi.mock('./services/api', () => ({
+// 局部 mock：isTubMissingError 用真实实现（TubManagerPage 靠它把「data 文件
+// 夹还没有」识别为正常空状态），其余按需覆盖
+vi.mock('./services/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./services/api')>()),
   loadTub: vi.fn(),
   getVersion: vi.fn(() => Promise.resolve('test')),
   getApiErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
@@ -117,6 +120,29 @@ describe('TubManagerPage data fetching (#135)', () => {
     resetStore({ tubPath: '', loadedTubPath: null });
     render(<App />);
     expect(loadTub).not.toHaveBeenCalled();
+  });
+
+  // 默认连接 <car>/data：data 文件夹还没有（未录制过）属正常空状态，
+  // 恢复加载 404 时静默处理并标记已处理，不弹错误横幅、不反复重试
+  it('stays silent and marks the path settled when the data folder is missing', async () => {
+    vi.mocked(loadTub).mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: { detail: 'Directory not found' } },
+    } as never);
+    resetStore({ tubPath: '/tmp/mycar/data', loadedTubPath: null });
+    render(<App />);
+
+    await waitFor(() => {
+      expect(loadTub).toHaveBeenCalledWith('/tmp/mycar/data');
+    });
+    await waitFor(() => {
+      expect(useStore.getState().isLoading).toBe(false);
+    });
+    expect(useStore.getState().error).toBeNull();
+    expect(useStore.getState().loadedTubPath).toBe('/tmp/mycar/data');
+    expect(useStore.getState().tubPath).toBe('/tmp/mycar/data');
+    // 已标记处理，不再重复请求
+    expect(loadTub).toHaveBeenCalledTimes(1);
   });
 });
 

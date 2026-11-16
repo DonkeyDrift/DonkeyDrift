@@ -47,6 +47,7 @@ import {
   PLAYHEAD_SCROLL_PADDING_RATIO,
   DRAG_SELECTION_THRESHOLD_PX,
   MIN_SELECTION_DRAFT_WIDTH_PX,
+  TOUCH_COMPAT_MOUSE_SUPPRESS_MS,
   writeSliderValue,
   cssVarColor,
   type RecordAction,
@@ -101,6 +102,14 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
   const isSelectingRef = useRef(false);
   const dragStartRef = useRef<{ x: number; index: number } | null>(null);
   const isDragSelectingRef = useRef(false);
+  // 最近一次触摸交互时间戳：触屏上 touchend 后浏览器会补发兼容鼠标事件，需按时间窗屏蔽，
+  // 否则它们会把触摸链路刚提交的选区再走一遍鼠标逻辑（详见 TOUCH_COMPAT_MOUSE_SUPPRESS_MS）。
+  // 初值 -Infinity：页面刚加载（performance.now() 尚小）时不能把真实鼠标事件误判为兼容事件。
+  const lastTouchTsRef = useRef(Number.NEGATIVE_INFINITY);
+  const isCompatMouseEvent = useCallback(
+    () => performance.now() - lastTouchTsRef.current < TOUCH_COMPAT_MOUSE_SUPPRESS_MS,
+    []
+  );
   const currentIndexRef = useRef(useStore.getState().currentIndex);
   const selectionRangeRef = useRef<{ startIndex: number | null; endIndex: number | null }>({
     startIndex: useStore.getState().selectionStartIndex,
@@ -972,6 +981,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // 触屏上补发的兼容 mousemove：忽略，避免十字线/草稿被鼠标逻辑二次驱动
+      if (isCompatMouseEvent()) return;
       if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
 
       const rect = containerRef.current.getBoundingClientRect();
@@ -981,16 +992,9 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       const chart = chartRef.current;
       const chartArea = chart.chartArea;
 
-      if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) {
-        if (hoverPositionRef.current || tooltipDataRef.current) {
-          hoverPositionRef.current = null;
-          tooltipDataRef.current = null;
-          setTooltipData(null);
-          requestChartRender();
-        }
-        return;
-      }
-
+      // 指针坐标一律按绘图区夹取：拖拽框选时指针常常会越出绘图区（拖到最左/最右一帧、
+      // 或纵向漂移进图例/刻度区），越界时必须继续按边界帧推进，否则草稿框会在离开绘图区的
+      // 那一刻冻结，导致「框不住」想选的整段范围。
       const clampedX = Math.max(chartArea.left, Math.min(x, chartArea.right));
       const clampedIndex = getIndexFromPointerX(clampedX, chart);
 
@@ -1021,6 +1025,17 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
             requestChartRender();
           }
         }
+      }
+
+      // 非拖拽时指针越出绘图区：收起悬停十字线/浮层（拖拽态已在上面按夹取坐标推进，不受影响）
+      if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) {
+        if (hoverPositionRef.current || tooltipDataRef.current) {
+          hoverPositionRef.current = null;
+          tooltipDataRef.current = null;
+          setTooltipData(null);
+          requestChartRender();
+        }
+        return;
       }
 
       const currentRecords = recordsRef.current;
@@ -1058,7 +1073,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       }
 
     },
-    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange]
+    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange, isCompatMouseEvent]
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1089,6 +1104,8 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // 触屏上 touchend 后补发的兼容鼠标事件：直接忽略，避免覆盖触摸链路刚确立的锚点/选区
+      if (isCompatMouseEvent()) return;
       if (!chartRef.current || !containerRef.current || !records.length) return;
       if (event.button !== 0) return;
 
@@ -1133,11 +1150,13 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       selectionDraftRef.current = null;
       setSelectionDraft(null);
     },
-    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender, setSelectionRange, clearSelectionRange]
+    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender, setSelectionRange, clearSelectionRange, isCompatMouseEvent]
   );
 
   const handleMouseUp = useCallback(
     () => {
+      // 触屏上补发的兼容 mouseup：忽略（触摸链路的提交已在 handleTouchEnd 完成）
+      if (isCompatMouseEvent()) return;
       isSelectingRef.current = false;
 
       if (isDragSelectingRef.current) {
@@ -1155,7 +1174,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
       selectionDraftRef.current = null;
       setSelectionDraft(null);
     },
-    [queueSelectionRangeUpdate, records.length]
+    [queueSelectionRangeUpdate, records.length, isCompatMouseEvent]
   );
 
   const isEditableTarget = (target: EventTarget | null) => {
@@ -1858,6 +1877,7 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
+      lastTouchTsRef.current = performance.now();
       if (!chartRef.current || !containerRef.current || !records.length) return;
       if (event.touches.length === 0) return;
 
@@ -1873,19 +1893,43 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       const clampedIndex = getIndexFromPointerX(x, chart);
 
+      // 记录按下点，供 touchmove 用水平位移阈值判定是否进入拖拽框选
+      dragStartRef.current = { x, index: clampedIndex };
+      isDragSelectingRef.current = false;
+
       // Update hover position so the red line can follow the touch exactly
       hoverPositionRef.current = { x, y, dataIndex: clampedIndex };
       requestChartRender();
 
       setCurrentIndex(clampedIndex);
 
+      // 两次轻触选择：touchstart 时立即处理，与鼠标 mousedown 行为一致。
+      // 触摸端的 preventDefault 会抑制合成 click，故不能依赖 click 事件。
+      if (globalSelectionAnchorIndex == null) {
+        globalSelectionAnchorIndex = clampedIndex;
+        clearSelectionRange();
+        visualSelectionRef.current = null;
+      } else {
+        const anchor = globalSelectionAnchorIndex;
+        const startIndex = Math.min(anchor, clampedIndex);
+        const endIndex = Math.max(anchor, clampedIndex) + 1;
+        visualSelectionRef.current = { startIndex, endIndex };
+        setSelectionRange(startIndex, endIndex);
+        globalSelectionAnchorIndex = clampedIndex;
+      }
+
+      // 清除拖动预览
+      selectionDraftRef.current = null;
+      setSelectionDraft(null);
+
       event.preventDefault();
     },
-    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender]
+    [getIndexFromPointerX, records.length, setCurrentIndex, requestChartRender, setSelectionRange, clearSelectionRange]
   );
 
   const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
+      lastTouchTsRef.current = performance.now();
       if (!chartRef.current || !containerRef.current || !recordsRef.current.length) return;
       if (event.touches.length === 0) return;
 
@@ -1899,6 +1943,36 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       const clampedX = Math.max(chartArea.left, Math.min(x, chartArea.right));
       const clampedIndex = getIndexFromPointerX(clampedX, chart);
+
+      // 拖拽框选：与鼠标一致，按下点与当前点水平位移超过阈值才进入拖拽态，
+      // 未过阈值时维持「移动十字线 + 两次轻触锚点」的原有行为。
+      const dragStart = dragStartRef.current;
+      if (dragStart) {
+        const deltaX = Math.abs(clampedX - dragStart.x);
+        if (!isDragSelectingRef.current && deltaX >= DRAG_SELECTION_THRESHOLD_PX) {
+          isDragSelectingRef.current = true;
+          globalSelectionAnchorIndex = null;
+          clearSelectionRange();
+          visualSelectionRef.current = null;
+          const draft = {
+            startX: dragStart.x,
+            currentX: clampedX,
+            startIndex: dragStart.index,
+            currentIndex: clampedIndex,
+          };
+          selectionDraftRef.current = draft;
+          setSelectionDraft(draft);
+          requestChartRender();
+        } else if (isDragSelectingRef.current) {
+          const prevDraft = selectionDraftRef.current;
+          if (prevDraft) {
+            const nextDraft = { ...prevDraft, currentX: clampedX, currentIndex: clampedIndex };
+            selectionDraftRef.current = nextDraft;
+            setSelectionDraft(nextDraft);
+            requestChartRender();
+          }
+        }
+      }
 
       const currentRecords = recordsRef.current;
       const record = currentRecords[clampedIndex];
@@ -1936,18 +2010,31 @@ export const TubEditor: React.FC<{ active?: boolean }> = ({ active = false }) =>
 
       event.preventDefault();
     },
-    [getIndexFromPointerX, requestChartRender, updateTooltipPosition]
+    [getIndexFromPointerX, requestChartRender, updateTooltipPosition, clearSelectionRange]
   );
 
   const handleTouchEnd = useCallback(
     () => {
+      lastTouchTsRef.current = performance.now();
       isSelectingRef.current = false;
-      // 触摸轻触（tap）等效于点击——选择逻辑由 touchstart 中 preventDefault 后的 click 事件处理
-      // 这里只清理预览状态
+
+      // 拖拽框选结束：提交草稿选区（与鼠标 mouseup 行为一致）
+      if (isDragSelectingRef.current) {
+        const draft = selectionDraftRef.current;
+        if (draft && records.length) {
+          const startIndex = Math.min(draft.startIndex, draft.currentIndex);
+          const endIndex = Math.max(draft.startIndex, draft.currentIndex) + 1;
+          queueSelectionRangeUpdate(startIndex, endIndex);
+          globalSelectionAnchorIndex = null;
+        }
+      }
+
+      isDragSelectingRef.current = false;
+      dragStartRef.current = null;
       selectionDraftRef.current = null;
       setSelectionDraft(null);
     },
-    []
+    [queueSelectionRangeUpdate, records.length]
   );
 
   const chartCardClassName = 'relative flex min-h-[clamp(20rem,48vh,34rem)] flex-col';

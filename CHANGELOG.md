@@ -4,14 +4,14 @@
   - 新增 `.github/workflows/one-click-deploy-windows.yml`：真实 Windows runner 上经仓库根 `一键部署.bat` 入口执行完整 9 步部署与验收（与 macOS 共用 install_steps 步骤生成器）；workflow_dispatch 手动触发 + main 上部署文件变更自动触发，90 分钟超时。
   - 补上 Windows 入口此前的"未实测"空白；首跑结果见 workflow 运行记录。
 
-## 2026-11-16 (278)
+## 2026-11-16 (282)
 
 - fix(deploy): 一键部署安装源失败自动回退官方 PyPI（Issue #528）
   - **背景**：安装步骤固定清华镜像（沿用 SSH 安装器）。实测两种真实故障让 `install-dependencies` 必败——镜像对短时多次全量解析的 IP 返 403 拦截页（curl 实测同 403）；用户开着系统代理时镜像拒绝代理出口 IP。官方 PyPI 走代理反而可用。
   - **改动**：`install_steps.py` 的 prelude 与 `_build_install_steps`/`build_install_steps` 增加 `index` 参数（默认仍 `UV_INDEX`，SSH 一键安装流程零变化），新增常量 `PYPI_FALLBACK_INDEX`；`scripts/one_click_deploy.py` 在 `install-dependencies` 失败时自动用官方 PyPI 重建该步骤重试一次（日志明示"回退官方 PyPI"），其余步骤不变。
   - **验证**：新增回退触发与 index 透传 2 项测试；一键部署+安装器测试 71 passed（零回归）；Linux 全量验证通过；真实裸机实测：清华 403 下自动回退官方源完成 9/9 步。
 
-## 2026-11-16 (277)
+## 2026-11-16 (281)
 
 - feat(deploy): 本地一键部署工具——免 SSH 在全新机器一键装好 DonkeyDrift 训练环境（Issue #526）
   - **背景**:原「环境一键部署」只存在于另一台机器的 DD 页面（Trainer「局域网主机」模式），经 SSH 到目标机执行 9 步安装；全新机器无法自我引导（本机无环境时没处点按钮）。
@@ -21,6 +21,41 @@
   - **验证**:macOS arm64 全新环境实测——首次部署 9/9 步通过，验收输出与远程安装完全一致（Python 3.11.18 / TF 2.15.1 + Metal GPU / numpy 1.26.4 / 11 个 gym 环境 / donkey CLI 子命令 / 钩子激活与离开停用）；幂等重跑全部走复用路径（uv/.venv/gym）；mypc 测试族 103 passed（含新增 `test_one_click_deploy.py` 10 项；`test_trainer_mypc_installer.py` 全部原样通过证明重构零行为变化）。
   - **测试环境注记**:部署的浮动依赖组合（starlette 1.10）TestClient 需 `httpx2`（不在 dev extras/lock 中），跑后端路由测试需另装。
   - **待办**:Linux（TONY007）在线后补 `linux_validation.py` 并走收尾 PR 合入 Tony；飞书部署文档待 Linux 在线核对；Windows 入口未实测。
+
+## 2026-11-10 (280)
+
+- feat(pilot): 「pilot 观测」周期日志改为配置开关，默认关闭
+  - 新增配置键 `PILOT_OBSERVE_INTERVAL`（秒，模板 `cfg_complete.py` 默认 0=关闭；旧 mycar 无该键时同样默认关闭）。>0 时每 N 秒记一条「pilot 观测」（推理输入统计 + 输出 + 新帧数），排查全自动异常时在 myconfig 设 5 打开。
+  - **帧冻结告警（输入 >2s 不更新）不受开关键影响，始终开启**——低噪声安全网；`DK_PILOT_DEBUG=1` 逐帧调试日志亦保持独立。
+  - 新增 4 例单测（缺省/显式 0 不打日志、=5 打印、日志关闭时冻结告警仍生效），套件 15 项全过。
+
+## 2026-11-10 (279)
+
+- fix(tui,web): 启动 drive 后网页打不开/浏览器毫无反应——TUI 实车链路漏传对外监听 + 浏览器静默失败
+  - **根因①（连不上）**：P0 安全补强（4cdcda3e）后 `donkey web` 默认仅回环（`resolve_backend_host`），launcher 实车链路显式传了 `--backend-host 0.0.0.0`，但 TUI `DriveCommand.get_command_line` 没传——后端绑 127.0.0.1，而 TUI 打印给用户的 Drive 页地址是局域网 IP（192.168.x.x），远程浏览器 connection refused。此前未被察觉是因为会话常复用 launcher 起的 0.0.0.0 后端。
+  - **根因②（无反应）**：远程/无 DISPLAY 会话（SSH、ZCode 终端）里 `webbrowser.open` **静默返回 False**（`_tryorder=None`），`--open` 与 TUI 复用分支都不打印任何失败信息，桌面浏览器也拉不起来。
+  - **修复①**：TUI Drive 命令显式传 `--backend-host`（默认 `0.0.0.0`，`DRIVE_WEB_HOST` 可覆盖回环），与 launcher 口径一致；非回环访问仍走 P0 令牌鉴权（URL 自动带 `?token=`）。
+  - **修复②**：`webui_instance.open_url_best_effort()`（仅标准库，base/tui 共用）——webbrowser 失败且本机有桌面 X 会话（/tmp/.X11-unix/X0）时回退 `DISPLAY=:0 xdg-open`（同 launcher 拉桌面应用的口径）；`base.py --open` 与 TUI 复用分支改为打印「已在浏览器打开/请手动访问」结果，不再无声失败。
+  - **验证**：`test_tui_drive.py` 更新 patch 层并新增 `--backend-host 0.0.0.0` 回归断言（复用分支 patch 移到 helper 层，顺带消除了真实 helper 在测试机上触发 xdg-open 的副作用）；与 `test_sweep_orphan_processes.py` 合跑 41 过；`get_command_line` 实测默认 0.0.0.0、`DRIVE_WEB_HOST=127.0.0.1` 可覆盖。
+
+## 2026-11-10 (278)
+
+- fix(drive): 全自动 pilot 恒定输出（小车冲出赛道）排查闭环 + 推理可观测性基建。完整调研见 `docs/issues/011-full-auto-constant-pilot-output.md`
+  - **定论**：模型/解释器/预处理/标签/执行链逐项对拍全部正常（arena MAE 0.055/0.017、扰动探针极差 0.384、相机 22fps 100% 唯一帧）；新进程实车两模型均正常跑圈（观测日志：新帧 50~57fps、angle 随弯道 -0.69~+0.10、零冻结告警）。根因归为**旧车端进程运行时性态**（最大嫌疑帧输送停滞，旧进程 stdout=DEVNULL 无直接取证），冻结检测器盯防复发。
+  - **可观测性**：`parts/pilot_holder.py` 每 5s 记 `pilot 观测`（输入 shape/dtype/mean + 输出 + 新帧数），输入帧 >2s 不变打 `疑似相机/管道冻结` 告警（对象 id + 1Hz 内容哈希兜底），`DK_PILOT_DEBUG=1` 逐帧；热加载单测 11 过 + 冻结检测冒烟验证。
+  - **日志落盘**：`templates/complete.py`（及 mycar manage.py）加 RotatingFileHandler → `logs/drive.log`（2MB×2），launcher（DEVNULL）/终端起车均留档，排查不再依赖启动方式。
+  - **诊断工具**：新增 `tools/diagnose_pilot.py`——Test A tub 对照(MAE) / Test B PilotHolder 路径对拍 / Test C 实时相机帧新鲜度 / Test C2 扰动敏感性探针；模型上车前先跑 Test A。
+  - **arena 口径统一**：`routers/arena.py` `fit_model_input_shape` 由 cv2 拉伸改 `fit_image_array`，与训练管道/车端 PilotHolder 同口径（4:3 下数值等价，其他比例防口径分裂；仍严格输出模型尺寸，不破坏 XNNPack 约束）。
+  - **车端调参（myconfig.py，车端目录不进本仓库）**：`AI_THROTTLE_MULT` 1.1→1.0——全自动油门=模型油门×该系数，模型预测(≈0.22)已接近手动记录(≈0.21)，×1.1 偏快导致弯道跑偏；弯道调参序 `0.9` → `STEERING_SMOOTHER_ALPHA=0.5` → 补录过弯数据重训。
+
+## 2026-11-09 (277)
+
+- fix(infer): 修复 `main → RealCar-1` 引入的「无 TensorFlow 车端 tflite 推理不可用」回归
+  - **根因**：`utils.get_model_by_type` 在 RealCar-1 把模型输入尺寸来源从 `cfg.IMAGE_H/W` 改为 `TRAINING_IMAGE_SIZE`（默认 `160x120`）。旧 mycar 配置（main 时代创建）没有该键 → 回退 160x120，而车端真实模型是 `[1,240,320,3]`；无 TF 的 AidLux 车端走 `AidLiteTflite`，aidlite `set_model_properties` 必须先给形状 → 拿错误形状建解释器导致加载/推理失败。有 TF 的 `.venv` 走 `KerasLinear + TfLite`（形状取自模型自身）故本机复现不出。
+  - **修复①**：`parts/npu_pilot.py` 新增 `read_tflite_input_shape()`（纯 `struct` 解析 `.tflite` FlatBuffer 的 `subgraphs[0].inputs[0]` 张量 shape，无需 TF/flatbuffers）；`AidLite.load()` 的 tflite 分支改为**模型声明形状优先、构造时配置值仅作解析失败回退**。`parts/npu_pilot.py` 里 `AidLiteTflite` 的 `in_shapes` 文档同步订正为「回退值，load 时以模型为准」。
+  - **修复②**：`NpuLinearPilot.load()` 以 `interpreter.get_input_shape()` 覆盖构造尺寸；`run()` 补 `fit_image_array`（相机分辨率 ≠ 模型输入时等比缩放+白框，与 Keras/Torch 路径一致）。
+  - **修复③**：`utils.get_model_by_type` 无 `TRAINING_IMAGE_SIZE` 键时回退 `cfg.IMAGE_H/W`（恢复 main 语义，兼容旧 mycar 配置）。
+  - **验证**：新增 `tests/test_tflite_input_shape.py` 5 例（旧配置无 TF → `[[1,240,320,3]]`、显式 `160x120` → `[[1,120,160,3]]`、load 覆盖配置形状、与 `tf.lite` 形状对拍、坏文件返回 None）全过；相关套件 32 过；mycar 实模型 `pilot_1792809061430/pilot_1793348849607.tflite` 解析均为 `[1,240,320,3]`。
 
 ## 2026-10-24 (276)
 

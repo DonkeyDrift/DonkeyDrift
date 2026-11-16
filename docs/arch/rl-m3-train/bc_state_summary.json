@@ -1,0 +1,71 @@
+{
+  "mode": "state",
+  "data": [
+    "outputs/bc_data_web1_clean"
+  ],
+  "epochs": 25,
+  "batch": 256,
+  "lr": 0.0003,
+  "seed": 0,
+  "hard_oversample": 0.3,
+  "filter_brake": true,
+  "final_val": {
+    "val_mse": 0.005423,
+    "val_mse_steer": 0.008622,
+    "val_mse_throttle": 0.002224
+  },
+  "history_tail": [
+    {
+      "epoch": 20,
+      "train_mse": 0.00372,
+      "val_mse": 0.005415,
+      "val_mse_steer": 0.008688,
+      "val_mse_throttle": 0.002142
+    },
+    {
+      "epoch": 21,
+      "train_mse": 0.003106,
+      "val_mse": 0.00552,
+      "val_mse_steer": 0.008687,
+      "val_mse_throttle": 0.002353
+    },
+    {
+      "epoch": 22,
+      "train_mse": 0.002908,
+      "val_mse": 0.005395,
+      "val_mse_steer": 0.008625,
+      "val_mse_throttle": 0.002166
+    },
+    {
+      "epoch": 23,
+      "train_mse": 0.002931,
+      "val_mse": 0.005445,
+      "val_mse_steer": 0.008616,
+      "val_mse_throttle": 0.002273
+    },
+    {
+      "epoch": 24,
+      "train_mse": 0.003249,
+      "val_mse": 0.005423,
+      "val_mse_steer": 0.008622,
+      "val_mse_throttle": 0.002224
+    }
+  ],
+  "wall_s": 0.8,
+  "export": "outputs/bc_export_m3_t0.zip",
+  "self_check": {
+    "max_abs_delta": 0.0,
+    "atol": 1e-05,
+    "pass": true,
+    "n": 256
+  },
+  "card_gates": {
+    "img_std_gt20": true,
+    "steer_hard_ge15pct": true,
+    "thr_gt02_ge30pct": true,
+    "steer_two_sided": true,
+    "frames_ge_3000_user_target": true
+  },
+  "torch": "2.15.0",
+  "finished_at": "2026-11-03 07:42:05"
+}
