@@ -402,44 +402,75 @@ def cmd_frame(args: argparse.Namespace) -> int:
     return 1
 
 
+def _list_formats(args: argparse.Namespace) -> None:
+    """avfoundation -list_options:设备原生格式表(与 OBS 属性面板同源)——
+    判断'格式表有 120 档'与'实际送得出 120'是两件事的基准。"""
+    ffmpeg = shutil.which("ffmpeg")
+    print("== 设备格式表(-list_options) ==", flush=True)
+    proc = subprocess.run(
+        [ffmpeg, "-hide_banner", "-f", "avfoundation",
+         "-list_options", "true", "-i", args.device],
+        capture_output=True, text=True, timeout=20)
+    for line in (proc.stderr or "").splitlines():
+        if any(k in line for k in ("pixel_format", "Supported", "mode")):
+            print(f"  {line.strip()[:160]}")
+
+
 def cmd_fftest(args: argparse.Namespace) -> int:
     """第三方参照判别:PyAV 疑似 EOF 早退时,用 CLI ffmpeg(内部重试)与
-    OpenCV(AVFoundation 原生)双参照测持续出帧——谁持续谁就是 M1 的采集层。"""
+    OpenCV(AVFoundation 原生)双参照测持续出帧——谁持续谁就是 M1 的采集层。
+    2026-11-20 v2:①先列设备格式表;②CLI 用 -progress 逐秒帧率(区分
+    '启动预热稀释的全程平均'与'稳态帧率'——720p 已协商 120tbr 但平均 84,
+    若稳态逐秒到 ~120 则卡为真 120,平均只是被预热拉低)。"""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         print("未找到 ffmpeg", file=sys.stderr)
         return 1
-    modes = [(1920, 1080, 120), (1280, 720, 120)]
+    import re as _re
+
+    _list_formats(args)
+
+    # 720p120=正题;1080p60=已知良好对照(方法论校准:稳态应≈60)
+    modes = [(1280, 720, 120), (1920, 1080, 60)]
     verdicts = []
     for w, h, fps in modes:
         print(f"== fftest {w}x{h}@{fps} nv12 ==", flush=True)
-        # --- 参照 1: CLI ffmpeg(同 libavfoundation,但阻塞+内部重试) ---
+        # --- 参照 1: CLI ffmpeg + 逐秒帧率 ---
         cli_fps = None
+        tail_fps = None
         try:
+            t0 = time.monotonic()
             proc = subprocess.run(
-                [ffmpeg, "-hide_banner", "-f", "avfoundation",
+                [ffmpeg, "-hide_banner", "-nostats", "-progress", "pipe:1",
+                 "-stats_period", "1",
+                 "-f", "avfoundation",
                  "-framerate", str(fps), "-pixel_format", "nv12",
                  "-video_size", f"{w}x{h}", "-i", args.device,
-                 "-t", "10", "-f", "null", "-"],
-                capture_output=True, text=True, timeout=30)
+                 "-t", "15", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=40)
+            wall = time.monotonic() - t0
             chunks = (proc.stderr or "").replace("\r", "\n").splitlines()
-            # 协商出的流参数行:tbr = 设备实际提供的帧率档(判虚标的决定性证据)
             stream_line = next((l for l in chunks if "Stream #0:0" in l), None)
             if stream_line:
                 print(f"  [CLI ffmpeg]  协商流: {stream_line.strip()[:110]}")
-            stat = next((l for l in reversed(chunks) if "frame=" in l), "")
-            import re as _re
-            m = _re.search(r"frame=\s*(\d+).*?fps=\s*([\d.]+)", stat)
-            if m:
-                cli_fps = float(m.group(2))
-                print(f"  [CLI ffmpeg]  frames={m.group(1)} fps={cli_fps} "
-                      f"{'OK' if cli_fps >= fps * 0.8 else '低'}")
+            frames_seq = [int(m) for m in
+                          _re.findall(r"^frame=(\d+)", proc.stdout or "", _re.M)]
+            if frames_seq:
+                total = frames_seq[-1]
+                cli_fps = round(total / max(wall, 1e-3), 1)
+                # 逐秒增量(stats_period 默认 1s;截尾 5 个避启动预热)
+                rates = [b - a for a, b in zip(frames_seq, frames_seq[1:])]
+                tail = rates[-5:] if len(rates) >= 5 else rates
+                tail_fps = round(sum(tail) / len(tail), 1) if tail else None
+                print(f"  [CLI ffmpeg]  总帧={total} wall={wall:.1f}s "
+                      f"平均={cli_fps}fps **稳态(后5s均值)={tail_fps}fps** "
+                      f"逐秒={rates}")
             else:
-                print(f"  [CLI ffmpeg]  无统计行 rc={proc.returncode} "
-                      f"tail={ (proc.stderr or '')[-120:]!r}")
+                print(f"  [CLI ffmpeg]  无进度输出 rc={proc.returncode} "
+                      f"tail={(proc.stderr or '')[-120:]!r}")
         except subprocess.TimeoutExpired:
-            print("  [CLI ffmpeg]  超时(30s)")
-        # --- 参照 2: OpenCV CAP_AVFoundation(原生 API,不经 ffmpeg) ---
+            print("  [CLI ffmpeg]  超时(40s)")
+        # --- 参照 2: OpenCV CAP_AVFOUNDATION(原生 API,不经 ffmpeg) ---
         cv_fps = None
         try:
             import cv2
@@ -453,7 +484,7 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 cap.set(cv2.CAP_PROP_FPS, fps)
                 fps_readback = cap.get(cv2.CAP_PROP_FPS)
-                n, first_ms, deadline = 0, None, time.monotonic() + 4
+                n, first_ms, deadline = 0, None, time.monotonic() + 8
                 while time.monotonic() < deadline:
                     ok, frame = cap.read()
                     if ok:
@@ -467,28 +498,35 @@ def cmd_fftest(args: argparse.Namespace) -> int:
 
             th = threading.Thread(target=_cv_worker, daemon=True)
             th.start()
-            th.join(15)
+            th.join(20)
             if "r" not in holder:
-                print("  [OpenCV]      打开/读帧挂起(>15s,授权或占用)")
+                print("  [OpenCV]      打开/读帧挂起(>20s,授权或占用)")
             else:
                 n, first_ms, shape, fps_rb = holder["r"]
-                cv_fps = round(n / 4, 1)
+                cv_fps = round(n / 8, 1)
                 print(f"  [OpenCV]      frames={n} fps={cv_fps} first={first_ms}ms "
                       f"shape={shape} FPS回读={fps_rb:.0f} "
                       f"{'OK' if cv_fps and cv_fps >= fps * 0.8 else '低'}")
         except ImportError:
             print("  [OpenCV]      cv2 不可用")
-        verdicts.append((w, h, fps, cli_fps, cv_fps))
+        verdicts.append((w, h, fps, cli_fps, tail_fps, cv_fps))
 
     print("\n== 判读 ==")
-    all_vals = [v for _, _, _, c, o in verdicts for v in (c, o) if v is not None]
-    if any(v >= 50 for v in all_vals):
-        best = max(all_vals)
+    for w, h, fps, cli_fps, tail_fps, cv_fps in verdicts:
+        steady = max(v for v in (tail_fps, cli_fps) if v is not None) \
+            if any(v is not None for v in (tail_fps, cli_fps)) else 0
+        tag = "稳态达标" if steady >= fps * 0.9 else ("稳态≈60" if 55 <= steady < fps * 0.9 else "不稳")
+        print(f"{w}x{h}@{fps}: CLI 平均={cli_fps} 稳态={tail_fps} | OpenCV={cv_fps}"
+              f" → {tag}")
+    best = max([v for _, _, _, _, t, c in verdicts for v in (t, c) if v is not None],
+               default=0)
+    if best >= 50:
         note = ""
         if best < 108:
-            note = ("(低于请求的 120)→ 源端帧率问题:HDMI 源(VRX)输出档或待机画面帧率,"
-                    "非采集层;接好图传、VRX 输出设为 720p120 后重跑复核")
-        print(f"采集链路可用:双参照持续出帧,当前实际帧率≈{best:.0f}fps {note}")
+            note = ("稳态仍<120:核对 VRX 的 HDMI 实际输出帧率(部分 VRX 解码 120 "
+                    "但 HDMI 输出锁 60,看 VRX OSD/说明书),以及格式表里 720p 档的"
+                    " fps 上限是否 ≥120")
+        print(f"采集链路可用:当前稳态最高≈{best:.0f}fps {note}")
         return 0
     print("两参照均不能持续出帧 → 卡/驱动/占用层问题:"
           "重插 USB 换口(零成本先做)→ 换线/HDMI 源 → 系统报告查 USB 设备")
