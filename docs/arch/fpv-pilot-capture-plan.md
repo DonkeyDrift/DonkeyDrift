@@ -149,10 +149,16 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 
 ```bash
 # 0) 授权：系统设置 → 隐私与安全性 → 摄像头 → 勾选你的终端 App（首次运行弹窗）
-# 1) 列设备（注意：枚举索引不稳定，两轮实测 0/1 互换——后续一律 --name 按名字解析）
+#    另：跑探测前先关掉 OBS——EAGAIN(Errno 35) 两大来源就是"授权未决"和"设备被独占"
+# 1) 列设备核对（枚举索引不稳定，脚本已默认按名解析 "USB3 Video"，无需手工带 --name）
 .venv/bin/python scripts/fpv_card_probe.py list
-# 2) 格式矩阵探测（子进程隔离，单档超时不拖垮全局；产出 docs/arch/fpv-card-probe.json）
-.venv/bin/python scripts/fpv_card_probe.py --name "USB3 Video" matrix
+# 2) 格式矩阵探测（子进程隔离，单档超时不拖垮全局；末尾自带 default 档判别
+#    "授权/占用问题"还是"格式协商问题"；产出 docs/arch/fpv-card-probe.json）
+.venv/bin/python scripts/fpv_card_probe.py matrix
 # 3) 抓一帧确认画面内容
-.venv/bin/python scripts/fpv_card_probe.py --name "USB3 Video" frame
+.venv/bin/python scripts/fpv_card_probe.py frame
 ```
+
+M0 首跑实录（2026-11-20，已修复）：裸跑 `matrix` 曾打到索引 0=**内置摄像头**
+（mjpeg EINVAL/640x480 I/O error 全是内置头格式签名）+ nv12 档全 EAGAIN（授权未决
+或设备被 OBS 独占）——教训：**按名解析必须是默认行为**，EAGAIN 要给对症提示。

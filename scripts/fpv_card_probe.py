@@ -16,8 +16,8 @@
 
 用法:
     .venv/bin/python scripts/fpv_card_probe.py list
-    # 推荐按名字解析(实测 macOS 枚举索引不稳定,两轮 0/1 互换):
-    .venv/bin/python scripts/fpv_card_probe.py --name "USB3 Video" matrix
+    # matrix 默认按名解析采集卡(实测 macOS 枚举索引不稳定,曾打到内置摄像头):
+    .venv/bin/python scripts/fpv_card_probe.py matrix
     .venv/bin/python scripts/fpv_card_probe.py single --w 1280 --h 720 --fps 120 --fmt nv12 [--dur 4]
     .venv/bin/python scripts/fpv_card_probe.py frame [--out /tmp/fpv_frame.png]
     # Windows 迁移后:--backend dshow --device "video=USB3 Video"
@@ -58,6 +58,15 @@ CANDIDATES = [
     (1920, 1080, 60, "nv12"),
     (640, 480, 120, "nv12"),
 ]
+
+# 默认按名解析的采集卡名(索引不稳定;不指定时会打到内置摄像头——2026-11-20 实测踩坑)
+DEFAULT_AVFOUNDATION_NAME = "USB3 Video"
+
+# EAGAIN 对症提示(Errno 35:授权未决/被拒,或设备被独占)
+EAGAIN_HINT = (
+    "EAGAIN:① 终端未获摄像头授权(系统设置→隐私与安全性→摄像头,勾选后重跑);"
+    "② 设备被其他 App 占用(关掉 OBS/采卡软件再试)"
+)
 
 
 def _pct(sorted_vals: list[float], p: float) -> float:
@@ -124,18 +133,22 @@ def _resolve_device_by_name(substr: str) -> str:
     return hits[0][0]
 
 
-def _open_container(args: argparse.Namespace, w: int, h: int, fps: int, fmt: str):
+def _open_container(args: argparse.Namespace,
+                    w: int | None, h: int | None, fps: int | None, fmt: str | None):
     import av  # 延迟导入:仅 single/frame 需要,坏环境时 list 仍可用
 
-    options = {
-        "framerate": str(fps),
-        "video_size": f"{w}x{h}",
-        "pixel_format": fmt,
-    }
+    options = None
+    if w:  # w=None 表示"不指定格式"探测(验证授权/设备,或让驱动挑默认档)
+        options = {
+            "framerate": str(fps),
+            "video_size": f"{w}x{h}",
+            "pixel_format": fmt,
+        }
     return av.open(args.device, format=args.backend, options=options)
 
 
-def _run_single(args: argparse.Namespace, w: int, h: int, fps: int, fmt: str,
+def _run_single(args: argparse.Namespace,
+                w: int | None, h: int | None, fps: int | None, fmt: str | None,
                 dur_s: float) -> dict:
     """单档探测(可能在本进程或子进程):decode 循环记到达时刻。"""
     result = {
@@ -146,9 +159,10 @@ def _run_single(args: argparse.Namespace, w: int, h: int, fps: int, fmt: str,
         "status": "ok", "error": None,
     }
     t_open0 = time.monotonic()
+    label = f"{w}x{h}@{fps} {fmt}" if w else "default(无格式约束)"
     # 开卡前提示:无权限环境实测会阻塞在 AVFoundation C 层,SIGALRM 打不断,
     # 手跑时超过 ~10s 无响应就 Ctrl-C,先按 TCC_HINT 授权再跑(推荐直接用 matrix)
-    print(f"[{w}x{h}@{fps} {fmt}] 打开设备中(>10s 无响应≈TCC 挂起,Ctrl-C 中断)…",
+    print(f"[{label}] 打开设备中(>10s 无响应≈TCC 挂起,Ctrl-C 中断)…",
           file=sys.stderr, flush=True)
     # 软看门狗:matrix 父进程另有 timeout 硬杀,这里兜底直接手跑的场景
     def _alarm(signum, frame):
@@ -163,12 +177,18 @@ def _run_single(args: argparse.Namespace, w: int, h: int, fps: int, fmt: str,
         signal.signal(signal.SIGALRM, prev_handler)
         return result
     except Exception as exc:  # av.AVError 等
-        result.update(status="open_error", error=str(exc)[:300])
+        msg = str(exc)
+        if "Errno 35" in msg or "temporarily unavailable" in msg:
+            # EAGAIN 实测两因:终端摄像头授权未决/被拒;设备被其他 App 独占(OBS 等)
+            result.update(status="eagain", error=EAGAIN_HINT + f" | 原始错误:{msg[:120]}")
+        else:
+            result.update(status="open_error", error=msg[:300])
         signal.alarm(0)
         signal.signal(signal.SIGALRM, prev_handler)
         return result
 
     arrivals: list[float] = []
+    cap = (fps or 600) * dur_s * 2  # fps=None(default 档)时按 600fps 上限截断
     try:
         deadline = time.monotonic() + dur_s
         for frame in container.decode(video=0):
@@ -176,7 +196,7 @@ def _run_single(args: argparse.Namespace, w: int, h: int, fps: int, fmt: str,
             if result["first_frame_ms"] is None:
                 result["first_frame_ms"] = round((now - t_open0) * 1000, 1)
             arrivals.append(now)
-            if now >= deadline or len(arrivals) >= fps * dur_s * 2:
+            if now >= deadline or len(arrivals) >= cap:
                 break
     except TimeoutError:
         result.update(status="hang_timeout", error=TCC_HINT)
@@ -199,26 +219,41 @@ def _run_single(args: argparse.Namespace, w: int, h: int, fps: int, fmt: str,
 
 
 def cmd_single(args: argparse.Namespace) -> int:
-    result = _run_single(args, args.w, args.h, args.fps, args.fmt, args.dur)
+    try:
+        w, h, fps, fmt = (None, None, None, None) if getattr(args, "any", False) \
+            else (args.w, args.h, args.fps, args.fmt)
+        result = _run_single(args, w, h, fps, fmt, args.dur)
+    except BaseException as exc:  # 子进程也要把崩溃回报给 matrix(2026-11-20 实测教训)
+        import traceback
+        result = {"w": getattr(args, "w", None), "h": getattr(args, "h", None),
+                  "fps_req": getattr(args, "fps", None), "fmt": getattr(args, "fmt", None),
+                  "status": "child_crash",
+                  "error": "".join(traceback.format_exception(exc))[-400:]}
     # 父进程(matrix)靠这行聚合;stdout 前缀保证可 grep
     print("RESULT_JSON:" + json.dumps(result, ensure_ascii=False))
-    readable = {k: result[k] for k in ("w", "h", "fps_req", "fmt", "frames",
-                                       "measured_fps", "first_frame_ms", "status")}
-    print(f"  {readable}")
+    keys = ("w", "h", "fps_req", "fmt", "frames", "measured_fps",
+            "first_frame_ms", "status")
+    print(f"  { {k: result.get(k) for k in keys} }")
     return 0
 
 
 def cmd_matrix(args: argparse.Namespace) -> int:
+    print(f"目标设备: [{args.device}] (backend={args.backend}, "
+          f"name={args.name!r})——索引不对请先跑 list 核对", flush=True)
     rows: list[dict] = []
-    for w, h, fps, fmt in CANDIDATES:
-        label = f"{w}x{h}@{fps} {fmt}"
+    # 末尾追加"不指定格式"档:它能出帧=授权/设备 OK,失败是格式协商问题;
+    # 它也失败=授权/占用问题(EAGAIN 提示会给出对症指引)
+    for w, h, fps, fmt in CANDIDATES + [(None, None, None, None)]:
+        label = f"{w}x{h}@{fps} {fmt}" if w else "default(无格式约束)"
         print(f"== 探测 {label} ...", flush=True)
         # 注意:--backend/--device 是主解析器参数,必须放在子命令之前
         cmd = [sys.executable, os.path.abspath(__file__),
                "--backend", args.backend, "--device", args.device,
-               "single",
-               "--w", str(w), "--h", str(h), "--fps", str(fps),
-               "--fmt", fmt, "--dur", str(args.dur)]
+               "single", "--dur", str(args.dur)]
+        if w:
+            cmd += ["--w", str(w), "--h", str(h), "--fps", str(fps), "--fmt", fmt]
+        else:
+            cmd += ["--any"]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True,
                                   timeout=args.dur + 25)
@@ -226,14 +261,16 @@ def cmd_matrix(args: argparse.Namespace) -> int:
                          if l.startswith("RESULT_JSON:")), None)
             row = json.loads(line[len("RESULT_JSON:"):]) if line else {
                 "w": w, "h": h, "fps_req": fps, "fmt": fmt,
-                "status": "no_result", "error": (proc.stderr or "")[-200:],
+                "status": "child_exit",
+                "error": f"rc={proc.returncode} {(proc.stderr or '')[-400:]}",
             }
         except subprocess.TimeoutExpired:
             row = {"w": w, "h": h, "fps_req": fps, "fmt": fmt,
                    "status": "hang_killed", "error": TCC_HINT}
         passed = (row.get("status") == "ok"
                   and row.get("frames", 0) >= 10
-                  and row.get("measured_fps", 0) >= row["fps_req"] * 0.9)
+                  and (row.get("fps_req") is None
+                       or row.get("measured_fps", 0) >= row["fps_req"] * 0.9))
         row["pass"] = passed
         rows.append(row)
         print(f"   -> {row['status']}  frames={row.get('frames', 0)} "
@@ -241,7 +278,8 @@ def cmd_matrix(args: argparse.Namespace) -> int:
               f"p95={row.get('intervals', {}).get('p95_ms', '-')}ms "
               f"{'PASS' if passed else ''}", flush=True)
 
-    recommendation = next((r for r in rows if r["pass"]), None)
+    # 推荐只从"显式格式"档里选(default 档只作授权/占用判据)
+    recommendation = next((r for r in rows if r["pass"] and r.get("fps_req")), None)
     rec_str = (f"{recommendation['w']}x{recommendation['h']}@"
                f"{recommendation['fps_req']} {recommendation['fmt']}") if recommendation else None
     report = {
@@ -254,11 +292,17 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     with open(_REPORT_PATH, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
-    print(f"\n推荐档位: {report['recommendation'] or '无(全档失败)'}")
+    print(f"\n推荐档位: {rec_str or '无(全档失败)'}")
+    default_row = next((r for r in rows if r.get("fps_req") is None), None)
+    if default_row and default_row.get("status") == "ok":
+        print(f"default 档出帧 {default_row.get('measured_fps')}fps → 授权/设备正常,"
+              f"失败档是格式协商问题(对照 OBS 属性面板'输入格式'下拉核对)")
     print(f"报告: {_REPORT_PATH}")
     if recommendation is None:
         hints = {r.get("status") for r in rows}
-        if hints & {"hang_killed", "hang_timeout", "no_frames"}:
+        if hints & {"eagain"}:
+            print(EAGAIN_HINT)
+        elif hints & {"hang_killed", "hang_timeout", "no_frames"}:
             print(TCC_HINT)
         return 1
     return 0
@@ -324,12 +368,18 @@ def main() -> int:
     p_single.add_argument("--fps", type=int, default=120)
     p_single.add_argument("--fmt", default="nv12")
     p_single.add_argument("--dur", type=float, default=4.0)
+    p_single.add_argument("--any", action="store_true",
+                          help="不指定格式(默认档)——验证授权/设备是否可用")
 
     p_frame = sub.add_parser("frame", help="抓一帧存 PNG")
     p_frame.add_argument("--index", default=None, help="显式设备索引(覆盖 --name)")
     p_frame.add_argument("--out", default="/tmp/fpv_frame.png")
 
     args = parser.parse_args()
+    # avfoundation 默认按名解析采集卡(索引不稳定;2026-11-20 实测裸跑打到内置摄像头)
+    if (args.backend == "avfoundation" and not args.name
+            and getattr(args, "index", None) is None):
+        args.name = DEFAULT_AVFOUNDATION_NAME
     # 解析优先级:子命令 --index > --name(按名解析,索引不稳定) > --device 默认
     if args.backend == "avfoundation":
         idx = getattr(args, "index", None)
