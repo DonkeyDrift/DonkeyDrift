@@ -147,12 +147,16 @@ def _run_phase(label: str, args: argparse.Namespace, sleep_s: float) -> dict:
         p = lambda q: gaps[min(len(gaps) - 1, round(q / 100 * (len(gaps) - 1)))]
         stats["p50_ms"] = round(p(50) * 1000, 2)
         stats["p95_ms"] = round(p(95) * 1000, 2)
-        # 逐秒帧数(稳态看尾部)
-        per_sec = []
+        # 逐秒帧数/逐秒唯一帧(内容帧率主判据:稳定 N<120 = N fps 内容装 120Hz 容器)
+        per_sec, uniq_sec = [], []
         for i in range(int(wall) + 1):
             lo = arrivals[0] + i
-            per_sec.append(sum(1 for t in arrivals if lo <= t < lo + 1))
-        stats["per_sec"] = [x for x in per_sec if x]
+            idxs = [j for j, t in enumerate(arrivals) if lo <= t < lo + 1]
+            if idxs:
+                per_sec.append(len(idxs))
+                uniq_sec.append(len({hash_list[j] for j in idxs}))
+        stats["per_sec"] = per_sec
+        stats["uniq_sec"] = uniq_sec
     print(f"  frames={n} fps={stats['fps']} unique={len(hashes)} "
           f"p50={stats.get('p50_ms', '-')}ms p95={stats.get('p95_ms', '-')}ms "
           f"eagain={eagain} eof={eof}", flush=True)
@@ -164,13 +168,7 @@ def _run_phase(label: str, args: argparse.Namespace, sleep_s: float) -> dict:
               flush=True)
     if "per_sec" in stats:
         print(f"  逐秒帧数={stats['per_sec']}", flush=True)
-        uniq_sec = []
-        for i in range(int(wall) + 1):
-            lo = arrivals[0] + i
-            idxs = [j for j, t in enumerate(arrivals) if lo <= t < lo + 1]
-            if idxs:
-                uniq_sec.append(len({hash_list[j] for j in idxs}))
-        print(f"  逐秒唯一帧={uniq_sec}", flush=True)
+        print(f"  逐秒唯一帧={stats['uniq_sec']}", flush=True)
     return stats
 
 
@@ -215,20 +213,34 @@ def main() -> int:
     else:
         print(f"⚠ A={fa}fps 偏低,unique={ua}/{a['frames']}——"
               f"先查源(VRX HDMI 输出帧率)与设备占用,再看逐秒形态")
-    # 内容帧率判据:重复帧位置差(定期复制=内容低于交付;连串散布=静止跳帧)
+    # 内容帧率判据(主=逐秒唯一帧稳定性,辅=重复帧位置差)。
+    # 2026-11-20 实测教训:100fps 内容装 120Hz 容器时位置差因双时钟域漂移散布 1~11
+    # (仅 77% 落 5~7),而逐秒唯一帧稳定钉在 100——稳定性才是内容帧率的可靠指纹;
+    # "120fps 内容+静止跳帧"的唯一帧数应随场景动静波动,不会每秒恰 100。
     for st in (a, b):
         d = st.get("dup")
+        uq_all = st.get("uniq_sec") or []
+        uq = uq_all[1:] if len(uq_all) >= 4 else uq_all  # 裁首秒(预热追赶帧)
         if not d:
             print(f"  [{st['label']}] 无重复帧 → 内容帧率=交付帧率(全唯一)")
             continue
         denom = max(1, d["count"] - 1)
-        est = 120 * (1 - 1 / max(1, d["delta_med"])) if d["delta_med"] else 0
+        if len(uq) >= 3 and (max(uq) - min(uq)) <= 4:
+            mean_u = sum(uq) / len(uq)
+            if mean_u < 112:
+                print(f"  [{st['label']}] 逐秒唯一帧稳定 {uq} → "
+                      f"**内容 ≈{mean_u:.0f}fps 装进 120Hz 容器**"
+                      f"(每秒 ~{120 - mean_u:.0f} 帧重复;位置差散布=双时钟域漂移)")
+                continue
+            print(f"  [{st['label']}] 逐秒唯一帧稳定 {uq}≈交付 → 内容≈120fps(偶发静止跳帧)")
+            continue
         if d["eq567"] >= denom * 0.9 and d["runs_max"] <= 2:
+            est = 120 * (1 - 1 / max(1, d["delta_med"])) if d["delta_med"] else 0
             print(f"  [{st['label']}] 重复帧位置差稳定 5~7(中位 {d['delta_med']}) → "
                   f"**内容 ≈{est:.0f}fps 装进 120Hz 容器**(每 {d['delta_med']} 帧复制 1)")
         else:
-            print(f"  [{st['label']}] 重复帧位置差散布(中位 {d['delta_med']},"
-                  f"连串最长 {d['runs_max']}) → 120fps 内容+静止跳帧(编码器 skip)")
+            print(f"  [{st['label']}] 逐秒唯一帧波动 {uq} + 连串最长 {d['runs_max']} → "
+                  f"以静止跳帧为主(编码器 skip),内容帧率≈交付")
     return 0
 
 
