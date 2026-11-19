@@ -84,13 +84,13 @@ class FpvCaptureCardCamera:
   探测一律用带超时的子进程隔离（见 `scripts/fpv_card_probe.py`）。
 - 依赖已就绪：`av` 17.1（仓库核心依赖）、ffmpeg（homebrew）。
 
-### 3.4 技术栈选型（已定 PyAV 主选 + 两级回退）
+### 3.4 技术栈选型（M0 实测后更新：macOS 用 OpenCV，PyAV 降级为 Windows 候选）
 
-| 栈 | 定位 | 回退触发条件 |
+| 栈 | 定位 | M0 实测结论（2026-11-20） |
 |---|---|---|
-| **PyAV + avfoundation** | 主选：进程内、帧时间戳精确、格式可控、三平台同 API（`format=` 切换） | 该卡 NV12 档协商失败 |
-| OpenCV `CAP_AVFOUNDATION`（cv2 4.11 就绪） | 备选：最简单但帧率/格式设置常不生效、内部缓冲加延迟 | PyAV MJPEG 档亦不可用 |
-| ffmpeg 子进程 → rawvideo 管道 | 兜底：鲁棒但多一次拷贝、无帧时间戳 | 仅诊断工具沿用 |
+| PyAV + avfoundation | ~~主选~~ Windows 候选 | **macOS 不可用**：突发 2-4 帧后 demuxer EOF 早退（非阻塞模式与 avfoundation 兼容性问题；CLI ffmpeg 同库正常因其内部重试） |
+| **OpenCV `CAP_AVFOUNDATION`** | **macOS 主选** | **实测通过**：1080p/720p 双档持续出帧（~60fps，受源端限制）、原生 720p 档确认（shape=(720,1280,3)）、首帧 ~330-410ms、逐帧 `cap.read()` 阻塞语义简单 |
+| ffmpeg 子进程 → rawvideo 管道 | 兜底/交叉验证 | 实测可用（~83fps 含突发追赶），留作对照工具（`fftest`） |
 
 ## 4. 训练数据录制（M3，Mac 单进程）
 
@@ -130,7 +130,7 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0 探测**（脚本已备：`scripts/fpv_card_probe.py`） | TCC 授权 + UVC 格式矩阵（720p120 原生档有无）+ 真实内容 fps + 采集延迟 | 定稿采集档位（§2.1）；实测延迟表回填 §5 |
+| **M0 探测** ✅（2026-11-20，脚本 `scripts/fpv_card_probe.py`） | TCC 授权排查 + UVC 格式矩阵 + 双参照判别 | **通过**：NV12 720p/1080p 格式全通；OpenCV 后端持续出帧；**原生 720p 档确认**；PyAV 于 macOS 判死刑（EOF 早退）→ M1 用 OpenCV；当前 ~60fps 归因源端（待机画面/VRX 输出档），接好图传后复核 120 |
 | **M1 采集层** | `fpv_capture.py` 部件 + 预览 + 统计 | 稳定 120fps 采集、帧龄 p95 <10ms |
 | **M2 桥+注入**（WheelLink 侧） | WS 服务 + `AiInputSource` + `MixedInputSource` + 三态仲裁 | 假推理（恒 0 转向/限幅油门）注入真车空转，安全链全程生效 |
 | **M3 闭环** | 人工录制 FPV 数据 → 训练 → AI 首航（先直线/大半径，AI-shadow 起步） | 人工随时接管无冲突；E2E 延迟实测达标 |
@@ -138,12 +138,12 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 
 ## 7. 风险与开放问题
 
-- **采集卡 1080p120 是否为 720p upscale**：M0 格式矩阵定（OBS 属性"输入格式"下拉即完整矩阵，
-  720p120 原生档存在则直接协商）。
-- **120fps 解码负载**：M0 实测帧间隔分布；超预算降 60fps 采集（帧新鲜度损失 8ms，可接受）。
+- ~~采集卡 1080p120 是否为 720p upscale~~ **已解决（M0）**：卡有**原生 720p NV12 档**（OpenCV 实测 shape=(720,1280,3)）。
+- **当前实测 ~60fps 而非 120**（M0）：归因**源端**——测试时图传"发射端已断开"（卡的待机画面）或 VRX HDMI 输出档为 60fps。待接好图传链路、VRX 输出设 720p120 后重跑 `fftest` 复核；采集层已验证与帧率档位解耦。
 - **图传 OSD 叠加**（电池/RSSI 入画）对模型是噪声：查图传菜单可否关 OSD，或训练前裁剪下缘条带。
 - 开放：AI 油门限幅是否独立于人工限幅配置（WheelLink 侧 `LimitPercent` 语义沿用还是单列）；
   `tele/attitude` 的具体列格式（M3 录制器实现时定）。
+- ~~120fps 解码负载~~：OpenCV 逐帧解码实测无压力（60fps 档）；120 档到源后复测。
 
 ## 8. 附：M0 运行指引
 
