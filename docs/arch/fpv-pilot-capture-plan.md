@@ -147,8 +147,8 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | **M0 探测** ✅（2026-11-20 终审，`fpv_card_probe.py` + **`fpv_rate_audit.py` 判决实验**） | TCC 授权排查 + 格式矩阵 + 双参照 + Swift 格式表 + **读取节拍归因审计** | **终审（翻案后定案）**：① 采集后端=**PyAV 重试循环**（每帧新建 generator+EAGAIN 重试，实测 120.3fps 满帧、p50=8.33ms）；② 采集档=1280×720 @120 会话，**实得满帧 120fps**；③ 卡**非虚标**（格式表 120 档真实；"85 上限/120 虚标"系 CLI ffmpeg 读取节拍误诊，240 档未测）；④ 无 MJPEG 档；⑤ 原生 720p 档确认。误诊史详见 §3.4 顶部警告框 |
-| **M1 采集层** | `fpv_capture.py` 部件 + 预览 + 统计 | 稳定 120fps 采集、帧龄 p95 <10ms |
-| **M2 桥+注入**（WheelLink 侧） | WS 服务 + `AiInputSource` + `MixedInputSource` + 三态仲裁 | 假推理（恒 0 转向/限幅油门）注入真车空转，安全链全程生效 |
+| **M1 采集层** ✅（2026-11-20 验收，`0c8b6dde`） | `fpv_capture.py` 部件 + `fpv_preview.py` 预览统计 + 单测 4 项（含 generator 重试回归护栏） | **通过**：实测 120fps 稳态 14s 无波动、arrival p50 8.05ms/p95 9.3ms、**age p95 稳态 9.4~9.8ms < 10ms**（启动瞬态 10.5 后收敛）；eagain 高计数=帧间隙重试常态，starved=False |
+| **M2 桥+注入**（WheelLink 侧）**代码 ✅（2026-11-20，`feat-ai-bridge` 分支 5 提交**：AiBridgeConfig/AiInputSource/MixedInputSource/AiBridgeServer/EngineHost 装配；Mac 门禁四组测试全绿，EngineHost 编译校验 0 警告）| WS 服务 + `AiInputSource` + `MixedInputSource` + 三态仲裁 | 假推理（恒 0 转向/限幅油门）注入真车空转，安全链全程生效（**台架验收待 Windows+硬件；ModeButton 点位待用户定**） |
 | **M3 闭环** | 人工录制 FPV 数据 → 训练 → AI 首航（先直线/大半径，AI-shadow 起步） | 人工随时接管无冲突；E2E 延迟实测达标 |
 | **M4 迁移** | 采集层切 `dshow`、推理与 WheelLink 同机（Windows） | 同机上 M0 指标复现；WS 走 localhost |
 
