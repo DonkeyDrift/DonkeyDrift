@@ -203,40 +203,47 @@ def _run_single(args: argparse.Namespace,
     loop_start = None
     cap = (fps or 600) * dur_s * 2  # fps=None(default 档)时按 600fps 上限截断
     deadline = time.monotonic() + dur_s
-    decoder = container.decode(video=0)
     loop_end = deadline
-    # 2026-11-20 实测定案:ffmpeg avfoundation 读帧间隙常返 EAGAIN,CLI ffmpeg 内部
-    # 重试而 PyAV 直接抛——必须睡 5ms 重试;连续 1.5s 无任何帧投递才判真死
-    # (内置相机实测:首帧 1145ms 后突发 4 帧,旧逻辑首帧前 EAGAIN 即误判)。
-    # 同日续证:NV12 各档突发 2-4 帧后 demuxer 返回 EOF(StopIteration)提前退出
-    # ——PyAV 非阻塞与 avfoundation 兼容性问题,用 fftest 子命令的 CLI/OpenCV
-    # 双参照判别(第三方参照分支原则)。
+
+    def _read_once():
+        """每次新建 decode generator 读一帧——avfoundation 读路径在帧间隙常态
+        返回 EAGAIN,而 generator 内抛异常即终止;复用死 generator 只会拿到假
+        StopIteration(2026-11-20 终审:所谓"PyAV EOF 早退"即此假象,fpv_rate_audit
+        实证新建 generator 重试可稳跑 120fps)。返回 (frame, 错误标签)。"""
+        gen = container.decode(video=0)
+        try:
+            return next(gen), None
+        except StopIteration:
+            return None, "eof"
+        except OSError as exc:
+            msg = str(exc)
+            if "Errno 35" in msg or "temporarily unavailable" in msg:
+                return None, "eagain"
+            return None, msg
+
     try:
         while time.monotonic() < deadline:
             if loop_start is None:
                 loop_start = time.monotonic()
-            try:
-                frame = next(decoder)
-            except StopIteration:
+            frame, err = _read_once()
+            if err == "eof":
                 loop_end = time.monotonic()
                 result.update(
                     status="eof",
-                    error=f"demuxer EOF:仅 {len(arrivals)} 帧后流结束(PyAV 非阻塞"
-                          f"与 avfoundation 兼容性问题疑似;跑 fftest 用 CLI ffmpeg/"
-                          f"OpenCV 双参照判别)")
+                    error=f"demuxer EOF:仅 {len(arrivals)} 帧后流结束"
+                          f"(新建 generator 重试下仍 EOF=真流止)")
                 break
-            except OSError as exc:
-                msg = str(exc)
-                if "Errno 35" in msg or "temporarily unavailable" in msg:
-                    eagain_retries += 1
-                    if time.monotonic() - last_progress > 1.5:
-                        loop_end = time.monotonic()
-                        result.update(status="eagain_read", error=EAGAIN_READ_HINT)
-                        break
-                    time.sleep(0.005)
-                    continue
+            if err == "eagain":
+                eagain_retries += 1
+                if time.monotonic() - last_progress > 1.5:
+                    loop_end = time.monotonic()
+                    result.update(status="eagain_read", error=EAGAIN_READ_HINT)
+                    break
+                time.sleep(0.005)
+                continue
+            if err:
                 loop_end = time.monotonic()
-                result.update(status="decode_error", error=msg[:300])
+                result.update(status="decode_error", error=str(err)[:300])
                 break
             now = time.monotonic()
             last_progress = now
@@ -455,11 +462,11 @@ def _list_formats(args: argparse.Namespace) -> None:
 
 
 def cmd_fftest(args: argparse.Namespace) -> int:
-    """第三方参照判别:PyAV 疑似 EOF 早退时,用 CLI ffmpeg(内部重试)与
-    OpenCV(AVFoundation 原生)双参照测持续出帧——谁持续谁就是 M1 的采集层。
-    2026-11-20 v2:①先列设备格式表;②CLI 用 -progress 逐秒帧率(区分
-    '启动预热稀释的全程平均'与'稳态帧率'——720p 已协商 120tbr 但平均 84,
-    若稳态逐秒到 ~120 则卡为真 120,平均只是被预热拉低)。"""
+    """第三方参照判别:CLI ffmpeg 与 OpenCV(AVFoundation 原生)双参照测持续出帧。
+    2026-11-20 v2:①先列设备格式表(Swift);②CLI 用 -progress 逐秒帧率。
+    ⚠️ 终审警示:CLI 的稳态 ~85fps 是其**读取节拍**而非设备上限(同日 fpv_rate_audit
+    忙重试实测 120.3fps)——>85fps 的结论一律以 fpv_rate_audit 为准,本子命令仅作
+    链路可用性/格式协商诊断。"""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         print("未找到 ffmpeg", file=sys.stderr)
@@ -625,7 +632,7 @@ def main() -> int:
     p_frame.add_argument("--out", default="/tmp/fpv_frame.png")
 
     sub_fftest = sub.add_parser("fftest", help="CLI ffmpeg + OpenCV 双参照持续出帧判别"
-                                          "(PyAV EOF 早退时定位采集层选型)")
+                                          "(链路/格式诊断;>85fps 结论以 fpv_rate_audit 为准)")
     sub_fftest.add_argument("--modes", default="720p120,1080p60",
                             help="逗号分隔待测档:'720p120'/'1080p60'/'1280x720@240'")
 

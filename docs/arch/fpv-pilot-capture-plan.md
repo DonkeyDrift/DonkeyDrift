@@ -62,7 +62,7 @@ class FpvCaptureCardCamera:
     cfg: FPV_CAPTURE_BACKEND = avfoundation | dshow | v4l2   # M0=avfoundation, M4=dshow
          FPV_CAPTURE_DEVICE_NAME = "USB3 Video"  # 按名字解析(推荐;macOS 枚举索引不稳定,
                                                   # 实测两轮 0/1 互换——索引只是兜底键)
-         FPV_CAPTURE_W/H/FPS = 1280/720/120 # M0 定稿：120 会话档，实得稳态 ~85fps（卡硬件上限）
+         FPV_CAPTURE_W/H/FPS = 1280/720/120 # M0 终审：120 会话档，实得稳态 120fps（fpv_rate_audit 实测 p50=8.33ms）
          FPV_CAPTURE_PIXFMT  = nv12
          FPV_MODEL_W/H       = 320/240      # 推理输入（与 TRAINING_IMAGE_SIZE 对齐）
     """
@@ -71,7 +71,8 @@ class FpvCaptureCardCamera:
     def stats(self) -> dict: ...                                    # 采集fps/帧龄/丢帧，供诊断
 ```
 
-- 后台线程 `container.decode` 循环 → 同帧派发两个消费者槽（模型帧/全帧）+ `set_source_arrival()`
+- 后台线程读帧循环（**PyAV 每帧新建 decode generator + EAGAIN 重试**，机制见 §3.4）→
+  同帧派发两个消费者槽（模型帧/全帧）+ `set_source_arrival()`
   打点（frame_freshness.py 侧信道，为延迟分解测量留桩）。
 - 可选像素印章：预览帧烧 `video_timestamp.draw_timestamp`，复用现有 E2E 测量方法论。
 - 录制帧 JPEG q85（720p ≈60KB/帧）。
@@ -84,13 +85,25 @@ class FpvCaptureCardCamera:
   探测一律用带超时的子进程隔离（见 `scripts/fpv_card_probe.py`）。
 - 依赖已就绪：`av` 17.1（仓库核心依赖）、ffmpeg（homebrew）。
 
-### 3.4 技术栈选型（M0 定案：ffmpeg rawvideo 管道为采集后端，跨平台）
+### 3.4 技术栈选型（终审翻案 2026-11-20：PyAV 重试循环为采集后端，实测满帧 120fps）
 
-| 栈 | 定位 | M0 实测结论（2026-11-20，含双实验定案） |
+> ⚠️ 误诊史（防再犯）：初版"85fps = 卡硬件上限、PyAV macOS 死刑、ffmpeg 管道胜出"**已全部推翻**。
+> 85 的真凶是 **CLI ffmpeg 读取路径的 EAGAIN 重试节拍**（~10ms 轮询+单帧读取，队列溢出丢帧）——
+> 所有测出 85 的工具（CLI ffmpeg）共用这一条路径；PyAV 的"EOF 早退"是探针自己的 bug
+> （**generator 在首个 EAGAIN 后死亡**，Python generator 抛异常即终止，后续 next() 全部假 StopIteration）。
+> 判决实验 `scripts/fpv_rate_audit.py`（忙重试 vs 5ms 重试两段对照）：
+> **605 帧/5s = 120.3fps，p50=8.33ms 精确 1/120，逐秒 120/120/120/120**——卡是真 120，格式表没虚标。
+
+| 栈 | 定位 | 终审结论（2026-11-20，fpv_rate_audit） |
 |---|---|---|
-| **ffmpeg 子进程 → rawvideo 管道** | **采集后端（macOS/Windows 通用）** | 实测可用：720p/1080p 持续出帧、协商档位精确（120/240 会话都能协商）、CLI 内部重试天然规避 PyAV 的 EAGAIN/EOF 坑；`format=avfoundation→dshow` 一参数迁移 |
-| OpenCV `CAP_AVFOUNDATION` | 预览/低帧率模式 | 实测锁 60fps（FPS 回读恒 60，选不中高帧率格式档），不可用于 >60 采集 |
-| PyAV + avfoundation | 仅 Windows 候选（M4 实测） | **macOS 判死刑**：突发 2-4 帧后 demuxer EOF 早退（非阻塞与 avfoundation 兼容性问题） |
+| **PyAV 重试循环（每帧新建 decode generator）** | **采集后端（M1）** | **实测 120.3fps 满帧**（忙重试与 5ms 睡眠重试均 ~120，队列吸收抖动）；进程内、逐帧时间戳、`format=avfoundation→dshow` 一参数迁移 |
+| ffmpeg 子进程 → rawvideo 管道 | 对照/诊断工具 | **陷阱**：CLI 读取节拍封顶 ~85fps（丢帧），不能当 >85 的采集后端；fftest 子命令保留作诊断 |
+| OpenCV `CAP_AVFOUNDATION` | 预览/低帧率模式 | 锁 60fps（格式选择选中 max60 条目，非卡限制），不用于 >60 采集 |
+
+**EAGAIN 重试范式（M1 必须照此实现）**：avfoundation 读路径在帧间隙常态返回 EAGAIN
+（`avf_read_frame` 不阻塞等帧），`container.decode()` generator 抛出该异常即**终止**——
+正确读法是**每次读取新建 generator**、EAGAIN 后重试（忙重试或 ≤5ms 睡眠均可，帧队列会吸收抖动），
+连续 >1.5s 无帧才判真死。30fps 内置相机同见"突发数帧后 EAGAIN"，此为该路径通性，不是卡/流故障。
 
 ## 4. 训练数据录制（M3，Mac 单进程）
 
@@ -116,7 +129,7 @@ class FpvCaptureCardCamera:
 | 图传链路（720p120 低延迟档） | 15~30ms | 数字图传固有 |
 | 接收机 HDMI → 采集卡 UVC 缓冲 | 8~17ms | 1-2 帧 @120fps，M0 实测 |
 | 解码+缩放（PyAV reformat） | 2~4ms | NV12→RGB24+缩放一步 |
-| 取帧等待（85fps 实测稳态） | ≤11.8ms | M0 定案：卡硬件上限 ~85fps（详见 §7） |
+| 取帧等待（120fps 满帧达成） | ≤8.3ms | 终审：p50=8.33ms 精确 1/120（fpv_rate_audit） |
 | 推理（320×240 小 CNN，MPS） | 3~8ms | 60Hz 无压力 |
 | WS 传输（LAN / 最终 localhost） | 1~3ms / ~0 | |
 | WheelLink→ELRS→车（官方实测） | 6~15ms | 150Hz 控制环 |
@@ -130,7 +143,7 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0 探测** ✅（2026-11-20，脚本 `scripts/fpv_card_probe.py`，fftest 双实验定案） | TCC 授权排查 + 格式矩阵 + 双参照 + Swift 原生格式表 + 逐秒稳态帧率 | **定案**：① 采集后端=ffmpeg rawvideo 管道（OpenCV 锁 60 仅预览，PyAV macOS EOF 死刑）；② 采集档=1280×720 @120 会话（原生 720p 档，实得稳态 ~85fps）；③ **卡硬件上限 ≈84-86fps**（双实验：会话 120/240 稳态同为 84.4；VRX 1080p60 输入下 120 会话稳态 83——上限按帧数卡、与分辨率/带宽无关，USB3 链路确认）；④ 格式表 120/144/240 档为宣传档；⑤ 无 MJPEG 档 |
+| **M0 探测** ✅（2026-11-20 终审，`fpv_card_probe.py` + **`fpv_rate_audit.py` 判决实验**） | TCC 授权排查 + 格式矩阵 + 双参照 + Swift 格式表 + **读取节拍归因审计** | **终审（翻案后定案）**：① 采集后端=**PyAV 重试循环**（每帧新建 generator+EAGAIN 重试，实测 120.3fps 满帧、p50=8.33ms）；② 采集档=1280×720 @120 会话，**实得满帧 120fps**；③ 卡**非虚标**（格式表 120 档真实；"85 上限/120 虚标"系 CLI ffmpeg 读取节拍误诊，240 档未测）；④ 无 MJPEG 档；⑤ 原生 720p 档确认。误诊史详见 §3.4 顶部警告框 |
 | **M1 采集层** | `fpv_capture.py` 部件 + 预览 + 统计 | 稳定 120fps 采集、帧龄 p95 <10ms |
 | **M2 桥+注入**（WheelLink 侧） | WS 服务 + `AiInputSource` + `MixedInputSource` + 三态仲裁 | 假推理（恒 0 转向/限幅油门）注入真车空转，安全链全程生效 |
 | **M3 闭环** | 人工录制 FPV 数据 → 训练 → AI 首航（先直线/大半径，AI-shadow 起步） | 人工随时接管无冲突；E2E 延迟实测达标 |
@@ -139,13 +152,11 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 ## 7. 风险与开放问题
 
 - ~~1080p upscale 疑问~~ **已解决**：卡有原生 720p 420v 档（Swift 格式表 + OpenCV shape 实证）。
-- **采集卡帧率上限（M0 双实验定案，2026-11-20）**：迈普（MACROSILICON，MS2130 类，VID 0x345F）方案
-  实测持续上限 **≈84-86fps**：① 会话开 120 与 240 稳态同为 84.4；② VRX 输出 1080p60 时 120 会话
-  稳态 83（排除"VRX 没给 120"）；③ 720p 与 1080p 上限帧率相同（按帧卡非按带宽，USB3
-  Device Speed=3 已确认）；④ 格式表 120/144/240 档虚标；⑤ 全表无 MJPEG。**软件无法突破，
-  ~85fps 即本卡天花板**——对延迟预算影响仅 +3.5ms（11.8ms vs 8.3ms 帧新鲜度），不阻塞 M1。
-  若未来要真 120：换**实测**能持续 120fps 采集的卡（宣传参数一律不信，收货先跑
-  `fpv_card_probe.py fftest` 验收），M1 采集层参数化、换卡零改码。
+- ~~85fps 硬件上限 / 120 虚标~~ **已翻案（终审 2026-11-20）**：`fpv_rate_audit.py` 忙重试实测
+  **120.3fps、p50=8.33ms 精确 1/120、逐秒 120/120/120**——卡真 120、格式表没虚标；此前的
+  "85 上限"全部来自 CLI ffmpeg 的读取节拍（~10ms 轮询+单帧读取丢帧），"PyAV EOF"是探针
+  generator 死亡的假象。教训：**读取器自身节拍会伪装成设备上限——凡"上限"结论必须有独立
+  读取器对照**（第三方参照分支原则）。240 档未测（若需更高帧率再补测）。
 - **图传 OSD 叠加**（电池/RSSI 入画）对模型是噪声：查图传菜单可否关 OSD，或训练前裁剪下缘条带。
 - 开放：AI 油门限幅是否独立于人工限幅（WheelLink 侧）；`tele/attitude` 列格式（M3 定）。
 
@@ -161,6 +172,8 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 .venv/bin/python scripts/fpv_card_probe.py matrix
 # 3) 抓一帧确认画面内容
 .venv/bin/python scripts/fpv_card_probe.py frame
+# 4) 帧率归因审计（判决实验：忙重试 vs 5ms 重试两段对照，验证满帧/唯一帧/间隔分布）
+.venv/bin/python scripts/fpv_rate_audit.py
 ```
 
 M0 首跑实录（2026-11-20，已修复）三条教训：
