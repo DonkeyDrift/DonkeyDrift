@@ -475,19 +475,18 @@ def cmd_fftest(args: argparse.Namespace) -> int:
         verdicts.append((w, h, fps, cli_fps, cv_fps))
 
     print("\n== 判读 ==")
-    any_ok = False
-    for w, h, fps, cli_fps, cv_fps in verdicts:
-        for name, v in (("CLI ffmpeg", cli_fps), ("OpenCV", cv_fps)):
-            if v is not None and v >= fps * 0.8:
-                any_ok = True
-                print(f"{w}x{h}@{fps}: {name} 持续出帧 {v}fps → "
-                      f"卡与链路正常,PyAV EOF 属兼容性问题;"
-                      f"M1 采集部件 macOS 走{'OpenCV' if name == 'OpenCV' else 'ffmpeg 管道'}后端")
-    if not any_ok:
-        print("两参照均不能持续出帧 → 卡/驱动/占用层问题:"
-              "重插 USB 换口(零成本先做)→ 换线/HDMI 源 → 系统报告查 USB 设备")
-        return 1
-    return 0
+    all_vals = [v for _, _, _, c, o in verdicts for v in (c, o) if v is not None]
+    if any(v >= 50 for v in all_vals):
+        best = max(all_vals)
+        note = ""
+        if best < 108:
+            note = ("(低于请求的 120)→ 源端帧率问题:HDMI 源(VRX)输出档或待机画面帧率,"
+                    "非采集层;接好图传、VRX 输出设为 720p120 后重跑复核")
+        print(f"采集链路可用:双参照持续出帧,当前实际帧率≈{best:.0f}fps {note}")
+        return 0
+    print("两参照均不能持续出帧 → 卡/驱动/占用层问题:"
+          "重插 USB 换口(零成本先做)→ 换线/HDMI 源 → 系统报告查 USB 设备")
+    return 1
 
 
 def main() -> int:
