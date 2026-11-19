@@ -402,18 +402,56 @@ def cmd_frame(args: argparse.Namespace) -> int:
     return 1
 
 
+_SWIFT_FMT = r'''
+import AVFoundation
+import CoreMedia
+func fourCC(_ c: FourCharCode) -> String {
+    let b = [UInt8((c>>24)&255), UInt8((c>>16)&255), UInt8((c>>8)&255), UInt8(c&255)]
+    return String(bytes: b, encoding: .ascii) ?? "0x\(String(c, radix: 16))"
+}
+let ds = AVCaptureDevice.DiscoverySession(deviceTypes: [.external],
+                                          mediaType: .video,
+                                          position: .unspecified).devices
+for d in ds {
+    print("DEVICE: \(d.localizedName)")
+    var seen = Set<String>()
+    for f in d.formats {
+        let dim = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+        let sub = fourCC(CMFormatDescriptionGetMediaSubType(f.formatDescription))
+        let mx = f.videoSupportedFrameRateRanges.map { Int($0.maxFrameRate) }.max() ?? 0
+        let key = "\(dim.width)x\(dim.height) \(sub) maxFPS=\(mx)"
+        if seen.insert(key).inserted { print("  \(key)") }
+    }
+}
+'''
+
+
 def _list_formats(args: argparse.Namespace) -> None:
-    """avfoundation -list_options:设备原生格式表(与 OBS 属性面板同源)——
-    判断'格式表有 120 档'与'实际送得出 120'是两件事的基准。"""
-    ffmpeg = shutil.which("ffmpeg")
-    print("== 设备格式表(-list_options) ==", flush=True)
-    proc = subprocess.run(
-        [ffmpeg, "-hide_banner", "-f", "avfoundation",
-         "-list_options", "true", "-i", args.device],
-        capture_output=True, text=True, timeout=20)
-    for line in (proc.stderr or "").splitlines():
-        if any(k in line for k in ("pixel_format", "Supported", "mode")):
-            print(f"  {line.strip()[:160]}")
+    """AVFoundation 原生格式表(Swift 枚举,免摄像头权限,与 OBS 下拉同源)。
+    注:ffmpeg avfoundation 无 -list_options(那是 Windows dshow 的选项)。"""
+    swift = shutil.which("swift")
+    if not swift:
+        print("== 设备格式表:swift 不可用,跳过 ==", flush=True)
+        return
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False) as f:
+        f.write(_SWIFT_FMT)
+        path = f.name
+    print("== 设备格式表(AVFoundation 原生) ==", flush=True)
+    try:
+        proc = subprocess.run([swift, path], capture_output=True, text=True,
+                              timeout=90)
+        out = (proc.stdout or "").strip()
+        lines = out.splitlines() if out else []
+        if not lines:
+            print(f"  (空;stderr tail={(proc.stderr or '')[-120:]!r})")
+        for line in lines:
+            if "USB3" in line or args.device in line:
+                print(f"  {line}")
+            elif line.startswith("  "):
+                print(f"  {line}")
+    finally:
+        os.unlink(path)
 
 
 def cmd_fftest(args: argparse.Namespace) -> int:
@@ -430,8 +468,24 @@ def cmd_fftest(args: argparse.Namespace) -> int:
 
     _list_formats(args)
 
-    # 720p120=正题;1080p60=已知良好对照(方法论校准:稳态应≈60)
-    modes = [(1280, 720, 120), (1920, 1080, 60)]
+    # 720p120=正题;1080p60=已知良好对照(方法论校准:稳态应≈60)。
+    # --modes 可自定义:逗号分隔 "1280x720@120" 或简写 "720p120"/"1080p60"。
+    shorthand = {"720p": (1280, 720), "1080p": (1920, 1080)}
+    parsed: list[tuple[int, int, int]] = []
+    for item in args.modes.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        m = _re.match(r"^(\d+p)(\d+)$", item)
+        if m and m.group(1) in shorthand:
+            parsed.append((*shorthand[m.group(1)], int(m.group(2))))
+            continue
+        m = _re.match(r"^(\d+)x(\d+)@(\d+)$", item)
+        if m:
+            parsed.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+        else:
+            print(f"忽略无法解析的档位: {item!r}", file=sys.stderr)
+    modes = parsed or [(1280, 720, 120), (1920, 1080, 60)]
     verdicts = []
     for w, h, fps in modes:
         print(f"== fftest {w}x{h}@{fps} nv12 ==", flush=True)
@@ -446,8 +500,8 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                  "-f", "avfoundation",
                  "-framerate", str(fps), "-pixel_format", "nv12",
                  "-video_size", f"{w}x{h}", "-i", args.device,
-                 "-t", "15", "-f", "null", "-"],
-                capture_output=True, text=True, timeout=40)
+                 "-t", "12", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=35)
             wall = time.monotonic() - t0
             chunks = (proc.stderr or "").replace("\r", "\n").splitlines()
             stream_line = next((l for l in chunks if "Stream #0:0" in l), None)
@@ -484,7 +538,7 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 cap.set(cv2.CAP_PROP_FPS, fps)
                 fps_readback = cap.get(cv2.CAP_PROP_FPS)
-                n, first_ms, deadline = 0, None, time.monotonic() + 8
+                n, first_ms, deadline = 0, None, time.monotonic() + 6
                 while time.monotonic() < deadline:
                     ok, frame = cap.read()
                     if ok:
@@ -498,12 +552,12 @@ def cmd_fftest(args: argparse.Namespace) -> int:
 
             th = threading.Thread(target=_cv_worker, daemon=True)
             th.start()
-            th.join(20)
+            th.join(15)
             if "r" not in holder:
-                print("  [OpenCV]      打开/读帧挂起(>20s,授权或占用)")
+                print("  [OpenCV]      打开/读帧挂起(>15s,授权或占用)")
             else:
                 n, first_ms, shape, fps_rb = holder["r"]
-                cv_fps = round(n / 8, 1)
+                cv_fps = round(n / 6, 1)
                 print(f"  [OpenCV]      frames={n} fps={cv_fps} first={first_ms}ms "
                       f"shape={shape} FPS回读={fps_rb:.0f} "
                       f"{'OK' if cv_fps and cv_fps >= fps * 0.8 else '低'}")
@@ -563,8 +617,10 @@ def main() -> int:
     p_frame.add_argument("--index", default=None, help="显式设备索引(覆盖 --name)")
     p_frame.add_argument("--out", default="/tmp/fpv_frame.png")
 
-    sub.add_parser("fftest", help="CLI ffmpeg + OpenCV 双参照持续出帧判别"
-                    "(PyAV EOF 早退时定位采集层选型)")
+    sub_fftest = sub.add_parser("fftest", help="CLI ffmpeg + OpenCV 双参照持续出帧判别"
+                                          "(PyAV EOF 早退时定位采集层选型)")
+    sub_fftest.add_argument("--modes", default="720p120,1080p60",
+                            help="逗号分隔待测档:'720p120'/'1080p60'/'1280x720@240'")
 
     args = parser.parse_args()
     # avfoundation 默认按名解析采集卡(索引不稳定;2026-11-20 实测裸跑打到内置摄像头)
