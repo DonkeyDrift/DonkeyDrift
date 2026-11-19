@@ -420,9 +420,13 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                 [ffmpeg, "-hide_banner", "-f", "avfoundation",
                  "-framerate", str(fps), "-pixel_format", "nv12",
                  "-video_size", f"{w}x{h}", "-i", args.device,
-                 "-t", "6", "-f", "null", "-"],
-                capture_output=True, text=True, timeout=20)
+                 "-t", "10", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=30)
             chunks = (proc.stderr or "").replace("\r", "\n").splitlines()
+            # 协商出的流参数行:tbr = 设备实际提供的帧率档(判虚标的决定性证据)
+            stream_line = next((l for l in chunks if "Stream #0:0" in l), None)
+            if stream_line:
+                print(f"  [CLI ffmpeg]  协商流: {stream_line.strip()[:110]}")
             stat = next((l for l in reversed(chunks) if "frame=" in l), "")
             import re as _re
             m = _re.search(r"frame=\s*(\d+).*?fps=\s*([\d.]+)", stat)
@@ -434,7 +438,7 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                 print(f"  [CLI ffmpeg]  无统计行 rc={proc.returncode} "
                       f"tail={ (proc.stderr or '')[-120:]!r}")
         except subprocess.TimeoutExpired:
-            print("  [CLI ffmpeg]  超时(20s)")
+            print("  [CLI ffmpeg]  超时(30s)")
         # --- 参照 2: OpenCV CAP_AVFoundation(原生 API,不经 ffmpeg) ---
         cv_fps = None
         try:
@@ -448,6 +452,7 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 cap.set(cv2.CAP_PROP_FPS, fps)
+                fps_readback = cap.get(cv2.CAP_PROP_FPS)
                 n, first_ms, deadline = 0, None, time.monotonic() + 4
                 while time.monotonic() < deadline:
                     ok, frame = cap.read()
@@ -458,7 +463,7 @@ def cmd_fftest(args: argparse.Namespace) -> int:
                     elif n == 0:
                         time.sleep(0.005)
                 cap.release()
-                holder["r"] = (n, first_ms, frame.shape if n else None)
+                holder["r"] = (n, first_ms, frame.shape if n else None, fps_readback)
 
             th = threading.Thread(target=_cv_worker, daemon=True)
             th.start()
@@ -466,10 +471,11 @@ def cmd_fftest(args: argparse.Namespace) -> int:
             if "r" not in holder:
                 print("  [OpenCV]      打开/读帧挂起(>15s,授权或占用)")
             else:
-                n, first_ms, shape = holder["r"]
+                n, first_ms, shape, fps_rb = holder["r"]
                 cv_fps = round(n / 4, 1)
                 print(f"  [OpenCV]      frames={n} fps={cv_fps} first={first_ms}ms "
-                      f"shape={shape} {'OK' if cv_fps and cv_fps >= fps * 0.8 else '低'}")
+                      f"shape={shape} FPS回读={fps_rb:.0f} "
+                      f"{'OK' if cv_fps and cv_fps >= fps * 0.8 else '低'}")
         except ImportError:
             print("  [OpenCV]      cv2 不可用")
         verdicts.append((w, h, fps, cli_fps, cv_fps))
