@@ -84,7 +84,7 @@ def _run_phase(label: str, args: argparse.Namespace, sleep_s: float) -> dict:
                "pixel_format": args.fmt}
     container = av.open(args.device, format=args.backend, options=options)
     arrivals: list[float] = []
-    hashes: set[str] = set()
+    hash_list: list[str] = []
     eagain = eof = errors = 0
     t0 = time.monotonic()
     deadline = t0 + args.dur
@@ -109,17 +109,39 @@ def _run_phase(label: str, args: argparse.Namespace, sleep_s: float) -> dict:
             # 唯一帧:降采样 luma 哈希(NV12 plane0 含行距填充,但填充恒定,足够判重)
             try:
                 h = hashlib.blake2b(bytes(frame.planes[0])[::64], digest_size=8)
-                hashes.add(h.hexdigest())
+                hash_list.append(h.hexdigest())
             except Exception:
-                pass
+                hash_list.append("")
     finally:
         container.close()
 
     wall = time.monotonic() - t0
     n = len(arrivals)
+    hashes = set(hash_list)
     stats = {"label": label, "frames": n, "wall_s": round(wall, 2),
              "fps": round(n / wall, 1) if wall > 0 else 0,
              "unique": len(hashes), "eagain": eagain, "eof": eof, "errors": errors}
+    # 重复帧位置分析(内容帧率判据):内容 N fps 装进 120Hz 交付容器 → 每 ceil(120/N)
+    # 帧复制 1 帧、位置差恒定(如 100fps→每 6 帧);120fps 内容+静止跳帧 → 成串分布
+    dup_pos = [i for i in range(1, len(hash_list)) if hash_list[i] == hash_list[i - 1]]
+    if dup_pos:
+        deltas = [b - a for a, b in zip(dup_pos, dup_pos[1:])]
+        runs, run = [], 1
+        for a, b in zip(dup_pos, dup_pos[1:]):
+            if b == a + 1:
+                run += 1
+            else:
+                runs.append(run)
+                run = 1
+        runs.append(run)
+        stats["dup"] = {
+            "count": len(dup_pos),
+            "delta_min": min(deltas) if deltas else None,
+            "delta_med": sorted(deltas)[len(deltas) // 2] if deltas else None,
+            "delta_max": max(deltas) if deltas else None,
+            "eq567": sum(1 for d in deltas if 5 <= d <= 7),
+            "runs_max": max(runs),
+        }
     if n >= 2:
         gaps = sorted(b - a for a, b in zip(arrivals, arrivals[1:]) if b > a)
         p = lambda q: gaps[min(len(gaps) - 1, round(q / 100 * (len(gaps) - 1)))]
@@ -134,8 +156,21 @@ def _run_phase(label: str, args: argparse.Namespace, sleep_s: float) -> dict:
     print(f"  frames={n} fps={stats['fps']} unique={len(hashes)} "
           f"p50={stats.get('p50_ms', '-')}ms p95={stats.get('p95_ms', '-')}ms "
           f"eagain={eagain} eof={eof}", flush=True)
+    if "dup" in stats:
+        d = stats["dup"]
+        print(f"  重复帧={d['count']}/{n} 位置差 min/med/max="
+              f"{d['delta_min']}/{d['delta_med']}/{d['delta_max']} "
+              f"(5~7 占比 {d['eq567']}/{max(1, d['count'] - 1)}) 连串最长={d['runs_max']}",
+              flush=True)
     if "per_sec" in stats:
-        print(f"  逐秒={stats['per_sec']}", flush=True)
+        print(f"  逐秒帧数={stats['per_sec']}", flush=True)
+        uniq_sec = []
+        for i in range(int(wall) + 1):
+            lo = arrivals[0] + i
+            idxs = [j for j, t in enumerate(arrivals) if lo <= t < lo + 1]
+            if idxs:
+                uniq_sec.append(len({hash_list[j] for j in idxs}))
+        print(f"  逐秒唯一帧={uniq_sec}", flush=True)
     return stats
 
 
@@ -180,6 +215,20 @@ def main() -> int:
     else:
         print(f"⚠ A={fa}fps 偏低,unique={ua}/{a['frames']}——"
               f"先查源(VRX HDMI 输出帧率)与设备占用,再看逐秒形态")
+    # 内容帧率判据:重复帧位置差(定期复制=内容低于交付;连串散布=静止跳帧)
+    for st in (a, b):
+        d = st.get("dup")
+        if not d:
+            print(f"  [{st['label']}] 无重复帧 → 内容帧率=交付帧率(全唯一)")
+            continue
+        denom = max(1, d["count"] - 1)
+        est = 120 * (1 - 1 / max(1, d["delta_med"])) if d["delta_med"] else 0
+        if d["eq567"] >= denom * 0.9 and d["runs_max"] <= 2:
+            print(f"  [{st['label']}] 重复帧位置差稳定 5~7(中位 {d['delta_med']}) → "
+                  f"**内容 ≈{est:.0f}fps 装进 120Hz 容器**(每 {d['delta_med']} 帧复制 1)")
+        else:
+            print(f"  [{st['label']}] 重复帧位置差散布(中位 {d['delta_med']},"
+                  f"连串最长 {d['runs_max']}) → 120fps 内容+静止跳帧(编码器 skip)")
     return 0
 
 
