@@ -68,13 +68,13 @@ EAGAIN_HINT = (
     "② 设备被其他 App 占用(关掉 OBS/采卡软件再试)"
 )
 
-# 读帧期 EAGAIN 对症提示(open 成功但帧不投递)——2026-11-20 实测:NV12 各档全中。
-# 本卡无 HDMI 信号时 OBS 仍见待机画面(卡自产待机帧),"无信号不吐帧"基本排除,
-# 首因=授权:VS Code/Cursor 集成终端的授权归宿主 App,授权了 Terminal 不代表它们有。
+# 读帧期 EAGAIN 判死提示(仅在连续 1.5s 无任何帧投递后触发)。
+# 2026-11-20 实测定案:avfoundation 读帧间隙的 EAGAIN 是常态(需重试,循环内已处理);
+# 真正持续无帧才是授权/占用/无信号问题。本卡无 HDMI 信号时 OBS 仍见待机画面
+# (卡自产待机帧),"无信号不吐帧"基本排除。
 EAGAIN_READ_HINT = (
-    "EAGAIN(读帧,open 成功但帧不投递):① 首查终端摄像头授权——系统设置→隐私与安全性"
-    "→摄像头,确认你敲命令的那个终端 App 在列表且已打开(VS Code/Cursor 集成终端的"
-    "授权归其宿主 App,可手动用 + 号添加);② 设备被其他 App 占用;③ HDMI 无信号。"
+    "持续 EAGAIN(>1.5s 无帧):① 终端摄像头授权(系统设置→隐私与安全性→摄像头,"
+    "确认敲命令的终端 App 在列表且已打开);② 设备被其他 App 占用;③ HDMI 无信号。"
     "判定捷径:照片 Booth 打开该相机看有无画面——有画面=卡正常,聚焦查①"
 )
 
@@ -198,36 +198,55 @@ def _run_single(args: argparse.Namespace,
         return result
 
     arrivals: list[float] = []
+    eagain_retries = 0
+    last_progress = t_open0
     cap = (fps or 600) * dur_s * 2  # fps=None(default 档)时按 600fps 上限截断
+    deadline = time.monotonic() + dur_s
+    decoder = container.decode(video=0)
+    # 2026-11-20 实测定案:ffmpeg avfoundation 读帧间隙常返 EAGAIN,CLI ffmpeg 内部
+    # 重试而 PyAV 直接抛——必须睡 5ms 重试;连续 1.5s 无任何帧投递才判真死
+    # (内置相机实测:首帧 1145ms 后突发 4 帧,旧逻辑首帧前 EAGAIN 即误判)。
     try:
-        deadline = time.monotonic() + dur_s
-        for frame in container.decode(video=0):
+        while time.monotonic() < deadline:
+            try:
+                frame = next(decoder)
+            except StopIteration:
+                break
+            except OSError as exc:
+                msg = str(exc)
+                if "Errno 35" in msg or "temporarily unavailable" in msg:
+                    eagain_retries += 1
+                    if time.monotonic() - last_progress > 1.5:
+                        result.update(status="eagain_read", error=EAGAIN_READ_HINT)
+                        break
+                    time.sleep(0.005)
+                    continue
+                result.update(status="decode_error", error=msg[:300])
+                break
             now = time.monotonic()
+            last_progress = now
             if result["first_frame_ms"] is None:
                 result["first_frame_ms"] = round((now - t_open0) * 1000, 1)
             arrivals.append(now)
-            if now >= deadline or len(arrivals) >= cap:
+            if len(arrivals) >= cap:
                 break
     except TimeoutError:
         result.update(status="hang_timeout", error=TCC_HINT)
     except KeyboardInterrupt:
         pass
-    except Exception as exc:  # 读帧期异常(实测最常见:EAGAIN on read → 授权未决)
-        msg = str(exc)
-        if "Errno 35" in msg or "temporarily unavailable" in msg:
-            result.update(status="eagain_read", error=EAGAIN_READ_HINT)
-        else:
-            result.update(status="decode_error", error=msg[:300])
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, prev_handler)
         container.close()
 
     wall = time.monotonic() - t_open0
+    loop_elapsed = max(last_progress - (deadline - dur_s), 1e-6)
     result["wall_s"] = round(wall, 2)
     result["frames"] = len(arrivals)
-    if len(arrivals) >= 2 and wall > 0:
-        result["measured_fps"] = round((len(arrivals) - 1) / (arrivals[-1] - arrivals[0]), 1)
+    result["eagain_retries"] = eagain_retries
+    if len(arrivals) >= 2:
+        # 吞吐口径:窗口内总帧数/循环时长(突发到达时帧间隔口径会虚高到万级)
+        result["measured_fps"] = round(len(arrivals) / loop_elapsed, 1)
         result["intervals"] = _interval_stats(arrivals)
     if len(arrivals) == 0 and result["status"] == "ok":
         result.update(status="no_frames", error=TCC_HINT)

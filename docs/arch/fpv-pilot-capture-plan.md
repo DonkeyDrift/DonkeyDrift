@@ -159,6 +159,12 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 .venv/bin/python scripts/fpv_card_probe.py frame
 ```
 
-M0 首跑实录（2026-11-20，已修复）：裸跑 `matrix` 曾打到索引 0=**内置摄像头**
-（mjpeg EINVAL/640x480 I/O error 全是内置头格式签名）+ nv12 档全 EAGAIN（授权未决
-或设备被 OBS 独占）——教训：**按名解析必须是默认行为**，EAGAIN 要给对症提示。
+M0 首跑实录（2026-11-20，已修复）三条教训：
+1. 裸跑 `matrix` 曾打到索引 0=**内置摄像头**（mjpeg EINVAL/640x480 I/O error 全是内置头
+   格式签名）——**按名解析必须是默认行为**；
+2. 采集卡 NV12 各档 "0 帧 EAGAIN" 曾误诊为授权问题——真因是 **ffmpeg avfoundation 读帧
+   间隙常返 EAGAIN，CLI ffmpeg 内部重试而 PyAV 直接抛**（内置相机实测：首帧 1145ms 后
+   突发 4 帧，随后 EAGAIN）——读帧循环必须睡 5ms 重试，连续 1.5s 无帧才判死；帧率口径
+   用窗口吞吐（突发到达时帧间隔口径虚高到万级）；
+3. ZCode 沙箱后台进程的摄像头授权弹窗不显示（tccutil reset 后仍不弹）——探测/采集一律
+   从用户终端跑；ZCode 侧权限不作为依赖。
