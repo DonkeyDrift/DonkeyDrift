@@ -68,6 +68,16 @@ EAGAIN_HINT = (
     "② 设备被其他 App 占用(关掉 OBS/采卡软件再试)"
 )
 
+# 读帧期 EAGAIN 对症提示(open 成功但帧不投递)——2026-11-20 实测:NV12 各档全中。
+# 本卡无 HDMI 信号时 OBS 仍见待机画面(卡自产待机帧),"无信号不吐帧"基本排除,
+# 首因=授权:VS Code/Cursor 集成终端的授权归宿主 App,授权了 Terminal 不代表它们有。
+EAGAIN_READ_HINT = (
+    "EAGAIN(读帧,open 成功但帧不投递):① 首查终端摄像头授权——系统设置→隐私与安全性"
+    "→摄像头,确认你敲命令的那个终端 App 在列表且已打开(VS Code/Cursor 集成终端的"
+    "授权归其宿主 App,可手动用 + 号添加);② 设备被其他 App 占用;③ HDMI 无信号。"
+    "判定捷径:照片 Booth 打开该相机看有无画面——有画面=卡正常,聚焦查①"
+)
+
 
 def _pct(sorted_vals: list[float], p: float) -> float:
     """nearest-rank 百分位;空表返回 0.0。"""
@@ -202,6 +212,12 @@ def _run_single(args: argparse.Namespace,
         result.update(status="hang_timeout", error=TCC_HINT)
     except KeyboardInterrupt:
         pass
+    except Exception as exc:  # 读帧期异常(实测最常见:EAGAIN on read → 授权未决)
+        msg = str(exc)
+        if "Errno 35" in msg or "temporarily unavailable" in msg:
+            result.update(status="eagain_read", error=EAGAIN_READ_HINT)
+        else:
+            result.update(status="decode_error", error=msg[:300])
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, prev_handler)
@@ -300,7 +316,9 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     print(f"报告: {_REPORT_PATH}")
     if recommendation is None:
         hints = {r.get("status") for r in rows}
-        if hints & {"eagain"}:
+        if hints & {"eagain_read"}:
+            print(EAGAIN_READ_HINT)
+        elif hints & {"eagain"}:
             print(EAGAIN_HINT)
         elif hints & {"hang_killed", "hang_timeout", "no_frames"}:
             print(TCC_HINT)
