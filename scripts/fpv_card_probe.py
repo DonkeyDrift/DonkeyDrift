@@ -200,27 +200,42 @@ def _run_single(args: argparse.Namespace,
     arrivals: list[float] = []
     eagain_retries = 0
     last_progress = t_open0
+    loop_start = None
     cap = (fps or 600) * dur_s * 2  # fps=None(default 档)时按 600fps 上限截断
     deadline = time.monotonic() + dur_s
     decoder = container.decode(video=0)
+    loop_end = deadline
     # 2026-11-20 实测定案:ffmpeg avfoundation 读帧间隙常返 EAGAIN,CLI ffmpeg 内部
     # 重试而 PyAV 直接抛——必须睡 5ms 重试;连续 1.5s 无任何帧投递才判真死
     # (内置相机实测:首帧 1145ms 后突发 4 帧,旧逻辑首帧前 EAGAIN 即误判)。
+    # 同日续证:NV12 各档突发 2-4 帧后 demuxer 返回 EOF(StopIteration)提前退出
+    # ——PyAV 非阻塞与 avfoundation 兼容性问题,用 fftest 子命令的 CLI/OpenCV
+    # 双参照判别(第三方参照分支原则)。
     try:
         while time.monotonic() < deadline:
+            if loop_start is None:
+                loop_start = time.monotonic()
             try:
                 frame = next(decoder)
             except StopIteration:
+                loop_end = time.monotonic()
+                result.update(
+                    status="eof",
+                    error=f"demuxer EOF:仅 {len(arrivals)} 帧后流结束(PyAV 非阻塞"
+                          f"与 avfoundation 兼容性问题疑似;跑 fftest 用 CLI ffmpeg/"
+                          f"OpenCV 双参照判别)")
                 break
             except OSError as exc:
                 msg = str(exc)
                 if "Errno 35" in msg or "temporarily unavailable" in msg:
                     eagain_retries += 1
                     if time.monotonic() - last_progress > 1.5:
+                        loop_end = time.monotonic()
                         result.update(status="eagain_read", error=EAGAIN_READ_HINT)
                         break
                     time.sleep(0.005)
                     continue
+                loop_end = time.monotonic()
                 result.update(status="decode_error", error=msg[:300])
                 break
             now = time.monotonic()
@@ -229,6 +244,7 @@ def _run_single(args: argparse.Namespace,
                 result["first_frame_ms"] = round((now - t_open0) * 1000, 1)
             arrivals.append(now)
             if len(arrivals) >= cap:
+                loop_end = now
                 break
     except TimeoutError:
         result.update(status="hang_timeout", error=TCC_HINT)
@@ -240,13 +256,14 @@ def _run_single(args: argparse.Namespace,
         container.close()
 
     wall = time.monotonic() - t_open0
-    loop_elapsed = max(last_progress - (deadline - dur_s), 1e-6)
     result["wall_s"] = round(wall, 2)
     result["frames"] = len(arrivals)
     result["eagain_retries"] = eagain_retries
     if len(arrivals) >= 2:
-        # 吞吐口径:窗口内总帧数/循环时长(突发到达时帧间隔口径会虚高到万级)
-        result["measured_fps"] = round(len(arrivals) / loop_elapsed, 1)
+        # 吞吐口径:帧数/实际采集循环时长(从首帧到循环结束)——突发到达时
+        # 帧间隔口径会虚高;EOF 早退时该值会如实走低
+        span = max(loop_end - arrivals[0], 1e-3)
+        result["measured_fps"] = round(len(arrivals) / span, 1)
         result["intervals"] = _interval_stats(arrivals)
     if len(arrivals) == 0 and result["status"] == "ok":
         result.update(status="no_frames", error=TCC_HINT)
@@ -304,12 +321,15 @@ def cmd_matrix(args: argparse.Namespace) -> int:
                    "status": "hang_killed", "error": TCC_HINT}
         passed = (row.get("status") == "ok"
                   and row.get("frames", 0) >= 10
+                  and row.get("wall_s", 0) >= args.dur * 0.8  # EOF 早退不放行
                   and (row.get("fps_req") is None
                        or row.get("measured_fps", 0) >= row["fps_req"] * 0.9))
         row["pass"] = passed
         rows.append(row)
         print(f"   -> {row['status']}  frames={row.get('frames', 0)} "
               f"measured={row.get('measured_fps', 0)}fps "
+              f"wall={row.get('wall_s', '-')}s first={row.get('first_frame_ms', '-')}ms "
+              f"retry={row.get('eagain_retries', '-')} "
               f"p95={row.get('intervals', {}).get('p95_ms', '-')}ms "
               f"{'PASS' if passed else ''}", flush=True)
 
@@ -382,6 +402,94 @@ def cmd_frame(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_fftest(args: argparse.Namespace) -> int:
+    """第三方参照判别:PyAV 疑似 EOF 早退时,用 CLI ffmpeg(内部重试)与
+    OpenCV(AVFoundation 原生)双参照测持续出帧——谁持续谁就是 M1 的采集层。"""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        print("未找到 ffmpeg", file=sys.stderr)
+        return 1
+    modes = [(1920, 1080, 120), (1280, 720, 120)]
+    verdicts = []
+    for w, h, fps in modes:
+        print(f"== fftest {w}x{h}@{fps} nv12 ==", flush=True)
+        # --- 参照 1: CLI ffmpeg(同 libavfoundation,但阻塞+内部重试) ---
+        cli_fps = None
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-hide_banner", "-f", "avfoundation",
+                 "-framerate", str(fps), "-pixel_format", "nv12",
+                 "-video_size", f"{w}x{h}", "-i", args.device,
+                 "-t", "6", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=20)
+            chunks = (proc.stderr or "").replace("\r", "\n").splitlines()
+            stat = next((l for l in reversed(chunks) if "frame=" in l), "")
+            import re as _re
+            m = _re.search(r"frame=\s*(\d+).*?fps=\s*([\d.]+)", stat)
+            if m:
+                cli_fps = float(m.group(2))
+                print(f"  [CLI ffmpeg]  frames={m.group(1)} fps={cli_fps} "
+                      f"{'OK' if cli_fps >= fps * 0.8 else '低'}")
+            else:
+                print(f"  [CLI ffmpeg]  无统计行 rc={proc.returncode} "
+                      f"tail={ (proc.stderr or '')[-120:]!r}")
+        except subprocess.TimeoutExpired:
+            print("  [CLI ffmpeg]  超时(20s)")
+        # --- 参照 2: OpenCV CAP_AVFoundation(原生 API,不经 ffmpeg) ---
+        cv_fps = None
+        try:
+            import cv2
+            import threading
+            holder = {}
+
+            def _cv_worker():
+                t0 = time.monotonic()
+                cap = cv2.VideoCapture(int(args.device), cv2.CAP_AVFOUNDATION)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                cap.set(cv2.CAP_PROP_FPS, fps)
+                n, first_ms, deadline = 0, None, time.monotonic() + 4
+                while time.monotonic() < deadline:
+                    ok, frame = cap.read()
+                    if ok:
+                        n += 1
+                        if first_ms is None:
+                            first_ms = round((time.monotonic() - t0) * 1000, 1)
+                    elif n == 0:
+                        time.sleep(0.005)
+                cap.release()
+                holder["r"] = (n, first_ms, frame.shape if n else None)
+
+            th = threading.Thread(target=_cv_worker, daemon=True)
+            th.start()
+            th.join(15)
+            if "r" not in holder:
+                print("  [OpenCV]      打开/读帧挂起(>15s,授权或占用)")
+            else:
+                n, first_ms, shape = holder["r"]
+                cv_fps = round(n / 4, 1)
+                print(f"  [OpenCV]      frames={n} fps={cv_fps} first={first_ms}ms "
+                      f"shape={shape} {'OK' if cv_fps and cv_fps >= fps * 0.8 else '低'}")
+        except ImportError:
+            print("  [OpenCV]      cv2 不可用")
+        verdicts.append((w, h, fps, cli_fps, cv_fps))
+
+    print("\n== 判读 ==")
+    any_ok = False
+    for w, h, fps, cli_fps, cv_fps in verdicts:
+        for name, v in (("CLI ffmpeg", cli_fps), ("OpenCV", cv_fps)):
+            if v is not None and v >= fps * 0.8:
+                any_ok = True
+                print(f"{w}x{h}@{fps}: {name} 持续出帧 {v}fps → "
+                      f"卡与链路正常,PyAV EOF 属兼容性问题;"
+                      f"M1 采集部件 macOS 走{'OpenCV' if name == 'OpenCV' else 'ffmpeg 管道'}后端")
+    if not any_ok:
+        print("两参照均不能持续出帧 → 卡/驱动/占用层问题:"
+              "重插 USB 换口(零成本先做)→ 换线/HDMI 源 → 系统报告查 USB 设备")
+        return 1
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--backend", default="avfoundation",
@@ -412,6 +520,9 @@ def main() -> int:
     p_frame.add_argument("--index", default=None, help="显式设备索引(覆盖 --name)")
     p_frame.add_argument("--out", default="/tmp/fpv_frame.png")
 
+    sub.add_parser("fftest", help="CLI ffmpeg + OpenCV 双参照持续出帧判别"
+                    "(PyAV EOF 早退时定位采集层选型)")
+
     args = parser.parse_args()
     # avfoundation 默认按名解析采集卡(索引不稳定;2026-11-20 实测裸跑打到内置摄像头)
     if (args.backend == "avfoundation" and not args.name
@@ -426,7 +537,8 @@ def main() -> int:
             args.device = _resolve_device_by_name(args.name)
 
     return {"list": cmd_list, "matrix": cmd_matrix,
-            "single": cmd_single, "frame": cmd_frame}[args.cmd](args)
+            "single": cmd_single, "frame": cmd_frame,
+            "fftest": cmd_fftest}[args.cmd](args)
 
 
 if __name__ == "__main__":
