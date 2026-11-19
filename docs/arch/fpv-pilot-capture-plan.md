@@ -62,7 +62,7 @@ class FpvCaptureCardCamera:
     cfg: FPV_CAPTURE_BACKEND = avfoundation | dshow | v4l2   # M0=avfoundation, M4=dshow
          FPV_CAPTURE_DEVICE_NAME = "USB3 Video"  # 按名字解析(推荐;macOS 枚举索引不稳定,
                                                   # 实测两轮 0/1 互换——索引只是兜底键)
-         FPV_CAPTURE_W/H/FPS = 1280/720/120 # M0 探测后定稿（720p120 优先）
+         FPV_CAPTURE_W/H/FPS = 1280/720/120 # M0 定稿：120 会话档，实得稳态 ~85fps（卡硬件上限）
          FPV_CAPTURE_PIXFMT  = nv12
          FPV_MODEL_W/H       = 320/240      # 推理输入（与 TRAINING_IMAGE_SIZE 对齐）
     """
@@ -84,13 +84,13 @@ class FpvCaptureCardCamera:
   探测一律用带超时的子进程隔离（见 `scripts/fpv_card_probe.py`）。
 - 依赖已就绪：`av` 17.1（仓库核心依赖）、ffmpeg（homebrew）。
 
-### 3.4 技术栈选型（M0 实测后更新：macOS 用 OpenCV，PyAV 降级为 Windows 候选）
+### 3.4 技术栈选型（M0 定案：ffmpeg rawvideo 管道为采集后端，跨平台）
 
-| 栈 | 定位 | M0 实测结论（2026-11-20） |
+| 栈 | 定位 | M0 实测结论（2026-11-20，含双实验定案） |
 |---|---|---|
-| PyAV + avfoundation | ~~主选~~ Windows 候选 | **macOS 不可用**：突发 2-4 帧后 demuxer EOF 早退（非阻塞模式与 avfoundation 兼容性问题；CLI ffmpeg 同库正常因其内部重试） |
-| **OpenCV `CAP_AVFOUNDATION`** | **macOS 主选** | **实测通过**：1080p/720p 双档持续出帧（~60fps，受源端限制）、原生 720p 档确认（shape=(720,1280,3)）、首帧 ~330-410ms、逐帧 `cap.read()` 阻塞语义简单 |
-| ffmpeg 子进程 → rawvideo 管道 | 兜底/交叉验证 | 实测可用（~83fps 含突发追赶），留作对照工具（`fftest`） |
+| **ffmpeg 子进程 → rawvideo 管道** | **采集后端（macOS/Windows 通用）** | 实测可用：720p/1080p 持续出帧、协商档位精确（120/240 会话都能协商）、CLI 内部重试天然规避 PyAV 的 EAGAIN/EOF 坑；`format=avfoundation→dshow` 一参数迁移 |
+| OpenCV `CAP_AVFOUNDATION` | 预览/低帧率模式 | 实测锁 60fps（FPS 回读恒 60，选不中高帧率格式档），不可用于 >60 采集 |
+| PyAV + avfoundation | 仅 Windows 候选（M4 实测） | **macOS 判死刑**：突发 2-4 帧后 demuxer EOF 早退（非阻塞与 avfoundation 兼容性问题） |
 
 ## 4. 训练数据录制（M3，Mac 单进程）
 
@@ -116,7 +116,7 @@ class FpvCaptureCardCamera:
 | 图传链路（720p120 低延迟档） | 15~30ms | 数字图传固有 |
 | 接收机 HDMI → 采集卡 UVC 缓冲 | 8~17ms | 1-2 帧 @120fps，M0 实测 |
 | 解码+缩放（PyAV reformat） | 2~4ms | NV12→RGB24+缩放一步 |
-| 取帧等待（120fps 节拍化） | ≤8.3ms | §3.1 原则的收益 |
+| 取帧等待（85fps 实测稳态） | ≤11.8ms | M0 定案：卡硬件上限 ~85fps（详见 §7） |
 | 推理（320×240 小 CNN，MPS） | 3~8ms | 60Hz 无压力 |
 | WS 传输（LAN / 最终 localhost） | 1~3ms / ~0 | |
 | WheelLink→ELRS→车（官方实测） | 6~15ms | 150Hz 控制环 |
@@ -130,7 +130,7 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0 探测** ✅（2026-11-20，脚本 `scripts/fpv_card_probe.py`） | TCC 授权排查 + UVC 格式矩阵 + 双参照判别 | **通过**：NV12 720p/1080p 格式全通；OpenCV 后端持续出帧；**原生 720p 档确认**；PyAV 于 macOS 判死刑（EOF 早退）→ M1 用 OpenCV；当前 ~60fps 归因源端（待机画面/VRX 输出档），接好图传后复核 120 |
+| **M0 探测** ✅（2026-11-20，脚本 `scripts/fpv_card_probe.py`，fftest 双实验定案） | TCC 授权排查 + 格式矩阵 + 双参照 + Swift 原生格式表 + 逐秒稳态帧率 | **定案**：① 采集后端=ffmpeg rawvideo 管道（OpenCV 锁 60 仅预览，PyAV macOS EOF 死刑）；② 采集档=1280×720 @120 会话（原生 720p 档，实得稳态 ~85fps）；③ **卡硬件上限 ≈84-86fps**（双实验：会话 120/240 稳态同为 84.4；VRX 1080p60 输入下 120 会话稳态 83——上限按帧数卡、与分辨率/带宽无关，USB3 链路确认）；④ 格式表 120/144/240 档为宣传档；⑤ 无 MJPEG 档 |
 | **M1 采集层** | `fpv_capture.py` 部件 + 预览 + 统计 | 稳定 120fps 采集、帧龄 p95 <10ms |
 | **M2 桥+注入**（WheelLink 侧） | WS 服务 + `AiInputSource` + `MixedInputSource` + 三态仲裁 | 假推理（恒 0 转向/限幅油门）注入真车空转，安全链全程生效 |
 | **M3 闭环** | 人工录制 FPV 数据 → 训练 → AI 首航（先直线/大半径，AI-shadow 起步） | 人工随时接管无冲突；E2E 延迟实测达标 |
@@ -138,12 +138,16 @@ M0 测量法：FPV 相机对准手机毫秒计时器 App 拍照，读"计时器�
 
 ## 7. 风险与开放问题
 
-- ~~采集卡 1080p120 是否为 720p upscale~~ **已解决（M0）**：卡有**原生 720p NV12 档**（OpenCV 实测 shape=(720,1280,3)）。
-- **当前实测 ~60fps 而非 120**（M0）：归因**源端**——测试时图传"发射端已断开"（卡的待机画面）或 VRX HDMI 输出档为 60fps。待接好图传链路、VRX 输出设 720p120 后重跑 `fftest` 复核；采集层已验证与帧率档位解耦。
+- ~~1080p upscale 疑问~~ **已解决**：卡有原生 720p 420v 档（Swift 格式表 + OpenCV shape 实证）。
+- **采集卡帧率上限（M0 双实验定案，2026-11-20）**：迈普（MACROSILICON，MS2130 类，VID 0x345F）方案
+  实测持续上限 **≈84-86fps**：① 会话开 120 与 240 稳态同为 84.4；② VRX 输出 1080p60 时 120 会话
+  稳态 83（排除"VRX 没给 120"）；③ 720p 与 1080p 上限帧率相同（按帧卡非按带宽，USB3
+  Device Speed=3 已确认）；④ 格式表 120/144/240 档虚标；⑤ 全表无 MJPEG。**软件无法突破，
+  ~85fps 即本卡天花板**——对延迟预算影响仅 +3.5ms（11.8ms vs 8.3ms 帧新鲜度），不阻塞 M1。
+  若未来要真 120：换**实测**能持续 120fps 采集的卡（宣传参数一律不信，收货先跑
+  `fpv_card_probe.py fftest` 验收），M1 采集层参数化、换卡零改码。
 - **图传 OSD 叠加**（电池/RSSI 入画）对模型是噪声：查图传菜单可否关 OSD，或训练前裁剪下缘条带。
-- 开放：AI 油门限幅是否独立于人工限幅配置（WheelLink 侧 `LimitPercent` 语义沿用还是单列）；
-  `tele/attitude` 的具体列格式（M3 录制器实现时定）。
-- ~~120fps 解码负载~~：OpenCV 逐帧解码实测无压力（60fps 档）；120 档到源后复测。
+- 开放：AI 油门限幅是否独立于人工限幅（WheelLink 侧）；`tele/attitude` 列格式（M3 定）。
 
 ## 8. 附：M0 运行指引
 

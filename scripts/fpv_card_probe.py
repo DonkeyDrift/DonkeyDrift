@@ -569,7 +569,14 @@ def cmd_fftest(args: argparse.Namespace) -> int:
     for w, h, fps, cli_fps, tail_fps, cv_fps in verdicts:
         steady = max(v for v in (tail_fps, cli_fps) if v is not None) \
             if any(v is not None for v in (tail_fps, cli_fps)) else 0
-        tag = "稳态达标" if steady >= fps * 0.9 else ("稳态≈60" if 55 <= steady < fps * 0.9 else "不稳")
+        if steady >= fps * 0.9:
+            tag = "稳态达标"
+        elif steady >= 75:
+            tag = "≈85平台(芯片内部上限,与会话/输入帧率/分辨率无关)"
+        elif steady >= 55:
+            tag = "≈60(输入直通)"
+        else:
+            tag = "不稳"
         print(f"{w}x{h}@{fps}: CLI 平均={cli_fps} 稳态={tail_fps} | OpenCV={cv_fps}"
               f" → {tag}")
     best = max([v for _, _, _, _, t, c in verdicts for v in (t, c) if v is not None],
