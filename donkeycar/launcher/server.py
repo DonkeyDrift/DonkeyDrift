@@ -29,6 +29,7 @@ from donkeycar.launcher.kimi_web import _entry_host, launch_kimi_code_web
 from donkeycar.launcher.dsh_web import _entry_url_for_client, launch_dsh_web
 from donkeycar.launcher.terminal import handle_terminal_ws, kill_session
 from donkeycar.launcher import auth as launch_auth
+from donkeycar.deployment import collect_deployment_warnings
 from donkeycar.webui_instance import (
     probe_http_ok,
     find_live_instance,
@@ -219,6 +220,13 @@ def _launch_drive():
         # 探测存活的 Web UI 实例（donkey web / donkey drive 启动时登记）
         inst = find_live_instance()
 
+        # 部署诊断（Tony 部署守护）：找到项目后计算一次，复用/新起 Web
+        # 都保留；顺带写安全日志（只输出警告文本，绝不含令牌/带令牌 URL）
+        deployment_warnings = collect_deployment_warnings(
+            car_path=project_path, web_instance=inst)
+        for deploy_warning in deployment_warnings:
+            print(f"[launcher] 部署警告: {deploy_warning}")
+
         creationflags = (
             subprocess.CREATE_NEW_PROCESS_GROUP
             if sys.platform == "win32" else 0
@@ -362,13 +370,15 @@ def _launch_drive():
             entry += f"?token={token}"
         entry += "#/drive"
 
+        # 部署警告合并进就绪警告（不覆盖）："\n" 连接，前端原样展示
+        all_warnings = ([warning] if warning else []) + deployment_warnings
         return {
             "status": "launched",
             "url": entry,
             "backend_port": backend_port,
             "frontend_port": frontend_port,
             "project": str(project_path),
-            "warning": warning,
+            "warning": "\n".join(all_warnings) if all_warnings else None,
         }
 
 
