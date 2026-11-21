@@ -20,6 +20,9 @@ def _isolate_process_registry(monkeypatch):
     monkeypatch.setattr(tui, "takeover_car_processes", lambda: None)
     monkeypatch.setattr(tui, "write_drive_pids", lambda pids: None)
     monkeypatch.setattr(tui, "remove_drive_pid_file", lambda: None)
+    # 部署诊断公共桩：默认空警告（隔离真实 git 查询），部署警告用例自行覆写
+    monkeypatch.setattr(tui, "collect_deployment_warnings",
+                        lambda **kwargs: [])
     # 局域网探测在测试环境不确定，默认固定 localhost；LAN 行为有专测
     monkeypatch.setattr(tui, "_lan_host", lambda: "localhost")
     # Drive 流程不应再出现交互 Confirm（时延探针提问已移除，开关走 env）；
@@ -407,6 +410,86 @@ def test_drive_command_takeover_kills_other_car_processes(monkeypatch, tmp_path)
     tui.DriveCommand().execute()
 
     assert takeover_calls == ["called"]
+
+
+# ---------------- 部署诊断警告（Tony 部署守护：启动前提示旧部署） ----------------
+
+def test_drive_prints_deployment_warnings(monkeypatch, tmp_path):
+    """启动链在清理/启动进程前打印所有部署警告。"""
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tui, "collect_deployment_warnings",
+                        lambda **kwargs: ["部署过旧"])
+    printed = []
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print",
+                        lambda value="", **kwargs: printed.append(str(value)))
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: "")
+    monkeypatch.setattr(tui.subprocess, "Popen",
+                        lambda *args, **kwargs: FakeProcess())
+
+    tui.DriveCommand().execute()
+
+    assert any("部署过旧" in value for value in printed)
+
+
+def test_drive_passes_car_path_and_web_instance_to_diagnostics(
+        monkeypatch, tmp_path):
+    """诊断入参：有效项目传 car_path，无有效项目车辆参数传 None；
+    web_instance 用探测到的实例登记。"""
+    (tmp_path / "manage.py").write_text("", encoding="utf-8")
+    (tmp_path / "myconfig.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    calls = []
+
+    def fake_diagnose(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    inst = {"pid": 4242, "backend_port": 8000, "frontend_port": 8000}
+    monkeypatch.setattr(tui, "find_live_instance", lambda: dict(inst))
+    monkeypatch.setattr(tui, "collect_deployment_warnings", fake_diagnose)
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: "")
+    monkeypatch.setattr(tui.subprocess, "Popen",
+                        lambda *args, **kwargs: FakeProcess())
+    # 复用 Web 时真实监控循环只响应 ESC；本测试验证诊断入参后应立即结束。
+    monkeypatch.setattr(tui.DriveCommand, "monitor_processes",
+                        lambda self, w, c: None)
+
+    tui.DriveCommand().execute()
+
+    assert calls and calls[0]["web_instance"] == inst
+    assert calls[0]["car_path"] == tmp_path
+
+
+def test_drive_passes_none_car_path_without_valid_project(monkeypatch, tmp_path):
+    """未进入有效项目：车辆模板不检查（car_path=None），仍传实例登记。"""
+    monkeypatch.chdir(tmp_path)  # 无 manage.py/myconfig.py
+    # 隔离项目自动回退（上次项目/~/projects 扫描/手动输入），确保停在"无项目"
+    monkeypatch.setattr(tui, "_get_last_project_path", lambda: None)
+    monkeypatch.setattr(tui, "_find_valid_projects", lambda: [])
+    monkeypatch.setattr(tui, "_prompt_project_path", lambda: None)
+
+    calls = []
+
+    def fake_diagnose(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(tui, "collect_deployment_warnings", fake_diagnose)
+    monkeypatch.setattr(tui.console, "clear", lambda: None)
+    monkeypatch.setattr(tui.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tui.Prompt, "ask", lambda *args, **kwargs: "")
+    monkeypatch.setattr(tui.subprocess, "Popen",
+                        lambda *args, **kwargs: FakeProcess())
+
+    tui.DriveCommand().execute()
+
+    assert calls and calls[0]["car_path"] is None
 
 
 # ---------------- WebRTC 时延探针集成（TUI 不再提问，开关走 env） ----------------

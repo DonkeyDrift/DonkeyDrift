@@ -46,6 +46,7 @@ from donkeycar.webui_instance import (
     takeover_car_processes,
     select_car_python,
 )
+from donkeycar.deployment import collect_deployment_warnings
 
 
 def _lan_host():
@@ -1315,6 +1316,13 @@ class DriveCommand(DonkeyCommand):
             web_cmd = self.get_command_line(current_params, backend_port=backend_port)
         car_cmd = self.get_car_command_line() if has_car_process else None
         drive_api_server_url = self.get_drive_api_server_url(backend_port=backend_port)
+
+        # 部署诊断（Tony 部署守护）：在清理/启动进程前打印所有警告；
+        # 无有效项目时不检查车辆模板（car_path 传 None）
+        for warning in collect_deployment_warnings(
+                car_path=car_path if has_car_process else None,
+                web_instance=inst):
+            console.print(f"[yellow]部署警告: {warning}[/yellow]")
         # WebRTC 时延探针（docs/guide/real-car-webrtc-camera-test.md）：
         # 帧上烧入捕获时间戳，供 scripts/webrtc_loop_probe.py 闭环实测；
         # 画面左上角会出现可见时间戳，正常驾驶默认关闭。

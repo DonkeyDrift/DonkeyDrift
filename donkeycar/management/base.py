@@ -30,6 +30,7 @@ from donkeycar.webui_instance import (
     select_car_python,
     select_backend_python,
 )
+from donkeycar.deployment import get_source_head
 
 PACKAGE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATES_PATH = os.path.join(PACKAGE_PATH, 'templates')
@@ -1072,9 +1073,11 @@ class Web(BaseCommand):
         # 等后端就绪再登记，避免其它链路探测到"半启动"实例而误清登记
         self._wait_for_port_ready(backend_port)
 
-        # 登记实例，供 donkey drive / launcher / TUI 等链路复用
+        # 登记实例，供 donkey drive / launcher / TUI 等链路复用；
+        # 一并登记本次源码提交号，复用方据此识别旧 Web 进程（部署诊断）
         my_pid = os.getpid()
-        write_instance(backend_port, frontend_port, pid=my_pid)
+        write_instance(backend_port, frontend_port, pid=my_pid,
+                       source_head=get_source_head())
 
         if args.open:
             self._open_browser_when_frontend_ready(frontend_port, frontend_url)
@@ -1534,8 +1537,10 @@ class Drive(Web):
                 self._terminate_process(backend_proc)
                 raise SystemExit(f'后端端口 {backend_port} 未在超时内就绪，已终止 Web UI')
 
-            # 登记实例，供 donkey web / launcher / TUI 等链路复用
-            write_instance(backend_port, frontend_port, pid=my_pid)
+            # 登记实例，供 donkey web / launcher / TUI 等链路复用；
+            # 一并登记本次源码提交号，复用方据此识别旧 Web 进程（部署诊断）
+            write_instance(backend_port, frontend_port, pid=my_pid,
+                           source_head=get_source_head())
             owns_instance = True
 
         car_cmd = self._build_car_command(args)

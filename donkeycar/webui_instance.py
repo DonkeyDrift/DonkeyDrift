@@ -57,8 +57,12 @@ def read_instance(instance_file=None):
 
 
 def write_instance(backend_port, frontend_port, pid=None,
-                   instance_file=None):
-    """写入实例登记（原子替换）。pid 缺省为当前进程。"""
+                   instance_file=None, source_head=None):
+    """写入实例登记（原子替换）。pid 缺省为当前进程。
+
+    source_head 提供时一并登记启动时的源码提交号（部署诊断用）；
+    缺省保持旧 payload 结构不变。
+    """
     if instance_file is None:
         instance_file = WEBUI_INSTANCE_FILE
     payload = {
@@ -67,6 +71,8 @@ def write_instance(backend_port, frontend_port, pid=None,
         "frontend_port": int(frontend_port),
         "started_at": time.time(),
     }
+    if source_head is not None:
+        payload["source_head"] = source_head
     path = Path(instance_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")

@@ -66,6 +66,18 @@ def _drive_web_token():
         yield stub
 
 
+@pytest.fixture(autouse=True)
+def _default_empty_deployment_warnings():
+    """部署诊断公共桩：默认空警告（隔离真实 git 查询与模板比较）。
+
+    部署警告用例自行再 patch launcher_server.collect_deployment_warnings
+    覆写返回值。
+    """
+    with mock.patch.object(launcher_server, "collect_deployment_warnings",
+                           return_value=[]) as dep:
+        yield dep
+
+
 # ===========================================================================
 # _wait_for_web_ready
 # ===========================================================================
@@ -368,6 +380,56 @@ class TestLaunchDrive:
         assert result["status"] == "error"
         assert "mycar" in result["error"]
         popen.assert_not_called()
+
+    # ---------------- 部署诊断警告（Tony 部署守护） ----------------
+
+    def test_reuse_launch_warning_includes_deployment_warnings(
+            self, capsys):
+        """复用存活实例：部署警告合并进 result["warning"] 并写安全日志。"""
+        inst = {"pid": 999, "backend_port": 8000, "frontend_port": 5188,
+                "started_at": time.time()}
+        patches = self._patch_common(inst=inst)
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            return_value=_FakeProc(),
+        ), mock.patch.object(
+            launcher_server, "collect_deployment_warnings",
+            return_value=["旧后端"],
+        ):
+            with patches["kill"], patches["project"], \
+                 patches["find"], patches["wait"], patches["pids"], \
+                 patches["model"]:
+                result = launcher_server._launch_drive()
+        assert result["status"] == "launched"
+        assert "旧后端" in result["warning"]
+        # 安全日志：警告文本写入 stdout（journald 采集），不含令牌
+        assert "旧后端" in capsys.readouterr().out
+
+    def test_cold_start_merges_deployment_warning_with_ready_warning(
+            self, _drive_web_token, capsys):
+        """新起 Web：就绪警告不被覆盖，部署警告合并追加。"""
+        _drive_web_token.return_value = "tok-secret"
+        procs = [_FakeProc(), _FakeProc()]
+        patches = self._patch_common(
+            inst=None, ready=(5188, 8000, "Web UI 在 90s 内未就绪"),
+        )
+        with mock.patch.object(
+            launcher_server.subprocess, "Popen",
+            side_effect=lambda *a, **k: procs.pop(0),
+        ), mock.patch.object(
+            launcher_server, "collect_deployment_warnings",
+            return_value=["旧后端"],
+        ):
+            with patches["kill"], patches["project"], patches["find"], \
+                 patches["wait"], patches["pids"], patches["model"]:
+                result = launcher_server._launch_drive()
+        assert result["status"] == "launched"
+        warning = result["warning"]
+        assert "未就绪" in warning
+        assert "旧后端" in warning
+        # 警告与日志都不得暴露令牌
+        assert "tok-secret" not in warning
+        assert "tok-secret" not in capsys.readouterr().out
 
 
 # ===========================================================================

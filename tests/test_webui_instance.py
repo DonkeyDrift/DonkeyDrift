@@ -97,6 +97,20 @@ def test_remove_instance_only_pid_mismatch_keeps_file(instance_file):
     assert read_instance(instance_file)["pid"] == 123
 
 
+def test_write_instance_with_source_head_roundtrip(instance_file):
+    """登记 source_head（部署诊断）：写入后可原样读回。"""
+    payload = write_instance(8000, 5188, pid=123, source_head="abc123")
+    assert payload["source_head"] == "abc123"
+    assert read_instance(instance_file)["source_head"] == "abc123"
+
+
+def test_write_instance_without_source_head_keeps_payload(instance_file):
+    """缺省（未提供 source_head）保持旧 payload 结构，不引入新字段。"""
+    payload = write_instance(8000, 5188, pid=123)
+    assert "source_head" not in payload
+    assert read_instance(instance_file) == payload
+
+
 # ===========================================================================
 # find_live_instance 判定链
 # ===========================================================================
@@ -320,10 +334,12 @@ def test_web_run_launches_and_registers_when_no_instance(instance_file):
     registrations = []
     real_write = webui_instance.write_instance
 
-    def spy_write(backend_port, frontend_port, pid=None, instance_file=None):
-        registrations.append((backend_port, frontend_port, pid))
+    def spy_write(backend_port, frontend_port, pid=None, instance_file=None,
+                  source_head=None):
+        registrations.append((backend_port, frontend_port, pid, source_head))
         return real_write(backend_port, frontend_port, pid=pid,
-                          instance_file=instance_file)
+                          instance_file=instance_file,
+                          source_head=source_head)
 
     def fake_launch(self, args):
         launched["called"] = True
@@ -331,6 +347,8 @@ def test_web_run_launches_and_registers_when_no_instance(instance_file):
 
     with mock.patch("donkeycar.management.base.find_live_instance",
                     return_value=None), \
+         mock.patch("donkeycar.management.base.get_source_head",
+                    return_value="abc123"), \
          mock.patch.object(Web, "_launch_web_ui", fake_launch), \
          mock.patch.object(Web, "_wait_for_port_ready", return_value=True), \
          mock.patch.object(Web, "_supervise_processes"), \
@@ -340,9 +358,9 @@ def test_web_run_launches_and_registers_when_no_instance(instance_file):
         Web().run([])
 
     assert launched.get("called") is True
-    # 启动成功后登记了实例（端口与 pid），run 退出时 finally 清除属于
-    # 本进程的登记，因此用 spy 验证写入内容
-    assert registrations == [(8000, 5188, os.getpid())]
+    # 启动成功后登记了实例（端口与 pid）和本次源码提交号（部署诊断），
+    # run 退出时 finally 清除属于本进程的登记，因此用 spy 验证写入内容
+    assert registrations == [(8000, 5188, os.getpid(), "abc123")]
     assert not instance_file.exists()
 
 
