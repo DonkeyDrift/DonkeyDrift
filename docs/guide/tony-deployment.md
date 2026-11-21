@@ -68,8 +68,8 @@ cd /home/dkc/projects/DonkeyDrift/.worktrees/deploy-simcollect
   权限 `0600`——后端启动时会打印带令牌的局域网入口，收紧权限避免外泄。
 - **令牌不回显**：部署自身的输出与错误信息不转发令牌；`token=<值>` 与
   `DRIVE_API_TOKEN` 环境变量值一律打码为 `***`。
-- **环境隔离**：Web 子进程继承环境但移除 `PYTHONPATH`，并把部署解释器所在
-  `bin` 目录加到 `PATH` 前端。
+- **环境隔离**：子进程把 `PYTHONPATH` 重置为目标部署仓库，避免车辆目录下
+  导入其他工作树；同时把部署解释器所在 `bin` 目录加到 `PATH` 前端。
 - **不越界**：不触碰用户在车辆目录的数据/模型；模板同步只经 `donkey update`
   的备份机制。
 

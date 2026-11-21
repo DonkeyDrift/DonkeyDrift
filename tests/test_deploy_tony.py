@@ -15,7 +15,7 @@
 - 重启语义：优先终止 webui.json 登记的旧实例并等待退出；无登记时仅匹配
   cwd=<repo>/web_ui/backend 且命令行含目标端口的 uvicorn
 - 启动细节：`<python> -m donkeycar.management web --path … --backend-port …
-  --backend-host 0.0.0.0 --route /drive`，环境移除 PYTHONPATH、把
+  --backend-host 0.0.0.0 --route /drive`，环境将 PYTHONPATH 重置为目标仓库、把
   sys.executable 所在 bin 加到 PATH 前端，日志文件权限 0600
 - 令牌脱敏：任何回显文本中的 token 值一律打码
 
@@ -399,7 +399,7 @@ def test_web_start_command_env_and_log_permissions(repo_and_car, tmp_path):
         idx = cmd.index(key)
         assert cmd[idx + 1] == value, (key, cmd)
     env = popen_kwargs["env"]
-    assert "PYTHONPATH" not in env
+    assert env["PYTHONPATH"] == str(repo)
     venv_bin = str(Path(sys.executable).parent)
     assert env["PATH"].startswith(venv_bin + runner.os.pathsep)
     assert popen_kwargs["start_new_session"] is True
@@ -439,7 +439,7 @@ def test_npm_and_car_update_use_isolated_conda_path(repo_and_car):
         assert runner.deploy(repo, car) == 0
     for cmd, kwargs in calls:
         if "npm" in cmd or "update" in cmd:
-            assert "PYTHONPATH" not in kwargs["env"]
+            assert kwargs["env"]["PYTHONPATH"] == str(repo)
             expected = str(Path(sys.executable).parent) + os.pathsep
             assert kwargs["env"]["PATH"].startswith(expected)
 

@@ -174,7 +174,7 @@ npm run build                         # cwd=<repo>/web_ui/frontend
 <python> -m donkeycar.management update  # cwd=<car>，保留其自动备份
 ```
 
-重启只处理目标部署：优先终止 `webui.json` 登记的父进程并等待退出；无登记时仅匹配 cwd 为 `<repo>/web_ui/backend` 且命令行含目标端口的 uvicorn。启动使用 `<python> -m donkeycar.management web --path <repo>/web_ui --backend-port <port> --backend-host 0.0.0.0 --route /drive`，继承环境但移除 `PYTHONPATH`，并把 `sys.executable` 所在 bin 加到 PATH 前端。等待 `find_live_instance()` 和 `/api/drive/stats` 均就绪，最后逐字节比较车辆模板。日志文件权限设为 0600，输出不转发令牌。
+重启只处理目标部署：优先终止 `webui.json` 登记的父进程并等待退出；无登记时仅匹配 cwd 为 `<repo>/web_ui/backend` 且命令行含目标端口的 uvicorn。启动使用 `<python> -m donkeycar.management web --path <repo>/web_ui --backend-port <port> --backend-host 0.0.0.0 --route /drive`，继承环境但把 `PYTHONPATH` 重置为目标仓库，并把 `sys.executable` 所在 bin 加到 PATH 前端。等待 `find_live_instance()` 和 `/api/drive/stats` 均就绪，最后逐字节比较车辆模板。日志文件权限设为 0600，输出不转发令牌。
 
 - [ ] **Step 4: 验证命令**
 
