@@ -118,7 +118,7 @@ def _print_plan(repo, car, port):
           f"cwd={repo / 'web_ui' / 'backend'} 且命令行含端口 {port} 的 uvicorn）；"
           f"再以 {sys.executable} -m donkeycar.management web --path {repo / 'web_ui'} "
           f"--backend-port {port} --backend-host 0.0.0.0 --route /drive 启动"
-          f"（继承环境但移除 PYTHONPATH；日志 {WEB_LOG_FILE}，权限 0600）")
+          f"（继承环境并把 PYTHONPATH 重置为目标仓库；日志 {WEB_LOG_FILE}，权限 0600）")
     print("6. 健康检查：等待实例登记 find_live_instance() 与 GET /api/drive/stats 就绪")
     print(f"7. 模板校验：逐字节比较 {car / 'manage.py'} 与 "
           f"{repo / 'donkeycar' / 'templates' / 'complete.py'}")
@@ -233,11 +233,11 @@ def _open_deploy_log():
     return fd
 
 
-def _web_env():
-    """Web 子进程环境：继承但移除 PYTHONPATH，并把 sys.executable 所在
-    bin 加到 PATH 前端（保证 uvicorn/npm 等与部署解释器同源）。"""
+def _web_env(repo):
+    """子进程环境：PYTHONPATH 固定为目标仓库，避免导入其他工作树；
+    同时把 sys.executable 所在 bin 加到 PATH 前端。"""
     env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
+    env["PYTHONPATH"] = str(repo)
     venv_bin = os.path.dirname(sys.executable)
     if venv_bin:
         env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
@@ -257,11 +257,11 @@ def _restart_web(repo, port):
            "--backend-host", "0.0.0.0",
            "--route", "/drive"]
     print(f"启动 Web：{' '.join(cmd)}（日志 {WEB_LOG_FILE}，权限 0600；"
-          "PYTHONPATH 已移除）")
+          "PYTHONPATH 已指向目标仓库）")
     log_fd = _open_deploy_log()
     try:
         # start_new_session：deploy 退出后 Web 进程组独立存活，不随终端挂断
-        subprocess.Popen(cmd, cwd=str(repo), env=_web_env(),
+        subprocess.Popen(cmd, cwd=str(repo), env=_web_env(repo),
                          stdin=subprocess.DEVNULL, stdout=log_fd,
                          stderr=subprocess.STDOUT, start_new_session=True)
     finally:
@@ -343,10 +343,10 @@ def deploy(repo_root, car_path, backend_port=8000, dry_run=False):
                   GIT_TIMEOUT_S)
         print("已 fast-forward 到 origin/Tony")
         _run_step(["npm", "run", "build"], BUILD_TIMEOUT_S,
-                  cwd=repo / "web_ui" / "frontend", env=_web_env())
+                  cwd=repo / "web_ui" / "frontend", env=_web_env(repo))
         print("前端生产包构建完成")
         _run_step([sys.executable, "-m", "donkeycar.management", "update"],
-                  UPDATE_TIMEOUT_S, cwd=car, env=_web_env())
+                  UPDATE_TIMEOUT_S, cwd=car, env=_web_env(repo))
         print("donkey update 完成（模板已同步，原文件由其自动备份）")
     except (DeployError, subprocess.SubprocessError, OSError) as exc:
         print(f"部署中止：{_redact(str(exc))}", file=sys.stderr)

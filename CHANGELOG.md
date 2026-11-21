@@ -1,7 +1,7 @@
 ## 2026-11-20 (287)
 
 - feat(deploy): 增加 Tony 标准部署与 Drive 启动前版本守护——防止部署工作树、运行进程和车辆模板再次静默错配
-  - 新增 `scripts/deploy_tony.py`：脏工作树保护 → fetch `origin/Tony` → ff-only → 前端构建 → `donkey update` 备份同步 → 目标端口 Web 重启 → 健康检查与模板逐字节验收；支持 `--dry-run`，移除 `PYTHONPATH` 并统一部署解释器 PATH，日志权限 0600。
+  - 新增 `scripts/deploy_tony.py`：脏工作树保护 → fetch `origin/Tony` → ff-only → 前端构建 → `donkey update` 备份同步 → 目标端口 Web 重启 → 健康检查与模板逐字节验收；支持 `--dry-run`，将 `PYTHONPATH` 重置为目标仓库并统一部署解释器 PATH，日志权限 0600。
   - 新增 `donkeycar/deployment.py`：仅读取本地 Git 元数据，检查源码落后 `origin/Tony`、已登记 Web 进程启动提交与当前源码不一致、车辆 `manage.py` 与当前模板不一致；启动检查不访问网络、不自动改文件。
   - `webui.json` 新增可选 `source_head`；TUI/launcher 在 Drive 启动前显示上述警告，覆盖「源码已更新但 8000 旧进程未重启」场景。
   - **验证**：相关 Python 集成回归 132 项通过、1 项跳过；部署命令另覆盖其他端口实例保护、死登记清理、Conda PATH 隔离、失败即停和令牌脱敏。
